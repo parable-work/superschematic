@@ -7,6 +7,7 @@
 pub mod scalars;
 pub mod enums;
 pub mod types;
+pub mod validators;
 pub mod versiongraph_recipe;
 
 pub use scalars::*;

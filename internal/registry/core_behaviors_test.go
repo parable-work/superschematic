@@ -10,7 +10,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
@@ -98,12 +98,60 @@ func TestCoreBehaviors(t *testing.T) {
 		t.Errorf("Budget: config required %v, requires %v; Retries: config required %v, requires %v; want true, none, true, [Workflow]",
 			budget.ConfigRequired(), budget.Requires, retries.ConfigRequired(), retries.Requires)
 	}
-	// Every work-queue operation writes; claimNext and expireHolder are schema-level.
+	// Constants and Variants judge the fields a write stores: no field, no
+	// operation, no requirement, and no veto code or precondition, since
+	// what they refuse is an issue at a field (invalid_instance).
+	constants, _ := reg.Behavior("Constants")
+	variants, _ := reg.Behavior("Variants")
+	for _, b := range []Behavior{constants, variants} {
+		if b.Package != EnginePackage || !b.ConfigRequired() || len(b.Requires) != 0 || len(b.Fields) != 0 || len(b.Operations) != 0 ||
+			len(b.Vetoes) != 0 || len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
+			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
+		}
+	}
+	// Every work-queue operation writes but countClaimable and checkReserve,
+	// which read; claimNext, countClaimable and expireHolder are schema-level.
+	reads := []string{"countClaimable", "checkReserve"}
+	schemaLevel := []string{"claimNext", "countClaimable", "expireHolder"}
 	for _, b := range []Behavior{lease, assignment, queue, presence, budget, retries} {
 		for _, op := range b.Operations {
-			if !op.Writes || (op.Scope == OperationScopeSchema) != (op.Name == "claimNext" || op.Name == "expireHolder") {
+			if op.Writes == slices.Contains(reads, op.Name) || (op.Scope == OperationScopeSchema) != slices.Contains(schemaLevel, op.Name) {
 				t.Errorf("%s.%s: writes %v, scope %q", b.Name, op.Name, op.Writes, op.Scope)
 			}
+		}
+	}
+	// Lease alone takes a precondition, its token; the refusals a client
+	// branches on carry codes.
+	for _, b := range reg.Behaviors() {
+		if (len(b.PreconditionSchema) > 0) != (b.Name == "Lease") {
+			t.Errorf("%s preconditionSchema = %s", b.Name, b.PreconditionSchema)
+		}
+	}
+	codes := func(b Behavior) []string {
+		var out []string
+		for _, veto := range b.Vetoes {
+			out = append(out, veto.Code)
+		}
+		return out
+	}
+	for _, want := range []struct {
+		behavior Behavior
+		codes    []string
+	}{
+		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
+		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
+		{links, []string{"no_revision", "required_link", "required_target"}},
+		{revisions, []string{"no_review", "not_pending"}},
+		{retries, []string{"exhausted", "limits_fixed", "not_configured"}},
+		{lease, []string{"held_by_another", "held_by_caller", "not_leased", "not_holder", "lapsed", "token_stale", "token_required", "max_expiries", "hold_limit_fixed", "not_configured"}},
+		{assignment, []string{"assigned_to_another", "already_assigned", "not_assigned", "not_configured"}},
+		{queue, []string{"not_claimable", "blocked", "claim_required"}},
+		{presence, []string{"no_principal", "not_principal", "principal_fixed"}},
+		{budget, []string{"over_limit", "not_leased", "scope_moved", "scope_reserved", "below_committed", "exceeds_reservation", "not_configured"}},
+		{blueprint, []string{"stamped", "no_dependencies", "not_constant", "no_revision", "unreadable", "invalid_steps"}},
+	} {
+		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
+			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
 		}
 	}
 
@@ -122,6 +170,11 @@ func TestCoreBehaviors(t *testing.T) {
 		{workflow, `{"states": ["draft"], "transitions": [], "terminal": ["draft"]}`, "behavior Workflow config: "},
 		{workflow, `{"states": ["a", "b"], "transitions": [{"from": "a", "to": "b", "guard": "x"}]}`, "behavior Workflow config: "},
 		{workflow, `{"states": ["a", "b"], "transitions": [{"from": "a", "to": "b", "permission": ""}]}`, "behavior Workflow config: "},
+		{workflow, `{"states": ["running", "passed", "failed", "skipped"], "transitions": [{"from": "running", "to": "passed"}, {"from": "running", "to": "failed"}, {"from": "running", "to": "skipped"}],
+			"outcomes": {"failed": "failure", "skipped": "neutral", "passed": "success"}}`, ""},
+		{workflow, `{"states": ["a", "b"], "transitions": [{"from": "a", "to": "b"}], "outcomes": {}}`, "behavior Workflow config: "},
+		{workflow, `{"states": ["a", "b"], "transitions": [{"from": "a", "to": "b"}], "outcomes": {"b": "aborted"}}`, "behavior Workflow config: "},
+		{workflow, `{"states": ["a", "b"], "transitions": [{"from": "a", "to": "b"}], "outcomes": {"in review": "failure"}}`, "behavior Workflow config: "},
 		{comments, ``, ""},
 		{comments, `{}`, ""},
 		{comments, `{"maxLength": 10}`, "behavior Comments takes no config"},
@@ -138,6 +191,10 @@ func TestCoreBehaviors(t *testing.T) {
 		{dependencies, `{"gatedStates": []}`, "behavior Dependencies config: "},
 		{dependencies, `{"gatedStates": [""]}`, "behavior Dependencies config: "},
 		{dependencies, `{"blockers": ["tasks"]}`, "behavior Dependencies config: "},
+		{dependencies, `{"gatedStates": ["doing", "done"], "satisfiedBy": ["success", "neutral"]}`, ""},
+		{dependencies, `{"satisfiedBy": []}`, "behavior Dependencies config: "},
+		{dependencies, `{"satisfiedBy": ["done"]}`, "behavior Dependencies config: "},
+		{dependencies, `{"satisfiedBy": ["success", "success"]}`, "behavior Dependencies config: "},
 		{links, `{"links": {"spec": {"schema": "documents", "pinned": true}, "parent": {"schema": "tasks", "required": true}}}`, ""},
 		{links, ``, "behavior Links config: "},
 		{links, `{"links": {}}`, "behavior Links config: "},
@@ -153,7 +210,9 @@ func TestCoreBehaviors(t *testing.T) {
 			"smallest": {"schema": "tasks", "link": "project", "function": "min", "field": "estimate"},
 			"largest": {"schema": "tasks", "link": "project", "function": "max", "field": "estimate"},
 			"finished": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"]},
-			"started": {"schema": "tasks", "link": "project", "function": "any"}}}`, ""},
+			"started": {"schema": "tasks", "link": "project", "function": "any"},
+			"succeeded": {"schema": "tasks", "link": "project", "function": "all", "outcomes": ["success", "neutral"], "gatedStates": ["done"]},
+			"failed": {"schema": "tasks", "link": "project", "function": "any", "outcomes": ["failure"]}}}`, ""},
 		{rollups, ``, "behavior Rollups config: "},
 		{rollups, `{"rollups": {}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"Tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, "behavior Rollups config: "},
@@ -168,6 +227,9 @@ func TestCoreBehaviors(t *testing.T) {
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "gatedStates": ["done"]}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": []}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "filter": "open"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "outcomes": ["success"]}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "outcomes": []}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "any", "outcomes": ["done"]}}}`, "behavior Rollups config: "},
 		{search, `{"fields": ["title", "body"], "weights": {"title": 3, "body": 0.5}}`, ""},
 		{search, `{"fields": ["title"]}`, ""},
 		{search, ``, "behavior Search config: "},
@@ -189,6 +251,29 @@ func TestCoreBehaviors(t *testing.T) {
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "the tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "tasks", "link": "Project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"transition": "done", "invoke": "comment"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "steps", "link": "run", "outcomes": ["success"]}}, "then": {"transition": "completed"}},
+			{"when": {"anyTerminal": {"schema": "steps", "link": "run", "outcomes": ["failure"]}}, "then": {"transition": "failed"}}]}`, ""},
+		{reactions, `{"rules": [{"when": {"anyTerminal": {"schema": "steps", "link": "run"}}, "then": {"transition": "failed"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"anyTerminal": {"schema": "steps", "link": "run", "outcomes": []}}, "then": {"transition": "failed"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "steps", "link": "run", "outcomes": ["passed"]}}, "then": {"transition": "completed"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "steps", "link": "run"}, "anyTerminal": {"schema": "steps", "link": "run", "outcomes": ["failure"]}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{constants, `{"fields": ["kind", "key"]}`, ""},
+		{constants, `{"fields": ["kind"], "permission": "steps.rename"}`, ""},
+		{constants, ``, "behavior Constants config: "},
+		{constants, `{"fields": []}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind", "kind"]}`, "behavior Constants config: "},
+		{constants, `{"fields": [""]}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind"], "permission": ""}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind"], "roles": ["admin"]}`, "behavior Constants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult", "review": "ReviewResult"}}`, ""},
+		{variants, ``, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind"}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"": "VerifyResult"}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": ""}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": ["VerifyResult"]}}`, "behavior Variants config: "},
+		{variants, `{"field": "", "by": "kind", "types": {"verify": "VerifyResult"}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult"}, "otherwise": "AnyResult"}`, "behavior Variants config: "},
 		{lease, ``, ""},
 		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "sweepMs": 2000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
 			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},
@@ -241,28 +326,32 @@ func TestCoreBehaviors(t *testing.T) {
 		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {}}, "stamp": "steps"}`, "behavior Blueprint config: "},
 		{budget, `{"meters": {"cpuSeconds": {"limit": 3600, "reserve": 600, "reset": "daily"}}}`, ""},
 		{budget, `{"meters": {"cpuSeconds": {"limitField": "cpuLimit", "reserveField": "cpuEstimate", "scope": "pool"}, "requests": {}},
-			"limitPermission": "jobs.budget", "onExceeded": {"direct": "budgetExceeded"}}`, ""},
+			"limitPermission": "jobs.budget", "onExceeded": {"direct": "budgetExceeded"}, "escalate": {"transition": "paused", "from": ["running"]}}`, ""},
+		{budget, `{"meters": {"cpuSeconds": {"reserve": 5, "reserveField": "cpuEstimate"}}}`, ""},
 		{budget, ``, "behavior Budget config: "},
 		{budget, `{"meters": {}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"CpuSeconds": {}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"limit": 0}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"limit": 10, "limitField": "cpuLimit"}}}`, "behavior Budget config: "},
-		{budget, `{"meters": {"cpuSeconds": {"reserve": 5, "reserveField": "cpuEstimate"}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {}}, "escalate": {"transition": "paused"}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {}}, "escalate": {"transition": "paused", "from": []}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"reset": "weekly"}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"scope": "Pool"}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {}}, "onExceeded": {}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {}}, "limitPermission": ""}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {}}, "raiseLimitKinds": ["person"]}`, "behavior Budget config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}, "rejected": "terminal"}, "totalAttempts": 4, "exhaustedState": "failed"}`, ""},
-		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "limitsField": "caps", "keepBest": {"minDelta": 0.5, "neverRegress": ["compiles"]},
-			"stuckAfter": 2, "resultField": "result", "exhaustedState": "failed", "from": ["running"], "permission": "jobs.work"}`, ""},
+		{retries, `{"classes": {"timeout": {"attempts": 3, "hint": "Give it more time."}}, "totalAttempts": 4, "limitsField": "caps", "limitsPermission": "jobs.caps",
+			"keepBest": {"minDelta": 0.5, "neverRegress": ["compiles"]}, "stuckAfter": 2, "resultField": "result", "exhaustedState": "failed", "from": ["running"],
+			"permission": "jobs.work"}`, ""},
 		{retries, ``, "behavior Retries config: "},
 		{retries, `{"classes": {}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 0}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": "fatal"}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
-		{retries, `{"classes": {"timeout": {"attempts": 3, "hint": "wait"}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3, "delay": "wait"}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3, "hint": ""}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"totalAttempts": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "stuckAfter": 0}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "from": []}`, "behavior Retries config: "},

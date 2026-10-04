@@ -164,7 +164,8 @@ value, true)` in the scan's transaction) before it reads the view.
 ## `outputs.sql`
 
 The DB kind's `sql` output has no switch; the DDL is implied by the kind.
-Its `outputs.sql` block places and owns the projection migrations:
+Its `outputs.sql` block places and owns the projection migrations, and
+lists the databases the DDL is written for:
 
 ```ts
 export default defineConfig({
@@ -180,8 +181,11 @@ export default defineConfig({
 | --- | --- |
 | `migrationsDir` | Where the migration pairs are written, relative to the service directory, so they land next to the service's hand-written migrations. Unset keeps them under `<out>/sql/<service>/projections/migrations`. The directory is not build-cache output: commit what the build writes there. |
 | `viewOwner` | The Postgres role the up migration creates the view as: `SET ROLE <viewOwner>` before the view DDL and `RESET ROLE` after it, so the schema's default privileges for that role grant readers their access. The migration runner must be a member of the role, and the role needs `CREATE` on the pool schema and `SELECT` on the tables the view reads. A lowercase identifier. Unset creates the view as the runner. `create.sql` and the down migration never switch roles. |
+| `dialects` | The databases the service is built for: `postgres`, and `sqlite` to also write `<out>/sql/<service>/sqlite/create.sql` and plan SQLite migrations ([Schema migrations](/superschematic/reference/migrations/#sqlite)). The list must hold `postgres`, since the Go ORM the kind always generates runs on Postgres. Unset is `["postgres"]`. A service that lists `sqlite` cannot have projections: SQLite refuses them. |
 
-An unknown key in the block fails the build.
+An unknown key in the block fails the build, as does a `dialects` list
+without `postgres`, with a dialect other than `postgres` and `sqlite`, or
+with a dialect twice.
 
 Replacing a view drops the grants on it. Roles, grants on the pool schema,
 default privileges and row-level security on the source tables stay with

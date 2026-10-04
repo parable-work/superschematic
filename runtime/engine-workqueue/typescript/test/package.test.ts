@@ -16,7 +16,7 @@ import { afterEach, describe, test } from 'node:test';
 import type { Principal } from '@superschematic/engine';
 
 import { DEFAULT_TTL_MS, assignment, blueprint, budget, lease, presence, queue, retries, workQueueBehaviors } from '../dist/index.js';
-import { Clock, alice, cleanup, drivers, jobsFixture, openTestEngine } from './helpers.ts';
+import { Clock, alice, cleanup, drivers, fenced, jobsFixture, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -55,6 +55,7 @@ for (const driver of drivers) {
         'Blueprint',
         'Budget',
         'Comments',
+        'Constants',
         'Dependencies',
         'Lease',
         'Links',
@@ -65,6 +66,7 @@ for (const driver of drivers) {
         'Revisions',
         'Rollups',
         'Search',
+        'Variants',
         'Workflow',
       ]);
     });
@@ -81,8 +83,8 @@ for (const driver of drivers) {
           ['Workflow', ['transition']],
           ['Lease', ['acquire', 'heartbeat', 'release', 'expire', 'direct', 'acknowledge', 'expireHolder', 'resetExpiries']],
           ['Assignment', ['assign', 'unassign']],
-          ['Queue', ['claim', 'claimNext', 'refresh']],
-          ['Budget', ['reserve', 'recordUsage', 'settle', 'setLimit', 'reserveFor', 'settleFor', 'recordUsageFor']],
+          ['Queue', ['claim', 'claimNext', 'countClaimable', 'refresh']],
+          ['Budget', ['reserve', 'checkReserve', 'recordUsage', 'settle', 'setLimit', 'reserveFor', 'settleFor', 'recordUsageFor']],
           ['Retries', ['recordAttempt']],
         ]
       );
@@ -109,10 +111,10 @@ for (const driver of drivers) {
       engine.instances.invoke(worker, 'jobs', 'index', 'recordAttempt', { failure: 'timeout' });
 
       clock.advance(20000);
-      assert.equal((engine.instances.invoke(worker, 'jobs', 'reindex', 'heartbeat', { token: 1 }) as { expiresAt: number }).expiresAt, 1_050_000);
-      assert.equal((engine.instances.invoke(worker, 'jobs', 'index', 'heartbeat', { token: 1 }) as { expiresAt: number }).expiresAt, 1_045_000);
+      assert.equal((engine.instances.invoke(worker, 'jobs', 'reindex', 'heartbeat', {}, fenced(1)) as { expiresAt: number }).expiresAt, 1_050_000);
+      assert.equal((engine.instances.invoke(worker, 'jobs', 'index', 'heartbeat', {}, fenced(1)) as { expiresAt: number }).expiresAt, 1_045_000);
       engine.instances.invoke(worker, 'jobs', 'reindex', 'transition', { to: 'done' });
-      engine.instances.invoke(worker, 'jobs', 'reindex', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'jobs', 'reindex', 'release', {}, fenced(1));
 
       // index's time limit passes, and mine's lease, never renewed, has
       // expired: the runner's sweep puts both back in the queue.
@@ -124,7 +126,7 @@ for (const driver of drivers) {
         priority: 5,
         timeLimitMs: 45000,
         status: 'queued',
-        lease: { holder: null, token: 2, acquiredAt: null, expiresAt: null, active: false, expiries: 1 },
+        lease: { holder: null, token: 2, acquiredAt: null, renewedAt: null, expiresAt: null, active: false, expiries: 1, ended: { reason: 'maxHold', at: 1_045_000 } },
         budget: { cpuSeconds: { used: 100, reserved: 0, limit: 3600, remaining: 3500 } },
         retries: { total: 1, classAttempts: { timeout: 1, invalidOutput: 0, rejected: 0 }, bestScore: null, exhausted: false, stuck: false },
       });
@@ -132,7 +134,7 @@ for (const driver of drivers) {
       assert.equal(engine.instances.get(alice, 'jobs', 'reindex')?.data.status, 'done');
     });
 
-    test("it runs the fixture's worker type as a schema of its own: a missed worker's job goes back in the queue", () => {
+    test("it runs the fixture's worker type as a schema of its own: a missed worker's live lease is spared, and goes when it runs out", () => {
       const clock = new Clock(1_000_000);
       const engine = openTestEngine({ driver, clock: clock.now, runner: { principal: { subject: 'runner', permissions: ['jobs.override'] } } });
       engine.schemas.define(alice, jobsFixture());
@@ -149,21 +151,29 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.invoke(worker, 'workers', 'w1', 'beat'), { deadline: 1_040_000 });
       assert.equal(claimNext(worker), 'index');
       clock.advance(20000);
-      engine.instances.invoke(worker, 'jobs', 'index', 'heartbeat', { token: 1 });
+      engine.instances.invoke(worker, 'jobs', 'index', 'heartbeat', {}, fenced(1));
 
-      // wren keeps its job's lease but stops beating its worker: the
-      // runner misses the worker, and the job's lease, active until
-      // 1_060_000, expires through expireHolder and puts it back.
+      // wren stops beating its worker but renews its job's lease: the
+      // runner misses the worker, and the miss spares the lease, renewed
+      // after the worker's last beat, so live work is not lost.
       clock.advance(10000);
       engine.runner.runDue();
       assert.equal(engine.instances.get(alice, 'workers', 'w1')?.data.status, 'missing');
+      assert.deepEqual((engine.instances.get(alice, 'workers', 'w1')?.data.presence as { released: unknown }).released, { jobs: [] });
+      assert.equal((engine.instances.get(alice, 'jobs', 'index')?.data.lease as { holder: unknown }).holder, 'wren');
+      // Its heartbeats stop too: the lease runs out on its own, at
+      // 1_060_000, and the runner's sweep puts the job back.
+      clock.advance(20000);
+      engine.runner.runDue();
       assert.deepEqual(engine.instances.get(alice, 'jobs', 'index')?.data.lease, {
         holder: null,
         token: 2,
         acquiredAt: null,
+        renewedAt: null,
         expiresAt: null,
         active: false,
         expiries: 1,
+        ended: { reason: 'ttl', at: 1_060_000 },
       });
       assert.equal(engine.instances.get(alice, 'jobs', 'index')?.data.status, 'queued');
       // The expiry settled the claim's reservation.

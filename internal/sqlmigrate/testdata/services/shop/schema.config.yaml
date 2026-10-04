@@ -1,0 +1,5 @@
+name: shop-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }

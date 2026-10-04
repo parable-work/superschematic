@@ -134,8 +134,9 @@ its lines and checks the country code:
 | `uploadMaxBytes` | file-upload scalars |
 
 The generated validators check them: `Validate()` in Go, `validate<Type>`
-and the parsers in TypeScript, `validate_all()` in Python. A failure names
-the rule it broke:
+and the parsers in TypeScript, `validate_all()` in Python, and
+`validators::validate_<type>` and `validators::parse_<type>` in Rust. A
+failure names the rule it broke:
 
 <Snippet file="go/types_test.go" symbol="ExampleShippingAddress_Validate" />
 

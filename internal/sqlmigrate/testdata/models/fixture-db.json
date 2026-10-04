@@ -1,0 +1,371 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "citext",
+    "pg_trgm",
+    "pgcrypto"
+  ],
+  "functions": [
+    {
+      "definition": "CREATE OR REPLACE FUNCTION tenant_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO tenant_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO tenant_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "tenant_capture_history",
+      "origin": "Tenant"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION tenant_user_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version. Its deleted_by is the actor a hard delete set in\n    -- superschematic.history_actor_id for the statement, else the row's own value.\n    INSERT INTO tenant_user_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1,\n        'deleted_by', COALESCE(\n          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,\n          OLD.deleted_by\n        )\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO tenant_user_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "tenant_user_capture_history",
+      "origin": "TenantUser"
+    }
+  ],
+  "service": "fixture-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Tenant.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "updated_at",
+          "nullable": true,
+          "origin": "Tenant.updatedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Tenant.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Tenant.name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "slug",
+          "origin": "Tenant.slug",
+          "type": "CITEXT"
+        },
+        {
+          "name": "email",
+          "origin": "Tenant.email",
+          "type": "TEXT"
+        },
+        {
+          "name": "status",
+          "origin": "Tenant.status",
+          "type": "TEXT"
+        },
+        {
+          "name": "is_active",
+          "origin": "Tenant.isActive",
+          "type": "BOOLEAN"
+        },
+        {
+          "name": "seat_count",
+          "origin": "Tenant.seatCount",
+          "type": "DOUBLE PRECISION"
+        },
+        {
+          "name": "metadata",
+          "origin": "Tenant.metadata",
+          "type": "JSONB"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "generated": "COALESCE(\"name\", '')",
+          "name": "search_text",
+          "nullable": true,
+          "type": "TEXT"
+        }
+      ],
+      "comment": "A tenant of the platform.",
+      "history": "tenant_history",
+      "indexes": [
+        {
+          "columns": [
+            "search_text"
+          ],
+          "method": "GIN",
+          "name": "idx_tenant_search_trgm",
+          "opclass": "gin_trgm_ops"
+        },
+        {
+          "columns": [
+            "slug"
+          ],
+          "method": "BTREE",
+          "name": "uq_tenant_slug",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "tenant",
+      "origin": "Tenant",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "tenant_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "slug"
+          ],
+          "name": "tenant_slug_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for tenant",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_tenant_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_tenant_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "tenant_history",
+      "origin": "Tenant",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "tenant_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "TenantUser.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "updated_at",
+          "nullable": true,
+          "origin": "TenantUser.updatedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "TenantUser.id",
+          "type": "UUID"
+        },
+        {
+          "name": "tenant_id",
+          "origin": "TenantUser.tenant",
+          "type": "UUID"
+        },
+        {
+          "name": "display_name",
+          "nullable": true,
+          "origin": "TenantUser.displayName",
+          "type": "TEXT"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "TenantUser.deletedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "deleted_by",
+          "nullable": true,
+          "origin": "TenantUser.deletedBy",
+          "type": "UUID"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "A soft-deletable tenant membership.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "tenant_id"
+          ],
+          "name": "fk_tenant_user_tenant_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "tenant"
+        }
+      ],
+      "history": "tenant_user_history",
+      "indexes": [
+        {
+          "columns": [
+            "tenant_id",
+            "display_name"
+          ],
+          "method": "BTREE",
+          "name": "idx_tenant_user_tenant_display_name",
+          "unique": true,
+          "where": "deleted_at IS NULL"
+        }
+      ],
+      "kind": "entity",
+      "name": "tenant_user",
+      "origin": "TenantUser",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "tenant_user_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for tenant_user",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_tenant_user_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_tenant_user_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "tenant_user_history",
+      "origin": "TenantUser",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "tenant_user_history_pkey"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER trg_tenant_bump_version\n  BEFORE UPDATE ON tenant\n  FOR EACH ROW EXECUTE FUNCTION tenant_capture_history()",
+      "name": "trg_tenant_bump_version",
+      "origin": "Tenant",
+      "table": "tenant"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_tenant_capture_history_delete\n  AFTER DELETE ON tenant\n  FOR EACH ROW EXECUTE FUNCTION tenant_capture_history()",
+      "name": "trg_tenant_capture_history_delete",
+      "origin": "Tenant",
+      "table": "tenant"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_tenant_capture_history_write\n  AFTER INSERT OR UPDATE ON tenant\n  FOR EACH ROW EXECUTE FUNCTION tenant_capture_history()",
+      "name": "trg_tenant_capture_history_write",
+      "origin": "Tenant",
+      "table": "tenant"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_tenant_user_bump_version\n  BEFORE UPDATE ON tenant_user\n  FOR EACH ROW EXECUTE FUNCTION tenant_user_capture_history()",
+      "name": "trg_tenant_user_bump_version",
+      "origin": "TenantUser",
+      "table": "tenant_user"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_tenant_user_capture_history_delete\n  AFTER DELETE ON tenant_user\n  FOR EACH ROW EXECUTE FUNCTION tenant_user_capture_history()",
+      "name": "trg_tenant_user_capture_history_delete",
+      "origin": "TenantUser",
+      "table": "tenant_user"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_tenant_user_capture_history_write\n  AFTER INSERT OR UPDATE ON tenant_user\n  FOR EACH ROW EXECUTE FUNCTION tenant_user_capture_history()",
+      "name": "trg_tenant_user_capture_history_write",
+      "origin": "TenantUser",
+      "table": "tenant_user"
+    }
+  ],
+  "version": 1
+}

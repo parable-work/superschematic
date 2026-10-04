@@ -1,0 +1,47 @@
+{
+  "dialect": "postgres",
+  "from": "b59e39d63f60e1f77b23e3740d1d36efbee32fc45e30ed8473d9b6b8163334c9",
+  "hash": "5ebd6e89e9f77d2de7a6c5fe5792559491894a55245743b02ba48a28321534db",
+  "service": "fixture-version-graph-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/note/column/body",
+          "reason": "The change rewrites note and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/note/column/body"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/note/column/body",
+          "reason": "Note.body changes from TEXT to JSONB: servers built from the previous version still read and write TEXT.",
+          "subject": "table/note/column/body"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/note/column/body",
+          "reason": "Note.body changes from TEXT to JSONB: the cast fails on a value JSONB cannot hold.",
+          "subject": "table/note/column/body"
+        },
+        {
+          "class": "history",
+          "id": "history:table/note/column/body",
+          "reason": "note is versioned: images recorded before this change keep Note.body as TEXT, which the history readers read as JSONB. Note.body is content of version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch rose from 1 to 2.",
+          "subject": "table/note/column/body"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE note\n  ALTER COLUMN body TYPE JSONB USING body::JSONB"
+      ],
+      "subject": "table/note/column/body",
+      "transactional": true
+    }
+  ],
+  "to": "9a22122af3c52bd6721462bbed4be7c5696bd86694255b408609c92e6beddff4",
+  "toModel": null,
+  "version": 1
+}

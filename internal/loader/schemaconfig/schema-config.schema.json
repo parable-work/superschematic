@@ -142,10 +142,25 @@
       ],
       "type": "object"
     },
+    "SqlDialect": {
+      "description": "A database the DB kind's sql output is built for.",
+      "enum": [
+        "postgres",
+        "sqlite"
+      ],
+      "type": "string"
+    },
     "SqlOutputConfig": {
       "additionalProperties": false,
-      "description": "The DB kind's sql output. The DDL and the ORM are implied by the kind; this block places and owns the generated projection view migrations.",
+      "description": "The DB kind's sql output. The DDL and the ORM are implied by the kind; this block places and owns the generated projection view migrations and lists the dialects the DDL is written for.",
       "properties": {
+        "dialects": {
+          "description": "The databases the service is built for. With sqlite listed, the build also writes sqlite/create.sql and refuses a schema that uses what SQLite does not support, and migrate plan --dialect sqlite plans for it. The list must hold postgres: the Go ORM the kind always generates runs on Postgres. Unset is [\"postgres\"].",
+          "items": {
+            "$ref": "#/definitions/SqlDialect"
+          },
+          "type": "array"
+        },
         "migrationsDir": {
           "description": "Where the projection view migrations are written, relative to the service directory. Unset keeps them under <out>/sql/<service>/projections/migrations.",
           "type": "string"

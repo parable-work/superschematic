@@ -183,7 +183,7 @@ Each `Register*` method checks its own spec:
 | `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog |
 | `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
-| `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params schema that is not an object schema or does not set `"additionalProperties": false`, an operation or field name that is malformed or repeats, an operation named like one every schema has (section 3.16) |
+| `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params or precondition schema that is not an object schema or does not set `"additionalProperties": false`, a create params schema that is not an object schema or whose `additionalProperties` is neither `false` nor a schema, an operation or field name that is malformed or repeats, an operation named like one every schema has, a veto code that is not lowercase snake case or repeats (section 3.16) |
 
 Every one of them fails after `Finalize`.
 
@@ -371,7 +371,7 @@ The core generators:
 | Name | Output key | Writes |
 | --- | --- | --- |
 | `types` | `types` | Go, TypeScript, Python and Rust types, one switch per language |
-| `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`) and sets their role (`viewOwner`) |
+| `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas, and SQLite DDL when `outputs.sql.dialects` lists `sqlite`; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`), sets their role (`viewOwner`) and lists the dialects (`dialects`) |
 | `orm` | none | the Go ORM; implied by the DB kind |
 | `api` | `api` | the Go chi server, the Rust axum crate or the TypeScript Hono package (`outputs.api.language`), and OpenAPI |
 | `sdks` | `sdk` | TypeScript, Go, Python and Rust clients, one switch per language |
@@ -719,9 +719,12 @@ shape is `BehaviorDeclaration`:
 | `name` | bare (`Workflow`) for a core behavior, `<extension>.<Name>` for an extension's |
 | `description` | what the behavior adds |
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
+| `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name` and `description` |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
+| `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
 
 An operation's `scope` says what a call names: `instance`, one instance
 by id, or `schema`, the schema as a whole with no instance, which an
@@ -739,7 +742,9 @@ registering extension's `Name()`; inside `Use` the spec's `Extension` must
 be the extension whose `Register` is running, so an extension cannot
 declare a core name. An operation may not be named `create`, `get`,
 `list`, `update` or `delete`, which every schema has (D16), or declare a
-scope other than `instance` or `schema`. `Finalize`
+scope other than `instance` or `schema`. A `preconditionSchema` is held
+to a `paramsSchema`'s rule, and a veto code that is not lowercase snake
+case, or is listed twice, is refused (D16, amended). `Finalize`
 checks `requires`, `conflicts` and the invocation policy values, since the
 policy is fixed only once every extension has registered.
 `Registry.Behavior(name)` returns a registered `Behavior`: the declaration,
@@ -757,6 +762,19 @@ so its parameters are exactly the ones it declares`. The value must be
 `false` itself: a schema that closes the object another way, with
 `unevaluatedProperties: false` or `additionalProperties: {"not": {}}`, is
 refused too.
+
+A `createParamsSchema` is an object schema too, but its
+`additionalProperties` may be a schema as well as `false`: a create's
+parameters may be keyed by names the config gives (`Links` takes its
+links by name), so the schema admits keys it does not list, and checks
+each one's value. `RegisterBehavior` refuses one that does not compile,
+is not an object schema, or leaves further keys unchecked (absent or
+`true`), as the engine does and in its words: `behavior <B>
+createParamsSchema must set "additionalProperties": false or a schema,
+so no create parameter goes unchecked`. Neither the loader nor a schema
+document reads it: a create gives the parameters to an engine
+(`runtime/engine/README.md`, "Create parameters"), and the `behaviors`
+command copies it with the rest of the declaration.
 
 In the IR a type lists its behaviors in `TypeDef.Behaviors`, a list of
 `ir.BehaviorRef{Name, Config}` written after `implements` and omitted when
@@ -827,7 +845,8 @@ No core generator sets the flag. `build --emit-ir`, `format` and
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
-`Dependencies`, `Links`, `Rollups`, `Search` and `Reactions`. It
+`Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`
+and `Variants`. It
 declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
@@ -837,12 +856,20 @@ Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
 types their configs. None names an invocation policy, since a
 distribution's policy need not have the core's values; each operation
 takes the policy's default. Every
-`paramsSchema` sets `additionalProperties: false`. A config a
+`paramsSchema` sets `additionalProperties: false`. `Links` and
+`Dependencies` declare a `createParamsSchema`: a create's links by name
+and its blockers. `Lease` declares a `preconditionSchema`, `{ token }`.
+`Workflow`, `Revisions`, `Dependencies`, `Links` and every work-queue
+behavior list the codes of their vetoes. `Constants` and `Variants`
+declare no field, operation, parameter, precondition or code: what they
+refuse is an issue at a field (`invalid_instance`), which the engine's
+implementation returns from its `validate` hook, not a veto. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
-that names a state the config does not list, a gated state of
-`Dependencies` that is not a terminal state of the type's Workflow, or a
-rollup whose linked schema has no such link, say);
+that names a state the config does not list, a Workflow outcome for a
+state a transition leaves, a gated state of `Dependencies` that is not a
+state of the type's Workflow, or a rollup whose linked schema has no
+such link, say);
 `runtime/engine/README.md`, "Core behaviors", has each engine
 behavior's config, fields and operations, and
 `runtime/engine-workqueue/README.md` each work-queue behavior's. The
@@ -854,21 +881,23 @@ engine; without them the engine refuses a schema that composes one.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
-| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`); required | `status` | `transition` |
+| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status` | `transition` |
 | `Comments` | none | `commentCount` | `comment`, `listComments` |
 | `Revisions` | `review` (`permission`), optional | `revision` | `listRevisions`, `propose`, `approve`, `reject`, `listProposals` |
-| `Dependencies` | `schemas`, `gatedStates`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
+| `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
-| `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
+| `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
-| `Reactions` | `rules` (each a `when`, `enters` or `allTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
-| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; optional; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
+| `Reactions` | `rules` (each a `when`, `enters`, `allTerminal` or `anyTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
+| `Constants` | `fields`, `permission`; required | none | none |
+| `Variants` | `field`, `by`, `types` (by a value of `by`, a type of the document); required | none | none |
+| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`; optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
-| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
+| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
 | `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required; `@superschematic/engine-workqueue` | `presence` | `beat`, `miss` |
 | `Blueprint` | `schema`, `parentLink`, `keyField`, one of `steps` (by key: `after`, `when`, `data`) and `from` (`link`, `field`), `copyFields`, `copyLinks`; required; `@superschematic/engine-workqueue` | `blueprint` | none |
-| `Budget` | `meters` (by name: `limit` or `limitField`, `reserve` or `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
-| `Retries` | `classes` (by name: `attempts`, or `terminal`), `totalAttempts`, `limitsField`, `keepBest` (`minDelta`, `neverRegress`), `stuckAfter`, `resultField`, `exhaustedState`, `from`, `permission`; required; requires `Workflow`; `@superschematic/engine-workqueue` | `retries` | `recordAttempt` |
+| `Budget` | `meters` (by name: `limit` or `limitField`, `reserve` and `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`), `escalate` (`transition`, `from`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
+| `Retries` | `classes` (by name: `attempts` and `hint`, or `terminal`), `totalAttempts`, `limitsField`, `limitsPermission`, `keepBest` (`minDelta`, `neverRegress`), `stuckAfter`, `resultField`, `exhaustedState`, `from`, `permission`; required; requires `Workflow`; `@superschematic/engine-workqueue` | `retries` | `recordAttempt` |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,
 amended): a blocker, a link target or the instances a rollup reads are
@@ -891,8 +920,8 @@ TypeScript twin to the same IR as well.
 applies its rules after a change commits (D16, amended), and a rule's
 links and states are checked by the engine, which sees the type's
 Workflow and Links configs. `make cli-smoke` loads
-`fixture-reactions-json`, whose projects start and finish their parent,
-and its TypeScript twin loads to the same IR.
+`fixture-reactions-json`, whose projects start, finish and fail their
+parent, and its TypeScript twin loads to the same IR.
 
 `Lease`, `Assignment`, `Queue`, `Budget` and `Retries` name the type's
 fields (`maxHoldField`, `priorityField`, `match`, `limitField`,
@@ -942,8 +971,10 @@ with `--package @superschematic/engine` and
 declarations it implements, and `make behaviors-check`, part of `make
 test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
-Schema's object keys sorted, two-space indents and a final newline, so
-it changes only when the declaration does.
+Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
+included), two-space
+indents and a final newline, so it changes only when the declaration
+does.
 
 ## 4. The open IR
 
@@ -1376,7 +1407,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

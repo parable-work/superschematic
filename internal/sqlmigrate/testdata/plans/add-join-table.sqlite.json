@@ -1,0 +1,21 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "f20200920ff8b8854d75a261c1bde4538c079af0fe74b57ae5d7c463935bab0d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"product_label\" (\n  \"product_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"product_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"product_id\") REFERENCES \"product\" (\"id\") ON DELETE CASCADE\n)"
+      ],
+      "subject": "table/product_label",
+      "transactional": true
+    }
+  ],
+  "to": "ed7f1eb0baddf00e5a7526d5da91130fc6033925cb44fbfef4720874ce27eeee",
+  "toModel": null,
+  "version": 1
+}

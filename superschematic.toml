@@ -22,9 +22,18 @@ scalar_pypi_dist = "superscalar"
 scalar_python_module = "superscalar"
 scalar_rust_crate = "superscalar"
 
+# The Rust expression a generated Rust validator reads the scalar registry
+# from, a `&'static Registry` of the scalar crate. Unset by default, which
+# reads the crate's builtin registry (<scalar_rust_crate>::Registry::builtin()).
+# A scalar crate that adds its own scalars names the function that returns
+# its assembled registry:
+#
+#   scalar_rust_registry = "acme_scalars::registry()"
+
 # Coordinates of this repository's runtime modules.
 schema_ir_go_module = "github.com/parable-work/superschematic/ir"
 schema_runtime_go_module = "github.com/parable-work/superschematic/runtime/schema/go"
+schema_runtime_rust_crate = "superschematic-schema-runtime"
 versiongraph_go_module = "github.com/parable-work/superschematic/runtime/versiongraph/go"
 versiongraph_rust_crate = "superschematic-versiongraph-engine"
 http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go"
@@ -89,6 +98,7 @@ scalar_typescript = "third_party/superscalar/bindings/typescript"
 scalar_rust = "third_party/superscalar/crates/core"
 schema_ir = "ir"
 schema_runtime_go = "runtime/schema/go"
+schema_runtime_rust = "runtime/schema/rust"
 versiongraph_go = "runtime/versiongraph/go"
 versiongraph_typescript = "runtime/versiongraph/typescript"
 versiongraph_rust = "runtime/versiongraph/rust-engine"

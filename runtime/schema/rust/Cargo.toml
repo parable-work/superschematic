@@ -1,0 +1,25 @@
+[package]
+name = "superschematic-schema-runtime"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.95.0"
+authors = ["Parable Work, Inc."]
+description = "Validation helpers the generated Rust types crates call"
+license = "Apache-2.0"
+repository = "https://github.com/parable-work/superschematic"
+
+# Standalone crate: generated Rust types crates depend on it by path (see
+# [paths] schema_runtime_rust in superschematic.toml), so it carries its own
+# dependency versions instead of inheriting a workspace's. It does not
+# depend on superscalar: only the generated validators call the scalar
+# crate, through the name the naming file gives it.
+[workspace]
+
+[dependencies]
+regex = "1.12"
+serde = "1.0.228"
+serde_json = "1.0.149"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"

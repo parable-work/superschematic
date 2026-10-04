@@ -9,16 +9,37 @@ nest and which instances are being written. Everything here is synchronous
 (D16): a function that returns a promise is a BehaviorError, which rolls
 the write back.
 
-Each function gets a context for its own behavior (behavior.ts). A guard
-and a field reader get a view: read-only columns and SQL, reads of other
-instances and their read-only operations. initialize, afterChange and a
-writing operation get a writable context, call(), references, and invoke
-of writing operations on other instances and create; a read-only
-operation gets one whose writes refuse and whose call() and invoke reach
-only read-only operations. An operation's context also has update(),
-which changes the instance's own fields with instances.update's checks
-and every guard, and validateUpdate(). A called operation runs in a
-savepoint, so a failure the caller catches leaves nothing of it behind.
+A create checks the parameters it gives the type's behaviors against
+their createParamsSchema (checkCreateParams), asks every guard, and
+hands each initialize its own. Each function gets a context for its own
+behavior (behavior.ts). A guard and a field reader get a view: read-only
+columns and SQL, reads of other instances and their read-only
+operations. initialize, afterChange and a writing operation get a
+writable context, call(), references, and invoke of writing operations
+on other instances and create; a read-only operation gets one whose
+writes refuse and whose call() and invoke reach only read-only
+operations. An operation's context also has update(), which changes the
+instance's own fields with instances.update's checks and every guard,
+and validateUpdate(). A called operation runs in a savepoint, so a
+failure the caller catches leaves nothing of it behind.
+
+A guard vetoes with a reason, or a Veto with a code its declaration lists
+(vetoes) and details; a handler, initialize and afterChange throw a
+BehaviorVetoError, held to the same list. A code the declaration does not
+list is a BehaviorError, so a client can rely on the codes a describe
+document lists. A call's preconditions, by behavior, are checked against
+each behavior's preconditionSchema (checkPreconditions) and handed to
+that behavior's guard as its request's precondition; a request a
+behavior's own code makes carries none.
+
+Every write of an instance's own fields, a create's, an update's and an
+operation's update() alike, asks each behavior's validate about the
+fields it would store once the live version accepts them
+(validationIssues), before any guard; their issues refuse it as the live
+version's do, and validateUpdate() reports them. A call's preconditions
+are its arguments, checked with them before the instance is read, so
+before any validate; what one asserts is its guard's to judge, after
+every validate, and validate never sees it.
 
 What a behavior reaches beyond its instance goes through the Reach, which
 the instance store implements: reads, invokes, creates and references
@@ -34,10 +55,22 @@ principal, on a chain whose cause the events it writes record.
 import type { PermissionMatcher } from '@superschematic/http-runtime';
 
 import type { Principal } from '../access.js';
-import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, OperationParamsError, type ValidationIssue } from '../errors.js';
+import {
+  BehaviorError,
+  BehaviorVetoError,
+  CreateParamsError,
+  EngineError,
+  InstanceValidationError,
+  OperationParamsError,
+  PreconditionsError,
+  type SchemaIssue,
+  type ValidationIssue,
+  type Veto,
+} from '../errors.js';
 import type { EngineEvent, EventCause } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject, jsonEqual, mergePatch, setMember } from '../instances/patch.js';
+import { pointer } from '../registry/document.js';
 import { readOnlyIssue } from '../registry/validator.js';
 import type { SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
@@ -45,12 +78,14 @@ import type { SqlMode } from './sql.js';
 import type {
   BehaviorReactions,
   BehaviorSchedule,
+  CreateInstanceOptions,
   FrozenJSON,
   GuardRequest,
   InstanceChange,
   InstanceContext,
   InstanceView,
   Instances,
+  InstancesInvokeOptions,
   OperationContext,
   OperationHandler,
   ReadOptions,
@@ -62,12 +97,14 @@ import type {
   SchemaContext,
   SchemaOperationHandler,
   Schemas,
+  ValidationContext,
+  ValidationRequest,
   WorkContext,
   WritableColumns,
 } from './behavior.js';
 import type { BoundBehavior, Composition } from './composition.js';
 import { deepFreeze, jsonCopy } from './json.js';
-import { BehaviorRegistry, type OperationSpec } from './registry.js';
+import { BehaviorRegistry, type OperationSpec, type RegisteredBehavior } from './registry.js';
 import { BehaviorSql, DeletedColumns, InstanceColumns, synchronous, type InstanceRelation } from './storage.js';
 
 /** How deep call(), invokes and reads of other instances may nest together; deeper is a cycle. */
@@ -79,9 +116,14 @@ export const MAX_BATCH_READ = 500;
 /** The prefix of each bound behavior's storage, by behavior name. */
 export type Prefixes = ReadonlyMap<string, string>;
 
+/** A call's preconditions, checked: each behavior's entry by its name, deep-frozen. */
+export type Preconditions = ReadonlyMap<string, FrozenJSON>;
+
 /** Checks an instance's own fields against the live version (registry/validator.ts). */
 export interface InstanceValidator {
   validate(value: unknown): ValidationIssue[];
+  /** Checks a value against one of the document's types besides the instance type, with issues under path. */
+  validateType(type: string, value: unknown, path: string): ValidationIssue[];
 }
 
 /** What running a version needs: its behaviors, their storage and its validator. */
@@ -165,16 +207,29 @@ export interface ReferenceSource {
 export interface Reach {
   /** Reads instances of a schema, with the named behavior fields (every one when undefined); asks read. */
   read(chain: Chain, schema: string, ids: readonly string[], fields: readonly string[] | undefined): Map<string, InstanceRecord>;
-  /** Invokes an instance operation as instances.invoke does, inside the chain's transaction; asks write or read. */
-  invoke(chain: Chain, from: string, schema: string, id: string, operation: string, params: unknown, writes: boolean): unknown;
+  /**
+   * Invokes an instance operation as instances.invoke does, with the
+   * caller's preconditions (unchecked), inside the chain's transaction;
+   * asks write or read.
+   */
+  invoke(chain: Chain, from: string, schema: string, id: string, operation: string, params: unknown, writes: boolean, preconditions: unknown): unknown;
   /** Invokes a schema-level operation as instances.invokeSchema does, inside the chain's transaction; asks write or read. */
   invokeSchema(chain: Chain, from: string, schema: string, operation: string, params: unknown, writes: boolean): unknown;
   /**
    * Creates an instance as instances.create does, inside the chain's
-   * transaction, in a savepoint; asks write. data is a JSON object; a
-   * read (writes false) is refused.
+   * transaction, in a savepoint; asks write. data is a JSON object, and
+   * behaviors, when given, a JSON object of create parameters by behavior
+   * name; a read (writes false) is refused.
    */
-  create(chain: Chain, from: string, schema: string, data: Record<string, unknown>, id: string | undefined, writes: boolean): InstanceRecord;
+  create(
+    chain: Chain,
+    from: string,
+    schema: string,
+    data: Record<string, unknown>,
+    id: string | undefined,
+    behaviors: Record<string, unknown> | undefined,
+    writes: boolean
+  ): InstanceRecord;
   /** Asks read on a schema, as a read of its instances does; throws forbidden on a refusal. */
   allowRead(chain: Chain, schema: string): void;
   /** The instance of an event as the log had it just before the event; asks read on its schema. */
@@ -235,22 +290,26 @@ export class Execution {
   }
 
   /**
-   * guard asks every behavior's guard in list order, then, for a request
-   * that writes, the guardReference of every behavior on another instance
-   * that refers to this one; the first veto throws BehaviorVetoError.
+   * guard asks every behavior's guard in list order, each with its own
+   * entry of the preconditions as the request's precondition, then, for a
+   * request that writes, the guardReference of every behavior on another
+   * instance that refers to this one; the first veto throws
+   * BehaviorVetoError.
    */
-  guard(request: GuardRequest, writes = true): void {
+  guard(request: GuardRequest, writes = true, preconditions?: Preconditions): void {
     const action = request.kind === 'operation' ? request.operation : request.kind;
     for (const bound of this.composition.behaviors) {
       const guard = bound.behavior.implementation.guard;
       if (!guard) {
         continue;
       }
-      const answer: unknown = guard.call(bound.behavior.implementation, this.view(bound), request);
+      const precondition = preconditions?.get(bound.behavior.name);
+      const asked = precondition === undefined ? request : (Object.freeze({ ...request, precondition }) as GuardRequest);
+      const answer: unknown = guard.call(bound.behavior.implementation, this.view(bound), asked);
       synchronous(bound.behavior.name, 'guard', answer);
-      const reason = vetoReason(bound.behavior.name, 'a guard', answer);
-      if (reason !== undefined) {
-        throw new BehaviorVetoError(bound.behavior.name, action, this.target.schema, this.target.id, reason);
+      const veto = vetoOf(bound.behavior, 'a guard', answer);
+      if (veto !== undefined) {
+        throw new BehaviorVetoError(bound.behavior.name, action, this.target.schema, this.target.id, veto);
       }
     }
     if (writes) {
@@ -258,12 +317,19 @@ export class Execution {
     }
   }
 
-  /** initialize runs every behavior's initialize in list order, for a new instance. */
-  initialize(): void {
+  /**
+   * initialize runs every behavior's initialize in list order, for a new
+   * instance, each with its own entry of the create's parameters (checked
+   * by checkCreateParams), {} when the create gives it none.
+   */
+  initialize(params: Readonly<Record<string, FrozenJSON>>): void {
     for (const bound of this.composition.behaviors) {
       const initialize = bound.behavior.implementation.initialize;
       if (initialize) {
-        synchronous(bound.behavior.name, 'initialize', initialize.call(bound.behavior.implementation, this.context(bound, true)));
+        const own = Object.prototype.hasOwnProperty.call(params, bound.behavior.name) ? params[bound.behavior.name] : NO_PARAMS;
+        declaredVetoes(this.composition, () =>
+          synchronous(bound.behavior.name, 'initialize', initialize.call(bound.behavior.implementation, this.context(bound, true), own))
+        );
       }
     }
   }
@@ -285,7 +351,9 @@ export class Execution {
     for (const bound of this.composition.behaviors) {
       const afterChange = bound.behavior.implementation.afterChange;
       if (afterChange) {
-        synchronous(bound.behavior.name, 'afterChange', afterChange.call(bound.behavior.implementation, this.context(bound, true), change));
+        declaredVetoes(this.composition, () =>
+          synchronous(bound.behavior.name, 'afterChange', afterChange.call(bound.behavior.implementation, this.context(bound, true), change))
+        );
       }
     }
   }
@@ -315,18 +383,22 @@ export class Execution {
   }
 
   /**
-   * invoke runs an operation: every guard, then its handler, then its
-   * result against resultSchema. params are already checked (checkParams).
+   * invoke runs an operation: every guard, with the caller's checked
+   * preconditions, then its handler, then its result against
+   * resultSchema. params are already checked (checkParams). A call() names
+   * its behavior as caller and has no preconditions.
    */
-  invoke(operation: OperationSpec, params: FrozenJSON, caller?: string): unknown {
+  invoke(operation: OperationSpec, params: FrozenJSON, caller?: string, preconditions?: Preconditions): unknown {
     return this.chain.nest(operation.behavior.name, `operation ${operation.name}`, () => {
       const request = { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, writes: operation.writes } as const;
-      this.guard(caller === undefined ? request : { ...request, caller }, operation.writes);
+      this.guard(caller === undefined ? request : { ...request, caller }, operation.writes, caller === undefined ? preconditions : undefined);
       const bound = this.composition.bound(operation.behavior.name) as BoundBehavior;
-      const result: unknown = (operation.handler as OperationHandler<unknown>).call(
-        bound.behavior.implementation.operations,
-        this.operationContext(bound, operation.writes && this.writable),
-        params
+      const result: unknown = declaredVetoes(this.composition, () =>
+        (operation.handler as OperationHandler<unknown>).call(
+          bound.behavior.implementation.operations,
+          this.operationContext(bound, operation.writes && this.writable),
+          params
+        )
       );
       return checkResult(operation, result);
     });
@@ -343,7 +415,7 @@ export class Execution {
 
   /** referenceContext is a view whose instances.invoke also runs writing operations: afterReferenceChange's. */
   referenceContext(bound: BoundBehavior): ReferenceContext<unknown> {
-    return this.frozen(this.viewMembers(bound, true));
+    return this.frozen({ ...this.viewMembers(bound, true), writing: this.chain.writing(this.target.schema, this.target.id) });
   }
 
   private call(from: BoundBehavior, writable: boolean, behavior: string, name: string, params: unknown): unknown {
@@ -408,7 +480,8 @@ export class Execution {
 
   // merge applies a behavior's merge patch to a copy of the instance's own
   // fields and lists what update() would refuse: a behavior's field, then
-  // whatever the live version refuses in the result.
+  // whatever the live version refuses in the result, then whatever the
+  // behaviors' validate refuses in it.
   private merge(from: BoundBehavior, patch: unknown): { patch: Record<string, unknown>; merged: Record<string, unknown>; issues: ValidationIssue[] } {
     const copied = jsonCopy(patch);
     if (!('value' in copied) || !isPlainObject(copied.value)) {
@@ -423,7 +496,15 @@ export class Execution {
       }
     }
     const merged = mergePatch(this.data, value) as Record<string, unknown>;
-    return { patch: value, merged, issues: issues.length > 0 ? issues : this.runtime.validator.validate(merged) };
+    if (issues.length > 0) {
+      return { patch: value, merged, issues };
+    }
+    const own = this.runtime.validator.validate(merged);
+    if (own.length > 0) {
+      return { patch: value, merged, issues: own };
+    }
+    const request: ValidationRequest = { kind: 'update', before: this.data, after: freezeCopy(merged), caller: from.behavior.name };
+    return { patch: value, merged, issues: validationIssues(this.runtime, this.chain, this.target, request) };
   }
 
   // frozen freezes a view or a context whose data reads the instance's own
@@ -590,10 +671,8 @@ export class SchemaExecution {
         ...scopeMembers(this.chain, this.reach, bound, this.schema, this.version, operation.writes),
         sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, 'read'),
       });
-      const result: unknown = (operation.handler as SchemaOperationHandler<unknown>).call(
-        bound.behavior.implementation.schemaOperations,
-        context,
-        params
+      const result: unknown = declaredVetoes(this.runtime.composition, () =>
+        (operation.handler as SchemaOperationHandler<unknown>).call(bound.behavior.implementation.schemaOperations, context, params)
       );
       return checkResult(operation, result);
     });
@@ -654,21 +733,24 @@ function instancesOf(chain: Chain, reach: Reach, behavior: string, invokeWrites:
       }
       return read(schema, unique, options, 'instances.getMany');
     },
-    invoke: (schema: string, id: string, operation: string, params?: FrozenJSON) => {
+    invoke: (schema: string, id: string, operation: string, params?: FrozenJSON, options?: InstancesInvokeOptions) => {
       checkName(behavior, 'instances.invoke', 'schema', schema);
       checkName(behavior, 'instances.invoke', 'id', id);
       checkName(behavior, 'instances.invoke', 'operation', operation);
-      return reach.invoke(chain, behavior, schema, id, operation, params ?? {}, invokeWrites);
+      if (options !== undefined && (typeof options !== 'object' || options === null)) {
+        throw new BehaviorError(behavior, 'instances.invoke takes options { preconditions? }');
+      }
+      return reach.invoke(chain, behavior, schema, id, operation, params ?? {}, invokeWrites, options?.preconditions);
     },
     invokeSchema: (schema: string, operation: string, params?: FrozenJSON) => {
       checkName(behavior, 'instances.invokeSchema', 'schema', schema);
       checkName(behavior, 'instances.invokeSchema', 'operation', operation);
       return reach.invokeSchema(chain, behavior, schema, operation, params ?? {}, invokeWrites);
     },
-    create: (schema: string, data: FrozenJSON, options?: { readonly id?: string }) => {
+    create: (schema: string, data: FrozenJSON, options?: CreateInstanceOptions) => {
       checkName(behavior, 'instances.create', 'schema', schema);
       if (options !== undefined && (typeof options !== 'object' || options === null)) {
-        throw new BehaviorError(behavior, 'instances.create takes options { id? }');
+        throw new BehaviorError(behavior, 'instances.create takes options { id?, behaviors? }');
       }
       if (options?.id !== undefined) {
         checkName(behavior, 'instances.create', 'id', options.id);
@@ -681,7 +763,18 @@ function instancesOf(chain: Chain, reach: Reach, behavior: string, invokeWrites:
         throw new BehaviorError(behavior, "instances.create takes the instance's own fields: a JSON object");
       }
       const fields = copied.value;
-      return chain.nest(behavior, 'instances.create', () => reach.create(chain, behavior, schema, fields, options?.id, invokeWrites));
+      let params: Record<string, unknown> | undefined;
+      if (options?.behaviors !== undefined) {
+        const given = jsonCopy(options.behaviors);
+        if (!('value' in given)) {
+          throw new BehaviorError(behavior, `instances.create: behaviors is not JSON${given.path ? ` at ${given.path}` : ''}: ${given.problem}`);
+        }
+        if (!isPlainObject(given.value)) {
+          throw new BehaviorError(behavior, "instances.create takes behaviors, the create's parameters by behavior name: a JSON object");
+        }
+        params = given.value;
+      }
+      return chain.nest(behavior, 'instances.create', () => reach.create(chain, behavior, schema, fields, options?.id, params, invokeWrites));
     },
   });
 }
@@ -739,15 +832,117 @@ function fieldsOption(behavior: string, what: string, options: ReadOptions | und
   return fields;
 }
 
-/** vetoReason reads a guard's answer: a reason, or undefined to allow. */
-export function vetoReason(behavior: string, what: string, answer: unknown): string | undefined {
+/**
+ * vetoOf reads a guard's answer: undefined to allow, or a veto, a reason
+ * (a non-empty string) or a Veto whose code the behavior's declaration
+ * lists and whose details are a JSON object, copied and deep-frozen.
+ * Anything else is a BehaviorError.
+ */
+export function vetoOf(behavior: RegisteredBehavior, what: string, answer: unknown): Veto | undefined {
   if (answer === undefined || answer === null) {
     return undefined;
   }
-  if (typeof answer !== 'string' || answer === '') {
-    throw new BehaviorError(behavior, `${what} returns a reason (a non-empty string) to veto, or undefined to allow`);
+  if (typeof answer === 'string' && answer !== '') {
+    return { reason: answer };
   }
-  return answer;
+  const shape = `${what} returns a reason (a non-empty string) or { reason, code?, details? } to veto, or undefined to allow`;
+  if (!isPlainObject(answer) || Object.keys(answer).some((key) => key !== 'reason' && key !== 'code' && key !== 'details')) {
+    throw new BehaviorError(behavior.name, shape);
+  }
+  const { reason, code, details } = answer;
+  if (typeof reason !== 'string' || reason === '') {
+    throw new BehaviorError(behavior.name, shape);
+  }
+  checkVetoCode(behavior, code);
+  if (details === undefined) {
+    return code === undefined ? { reason } : { reason, code: code as string };
+  }
+  return { reason, ...(code === undefined ? {} : { code: code as string }), details: vetoDetails(behavior.name, details) };
+}
+
+// checkVetoCode holds a veto's code to one its behavior's declaration lists.
+function checkVetoCode(behavior: RegisteredBehavior, code: unknown): void {
+  if (code !== undefined && (typeof code !== 'string' || !behavior.vetoCodes.has(code))) {
+    const listed = [...behavior.vetoCodes];
+    throw new BehaviorError(
+      behavior.name,
+      `a veto's code ${JSON.stringify(code)} is not one its declaration lists (${listed.length > 0 ? listed.join(', ') : 'none'})`
+    );
+  }
+}
+
+// vetoDetails copies a veto's details, which are a JSON object.
+function vetoDetails(behavior: string, details: unknown): Readonly<Record<string, unknown>> {
+  const copied = jsonCopy(details);
+  if (!('value' in copied) || !isPlainObject(copied.value)) {
+    throw new BehaviorError(behavior, "a veto's details are a JSON object");
+  }
+  return deepFreeze(copied.value);
+}
+
+/**
+ * declaredVetoes runs a behavior's code and holds a BehaviorVetoError it
+ * throws to the codes its behavior declares, and its details to a JSON
+ * object: the veto of a behavior of the composition whose code its
+ * declaration does not list is a BehaviorError. A veto of a behavior of
+ * another schema, from an invoke, was held to them where it was thrown.
+ */
+export function declaredVetoes<T>(composition: Composition, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof BehaviorVetoError && (error.vetoCode !== undefined || error.vetoDetails !== undefined)) {
+      const bound = composition.bound(error.behavior);
+      if (bound) {
+        checkVetoCode(bound.behavior, error.vetoCode);
+        if (error.vetoDetails !== undefined) {
+          vetoDetails(error.behavior, error.vetoDetails);
+        }
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * checkPreconditions checks a call's preconditions against the type's
+ * behaviors: a JSON object whose every member names a behavior the type
+ * composes that declares a preconditionSchema, with an entry its schema
+ * accepts. undefined, or no entry, is no preconditions. Every problem is
+ * an issue of one PreconditionsError (invalid_argument).
+ */
+export function checkPreconditions(composition: Composition, schema: string, preconditions: unknown): Preconditions | undefined {
+  if (preconditions === undefined) {
+    return undefined;
+  }
+  const copied = jsonCopy(preconditions);
+  if (!('value' in copied) || !isPlainObject(copied.value)) {
+    throw new PreconditionsError(schema, [{ path: '', message: "the preconditions are a JSON object of each behavior's entry by its name" }]);
+  }
+  const issues: SchemaIssue[] = [];
+  const checked = new Map<string, FrozenJSON>();
+  for (const [name, entry] of Object.entries(copied.value)) {
+    const at = pointer(name);
+    const bound = composition.bound(name);
+    if (!bound) {
+      issues.push({ path: at, message: `${schema} composes no behavior ${name}` });
+      continue;
+    }
+    const validate = bound.behavior.precondition;
+    if (validate === undefined) {
+      issues.push({ path: at, message: `behavior ${name} takes no precondition` });
+      continue;
+    }
+    if (!validate(entry)) {
+      issues.push(...BehaviorRegistry.issues(validate.errors).map((issue) => ({ path: `${at}${issue.path}`, message: issue.message })));
+      continue;
+    }
+    checked.set(name, deepFreeze(entry as FrozenJSON));
+  }
+  if (issues.length > 0) {
+    throw new PreconditionsError(schema, issues);
+  }
+  return checked.size > 0 ? checked : undefined;
 }
 
 function prefixOf(prefixes: Prefixes, bound: BoundBehavior): string {
@@ -769,6 +964,138 @@ function checkResult(operation: OperationSpec, result: unknown): unknown {
     throw new BehaviorError(operation.behavior.name, `operation ${operation.name} returned a result its resultSchema refuses: ${detail}`);
   }
   return value;
+}
+
+/**
+ * validationIssues asks every behavior's validate, in list order, about
+ * the instance's own fields a write would store, which the live version
+ * accepts, and returns their issues together. Each validate gets a
+ * context with the config, the call, can() and checkType(), which checks
+ * a value against a type its checkedTypes names.
+ */
+export function validationIssues(runtime: Runtime, chain: Chain, target: ExecutionTarget, request: ValidationRequest): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const frozen = deepFreeze(request);
+  for (const bound of runtime.composition.behaviors) {
+    const validate = bound.behavior.implementation.validate;
+    if (!validate) {
+      continue;
+    }
+    const name = bound.behavior.name;
+    const context: ValidationContext<unknown> = Object.freeze({
+      behavior: name,
+      config: bound.config,
+      namespace: chain.namespace,
+      schema: target.schema,
+      version: target.version,
+      id: target.id,
+      principal: chain.principal,
+      now: chain.now,
+      can: (permission: string) => can(chain, name, permission),
+      checkType: (type: string, value: unknown, path: string) => {
+        if (typeof type !== 'string' || !bound.checked.includes(type)) {
+          throw new BehaviorError(
+            name,
+            `checkType: ${String(type)} is not a type its checkedTypes names (${bound.checked.length > 0 ? bound.checked.join(', ') : 'none'})`
+          );
+        }
+        if (typeof path !== 'string') {
+          throw new BehaviorError(name, 'checkType takes the path of the value: a string');
+        }
+        return runtime.validator.validateType(type, value, path);
+      },
+    });
+    const answer: unknown = declaredVetoes(runtime.composition, () => validate.call(bound.behavior.implementation, context, frozen));
+    synchronous(name, 'validate', answer);
+    issues.push(...returnedIssues(name, answer));
+  }
+  return issues;
+}
+
+// returnedIssues reads what a validate returned: a list of issues, or
+// nothing.
+function returnedIssues(behavior: string, answer: unknown): ValidationIssue[] {
+  if (answer === undefined || answer === null) {
+    return [];
+  }
+  const shaped = (issue: unknown): issue is ValidationIssue =>
+    typeof issue === 'object' &&
+    issue !== null &&
+    typeof (issue as ValidationIssue).path === 'string' &&
+    typeof (issue as ValidationIssue).rule === 'string' &&
+    (issue as ValidationIssue).rule !== '' &&
+    typeof (issue as ValidationIssue).message === 'string' &&
+    (issue as ValidationIssue).message !== '';
+  if (!Array.isArray(answer) || !answer.every(shaped)) {
+    throw new BehaviorError(behavior, 'validate returns a list of issues, each { path, rule, message } with a rule and a message, or nothing to accept');
+  }
+  return answer.map(({ path, rule, message }) => ({ path, rule, message }));
+}
+
+/** What initialize gets from a create that gives its behavior no parameters. */
+const NO_PARAMS: FrozenJSON = Object.freeze({});
+
+/**
+ * checkCreateParams copies the parameters a create gives the type's
+ * behaviors and checks them: a JSON object by behavior name, each entry
+ * for a behavior the type composes that declares a createParamsSchema,
+ * which accepts it; a behavior with a createParamsSchema the create gives
+ * nothing must accept {}. It returns the entries, deep-frozen: what every
+ * guard is asked with and each initialize gets its own of. A refusal is a
+ * CreateParamsError with every issue, at JSON pointers under /behaviors.
+ */
+export function checkCreateParams(composition: Composition, schema: string, behaviors: unknown): Readonly<Record<string, FrozenJSON>> {
+  if (behaviors === undefined) {
+    behaviors = {};
+  }
+  if (!isPlainObject(behaviors)) {
+    throw new CreateParamsError(schema, [{ path: '/behaviors', message: "behaviors is the create's parameters by behavior name: a JSON object" }]);
+  }
+  const issues: SchemaIssue[] = [];
+  const out: Record<string, FrozenJSON> = {};
+  const check = (bound: BoundBehavior, at: string, entry: unknown): void => {
+    const validate = bound.behavior.createParams as NonNullable<typeof bound.behavior.createParams>;
+    if (!validate(entry)) {
+      issues.push(...BehaviorRegistry.issues(validate.errors).map((issue) => ({ path: `${at}${issue.path}`, message: issue.message })));
+    }
+  };
+  for (const [name, entry] of Object.entries(behaviors)) {
+    if (entry === undefined) {
+      continue;
+    }
+    const at = `/behaviors${pointer(name)}`;
+    const bound = composition.bound(name);
+    if (!bound) {
+      const taking = composition.behaviors.filter((candidate) => candidate.behavior.createParams !== undefined).map((candidate) => candidate.behavior.name);
+      issues.push({
+        path: at,
+        message: `${schema} does not compose behavior ${name} (its behaviors that take create parameters: ${taking.length > 0 ? taking.join(', ') : 'none'})`,
+      });
+      continue;
+    }
+    if (bound.behavior.createParams === undefined) {
+      issues.push({ path: at, message: `behavior ${name} takes no create parameters` });
+      continue;
+    }
+    const copied = jsonCopy(entry);
+    if (!('value' in copied)) {
+      issues.push({ path: `${at}${pathPointer(copied.path)}`, message: copied.problem });
+      continue;
+    }
+    check(bound, at, copied.value);
+    out[name] = copied.value as FrozenJSON;
+  }
+  const given = behaviors;
+  for (const bound of composition.behaviors) {
+    const name = bound.behavior.name;
+    if (bound.behavior.createParams !== undefined && (!Object.prototype.hasOwnProperty.call(given, name) || given[name] === undefined)) {
+      check(bound, `/behaviors${pointer(name)}`, {});
+    }
+  }
+  if (issues.length > 0) {
+    throw new CreateParamsError(schema, issues);
+  }
+  return deepFreeze(out);
 }
 
 /**

@@ -1,0 +1,41 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "2748b05bad326495ef116a3bcb8fa3e6c9a3719f87957429eb325b9dbde1c155",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_line/column/sku",
+          "reason": "OrderLine.sku changes from TEXT to VARCHAR(16): the cast truncates or rounds values VARCHAR(16) cannot hold exactly.",
+          "subject": "table/order_line/column/sku"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_line/column/sku",
+          "reason": "The change rewrites order_line and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/order_line/column/sku"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/column/sku",
+          "reason": "OrderLine.sku changes from TEXT to VARCHAR(16): servers built from the previous version still read and write TEXT.",
+          "subject": "table/order_line/column/sku"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line\n  ALTER COLUMN sku TYPE VARCHAR(16) USING sku::VARCHAR(16)"
+      ],
+      "subject": "table/order_line/column/sku",
+      "transactional": true
+    }
+  ],
+  "to": "f70616e8f6973288af4bc72c99ef32375b7699dce767a587eec2e53232c00abb",
+  "toModel": null,
+  "version": 1
+}

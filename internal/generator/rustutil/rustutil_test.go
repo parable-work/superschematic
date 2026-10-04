@@ -1,6 +1,67 @@
 package rustutil
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// keywords lists every word IsRustKeyword reports.
+var keywords = []string{
+	"as", "break", "const", "continue", "crate", "else", "enum", "extern", "false",
+	"fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+	"ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+	"unsafe", "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box",
+	"do", "final", "macro", "override", "priv", "try", "typeof", "unsized", "virtual", "yield",
+}
+
+func TestEscapeKeyword(t *testing.T) {
+	for in, want := range map[string]string{
+		"tenant": "tenant",
+		"type":   "r#type",
+		"match":  "r#match",
+		"self":   "self_",
+		"Self":   "Self_",
+		"crate":  "crate_",
+		"super":  "super_",
+	} {
+		if got := EscapeKeyword(in); got != want {
+			t.Errorf("EscapeKeyword(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestEscapedKeywordsCompile binds every escaped keyword in a Rust function
+// and compiles it: crate, self, Self and super are no raw identifiers, so an
+// escape that wrote r#self would fail here.
+func TestEscapedKeywordsCompile(t *testing.T) {
+	rustc, err := exec.LookPath("rustc")
+	if err != nil {
+		t.Skip("rustc not available")
+	}
+	for _, kw := range keywords {
+		if !IsRustKeyword(kw) {
+			t.Errorf("IsRustKeyword(%q) = false", kw)
+		}
+	}
+	var src strings.Builder
+	src.WriteString("#![allow(non_snake_case, unused_variables)]\npub fn bindings() {\n")
+	for _, kw := range keywords {
+		src.WriteString("    let " + EscapeKeyword(kw) + " = 0;\n")
+	}
+	src.WriteString("}\n")
+	dir := t.TempDir()
+	file := filepath.Join(dir, "keywords.rs")
+	if err := os.WriteFile(file, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(rustc, "--edition", "2021", "--crate-type", "lib", "--emit", "metadata", "-o", filepath.Join(dir, "keywords.rmeta"), file)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("rustc refused the escaped keywords: %v\n%s\n%s", err, out, src.String())
+	}
+}
 
 func TestIsRustKeyword(t *testing.T) {
 	for _, kw := range []string{"type", "match", "self", "Self", "async", "yield"} {

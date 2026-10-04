@@ -21,6 +21,10 @@ The HTTP runtime generated servers import is
 `[paths].http_runtime_rust` points generated `Cargo.toml` path
 dependencies at `runtime/http/rust` in a checkout.
 
+A types crate's validators call `superschematic-schema-runtime`, also
+unpublished until the first tag; `[paths].schema_runtime_rust` points it
+at `runtime/schema/rust` in a checkout.
+
 A types crate whose schema declares a
 [version graph](/superschematic/reference/version-graphs/#use-the-engine-from-rust)
 depends on the engine `superschematic-versiongraph-engine`, also
@@ -118,6 +122,39 @@ the payload contradicts one of the member's tags, a field that two or more
 members declare with distinct string or enum defaults. When no member
 declares every key, the first member whose tags the payload allows wins.
 Either way the payload must be a JSON object.
+
+### Validate
+
+The crate's `validators` module checks a JSON value against a type before
+it is decoded, as the generated Go, TypeScript and Python validators do: a
+missing required field, then a value of the wrong JSON type, then the
+type's rules, with one error per failing value at its wire path
+(`amountCents`, `tags[2]`, `labels.color`). `parse_<type>` fills the
+type's `@default` values, refuses undeclared keys when you ask it to,
+validates the value and decodes it:
+
+```rust
+use schemas_catalog_types::{validators, Money};
+use superschematic_schema_runtime::{ParseError, UnknownFields};
+
+fn read(value: serde_json::Value) -> Result<Money, ParseError> {
+    let errors = validators::validate_money(&value);
+    if !errors.is_empty() {
+        // {"amountCents":[{"validator":"type","message":"expected a number"}]}
+        eprintln!("{}", serde_json::to_string(&errors).unwrap());
+    }
+    validators::parse_money(value, UnknownFields::Refuse)
+}
+```
+
+A `ParseError` says which step refused the value: `NotAnObject`,
+`UnknownFields`, `Invalid` with the errors, or `Decode` with serde's.
+Each scalar the schema uses has `validators::scalars::validate_<scalar>`
+and `validate_<scalar>_required`, and each enum `validate_<enum>`; they
+take an `Option<&serde_json::Value>`. The scalar core's own checks come
+from the `superscalar` crate (`scalar_rust_registry` names another
+registry), and the Rust validators run the same vectors as the other
+three languages in `internal/generator/parity`.
 
 ## Consume a generated SDK
 

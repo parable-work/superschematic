@@ -1,6 +1,6 @@
 {
   "name": "Lease",
-  "description": "An exclusive, time-bounded lease on the instance, held by one principal and numbered by a fencing token that advances at every acquire, release and expiry. While the lease is active only its holder may change the instance; a heartbeat with the current token renews it and delivers the directives sent to the holder. A lease its holder stops renewing expires, and the expiry can move the instance's Workflow status back.",
+  "description": "An exclusive, time-bounded lease on the instance, held by one principal and numbered by a fencing token that advances at every acquire, release and expiry. While the lease is active only its holder may change the instance, and a write that presents a token other than the current one, as Lease's precondition, is refused whoever calls; a heartbeat with the current token renews the lease and delivers the directives sent to the holder. A lease its holder stops renewing expires, and the expiry can move the instance's Workflow status back.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -11,7 +11,7 @@
         "minimum": 1000
       },
       "heartbeatMs": {
-        "description": "How often the holder should send a heartbeat, in milliseconds, less than ttlMs; a third of ttlMs when absent. acquire returns it.",
+        "description": "How often the holder should send a heartbeat, in milliseconds, at most half of ttlMs, so one late heartbeat does not lose the lease; a third of ttlMs when absent. acquire returns it.",
         "type": "integer",
         "minimum": 1
       },
@@ -31,7 +31,7 @@
         "minLength": 1
       },
       "onExpiry": {
-        "description": "Moves the instance's Workflow status when a lease ends with the work unfinished: at an expiry, and at a release, while the status is one of from. Needs Workflow on the type.",
+        "description": "Moves the instance's Workflow status when a lease ends with the work unfinished: at an expiry, an abandon and a release, while the status is one of from. Needs Workflow on the type.",
         "type": "object",
         "additionalProperties": false,
         "required": ["transition", "from"],
@@ -47,12 +47,12 @@
         }
       },
       "maxExpiries": {
-        "description": "How many expiries an instance may have. Once it has had this many, its lease cannot be acquired again until resetExpiries.",
+        "description": "How many expiries an instance may have, abandons included. Once it has had this many, its lease cannot be acquired again until resetExpiries.",
         "type": "integer",
         "minimum": 1
       },
       "escalate": {
-        "description": "Used instead of onExpiry at the expiry that reaches maxExpiries, which it needs. Needs Workflow on the type.",
+        "description": "Used instead of onExpiry at the expiry or abandon that reaches maxExpiries, which it needs. Needs Workflow on the type.",
         "type": "object",
         "additionalProperties": false,
         "required": ["transition", "from"],
@@ -68,10 +68,14 @@
         }
       },
       "exempt": {
-        "description": "Writing operations of the type's other behaviors, each as <Behavior>.<operation>, that a principal other than the holder may run while the lease is active.",
+        "description": "Writing operations of the type's other behaviors, each as <Behavior>.<operation>, that a principal other than the holder may run while the lease is active, and that requireToken does not hold to the token.",
         "type": "array",
         "uniqueItems": true,
         "items": { "type": "string", "pattern": "^([A-Za-z][A-Za-z0-9_-]*\\.)?[A-Z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$" }
+      },
+      "requireToken": {
+        "description": "When true, a write to an instance with an active lease that does not present the current token as Lease's precondition is refused, the holder's own included, so every process of a principal fences its writes. Exempt and read-only operations, Lease's own operations and a principal with overridePermission are not held to it.",
+        "type": "boolean"
       },
       "acquirePermission": {
         "description": "The permission a principal needs to acquire a lease. Absent, any principal who may write the instance can.",
@@ -91,7 +95,7 @@
     }
   },
   "fields": [
-    { "name": "lease", "description": "The lease: holder (null when free), token, acquiredAt, expiresAt, active (held and not expired) and expiries." }
+    { "name": "lease", "description": "The lease: holder (null when free), token, acquiredAt, renewedAt (its acquire or its last heartbeat), expiresAt, active (held and not expired), expiries, and ended, how and when the last lease ended (null while one is held)." }
   ],
   "operations": [
     {
@@ -109,7 +113,7 @@
         "additionalProperties": false,
         "required": ["token", "expiresAt", "heartbeatMs"],
         "properties": {
-          "token": { "description": "The lease's fencing token, which heartbeat, release and acknowledge take.", "type": "integer" },
+          "token": { "description": "The lease's fencing token, which the holder's writes present as Lease's precondition.", "type": "integer" },
           "expiresAt": { "description": "When the lease expires unless renewed, in epoch milliseconds.", "type": "integer" },
           "heartbeatMs": { "description": "How often to send a heartbeat, in milliseconds.", "type": "integer" }
         }
@@ -118,13 +122,18 @@
     },
     {
       "name": "heartbeat",
-      "description": "Renews the lease, never past its longest hold, and returns the directives sent under it that are not acknowledged. Only the holder, with the current token, while the lease is active: an expired lease cannot be renewed.",
+      "description": "Renews the lease, never past its longest hold, acknowledges the directives acknowledge names, and returns the directives sent under it that are not acknowledged. Only the holder, presenting the current token as Lease's precondition, while the lease is active: an expired lease cannot be renewed.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["token"],
         "properties": {
-          "token": { "description": "The lease's fencing token.", "type": "integer", "minimum": 1 }
+          "acknowledge": {
+            "description": "Directives of the lease to mark handled first, as acknowledge does, so a heartbeat acknowledges in the same write; empty, none.",
+            "type": "array",
+            "maxItems": 500,
+            "uniqueItems": true,
+            "items": { "type": "integer", "minimum": 1 }
+          }
         }
       },
       "resultSchema": {
@@ -144,6 +153,7 @@
                 "id": { "description": "The directive's number in its lease.", "type": "integer" },
                 "name": { "type": "string" },
                 "data": { "type": "object" },
+                "dedupeKey": { "description": "The key it was sent with, when it was.", "type": "string" },
                 "createdAt": { "type": "integer" },
                 "createdBy": { "type": "string" }
               }
@@ -155,12 +165,12 @@
     },
     {
       "name": "release",
-      "description": "Ends an active lease: the holder with the current token, or a principal with overridePermission, whose token is optional. The token advances, so the directives sent under the lease are not delivered again, and onExpiry moves the status when it is still one of its from states.",
+      "description": "Ends an active lease: the holder, presenting the current token as Lease's precondition, or a principal with overridePermission, who need not. The token advances, so the directives sent under the lease are not delivered again, and onExpiry moves the status when it is still one of its from states. With abandon, the holder gives the work up as failed: the release counts as an expiry, and escalate applies at the one that reaches maxExpiries.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "token": { "description": "The lease's fencing token; the holder must give it.", "type": "integer", "minimum": 1 }
+          "abandon": { "description": "Whether the work is given up as failed, so the release counts as an expiry.", "type": "boolean" }
         }
       },
       "resultSchema": { "type": "object", "additionalProperties": false },
@@ -168,12 +178,17 @@
     },
     {
       "name": "expire",
-      "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not. The engine's runner calls it on every lapsed lease, every sweepMs.",
+      "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not, unless notRenewedAfter spares it. The engine's runner calls it on every lapsed lease, every sweepMs.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "holder": { "description": "The principal whose lease to expire now, active or not; it needs overridePermission.", "type": "string", "minLength": 1 }
+          "holder": { "description": "The principal whose lease to expire now, active or not; it needs overridePermission.", "type": "string", "minLength": 1 },
+          "notRenewedAfter": {
+            "description": "With holder: an active lease its holder acquired or renewed after this time, in epoch milliseconds, is spared, since its own heartbeats show the process holding it is alive. A lapsed one expires all the same.",
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "resultSchema": {
@@ -181,42 +196,53 @@
         "additionalProperties": false,
         "required": ["expired"],
         "properties": {
-          "expired": { "description": "Whether a lease expired.", "type": "boolean" }
+          "expired": { "description": "Whether a lease expired.", "type": "boolean" },
+          "reason": {
+            "description": "Why, when one expired: ttl, its holder stopped renewing it; maxHold, it reached its longest hold; holder, it was active and expired by its holder's name.",
+            "type": "string",
+            "enum": ["ttl", "maxHold", "holder"]
+          }
         }
       },
       "writes": true
     },
     {
       "name": "direct",
-      "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
+      "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": ["name"],
         "properties": {
           "name": { "description": "What the directive asks.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$" },
-          "data": { "description": "Its data.", "type": "object" }
+          "data": { "description": "Its data.", "type": "object" },
+          "dedupeKey": {
+            "description": "Sends the directive once per lease: when one was sent under the current token with this key, acknowledged or not, that one stands and nothing is sent.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
         }
       },
       "resultSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id"],
+        "required": ["id", "created"],
         "properties": {
-          "id": { "description": "The directive's number in its lease.", "type": "integer" }
+          "id": { "description": "The directive's number in its lease: the one sent, or the one already sent with dedupeKey.", "type": "integer" },
+          "created": { "description": "Whether this call sent it; false when one with dedupeKey was already sent.", "type": "boolean" }
         }
       },
       "writes": true
     },
     {
       "name": "acknowledge",
-      "description": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, with the current token.",
+      "description": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["token", "ids"],
+        "required": ["ids"],
         "properties": {
-          "token": { "description": "The lease's fencing token.", "type": "integer", "minimum": 1 },
           "ids": {
             "description": "The directives' numbers.",
             "type": "array",
@@ -232,22 +258,34 @@
     },
     {
       "name": "expireHolder",
-      "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. Needs overridePermission; refused when the config names none.",
+      "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.",
       "scope": "schema",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": ["holder"],
         "properties": {
-          "holder": { "description": "The principal whose leases to expire.", "type": "string", "minLength": 1 }
+          "holder": { "description": "The principal whose leases to expire.", "type": "string", "minLength": 1 },
+          "notRenewedAfter": { "description": "As expire's: an active lease acquired or renewed after this time is spared.", "type": "integer", "minimum": 0 }
         }
       },
       "resultSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["expired"],
+        "required": ["expired", "reasons", "ids"],
         "properties": {
-          "expired": { "description": "How many leases expired.", "type": "integer" }
+          "expired": { "description": "How many leases expired.", "type": "integer" },
+          "ids": { "description": "The instances whose lease expired, by id.", "type": "array", "items": { "type": "string" } },
+          "reasons": {
+            "description": "How many expired for each reason expire gives, by reason; a reason none expired for is absent.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "ttl": { "type": "integer" },
+              "maxHold": { "type": "integer" },
+              "holder": { "type": "integer" }
+            }
+          }
         }
       },
       "writes": true
@@ -266,5 +304,25 @@
       },
       "writes": true
     }
+  ],
+  "preconditionSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["token"],
+    "properties": {
+      "token": { "description": "The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).", "type": "integer", "minimum": 0 }
+    }
+  },
+  "vetoes": [
+    { "code": "held_by_another", "description": "Another principal holds the instance's active lease." },
+    { "code": "held_by_caller", "description": "The caller already holds the active lease: acquire refuses it, and heartbeat renews it." },
+    { "code": "not_leased", "description": "No principal holds a lease on the instance." },
+    { "code": "not_holder", "description": "The caller does not hold the lease the call needs it to hold." },
+    { "code": "lapsed", "description": "The lease is past its expiry time or its longest hold: it gives its holder nothing, and only its expiry can follow." },
+    { "code": "token_stale", "description": "The token the call presents as Lease's precondition is not the lease's current one: a newer lease, or none, has replaced the one it names." },
+    { "code": "token_required", "description": "The call presents no token as Lease's precondition, and needs one: a heartbeat, an acknowledgement or a holder's release, or any write under requireToken while the lease is active." },
+    { "code": "max_expiries", "description": "The instance has had maxExpiries expiries, so its lease cannot be acquired until resetExpiries." },
+    { "code": "hold_limit_fixed", "description": "maxHoldField cannot change while a lease is held." },
+    { "code": "not_configured", "description": "The config names no permission that allows the call: direct without directPermission or overridePermission, resetExpiries without overridePermission." }
   ]
 }

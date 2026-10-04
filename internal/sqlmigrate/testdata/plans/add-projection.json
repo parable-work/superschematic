@@ -1,0 +1,22 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "a3f2556531d91f6d9391297ea5f79fa53e0b2631231ae2bfc12ad898e05686af",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createView",
+      "phase": "expand",
+      "statements": [
+        "CREATE VIEW report.customer_directory WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.\"name\",\n  base.email\nFROM customer AS base\n",
+        "COMMENT ON VIEW report.customer_directory IS 'Customers by name.'"
+      ],
+      "subject": "view/report.customer_directory",
+      "transactional": true
+    }
+  ],
+  "to": "b283f71eef6709f93a9e09499b7a751dd083aa79572dc38762f7e2a1a446c5b8",
+  "toModel": null,
+  "version": 1
+}

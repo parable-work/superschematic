@@ -2,16 +2,18 @@
 // only its own behaviors and the core meta-schema runs the documents the
 // core binary builds in the CLI smoke: fixture-behaviors-json, whose type
 // composes Workflow, Comments and Revisions, fixture-cross-instance-json,
-// whose tasks wait on tasks and documents and link to both and to a
-// project, fixture-rollups-json, whose projects roll their tasks up,
-// fixture-search-json, whose notes are searched, and
-// fixture-reactions-json, whose projects start and finish their parent.
+// whose tasks wait on tasks and documents and link to both and to the
+// project every create gives, fixture-rollups-json, whose projects roll their tasks up,
+// fixture-search-json, whose notes are searched,
+// fixture-reactions-json, whose projects start, finish and fail their
+// parent, and fixture-variants-json, whose steps keep their kind and hold
+// a result of the kind's shape.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { EngineError, defineBehavior, type Principal } from '../dist/index.js';
-import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectTreeDocument, projectsDocument, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectTreeDocument, projectsDocument, stepsDocument, tasksDocument } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -30,7 +32,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Variants', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -153,9 +155,9 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.invokeSchema(writer, 'notes', 'search', { query: 'release plan' }), { items: [], next: null });
     });
 
-    test('it runs the tasks document beside the documents one: blockers of both schemas, and links to both', () => {
+    test('it runs the tasks document beside the documents one: blockers of both schemas, and links to both and to the project its create gives', () => {
       const engine = openTestEngine({ driver });
-      for (const document of [documents, tasks]) {
+      for (const document of [documents, tasks, projects]) {
         engine.schemas.define(alice, document);
         engine.schemas.publish(alice, document.name as string);
       }
@@ -164,9 +166,13 @@ for (const driver of drivers) {
         ['Workflow', 'Dependencies', 'Links']
       );
       engine.instances.create(writer, 'documents', { title: 'Design' }, { id: 'doc-1' });
-      engine.instances.create(writer, 'tasks', { title: 'Plan' }, { id: 'plan' });
-      const created = engine.instances.create(writer, 'tasks', { title: 'Build' }, { id: 'build' });
-      assert.deepEqual(created.data, { title: 'Build', status: 'todo', blocked: false });
+      engine.instances.create(writer, 'projects', { title: 'Launch' }, { id: 'launch' });
+      // A task's project is required: its create gives it.
+      assert.equal(thrown(() => engine.instances.create(writer, 'tasks', { title: 'Stray' })).code, 'invalid_argument');
+      const project = { Links: { project: 'launch' } };
+      engine.instances.create(writer, 'tasks', { title: 'Plan' }, { id: 'plan', behaviors: project });
+      const created = engine.instances.create(writer, 'tasks', { title: 'Build' }, { id: 'build', behaviors: project });
+      assert.deepEqual(created.data, { title: 'Build', status: 'todo', blocked: false, links: { project: { schema: 'projects', id: 'launch' } } });
 
       // build waits on plan and on the design, implements the design at its
       // first revision, and belongs to plan.
@@ -179,8 +185,19 @@ for (const driver of drivers) {
         title: 'Build',
         status: 'doing',
         blocked: true,
-        links: { parent: { schema: 'tasks', id: 'plan' }, spec: { schema: 'documents', id: 'doc-1', revision: 1, stale: false } },
+        links: {
+          parent: { schema: 'tasks', id: 'plan' },
+          project: { schema: 'projects', id: 'launch' },
+          spec: { schema: 'documents', id: 'doc-1', revision: 1, stale: false },
+        },
       });
+      // A create gives the same edges and links in one event: test waits on plan.
+      const test = engine.instances.create(writer, 'tasks', { title: 'Test' }, {
+        id: 'test',
+        behaviors: { Links: { project: 'launch', parent: 'plan' }, Dependencies: { blockers: [{ id: 'plan' }] } },
+      });
+      assert.deepEqual([test.seq, test.data.blocked, Object.keys(test.data.links as object)], [1, true, ['parent', 'project']]);
+      engine.instances.delete(writer, 'tasks', 'test');
       assert.equal(thrown(() => engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'done' })).code, 'vetoed');
 
       // The design is revised, then archived, a terminal state; plan is done.
@@ -198,9 +215,9 @@ for (const driver of drivers) {
       });
       assert.deepEqual(engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'done' }), { from: 'doing', to: 'done' });
 
-      // plan is build's required parent, so it stays; the design can go,
-      // which removes build's edge to it and clears its spec link.
-      assert.equal(thrown(() => engine.instances.delete(writer, 'tasks', 'plan')).code, 'vetoed');
+      // launch is the tasks' required project, so it stays; the design can
+      // go, which removes build's edge to it and clears its spec link.
+      assert.equal(thrown(() => engine.instances.delete(writer, 'projects', 'launch')).code, 'vetoed');
       const after = engine.events.read(alice, { limit: 500 }).events.at(-1)?.cursor ?? 0;
       assert.equal(engine.instances.delete(writer, 'documents', 'doc-1'), true);
       assert.deepEqual(
@@ -215,7 +232,7 @@ for (const driver of drivers) {
         title: 'Build',
         status: 'done',
         blocked: false,
-        links: { parent: { schema: 'tasks', id: 'plan' } },
+        links: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } },
       });
     });
 
@@ -232,8 +249,7 @@ for (const driver of drivers) {
       const created = engine.instances.create(writer, 'projects', { title: 'Launch' }, { id: 'launch' });
       assert.deepEqual(created.data, { title: 'Launch', status: 'active', rollups: { tasks: 0, tasksByStatus: {}, tasksFinished: true } });
       for (const id of ['plan', 'build']) {
-        engine.instances.create(writer, 'tasks', { title: id }, { id });
-        engine.instances.invoke(writer, 'tasks', id, 'link', { name: 'project', id: 'launch' });
+        engine.instances.create(writer, 'tasks', { title: id }, { id, behaviors: { Links: { project: 'launch' } } });
       }
       engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'doing' });
       assert.deepEqual(engine.instances.get(alice, 'projects', 'launch')?.data.rollups, {
@@ -249,7 +265,7 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.invoke(writer, 'projects', 'launch', 'transition', { to: 'done' }), { from: 'active', to: 'done' });
     });
 
-    test('it runs the project tree document: a project starts its parent, and the last to finish finishes it, after the commit', () => {
+    test('it runs the project tree document: a project starts its parent, the last to finish finishes it, and one that fails fails it, after the commit', () => {
       const runner: Principal = { subject: 'runner', permissions: [] };
       const engine = openTestEngine({ driver, runner: { principal: runner } });
       engine.schemas.define(alice, projectTreeDocument());
@@ -279,6 +295,41 @@ for (const driver of drivers) {
           ['runner', { to: 'done' }, 'Reactions', 1],
         ]
       );
+
+      // A tree with a failed project fails its parent, and is never done.
+      for (const id of ['release', 'docs', 'site']) {
+        engine.instances.create(writer, 'projects', { title: id }, { id });
+      }
+      for (const id of ['docs', 'site']) {
+        engine.instances.invoke(writer, 'projects', id, 'link', { name: 'parent', id: 'release' });
+        engine.instances.invoke(writer, 'projects', id, 'transition', { to: 'doing' });
+      }
+      engine.instances.invoke(writer, 'projects', 'docs', 'transition', { to: 'failed' });
+      engine.instances.invoke(writer, 'projects', 'site', 'transition', { to: 'done' });
+      engine.runner.runDue();
+      assert.deepEqual(
+        ['release', 'docs', 'site'].map((id) => engine.instances.get(alice, 'projects', id)?.data.status),
+        ['failed', 'failed', 'done']
+      );
+    });
+
+    test("it runs the steps document: a step's kind stays what its create gave it, and its result has the kind's shape", () => {
+      const engine = openTestEngine({ driver });
+      engine.schemas.define(alice, stepsDocument());
+      engine.schemas.publish(alice, 'Step');
+      const check = engine.instances.create(writer, 'Step', { title: 'Lint', kind: 'verify', result: { passed: true, checks: [{ name: 'eslint', ok: true }] } });
+      assert.equal(check.seq, 1);
+      assert.deepEqual(
+        thrown(() => engine.instances.update(writer, 'Step', check.id, { kind: 'note', result: null })).message,
+        'Step in namespace default (version 1): kind: kind is a constant of Step: its create sets it and nothing changes it after'
+      );
+      assert.equal(thrown(() => engine.instances.update(writer, 'Step', check.id, { result: { passed: 'yes' } })).code, 'invalid_instance');
+      assert.equal(thrown(() => engine.instances.create(writer, 'Step', { title: 'Idea', kind: 'note', result: { passed: true } })).code, 'invalid_instance');
+      assert.deepEqual(engine.instances.update(writer, 'Step', check.id, { result: { passed: false } }).data, {
+        title: 'Lint',
+        kind: 'verify',
+        result: { passed: false, checks: [{ name: 'eslint', ok: true }] },
+      });
     });
   });
 }

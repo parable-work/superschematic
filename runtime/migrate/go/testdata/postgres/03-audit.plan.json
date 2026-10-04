@@ -1,0 +1,148 @@
+{
+  "dialect": "postgres",
+  "from": "f22400dcddd77d057bdd06c4ddc0fa4bf47df8d66ab9c211b1b747b083f45b41",
+  "hash": "2eaba3d9c70ec78e04fe1a2dc86b2cf789db2b8fe572a7030729d2bacba462b9",
+  "service": "shop",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE audit (id BIGINT NOT NULL, note TEXT, CONSTRAINT audit_pkey PRIMARY KEY (id))",
+        "COMMENT ON TABLE audit IS 'Audit rows'"
+      ],
+      "subject": "table/audit",
+      "transactional": true
+    }
+  ],
+  "to": "6036310fa3bf1249db5c9ea535fe7e637d860ba148c61590451d2e69b778bba5",
+  "toModel": {
+    "dialect": "postgres",
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION order_total_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.total \u003c 0 THEN RAISE EXCEPTION 'total must not be negative; got %', NEW.total; END IF; RETURN NEW; END; $$",
+        "name": "order_total_check",
+        "origin": "Order"
+      }
+    ],
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Audit.id",
+            "type": "BIGINT"
+          },
+          {
+            "name": "note",
+            "nullable": true,
+            "origin": "Audit.note",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Audit rows",
+        "kind": "entity",
+        "name": "audit",
+        "origin": "Audit",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "audit_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "BIGINT"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Customer.email",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "BIGINT"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "BIGINT"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "BIGINT"
+          },
+          {
+            "name": "note",
+            "nullable": true,
+            "origin": "Order.note",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "total"
+            ],
+            "method": "BTREE",
+            "name": "order_total_idx"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "definition": "CREATE TRIGGER order_total_check BEFORE INSERT OR UPDATE ON \"order\" FOR EACH ROW EXECUTE FUNCTION order_total_check()",
+        "name": "order_total_check",
+        "origin": "Order",
+        "table": "order"
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

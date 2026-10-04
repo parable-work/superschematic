@@ -22,14 +22,22 @@ and gets a context that reaches only what the behavior may touch:
   one only in a write (D16, amended);
 - instances.create, wherever a writing operation can be invoked: a new
   instance of the namespace, created as engine.instances.create would
-  create it for the principal, with every behavior's initialize and
-  afterChange and its event (D16, amended);
+  create it for the principal, with the parameters a create gives its
+  behaviors (its links and blockers, say), every behavior's guard,
+  initialize and afterChange and its event (D16, amended);
 - references: the instances this one refers to, recorded with the engine
   so the behavior hears when one of them changes or goes;
 - in a write, call(), which runs another behavior's operation on the same
   instance, that behavior's guards and every other guard first;
 - in a writing operation, update(), which changes the instance's own
   fields with the checks and guards of an update.
+
+validate judges the instance's own fields a create or an update would
+store, once the live version accepts them, and its issues refuse the
+write as the live version's do (invalid_instance). Its context reaches
+no storage and no other instance: only the config, the call, can() and
+checkType(), which holds a value to a type of the schema document that
+the behavior's checkedTypes names, as the live version holds a field's.
 
 Two more run after the commit, on the engine's runner, as the principal
 the deployment names for it (D16, amended): reactions, which hear the
@@ -51,7 +59,7 @@ operations, so its guards always run, on this instance or another.
 */
 
 import type { Principal } from '../access.js';
-import type { ValidationIssue } from '../errors.js';
+import type { ValidationIssue, Veto } from '../errors.js';
 import type { EngineEvent } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
@@ -204,12 +212,13 @@ export interface Instances {
    * guard of that instance, its handler and its result, then for a writing
    * operation that instance's afterChange, its next seq and its operation
    * event, all in this call's transaction, in a savepoint that rolls back
-   * alone when it throws. From a guard, a field reader and a read-only
-   * operation it reaches read-only operations only. Invoking a writing
-   * operation of an instance whose write is still running up the call is
-   * a cycle, and refused (BehaviorError).
+   * alone when it throws. options.preconditions are checked and handed to
+   * that instance's guards as a caller's are. From a guard, a field reader
+   * and a read-only operation it reaches read-only operations only.
+   * Invoking a writing operation of an instance whose write is still
+   * running up the call is a cycle, and refused (BehaviorError).
    */
-  invoke(schema: string, id: string, operation: string, params?: FrozenJSON): unknown;
+  invoke(schema: string, id: string, operation: string, params?: FrozenJSON, options?: InstancesInvokeOptions): unknown;
   /**
    * Runs a schema-level operation of a schema, its own or another, as
    * engine.instances.invokeSchema would: the parameters against its
@@ -223,18 +232,42 @@ export interface Instances {
    * Creates an instance of a schema, the namespace's own, as
    * engine.instances.create would for the call's principal: it asks the
    * access policy for write on the schema, validates data (the instance's
-   * own fields) against the live version, and runs every behavior's
-   * initialize and afterChange on the new instance and appends its create
-   * event, which records the runner's cause in the runner's work. It runs
-   * in this call's transaction, in a savepoint that rolls back alone when
-   * it throws, and nests like an invoke. The id is options.id, or one the
-   * engine's id generator makes. Returns the instance's record,
+   * own fields) against the live version and options.behaviors against
+   * the createParamsSchema of each behavior it names, asks every
+   * behavior's guard, runs every behavior's initialize, with its own
+   * parameters, and afterChange on the new instance, and appends its
+   * create event, which records the runner's cause in the runner's work.
+   * It runs in this call's transaction, in a savepoint that rolls back
+   * alone when it throws, and nests like an invoke. The id is options.id,
+   * or one the engine's id generator makes. Returns the instance's record,
    * deep-frozen. Where instances.invoke reaches only read-only
    * operations, from a guard, a field reader and a read-only operation,
    * it is a BehaviorError; so is creating an instance whose write is still
    * running up the call.
    */
-  create(schema: string, data: FrozenJSON, options?: { readonly id?: string }): InstanceRecord;
+  create(schema: string, data: FrozenJSON, options?: CreateInstanceOptions): InstanceRecord;
+}
+
+/** What a behavior's instances.create takes beside the schema and the data. */
+export interface CreateInstanceOptions {
+  /** The id; the engine's id generator makes one when absent. */
+  readonly id?: string;
+  /**
+   * The parameters the create gives the new instance's behaviors, by
+   * behavior name, each held to its createParamsSchema: Links' links and
+   * Dependencies' blockers, say, which then hold from the create on.
+   */
+  readonly behaviors?: Readonly<Record<string, unknown>>;
+}
+
+/** How a behavior invokes another instance's operation. */
+export interface InstancesInvokeOptions {
+  /**
+   * The preconditions of the call, by behavior: each entry is checked
+   * against its behavior's preconditionSchema and handed to that
+   * behavior's guard, as a caller's are (engine.instances.invoke).
+   */
+  readonly preconditions?: Readonly<Record<string, unknown>>;
 }
 
 /** The schemas the namespace reaches, as the call's principal may read them. */
@@ -410,7 +443,16 @@ export interface BehaviorSchedule<Config> {
  * referencing instance only through an operation it invokes on it, so
  * that instance's guards run and its change gets an event.
  */
-export interface ReferenceContext<Config> extends InstanceView<Config> {}
+export interface ReferenceContext<Config> extends InstanceView<Config> {
+  /**
+   * Whether a write of the referencing instance is running up this call:
+   * its own write changed the instance it refers to, as a claim's
+   * reservation changes an enclosing budget. Invoking one of its writing
+   * operations now is a cycle (BehaviorError); what its own write leaves
+   * is that write's to settle, in its operation or its afterChange.
+   */
+  readonly writing: boolean;
+}
 
 /**
  * A write to one instance: initialize, afterChange and an operation. In a
@@ -455,21 +497,103 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
   /**
    * What update(patch) would refuse the patch for, without writing or
    * asking a guard: a behavior's field, then what the live version refuses
-   * in the merged instance. Empty when it would validate.
+   * in the merged instance, then what the behaviors' validate refuses in
+   * it. Empty when it would validate.
    */
   validateUpdate(patch: FrozenJSON): readonly ValidationIssue[];
 }
 
-/** What a guard is asked to allow. The instance before the change is the view's data. */
+/**
+ * What a behavior's validate is asked to judge: the instance's own fields
+ * a write would store, which the live version accepts.
+ */
+export type ValidationRequest =
+  | {
+      readonly kind: 'create';
+      /** The new instance's own fields. */
+      readonly data: FrozenJSON;
+    }
+  | {
+      readonly kind: 'update';
+      /** The instance's own fields before the update. */
+      readonly before: FrozenJSON;
+      /** Its own fields after the merge: what the update would store. */
+      readonly after: FrozenJSON;
+      /** The behavior whose operation applies it with update(); absent for a caller's update. */
+      readonly caller?: string;
+    };
+
+/**
+ * validate's context: the behavior, its config and the call. It reaches no
+ * storage and no other instance, since what it judges is the fields a
+ * write would store, and validateUpdate() asks it with nothing written.
+ */
+export interface ValidationContext<Config> {
+  readonly behavior: string;
+  /** The type's config of the behavior: what parseConfig returned, or the JSON config; deep-frozen. */
+  readonly config: Config;
+  readonly namespace: string;
+  readonly schema: string;
+  /** The live schema version the call runs with. */
+  readonly version: number;
+  readonly id: string;
+  readonly principal: Principal;
+  readonly now: number;
+  /** Whether the principal holds a permission, as BehaviorScope.can answers. */
+  can(permission: string): boolean;
+  /**
+   * The issues of a value as a value of a type of the schema document, by
+   * the rules the live version holds a field of that type to: a JSON
+   * object, each field's value, and no key the type does not declare, at
+   * any depth. Each issue's path is under path (`result`, then
+   * `result.checks[0].name`). The type is one checkedTypes(config) names;
+   * any other is a BehaviorError.
+   */
+  checkType(type: string, value: unknown, path: string): ValidationIssue[];
+}
+
+/** Which instance schema instanceSchema describes: an instance's or a create's data, or an update's merge patch. */
+export type InstanceSchemaForm = 'instance' | 'patch';
+
+/**
+ * Renders a type checkedTypes names as the describe document renders a
+ * nested type: a closed object of its fields, and in a patch, with none
+ * required. nullable also takes null, as an optional field does.
+ */
+export type TypeSchema = (type: string, options?: { readonly nullable?: boolean }) => unknown;
+
+/**
+ * What a guard is asked to allow. The instance before the change is the
+ * view's data; for a create, the new instance's own fields. precondition
+ * is the guard's own behavior's entry in the preconditions the caller sent
+ * with the update, the delete or the operation, checked against its
+ * preconditionSchema; absent when the caller sent none for it, and always
+ * for a create, which no caller can fence, and for a request a behavior's
+ * own code makes (caller).
+ */
 export type GuardRequest =
+  | {
+      readonly kind: 'create';
+      /** The new instance's own fields, as the create gives them and the view's data holds them. */
+      readonly data: FrozenJSON;
+      /**
+       * The create's parameters, by behavior name, as it gives them: an
+       * entry for each behavior it gives one, checked against that
+       * behavior's createParamsSchema.
+       */
+      readonly behaviors: Readonly<Record<string, FrozenJSON>>;
+      /** A create has no precondition: there is nothing yet to fence. */
+      readonly precondition?: undefined;
+    }
   | {
       readonly kind: 'update';
       readonly patch: FrozenJSON;
       readonly after: FrozenJSON;
       /** The behavior whose operation applied it with update(); absent for a caller's update. */
       readonly caller?: string;
+      readonly precondition?: FrozenJSON;
     }
-  | { readonly kind: 'delete' }
+  | { readonly kind: 'delete'; readonly precondition?: FrozenJSON }
   | {
       readonly kind: 'operation';
       /** The behavior whose operation it is. */
@@ -484,7 +608,14 @@ export type GuardRequest =
       readonly writes: boolean;
       /** The behavior whose code made the call, for a call(); absent for a caller's. */
       readonly caller?: string;
+      readonly precondition?: FrozenJSON;
     };
+
+/**
+ * What a guard returns: nothing to allow, or a veto, a reason or a Veto
+ * with a code its declaration lists and details.
+ */
+export type GuardAnswer = string | Veto | undefined | void;
 
 /** What changed, for afterChange. */
 export type InstanceChange =
@@ -552,6 +683,8 @@ export interface ConfigTarget {
    * the type "string", or ["string", "null"] when it is not required.
    */
   readonly fieldSchemas: Readonly<Record<string, unknown>>;
+  /** The schema document's types besides the instance type, by name, sorted: the ones checkedTypes may name. */
+  readonly types: readonly string[];
   /** Every behavior the type lists, in order. */
   readonly behaviors: readonly string[];
   /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
@@ -645,18 +778,67 @@ export interface BehaviorImplementation<Config = unknown> {
   /** The storage it owns, created when a schema that composes it is published. */
   readonly migrations?: readonly BehaviorMigration[];
 
-  /** Sets up its state for a new instance, in the create's transaction, in list order. */
-  initialize?(context: InstanceContext<Config>): void;
+  /**
+   * Sets up its state for a new instance, in the create's transaction, in
+   * list order, once every guard has allowed the create. params is its own
+   * entry of the create's parameters (CreateInstanceOptions.behaviors),
+   * which its createParamsSchema accepted; {} when the create gives none.
+   * A parameter its config refuses (a name it does not give) throws
+   * CreateParamsError, at a pointer under /behaviors/<its name>.
+   */
+  initialize?(context: InstanceContext<Config>, params: FrozenJSON): void;
 
   /**
-   * May veto an update, a delete or an operation of any behavior on the
-   * type: return a reason. Every behavior's guard runs in list order and
-   * the first veto wins; the change is refused with a BehaviorVetoError
-   * (vetoed).
+   * May veto a create, an update, a delete or an operation of any behavior
+   * on the type: return a reason, or a Veto with a code its declaration
+   * lists (vetoes) and details. Every behavior's guard runs in list order
+   * and the first veto wins; the change is refused with a
+   * BehaviorVetoError (vetoed). A code the declaration does not list is a
+   * BehaviorError. A create is asked once its row is inserted and before
+   * any initialize, so the view's data is the new instance's own fields
+   * and its columns hold their defaults; a veto leaves nothing of it.
    */
-  guard?(context: InstanceView<Config>, request: GuardRequest): string | undefined | void;
+  guard?(context: InstanceView<Config>, request: GuardRequest): GuardAnswer;
 
-  /** A handler per declared operation of scope instance (the default). */
+  /**
+   * Judges the instance's own fields a create or an update would store:
+   * returns the issues it finds ({ path, rule, message }, a path as the
+   * live version writes one, such as `result.checks[0]`), none to accept.
+   * It runs on every write of the fields, a caller's or a behavior's
+   * (instances.create, an operation's update()), once the live version
+   * accepts them and before any guard, every behavior's in list order, and
+   * their issues together refuse the write with InstanceValidationError
+   * (invalid_instance), as the live version's do; validateUpdate()
+   * reports them without writing.
+   */
+  validate?(context: ValidationContext<Config>, request: ValidationRequest): readonly ValidationIssue[] | undefined | void;
+
+  /**
+   * The types of the schema document, besides the instance type, whose
+   * values validate checks with checkType under the config. The
+   * compatibility rule holds a new version to each one both versions'
+   * configs name as it holds a type a field reaches, so a new version
+   * cannot refuse a value a stored instance holds; instanceSchema renders
+   * them.
+   */
+  checkedTypes?(config: Config): readonly string[];
+
+  /**
+   * What validate holds the instance's own fields to, as JSON Schemas,
+   * which the describe document's instance and the create and update
+   * tools' arguments carry under allOf, so a client sees the shape a write
+   * takes: form 'instance' for an instance and a create's data, 'patch'
+   * for an update's merge patch. typeSchema renders a type checkedTypes
+   * names in the form.
+   */
+  instanceSchema?(config: Config, form: InstanceSchemaForm, typeSchema: TypeSchema): readonly unknown[];
+
+  /**
+   * A handler per declared operation of scope instance (the default). A
+   * handler refuses a call with a BehaviorVetoError, whose veto may carry
+   * a code its declaration lists, as a guard's may; any other code is a
+   * BehaviorError. So does a schema-level one, initialize and afterChange.
+   */
   readonly operations?: Readonly<Record<string, OperationHandler<Config>>>;
 
   /** A handler per declared operation of scope schema. */
@@ -675,11 +857,13 @@ export interface BehaviorImplementation<Config = unknown> {
   /**
    * May veto an update, a delete or a writing operation of an instance the
    * behavior's instance refers to (a recorded reference), whoever the
-   * caller: return a reason. The view is the referencing instance's. It
-   * runs with the referenced instance's own guards, after them, for each
-   * reference; the first veto wins (BehaviorVetoError, vetoed).
+   * caller: return a reason or a Veto, as guard does. The view is the
+   * referencing instance's. It runs with the referenced instance's own
+   * guards, after them, for each reference; the first veto wins
+   * (BehaviorVetoError, vetoed). Its request carries no precondition: the
+   * caller's preconditions are for the referenced instance's behaviors.
    */
-  guardReference?(view: InstanceView<Config>, reference: Reference, request: GuardRequest): string | undefined | void;
+  guardReference?(view: InstanceView<Config>, reference: Reference, request: GuardRequest): GuardAnswer;
 
   /**
    * Runs after an update, a delete or a writing operation of an instance

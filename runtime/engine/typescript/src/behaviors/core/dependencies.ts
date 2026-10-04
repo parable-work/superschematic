@@ -2,50 +2,73 @@
 Dependencies, the core's blockers between instances (D16, amended). An
 edge says a blocker holds up its dependent. A blocker is an instance of
 the dependent's own schema, or of one the config lists, in the same
-namespace, and its schema composes Workflow. It is open while its status
-is not a terminal state of its own schema's Workflow config
-(isTerminalState), and the dependent is blocked while any blocker is
-open. One function, openBlockers, answers that for the blocked field and
-the guard alike, over every blocker, whatever its schema.
+namespace, and its schema composes Workflow. It is finished once its
+status is a terminal state of its own schema's Workflow config whose
+outcome (stateOutcome) the dependent's satisfiedBy lists, success by
+default, and open until then: a blocker that failed stays open, so it
+does not let its dependents through, until it is removed. The dependent
+is blocked while any blocker is open. One function, openBlockers,
+answers that for the blocked field and the guard alike, over every
+blocker, whatever its schema.
 
 The guard gates the type's own Workflow: a transition into a gated state
-(every terminal state of the type's Workflow, or the ones the config
-lists, which must be terminal) is refused while the instance is blocked.
-It reads the state from transition's to, which Workflow's closed
+(every terminal state of the type's Workflow, or the states the config
+lists, terminal or not) is refused while the instance is blocked. A gate
+on a state that is not terminal holds up the start of work, a move from
+todo to doing say, as a gate on a terminal one holds up its end. It
+reads the state from transition's to, which Workflow's closed
 paramsSchema makes the only parameter, and it runs for every transition
 request, a caller's, another behavior's call() and another instance's
-invoke alike, before any handler. An instance in a gated state takes no
-open blocker, so a finished instance is never blocked.
+invoke alike, before any handler. An instance in a gated state that is
+terminal takes no open blocker: no transition leaves it, and its gate let
+it in with every blocker finished, so it is never blocked. One in a gated
+state that is not terminal takes one, which holds up its next move into
+a gated state; it is how a dependency found during the work is recorded.
 
 addBlocker refuses an edge that would close a cycle, in any schema: the
 new blocker must not be blocked by the dependent, directly or through
-others. Each edge is also a reference the engine records, so deleting a
-blocker runs afterReferenceChange on each dependent, which removes the
-edge with removeBlocker, as the caller: its own event records it.
-Deleting a dependent deletes its edges. Blockers are read as the caller,
-so a caller who may not read a blocker's schema cannot read whether its
-dependents are blocked.
+others. A create may give blockers too, in its parameters (initialize),
+each held to addBlocker's checks in the create's transaction, so an
+instance is blocked from its first event and never claimable before its
+edges exist. Its status then is its Workflow's initial state, so the
+same finished/open rule, satisfiedBy and the terminal gated state rule
+apply: an initial state that is gated and that no transition leaves
+takes no open blocker. Each edge is also a reference the engine records,
+so deleting a blocker runs afterReferenceChange on each dependent, which
+removes the edge with removeBlocker, as the caller: its own event
+records it. Deleting a dependent deletes its edges. Blockers are read as
+the caller, so a caller who may not read a blocker's schema cannot read
+whether its dependents are blocked.
 
-configChange: schemas and gatedStates may change (existing edges stay,
-and parseConfig holds gatedStates to the new Workflow's terminal
+Every veto carries a code the declaration lists: the gate's blocked,
+with the open blockers in its details, and an edge's already_blocking,
+cycle and gated, which a create's blocker gets as addBlocker's would,
+with the pointer of its entry.
+
+configChange: schemas, gatedStates and satisfiedBy may change (existing
+edges stay, and parseConfig holds gatedStates to the new Workflow's
 states). Dependencies can be added to a schema that has instances, which
 start with no blockers, and cannot be removed from one: its edges and
 references would stay behind.
 */
 
-import { BehaviorVetoError, OperationParamsError } from '../../errors.js';
+import { BehaviorVetoError, CreateParamsError, OperationParamsError } from '../../errors.js';
 import type { Row } from '../../storage/driver.js';
 import { BehaviorConfigError, defineBehavior, type InstanceContext, type InstanceView } from '../behavior.js';
 import { page, pageRequest } from '../paging.js';
 import declaration from './declarations/Dependencies.behavior.json' with { type: 'json' };
-import { isTerminalState, type WorkflowStates } from './workflow.js';
+import { isTerminalState, stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
 /** Dependencies' config, parsed: the defaults filled in. */
 export interface DependenciesConfig {
   /** The schemas a blocker may be an instance of. */
   readonly schemas: readonly string[];
-  /** The states of the type's Workflow a transition into waits for every blocker. */
+  /** The states of the type's Workflow a transition into waits for every blocker to finish. */
   readonly gatedStates: readonly string[];
+  /** The outcomes of a blocker's terminal state that finish it. */
+  readonly satisfiedBy: readonly WorkflowOutcome[];
+  /** The gated states no transition of the type's Workflow leaves: an instance in one takes no open blocker. */
+  readonly terminalGatedStates: readonly string[];
 }
 
 /** A blocker, as addBlocker and listBlockers return it. */
@@ -54,7 +77,7 @@ export interface BlockerRecord {
   readonly id: string;
   /** Its Workflow status; absent when it has none. */
   readonly status?: string;
-  /** Whether its status is not a terminal state of its schema's Workflow. */
+  /** Whether it is not finished: its status is not a terminal state of its schema's Workflow whose outcome satisfiedBy lists. */
   readonly open: boolean;
 }
 
@@ -91,12 +114,13 @@ function edges(view: InstanceView<unknown>, after = 0, limit = -1): Edge[] {
 /**
  * blockers reads each blocker's status as the caller: its schema's
  * Workflow config and the instance's status field. A blocker is open
- * unless its status is a terminal state of that config. One whose row is
- * gone while its edge remains, which only happens while its delete runs
- * the hook that removes the edge, stays open until the edge goes, so the
- * dependent's removeBlocker event records blocked changing.
+ * unless its status is a terminal state of that config whose outcome the
+ * dependent's satisfiedBy lists. One whose row is gone while its edge
+ * remains, which only happens while its delete runs the hook that removes
+ * the edge, stays open until the edge goes, so the dependent's
+ * removeBlocker event records blocked changing.
  */
-function blockers(view: InstanceView<unknown>, list: readonly Edge[]): BlockerRecord[] {
+function blockers(view: InstanceView<DependenciesConfig>, list: readonly Edge[]): BlockerRecord[] {
   const bySchema = new Map<string, string[]>();
   for (const edge of list) {
     bySchema.set(edge.schema, [...(bySchema.get(edge.schema) ?? []), edge.id]);
@@ -107,8 +131,9 @@ function blockers(view: InstanceView<unknown>, list: readonly Edge[]): BlockerRe
     for (let start = 0; start < ids.length; start += BATCH) {
       for (const [id, record] of view.instances.getMany(schema, ids.slice(start, start + BATCH), { fields: ['status'] })) {
         const status = typeof record.data.status === 'string' ? record.data.status : undefined;
-        const done = flow !== undefined && status !== undefined && isTerminalState(flow, status);
-        found.set(`${schema}\u0000${id}`, { schema, id, ...(status === undefined ? {} : { status }), open: !done });
+        const outcome = flow !== undefined && status !== undefined ? stateOutcome(flow, status) : undefined;
+        const finished = outcome !== undefined && view.config.satisfiedBy.includes(outcome);
+        found.set(`${schema}\u0000${id}`, { schema, id, ...(status === undefined ? {} : { status }), open: !finished });
       }
     }
   }
@@ -116,7 +141,7 @@ function blockers(view: InstanceView<unknown>, list: readonly Edge[]): BlockerRe
 }
 
 /** openBlockers is the one rule the blocked field and the guard share: the blockers that are open. */
-function openBlockers(view: InstanceView<unknown>): BlockerRecord[] {
+function openBlockers(view: InstanceView<DependenciesConfig>): BlockerRecord[] {
   return blockers(view, edges(view)).filter((blocker) => blocker.open);
 }
 
@@ -147,13 +172,111 @@ function reaches(view: InstanceView<unknown>, from: { schema: string; id: string
   return false;
 }
 
-function blockerParams(context: InstanceContext<DependenciesConfig>, operation: string, params: Readonly<Record<string, unknown>>): { schema: string; id: string } {
+/** The codes of Dependencies' vetoes, as its declaration lists them. */
+type DependenciesVeto = 'blocked' | 'already_blocking' | 'cycle' | 'gated';
+
+/**
+ * How an edge's checks refuse: at the parameter they name (the blocker's
+ * schema or id), or as a veto with its declared code. addBlocker and
+ * removeBlocker refuse their own parameters; a create, the blocker's entry
+ * of its parameters, and its veto is the create's.
+ */
+interface EdgeRefusals {
+  param(at: 'schema' | 'id', message: string): Error;
+  veto(reason: string, code: DependenciesVeto): Error;
+}
+
+function operationRefusals(context: InstanceContext<DependenciesConfig>, operation: string): EdgeRefusals {
+  return {
+    param: (at, message) => new OperationParamsError(NAME, operation, [{ path: `/${at}`, message }]),
+    veto: (reason, code) => new BehaviorVetoError(NAME, operation, context.schema, context.id, { reason, code }),
+  };
+}
+
+function createRefusals(context: InstanceContext<DependenciesConfig>, index: number): EdgeRefusals {
+  return {
+    param: (at, message) => new CreateParamsError(context.schema, [{ path: `/behaviors/${NAME}/blockers/${index}/${at}`, message }]),
+    veto: (reason, code) =>
+      new BehaviorVetoError(NAME, 'create', context.schema, context.id, { reason, code, details: { path: `/behaviors/${NAME}/blockers/${index}` } }),
+  };
+}
+
+function blockerParams(context: InstanceContext<DependenciesConfig>, params: Readonly<Record<string, unknown>>, refuse: EdgeRefusals): { schema: string; id: string } {
   const schema = (params.schema as string | undefined) ?? context.schema;
   const id = params.id as string;
   if (schema === context.schema && id === context.id) {
-    throw new OperationParamsError(NAME, operation, [{ path: '/id', message: `${context.schema} ${context.id} cannot block itself` }]);
+    throw refuse.param('id', `${context.schema} ${context.id} cannot block itself`);
   }
   return { schema, id };
+}
+
+// statusOf reads the instance's Workflow status as the caller; at its
+// create, before Workflow's initialize when the type lists it later, the
+// initial state its Workflow config gives.
+function statusOf(context: InstanceContext<DependenciesConfig>): string | undefined {
+  const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
+  if (typeof status === 'string') {
+    return status;
+  }
+  const flow = context.schemas.config(context.schema, 'Workflow') as { states?: unknown; initial?: unknown } | undefined;
+  if (typeof flow?.initial === 'string') {
+    return flow.initial;
+  }
+  return Array.isArray(flow?.states) && typeof flow.states[0] === 'string' ? flow.states[0] : undefined;
+}
+
+/**
+ * addEdge makes a blocker block the instance, with addBlocker's checks: a
+ * schema the config lists that composes Workflow, a blocker that exists,
+ * read as the caller, not one already added, no cycle, and no open
+ * blocker of an instance in a gated state no transition leaves. It
+ * records the edge and its reference, and returns the blocker.
+ */
+function addEdge(context: InstanceContext<DependenciesConfig>, params: Readonly<Record<string, unknown>>, refuse: EdgeRefusals): BlockerRecord {
+  const target = blockerParams(context, params, refuse);
+  if (!context.config.schemas.includes(target.schema)) {
+    throw refuse.param('schema', `a blocker of ${context.schema} is an instance of ${context.config.schemas.join(', ')}, not ${target.schema}`);
+  }
+  if (context.schemas.config(target.schema, 'Workflow') === undefined) {
+    throw refuse.param('schema', `${target.schema} does not compose Workflow, so its instances cannot block`);
+  }
+  if (context.instances.get(target.schema, target.id, { fields: [] }) === undefined) {
+    throw refuse.param('id', `${target.schema} ${target.id} does not exist`);
+  }
+  const table = context.sql.table('edges');
+  if (
+    context.sql.get(`SELECT 1 AS found FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND blocker_schema = ? AND blocker_id = ?`, [
+      ...key(context),
+      target.schema,
+      target.id,
+    ])
+  ) {
+    throw refuse.veto(`${target.schema} ${target.id} already blocks it`, 'already_blocking');
+  }
+  if (reaches(context, target, { schema: context.schema, id: context.id })) {
+    throw refuse.veto(
+      `${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`,
+      'cycle'
+    );
+  }
+  // An instance in a gated state no transition leaves has passed its
+  // last gate: a blocker could hold up nothing, and blocked would say it
+  // waits. At a create that is its Workflow's initial state, when no
+  // transition leaves it.
+  const [blocker] = blockers(context, [{ edge: 0, ...target }]);
+  const status = statusOf(context);
+  if (blocker.open && status !== undefined && context.config.terminalGatedStates.includes(status)) {
+    throw refuse.veto(`it is ${status}, a gated state no transition leaves, so it takes no blocker that is not finished: ${describe(blocker)}`, 'gated');
+  }
+  context.sql.run(`INSERT INTO ${table} (namespace, schema, id, blocker_schema, blocker_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+    ...key(context),
+    target.schema,
+    target.id,
+    context.principal.subject,
+    context.now,
+  ]);
+  context.references.add(target.schema, target.id);
+  return blocker;
 }
 
 function describe(blocker: { schema: string; id: string; status?: string }): string {
@@ -164,27 +287,26 @@ export const dependencies = defineBehavior<DependenciesConfig>({
   declaration,
 
   // The configSchema holds the shape; this holds gatedStates to the
-  // terminal states of the type's Workflow, whose config it is given.
+  // states of the type's Workflow, whose config it is given, and fills
+  // in every terminal state when the config names none.
   parseConfig(json, target) {
-    const raw = json as { schemas?: string[]; gatedStates?: string[] };
+    const raw = json as { schemas?: string[]; gatedStates?: string[]; satisfiedBy?: WorkflowOutcome[] };
     const flow = target.configs.Workflow as Partial<WorkflowStates> | undefined;
     const schemas = raw.schemas ?? [target.schema];
+    const satisfiedBy = raw.satisfiedBy ?? ['success'];
     if (flow === undefined || !Array.isArray(flow.states) || !Array.isArray(flow.transitions)) {
       // The type does not list Workflow, or gives it a config it refuses:
       // the requires check or Workflow's own config check refuses it.
-      return { schemas, gatedStates: raw.gatedStates ?? [] };
+      return { schemas, gatedStates: raw.gatedStates ?? [], satisfiedBy, terminalGatedStates: [] };
     }
     const states = flow as WorkflowStates;
-    const terminal = states.states.filter((state) => isTerminalState(states, state));
     for (const state of raw.gatedStates ?? []) {
       if (!states.states.includes(state)) {
         throw new BehaviorConfigError(`gated state "${state}" is not a state of the type's Workflow (${states.states.join(', ')})`);
       }
-      if (!terminal.includes(state)) {
-        throw new BehaviorConfigError(`gated state "${state}" is not a terminal state of the type's Workflow: a transition leaves it`);
-      }
     }
-    return { schemas, gatedStates: raw.gatedStates ?? terminal };
+    const gatedStates = raw.gatedStates ?? states.states.filter((state) => isTerminalState(states, state));
+    return { schemas, gatedStates, satisfiedBy, terminalGatedStates: gatedStates.filter((state) => isTerminalState(states, state)) };
   },
 
   configChange(before, after) {
@@ -229,64 +351,30 @@ export const dependencies = defineBehavior<DependenciesConfig>({
     if (open.length === 0) {
       return undefined;
     }
-    return `${view.schema} ${view.id} cannot move to ${to} while it is blocked by ${open.map(describe).join(', ')}`;
+    return {
+      reason: `${view.schema} ${view.id} cannot move to ${to} while it is blocked by ${open.map(describe).join(', ')}`,
+      code: 'blocked',
+      details: { blockers: open.map((blocker) => ({ schema: blocker.schema, id: blocker.id, ...(blocker.status === undefined ? {} : { status: blocker.status }) })) },
+    };
+  },
+
+  // A create's blockers, each added with addBlocker's checks.
+  initialize(context, params) {
+    const given = (params.blockers ?? []) as ReadonlyArray<Readonly<Record<string, unknown>>>;
+    given.forEach((blocker, index) => {
+      addEdge(context, blocker, createRefusals(context, index));
+    });
   },
 
   operations: {
     addBlocker(context, params) {
-      const target = blockerParams(context, 'addBlocker', params);
-      if (!context.config.schemas.includes(target.schema)) {
-        throw new OperationParamsError(NAME, 'addBlocker', [
-          { path: '/schema', message: `a blocker of ${context.schema} is an instance of ${context.config.schemas.join(', ')}, not ${target.schema}` },
-        ]);
-      }
-      if (context.schemas.config(target.schema, 'Workflow') === undefined) {
-        throw new OperationParamsError(NAME, 'addBlocker', [
-          { path: '/schema', message: `${target.schema} does not compose Workflow, so its instances cannot block` },
-        ]);
-      }
-      if (context.instances.get(target.schema, target.id, { fields: [] }) === undefined) {
-        throw new OperationParamsError(NAME, 'addBlocker', [{ path: '/id', message: `${target.schema} ${target.id} does not exist` }]);
-      }
-      const table = context.sql.table('edges');
-      if (
-        context.sql.get(`SELECT 1 AS found FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND blocker_schema = ? AND blocker_id = ?`, [
-          ...key(context),
-          target.schema,
-          target.id,
-        ])
-      ) {
-        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, `${target.schema} ${target.id} already blocks it`);
-      }
-      if (reaches(context, target, { schema: context.schema, id: context.id })) {
-        throw new BehaviorVetoError(
-          NAME,
-          'addBlocker',
-          context.schema,
-          context.id,
-          `${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`
-        );
-      }
-      const [blocker] = blockers(context, [{ edge: 0, ...target }]);
-      const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
-      if (blocker.open && typeof status === 'string' && context.config.gatedStates.includes(status)) {
-        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, `it is ${status}, a gated state, so it takes no blocker that is not done: ${describe(blocker)}`);
-      }
-      context.sql.run(`INSERT INTO ${table} (namespace, schema, id, blocker_schema, blocker_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
-        ...key(context),
-        target.schema,
-        target.id,
-        context.principal.subject,
-        context.now,
-      ]);
-      context.references.add(target.schema, target.id);
-      return blocker;
+      return addEdge(context, params, operationRefusals(context, 'addBlocker'));
     },
 
     // removeBlocker reads nothing of the blocker, which may be the
     // instance whose delete is removing its edges.
     removeBlocker(context, params) {
-      const target = blockerParams(context, 'removeBlocker', params);
+      const target = blockerParams(context, params, operationRefusals(context, 'removeBlocker'));
       const removed = context.sql.run(
         `DELETE FROM ${context.sql.table('edges')} WHERE namespace = ? AND schema = ? AND id = ? AND blocker_schema = ? AND blocker_id = ?`,
         [...key(context), target.schema, target.id]

@@ -25,7 +25,7 @@ DROP TRIGGER IF EXISTS {{ $history.VersionTriggerName }} ON {{ $history.QuotedSo
 DROP TRIGGER IF EXISTS {{ $history.WriteTriggerName }} ON {{ $history.QuotedSourceTableName }};
 DROP TRIGGER IF EXISTS {{ $history.DeleteTriggerName }} ON {{ $history.QuotedSourceTableName }};
 {{- if gt $history.RetentionDays 0 }}
-DROP FUNCTION IF EXISTS {{ $history.PruneFunctionName }}(INTEGER);
+DROP FUNCTION IF EXISTS {{ $history.PruneFunctionName }}(INTEGER, INTEGER);
 {{- end }}
 DROP FUNCTION IF EXISTS {{ $history.FunctionName }}();
 {{- end }}

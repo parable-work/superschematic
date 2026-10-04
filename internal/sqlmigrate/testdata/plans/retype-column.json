@@ -1,0 +1,46 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "17d8bd603f350954a5b54f4056e71429c13c9aed85ac29e37107667a24389089",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/code",
+          "reason": "Order.code changes from VARCHAR(80) to TEXT: servers built from the previous version still read and write VARCHAR(80).",
+          "subject": "table/order/column/code"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:table/order/column/code@shop-api/OrderView.code",
+          "reader": "shop-api/OrderView.code",
+          "reason": "shop-api reads order.code through OrderView.code, and this step changes its type to TEXT.",
+          "subject": "table/order/column/code"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:view/report.order_summary@report.order_summary",
+          "reader": "report.order_summary",
+          "reason": "The projection view report.order_summary publishes (code VARCHAR(80), total BIGINT, customer_name VARCHAR(80)) and now publishes (code TEXT, total BIGINT, customer_name VARCHAR(80)): its readers' Arrow schema changes.",
+          "subject": "view/report.order_summary"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "DROP VIEW report.order_summary",
+        "ALTER TABLE \"order\"\n  ALTER COLUMN code TYPE TEXT",
+        "CREATE VIEW report.order_summary WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.code,\n  base.total,\n  customer.\"name\" AS customer_name\nFROM \"order\" AS base\n  INNER JOIN customer AS customer ON base.customer_id = customer.id\n",
+        "COMMENT ON VIEW report.order_summary IS 'Orders with their customer''s name, for reporting.'"
+      ],
+      "subject": "table/order/column/code",
+      "transactional": true
+    }
+  ],
+  "to": "1bc24457b9308328f95b8d8b7ace6b2615c9207ce8e833ac7fa73414f4485de9",
+  "toModel": null,
+  "version": 1
+}

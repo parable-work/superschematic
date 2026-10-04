@@ -356,12 +356,16 @@ export const holder = defineBehavior<HolderConfig>({
     },
   },
   guardReference(view, reference, request) {
-    if ((view.config.veto ?? []).includes(request.kind)) {
+    if ((view.config.veto ?? []).some((kind) => kind === request.kind)) {
       return `${view.schema} ${view.id} holds it (${reference.key || 'no key'})`;
     }
     return undefined;
   },
   afterReferenceChange(context, reference, change) {
+    // Its own write changed what it holds: noting it now would be a cycle.
+    if (context.writing) {
+      return;
+    }
     context.instances.invoke(context.schema, context.id, 'note', { schema: reference.schema, id: reference.id, kind: change.kind });
     if (change.kind === 'delete' && context.config.leave !== true) {
       context.instances.invoke(context.schema, context.id, 'release', { schema: reference.schema, id: reference.id, key: reference.key });

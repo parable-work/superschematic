@@ -1,0 +1,41 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "701bea7c387b80a8c19501c4297b8940b27ec520893100a4bb5caee50bb5002d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product ADD COLUMN _version BIGINT DEFAULT 1 NOT NULL"
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION product_bump_version() RETURNS trigger AS $$\nBEGIN\n  -- BEFORE UPDATE: the stored row takes the next version.\n  NEW._version := OLD._version + 1;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER trg_product_bump_version\n  BEFORE UPDATE ON product\n  FOR EACH ROW EXECUTE FUNCTION product_bump_version()"
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    }
+  ],
+  "to": "f410e89d4a8d1d5dec25da83da56b04ab3945f1b948cef0452adc49e24813a85",
+  "toModel": null,
+  "version": 1
+}

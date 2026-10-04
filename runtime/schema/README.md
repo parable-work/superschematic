@@ -3,19 +3,22 @@
 The schema runtime reads, writes, validates, masks and merges schema
 documents (the IR that `superschematic build` emits) in Go, TypeScript and
 Python. It is the compiler's runtime, not scalar behaviour: it calls the
-scalar functions in superscalar and adds nothing to them.
+scalar functions in superscalar and adds nothing to them. The Rust crate is
+narrower: it reads no IR, and holds only what the validators in a generated
+Rust types crate share (see [`rust/README.md`](rust/README.md)).
 
 ```
 go/          github.com/parable-work/superschematic/runtime/schema/go: ir, parse, validate, mask, merge, serialize
 typescript/  @superschematic/schema-runtime: JSON/YAML reader and writer, IR reader, strict schema-file loader, parse, validate, mask, merge
 python/      superschematic-schema-runtime: JSON/YAML reader, parse, validate, mask, merge, serialize
+rust/        superschematic-schema-runtime: the helpers the generated Rust validators call
 testdata/    fixtures the runtime suites share
 ```
 
 `testdata/validation_parity.json` is the validation corpus every runtime
 asserts: the matrix schema's IR and one vector table with the expected
-verdicts, the same table the generated Go, TypeScript and Python validators
-run in `internal/generator/parity`. That package writes it
+verdicts, the same table the generated Go, TypeScript, Python and Rust
+validators run in `internal/generator/parity`. That package writes it
 (`go test ./internal/generator/parity -update`); the TypeScript suite keeps
 `testdata/validation_parity.document.json`, the schema JSON form the Python
 runtime reads, equal to it (`UPDATE_PARITY_DOCUMENT=1 bun run test`).

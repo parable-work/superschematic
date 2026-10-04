@@ -1,12 +1,28 @@
 {
   "name": "Workflow",
-  "description": "A state machine on the instance: a status that starts in the initial state and changes only through transition, along a transition the config lists. A transition may name a permission the caller must hold. A state that no transition leaves is terminal.",
+  "description": "A state machine on the instance: a status that starts in the initial state and changes only through transition, along a transition the config lists. A transition may name a permission the caller must hold. A state that no transition leaves is terminal, and a terminal state has an outcome: success, failure or neutral, success unless the config says otherwise. Other instances' blockers, rollups and reactions read it.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
       "initial": {
         "description": "The state a new instance starts in; the first of states when absent.",
         "type": "string"
+      },
+      "outcomes": {
+        "additionalProperties": {
+          "enum": [
+            "success",
+            "failure",
+            "neutral"
+          ]
+        },
+        "description": "The outcome of each terminal state it names: success, failure or neutral. A terminal state it does not name is a success. Each key is a terminal state of states.",
+        "minProperties": 1,
+        "propertyNames": {
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+        },
+        "type": "object"
       },
       "states": {
         "description": "Every state an instance can be in.",
@@ -96,6 +112,24 @@
         "type": "object"
       },
       "writes": true
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "already_in_state",
+      "description": "The instance is already in the state the transition names."
+    },
+    {
+      "code": "terminal_state",
+      "description": "The instance is in a terminal state: no transition leaves it."
+    },
+    {
+      "code": "transition_not_allowed",
+      "description": "No transition of the config leads from the instance's state to the one named."
+    },
+    {
+      "code": "no_status",
+      "description": "The instance has no status to move from."
     }
   ]
 }

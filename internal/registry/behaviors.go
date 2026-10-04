@@ -43,6 +43,12 @@ type BehaviorDeclaration struct {
 	// ConfigSchema is the JSON Schema of the config a type gives the
 	// behavior. Absent means the behavior takes no config.
 	ConfigSchema json.RawMessage `json:"configSchema,omitempty"`
+	// CreateParamsSchema is the JSON Schema of the parameters a create
+	// gives the behavior for the new instance, which an engine passes to
+	// its initialize: an object schema that sets "additionalProperties",
+	// false or a schema, so no parameter goes unchecked. Absent means a
+	// create gives it none.
+	CreateParamsSchema json.RawMessage `json:"createParamsSchema,omitempty"`
 	// Requires names behaviors a type must also list to list this one.
 	Requires []string `json:"requires,omitempty"`
 	// Conflicts names behaviors a type that lists this one may not list.
@@ -52,6 +58,25 @@ type BehaviorDeclaration struct {
 	// Operations are the operations the behavior adds to a type, beside
 	// the create, get, list, update and delete every schema has.
 	Operations []BehaviorOperation `json:"operations,omitempty"`
+	// PreconditionSchema is the JSON Schema of the entry a caller sends
+	// for the behavior in the preconditions of an update, a delete or an
+	// operation: an object schema that sets "additionalProperties": false,
+	// as a paramsSchema does. An engine checks a caller's entry against it
+	// and hands it to the behavior's guard. Absent, the behavior takes
+	// none.
+	PreconditionSchema json.RawMessage `json:"preconditionSchema,omitempty"`
+	// Vetoes are the codes the behavior's refusals carry. A client
+	// branches on a veto's code, read beside the behavior's name; an
+	// engine refuses a veto whose code its behavior does not list.
+	Vetoes []BehaviorVeto `json:"vetoes,omitempty"`
+}
+
+// BehaviorVeto is one code a behavior's vetoes carry.
+type BehaviorVeto struct {
+	// Code is lowercase snake case, at most 64 characters, unique within
+	// the behavior.
+	Code        string `json:"code"`
+	Description string `json:"description,omitempty"`
 }
 
 // BehaviorField is a field a behavior adds to a type. It carries a name and
@@ -117,6 +142,7 @@ var (
 	behaviorBareName      = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 	behaviorOperationName = regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
 	behaviorFieldName     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	behaviorVetoCode      = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
 	// npmPackageName is a lowercase npm package name, scoped or not.
 	npmPackageName = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$`)
 )
@@ -130,11 +156,15 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // config, params or result schema that does not compile; a params schema
 // that is not an object schema or does not set "additionalProperties":
 // false, the engine's rule, so no parameter reaches a handler without its
-// guards seeing it; an operation name that is not camelCase, repeats, or
-// is one an engine gives every schema (create, get, list, update, delete);
-// a scope other than "instance" or "schema"; a field name that is not an
-// identifier or repeats; and a Package that is not an npm package name.
-// Finalize checks
+// guards seeing it; a create params schema that does not compile, is not
+// an object schema or sets "additionalProperties" to neither false nor a
+// schema; an operation name that is not camelCase, repeats, or is one an
+// engine gives every schema (create, get, list, update, delete); a scope
+// other than "instance" or "schema"; a field name that is not an
+// identifier or repeats; a preconditionSchema that does not compile, is
+// not an object schema or does not set "additionalProperties": false; a
+// veto code that is not lowercase snake case of at most 64 characters, or
+// repeats; and a Package that is not an npm package name. Finalize checks
 // what needs the whole registry: requires and conflicts name registered
 // behaviors, and each operation's invocation policy is a value of the
 // registry's policy.
@@ -174,10 +204,19 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 		// the data-form JSON Schema then requires the key.
 		b.configRequired = compiled.Validate(map[string]any{}) != nil
 	}
+	if err := checkBehaviorCreateParams(decl); err != nil {
+		return err
+	}
 	if err := checkBehaviorFields(decl); err != nil {
 		return err
 	}
 	if err := checkBehaviorOperations(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorPrecondition(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorVetoes(decl); err != nil {
 		return err
 	}
 	r.behaviors[decl.Name] = b
@@ -210,6 +249,31 @@ func checkBehaviorName(name, extension string) error {
 	}
 	if !behaviorBareName.MatchString(bare) {
 		return fmt.Errorf("registry: behavior name %q is malformed: after %s. comes %s", name, extension, behaviorNameDescriptor)
+	}
+	return nil
+}
+
+// checkBehaviorCreateParams holds a create params schema to an object
+// schema whose "additionalProperties" is false or a schema. Unlike an
+// operation's parameters, a create's may be keyed by names the config
+// gives (a link's name), so the schema may admit further keys, but it
+// checks each one's value.
+func checkBehaviorCreateParams(decl BehaviorDeclaration) error {
+	if len(decl.CreateParamsSchema) == 0 {
+		return nil
+	}
+	if _, err := compileSchema(decl.CreateParamsSchema, "superschematic://behaviors/"+decl.Name+"/createParams.json"); err != nil {
+		return fmt.Errorf("registry: behavior %s createParamsSchema: %w", decl.Name, err)
+	}
+	var params struct {
+		Type                 any `json:"type"`
+		AdditionalProperties any `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal(decl.CreateParamsSchema, &params); err != nil || params.Type != "object" {
+		return fmt.Errorf("registry: behavior %s createParamsSchema must be an object schema (\"type\": \"object\")", decl.Name)
+	}
+	if _, isSchema := params.AdditionalProperties.(map[string]any); params.AdditionalProperties != false && !isSchema {
+		return fmt.Errorf("registry: behavior %s createParamsSchema must set \"additionalProperties\": false or a schema, so no create parameter goes unchecked", decl.Name)
 	}
 	return nil
 }
@@ -255,16 +319,62 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 				return fmt.Errorf("registry: behavior %s operation %s %s: %w", decl.Name, op.Name, s.key, err)
 			}
 		}
-		var params struct {
-			Type                 any `json:"type"`
-			AdditionalProperties any `json:"additionalProperties"`
-		}
-		if err := json.Unmarshal(op.ParamsSchema, &params); err != nil || params.Type != "object" {
+		object, closed := closedObjectSchema(op.ParamsSchema)
+		if !object {
 			return fmt.Errorf("registry: behavior %s operation %s paramsSchema must be an object schema (\"type\": \"object\")", decl.Name, op.Name)
 		}
-		if params.AdditionalProperties != false {
+		if !closed {
 			return fmt.Errorf("registry: behavior %s operation %s paramsSchema must set \"additionalProperties\": false, so its parameters are exactly the ones it declares", decl.Name, op.Name)
 		}
+	}
+	return nil
+}
+
+// closedObjectSchema reports whether a JSON Schema is an object schema
+// ("type": "object") and whether it sets "additionalProperties": false.
+func closedObjectSchema(raw json.RawMessage) (object, closed bool) {
+	var schema struct {
+		Type                 any `json:"type"`
+		AdditionalProperties any `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil || schema.Type != "object" {
+		return false, false
+	}
+	return true, schema.AdditionalProperties == false
+}
+
+// checkBehaviorPrecondition holds a preconditionSchema to the rule of a
+// paramsSchema: it compiles, and it is a closed object schema, so a guard
+// reads exactly the members it declares.
+func checkBehaviorPrecondition(decl BehaviorDeclaration) error {
+	if len(decl.PreconditionSchema) == 0 {
+		return nil
+	}
+	if _, err := compileSchema(decl.PreconditionSchema, "superschematic://behaviors/"+decl.Name+"/precondition.json"); err != nil {
+		return fmt.Errorf("registry: behavior %s preconditionSchema: %w", decl.Name, err)
+	}
+	object, closed := closedObjectSchema(decl.PreconditionSchema)
+	if !object {
+		return fmt.Errorf("registry: behavior %s preconditionSchema must be an object schema (\"type\": \"object\")", decl.Name)
+	}
+	if !closed {
+		return fmt.Errorf("registry: behavior %s preconditionSchema must set \"additionalProperties\": false, so its members are exactly the ones it declares", decl.Name)
+	}
+	return nil
+}
+
+// checkBehaviorVetoes holds each veto code to lowercase snake case of at
+// most 64 characters, listed once.
+func checkBehaviorVetoes(decl BehaviorDeclaration) error {
+	seen := map[string]bool{}
+	for _, veto := range decl.Vetoes {
+		if len(veto.Code) > 64 || !behaviorVetoCode.MatchString(veto.Code) {
+			return fmt.Errorf("registry: behavior %s veto code %q is not lowercase snake case of at most 64 characters", decl.Name, veto.Code)
+		}
+		if seen[veto.Code] {
+			return fmt.Errorf("registry: behavior %s declares veto code %q twice", decl.Name, veto.Code)
+		}
+		seen[veto.Code] = true
 	}
 	return nil
 }

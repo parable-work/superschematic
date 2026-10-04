@@ -75,9 +75,7 @@ func TestEncryptedBodiesAreTheRequestBody(t *testing.T) {
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 
-[patch.crates-io]
-superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
-`)
+`+testpaths.RustPatch(paths, naming.Default()))
 	privateKey, publicKey := testKeyPair(t)
 	test := strings.NewReplacer(
 		"SDK_CRATE", strings.ReplaceAll(sdkOutput.CrateName, "-", "_"),

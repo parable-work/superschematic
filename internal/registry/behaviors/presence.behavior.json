@@ -1,6 +1,6 @@
 {
   "name": "Presence",
-  "description": "A heartbeat on an instance that stands for a worker: the principal whose subject the instance's principalField holds beats it, and an instance not beaten within ttlMs of its create or its last beat is missed. A miss can move the instance's Workflow status and expire the leases the principal holds on the schemas the config names; the engine's runner applies the misses every sweepMs.",
+  "description": "A heartbeat on an instance that stands for a worker: the principal whose subject the instance's principalField holds beats it, and an instance not beaten within ttlMs of its create or its last beat is missed. A miss can move the instance's Workflow status and expire the leases the principal holds on the schemas the config names, but for the ones renewed since its last beat; the engine's runner applies the misses every sweepMs.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -49,7 +49,7 @@
         }
       },
       "releaseLeases": {
-        "description": "Schemas that compose Lease, whose leases the principal holds are expired when the instance is missed, through Lease's schema-level expireHolder. The principal that applies the miss, the runner's in the sweep, needs Lease's overridePermission on each.",
+        "description": "Schemas that compose Lease, whose leases the principal holds are expired when the instance is missed, through Lease's schema-level expireHolder, but for a lease renewed after the principal's last beat, whose own heartbeats show it alive. The principal that applies the miss, the runner's in the sweep, needs Lease's overridePermission on each.",
         "type": "array",
         "uniqueItems": true,
         "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" }
@@ -62,7 +62,7 @@
     }
   },
   "fields": [
-    { "name": "presence", "description": "The heartbeat: deadline, when the instance is missed unless beaten, lastBeatAt, both in epoch milliseconds or null, and missed." }
+    { "name": "presence", "description": "The heartbeat: deadline, when the instance is missed unless beaten, lastBeatAt, both in epoch milliseconds or null, missed, and released, the instances whose lease the last miss expired, by schema (null before a miss)." }
   ],
   "operations": [
     {
@@ -81,17 +81,27 @@
     },
     {
       "name": "miss",
-      "description": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
+      "description": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas that were not renewed after its last beat, recording which in released. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
       "paramsSchema": { "type": "object", "additionalProperties": false },
       "resultSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": ["missed"],
         "properties": {
-          "missed": { "description": "Whether this call missed the instance.", "type": "boolean" }
+          "missed": { "description": "Whether this call missed the instance.", "type": "boolean" },
+          "released": {
+            "description": "When it did: the instances whose lease it expired, by releaseLeases schema; empty when another instance that stands for the principal is present.",
+            "type": "object",
+            "additionalProperties": { "type": "array", "items": { "type": "string" } }
+          }
         }
       },
       "writes": true
     }
+  ],
+  "vetoes": [
+    { "code": "no_principal", "description": "The instance's principalField holds no principal, so no one may beat it." },
+    { "code": "not_principal", "description": "The instance stands for another principal, who alone may beat it." },
+    { "code": "principal_fixed", "description": "principalField holds the principal the instance stands for, and does not change once set." }
   ]
 }

@@ -1,0 +1,57 @@
+{
+  "dialect": "postgres",
+  "from": "8f8a634659902bbb610a36f200465aa34f1aaa89666f553f0340f89cacc221f6",
+  "hash": "d5ae9b3d2a178aa5f5d8eb5e6c8ebb7debcb77c2391e83e459533f35df313ad7",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/total",
+          "reason": "Order.total changes from BIGINT to DOUBLE PRECISION: the cast truncates or rounds values DOUBLE PRECISION cannot hold exactly.",
+          "subject": "table/order/column/total"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/order/column/total",
+          "reason": "The change rewrites order and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/order/column/total"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/total",
+          "reason": "Order.total changes from BIGINT to DOUBLE PRECISION: servers built from the previous version still read and write BIGINT.",
+          "subject": "table/order/column/total"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:view/report.order_summary@report.order_summary",
+          "reader": "report.order_summary",
+          "reason": "The projection view report.order_summary publishes (code VARCHAR(80), total BIGINT, customer_name VARCHAR(80)) and now publishes (code VARCHAR(80), total DOUBLE PRECISION, customer_name VARCHAR(80)): its readers' Arrow schema changes.",
+          "subject": "view/report.order_summary"
+        },
+        {
+          "class": "history",
+          "id": "history:table/order/column/total",
+          "reason": "order is versioned: images recorded before this change keep Order.total as BIGINT, which the history readers read as DOUBLE PRECISION.",
+          "subject": "table/order/column/total"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "DROP VIEW report.order_summary",
+        "ALTER TABLE \"order\"\n  ALTER COLUMN total TYPE DOUBLE PRECISION USING total::DOUBLE PRECISION",
+        "CREATE VIEW report.order_summary WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.code,\n  base.total,\n  customer.\"name\" AS customer_name\nFROM \"order\" AS base\n  INNER JOIN customer AS customer ON base.customer_id = customer.id\n",
+        "COMMENT ON VIEW report.order_summary IS 'Orders with their customer''s name, for reporting.'"
+      ],
+      "subject": "table/order/column/total",
+      "transactional": true
+    }
+  ],
+  "to": "58f401d97b5b725821e1f5fbc0ab806bda8948deaa3a99f6df2a6e27a3a158f4",
+  "toModel": null,
+  "version": 1
+}

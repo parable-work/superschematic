@@ -1,0 +1,120 @@
+{
+  "dialect": "sqlite",
+  "from": "",
+  "hash": "88cc6c7f17de9161902dfca3e0ab09daff36b2283cef2b26d41d094cb4b91f3e",
+  "service": "shop",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE customer (id INTEGER NOT NULL, name TEXT NOT NULL, CONSTRAINT customer_pkey PRIMARY KEY (id))"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"order\" (id INTEGER NOT NULL, customer_id INTEGER NOT NULL, total INTEGER NOT NULL, CONSTRAINT order_pkey PRIMARY KEY (id), CONSTRAINT order_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (id) ON DELETE CASCADE)"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX order_customer_id_idx ON \"order\" (customer_id)"
+      ],
+      "subject": "table/order/index/order_customer_id_idx",
+      "transactional": true
+    }
+  ],
+  "to": "df19b9e8e1a4d5890f05477816cd7bcb91b68dd4250522dc0ab747a4c79d148c",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "name",
+            "origin": "Customer.name",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "INTEGER"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "INTEGER"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "method": "BTREE",
+            "name": "order_customer_id_idx"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

@@ -1,6 +1,6 @@
 {
   "name": "Blueprint",
-  "description": "Creates the instance's children from a map of steps: one instance of the child schema per step, linked to the instance and blocked by the children of the steps it comes after, all in one transaction that a failure refuses whole. The steps are inline in the config, stamped when the instance is created, or held by a definition the instance links to, pinned to a revision, stamped when that link is first set. A step can depend on the instance's fields (when); a step left out passes its dependencies on to the steps that come after it.",
+  "description": "Creates the instance's children from a map of steps: one instance of the child schema per step, created with its link to the instance and blocked by the children of the steps it comes after, all in one transaction that a failure refuses whole. The steps are inline in the config, stamped when the instance is created, or held by a definition the instance links to, pinned to a revision, stamped when that link is first set, by the create that gives it or a later link. A step can depend on the instance's fields (when); a step left out passes its dependencies on to the steps that come after it.",
   "configSchema": {
     "additionalProperties": false,
     "oneOf": [
@@ -26,7 +26,7 @@
         "uniqueItems": true
       },
       "copyLinks": {
-        "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records. Only with from: an instance holds no link when it is created.",
+        "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records: the links the instance holds when it is stamped, which for inline steps are the ones its create gives.",
         "items": {
           "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
           "type": "string"
@@ -36,7 +36,7 @@
       },
       "from": {
         "additionalProperties": false,
-        "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set.",
+        "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set, by the create that gives it or a later link.",
         "properties": {
           "field": {
             "description": "The field of the linked instance's type that holds the steps.",
@@ -66,7 +66,7 @@
         "type": "string"
       },
       "schema": {
-        "description": "The child schema. It composes Links with parentLink, Dependencies when a step comes after another, and not Blueprint.",
+        "description": "The child schema. It composes Links with parentLink, Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint.",
         "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
         "type": "string"
       },
@@ -143,6 +143,32 @@
     {
       "name": "blueprint",
       "description": "What was stamped: children, each step's key and its child's id, in the order they were created; absent until the instance is stamped."
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "stamped",
+      "description": "Links' link moving the from link once the instance's children were stamped from the revision it pins."
+    },
+    {
+      "code": "no_dependencies",
+      "description": "A stamp whose steps come after others, while the child schema does not compose Dependencies."
+    },
+    {
+      "code": "not_constant",
+      "description": "A stamp while the child schema's Constants does not keep keyField and every copied field, which a later version of it dropped; details.fields lists the ones it does not keep."
+    },
+    {
+      "code": "no_revision",
+      "description": "A stamp from a from link that records no revision to read the steps from."
+    },
+    {
+      "code": "unreadable",
+      "description": "A stamp from a pinned revision of the definition the principal cannot read."
+    },
+    {
+      "code": "invalid_steps",
+      "description": "A stamp from a map of steps that is not valid for this type."
     }
   ]
 }

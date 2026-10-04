@@ -1,0 +1,105 @@
+{
+  "dialect": "sqlite",
+  "from": "df19b9e8e1a4d5890f05477816cd7bcb91b68dd4250522dc0ab747a4c79d148c",
+  "hash": "63ebe83ae83ceb1d2674e618027dcb862de74935893efde88fc83b72c9ea511a",
+  "service": "shop",
+  "steps": [
+    {
+      "foreignKeysOff": true,
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE customer__new (id INTEGER NOT NULL, name TEXT NOT NULL, CONSTRAINT customer_pkey PRIMARY KEY (id))",
+        "INSERT INTO customer__new (id, name) SELECT id, name FROM customer WHERE id \u003c\u003e 1",
+        "DROP TABLE customer",
+        "ALTER TABLE customer__new RENAME TO customer"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    }
+  ],
+  "to": "2228ee6df9a98440f4cee74a3a074e3bd9002ce443e167fa138e014526574866",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "name",
+            "origin": "Customer.name",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Rebuilt without customer 1, which orders still reference.",
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "INTEGER"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "INTEGER"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "method": "BTREE",
+            "name": "order_customer_id_idx"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

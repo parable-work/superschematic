@@ -1,9 +1,35 @@
 {
   "name": "Budget",
-  "description": "Reserve-then-settle budgets on the instance, in units the deployment names. Each meter counts what the instance has used and the reservations it holds against its limit. A reservation that does not fit here, or in an enclosing scope that a Links link points at, is refused, and the whole chain is left as it was. Usage is never refused: it draws the instance's own reservation down, counts here and in every enclosing scope, and reports each instance it takes over its limit. On a type that composes Lease, a reservation lives as long as the lease it was made under.",
+  "description": "Reserve-then-settle budgets on the instance, in units the deployment names. Each meter counts what the instance has used and the reservations it holds against its limit. A reservation that does not fit here, or in an enclosing scope that a Links link points at, is refused, and the whole chain is left as it was. Usage is never refused: it draws the instance's own reservation down, counts here and in every enclosing scope, reports each instance it takes over its limit, and can move the status of each through escalate. checkReserve answers whether a reservation would fit now, which Queue copies so that work over its budget is not tried. On a type that composes Lease, a reservation lives as long as the lease it was made under.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
+      "escalate": {
+        "additionalProperties": false,
+        "description": "Moves the instance's Workflow status when usage leaves it over the limit of a meter, while the status is one of from, in the transaction of that usage: an instance's own usage, or one an instance inside it passes up, so a scope's config moves the scope. A move a guard vetoes or the caller may not make leaves the status, and the usage counts all the same. Needs Workflow on the type.",
+        "properties": {
+          "from": {
+            "description": "The states the status moves from; in any other state it stays.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "transition": {
+            "description": "The state to move to, through Workflow's transition.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "transition",
+          "from"
+        ],
+        "type": "object"
+      },
       "limitPermission": {
         "description": "The permission a principal needs to change a meter's limit, with setLimit or through limitField. Absent, no limit changes once the instance exists.",
         "minLength": 1,
@@ -13,19 +39,9 @@
         "additionalProperties": {
           "additionalProperties": false,
           "not": {
-            "anyOf": [
-              {
-                "required": [
-                  "limit",
-                  "limitField"
-                ]
-              },
-              {
-                "required": [
-                  "reserve",
-                  "reserveField"
-                ]
-              }
+            "required": [
+              "limit",
+              "limitField"
             ]
           },
           "properties": {
@@ -40,12 +56,12 @@
               "type": "string"
             },
             "reserve": {
-              "description": "The amount reserve takes for the meter when it is given no meter: what a claim reserves.",
+              "description": "The amount reserve takes for the meter when it is given no meter: what a claim reserves. With reserveField, the amount when the field holds no positive integer.",
               "minimum": 1,
               "type": "integer"
             },
             "reserveField": {
-              "description": "An integer field of the type whose positive value is the amount reserve takes for the meter when it is given no meter.",
+              "description": "An integer field of the type whose positive value is the amount reserve takes for the meter when it is given no meter, in place of reserve.",
               "minLength": 1,
               "type": "string"
             },
@@ -136,8 +152,70 @@
       "writes": true
     },
     {
+      "name": "checkReserve",
+      "description": "Whether reserve with the same parameters would fit now, here and in every enclosing scope, after the reservations of a lease that is no longer active are settled, as reserve settles them; it changes nothing and does not ask for a lease. Queue copies its answer so that a claim that cannot fit is not tried.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "How much of the meter; its configured reservation when absent. Needs meter.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "meter": {
+            "description": "The meter; every meter with a configured reservation when absent.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "fits": {
+            "description": "Whether the reservation fits now.",
+            "type": "boolean"
+          },
+          "scopes": {
+            "description": "The enclosing scopes the answer read, innermost first: a change of one can change it.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "schema",
+                "id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "until": {
+            "description": "When it does not fit: the start of the next UTC day, when the daily meters starting again make it fit with nothing else changing; null when only a change can make it fit, and when it fits.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "fits",
+          "until",
+          "scopes"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "recordUsage",
-      "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+      "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, moves the status of each whose config gives escalate, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -173,6 +251,10 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "escalated": {
+                  "description": "Whether its escalate moved its status in this call.",
+                  "type": "boolean"
+                },
                 "id": {
                   "type": "string"
                 },
@@ -190,7 +272,8 @@
                 "schema",
                 "id",
                 "used",
-                "limit"
+                "limit",
+                "escalated"
               ],
               "type": "object"
             },
@@ -446,6 +529,10 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "escalated": {
+                  "description": "Whether its escalate moved its status in this call.",
+                  "type": "boolean"
+                },
                 "id": {
                   "type": "string"
                 },
@@ -463,7 +550,8 @@
                 "schema",
                 "id",
                 "used",
-                "limit"
+                "limit",
+                "escalated"
               ],
               "type": "object"
             },
@@ -481,6 +569,36 @@
         "type": "object"
       },
       "writes": true
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "over_limit",
+      "description": "The reservation does not fit a meter's limit, here or in an enclosing scope (details.scope names which)."
+    },
+    {
+      "code": "not_leased",
+      "description": "On a type that composes Lease, reserve needs an active lease."
+    },
+    {
+      "code": "scope_moved",
+      "description": "The meter's reservation is held through a scope its link no longer points at; it is settled before a reservation through the new one."
+    },
+    {
+      "code": "scope_reserved",
+      "description": "A scope link does not change while a reservation is held through it."
+    },
+    {
+      "code": "below_committed",
+      "description": "A limit below what the instance has used and reserved."
+    },
+    {
+      "code": "exceeds_reservation",
+      "description": "A scope holds no more for an instance than that instance has reserved."
+    },
+    {
+      "code": "not_configured",
+      "description": "The config names no limitPermission, which changing a limit needs."
     }
   ]
 }

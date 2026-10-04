@@ -1,12 +1,14 @@
-// Links, the core's typed links: link and unlink, the links field, pinned
-// links and their staleness, the delete of a target (refused for a
-// required link, cleared for an optional one, as the caller), the
-// schema-level listLinked, reads as the caller, and its config rules.
+// Links, the core's typed links: link and unlink, links a create gives
+// (every required one among them), the links field, pinned links and
+// their staleness, the delete of a target (refused for a required link,
+// cleared for an optional one, as the caller), the schema-level
+// listLinked, reads as the caller, and its config rules.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import {
   BehaviorVetoError,
+  CreateParamsError,
   EngineError,
   IncompatibleChangeError,
   OperationParamsError,
@@ -55,7 +57,8 @@ for (const driver of drivers) {
     return openTestEngine({ driver, ...options });
   }
 
-  // Specs s1 and s2 keep revisions; people p1 and p2; tasks t1 to t3.
+  // Specs s1 and s2 keep revisions; people p1 and p2; tasks t1 to t3, whose
+  // required owner their create gives: p1 owns t1, p2 the others.
   function world(options: Partial<EngineOptions> = {}): Engine {
     const engine = open(options);
     publish(engine, schema('Spec', [{ name: 'Revisions' }]));
@@ -68,7 +71,7 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Person', { title: id }, { id });
     }
     for (const id of ['t1', 't2', 't3']) {
-      engine.instances.create(alice, 'Task', { title: id }, { id });
+      engine.instances.create(alice, 'Task', { title: id }, { id, behaviors: { Links: { owner: id === 't1' ? 'p1' : 'p2' } } });
     }
     return engine;
   }
@@ -80,7 +83,7 @@ for (const driver of drivers) {
   describe(`Links (${driver})`, () => {
     test('link points a named link at an instance of its schema; links holds them all, by name; link again moves one', () => {
       const engine = world();
-      assert.equal(linksOf(engine, 't1'), undefined);
+      assert.deepEqual(linksOf(engine, 't1'), { owner: { schema: 'Person', id: 'p1' } });
       assert.deepEqual(link(engine, 't1', { name: 'owner', id: 'p1' }), { name: 'owner', schema: 'Person', id: 'p1' });
       assert.deepEqual(link(engine, 't1', { name: 'related', id: 't2' }), { name: 'related', schema: 'Task', id: 't2' });
       assert.deepEqual(linksOf(engine, 't1'), { owner: { schema: 'Person', id: 'p1' }, related: { schema: 'Task', id: 't2' } });
@@ -103,18 +106,19 @@ for (const driver of drivers) {
       assert.deepEqual(issues({ name: 'owner', id: 'p9' }), [{ path: '/id', message: 'Person p9 does not exist' }]);
       assert.deepEqual(issues({ name: 'owner', id: 'p1', revision: 1 }), [{ path: '/revision', message: 'link owner is not pinned, so it records no revision' }]);
       assert.deepEqual(issues({ name: 'owner', id: 'p1', extra: 1 }).map((issue) => issue.path), ['']);
-      assert.equal(linksOf(engine, 't1'), undefined);
+      assert.deepEqual(linksOf(engine, 't1'), { owner: { schema: 'Person', id: 'p1' } });
     });
 
     test("a pinned link records the target's revision and reports when the target has moved past it", () => {
       const engine = world();
+      const specOf = (id: string) => (linksOf(engine, id) as { spec?: unknown } | undefined)?.spec;
       assert.deepEqual(link(engine, 't1', { name: 'spec', id: 's1' }), { name: 'spec', schema: 'Spec', id: 's1', revision: 1 });
-      assert.deepEqual(linksOf(engine, 't1'), { spec: { schema: 'Spec', id: 's1', revision: 1, stale: false } });
+      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 1, stale: false });
       engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });
-      assert.deepEqual(linksOf(engine, 't1'), { spec: { schema: 'Spec', id: 's1', revision: 1, stale: true } });
+      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 1, stale: true });
       assert.equal(engine.instances.get(alice, 'Task', 't1')?.seq, 2, 'read when read: no event on the task');
       link(engine, 't1', { name: 'spec', id: 's1' });
-      assert.deepEqual(linksOf(engine, 't1'), { spec: { schema: 'Spec', id: 's1', revision: 2, stale: false } });
+      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 2, stale: false });
       assert.deepEqual(link(engine, 't1', { name: 'spec', id: 's1', revision: 1 }), { name: 'spec', schema: 'Spec', id: 's1', revision: 1 });
       assert.equal((linksOf(engine, 't1') as { spec: { stale: boolean } }).spec.stale, true);
       assert.deepEqual(thrown(() => link(engine, 't1', { name: 'spec', id: 's1', revision: 3 }), OperationParamsError).issues, [
@@ -134,7 +138,7 @@ for (const driver of drivers) {
       // Revisions added to a schema with instances: s1 has none until it changes.
       publish(engine, schema('Spec', [{ name: 'Revisions' }]));
       const none = thrown(() => link(engine, 't1', { name: 'spec', id: 's1' }), BehaviorVetoError);
-      assert.deepEqual([none.behavior, none.action, none.reason], ['Links', 'link', 'Spec s1 has no revision to pin yet']);
+      assert.deepEqual([none.behavior, none.action, none.reason, none.vetoCode], ['Links', 'link', 'Spec s1 has no revision to pin yet', 'no_revision']);
       engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });
       assert.equal((link(engine, 't1', { name: 'spec', id: 's1' }) as { revision: number }).revision, 1);
     });
@@ -145,7 +149,7 @@ for (const driver of drivers) {
       link(engine, 't1', { name: 'spec', id: 's1' });
       assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'spec' }), { name: 'spec', schema: 'Spec', id: 's1', revision: 1 });
       const required = thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'owner' }), BehaviorVetoError);
-      assert.equal(required.reason, 'link owner is required: it can be moved with link, not unlinked');
+      assert.deepEqual([required.reason, required.vetoCode], ['link owner is required: it can be moved with link, not unlinked', 'required_link']);
       assert.deepEqual(thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'related' }), OperationParamsError).issues, [
         { path: '/name', message: 'Task t1 has no link related' },
       ]);
@@ -159,8 +163,8 @@ for (const driver of drivers) {
       link(engine, 't3', { name: 'related', id: 't2' });
       const refused = thrown(() => engine.instances.delete(bob, 'Person', 'p1'), BehaviorVetoError);
       assert.deepEqual(
-        [refused.behavior, refused.action, refused.message],
-        ['Links', 'delete', 'behavior Links vetoes delete of Person p1: an instance of Task links to it through its required link owner']
+        [refused.behavior, refused.action, refused.message, refused.vetoCode],
+        ['Links', 'delete', 'behavior Links vetoes delete of Person p1: an instance of Task links to it through its required link owner', 'required_target']
       );
       const after = engine.events.read(alice, { limit: 500 }).events.at(-1)?.cursor ?? 0;
       assert.equal(engine.instances.delete(bob, 'Task', 't2'), true);
@@ -173,7 +177,7 @@ for (const driver of drivers) {
         ]
       );
       assert.deepEqual(linksOf(engine, 't1'), { owner: { schema: 'Person', id: 'p1' } });
-      assert.equal(linksOf(engine, 't3'), undefined);
+      assert.deepEqual(linksOf(engine, 't3'), { owner: { schema: 'Person', id: 'p2' } });
       // Moving the required link frees p1.
       link(engine, 't1', { name: 'owner', id: 'p2' });
       assert.equal(engine.instances.delete(bob, 'Person', 'p1'), true);
@@ -235,18 +239,119 @@ for (const driver of drivers) {
       publish(engine, schema('Task', []));
       engine.instances.create(alice, 'Person', { title: 'p1' }, { id: 'p1' });
       engine.instances.create(alice, 'Task', { title: 't1' }, { id: 't1' });
+      const change = (links: Record<string, unknown>) => thrown(() => engine.schemas.define(alice, tasks(links)), IncompatibleChangeError).changes.map((c) => c.message);
+      // t1 holds no link, so Links comes with no required one.
+      assert.match(change({ owner: { schema: 'Person', required: true } })[0], /cannot be added to type Task, which has instances: the instances that exist hold no link owner, which is required/);
       publish(engine, tasks({ owner: { schema: 'Person' } }));
       link(engine, 't1', { name: 'owner', id: 'p1' });
-      // required and pinned may change, and links may be added.
-      publish(engine, tasks({ owner: { schema: 'Person', required: true }, related: { schema: 'Task' } }));
-      assert.equal(thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'owner' }), BehaviorVetoError).behavior, 'Links');
-      const change = (links: Record<string, unknown>) => thrown(() => engine.schemas.define(alice, tasks(links)), IncompatibleChangeError).changes.map((c) => c.message);
+      // pinned may change and optional links may be added; no link becomes
+      // required, as no field does: an instance may not hold it.
+      assert.match(change({ owner: { schema: 'Person', required: true } })[0], /link owner becomes required, and an instance the live version accepts may not hold it/);
+      assert.match(change({ owner: { schema: 'Person' }, boss: { schema: 'Person', required: true } })[0], /link boss is new and required, and an instance the live version accepts holds none/);
+      publish(engine, tasks({ owner: { schema: 'Person' }, related: { schema: 'Task', pinned: true } }));
+      publish(engine, tasks({ owner: { schema: 'Person' }, related: { schema: 'Task' } }));
       assert.deepEqual(change({ related: { schema: 'Task' } }), [
-        'behavior Links on type Task cannot change its config from {"links":{"owner":{"required":true,"schema":"Person"},"related":{"schema":"Task"}}} to {"links":{"related":{"schema":"Task"}}}: link owner is gone, and its instances may hold it',
+        'behavior Links on type Task cannot change its config from {"links":{"owner":{"schema":"Person"},"related":{"schema":"Task"}}} to {"links":{"related":{"schema":"Task"}}}: link owner is gone, and its instances may hold it',
       ]);
       assert.match(change({ owner: { schema: 'Task' }, related: { schema: 'Task' } })[0], /link owner points at Person, not Task, in the instances that hold it/);
       const removed = thrown(() => engine.schemas.define(alice, schema('Task', [])), IncompatibleChangeError);
       assert.match(removed.message, /behavior Links cannot be removed from type Task, which has instances: the links and references its instances hold would stay behind/);
+    });
+
+    test("a create gives links by name, a target's id or { id, revision }; they hold from its event, as link's do", () => {
+      const engine = world();
+      engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });
+      const created = engine.instances.create(
+        alice,
+        'Task',
+        { title: 't4' },
+        { id: 't4', behaviors: { Links: { owner: 'p1', spec: { id: 's1', revision: 1 }, related: { id: 't1' } } } }
+      );
+      const links = {
+        owner: { schema: 'Person', id: 'p1' },
+        related: { schema: 'Task', id: 't1' },
+        spec: { schema: 'Spec', id: 's1', revision: 1, stale: true },
+      };
+      assert.deepEqual(created.data, { title: 't4', links });
+      // One event: the create, which carries the links.
+      const events = engine.events.read(alice, { schema: 'Task', instanceId: 't4' }).events;
+      assert.deepEqual(
+        events.map((event) => [event.kind, event.change]),
+        [['create', { title: 't4', links }]]
+      );
+      // A pinned link gets the target's latest revision when the create names none.
+      engine.instances.create(alice, 'Task', { title: 't5' }, { id: 't5', behaviors: { Links: { owner: 'p2', spec: 's1' } } });
+      assert.deepEqual((linksOf(engine, 't5') as { spec: unknown }).spec, { schema: 'Spec', id: 's1', revision: 2, stale: false });
+      // They are references as link's are: the required owner holds p1, and
+      // t1's delete unlinks related on t4.
+      assert.equal(thrown(() => engine.instances.delete(alice, 'Person', 'p1'), BehaviorVetoError).behavior, 'Links');
+      engine.instances.invoke(alice, 'Task', 't1', 'link', { name: 'owner', id: 'p2' });
+      assert.equal(engine.instances.delete(alice, 'Task', 't1'), true);
+      assert.equal((linksOf(engine, 't4') as { related?: unknown }).related, undefined);
+      assert.deepEqual(engine.events.read(alice, { schema: 'Task', instanceId: 't4' }).events.at(-1)?.change, {
+        behavior: 'Links',
+        operation: 'unlink',
+        params: { name: 'related' },
+        patch: { links: { related: null } },
+      });
+      assert.equal(thrown(() => engine.instances.delete(alice, 'Person', 'p1'), BehaviorVetoError).behavior, 'Links');
+    });
+
+    test("a required link is one every create gives; a create's links are held to link's checks, at pointers into its parameters", () => {
+      const engine = world();
+      const issues = (behaviors: Record<string, unknown> | undefined) =>
+        thrown(() => engine.instances.create(alice, 'Task', { title: 't9' }, { id: 't9', ...(behaviors === undefined ? {} : { behaviors }) }), CreateParamsError).issues;
+      const required = [{ path: '/behaviors/Links', message: 'link owner is required, so a create of Task gives it' }];
+      assert.deepEqual(issues(undefined), required);
+      assert.deepEqual(issues({ Links: {} }), required);
+      assert.deepEqual(issues({ Links: { owner: 'p1', boss: 'p2' } }), [{ path: '/behaviors/Links/boss', message: 'Task has no link boss (its links: owner, related, spec)' }]);
+      assert.deepEqual(issues({ Links: { owner: 'p9' } }), [{ path: '/behaviors/Links/owner', message: 'Person p9 does not exist' }]);
+      assert.deepEqual(issues({ Links: { owner: { id: 'p9' } } }), [{ path: '/behaviors/Links/owner/id', message: 'Person p9 does not exist' }]);
+      assert.deepEqual(issues({ Links: { owner: { id: 'p1', revision: 1 } } }), [
+        { path: '/behaviors/Links/owner/revision', message: 'link owner is not pinned, so it records no revision' },
+      ]);
+      assert.deepEqual(issues({ Links: { owner: 'p1', spec: { id: 's1', revision: 2 } } }), [
+        { path: '/behaviors/Links/spec/revision', message: 'Spec s1 has revisions 1 to 1, not 2' },
+      ]);
+      // Its createParamsSchema: a name is camelCase, a target an id or { id, revision? }.
+      assert.deepEqual(issues({ Links: { owner: 7 } }), [{ path: '/behaviors/Links/owner', message: 'must be string,object' }]);
+      assert.deepEqual(
+        issues({ Links: { owner: { id: 'p1', pin: 1 } } }).map((issue) => issue.path),
+        ['/behaviors/Links/owner']
+      );
+      assert.ok(issues({ Links: { Owner: 'p1' } }).some((issue) => issue.path === '/behaviors/Links' && /property name/.test(issue.message)));
+      // A refused create leaves nothing: no instance, no link, no event.
+      assert.equal(engine.instances.get(alice, 'Task', 't9'), undefined);
+      assert.equal(engine.events.read(alice, { schema: 'Task', instanceId: 't9' }).events.length, 0);
+      assert.equal(engine.instances.delete(alice, 'Spec', 's2'), true);
+    });
+
+    test("a create's pinned link to a target with no revision is vetoed; a caller who may not read the target's schema cannot give it", () => {
+      const engine = open({ policy: policy(({ schema }) => schema === 'Task') });
+      publish(engine, schema('Spec', []));
+      publish(engine, schema('Task', [{ name: 'Links', config: { links: { spec: { schema: 'Spec', pinned: true } } } }]));
+      engine.instances.create(alice, 'Spec', { title: 's1' }, { id: 's1' });
+      // Revisions added to a schema with instances: s1 has none until it changes.
+      publish(engine, schema('Spec', [{ name: 'Revisions' }]));
+      const none = thrown(() => engine.instances.create(alice, 'Task', { title: 't1' }, { behaviors: { Links: { spec: 's1' } } }), BehaviorVetoError);
+      // A create's link is vetoed with link's declared code, and its entry.
+      assert.deepEqual(
+        [none.behavior, none.action, none.reason, none.vetoCode, none.vetoDetails],
+        ['Links', 'create', 'Spec s1 has no revision to pin yet', 'no_revision', { path: '/behaviors/Links/spec' }]
+      );
+      engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });
+      const refused = thrown(() => engine.instances.create(bob, 'Task', { title: 't1' }, { behaviors: { Links: { spec: 's1' } } }), EngineError);
+      assert.equal(refused.code, 'forbidden');
+      assert.equal(engine.instances.list(alice, 'Task').items.length, 0);
+      assert.deepEqual(engine.instances.create(bob, 'Task', { title: 't1' }, { id: 't1' }).data, { title: 't1' });
+    });
+
+    test('a required link may become optional, and then be unlinked', () => {
+      const engine = world();
+      publish(engine, tasks({ ...taskLinks, owner: { schema: 'Person' } }));
+      engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'owner' });
+      assert.equal(linksOf(engine, 't1'), undefined);
+      assert.deepEqual(engine.instances.create(alice, 'Task', { title: 't4' }, { id: 't4' }).data, { title: 't4' });
     });
   });
 }

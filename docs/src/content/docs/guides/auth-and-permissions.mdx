@@ -13,7 +13,8 @@ says who the caller is and what they hold. The generated server enforces
 the first against the second: 401 when a route needs a caller and has
 none, 403 when the caller holds no permission the route accepts. This guide
 uses `shop-orders`, served in Go, and `shop-storefront`, served in
-TypeScript.
+TypeScript; the Rust server applies the same rules
+([Rust](#say-who-the-caller-is-rust)).
 
 ## What a route requires
 

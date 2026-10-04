@@ -71,7 +71,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Pinned", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Pinned", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -95,6 +95,50 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	if err := reg.RegisterBehavior(BehaviorSpec{Declaration: declaration("Late", nil)}); err == nil || !strings.Contains(err.Error(), "after Finalize") {
 		t.Fatalf("post-Finalize registration: got %v", err)
+	}
+}
+
+// A declaration may give the schema of the precondition a caller sends
+// for the behavior, held to a paramsSchema's rule, and the codes its
+// vetoes carry, each lowercase snake case and listed once, beside the
+// schema of the parameters a create gives it.
+func TestRegisterBehaviorPreconditionAndVetoes(t *testing.T) {
+	precondition := map[string]any{"type": "object", "additionalProperties": false, "required": []any{"token"}, "properties": map[string]any{"token": map[string]any{"type": "integer"}}}
+	createParams := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"holder": map[string]any{"type": "string"}}}
+	reg := New(naming.Default())
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Hold", map[string]any{
+		"createParamsSchema": createParams,
+		"preconditionSchema": precondition,
+		"vetoes":             []any{map[string]any{"code": "held", "description": "Another holds it."}, map[string]any{"code": "token_stale"}},
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	hold, _ := reg.Behavior("acme.Hold")
+	if len(hold.CreateParamsSchema) == 0 || len(hold.PreconditionSchema) == 0 || len(hold.Vetoes) != 2 || hold.Vetoes[0] != (BehaviorVeto{Code: "held", Description: "Another holds it."}) || hold.Vetoes[1].Code != "token_stale" {
+		t.Fatalf("acme.Hold = %+v", hold)
+	}
+
+	for _, test := range []struct {
+		name    string
+		members map[string]any
+		want    string
+	}{
+		{"precondition does not compile", map[string]any{"preconditionSchema": map[string]any{"type": 7}}, "registry: behavior acme.Hold preconditionSchema: "},
+		{"precondition not an object", map[string]any{"preconditionSchema": map[string]any{"type": "integer"}}, `registry: behavior acme.Hold preconditionSchema must be an object schema ("type": "object")`},
+		{"precondition open", map[string]any{"preconditionSchema": map[string]any{"type": "object"}}, `registry: behavior acme.Hold preconditionSchema must set "additionalProperties": false, so its members are exactly the ones it declares`},
+		{"code camelCase", map[string]any{"vetoes": []any{map[string]any{"code": "tokenStale"}}}, `registry: behavior acme.Hold veto code "tokenStale" is not lowercase snake case of at most 64 characters`},
+		{"code empty", map[string]any{"vetoes": []any{map[string]any{"code": ""}}}, `registry: behavior acme.Hold veto code "" is not lowercase snake case`},
+		{"code double underscore", map[string]any{"vetoes": []any{map[string]any{"code": "token__stale"}}}, `veto code "token__stale" is not lowercase snake case`},
+		{"code too long", map[string]any{"vetoes": []any{map[string]any{"code": strings.Repeat("a", 65)}}}, "is not lowercase snake case of at most 64 characters"},
+		{"code twice", map[string]any{"vetoes": []any{map[string]any{"code": "held"}, map[string]any{"code": "held"}}}, `registry: behavior acme.Hold declares veto code "held" twice`},
+		{"veto unknown key", map[string]any{"vetoes": []any{map[string]any{"code": "held", "status": 409}}}, `unknown field "status"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Hold", test.members)})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -150,6 +194,11 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"extension name malformed", "acme", declaration("acme.rating", nil), `behavior name "acme.rating" is malformed`},
 		{"extension name nested", "acme", declaration("acme.Rating.Stars", nil), `behavior name "acme.Rating.Stars" is malformed`},
 		{"config schema", "acme", declaration("acme.Rating", map[string]any{"configSchema": map[string]any{"type": 7}}), "behavior acme.Rating configSchema: "},
+		{"create params schema", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": map[string]any{"type": 7}}), "behavior acme.Rating createParamsSchema: "},
+		{"create params not an object", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": map[string]any{"type": "array", "additionalProperties": false}}), `behavior acme.Rating createParamsSchema must be an object schema ("type": "object")`},
+		{"create params a boolean schema", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": true}), `behavior acme.Rating createParamsSchema must be an object schema ("type": "object")`},
+		{"create params open", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": objectSchema}), `behavior acme.Rating createParamsSchema must set "additionalProperties": false or a schema, so no create parameter goes unchecked`},
+		{"create params open by true", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": map[string]any{"type": "object", "additionalProperties": true}}), `createParamsSchema must set "additionalProperties": false or a schema`},
 		{"field name", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "rating count"}}}), `behavior acme.Rating field name "rating count" is not an identifier`},
 		{"field twice", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "stars"}, map[string]any{"name": "stars"}}}), `behavior acme.Rating declares field "stars" twice`},
 		{"operation not camelCase", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("Rate", nil)}}), `behavior acme.Rating operation name "Rate" is not camelCase`},
@@ -242,6 +291,27 @@ func TestRegisterBehaviorRefusesOpenParams(t *testing.T) {
 	}
 }
 
+// A create's parameters for a behavior may be keyed by names its config
+// gives (a link's name), so createParamsSchema may admit further keys, but
+// only through "additionalProperties" set to a schema that checks them.
+func TestRegisterBehaviorTakesCreateParams(t *testing.T) {
+	for _, params := range []string{
+		`{"type":"object","additionalProperties":false,"properties":{"blockers":{"type":"array"}}}`,
+		`{"type":"object","propertyNames":{"pattern":"^[a-z]+$"},"additionalProperties":{"type":"string"}}`,
+	} {
+		reg := New(naming.Default())
+		if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Rating", map[string]any{
+			"createParamsSchema": json.RawMessage(params),
+		})}); err != nil {
+			t.Fatalf("%s: %v", params, err)
+		}
+		rating, _ := reg.Behavior("acme.Rating")
+		if string(rating.CreateParamsSchema) != params {
+			t.Errorf("CreateParamsSchema = %s, want %s", rating.CreateParamsSchema, params)
+		}
+	}
+}
+
 // An extension registers its behaviors under its own name only: Use holds
 // the spec's Extension to the extension whose Register is running, so an
 // extension cannot declare a bare core name or another extension's.
@@ -288,7 +358,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},

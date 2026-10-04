@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
 	"github.com/parable-work/superschematic/internal/testpaths"
@@ -54,9 +55,7 @@ func TestNestedArraysSDKCrateBuildsAndRuns(t *testing.T) {
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 
-[patch.crates-io]
-superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
-`)
+`+testpaths.RustPatch(paths, naming.Default()))
 	crate := strings.ReplaceAll(sdkOutput.CrateName, "-", "_")
 	writeFile(t, filepath.Join(sdkDir, "tests", "nested_arrays.rs"), strings.ReplaceAll(nestedArraysSDKTest, "SDK_CRATE", crate))
 	writeFile(t, filepath.Join(sdkDir, "tests", "path_params.rs"), strings.ReplaceAll(pathParamsSDKTest, "SDK_CRATE", crate))

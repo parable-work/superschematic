@@ -1,7 +1,8 @@
 name: ci
 
-# Gates for the superschematic repository: DCO sign-off, the four Go modules
-# (build, vet, test with the database tests against a Postgres container,
+# Gates for the superschematic repository: DCO sign-off, five Go modules (the
+# compiler, the IR, the schema and http runtimes and the migration runner:
+# build, vet, test with the database tests against a Postgres container,
 # gofmt, golangci-lint, scalar catalog, schema-file types and core behavior
 # declarations drift, CLI smoke over the fixture corpus), the acme example
 # extension (smoke plus the no-core-edits check), the TypeScript authoring
@@ -219,9 +220,12 @@ jobs:
           # builds the generated crate and runs it on it, and pygen's runs the
           # generated Python package on it.
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # The migration runner's tests apply plans to databases they
+          # create on it; its SQLite tests need no service.
+          SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
-          for m in . ir runtime/schema/go runtime/http/go; do
+          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go; do
             echo "==> $m"
             (cd "$m" && go build ./... && go vet ./... && go test -count=1 ./...)
           done
@@ -292,6 +296,15 @@ jobs:
         with:
           version: v${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: runtime/http/go
+          install-mode: none
+
+      - name: golangci-lint (runtime/migrate/go)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: runtime/migrate/go
           install-mode: none
 
   acme:
@@ -545,7 +558,7 @@ jobs:
           uv run --python 3.9 --isolated pytest -q
 
   rust:
-    name: rust (http runtime crate)
+    name: rust (http and schema runtime crates)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -562,7 +575,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: runtime/http/rust
+          workspaces: |
+            runtime/http/rust
+            runtime/schema/rust
 
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
@@ -570,6 +585,18 @@ jobs:
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
           cargo test
+
+      # superscalar's default lossless-json feature turns on serde_json's
+      # arbitrary_precision and preserve_order, and Cargo unifies them into
+      # every crate of a build that uses it, so the schema runtime's tests run
+      # with and without them.
+      - name: schema runtime fmt / clippy / test
+        working-directory: runtime/schema/rust
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+          cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)

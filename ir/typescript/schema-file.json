@@ -123,7 +123,7 @@
                     "uniqueItems": true
                   },
                   "copyLinks": {
-                    "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records. Only with from: an instance holds no link when it is created.",
+                    "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records: the links the instance holds when it is stamped, which for inline steps are the ones its create gives.",
                     "items": {
                       "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                       "type": "string"
@@ -133,7 +133,7 @@
                   },
                   "from": {
                     "additionalProperties": false,
-                    "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set.",
+                    "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set, by the create that gives it or a later link.",
                     "properties": {
                       "field": {
                         "description": "The field of the linked instance's type that holds the steps.",
@@ -163,7 +163,7 @@
                     "type": "string"
                   },
                   "schema": {
-                    "description": "The child schema. It composes Links with parentLink, Dependencies when a step comes after another, and not Blueprint.",
+                    "description": "The child schema. It composes Links with parentLink, Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint.",
                     "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
                     "type": "string"
                   },
@@ -255,6 +255,32 @@
               "config": {
                 "additionalProperties": false,
                 "properties": {
+                  "escalate": {
+                    "additionalProperties": false,
+                    "description": "Moves the instance's Workflow status when usage leaves it over the limit of a meter, while the status is one of from, in the transaction of that usage: an instance's own usage, or one an instance inside it passes up, so a scope's config moves the scope. A move a guard vetoes or the caller may not make leaves the status, and the usage counts all the same. Needs Workflow on the type.",
+                    "properties": {
+                      "from": {
+                        "description": "The states the status moves from; in any other state it stays.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "transition": {
+                        "description": "The state to move to, through Workflow's transition.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "transition",
+                      "from"
+                    ],
+                    "type": "object"
+                  },
                   "limitPermission": {
                     "description": "The permission a principal needs to change a meter's limit, with setLimit or through limitField. Absent, no limit changes once the instance exists.",
                     "minLength": 1,
@@ -264,19 +290,9 @@
                     "additionalProperties": {
                       "additionalProperties": false,
                       "not": {
-                        "anyOf": [
-                          {
-                            "required": [
-                              "limit",
-                              "limitField"
-                            ]
-                          },
-                          {
-                            "required": [
-                              "reserve",
-                              "reserveField"
-                            ]
-                          }
+                        "required": [
+                          "limit",
+                          "limitField"
                         ]
                       },
                       "properties": {
@@ -291,12 +307,12 @@
                           "type": "string"
                         },
                         "reserve": {
-                          "description": "The amount reserve takes for the meter when it is given no meter: what a claim reserves.",
+                          "description": "The amount reserve takes for the meter when it is given no meter: what a claim reserves. With reserveField, the amount when the field holds no positive integer.",
                           "minimum": 1,
                           "type": "integer"
                         },
                         "reserveField": {
-                          "description": "An integer field of the type whose positive value is the amount reserve takes for the meter when it is given no meter.",
+                          "description": "An integer field of the type whose positive value is the amount reserve takes for the meter when it is given no meter, in place of reserve.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -369,6 +385,47 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Constants"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "fields": {
+                    "description": "The type's own top-level fields, by JSON key, that keep the value their create gives them.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 64,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "permission": {
+                    "description": "The permission a caller needs to change them after the create; nobody may when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fields"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Dependencies"
               }
             }
@@ -379,10 +436,23 @@
                 "additionalProperties": false,
                 "properties": {
                   "gatedStates": {
-                    "description": "The terminal states of the type's Workflow that a transition into waits for every blocker to reach a terminal state of its own; every terminal state when absent.",
+                    "description": "The states of the type's Workflow that a transition into waits for every blocker to finish; every terminal state when absent.",
                     "items": {
                       "minLength": 1,
                       "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "satisfiedBy": {
+                    "description": "The outcomes of a blocker's terminal state that finish it; success when absent. A blocker in a terminal state whose outcome the list lacks blocks until it is removed.",
+                    "items": {
+                      "enum": [
+                        "success",
+                        "failure",
+                        "neutral"
+                      ]
                     },
                     "minItems": 1,
                     "type": "array",
@@ -429,7 +499,7 @@
                   },
                   "escalate": {
                     "additionalProperties": false,
-                    "description": "Used instead of onExpiry at the expiry that reaches maxExpiries, which it needs. Needs Workflow on the type.",
+                    "description": "Used instead of onExpiry at the expiry or abandon that reaches maxExpiries, which it needs. Needs Workflow on the type.",
                     "properties": {
                       "from": {
                         "description": "The states the status moves from; in any other state it stays.",
@@ -454,7 +524,7 @@
                     "type": "object"
                   },
                   "exempt": {
-                    "description": "Writing operations of the type's other behaviors, each as \u003cBehavior\u003e.\u003coperation\u003e, that a principal other than the holder may run while the lease is active.",
+                    "description": "Writing operations of the type's other behaviors, each as \u003cBehavior\u003e.\u003coperation\u003e, that a principal other than the holder may run while the lease is active, and that requireToken does not hold to the token.",
                     "items": {
                       "pattern": "^([A-Za-z][A-Za-z0-9_-]*\\.)?[A-Z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$",
                       "type": "string"
@@ -463,12 +533,12 @@
                     "uniqueItems": true
                   },
                   "heartbeatMs": {
-                    "description": "How often the holder should send a heartbeat, in milliseconds, less than ttlMs; a third of ttlMs when absent. acquire returns it.",
+                    "description": "How often the holder should send a heartbeat, in milliseconds, at most half of ttlMs, so one late heartbeat does not lose the lease; a third of ttlMs when absent. acquire returns it.",
                     "minimum": 1,
                     "type": "integer"
                   },
                   "maxExpiries": {
-                    "description": "How many expiries an instance may have. Once it has had this many, its lease cannot be acquired again until resetExpiries.",
+                    "description": "How many expiries an instance may have, abandons included. Once it has had this many, its lease cannot be acquired again until resetExpiries.",
                     "minimum": 1,
                     "type": "integer"
                   },
@@ -484,7 +554,7 @@
                   },
                   "onExpiry": {
                     "additionalProperties": false,
-                    "description": "Moves the instance's Workflow status when a lease ends with the work unfinished: at an expiry, and at a release, while the status is one of from. Needs Workflow on the type.",
+                    "description": "Moves the instance's Workflow status when a lease ends with the work unfinished: at an expiry, an abandon and a release, while the status is one of from. Needs Workflow on the type.",
                     "properties": {
                       "from": {
                         "description": "The states the status moves from; in any other state it stays.",
@@ -512,6 +582,10 @@
                     "description": "The permission that lets a principal release another principal's lease, change the instance while another principal holds its lease, reset its expiries, and send directives when directPermission is absent.",
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "requireToken": {
+                    "description": "When true, a write to an instance with an active lease that does not present the current token as Lease's precondition is refused, the holder's own included, so every process of a principal fences its writes. Exempt and read-only operations, Lease's own operations and a principal with overridePermission are not held to it.",
+                    "type": "boolean"
                   },
                   "sweepMs": {
                     "description": "How often the engine's runner expires the leases past their expiry time or longest hold, in milliseconds; 5000 when absent.",
@@ -551,7 +625,7 @@
                           "type": "boolean"
                         },
                         "required": {
-                          "description": "Once set, the link can be moved to another target but not unlinked, and the delete of its target is refused.",
+                          "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused.",
                           "type": "boolean"
                         },
                         "schema": {
@@ -655,7 +729,7 @@
                     "type": "string"
                   },
                   "releaseLeases": {
-                    "description": "Schemas that compose Lease, whose leases the principal holds are expired when the instance is missed, through Lease's schema-level expireHolder. The principal that applies the miss, the runner's in the sweep, needs Lease's overridePermission on each.",
+                    "description": "Schemas that compose Lease, whose leases the principal holds are expired when the instance is missed, through Lease's schema-level expireHolder, but for a lease renewed after the principal's last beat, whose own heartbeats show it alive. The principal that applies the miss, the runner's in the sweep, needs Lease's overridePermission on each.",
                     "items": {
                       "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
                       "type": "string"
@@ -726,7 +800,7 @@
                     "type": "object"
                   },
                   "match": {
-                    "description": "The type's own top-level scalar fields claimNext may filter on, by equality.",
+                    "description": "The type's own top-level scalar fields claimNext and countClaimable may filter on, by equality with a value or membership in a list of values.",
                     "items": {
                       "minLength": 1,
                       "type": "string"
@@ -798,18 +872,31 @@
                         },
                         "when": {
                           "additionalProperties": false,
-                          "description": "What sets the rule off: one of enters and allTerminal.",
+                          "description": "What sets the rule off: one of enters, allTerminal and anyTerminal.",
                           "maxProperties": 1,
                           "minProperties": 1,
                           "properties": {
                             "allTerminal": {
                               "additionalProperties": false,
-                              "description": "The rule fires on an instance when an instance of schema that links to it through link changes or goes, and every instance that links to it there is in a terminal state of its own schema's Workflow, at least one.",
+                              "description": "The rule fires on an instance when an instance of schema that links to it through link changes or goes, and every instance that links to it there is in a terminal state of its own schema's Workflow, with an outcome outcomes lists when it is given, at least one.",
                               "properties": {
                                 "link": {
                                   "description": "The link of that schema's Links config that points at this type's schema.",
                                   "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                                   "type": "string"
+                                },
+                                "outcomes": {
+                                  "description": "The outcomes a linking instance's terminal state must have; every outcome when absent.",
+                                  "items": {
+                                    "enum": [
+                                      "success",
+                                      "failure",
+                                      "neutral"
+                                    ]
+                                  },
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "uniqueItems": true
                                 },
                                 "schema": {
                                   "description": "The schema of the linking instances, which composes Links and Workflow.",
@@ -820,6 +907,41 @@
                               "required": [
                                 "schema",
                                 "link"
+                              ],
+                              "type": "object"
+                            },
+                            "anyTerminal": {
+                              "additionalProperties": false,
+                              "description": "The rule fires on an instance when an instance of schema that links to it through link enters a terminal state of its own schema's Workflow whose outcome outcomes lists, by a create or a transition, or is linked to it while in one.",
+                              "properties": {
+                                "link": {
+                                  "description": "The link of that schema's Links config that points at this type's schema.",
+                                  "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                                  "type": "string"
+                                },
+                                "outcomes": {
+                                  "description": "The outcomes of the terminal states that set the rule off.",
+                                  "items": {
+                                    "enum": [
+                                      "success",
+                                      "failure",
+                                      "neutral"
+                                    ]
+                                  },
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "schema": {
+                                  "description": "The schema of the linking instances, which composes Links and Workflow.",
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "schema",
+                                "link",
+                                "outcomes"
                               ],
                               "type": "object"
                             },
@@ -877,6 +999,12 @@
                               "description": "How many failures of the class an instance may have.",
                               "minimum": 1,
                               "type": "integer"
+                            },
+                            "hint": {
+                              "description": "What recordAttempt returns for a failure of the class, to steer the worker's next attempt.",
+                              "maxLength": 2000,
+                              "minLength": 1,
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -889,7 +1017,7 @@
                         }
                       ]
                     },
-                    "description": "The failure classes, by name: each its own cap of attempts, or terminal, which exhausts the instance at its first failure.",
+                    "description": "The failure classes, by name: each its own cap of attempts, with an optional hint for the next attempt, or terminal, which exhausts the instance at its first failure.",
                     "minProperties": 1,
                     "propertyNames": {
                       "not": {
@@ -936,7 +1064,12 @@
                     "type": "object"
                   },
                   "limitsField": {
-                    "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored.",
+                    "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored. Once the instance exists, only a principal with limitsPermission changes it, and the holder of its active lease does not.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "limitsPermission": {
+                    "description": "The permission a principal needs to change limitsField once the instance exists. Absent, the caps an instance is created with do not change.",
                     "minLength": 1,
                     "type": "string"
                   },
@@ -1067,6 +1200,23 @@
                               }
                             }
                           }
+                        },
+                        {
+                          "if": {
+                            "required": [
+                              "outcomes"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "function": {
+                                "enum": [
+                                  "all",
+                                  "any"
+                                ]
+                              }
+                            }
+                          }
                         }
                       ],
                       "properties": {
@@ -1076,7 +1226,7 @@
                           "type": "string"
                         },
                         "function": {
-                          "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow.",
+                          "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow, with an outcome outcomes lists when it is given.",
                           "enum": [
                             "count",
                             "countBy",
@@ -1101,6 +1251,19 @@
                           "description": "The link of that schema's Links config that points at this schema.",
                           "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                           "type": "string"
+                        },
+                        "outcomes": {
+                          "description": "For all and any, the outcomes a linked instance's terminal state must have to count; every outcome when absent.",
+                          "items": {
+                            "enum": [
+                              "success",
+                              "failure",
+                              "neutral"
+                            ]
+                          },
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "schema": {
                           "description": "The schema whose instances point at this one; it composes Links.",
@@ -1186,6 +1349,56 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Variants"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "by": {
+                    "description": "The type's own string or enum field, by JSON key, whose value picks the type.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "field": {
+                    "description": "The type's own field the variants type, by JSON key: a Generic.JSON field, or one of a scalar whose values are JSON objects.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "types": {
+                    "additionalProperties": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "description": "By a value of by, the type of the schema document, besides the instance type, that field holds while by holds the value.",
+                    "maxProperties": 256,
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "field",
+                  "by",
+                  "types"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Workflow"
               }
             }
@@ -1198,6 +1411,22 @@
                   "initial": {
                     "description": "The state a new instance starts in; the first of states when absent.",
                     "type": "string"
+                  },
+                  "outcomes": {
+                    "additionalProperties": {
+                      "enum": [
+                        "success",
+                        "failure",
+                        "neutral"
+                      ]
+                    },
+                    "description": "The outcome of each terminal state it names: success, failure or neutral. A terminal state it does not name is a success. Each key is a terminal state of states.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                    },
+                    "type": "object"
                   },
                   "states": {
                     "description": "Every state an instance can be in.",
@@ -1261,6 +1490,7 @@
             "Blueprint",
             "Budget",
             "Comments",
+            "Constants",
             "Dependencies",
             "Lease",
             "Links",
@@ -1271,6 +1501,7 @@
             "Revisions",
             "Rollups",
             "Search",
+            "Variants",
             "Workflow"
           ],
           "type": "string"

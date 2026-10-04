@@ -1,6 +1,6 @@
 {
   "name": "Workflow",
-  "description": "A state machine on the instance: a status that starts in the initial state and changes only through transition, along a transition the config lists. A transition may name a permission the caller must hold. A state that no transition leaves is terminal.",
+  "description": "A state machine on the instance: a status that starts in the initial state and changes only through transition, along a transition the config lists. A transition may name a permission the caller must hold. A state that no transition leaves is terminal, and a terminal state has an outcome: success, failure or neutral, success unless the config says otherwise. Other instances' blockers, rollups and reactions read it.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -34,6 +34,13 @@
             }
           }
         }
+      },
+      "outcomes": {
+        "description": "The outcome of each terminal state it names: success, failure or neutral. A terminal state it does not name is a success. Each key is a terminal state of states.",
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "maxLength": 64 },
+        "additionalProperties": { "enum": ["success", "failure", "neutral"] }
       }
     }
   },
@@ -63,5 +70,11 @@
       },
       "writes": true
     }
+  ],
+  "vetoes": [
+    { "code": "already_in_state", "description": "The instance is already in the state the transition names." },
+    { "code": "terminal_state", "description": "The instance is in a terminal state: no transition leaves it." },
+    { "code": "transition_not_allowed", "description": "No transition of the config leads from the instance's state to the one named." },
+    { "code": "no_status", "description": "The instance has no status to move from." }
   ]
 }

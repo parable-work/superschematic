@@ -47,6 +47,8 @@ Version sites (relative to the repository root):
                                       core it builds on
   runtime/http/rust/Cargo.toml        [package] version
   runtime/http/rust/Cargo.lock        the superschematic-http-runtime package
+  runtime/schema/rust/Cargo.toml      [package] version
+  runtime/schema/rust/Cargo.lock      the superschematic-schema-runtime package
   runtime/versiongraph/rust/Cargo.toml
                                       [package] version
   runtime/versiongraph/rust/Cargo.lock
@@ -88,7 +90,7 @@ NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config"]
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is
 # vX.Y.Z.
-GO_MODULES = ["ir", "runtime/schema/go", "runtime/http/go", "runtime/versiongraph/go", ""]
+GO_MODULES = ["ir", "runtime/schema/go", "runtime/http/go", "runtime/versiongraph/go", "runtime/migrate/go", ""]
 
 SEMVER = re.compile(
     r"^(?P<core>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
@@ -267,6 +269,20 @@ def sites():
         (
             ROOT / "runtime" / "http" / "rust" / "Cargo.lock",
             [(r'(\[\[package\]\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "schema" / "rust" / "Cargo.toml",
+            [(r'(\[package\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "schema" / "rust" / "Cargo.lock",
+            [(r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
             "semver",
         )
     )

@@ -4,6 +4,13 @@ config's initial state and changes only through transition, along a
 transition the config lists, which may name a permission the caller must
 hold. A state that no transition leaves is terminal.
 
+A terminal state has an outcome: success, failure or neutral. The config's
+outcomes names it for the terminal states it lists, and every other one is
+a success, so a config without outcomes means what it did before outcomes
+existed. Workflow itself reads no outcome: Dependencies, Rollups and
+Reactions read it from another schema's config, through stateOutcome, to
+tell a blocker or a child that finished well from one that failed.
+
 Nothing else can move the status. It is Workflow's own column: a create
 or an update that sets `status` is refused (readOnly), and another
 behavior has no handle on the column. transition's parameter is `to`
@@ -13,12 +20,17 @@ caller's or another behavior's call(), before any handler runs, and the
 handler holds the column to what the guard allowed.
 
 configChange: a new version keeps every state of the old config, since an
-instance may be in any of them; transitions, their permissions and the
-initial state may change. Workflow cannot be added to or removed from a
-schema that has instances: they would have no status, or lose it.
+instance may be in any of them; transitions, their permissions, the
+initial state and outcomes may change. Outcomes, like transitions, are
+read when another instance's field is computed or a rule runs, so a new
+version's outcome applies at the next read to the instances already in
+the state; nothing is stored or moved back. Workflow cannot be added to
+or removed from a schema that has instances: they would have no status,
+or lose it.
 */
 
 import { BehaviorError, EngineError, OperationParamsError } from '../../errors.js';
+import { setMember } from '../../instances/patch.js';
 import { BehaviorConfigError, defineBehavior } from '../behavior.js';
 import declaration from './declarations/Workflow.behavior.json' with { type: 'json' };
 
@@ -30,17 +42,23 @@ export interface WorkflowTransition {
   readonly permission?: string;
 }
 
-/** Workflow's config, parsed: the initial state filled in. */
+/** The outcome of a terminal state: how the work it ends went. */
+export type WorkflowOutcome = 'success' | 'failure' | 'neutral';
+
+/** Workflow's config, parsed: the initial state filled in, and every terminal state's outcome. */
 export interface WorkflowConfig {
   readonly states: readonly string[];
   readonly initial: string;
   readonly transitions: readonly WorkflowTransition[];
+  readonly outcomes: Readonly<Record<string, WorkflowOutcome>>;
 }
 
-/** What isTerminalState reads of a Workflow config, as a schema holds it or parsed. */
+/** What isTerminalState and stateOutcome read of a Workflow config, as a schema holds it or parsed. */
 export interface WorkflowStates {
   readonly states: readonly string[];
   readonly transitions: ReadonlyArray<{ readonly from: string }>;
+  /** The outcomes of the terminal states it names; a terminal state it does not name is a success. */
+  readonly outcomes?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -54,6 +72,20 @@ export function isTerminalState(config: WorkflowStates, state: string): boolean 
   return config.states.includes(state) && !config.transitions.some((transition) => transition.from === state);
 }
 
+/**
+ * stateOutcome gives the outcome of a terminal state of a Workflow
+ * config, as a schema holds it or parsed: the one its outcomes names, or
+ * success. A state that is not terminal has none, so it returns undefined.
+ */
+export function stateOutcome(config: WorkflowStates, state: string): WorkflowOutcome | undefined {
+  if (!isTerminalState(config, state)) {
+    return undefined;
+  }
+  const outcomes = config.outcomes;
+  const named = outcomes !== undefined && Object.prototype.hasOwnProperty.call(outcomes, state) ? outcomes[state] : undefined;
+  return (named ?? 'success') as WorkflowOutcome;
+}
+
 // targets lists the states a transition leads to from one.
 function targets(config: WorkflowConfig, from: string): string[] {
   return config.transitions.filter((transition) => transition.from === from).map((transition) => transition.to);
@@ -64,7 +96,7 @@ export const workflow = defineBehavior<WorkflowConfig>({
 
   // The configSchema holds the shape; this holds the states together.
   parseConfig(json) {
-    const raw = json as { states: string[]; initial?: string; transitions: WorkflowTransition[] };
+    const raw = json as { states: string[]; initial?: string; transitions: WorkflowTransition[]; outcomes?: Record<string, WorkflowOutcome> };
     const states = raw.states;
     const initial = raw.initial ?? states[0];
     if (!states.includes(initial)) {
@@ -86,11 +118,24 @@ export const workflow = defineBehavior<WorkflowConfig>({
       }
       seen.add(edge);
     }
-    const config: WorkflowConfig = {
-      states: [...states],
-      initial,
-      transitions: raw.transitions.map(({ from, to, permission }) => (permission === undefined ? { from, to } : { from, to, permission })),
-    };
+    const transitions = raw.transitions.map(({ from, to, permission }) => (permission === undefined ? { from, to } : { from, to, permission }));
+    const declared = raw.outcomes ?? {};
+    for (const state of Object.keys(declared)) {
+      if (!states.includes(state)) {
+        throw new BehaviorConfigError(`outcomes names "${state}", which is not one of its states (${states.join(', ')})`);
+      }
+      if (!isTerminalState({ states, transitions }, state)) {
+        throw new BehaviorConfigError(`outcomes names "${state}", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome`);
+      }
+    }
+    const outcomes: Record<string, WorkflowOutcome> = {};
+    for (const state of states) {
+      const outcome = stateOutcome({ states, transitions, outcomes: declared }, state);
+      if (outcome !== undefined) {
+        setMember(outcomes, state, outcome);
+      }
+    }
+    const config: WorkflowConfig = { states: [...states], initial, transitions, outcomes };
     // A state no transition reaches stays allowed: a new version keeps
     // every state an instance may be in, including one it no longer enters.
     return config;
@@ -126,17 +171,21 @@ export const workflow = defineBehavior<WorkflowConfig>({
     }
     const from = view.columns.get().status;
     if (typeof from !== 'string') {
-      return `${view.schema} ${view.id} has no status`;
+      return { reason: `${view.schema} ${view.id} has no status`, code: 'no_status' };
     }
     if (from === to) {
-      return `${view.schema} ${view.id} is already ${to}`;
+      return { reason: `${view.schema} ${view.id} is already ${to}`, code: 'already_in_state', details: { from, to } };
     }
     const move = config.transitions.find((transition) => transition.from === from && transition.to === to);
     if (!move) {
       const next = targets(config, from);
       return next.length === 0
-        ? `${from} is a terminal state: no transition leaves it`
-        : `no transition leads from ${from} to ${to}; from ${from} it can move to ${next.join(', ')}`;
+        ? { reason: `${from} is a terminal state: no transition leaves it`, code: 'terminal_state', details: { from, to } }
+        : {
+            reason: `no transition leads from ${from} to ${to}; from ${from} it can move to ${next.join(', ')}`,
+            code: 'transition_not_allowed',
+            details: { from, to, allowed: next },
+          };
     }
     if (move.permission !== undefined && !view.can(move.permission)) {
       throw new EngineError(

@@ -1,6 +1,7 @@
 // Workflow, the core's state machine: its config, the transition operation
 // and its guard, which no caller and no other behavior gets past, its
-// permission gates, its events and its rule for a new version.
+// permission gates, its events, its rule for a new version, and the
+// outcomes of its terminal states.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -14,6 +15,7 @@ import {
   SchemaDocumentError,
   defineBehavior,
   isTerminalState,
+  stateOutcome,
   type Engine,
   type EngineOptions,
   type Principal,
@@ -193,6 +195,11 @@ for (const driver of drivers) {
         ],
         [{ ...orderFlow, transitions: [...orderFlow.transitions, { from: 'open', to: 'open' }] }, 'a transition from "open" to itself changes nothing'],
         [{ ...orderFlow, transitions: [...orderFlow.transitions, { from: 'draft', to: 'open' }] }, 'the transition from "draft" to "open" is listed twice'],
+        [{ ...orderFlow, outcomes: { lost: 'failure' } }, 'outcomes names "lost", which is not one of its states (draft, open, shipped, cancelled)'],
+        [
+          { ...orderFlow, outcomes: { shipped: 'success', open: 'failure' } },
+          'outcomes names "open", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome',
+        ],
       ];
       for (const [config, message] of refusals) {
         const error = thrown(() => engine.schemas.define(alice, orderSchema(config)), SchemaDocumentError);
@@ -205,6 +212,8 @@ for (const driver of drivers) {
         orderSchema({ states: [], transitions: [] }),
         orderSchema({ states: ['in review'], transitions: [] }),
         orderSchema({ ...orderFlow, terminal: ['shipped'] }),
+        orderSchema({ ...orderFlow, outcomes: { cancelled: 'aborted' } }),
+        orderSchema({ ...orderFlow, outcomes: {} }),
         unconfigured,
       ]) {
         const error = thrown(() => engine.schemas.define(alice, document), SchemaDocumentError);
@@ -271,6 +280,38 @@ for (const driver of drivers) {
       const engine = published();
       const [composed] = engine.schemas.behaviors(alice, 'Order');
       assert.equal(isTerminalState(composed.config as typeof orderFlow, 'draft'), false);
+    });
+
+    test('stateOutcome: a terminal state has the outcome outcomes names, success when it names none; any other state has none', () => {
+      const flow = { ...orderFlow, outcomes: { cancelled: 'failure' } };
+      assert.equal(stateOutcome(flow, 'cancelled'), 'failure');
+      assert.equal(stateOutcome(flow, 'shipped'), 'success');
+      assert.equal(stateOutcome(flow, 'open'), undefined);
+      assert.equal(stateOutcome(flow, 'lost'), undefined);
+      assert.equal(stateOutcome(orderFlow, 'cancelled'), 'success', 'a config without outcomes means what it did before them');
+      const named = { states: ['open', 'constructor'], transitions: [{ from: 'open', to: 'constructor' }], outcomes: {} };
+      assert.equal(stateOutcome(named, 'constructor'), 'success', 'a state named like an Object member is not looked up on the prototype');
+      const engine = published(flow);
+      const [composed] = engine.schemas.behaviors(alice, 'Order');
+      assert.deepEqual(composed.config, flow, 'the config as the schema holds it, which stateOutcome reads');
+      assert.equal(stateOutcome(composed.config as typeof flow, 'cancelled'), 'failure');
+      // Workflow reads no outcome itself: a move into a failure state is a move like any other.
+      assert.deepEqual(engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'cancelled' }), { from: 'draft', to: 'cancelled' });
+    });
+
+    test('a new version may change outcomes, as it may change transitions: nothing is stored, and readers see the new one at their next read', () => {
+      const engine = published({ ...orderFlow, outcomes: { cancelled: 'failure' } });
+      engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'cancelled' });
+      for (const outcomes of [{ cancelled: 'neutral' }, { cancelled: 'neutral', shipped: 'success' }, undefined]) {
+        engine.schemas.define(alice, orderSchema(outcomes === undefined ? orderFlow : { ...orderFlow, outcomes }));
+        engine.schemas.publish(alice, 'Order');
+      }
+      assert.equal(engine.schemas.live(alice, 'Order')?.version, 4);
+      const [composed] = engine.schemas.behaviors(alice, 'Order');
+      assert.equal(stateOutcome(composed.config as typeof orderFlow, 'cancelled'), 'success');
+      // A transition out of a state with an outcome makes it not terminal, which a new version must say by dropping the outcome.
+      const reopened = { ...orderFlow, transitions: [...orderFlow.transitions, { from: 'cancelled', to: 'draft' }], outcomes: { cancelled: 'failure' } };
+      assert.match(thrown(() => engine.schemas.define(alice, orderSchema(reopened)), SchemaDocumentError).message, /outcomes names "cancelled", which is not a terminal state/);
     });
   });
 }

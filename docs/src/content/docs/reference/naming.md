@@ -98,6 +98,18 @@ Default: `superscalar`
 Cargo crate name of the scalar library. Generated Rust spells it with
 `-` folded to `_`.
 
+### `scalar_rust_registry`
+
+Default: unset, which reads the scalar crate's builtin registry,
+`<scalar_rust_crate>::Registry::builtin()` with the crate name folded as
+above.
+
+The Rust expression a generated Rust validator reads the scalar registry
+from, of type `&'static Registry` of the scalar crate. A scalar crate that
+adds its own scalars to superscalar's names the function that returns its
+assembled registry, for example `acme_scalars::registry()`. Without it a
+value of one of those scalars is refused as an unknown scalar.
+
 ### `schema_ir_go_module`
 
 Default: `github.com/parable-work/superschematic/ir`
@@ -109,6 +121,15 @@ Go module path of the schema IR.
 Default: `github.com/parable-work/superschematic/runtime/schema/go`
 
 Go module path of the schema runtime.
+
+### `schema_runtime_rust_crate`
+
+Default: `superschematic-schema-runtime`
+
+Cargo crate name of the Rust schema runtime: the error map, JSON type
+checks and compiled patterns the validators of a generated Rust types
+crate call. Generated code imports it as the identifier form of this name
+(`superschematic_schema_runtime`).
 
 ### `versiongraph_go_module`
 
@@ -384,6 +405,13 @@ Directory of the schema IR Go module.
 Default: unset. This repository's own file sets `runtime/schema/go`.
 
 Directory of the schema runtime Go module.
+
+### `paths.schema_runtime_rust`
+
+Default: unset. This repository's own file sets `runtime/schema/rust`.
+
+Directory of the Rust schema runtime crate. Unset, a generated Rust types
+crate names the crate's version instead of a path.
 
 ### `paths.versiongraph_go`
 

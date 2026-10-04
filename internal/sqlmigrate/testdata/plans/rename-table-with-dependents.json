@@ -1,0 +1,173 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "79cd9e93fa2ae4ba8e3ba8d12e43a70794c6fc58ae41375d3cf6d1370263e3ca",
+  "renames": [
+    "order=purchase"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase",
+          "reason": "Table order is renamed to purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:table/purchase@shop-api/OrderView.total",
+          "reader": "shop-api/OrderView.total",
+          "reason": "shop-api reads order.total through OrderView.total, and this step renames its table to purchase.",
+          "subject": "table/purchase"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME TO purchase"
+      ],
+      "subject": "table/purchase",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase_label",
+          "reason": "Table order_label is renamed to purchase_label, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase_label"
+        }
+      ],
+      "index": 2,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_label RENAME TO purchase_label"
+      ],
+      "subject": "table/purchase_label",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/column/purchase_id",
+          "reason": "order_line.order_id is renamed to order_line.purchase_id, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/order_line/column/purchase_id"
+        }
+      ],
+      "index": 3,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line RENAME COLUMN order_id TO purchase_id"
+      ],
+      "subject": "table/order_line/column/purchase_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase_label/column/purchase_id",
+          "reason": "order_label.order_id is renamed to purchase_label.purchase_id, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase_label/column/purchase_id"
+        }
+      ],
+      "index": 4,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_label RENAME COLUMN order_id TO purchase_id"
+      ],
+      "subject": "table/purchase_label/column/purchase_id",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line RENAME CONSTRAINT fk_order_line_order_id TO fk_order_line_purchase_id"
+      ],
+      "subject": "table/order_line/constraint/fk_order_line_purchase_id",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase RENAME CONSTRAINT fk_order_customer_id TO fk_purchase_customer_id"
+      ],
+      "subject": "table/purchase/constraint/fk_purchase_customer_id",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase RENAME CONSTRAINT order_pkey TO purchase_pkey"
+      ],
+      "subject": "table/purchase/constraint/purchase_pkey",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_customer_placed_at RENAME TO idx_purchase_customer_placed_at"
+      ],
+      "subject": "table/purchase/index/idx_purchase_customer_placed_at",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_label RENAME CONSTRAINT fk_order_label_label_id TO fk_purchase_label_label_id"
+      ],
+      "subject": "table/purchase_label/constraint/fk_purchase_label_label_id",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_label RENAME CONSTRAINT fk_order_label_order_id TO fk_purchase_label_purchase_id"
+      ],
+      "subject": "table/purchase_label/constraint/fk_purchase_label_purchase_id",
+      "transactional": true
+    },
+    {
+      "index": 11,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_label RENAME CONSTRAINT order_label_pkey TO purchase_label_pkey"
+      ],
+      "subject": "table/purchase_label/constraint/purchase_label_pkey",
+      "transactional": true
+    },
+    {
+      "index": 12,
+      "op": "commentOnTable",
+      "phase": "expand",
+      "statements": [
+        "COMMENT ON TABLE purchase_label IS 'Join table for purchase.labels'"
+      ],
+      "subject": "table/purchase_label",
+      "transactional": true
+    }
+  ],
+  "to": "7224ec2d8e1e7516c026168ec82be29100da3a8b99fb520876287bc211cb5beb",
+  "toModel": null,
+  "version": 1
+}

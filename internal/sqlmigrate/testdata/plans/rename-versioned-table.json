@@ -1,0 +1,304 @@
+{
+  "dialect": "postgres",
+  "from": "31212a21c0f0f5bd1dbeb697a04bf371066d8af2618ef60d69087d8fc60e7998",
+  "hash": "e8f1c2bfd6665312fa500c8566703da8514e91cea3fbf79f7d215596014e4606",
+  "renames": [
+    "order=purchase"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase",
+          "reason": "Table order is renamed to purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME TO purchase"
+      ],
+      "subject": "table/purchase",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase_history",
+          "reason": "Table order_history is renamed to purchase_history, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase_history"
+        }
+      ],
+      "index": 2,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_history RENAME TO purchase_history"
+      ],
+      "subject": "table/purchase_history",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase_label",
+          "reason": "Table order_label is renamed to purchase_label, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase_label"
+        }
+      ],
+      "index": 3,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_label RENAME TO purchase_label"
+      ],
+      "subject": "table/purchase_label",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/column/purchase_id",
+          "reason": "order_line.order_id is renamed to order_line.purchase_id, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/order_line/column/purchase_id"
+        }
+      ],
+      "index": 4,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line RENAME COLUMN order_id TO purchase_id"
+      ],
+      "subject": "table/order_line/column/purchase_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase_label/column/purchase_id",
+          "reason": "order_label.order_id is renamed to purchase_label.purchase_id, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase_label/column/purchase_id"
+        }
+      ],
+      "index": 5,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_label RENAME COLUMN order_id TO purchase_id"
+      ],
+      "subject": "table/purchase_label/column/purchase_id",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line RENAME CONSTRAINT fk_order_line_order_id TO fk_order_line_purchase_id"
+      ],
+      "subject": "table/order_line/constraint/fk_order_line_purchase_id",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase RENAME CONSTRAINT fk_order_customer_id TO fk_purchase_customer_id"
+      ],
+      "subject": "table/purchase/constraint/fk_purchase_customer_id",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase RENAME CONSTRAINT order_pkey TO purchase_pkey"
+      ],
+      "subject": "table/purchase/constraint/purchase_pkey",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_customer_placed_at RENAME TO idx_purchase_customer_placed_at"
+      ],
+      "subject": "table/purchase/index/idx_purchase_customer_placed_at",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_history RENAME CONSTRAINT order_history_pkey TO purchase_history_pkey"
+      ],
+      "subject": "table/purchase_history/constraint/purchase_history_pkey",
+      "transactional": true
+    },
+    {
+      "index": 11,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_history_id_recorded RENAME TO idx_purchase_history_id_recorded"
+      ],
+      "subject": "table/purchase_history/index/idx_purchase_history_id_recorded",
+      "transactional": true
+    },
+    {
+      "index": 12,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_history_recorded RENAME TO idx_purchase_history_recorded"
+      ],
+      "subject": "table/purchase_history/index/idx_purchase_history_recorded",
+      "transactional": true
+    },
+    {
+      "index": 13,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX uq_order_history_id_version RENAME TO uq_purchase_history_id_version"
+      ],
+      "subject": "table/purchase_history/index/uq_purchase_history_id_version",
+      "transactional": true
+    },
+    {
+      "index": 14,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_label RENAME CONSTRAINT fk_order_label_label_id TO fk_purchase_label_label_id"
+      ],
+      "subject": "table/purchase_label/constraint/fk_purchase_label_label_id",
+      "transactional": true
+    },
+    {
+      "index": 15,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_label RENAME CONSTRAINT fk_order_label_order_id TO fk_purchase_label_purchase_id"
+      ],
+      "subject": "table/purchase_label/constraint/fk_purchase_label_purchase_id",
+      "transactional": true
+    },
+    {
+      "index": 16,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE purchase_label RENAME CONSTRAINT order_label_pkey TO purchase_label_pkey"
+      ],
+      "subject": "table/purchase_label/constraint/purchase_label_pkey",
+      "transactional": true
+    },
+    {
+      "index": 17,
+      "op": "renameFunction",
+      "phase": "expand",
+      "statements": [
+        "ALTER FUNCTION order_capture_history() RENAME TO purchase_capture_history"
+      ],
+      "subject": "function/purchase_capture_history",
+      "transactional": true
+    },
+    {
+      "index": 18,
+      "op": "renameFunction",
+      "phase": "expand",
+      "statements": [
+        "ALTER FUNCTION order_prune_history(INTEGER, INTEGER) RENAME TO purchase_prune_history"
+      ],
+      "subject": "function/purchase_prune_history",
+      "transactional": true
+    },
+    {
+      "index": 19,
+      "op": "renameTrigger",
+      "phase": "expand",
+      "statements": [
+        "ALTER TRIGGER trg_order_bump_version ON purchase RENAME TO trg_purchase_bump_version"
+      ],
+      "subject": "trigger/purchase/trg_purchase_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 20,
+      "op": "renameTrigger",
+      "phase": "expand",
+      "statements": [
+        "ALTER TRIGGER trg_order_capture_history_delete ON purchase RENAME TO trg_purchase_capture_history_delete"
+      ],
+      "subject": "trigger/purchase/trg_purchase_capture_history_delete",
+      "transactional": true
+    },
+    {
+      "index": 21,
+      "op": "renameTrigger",
+      "phase": "expand",
+      "statements": [
+        "ALTER TRIGGER trg_order_capture_history_write ON purchase RENAME TO trg_purchase_capture_history_write"
+      ],
+      "subject": "trigger/purchase/trg_purchase_capture_history_write",
+      "transactional": true
+    },
+    {
+      "index": 22,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION purchase_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO purchase_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO purchase_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/purchase_capture_history",
+      "transactional": true
+    },
+    {
+      "index": 23,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION purchase_prune_history(retention_days INTEGER DEFAULT 30, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$\nDECLARE\n  deleted_count BIGINT;\nBEGIN\n  WITH candidates AS (\n    SELECT h.history_id\n    FROM purchase_history h\n    WHERE h.recorded_at \u003c now() - make_interval(days =\u003e retention_days)\n      AND EXISTS (\n        SELECT 1\n        FROM purchase_history newer\n        WHERE newer.id = h.id\n          AND newer._version \u003e h._version\n      )\n    LIMIT max_rows\n  ),\n  deleted AS (\n    DELETE FROM purchase_history h\n    USING candidates c\n    WHERE h.history_id = c.history_id\n    RETURNING 1\n  )\n  SELECT count(*) INTO deleted_count FROM deleted;\n  RETURN deleted_count;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/purchase_prune_history",
+      "transactional": true
+    },
+    {
+      "index": 24,
+      "op": "commentOnTable",
+      "phase": "expand",
+      "statements": [
+        "COMMENT ON TABLE purchase_history IS 'Version history for purchase'"
+      ],
+      "subject": "table/purchase_history",
+      "transactional": true
+    },
+    {
+      "index": 25,
+      "op": "commentOnTable",
+      "phase": "expand",
+      "statements": [
+        "COMMENT ON TABLE purchase_label IS 'Join table for purchase.labels'"
+      ],
+      "subject": "table/purchase_label",
+      "transactional": true
+    }
+  ],
+  "to": "547eebef88cd4e39b4f6745d108a8efb1d51c885250a5e3f77aafdc51fa4e41c",
+  "toModel": null,
+  "version": 1
+}

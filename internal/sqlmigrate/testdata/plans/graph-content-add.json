@@ -1,0 +1,29 @@
+{
+  "dialect": "postgres",
+  "from": "b59e39d63f60e1f77b23e3740d1d36efbee32fc45e30ed8473d9b6b8163334c9",
+  "hash": "0f8ed94cd959af6f6a5192b7fa32cf433835478ca9098c85ce4c689dbc39e1d9",
+  "service": "fixture-version-graph-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "history",
+          "id": "history:table/cover/column/caption",
+          "reason": "Cover.caption is content of version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch stays 1.",
+          "subject": "table/cover/column/caption"
+        }
+      ],
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE cover ADD COLUMN caption TEXT"
+      ],
+      "subject": "table/cover/column/caption",
+      "transactional": true
+    }
+  ],
+  "to": "fd1110489f1588d980ee4e2390c7b94b87177f7c8fa95cb545fcc46062b63c40",
+  "toModel": null,
+  "version": 1
+}

@@ -1,13 +1,13 @@
 /*
 The behaviors an engine can run: implementations registered when it opens
 (EngineOptions.behaviors) or later (engine.behaviors.register). Registering
-checks the declaration (declaration.ts), compiles its config, parameter
-and result schemas, and refuses an implementation whose operations,
-schema-level operations or fields are not exactly the ones its
-declaration names, whose migrations are malformed (an index over a
-column no migration up to its own adds among them), or whose reactions
-or schedules are not functions the runner can call. A name registers
-once.
+checks the declaration (declaration.ts), compiles its config, create
+parameter, parameter, result and precondition schemas, and refuses an
+implementation whose operations, schema-level operations or fields are
+not exactly the ones its declaration names, whose migrations are
+malformed (an index over a column no migration up to its own adds among
+them), or whose reactions or schedules are not functions the runner can
+call. A name registers once.
 
 A behavior whose storage already exists in the file (a schema that
 composes it was published before) has its storage brought up to its
@@ -57,6 +57,8 @@ export interface OperationSpec {
 /** A registered implementation, checked and compiled. */
 export class RegisteredBehavior {
   readonly operations: ReadonlyMap<string, OperationSpec>;
+  /** The codes its declaration lists for its vetoes. */
+  readonly vetoCodes: ReadonlySet<string>;
 
   constructor(
     readonly name: string,
@@ -65,14 +67,19 @@ export class RegisteredBehavior {
     readonly implementation: BehaviorImplementation<unknown>,
     /** The compiled configSchema; undefined when the behavior takes no config. */
     readonly config: ValidateFunction | undefined,
+    /** The compiled createParamsSchema; undefined when a create gives the behavior no parameters. */
+    readonly createParams: ValidateFunction | undefined,
     operations: ReadonlyArray<Omit<OperationSpec, 'behavior'>>,
     /** Its declared fields, in declaration order, with their readers. */
     readonly fields: ReadonlyArray<{ readonly name: string; readonly read: FieldReader<unknown> }>,
     /** Every column its migrations add, by its own name. */
     readonly columns: readonly string[],
-    readonly migrations: readonly BehaviorMigration[]
+    readonly migrations: readonly BehaviorMigration[],
+    /** The compiled preconditionSchema; undefined when the behavior takes no precondition. */
+    readonly precondition: ValidateFunction | undefined
   ) {
     this.operations = new Map(operations.map((operation) => [operation.name, { ...operation, behavior: this }]));
+    this.vetoCodes = new Set((declaration.vetoes ?? []).map((veto) => veto.code));
   }
 }
 
@@ -153,6 +160,10 @@ export class BehaviorRegistry {
     }
     const declaration = deepFreeze(JSON.parse(JSON.stringify(implementation.declaration)) as BehaviorDeclaration);
     const config = declaration.configSchema === undefined ? undefined : this.schema(declaration.configSchema, 'configSchema', problems);
+    const createParams =
+      declaration.createParamsSchema === undefined ? undefined : this.schema(declaration.createParamsSchema, 'createParamsSchema', problems);
+    const precondition =
+      declaration.preconditionSchema === undefined ? undefined : this.schema(declaration.preconditionSchema, 'preconditionSchema', problems);
 
     const handlers = ownFunctions(implementation.operations, 'operations', problems);
     const schemaHandlers = ownFunctions(implementation.schemaOperations, 'schemaOperations', problems);
@@ -189,7 +200,19 @@ export class BehaviorRegistry {
       problems
     );
 
-    for (const hook of ['parseConfig', 'configChange', 'afterConfigChange', 'initialize', 'guard', 'afterChange', 'guardReference', 'afterReferenceChange'] as const) {
+    for (const hook of [
+      'parseConfig',
+      'configChange',
+      'afterConfigChange',
+      'initialize',
+      'guard',
+      'validate',
+      'checkedTypes',
+      'instanceSchema',
+      'afterChange',
+      'guardReference',
+      'afterReferenceChange',
+    ] as const) {
       if (implementation[hook] !== undefined && typeof implementation[hook] !== 'function') {
         problems.push(`${hook} is a function`);
       }
@@ -207,10 +230,12 @@ export class BehaviorRegistry {
       declaration,
       implementation as BehaviorImplementation<unknown>,
       config,
+      createParams,
       operations,
       fields,
       columns,
-      Object.freeze([...migrations])
+      Object.freeze([...migrations]),
+      precondition
     );
   }
 

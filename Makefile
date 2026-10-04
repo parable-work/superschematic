@@ -19,7 +19,7 @@ export GOTOOLCHAIN := go$(GO_VERSION)
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages.
 export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go
 BIN := bin/superschematic
 
 # build-all keys its cache on a hash of this binary. -trimpath drops the
@@ -130,9 +130,13 @@ python:
 # The version-graph crates' tests run again with serde_json's preserve_order
 # on, which superscalar turns on and Cargo unifies into every crate of a
 # build that uses it: a content hash and a canonical row must not depend on
-# the order a serde_json map keeps.
+# the order a serde_json map keeps. The schema runtime's run again with
+# arbitrary_precision too, which superscalar's default lossless-json feature
+# turns on: an error map and a number check must not depend on either.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
+		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test \
 		&& cargo test --features serde_json/preserve_order
@@ -190,11 +194,12 @@ docs:
 # The binary with no extension linked builds a DB, an API and a General
 # service from the fixture corpus, and loads fixture-behaviors-json,
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
-# fixture-reactions-json and fixture-workqueue-json, whose types compose
-# the core's behaviors (D10): --emit-ir carries all fifteen and json-schema
-# admits them. The engine runs the first five documents with its own
-# behaviors in runtime/engine/typescript/test/core-behaviors.test.ts, and
-# the work-queue package runs the last in
+# fixture-reactions-json, fixture-variants-json and fixture-workqueue-json,
+# whose types compose the core's behaviors (D10): --emit-ir carries all
+# seventeen and json-schema admits them. The engine runs the first six
+# documents with its own behaviors in
+# runtime/engine/typescript/test/core-behaviors.test.ts, and the work-queue
+# package runs the last in
 # runtime/engine-workqueue/typescript/test/package.test.ts.
 cli-smoke: $(BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
@@ -212,10 +217,12 @@ cli-smoke: $(BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(BIN) build internal/loader/testdata/services/fixture-reactions-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(BIN) build internal/loader/testdata/services/fixture-variants-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Lease Assignment Queue Presence Blueprint Budget Retries; do \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Lease Assignment Queue Presence Blueprint Budget Retries; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 

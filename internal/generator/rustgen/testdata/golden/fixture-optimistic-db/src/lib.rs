@@ -6,6 +6,7 @@
 
 pub mod scalars;
 pub mod types;
+pub mod validators;
 
 pub use scalars::*;
 pub use types::*;

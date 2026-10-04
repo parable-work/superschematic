@@ -432,3 +432,29 @@ func TestSDKTokenMethodsFollowOperationsNotPublic(t *testing.T) {
 		})
 	}
 }
+
+// TestRustIdentifiersEscapeKeywords: an operation, argument or namespace
+// named like a Rust keyword gets an identifier Rust accepts. crate, self,
+// Self and super cannot be raw identifiers, so they take a trailing
+// underscore, as the types' field names do.
+func TestRustIdentifiersEscapeKeywords(t *testing.T) {
+	for in, want := range map[string]string{
+		"getTenant": "get_tenant",
+		"type":      "r#type",
+		"match":     "r#match",
+		"self":      "self_",
+		"super":     "super_",
+		"crate":     "crate_",
+		"9lives":    "_9lives",
+	} {
+		if got := toRustMethodName(in); got != want {
+			t.Errorf("toRustMethodName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := toRustFieldName("self"); got != "self_" {
+		t.Errorf("toRustFieldName(self) = %q", got)
+	}
+	if got := toRustModuleName("super"); got != "super_" {
+		t.Errorf("toRustModuleName(super) = %q", got)
+	}
+}

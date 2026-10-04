@@ -6,13 +6,15 @@ import (
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
-// sqlOutputSchema is the JSON Schema of outputs.sql.
+// sqlOutputSchema is the JSON Schema of outputs.sql. registry.ParseOutputs
+// checks the dialects themselves, so it can say why it refuses a list.
 var sqlOutputSchema = json.RawMessage(`{
 	"type": "object",
 	"additionalProperties": false,
 	"properties": {
 		"migrationsDir": {"type": "string"},
-		"viewOwner": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+		"viewOwner": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+		"dialects": {"type": "array", "items": {"type": "string"}}
 	}
 }`)
 
@@ -48,7 +50,8 @@ func RegisterCore(reg *registry.Registry) error {
 		{
 			// SQL DDL and the Go ORM are implied by the DB kind; the outputs
 			// block has no switch for them. outputs.sql places and owns the
-			// generated projection view migrations.
+			// generated projection view migrations and lists the dialects
+			// the DDL is written for.
 			Name:         "sql",
 			OutputKey:    "sql",
 			OutputSchema: sqlOutputSchema,

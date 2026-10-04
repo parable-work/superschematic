@@ -14,13 +14,15 @@ export type { AccessPolicy, AccessRequest, Action, Principal } from './access.js
 export {
   BehaviorError,
   BehaviorVetoError,
+  CreateParamsError,
   EngineError,
   IncompatibleChangeError,
   InstanceValidationError,
   OperationParamsError,
+  PreconditionsError,
   SchemaDocumentError,
 } from './errors.js';
-export type { EngineErrorCode, SchemaChange, SchemaIssue, ValidationIssue } from './errors.js';
+export type { EngineErrorCode, SchemaChange, SchemaIssue, ValidationIssue, Veto } from './errors.js';
 
 export { DEFAULT_NAMESPACE, NAMESPACE_NAME, Namespaces } from './namespaces.js';
 export type { NamespaceOptions } from './namespaces.js';
@@ -76,13 +78,17 @@ export type {
   ConfigSchema,
   ConfigSchemas,
   ConfigTarget,
+  CreateInstanceOptions,
   FieldReader,
   FrozenJSON,
+  GuardAnswer,
   GuardRequest,
   InstanceChange,
   InstanceContext,
+  InstanceSchemaForm,
   InstanceView,
   Instances,
+  InstancesInvokeOptions,
   OperationContext,
   OperationHandler,
   PublishContext,
@@ -101,14 +107,18 @@ export type {
   StoredInstance,
   TableReader,
   TableWriter,
+  TypeSchema,
+  ValidationContext,
+  ValidationRequest,
   WorkContext,
   WritableColumns,
 } from './behaviors/behavior.js';
-export { BEHAVIOR_NAME, BUILTIN_OPERATIONS, OPERATION_SCOPES } from './behaviors/declaration.js';
+export { BEHAVIOR_NAME, BUILTIN_OPERATIONS, OPERATION_SCOPES, VETO_CODE } from './behaviors/declaration.js';
 export type {
   BehaviorDeclaration,
   BehaviorFieldDeclaration,
   BehaviorOperationDeclaration,
+  BehaviorVetoDeclaration,
   JSONSchema,
   OperationScope,
 } from './behaviors/declaration.js';
@@ -118,10 +128,11 @@ export { page, pageRequest } from './behaviors/paging.js';
 export type { Page } from './behaviors/paging.js';
 
 // The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
-export { MAX_ROLLUP_READ, isTerminalState } from './behaviors/core/index.js';
+export { MAX_ROLLUP_READ, isTerminalState, stateOutcome } from './behaviors/core/index.js';
 export type {
   BlockerRecord,
   CommentRecord,
+  ConstantsConfig,
   DependenciesConfig,
   DependentRecord,
   LinkRecord,
@@ -131,6 +142,7 @@ export type {
   ProposalState,
   ReactionsConfig,
   ReactionsRule,
+  ReactionsTerminal,
   ReactionsThen,
   ReactionsWhen,
   RevisionRecord,
@@ -142,7 +154,9 @@ export type {
   SearchConfig,
   SearchHit,
   SnippetPart,
+  VariantsConfig,
   WorkflowConfig,
+  WorkflowOutcome,
   WorkflowStates,
   WorkflowTransition,
 } from './behaviors/core/index.js';
