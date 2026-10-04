@@ -875,6 +875,9 @@ model, or retired, when it lands.
 ## 16. What the source tree taught
 
 The source tree's generator grew a deploy family for a distribution:
+## 17. What the distribution's deploy family taught
+
+A distribution built a deploy family on the source tree's generator:
 `resourcesgen`, `chartgen`, `argogen`, `helmvaluesgen`, `mergedvalues`,
 `stacksgen` and `suitesgen`.
 

@@ -43,6 +43,12 @@ type BehaviorDeclaration struct {
 	// ConfigSchema is the JSON Schema of the config a type gives the
 	// behavior. Absent means the behavior takes no config.
 	ConfigSchema json.RawMessage `json:"configSchema,omitempty"`
+	// CreateParamsSchema is the JSON Schema of the parameters a create
+	// gives the behavior for the new instance, which an engine passes to
+	// its initialize: an object schema that sets "additionalProperties",
+	// false or a schema, so no parameter goes unchecked. Absent means a
+	// create gives it none.
+	CreateParamsSchema json.RawMessage `json:"createParamsSchema,omitempty"`
 	// Requires names behaviors a type must also list to list this one.
 	Requires []string `json:"requires,omitempty"`
 	// Conflicts names behaviors a type that lists this one may not list.
@@ -130,7 +136,9 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // config, params or result schema that does not compile; a params schema
 // that is not an object schema or does not set "additionalProperties":
 // false, the engine's rule, so no parameter reaches a handler without its
-// guards seeing it; an operation name that is not camelCase, repeats, or
+// guards seeing it; a create params schema that does not compile, is not
+// an object schema or sets "additionalProperties" to neither false nor a
+// schema; an operation name that is not camelCase, repeats, or
 // is one an engine gives every schema (create, get, list, update, delete);
 // a scope other than "instance" or "schema"; a field name that is not an
 // identifier or repeats; and a Package that is not an npm package name.
@@ -174,6 +182,9 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 		// the data-form JSON Schema then requires the key.
 		b.configRequired = compiled.Validate(map[string]any{}) != nil
 	}
+	if err := checkBehaviorCreateParams(decl); err != nil {
+		return err
+	}
 	if err := checkBehaviorFields(decl); err != nil {
 		return err
 	}
@@ -210,6 +221,31 @@ func checkBehaviorName(name, extension string) error {
 	}
 	if !behaviorBareName.MatchString(bare) {
 		return fmt.Errorf("registry: behavior name %q is malformed: after %s. comes %s", name, extension, behaviorNameDescriptor)
+	}
+	return nil
+}
+
+// checkBehaviorCreateParams holds a create params schema to an object
+// schema whose "additionalProperties" is false or a schema. Unlike an
+// operation's parameters, a create's may be keyed by names the config
+// gives (a link's name), so the schema may admit further keys, but it
+// checks each one's value.
+func checkBehaviorCreateParams(decl BehaviorDeclaration) error {
+	if len(decl.CreateParamsSchema) == 0 {
+		return nil
+	}
+	if _, err := compileSchema(decl.CreateParamsSchema, "superschematic://behaviors/"+decl.Name+"/createParams.json"); err != nil {
+		return fmt.Errorf("registry: behavior %s createParamsSchema: %w", decl.Name, err)
+	}
+	var params struct {
+		Type                 any `json:"type"`
+		AdditionalProperties any `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal(decl.CreateParamsSchema, &params); err != nil || params.Type != "object" {
+		return fmt.Errorf("registry: behavior %s createParamsSchema must be an object schema (\"type\": \"object\")", decl.Name)
+	}
+	if _, isSchema := params.AdditionalProperties.(map[string]any); params.AdditionalProperties != false && !isSchema {
+		return fmt.Errorf("registry: behavior %s createParamsSchema must set \"additionalProperties\": false or a schema, so no create parameter goes unchecked", decl.Name)
 	}
 	return nil
 }
