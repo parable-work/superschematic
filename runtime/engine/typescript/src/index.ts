@@ -118,7 +118,7 @@ export { page, pageRequest } from './behaviors/paging.js';
 export type { Page } from './behaviors/paging.js';
 
 // The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
-export { MAX_ROLLUP_READ, isTerminalState } from './behaviors/core/index.js';
+export { MAX_ROLLUP_READ, isTerminalState, stateOutcome } from './behaviors/core/index.js';
 export type {
   BlockerRecord,
   CommentRecord,
@@ -131,6 +131,7 @@ export type {
   ProposalState,
   ReactionsConfig,
   ReactionsRule,
+  ReactionsTerminal,
   ReactionsThen,
   ReactionsWhen,
   RevisionRecord,
@@ -143,6 +144,7 @@ export type {
   SearchHit,
   SnippetPart,
   WorkflowConfig,
+  WorkflowOutcome,
   WorkflowStates,
   WorkflowTransition,
 } from './behaviors/core/index.js';
