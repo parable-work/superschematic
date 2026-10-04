@@ -1,0 +1,29 @@
+{
+  "name": "Variants",
+  "description": "Types an open JSON field of the type by the value of another of its fields: while by holds a value types lists, field, when it holds a value, is held to that type of the schema document as a field of the type is, unknown keys refused at every depth; while by holds another value or none, field holds none. A result whose shape differs per kind of step is refused when it is written in the wrong shape. The describe document and the create and update tools show each variant.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["field", "by", "types"],
+    "properties": {
+      "field": {
+        "description": "The type's own field the variants type, by JSON key: a Generic.JSON field, or one of a scalar whose values are JSON objects.",
+        "type": "string",
+        "minLength": 1
+      },
+      "by": {
+        "description": "The type's own string or enum field, by JSON key, whose value picks the type.",
+        "type": "string",
+        "minLength": 1
+      },
+      "types": {
+        "description": "By a value of by, the type of the schema document, besides the instance type, that field holds while by holds the value.",
+        "type": "object",
+        "minProperties": 1,
+        "maxProperties": 256,
+        "propertyNames": { "minLength": 1 },
+        "additionalProperties": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

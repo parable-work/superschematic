@@ -1,7 +1,7 @@
 {
   "kind": "General",
   "name": "tasks",
-  "description": "A task an engine runs with the core's behaviors and no extension: it moves from todo through doing to done, waits for its blockers, a task or a document, before it is done, and links to the document it implements, pinned to a revision, to a parent task and to its project.",
+  "description": "A task an engine runs with the core's behaviors and no extension: it moves from todo through doing to done, waits for its blockers, a task or a document, before it is done, and links to the document it implements, pinned to a revision, to a parent task and to its project, which every create gives.",
   "types": {
     "Task": {
       "name": "Task",
@@ -25,8 +25,8 @@
           "config": {
             "links": {
               "spec": { "schema": "documents", "pinned": true },
-              "parent": { "schema": "tasks", "required": true },
-              "project": { "schema": "projects" }
+              "parent": { "schema": "tasks" },
+              "project": { "schema": "projects", "required": true }
             }
           }
         }

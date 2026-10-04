@@ -1,8 +1,8 @@
 /*
 How an engine refusal crosses HTTP. Each EngineError code has one status,
 and the problem document carries the code as its `code` member; a refused
-schema document, instance or operation's parameters carries its issues as
-`details.issues`, a refused version its changes as `details.changes`, and
+schema document, instance, operation's parameters or create's parameters
+carries its issues as `details.issues`, a refused version its changes as `details.changes`, and
 a behavior's veto the behavior, what it refused and why as `details`. The
 detail is the engine's message, which names only what the request named.
 `type` stays about:blank, as the HTTP runtime writes it for every problem,
@@ -14,6 +14,7 @@ import { HttpProblem } from '@superschematic/http-runtime';
 
 import {
   BehaviorVetoError,
+  CreateParamsError,
   EngineError,
   IncompatibleChangeError,
   InstanceValidationError,
@@ -54,7 +55,12 @@ export function engineProblem(error: unknown): HttpProblem | undefined {
 }
 
 function detailsOf(error: EngineError): { details?: unknown } {
-  if (error instanceof SchemaDocumentError || error instanceof InstanceValidationError || error instanceof OperationParamsError) {
+  if (
+    error instanceof SchemaDocumentError ||
+    error instanceof InstanceValidationError ||
+    error instanceof OperationParamsError ||
+    error instanceof CreateParamsError
+  ) {
     return { details: { issues: error.issues } };
   }
   if (error instanceof BehaviorVetoError) {

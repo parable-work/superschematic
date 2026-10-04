@@ -24,7 +24,10 @@ argument schema whether a schema is generated or run by the engine:
   and an enum also lists null.
 
 The engine keys a property by the field's JSON key (its jsonTag, or its
-name), the key its instances hold. A builtin scalar the document does not
+name), the key its instances hold. An instance's object may carry allOf:
+the JSON Schemas its behaviors' validate holds its own fields to
+(instanceSchema), as they write them. The Go generators write none, so
+the parity vectors hold none. A builtin scalar the document does not
 declare is taken from the schema runtime's catalog, as the Go loader fills
 in a declared one. The GraphQL primitive names the schema runtime also
 reads (String, ID, Int, Float, Boolean), which the Go loader refuses, are
@@ -79,6 +82,12 @@ export interface Property {
   readonly items?: Property;
   readonly properties?: ReadonlyMap<string, Property>;
   readonly required?: readonly string[];
+  /**
+   * JSON Schemas an object also satisfies, written as they are: what a
+   * behavior's validate holds an instance's own fields to beyond their
+   * types (its instanceSchema). The Go generators write none.
+   */
+  readonly allOf?: readonly unknown[];
 }
 
 /** An argument schema: toolsutil.JSONSchemaObject, a closed object. */
@@ -158,6 +167,16 @@ export class FieldSchemas {
   object(typeName: string, vendor: ArgumentSchema['vendor'] = []): ArgumentSchema {
     const { properties, required } = this.fields(typeName, new Set());
     return { vendor, properties, required };
+  }
+
+  /**
+   * type is the schema of a value of one of the document's types: a
+   * closed object of its fields, as a field of that type is written,
+   * not nullable.
+   */
+  type(typeName: string): Property {
+    const { properties, required } = this.fields(typeName, new Set([typeName]));
+    return { type: 'object', description: `${typeName} object`, additionalProperties: false, properties, required };
   }
 
   /** field is the schema of one field's value; toolsutil.FieldToJSONSchemaProperty. */
@@ -463,6 +482,7 @@ export function renderProperty(property: Property, scalarKeyName: string): unkno
   if (property.pattern !== undefined) out.pattern = property.pattern;
   if (property.properties !== undefined && property.properties.size > 0) out.properties = renderProperties(property.properties, scalarKeyName);
   if (property.required !== undefined && property.required.length > 0) out.required = [...property.required];
+  if (property.allOf !== undefined && property.allOf.length > 0) out.allOf = [...property.allOf];
   out.type = typeValue(property);
   if (scalarKeyName !== '' && property.canonicalScalar !== undefined) {
     out[scalarKeyName] = property.canonicalScalar;
@@ -573,6 +593,7 @@ function encodeProperty(property: Property, scalarKeyName: string): string {
   if (property.required !== undefined && property.required.length > 0) members.push(`"required":${goJSON(property.required)}`);
   if (nullable || any) members.push(`"type":${goJSON(typeValue(property))}`);
   if (nullable && values) members.push(`"enum":${goJSON([...values, null])}`);
+  if (property.allOf !== undefined && property.allOf.length > 0) members.push(`"allOf":${goJSON(property.allOf)}`);
   return `{${members.join(',')}}`;
 }
 

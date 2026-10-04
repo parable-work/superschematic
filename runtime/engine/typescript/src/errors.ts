@@ -105,11 +105,11 @@ export class InstanceValidationError extends EngineError {
   }
 }
 
-/** A guard of a behavior on the type refused an update, a delete or an operation. */
+/** A guard of a behavior on the type refused a create, an update, a delete or an operation. */
 export class BehaviorVetoError extends EngineError {
   /** The behavior whose guard refused. */
   readonly behavior: string;
-  /** What it refused: `update`, `delete`, or the operation's name. */
+  /** What it refused: `create`, `update`, `delete`, or the operation's name. */
   readonly action: string;
   readonly reason: string;
 
@@ -132,6 +132,27 @@ export class OperationParamsError extends EngineError {
       `operation ${operation} of behavior ${behavior}: ${issues.map((issue) => (issue.path ? `${issue.path}: ${issue.message}` : issue.message)).join('; ')}`
     );
     this.name = 'OperationParamsError';
+    this.issues = issues;
+  }
+}
+
+/**
+ * A create's parameters for the type's behaviors, refused: an entry for a
+ * behavior the type does not compose or that takes none, one its
+ * createParamsSchema refuses, or one its behavior refuses for its config
+ * (a link the config does not give, a required link not given). Each
+ * issue is at a JSON pointer into the create's arguments, under
+ * /behaviors/<behavior>.
+ */
+export class CreateParamsError extends EngineError {
+  readonly issues: SchemaIssue[];
+
+  constructor(schema: string, issues: SchemaIssue[]) {
+    super(
+      'invalid_argument',
+      `create of ${schema}: ${issues.map((issue) => (issue.path ? `${issue.path}: ${issue.message}` : issue.message)).join('; ')}`
+    );
+    this.name = 'CreateParamsError';
     this.issues = issues;
   }
 }
