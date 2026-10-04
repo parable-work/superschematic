@@ -1,0 +1,77 @@
+{
+  "dialect": "postgres",
+  "from": "dba852f966f7937569500eb439ff81547f46549d7002c4fbc4f22567a7e710af",
+  "hash": "49a27fa192e861cd2061138ddfe0f248b09a1ed5412fea166b42bd6dec536eb3",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX idx_account_email"
+      ],
+      "subject": "table/account/index/idx_account_email",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/account/column/email",
+          "reason": "Dropping account.email deletes the values of Account.email.",
+          "subject": "table/account/column/email"
+        }
+      ],
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE account DROP COLUMN email"
+      ],
+      "subject": "table/account/column/email",
+      "transactional": true
+    }
+  ],
+  "to": "ca67e0e3d2c2eb5fc709be95f3fae1e89bb94379e808193262fea9f98f895bb5",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "display_name",
+            "origin": "Account.displayName",
+            "type": "TEXT"
+          },
+          {
+            "name": "balance",
+            "origin": "Account.balance",
+            "type": "DOUBLE PRECISION"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

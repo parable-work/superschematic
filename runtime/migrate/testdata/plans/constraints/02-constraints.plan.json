@@ -1,0 +1,199 @@
+{
+  "dialect": "postgres",
+  "from": "e4d34acd80f06c161377d9f3e4ee4a51550478a5ec4466bc043df5f54c95d176",
+  "hash": "93b845f219a7a779f3559b7fb940760fd406e02bd56a51340f8d6ca353772600",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/account/constraint/account_name_key",
+          "reason": "Account.name becomes unique: servers built from the previous version may write duplicates.",
+          "subject": "table/account/constraint/account_name_key"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/account/constraint/account_name_key",
+          "reason": "Building the unique index fails when account holds duplicate values of Account.name.",
+          "subject": "table/account/constraint/account_name_key"
+        }
+      ],
+      "index": 1,
+      "op": "buildUniqueIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS account_name_key"
+      ],
+      "statements": [
+        "CREATE UNIQUE INDEX CONCURRENTLY account_name_key ON account USING BTREE (\"name\")"
+      ],
+      "subject": "table/account/constraint/account_name_key",
+      "transactional": false
+    },
+    {
+      "index": 2,
+      "op": "addUnique",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE account ADD CONSTRAINT account_name_key UNIQUE USING INDEX account_name_key"
+      ],
+      "subject": "table/account/constraint/account_name_key",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "addForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE entry ADD CONSTRAINT fk_entry_account_id FOREIGN KEY (account_id) REFERENCES account (id) ON DELETE RESTRICT NOT VALID"
+      ],
+      "subject": "table/entry/constraint/fk_entry_account_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/entry/constraint/fk_entry_account_id",
+          "reason": "Validating fk_entry_account_id fails when a row of entry has a account_id that account(id) does not hold.",
+          "subject": "table/entry/constraint/fk_entry_account_id"
+        }
+      ],
+      "index": 4,
+      "op": "validateForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE entry VALIDATE CONSTRAINT fk_entry_account_id"
+      ],
+      "subject": "table/entry/constraint/fk_entry_account_id",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "addNotNullCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE entry ADD CONSTRAINT entry_memo_not_null_check CHECK (memo IS NOT NULL) NOT VALID"
+      ],
+      "subject": "table/entry/column/memo",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/entry/column/memo",
+          "reason": "Entry.memo becomes required: the step fails when entry has a row where memo is null.",
+          "subject": "table/entry/column/memo"
+        }
+      ],
+      "index": 6,
+      "op": "validateNotNullCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE entry VALIDATE CONSTRAINT entry_memo_not_null_check"
+      ],
+      "subject": "table/entry/column/memo",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "setNotNull",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE entry ALTER COLUMN memo SET NOT NULL",
+        "ALTER TABLE entry DROP CONSTRAINT entry_memo_not_null_check"
+      ],
+      "subject": "table/entry/column/memo",
+      "transactional": true
+    }
+  ],
+  "to": "ac04a8a51dbbeaa0c06214c0535999dd1eaa033c804b741623a064bef4769136",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        },
+        "uniques": [
+          {
+            "columns": [
+              "name"
+            ],
+            "name": "account_name_key"
+          }
+        ]
+      },
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "account_id",
+            "nullable": true,
+            "origin": "Entry.accountId",
+            "type": "UUID"
+          },
+          {
+            "name": "memo",
+            "origin": "Entry.memo",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Entry",
+        "foreignKeys": [
+          {
+            "columns": [
+              "account_id"
+            ],
+            "name": "fk_entry_account_id",
+            "onDelete": "RESTRICT",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "account"
+          }
+        ],
+        "kind": "entity",
+        "name": "entry",
+        "origin": "Entry",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "entry_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

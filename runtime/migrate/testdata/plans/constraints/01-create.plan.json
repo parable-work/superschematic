@@ -1,0 +1,107 @@
+{
+  "dialect": "postgres",
+  "from": "",
+  "hash": "8ebac5fa3f0e57ed6b06749144641528f67cc04e9c443defecc2c2ad40a67e6f",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createExtension",
+      "phase": "expand",
+      "statements": [
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+      ],
+      "subject": "extension/pgcrypto",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE account (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  \"name\" TEXT NOT NULL,\n  CONSTRAINT account_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE account IS 'Generated from schema type: Account'"
+      ],
+      "subject": "table/account",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE entry (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  account_id UUID,\n  memo TEXT,\n  CONSTRAINT entry_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE entry IS 'Generated from schema type: Entry'"
+      ],
+      "subject": "table/entry",
+      "transactional": true
+    }
+  ],
+  "to": "e4d34acd80f06c161377d9f3e4ee4a51550478a5ec4466bc043df5f54c95d176",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "account_id",
+            "nullable": true,
+            "origin": "Entry.accountId",
+            "type": "UUID"
+          },
+          {
+            "name": "memo",
+            "nullable": true,
+            "origin": "Entry.memo",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Entry",
+        "kind": "entity",
+        "name": "entry",
+        "origin": "Entry",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "entry_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}
