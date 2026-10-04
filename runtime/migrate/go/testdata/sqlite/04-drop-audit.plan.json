@@ -1,0 +1,125 @@
+{
+  "dialect": "sqlite",
+  "from": "44ae02af6bad1bdfa2fd3ce21b7a79f9fe1fd3c98d8f0f07e1b4ed1c9434d194",
+  "hash": "e4e0cb978dc820f699031eb0388ddb97efda720bbd82086dd8e620af3a0270a7",
+  "service": "shop",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/audit",
+          "reason": "Audit is dropped with its rows.",
+          "subject": "table/audit"
+        }
+      ],
+      "index": 1,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE audit"
+      ],
+      "subject": "table/audit",
+      "transactional": true
+    }
+  ],
+  "to": "14d676a954dbee841ceead456228d2237fd5aef1f0bd11fe0b6b0421e5daaa60",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Customer.email",
+            "type": "TEXT"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "method": "BTREE",
+            "name": "customer_email_key",
+            "unique": true
+          }
+        ],
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "INTEGER"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "INTEGER"
+          },
+          {
+            "name": "note",
+            "nullable": true,
+            "origin": "Order.note",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "method": "BTREE",
+            "name": "order_customer_id_idx"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

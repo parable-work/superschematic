@@ -1,0 +1,173 @@
+{
+  "dialect": "sqlite",
+  "from": "df19b9e8e1a4d5890f05477816cd7bcb91b68dd4250522dc0ab747a4c79d148c",
+  "hash": "bbf9203424b6fd029ae360297d04a0fd8c058e7afebffc62d6c728ebb706c77a",
+  "service": "shop",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD COLUMN note TEXT"
+      ],
+      "subject": "table/order/column/note",
+      "transactional": true
+    },
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Customer.name becomes optional: SQLite rebuilds the table.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "Customer.name becomes optional: SQLite rebuilds the table.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 2,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE customer__new (id INTEGER NOT NULL, name TEXT, email TEXT, CONSTRAINT customer_pkey PRIMARY KEY (id))",
+        "INSERT INTO customer__new (id, name) SELECT id, name FROM customer",
+        "DROP TABLE customer",
+        "ALTER TABLE customer__new RENAME TO customer"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX customer_email_key ON customer (email)"
+      ],
+      "subject": "table/customer/index/customer_email_key",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/customer/column/name",
+          "reason": "Customer.name is dropped with its data.",
+          "subject": "table/customer/column/name"
+        }
+      ],
+      "index": 4,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE customer DROP COLUMN name"
+      ],
+      "subject": "table/customer/column/name",
+      "transactional": true
+    }
+  ],
+  "to": "14d676a954dbee841ceead456228d2237fd5aef1f0bd11fe0b6b0421e5daaa60",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Customer.email",
+            "type": "TEXT"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "method": "BTREE",
+            "name": "customer_email_key",
+            "unique": true
+          }
+        ],
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "INTEGER"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "INTEGER"
+          },
+          {
+            "name": "note",
+            "nullable": true,
+            "origin": "Order.note",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "method": "BTREE",
+            "name": "order_customer_id_idx"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}
