@@ -42,7 +42,7 @@ export abstract class Recipe {
   title: string;
 }
 
-@versioned({ retentionDays: 365 })
+@versioned({ retentionDays: 365, exclude: ["scratch"] })
 @graphMember({ graph: Recipe, order: "position" })
 export abstract class Step {
   @key
