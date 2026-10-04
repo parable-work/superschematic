@@ -682,6 +682,21 @@ func TestMigratePlanSQLite(t *testing.T) {
 		assert.Contains(t, err.Error(), "shop-db is built for postgres, not sqlite: add sqlite to its outputs.sql.dialects to plan for it")
 	}
 
+	// A data-form config is checked against its JSON Schema first, which
+	// names the dialects; the registry says why for the rest.
+	for list, want := range map[string]string{
+		`["mysql", "postgres"]`:    "at '/outputs/sql/dialects/0': value must be one of 'postgres', 'sqlite'",
+		`["sqlite"]`:               "outputs.sql.dialects must list postgres",
+		`["postgres", "postgres"]`: "outputs.sql.dialects lists postgres twice",
+	} {
+		files := migrateDB(orderIDField)
+		files["schema.config.json"] = `{"name": "shop-db", "kind": "DB", "outputs": {"types": {"go": {"enabled": true}}, "sql": {"dialects": ` + list + `}}}`
+		root := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{"shop-db": files})
+		_, _, err := runMigratePlanCmd(t, filepath.Join(root, "shop-db"), "--print-model")
+		require.Error(t, err, list)
+		assert.Contains(t, err.Error(), want, list)
+	}
+
 	previous := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{
 		"shop-db": sqliteDB(orderIDField, orderTotalField),
 	})
