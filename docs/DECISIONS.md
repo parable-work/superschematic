@@ -1886,3 +1886,38 @@ from the distribution and what did not.
 | End-user auth and service auth are separate concepts. Platforms admit callers along edges, and an application-level service principal travels in its own header beside the end user's `Authorization`. | Service calls through the end-user auth provider with a minted token, which merges the two principals |
 
 Nothing here is built. The design is reversible until the first release.
+## D26. Every server runs an `@hmacVerified` provider's verifier first
+
+`@hmacVerified({ provider })` reached only the Go server. apigen read the
+provider, `Implementations` gained a `WebhookVerifiers` map that
+`ValidateImplementations` required for every provider, and the route ran
+the provider's verifier ahead of the rate limit, the body limit and the
+permission check. The TypeScript and Rust server generators never read the
+provider, so a webhook route served by either took unsigned requests, and
+nothing said so.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The TypeScript and Rust servers enforce it, as the Go server does: `Implementations` has a verifier for each provider the schema names (`webhookVerifiers`, `webhook_verifiers`), the server does not start without one for every provider, and a provider's verifier runs before every other step of its routes. | Refusing such an operation at build time unless it is `@manualRouteRegistration`, as both servers refuse an encrypted one (D15, D20 amended). That is less code, but it leaves the signature check to a hand-written route in two servers of three. |
+| The TypeScript verifier is Hono middleware (`WebhookVerifier`, exported by `@superschematic/http-runtime/hono`), the counterpart of Go's `func(http.Handler) http.Handler`. The operation table names the provider (`webhookProvider`), and `mountOperation` and `mountManualOperation` throw at mount when such a spec has no verifier. `webhookVerifiers` has a property per provider, so tsc catches a missing one; `buildRouter` throws `Implementations.webhookVerifiers for provider <provider> is required`, as Go and Rust word it, for a caller tsc did not check. | A predicate the runtime calls with the headers and the raw body, answering 401 itself. It is simpler to write, but it fixes the refusal's status and body, and the Go verifier answers for itself. |
+| The TypeScript verifier may read the body. The route reads a copy of the request (`Request.clone()`) taken before the verifier ran. | Asking the verifier to read a clone. One that calls `c.req.text()`, as provider examples do, would leave the route a used body and a 500. |
+| The TypeScript router runs the verifier on a `@manualRouteRegistration` route too, before the service's handler, as it runs the rate limit and the gate there. | |
+| The Rust verifier is an async trait whose `verify(request, next)` is axum middleware, the counterpart of `axum::middleware::from_fn`. `webhook_verifiers` is a `HashMap<String, Arc<dyn WebhookVerifier>>` keyed by provider, as Go's map is. `webhook_verified(route, verifier)` adds it with `route_layer`, so it runs before the handler's extractors read the body and not on a 405. `build_router` panics without a verifier for every provider, as axum panics on a route it cannot mount; `validate_implementations` returns the message. | A struct with a field per provider, which the compiler would check, but which needs a Rust identifier from every provider string and keys the verifiers differently from Go and TypeScript; `build_router` returning a `Result`, which changes its signature for every crate |
+| `build_router` does not mount a `@manualRouteRegistration` operation (D20 amended), so it applies no verifier to one. The service wraps the route it adds in `webhook_verified`, and `build_router`'s doc says so for each such operation. Its provider still needs a verifier in `webhook_verifiers`, as in Go and TypeScript. | Requiring verifiers only for the providers of mounted operations, which gives the three servers different rules |
+
+In all three servers the verifier runs before the body limit, so it reads
+a body of any size; a verifier that cares caps its own read, as the Rust
+one must in `to_bytes`. The Rust router applies none of the other traffic
+controls or the permission check, so there the verifier is the only step
+before the handler. The Python and Rust SDKs still generate a method for a
+`@webhook` operation, which the Go and TypeScript SDKs leave out; this
+entry does not change that.
+
+`fixture-webhooks-api` declares two providers, a manual webhook and a
+route that is not one. `runtime/http/typescript/src/hono.test.ts`,
+`internal/generator/tsrestgen/webhooks_test.go` (under Bun) and
+`internal/generator/rustrestgen/webhooks_test.go` (under cargo) check the
+order, the refusal at startup and the body the route receives. Output for
+a schema without `@hmacVerified` is unchanged byte for byte.
+
+The rule is reversible until the first release.

@@ -1,21 +1,19 @@
-# {{ .PackageName }}
+# @schemas/fixture-webhooks-api-api
 
-Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
-`{{ .RuntimePackage }}` and Hono {{ .HonoVersion }}.
+Generated TypeScript API server for the `fixture-webhooks-api` schema. Built on
+`@superschematic/http-runtime` and Hono 4.13.8.
 
-**Do not edit manually.** Regenerate it by building the `{{ .SchemaName }}` schema.
+**Do not edit manually.** Regenerate it by building the `fixture-webhooks-api` schema.
 
 ## Layout
 
 - `interfaces.ts`: one `<Namespace>Implementation` interface per operation
   class with typed arguments (path params as scalar types, query params
   optional unless required, the input type from the generated types package)
-  and the `Implementations` record the router takes.
-{{- if .WebhookProviders }} Its
+  and the `Implementations` record the router takes. Its
   `webhookVerifiers` holds the verifier of each `@hmacVerified` provider
-  ({{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}`{{ $p }}`{{ end }}), Hono middleware that checks a request's signature
+  (`github`, `stripe`), Hono middleware that checks a request's signature
   before every other step of the provider's routes.
-{{- end }}
 - `router.ts`: `buildRouter(implementations, options)` returns a Hono router
   that mounts every `@rest` operation under `/api`, decodes parameters,
   parses JSON bodies through the generated strict `parse<Input>FromJSON`
@@ -30,44 +28,36 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
 
 | Method | Path | Operation | Auth |
 | --- | --- | --- | --- |
-{{- range .Endpoints }}
-| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ if .PublicRoute }}public{{ else if .RequiredPerms }}{{ join .RequiredPerms ", " }}{{ else if .RequiresAuth }}authenticated{{ else }}none{{ end }} |
-{{- end }}
+| `GET` | `/api/events/{id}` | `event.getEvent` | none |
+| `POST` | `/api/webhooks/github` | `webhook.receiveGithubEvent` (signed: github) | webhooks.receive |
+| `POST` | `/api/webhooks/github/raw` | `webhook.receiveRawGithubEvent` (manual) (signed: github) | none |
+| `POST` | `/api/webhooks/stripe` | `webhook.receiveStripeEvent` (signed: stripe) | public |
 
 ## Usage
 
 ```ts
 import { Hono } from 'hono';
-import { errorHandler, notFoundHandler } from '{{ .RuntimePackage }}/hono';
-import { buildRouter, type Implementations } from '{{ .PackageName }}';
+import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
+import { buildRouter, type Implementations } from '@schemas/fixture-webhooks-api-api';
 
-{{ if .WebhookProviders -}}
 const implementations: Implementations = {
   /* one object per operation class */
   webhookVerifiers: {
-{{- range .WebhookProviders }}
-    {{ tsString . }}: async (c, next) => { /* refuse a bad signature, else */ await next(); },
-{{- end }}
+    'github': async (c, next) => { /* refuse a bad signature, else */ await next(); },
+    'stripe': async (c, next) => { /* refuse a bad signature, else */ await next(); },
   },
 };
-{{ else -}}
-const implementations: Implementations = { /* one object per operation class */ };
-{{ end -}}
 const app = new Hono();
 app.route('/', buildRouter(implementations, {
   authenticate: async ctx => /* the caller, or null */ null,
-{{- if .HasManualRoutes }}
   manualRoutes: {
-{{- range .ManualEndpoints }}
-    {{ .Name }}: async (c, ctx) => new Response(/* the service's own handler */),
-{{- end }}
+    receiveRawGithubEvent: async (c, ctx) => new Response(/* the service's own handler */),
   },
-{{- end }}
 }));
 app.notFound(notFoundHandler());
 app.onError(errorHandler());
 ```
 
-Peer dependencies (`{{ .RuntimePackage }}`, the generated types packages,
+Peer dependencies (`@superschematic/http-runtime`, the generated types packages,
 `hono`) are resolved by the consuming service, the way it resolves the scalar
 library.

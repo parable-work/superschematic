@@ -111,6 +111,10 @@ type EndpointInfo struct {
 	// the adapter applies them with the Go runtime's semantics.
 	RateLimitPerMinute *int
 	TimeoutSeconds     *int
+	// WebhookProvider is the @hmacVerified provider, or empty. The router
+	// mounts the route with Implementations.webhookVerifiers[provider],
+	// which runs before every other step.
+	WebhookProvider string
 
 	// DocLines is the JSDoc body of the implementation method: title,
 	// description, route, and the auth requirement.
@@ -155,6 +159,10 @@ type APIOutput struct {
 	Namespaces      []NamespaceInfo
 	Endpoints       []EndpointInfo // every endpoint, manual ones included
 	ManualEndpoints []EndpointInfo
+	// WebhookProviders are the @hmacVerified providers of every endpoint,
+	// manual ones included, sorted: Implementations.webhookVerifiers has a
+	// verifier for each, as the Go server's WebhookVerifiers map does.
+	WebhookProviders []string
 
 	// TypeImports are the type-only imports of interfaces.ts from
 	// `<package>/types` (inputs, outputs, enum parameters);
@@ -218,12 +226,16 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	}
 
 	byNamespace := map[string]*NamespaceInfo{}
+	webhookProviders := map[string]struct{}{}
 	for _, ep := range apiOutput.Endpoints {
 		endpoint, err := b.endpoint(ep)
 		if err != nil {
 			return nil, err
 		}
 		output.Endpoints = append(output.Endpoints, endpoint)
+		if endpoint.WebhookProvider != "" {
+			webhookProviders[endpoint.WebhookProvider] = struct{}{}
+		}
 		if endpoint.ManualRouteRegistration {
 			output.ManualEndpoints = append(output.ManualEndpoints, endpoint)
 			continue
@@ -242,6 +254,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	for _, name := range sortedKeys(byNamespace) {
 		output.Namespaces = append(output.Namespaces, *byNamespace[name])
 	}
+	output.WebhookProviders = sortedKeys(webhookProviders)
 
 	output.TypeImports = b.packageImports(b.typeImports)
 	output.RouterTypeImports = b.packageImports(b.routerTypeImports)
@@ -306,6 +319,7 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		RequiredPerms:           append([]string(nil), ep.RequiredPerms...),
 		PermsLiteral:            tsStringList(ep.RequiredPerms),
 		ManualRouteRegistration: ep.ManualRouteRegistration,
+		WebhookProvider:         ep.WebhookHMACProvider,
 	}
 	if ep.BodyLimit != nil {
 		bytes := *ep.BodyLimit * 1024 * 1024
@@ -731,6 +745,9 @@ func docLines(ep EndpointInfo) []string {
 		lines = append(lines, "")
 	}
 	lines = append(lines, ep.Method+" "+ep.Path)
+	if ep.WebhookProvider != "" {
+		lines = append(lines, "Webhook: the "+ep.WebhookProvider+" webhook verifier checks the request before every other step.")
+	}
 	if ep.RateLimitPerMinute != nil {
 		lines = append(lines, fmt.Sprintf("Rate limited to %d requests per minute per client.", *ep.RateLimitPerMinute))
 	}

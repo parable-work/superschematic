@@ -35,6 +35,9 @@ type EndpointInfo struct {
 	InputType    string
 	OutputType   string
 	PathParams   []string
+	// WebhookProvider is the @hmacVerified provider, or empty. build_router
+	// wraps the route in webhook_verified with that provider's verifier.
+	WebhookProvider string
 }
 
 // APIOutput contains generated Rust REST API metadata.
@@ -45,6 +48,10 @@ type APIOutput struct {
 	// ManualEndpoints are the @manualRouteRegistration operations, which the
 	// service mounts itself.
 	ManualEndpoints []EndpointInfo
+	// WebhookProviders are the @hmacVerified providers of every endpoint,
+	// manual ones included, sorted: Implementations.webhook_verifiers needs a
+	// verifier for each, as the Go server's WebhookVerifiers map does.
+	WebhookProviders []string
 }
 
 // NamespaceOutput contains data for generating namespace scaffold files.
@@ -92,6 +99,11 @@ type Options struct {
 // adds its route to the router build_router returns. The router has no step
 // that decrypts a request body, so an encrypted operation that is not
 // @manualRouteRegistration is refused.
+//
+// An @hmacVerified operation's route runs its provider's WebhookVerifier
+// before the handler, as the Go router runs the provider's WebhookVerifier
+// before its other middleware, and build_router panics when
+// Implementations.webhook_verifiers lacks a provider's verifier.
 func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	generated, err := rustapigen.Generate(schema, rustapigen.Options{
 		SchemaName:     opts.SchemaName,
@@ -118,6 +130,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	}
 
 	namespaceSet := make(map[string]struct{})
+	webhookProviders := make(map[string]struct{})
 	for _, endpoint := range generated.Endpoints {
 		// The Go router decrypts an encrypted operation's body with the
 		// configured PayloadDecryptor before it parses it. The Rust router
@@ -160,6 +173,11 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 			InputType:   endpoint.InputType,
 			OutputType:  endpoint.OutputType,
 			PathParams:  pathParams,
+
+			WebhookProvider: endpoint.WebhookHMACProvider,
+		}
+		if info.WebhookProvider != "" {
+			webhookProviders[info.WebhookProvider] = struct{}{}
 		}
 		if endpoint.ManualRouteRegistration {
 			output.ManualEndpoints = append(output.ManualEndpoints, info)
@@ -170,6 +188,10 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	}
 
 	output.Namespaces = rustapigen.SortedNamespaces(namespaceSet)
+	for provider := range webhookProviders {
+		output.WebhookProviders = append(output.WebhookProviders, provider)
+	}
+	sort.Strings(output.WebhookProviders)
 	sortEndpoints(output.Endpoints)
 	sortEndpoints(output.ManualEndpoints)
 
@@ -259,7 +281,13 @@ func templateFuncs() template.FuncMap {
 	return rustapigen.TemplateFuncs(template.FuncMap{
 		"isGetMethod": func(m string) bool { return strings.EqualFold(m, "get") },
 		"toUpper":     strings.ToUpper,
+		"rustString":  rustString,
 	})
+}
+
+// rustString renders a Rust string literal.
+func rustString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s) + `"`
 }
 
 // SetReplacePaths computes dependency path fields for generated Cargo.toml.
