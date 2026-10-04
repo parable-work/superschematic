@@ -774,30 +774,25 @@ func buildHistoryTable(table Table, cfg *ir.VersionedConfig, actorSetting string
 		DefaultPartitionName:   historyName + "_default",
 		QuotedDefaultPartition: sqlutil.QuoteIdentifier(historyName + "_default"),
 	}
-	var excluded map[string]bool
-	if cfg != nil && len(cfg.Exclude) > 0 {
-		excluded = make(map[string]bool, len(cfg.Exclude))
-		literals := make([]string, 0, len(cfg.Exclude))
-		for _, field := range cfg.Exclude {
-			column := codegen.ToSnakeCase(field)
-			excluded[column] = true
+	// The retention, the exclusions and the actor column are the ones
+	// graphdesc gives a version graph's kind (sqlutil.VersionedHistory).
+	kept := sqlutil.VersionedHistory(cfg, func(column string) bool { return columnNamed(table, column) != nil })
+	history.RetentionDays = kept.RetentionDays
+	if len(kept.Exclude) > 0 {
+		literals := make([]string, 0, len(kept.Exclude))
+		for _, column := range kept.Exclude {
 			history.ExcludedColumns = append(history.ExcludedColumns, column)
 			literals = append(literals, "'"+strings.ReplaceAll(column, "'", "''")+"'")
 		}
 		history.ExcludeArray = "ARRAY[" + strings.Join(literals, ", ") + "]"
 	}
-	// An excluded actor column is left out of the tombstone too, so the
-	// tombstone records no actor.
-	if actor := historyActorColumn(table); actor != nil && !excluded[actor.Name] {
+	if actor := columnNamed(table, kept.Actor); actor != nil {
 		history.ActorColumn = actor.Name
 		history.QuotedActorColumn = actor.QuotedName
 		history.ActorColumnType = actor.Type
 		history.ActorSetting = actorSetting
 	}
 	if cfg != nil {
-		if cfg.RetentionDays != nil {
-			history.RetentionDays = *cfg.RetentionDays
-		}
 		history.PartitionBy = cfg.PartitionBy
 		for i, pin := range cfg.PruneKeepReferencedBy {
 			history.PruneKeep = append(history.PruneKeep, PruneKeepRef{
@@ -811,14 +806,11 @@ func buildHistoryTable(table Table, cfg *ir.VersionedConfig, actorSetting string
 	return history, nil
 }
 
-// historyActorColumn returns the column a delete tombstone records its
-// actor in: deleted_by when the table has one, else updated_by, else nil.
-func historyActorColumn(table Table) *Column {
-	for _, name := range []string{"deleted_by", "updated_by"} {
-		for i := range table.Columns {
-			if table.Columns[i].Name == name {
-				return &table.Columns[i]
-			}
+// columnNamed returns the table's column of that name, or nil.
+func columnNamed(table Table, name string) *Column {
+	for i := range table.Columns {
+		if table.Columns[i].Name == name {
+			return &table.Columns[i]
 		}
 	}
 	return nil
