@@ -603,6 +603,7 @@ export const cases: Case[] = [
         assert.deepEqual(b.transact((tx) => tx.rows("step", aw.draft.id)), []);
         assert.equal(b.transact((tx) => tx.commits()).length, 0);
         assert.ok(thrown(() => bEngine.materialize(aw.commit.id)) instanceof NotFoundError);
+        assert.ok(thrown(() => bEngine.release(cook, bread, aw.commit.id, 0)) instanceof NotFoundError);
         assert.ok(thrown(() => bEngine.history(aw.draft.id)) instanceof NotFoundError);
         assert.ok(thrown(() => bEngine.branch(cook, aw.draft.id, "x")) instanceof NotFoundError);
         assert.equal(b.transact((tx) => tx.nextSequence(bread)), 1);
