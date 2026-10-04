@@ -4,7 +4,7 @@
 //! service mounts them itself (see `build_router`).
 
 use async_trait::async_trait;
-use superschematic_http_runtime::{ApiError, RequestContext};
+use superschematic_http_runtime::{ApiError, Authenticator, RequestContext};
 use serde_json::Value;
 use std::sync::Arc;
 #[async_trait]
@@ -27,4 +27,8 @@ pub trait TenantImplementation: Send + Sync + 'static {
 pub struct Implementations {
     pub session: Arc<dyn SessionImplementation>,
     pub tenant: Arc<dyn TenantImplementation>,
+    /// Establishes the caller of each route that needs one (@auth,
+    /// @requirePermission, @requireOwnership, an Authenticated set), and
+    /// decides whether its permissions satisfy a @requirePermission list.
+    pub authenticator: Arc<dyn Authenticator>,
 }
