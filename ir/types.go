@@ -433,9 +433,11 @@ type FieldDef struct {
 	// without @auth or @requirePermission.
 	Public bool `json:"public,omitempty" yaml:"public,omitempty"`
 
-	// Webhook marks an inbound webhook operation (@webhook): no
-	// @auth / @requirePermission; registered on public routes with optional
-	// @hmacVerified middleware.
+	// Webhook marks an operation a third party calls, not the service's
+	// clients (@webhook): a provider such as Stripe or GitHub posts to it
+	// from its own servers. No SDK generates a method for it (D28). The
+	// servers serve it as any other route; @hmacVerified adds the
+	// provider's signature check.
 	Webhook bool `json:"webhook,omitempty" yaml:"webhook,omitempty"`
 
 	// HMACVerifiedProvider is the WebhookProviderEnum name from

@@ -1896,3 +1896,38 @@ order, the refusal at startup and the body the route receives. Output for
 a schema without `@hmacVerified` is unchanged byte for byte.
 
 The rule is reversible until the first release.
+
+## D28. No SDK has a method for a `@webhook` operation
+
+`@webhook` marks an operation a third party calls. The Go and TypeScript
+SDKs have skipped one since the bootstrap commit (`0b783d15`), which
+brought the check over from the source tree with no recorded reason; those
+two checks were the only readers of `IsWebhook`. The Python and Rust SDK
+generators never read it, so both generated a client method for every
+webhook. The Rust SDK also listed it in its tool schema and audit
+documents and validated its input type before a request. D26 noted the
+gap and left it; this entry supersedes that sentence.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@webhook` means a third party calls the route, and no SDK has a method for it. An SDK is the client for the service's own callers. A webhook's caller is the provider (Stripe, GitHub), which sends its own request from its own servers, so a generated method has no real user. | Dropping the skip in every SDK. Each SDK would gain a method nobody can use, and a reader of the SDK would take the route for one its callers call. |
+| Under `@hmacVerified` such a method cannot work: no SDK signs a request, so the provider's verifier refuses every call it sends (D26). Making it work would put the provider's signing secret in a client. | Skipping only `@hmacVerified` webhooks, which makes `@webhook` mean two things: a route a third party calls, and one the service's clients call unsigned |
+| A route the service's own clients or services call, an internal callback say, is an ordinary route and is not declared `@webhook`. | |
+| The Python and Rust SDKs skip an operation whose `EndpointInfo.IsWebhook` is set, where the Go and TypeScript SDKs do: it has no method, and a namespace whose operations are all webhooks is not generated. The Rust SDK's tool documents leave it out too, as the Go and TypeScript SDKs' already did, since theirs come from the TypeScript SDK's methods. The Rust SDK's validation schemas leave out the webhook's input type, which no method validates. | Rust tool documents that follow the operations rather than the SDK's methods, which would list tools the Rust crate has no method for and the other SDKs leave out |
+
+The OpenAPI document keeps the route, since it tells the provider where to
+post. The provider tool lists (`openai.json`, `anthropic.json`) hold only
+operations published through `@mcp`, so they change only for a webhook a
+schema published that way, which only the Rust lists carried. An SDK still
+carries its auth surface when only a webhook needs a caller, since
+`APIOutput.HasAuth` counts every operation (D15, amended); all four SDKs
+agree on that.
+
+`internal/generator/pysdkgen/webhooks_test.go` and
+`internal/generator/rustsdkgen/webhooks_test.go` check that the SDK of
+`fixture-webhooks-api` (D26) has `event.get_event` and no other method,
+and the Rust test that its tools and validation schemas hold no webhook. A
+golden tree pins each SDK. Output for a schema without `@webhook` is
+unchanged byte for byte.
+
+The rule is reversible until the first release.

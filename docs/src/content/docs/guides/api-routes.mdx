@@ -191,9 +191,11 @@ decryptor, which in a deployment calls a key service. On such a route
 
 ## Webhooks
 
-`@webhook` marks an operation a third party calls, not your clients. The
-Go and TypeScript SDKs leave it out; the Python and Rust SDKs still
-generate a method for it.
+`@webhook` marks an operation a third party calls, not your clients.
+Every SDK leaves it out, methods and tools alike, since the provider
+sends its own request from its own servers and no SDK holds the signing
+secret `@hmacVerified` checks. A route your own clients or services call
+is an ordinary route, not a webhook.
 
 `@hmacVerified({ provider: "stripe" })` puts a signature check in front of
 the route, in every server. `Implementations` gains a verifier for each
