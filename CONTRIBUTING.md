@@ -110,7 +110,7 @@ of them; run them locally before pushing.
 | `make go-test`        | `go test -count=1 ./...` in the six Go modules                       |
 | `make go-fmt-check`   | `gofmt -l` is empty                                                  |
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the six Go modules       |
-| `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar |
+| `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make behaviors-check` | The copies of the core's behavior declarations in the packages that implement them (`runtime/engine/typescript/src/behaviors/core/declarations`, `runtime/engine-workqueue/typescript/src/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |

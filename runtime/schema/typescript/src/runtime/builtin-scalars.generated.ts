@@ -1253,3 +1253,56 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     }
   }
 };
+
+// The value class (D19) the graph descriptor gives a single field of each
+// builtin scalar: the class of one value of it stored in a column of its
+// own (graphdesc.ScalarClass), keyed as BUILTIN_SCALARS is. A scalar no
+// class reads is not here.
+export const BUILTIN_SCALAR_VALUE_CLASSES: Record<string, string> = {
+  "AgentSkill_Name": "string",
+  "Auth_JWT": "string",
+  "Auth_Password": "string",
+  "Contact_Email": "string",
+  "Contact_PhoneNumber": "string",
+  "Crypto_RSAPrivateKey": "string",
+  "Crypto_RSAPublicKey": "string",
+  "Crypto_SHA256": "string",
+  "Design_Color": "string",
+  "File_SizeBytes": "integer",
+  "Finance_Money": "integer",
+  "Generic_Int64": "integer",
+  "Generic_JSON": "json",
+  "Generic_Probability": "number",
+  "Generic_StringMap": "json",
+  "Git_PathPattern": "string",
+  "Identity_Name": "string",
+  "Identity_Slug": "string",
+  "Identity_UUID": "uuid",
+  "Identity_UserID": "uuid",
+  "Localization_Locale": "string",
+  "Network_DnsLabel": "string",
+  "Network_DomainName": "string",
+  "Network_IpAddress": "string",
+  "Network_Uri": "string",
+  "Network_Url": "string",
+  "Ordering_Rank": "integer",
+  "Temporal_CronExpression": "string",
+  "Temporal_Date": "date",
+  "Temporal_DateTime": "dateTime",
+  "Temporal_Days": "integer",
+  "Temporal_Duration": "duration",
+  "Temporal_Hours": "integer",
+  "Temporal_Milliseconds": "integer",
+  "Temporal_Minutes": "integer",
+  "Temporal_Month": "string",
+  "Temporal_Quarter": "string",
+  "Temporal_QuarterYear": "string",
+  "Temporal_RecurrenceRule": "string",
+  "Temporal_Seconds": "integer",
+  "Temporal_Time": "time",
+  "Temporal_TimeZone": "string",
+  "Temporal_Year": "string",
+  "Text_Markdown": "string",
+  "Text_Sql": "string",
+  "Version_SemVer": "string"
+};
