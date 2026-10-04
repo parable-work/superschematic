@@ -183,7 +183,9 @@ an encrypted operation
 ([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads))
 unless it is `@manualRouteRegistration`. The service's own handler for
 such an operation receives the envelope as its body and decrypts it, as
-the Go server's `PayloadDecryptor` does.
+the Go server's `PayloadDecryptor` does. The router has no multipart step
+either, so the build refuses an operation that uploads files unless it is
+`@manualRouteRegistration`; the service's handler reads the multipart body.
 
 An `@hmacVerified` operation's route
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its

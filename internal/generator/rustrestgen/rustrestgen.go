@@ -149,7 +149,8 @@ type Options struct {
 // out of its implementation interfaces: the router does not mount it, its
 // namespace trait has no method for it, and it gets no scaffold. The service
 // adds its route to the router build_router returns. The router has no step
-// that decrypts a request body, so an encrypted operation that is not
+// that decrypts a request body and none that reads a multipart one, so an
+// encrypted operation or a file upload that is not
 // @manualRouteRegistration is refused.
 //
 // An @hmacVerified operation's route runs its provider's WebhookVerifier
@@ -198,6 +199,12 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		// decrypts it.
 		if endpoint.Encrypted && !endpoint.ManualRouteRegistration {
 			return nil, fmt.Errorf("rustrestgen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result or argument); the Rust router has no decryption step, declare it @manualRouteRegistration and add its route in the service, which decrypts the payload", endpoint.Namespace, endpoint.Name)
+		}
+		// The Go router reads a file upload's multipart body. The Rust
+		// router's handlers take JSON, so axum would answer every upload
+		// 415; the service mounts the route and reads the multipart body.
+		if endpoint.HasFileUpload && !endpoint.ManualRouteRegistration {
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s uploads files; the Rust router has no multipart step, declare it @manualRouteRegistration and add its route in the service, which reads the multipart body", endpoint.Namespace, endpoint.Name)
 		}
 		ns := endpoint.Namespace
 		if ns == "" {
