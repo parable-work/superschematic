@@ -2033,7 +2033,7 @@ byte for byte. `superschematic migrate plan` takes the previous version as
 Markdown. The runner is the sixth Go module, `runtime/migrate/go`, with a
 Postgres and a SQLite driver and the binary `superschematic-migrate`
 (`runtime/migrate/README.md`). The reference page is "Schema migrations".
-Plan goldens cover 57 pairs; every pair and every `sqlgen` fixture
+Plan goldens cover 55 pairs; every pair and every `sqlgen` fixture
 converges on Postgres; the runner applies the compiler's vectors, resumes
 after a failure at every step, and serializes two runners. Rules settled
 as they were built: the model records a `@versioned` table's excluded
