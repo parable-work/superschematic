@@ -207,6 +207,25 @@ export function reachableTypes(document: Document, root: string): string[] {
   return seen;
 }
 
+/**
+ * runtimeDocument is a document as the schema runtime reads it to
+ * validate: a scalar the builtin catalog holds is the catalog's, whatever
+ * the document declares for it, as the Go loader fills it in
+ * (loader.hydrateScalarsFromRegistry) and the describe document writes it
+ * (tools/schema.ts). The form `superschematic format --to=json` writes
+ * declares each catalog scalar its fields use, by name and language
+ * primitive, which the schema runtime would otherwise read as the whole
+ * scalar: a Generic.JSON field declared so would take only strings.
+ */
+export function runtimeDocument(document: Document): Document {
+  const scalars = document.scalars ?? {};
+  const own = Object.keys(scalars).filter((name) => !hasOwn(BUILTIN_SCALARS, scalarKey(name)));
+  if (own.length === Object.keys(scalars).length) {
+    return document;
+  }
+  return { ...document, scalars: Object.fromEntries(own.map((name) => [name, scalars[name]])) };
+}
+
 /** pointer writes a JSON pointer from its tokens. */
 export function pointer(...tokens: string[]): string {
   return tokens.map((token) => `/${token.replace(/~/g, '~0').replace(/\//g, '~1')}`).join('');

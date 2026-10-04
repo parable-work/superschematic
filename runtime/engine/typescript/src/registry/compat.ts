@@ -16,15 +16,16 @@ the new version:
   values validate (descriptions, comments, defaults, UI metadata) pass.
 
 Types, enums and scalars no field reaches are free to change. Scalars are
-compared as the schema runtime reads them, the document's definition over
-the builtin catalog.
+compared as the schema runtime reads them to validate: a scalar the
+builtin catalog holds is the catalog's, whatever the document declares
+for it (runtimeDocument), and any other is the document's.
 */
 
 import { parseSchemaIR, type ScalarDef, type Schema } from '@superschematic/schema-runtime';
 import type { EnumDef, FieldDef, TypeDef, TypeRef } from '@superschematic/schema-ir/schema-file';
 
 import type { SchemaChange } from '../errors.js';
-import { arrayDepth, jsonKey, refKind, scalarKey, type SchemaModel } from './document.js';
+import { arrayDepth, jsonKey, refKind, runtimeDocument, scalarKey, type SchemaModel } from './document.js';
 
 /** incompatibleChanges lists every change from before to after that the rule refuses; empty means compatible. */
 export function incompatibleChanges(before: SchemaModel, after: SchemaModel): SchemaChange[] {
@@ -79,8 +80,8 @@ export function incompatibleChanges(before: SchemaModel, after: SchemaModel): Sc
   }
 
   if (scalars.size > 0) {
-    const oldSchema = parseSchemaIR(before.document);
-    const newSchema = parseSchemaIR(after.document);
+    const oldSchema = parseSchemaIR(runtimeDocument(before.document));
+    const newSchema = parseSchemaIR(runtimeDocument(after.document));
     for (const scalarName of [...scalars].sort()) {
       compareScalar(scalarName, oldSchema, newSchema, changes);
     }

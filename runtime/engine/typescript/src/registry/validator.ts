@@ -1,7 +1,8 @@
 /*
 The validator of one schema version. The schema runtime checks each
 field's value (presence, JSON type, scalar rules, enum membership, list
-rules), built with parseSchemaIR from the loaded document; a list field
+rules), built with parseSchemaIR from the loaded document, a catalog
+scalar the document declares read as the catalog's (runtimeDocument); a list field
 that holds no list and an object-typed field or list element that holds
 no object are its `type` issues. The engine checks two things the
 runtime does not, because the compatibility rule depends on what a
@@ -20,7 +21,7 @@ import { Runtime, parseSchemaIR } from '@superschematic/schema-runtime';
 import type { Document, FieldDef, TypeDef } from '@superschematic/schema-ir/schema-file';
 
 import type { ValidationIssue } from '../errors.js';
-import { arrayDepth, jsonKey, refKind, type SchemaModel } from './document.js';
+import { arrayDepth, jsonKey, refKind, runtimeDocument, type SchemaModel } from './document.js';
 
 type RuntimeErrors = ReturnType<Runtime['validateType']>;
 
@@ -36,7 +37,7 @@ export class SchemaValidator {
     readonly model: SchemaModel,
     private readonly behaviorFields: ReadonlyMap<string, string> = new Map()
   ) {
-    const schema = parseSchemaIR(model.document);
+    const schema = parseSchemaIR(runtimeDocument(model.document));
     this.runtime = new Runtime(schema);
     this.isInput = !Object.prototype.hasOwnProperty.call(schema.types ?? {}, model.instanceType);
   }
