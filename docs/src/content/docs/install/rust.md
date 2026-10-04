@@ -166,6 +166,16 @@ axum server crate `schemas-<name>-api` under `schemas/dist/api/<name>`. It
 needs `outputs.types` for Rust too: the crate depends on the types crate,
 and the build refuses the config without it.
 
+The Rust router does not yet enforce a route's auth or traffic controls.
+`@auth`, `@requirePermission`, `@requireOwnership`, an `Authenticated`
+set, `@rateLimit`, `@bodyLimit` and `@timeout` change nothing in the
+crate: every route `build_router` mounts answers any caller, whatever
+permission the schema lists, with no rate or time limit and only axum's
+default 2 MB cap on a JSON body. The Go and TypeScript servers enforce
+them. Until the Rust router does, check the caller in each implementation
+(`ctx.headers` carries the `authorization` header), or serve the router
+behind a layer or proxy that authenticates and bounds traffic.
+
 `build_router` mounts every operation except those declared
 `@manualRouteRegistration`, as the Go server's `RegisterRoutes` leaves
 them out. Such an operation has no method on its namespace's trait and no
