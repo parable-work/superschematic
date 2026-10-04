@@ -2065,6 +2065,31 @@ a schema without `@hmacVerified` is unchanged byte for byte.
 
 The rule is reversible until the first release.
 
+## D30. A stack model deploys a schema tree through platforms and provisioners
+
+superschematic generates the code of a tree of services but nothing that
+runs it. An engineer writes the server's `main`, the connection string, the
+deploy configuration and the CI by hand, and so restates what the schemas
+already say: `authDb` names an API's database, yet `examples/acme-shop`
+connects with `os.Getenv("DATABASE_URL")`. A distribution built a deploy
+family on the source tree. It works, but it holds its model in executable
+TypeScript, flattens typed references to strings and checks the same facts
+in three places. This entry records a general design before any of it is
+built. `docs/stack-model.md` is the design; its section 16 says what came
+from the distribution and what did not.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A stack is a service of a new core kind, `Stack`, read statically like any schema. It declares entry points, deployables that differ from the defaults, and environments. Each API service is one server and each DB service one database unless a declaration says otherwise. | An executable TypeScript model run under bun, as the source tree's is, which flattened references to strings and re-validated them in Go; an extension kind, whose output the core generators (env config, entrypoints) could not consume |
+| Wiring is derived. A server's database comes from each served API's `authDb`, and the one wiring fact a person writes is `calls`, as service handles. Each edge adds a typed field to the server's generated config, and the platform fills it. | A values document per environment that names each connection string, as `extensions/deploy` does; environment variables declared by hand in `@envVars` and checked for agreement |
+| Platforms (a deployable kind on a runtime), connectors (an edge between two platforms), targets (a bundle of platforms) and provisioners (a tool that applies resources) are four registrations. Cloud Run with Cloud SQL is the first target. GKE, hosted Kubernetes and Cloudflare are later registrations, not core edits. | One target per cloud owning everything, which ties Cloud Run to Cloud SQL and makes GKE a rewrite; a closed set of environment kinds, as the source tree has |
+| Platforms and connectors lower to a resource graph whose vocabulary is Pulumi's package schemas, pinned and checked in for offline validation. Provisioners read only that graph. | Platforms written as Pulumi Go components, which ties every platform to Pulumi; a vocabulary of our own, which would re-model every cloud resource |
+| Pulumi is the first provisioner. superschematic drives it from Go through the Automation API, renders the program as Pulumi YAML from the graph, and keeps state in a GCS bucket with a Cloud KMS secrets provider that bootstrap creates. Code outside the stack reaches its resources through a generated, typed binding over the stack's outputs. | A generated, typed Pulumi Go program, which needs schema-aware code generation and a compile on every run for checks the offline graph validation already makes; OpenTofu first, which superschematic could drive only by running its CLI; Config Connector or Crossplane, which need a cluster; Pulumi Cloud for state, an account beyond the GCP project |
+| superschematic generates each server's entrypoint and Dockerfile. The engineer writes the implementation interfaces and one constructor whose signature is generated. | Pointing a deployable at an image the engineer maintains, which leaves the wiring in a hand-written `main` |
+| Migrations belong to `sqlgen`, for Postgres and SQLite, and get their own entry. The stack model consumes an offline plan with hazards, and an apply step. | A schema-diff step inside the deploy, which SQLite (the engine, D16) could not share |
+| End-user auth and service auth are separate concepts. Platforms admit callers along edges, and an application-level service principal travels in its own header beside the end user's `Authorization`. | Service calls through the end-user auth provider with a minted token, which merges the two principals |
+
+Nothing here is built. The design is reversible until the first release.
 ## D28. No SDK has a method for a `@webhook` operation
 
 `@webhook` marks an operation a third party calls. The Go and TypeScript
