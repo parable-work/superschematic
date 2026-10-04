@@ -1,9 +1,19 @@
 // Behaviors the engine's tests register: a counter, a flag that holds an
 // instance still, and a tally that requires the counter and changes it
-// through its operation. The flag conflicts with the tally.
+// through its operation. The flag conflicts with the tally. A hold, which
+// fences writes by a generation they present as its precondition and
+// vetoes with codes, registers only where a test asks for it.
 import { readFileSync } from 'node:fs';
 
-import { BehaviorConfigError, BehaviorVetoError, defineBehavior, type BehaviorDeclaration, type Engine, type EngineOptions } from '../dist/index.js';
+import {
+  BehaviorConfigError,
+  BehaviorVetoError,
+  defineBehavior,
+  type BehaviorDeclaration,
+  type Engine,
+  type EngineOptions,
+  type GuardRequest,
+} from '../dist/index.js';
 import { alice, openTestEngine, schemaDocument, type Field } from './helpers.ts';
 
 /**
@@ -258,6 +268,107 @@ export const tally = defineBehavior({
 });
 
 export const testBehaviors = [counter, flag, tally];
+
+export const holdDeclaration: BehaviorDeclaration = {
+  name: 'test.Hold',
+  description: 'Numbers the instance by a generation, which a write presents as its precondition to fence itself.',
+  configSchema: { type: 'object', additionalProperties: false, properties: { require: { type: 'boolean' } } },
+  fields: [{ name: 'generation', description: 'The generation a write presents.' }],
+  operations: [
+    {
+      name: 'advance',
+      description: 'Moves the instance to its next generation.',
+      paramsSchema: noParams,
+      resultSchema: { type: 'object', required: ['generation'], properties: { generation: { type: 'integer' } } },
+      writes: true,
+    },
+    {
+      name: 'forward',
+      description: 'Advances another instance, presenting the generation given as its precondition.',
+      paramsSchema: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: { type: 'string' }, generation: { type: 'integer' } } },
+      resultSchema: { type: 'object', required: ['generation'], properties: { generation: { type: 'integer' } } },
+      writes: true,
+    },
+    {
+      name: 'refuse',
+      description: 'Refuses with a veto that carries the code and details given.',
+      paramsSchema: { type: 'object', additionalProperties: false, properties: { code: { type: 'string' }, details: {} } },
+      resultSchema: { type: 'null' },
+      writes: true,
+    },
+    {
+      name: 'peek',
+      description: 'Reads the generation.',
+      paramsSchema: noParams,
+      resultSchema: { type: 'object', required: ['generation'], properties: { generation: { type: 'integer' } } },
+    },
+  ],
+  preconditionSchema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['generation'],
+    properties: { generation: { type: 'integer', minimum: 0 } },
+  },
+  vetoes: [
+    { code: 'stale', description: 'The generation presented is not the instance\'s.' },
+    { code: 'required', description: 'With require, a write presents no generation.' },
+    { code: 'refused' },
+  ],
+};
+
+/** Every request test.Hold's guard is asked, in order; a test empties it. */
+export const holdRequests: GuardRequest[] = [];
+
+// A write that presents a generation other than the instance's is
+// refused; with require, so is one that presents none. A behavior's own
+// requests (caller) never present one.
+export const hold = defineBehavior<{ require?: boolean }>({
+  declaration: holdDeclaration,
+  migrations: [{ version: 1, name: 'generation', columns: { generation: { type: 'integer', notNull: true, default: 0 } } }],
+  guard(view, request) {
+    holdRequests.push(request);
+    if (request.kind === 'operation' && !request.writes) {
+      return undefined;
+    }
+    const current = Number(view.columns.get().generation);
+    const presented = request.precondition?.generation as number | undefined;
+    if (presented !== undefined && presented !== current) {
+      return { reason: `generation ${presented} is stale: the instance is at ${current}`, code: 'stale', details: { generation: presented, current } };
+    }
+    if (view.config.require === true && presented === undefined && (request.kind === 'delete' || request.caller === undefined)) {
+      return { reason: 'a write presents the generation', code: 'required' };
+    }
+    return undefined;
+  },
+  operations: {
+    advance(context) {
+      const generation = Number(context.columns.get().generation) + 1;
+      context.columns.set({ generation });
+      return { generation };
+    },
+    forward(context, params) {
+      const generation = params.generation as number | undefined;
+      return context.instances.invoke(
+        context.schema,
+        params.id as string,
+        'advance',
+        {},
+        generation === undefined ? undefined : { preconditions: { 'test.Hold': { generation } } }
+      );
+    },
+    refuse(context, params) {
+      throw new BehaviorVetoError('test.Hold', 'refuse', context.schema, context.id, {
+        reason: 'refused as asked',
+        ...(params.code === undefined ? {} : { code: params.code as string }),
+        ...(params.details === undefined ? {} : { details: params.details as Record<string, unknown> }),
+      });
+    },
+    peek: (context) => ({ generation: Number(context.columns.get().generation) }),
+  },
+  fields: {
+    generation: (view) => view.columns.get().generation,
+  },
+});
 
 /** An Item schema whose instance type composes behaviors: [{ name, config? }]. */
 export function itemDocument(behaviors: Array<{ name: string; config?: unknown }>, fields: Field[] = []): Record<string, unknown> {

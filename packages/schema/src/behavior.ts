@@ -187,7 +187,7 @@ export interface ReactionThen {
 export interface LeaseConfig {
   /** How long a lease lasts after its acquire or its last heartbeat, in milliseconds, at least 1000; 60000 when absent. */
   readonly ttlMs?: number;
-  /** How often the holder should send a heartbeat, in milliseconds, less than ttlMs; a third of ttlMs when absent. */
+  /** How often the holder should send a heartbeat, in milliseconds, at most half of ttlMs; a third of ttlMs when absent. */
   readonly heartbeatMs?: number;
   /** How often the engine's runner expires lapsed leases, in milliseconds, at least 1000; 5000 when absent. */
   readonly sweepMs?: number;
@@ -197,16 +197,22 @@ export interface LeaseConfig {
   readonly maxHoldField?: string;
   /**
    * Moves the instance's Workflow status, through transition, when a lease
-   * ends with the work unfinished: at an expiry, and at a release, while
-   * the status is one of from. Needs Workflow on the type.
+   * ends with the work unfinished: at an expiry, an abandon and a release,
+   * while the status is one of from. Needs Workflow on the type.
    */
   readonly onExpiry?: LeaseTransition;
-  /** How many expiries an instance may have before its lease cannot be acquired again. */
+  /** How many expiries an instance may have, abandons included, before its lease cannot be acquired again. */
   readonly maxExpiries?: number;
-  /** Used instead of onExpiry at the expiry that reaches maxExpiries, which it needs. */
+  /** Used instead of onExpiry at the expiry or abandon that reaches maxExpiries, which it needs. */
   readonly escalate?: LeaseTransition;
   /** Writing operations of the type's other behaviors, as `<Behavior>.<operation>`, that other principals may run while the lease is active. */
   readonly exempt?: readonly string[];
+  /**
+   * Refuses a write to an instance with an active lease that does not
+   * present the current token as Lease's precondition, the holder's own
+   * included, so every process of a principal fences its writes.
+   */
+  readonly requireToken?: boolean;
   /** The permission a principal needs to acquire a lease. */
   readonly acquirePermission?: string;
   /** The permission that releases another principal's lease, writes while another holds it, resets expiries, and sends directives when directPermission is absent. */

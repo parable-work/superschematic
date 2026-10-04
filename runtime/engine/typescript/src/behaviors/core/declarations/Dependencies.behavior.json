@@ -249,5 +249,23 @@
         "type": "object"
       }
     }
+  ],
+  "vetoes": [
+    {
+      "code": "blocked",
+      "description": "A Workflow transition into a gated state while a blocker is open; details lists the open blockers."
+    },
+    {
+      "code": "already_blocking",
+      "description": "addBlocker of an instance that already blocks this one."
+    },
+    {
+      "code": "cycle",
+      "description": "addBlocker of an edge that would close a cycle."
+    },
+    {
+      "code": "gated",
+      "description": "addBlocker of an open blocker while the instance is in a gated state."
+    }
   ]
 }

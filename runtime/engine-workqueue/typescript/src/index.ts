@@ -26,7 +26,7 @@ export type { AssignmentConfig } from './assignment.js';
 export { budget } from './budget.js';
 export type { BudgetConfig, BudgetMeter, MeterRecord, Overrun } from './budget.js';
 export { DEFAULT_SWEEP_MS, DEFAULT_TTL_MS, MAX_SWEEP, lease } from './lease.js';
-export type { DirectiveRecord, LeaseConfig, LeaseRecord, LeaseTransition } from './lease.js';
+export type { DirectiveRecord, ExpiryReason, LeaseConfig, LeaseEnd, LeaseRecord, LeaseTransition } from './lease.js';
 export { presence } from './presence.js';
 export type { PresenceConfig, PresenceRecord, PresenceTransition } from './presence.js';
 export { DEFAULT_MAX_CANDIDATES, queue } from './queue.js';

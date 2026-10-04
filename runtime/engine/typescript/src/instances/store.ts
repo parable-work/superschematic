@@ -9,7 +9,8 @@ transaction (events/log.ts).
 
 The behaviors of the live version run with every call (behaviors/): a
 create runs their initialize, then their afterChange; an update and a
-delete ask their guards first and run afterChange after; a read adds the
+delete ask their guards first, each with its entry of the caller's
+preconditions, and run afterChange after; a read adds the
 fields they declare beside the instance's own, which are theirs to change:
 a create or an update that sets one is refused (readOnly). invoke calls one
 of their operations: it checks the parameters, asks the policy for write
@@ -40,7 +41,17 @@ import type { PermissionMatcher } from '@superschematic/http-runtime';
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
 import type { BoundBehavior } from '../behaviors/composition.js';
 import type { FrozenJSON, GuardRequest, InstanceChange, Reference } from '../behaviors/behavior.js';
-import { Chain, Execution, SchemaExecution, checkParams, vetoReason, type Reach, type ReferenceSource } from '../behaviors/execution.js';
+import {
+  Chain,
+  Execution,
+  SchemaExecution,
+  checkParams,
+  checkPreconditions,
+  vetoOf,
+  type Preconditions,
+  type Reach,
+  type ReferenceSource,
+} from '../behaviors/execution.js';
 import { deepFreeze } from '../behaviors/json.js';
 import type { OperationSpec } from '../behaviors/registry.js';
 import { synchronous } from '../behaviors/storage.js';
@@ -98,11 +109,22 @@ export interface UpdateOptions extends InstanceTarget {
    * write transaction.
    */
   expectedSeq?: number;
+  /**
+   * Preconditions by behavior, such as `{ Lease: { token: 7 } }`: each
+   * entry names a behavior the type composes that declares a
+   * preconditionSchema, and holds what that schema accepts, or the call
+   * is refused (PreconditionsError, invalid_argument). Each behavior's
+   * guard gets its own entry as the request's precondition, and decides
+   * what it asserts. A patch that changes nothing asks no guard.
+   */
+  preconditions?: Readonly<Record<string, unknown>>;
 }
 
 export interface DeleteOptions extends InstanceTarget {
   /** As UpdateOptions.expectedSeq. */
   expectedSeq?: number;
+  /** As UpdateOptions.preconditions. */
+  preconditions?: Readonly<Record<string, unknown>>;
 }
 
 export interface InvokeOptions extends InstanceTarget {
@@ -113,6 +135,8 @@ export interface InvokeOptions extends InstanceTarget {
    * that writes.
    */
   expectedSeq?: number;
+  /** As UpdateOptions.preconditions, handed to the guards the operation asks. */
+  preconditions?: Readonly<Record<string, unknown>>;
 }
 
 /** Where a schema-level operation runs: a namespace, `default` when absent. */
@@ -163,7 +187,8 @@ export class InstanceStore {
     this.references = new ReferenceTable(storage);
     this.reach = {
       read: (chain, schema, ids, fields) => this.readFor(chain, schema, ids, fields),
-      invoke: (chain, from, schema, id, operation, params, writes) => this.invokeFor(chain, from, schema, id, operation, params, writes),
+      invoke: (chain, from, schema, id, operation, params, writes, preconditions) =>
+        this.invokeFor(chain, from, schema, id, operation, params, writes, preconditions),
       invokeSchema: (chain, from, schema, operation, params, writes) => this.invokeSchemaFor(chain, from, schema, operation, params, writes),
       create: (chain, from, schema, data, id, writes) => this.createFor(chain, from, schema, data, id, writes),
       allowRead: (chain, schema) => {
@@ -290,6 +315,7 @@ export class InstanceStore {
         if (readOnly.length > 0) {
           throw new InstanceValidationError(namespace, schema, record.version as number, readOnly);
         }
+        const preconditions = checkPreconditions(runtime.composition, schema, options.preconditions);
         const row = this.existing(namespace, schema, id);
         matchSeq(row, options.expectedSeq);
         const current = JSON.parse(String(row.data)) as Record<string, unknown>;
@@ -300,7 +326,7 @@ export class InstanceStore {
         }
         const execution = this.execution(chain, runtime, record, id, current, true);
         const frozenPatch = deepFreeze(JSON.parse(JSON.stringify(patch)) as FrozenJSON);
-        execution.guard({ kind: 'update', patch: frozenPatch, after: deepFreeze(JSON.parse(JSON.stringify(merged)) as FrozenJSON) });
+        execution.guard({ kind: 'update', patch: frozenPatch, after: deepFreeze(JSON.parse(JSON.stringify(merged)) as FrozenJSON) }, true, preconditions);
         const before = execution.fields();
         const seq = Number(row.seq) + 1;
         this.storage.run(
@@ -347,13 +373,14 @@ export class InstanceStore {
       chain.write(schema, id, () => {
         const record = this.live(namespace, schema);
         const runtime = this.catalog.runtimeOf(record);
+        const preconditions = checkPreconditions(runtime.composition, schema, options.preconditions);
         const row = this.row(namespace, schema, id);
         if (!row) {
           return false;
         }
         matchSeq(row, options.expectedSeq);
         const execution = this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, true);
-        execution.guard({ kind: 'delete' });
+        execution.guard({ kind: 'delete' }, true, preconditions);
         execution.deleting();
         this.storage.run('DELETE FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?', [namespace, schema, id]);
         execution.afterChange({ kind: 'delete' });
@@ -406,14 +433,15 @@ export class InstanceStore {
     this.access.require(principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
     checkExpectedSeq(options.expectedSeq);
     const checked = checkParams(spec, params);
+    const preconditions = checkPreconditions(runtime.composition, schema, options.preconditions);
     const chain = this.chain(principal, namespace);
     if (!spec.writes) {
       const row = this.existing(namespace, schema, id);
       matchSeq(row, options.expectedSeq);
-      const result = this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, false).invoke(spec, checked);
-      return { result, seq: Number(row.seq) };
+      const execution = this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, false);
+      return { result: execution.invoke(spec, checked, undefined, preconditions), seq: Number(row.seq) };
     }
-    return this.storage.transaction(() => this.runOperation(chain, record, runtime, spec, id, checked, options.expectedSeq));
+    return this.storage.transaction(() => this.runOperation(chain, record, runtime, spec, id, checked, options.expectedSeq, preconditions));
   }
 
   /**
@@ -488,7 +516,8 @@ export class InstanceStore {
     spec: OperationSpec,
     id: string,
     checked: FrozenJSON,
-    expectedSeq: number | undefined
+    expectedSeq: number | undefined,
+    preconditions: Preconditions | undefined
   ): OperationOutcome {
     const namespace = chain.namespace;
     const schema = record.name;
@@ -498,7 +527,7 @@ export class InstanceStore {
       const execution = this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, true);
       const own = execution.current();
       const before = execution.fields();
-      const result = execution.invoke(spec, checked);
+      const result = execution.invoke(spec, checked, undefined, preconditions);
       // An operation may change the instance's own fields through update();
       // afterChange gets them from before it, and the event carries the change.
       const ownAfter = execution.current();
@@ -563,10 +592,19 @@ export class InstanceStore {
   }
 
   // invokeFor runs an instance operation a behavior invokes, as the
-  // chain's principal, in the chain's transaction: a savepoint for a
-  // writing one, which a write running up the chain on the same instance
-  // refuses as a cycle.
-  private invokeFor(chain: Chain, from: string, schema: string, id: string, operation: string, params: unknown, writes: boolean): unknown {
+  // chain's principal, with the preconditions it gives, in the chain's
+  // transaction: a savepoint for a writing one, which a write running up
+  // the chain on the same instance refuses as a cycle.
+  private invokeFor(
+    chain: Chain,
+    from: string,
+    schema: string,
+    id: string,
+    operation: string,
+    params: unknown,
+    writes: boolean,
+    given: unknown
+  ): unknown {
     const namespace = chain.namespace;
     checkSchemaName(schema);
     const { record, runtime, spec } = this.operation(chain.principal, namespace, schema, operation, 'instance');
@@ -578,14 +616,15 @@ export class InstanceStore {
     }
     this.access.require(chain.principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
     const checked = checkParams(spec, params);
+    const preconditions = checkPreconditions(runtime.composition, schema, given);
     if (!spec.writes) {
       const row = this.existing(namespace, schema, id);
-      return this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, false).invoke(spec, checked);
+      return this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, false).invoke(spec, checked, undefined, preconditions);
     }
     if (chain.writing(schema, id)) {
       throw new BehaviorError(from, `invoking ${spec.name} of ${schema} ${id} is a cycle: a write of ${schema} ${id} is still running up this call`);
     }
-    return this.storage.transaction(() => this.runOperation(chain, record, runtime, spec, id, checked, undefined)).result;
+    return this.storage.transaction(() => this.runOperation(chain, record, runtime, spec, id, checked, undefined, preconditions)).result;
   }
 
   // createFor creates an instance a behavior asks for, as the chain's
@@ -716,9 +755,9 @@ export class InstanceStore {
         synchronous(incoming.behavior, 'guardReference', answer);
         return answer;
       });
-      const reason = vetoReason(incoming.behavior, 'guardReference', answer);
-      if (reason !== undefined) {
-        throw new BehaviorVetoError(incoming.behavior, action, schema, id, reason);
+      const veto = vetoOf(source.bound.behavior, 'guardReference', answer);
+      if (veto !== undefined) {
+        throw new BehaviorVetoError(incoming.behavior, action, schema, id, veto);
       }
     }
   }

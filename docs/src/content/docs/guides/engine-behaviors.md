@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; schema-level operations; the runner that runs reactions and schedules; and the core's Dependencies, Links, Rollups, Search and Reactions behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; and the core's Dependencies, Links, Rollups, Search and Reactions behaviors.
 sidebar:
   order: 7
 ---
@@ -131,6 +131,42 @@ it invokes and the instances it creates, each with its own event. Each
 route answers 404 for an operation of the other scope. Over MCP, the tool
 takes the operation's parameters and no instance id.
 
+## Refusals and preconditions
+
+A behavior that refuses a change answers 409 `vetoed`. Its problem's
+`details` name the behavior, what it refused and why, and, where a client
+would branch on it, a code the behavior's declaration lists, with
+details of its own:
+
+```json
+{ "status": 409, "code": "vetoed",
+  "details": { "behavior": "Workflow", "action": "transition", "reason": "no transition leads from todo to done; from todo it can move to doing",
+               "code": "transition_not_allowed", "details": { "from": "todo", "to": "done", "allowed": ["doing"] } } }
+```
+
+The describe document lists each behavior's codes. A code is read beside
+`details.behavior`, so `blocked` is Dependencies' and `token_stale`
+Lease's. An MCP tool error carries the same problem.
+
+A write can carry preconditions, each behavior's entry by its name, for
+that behavior's guard to check: Lease's is `{ token }`, so a worker's
+writes are refused once its lease is gone. Over HTTP they are the
+`Preconditions` header on PATCH, DELETE and an operation; over MCP the
+`preconditions` argument; in TypeScript the `preconditions` option:
+
+```
+PATCH /namespaces/default/schemas/jobs/instances/{id}   Preconditions: {"Lease": {"token": 3}}
+```
+
+```ts
+engine.instances.invoke(worker, 'jobs', id, 'transition', { to: 'done' }, { preconditions: { Lease: { token: 3 } } });
+```
+
+An entry for a behavior the type does not compose, or that declares no
+precondition, or that its schema refuses, is 400 `invalid_argument` with
+`details.issues`; a precondition the guard finds false is that
+behavior's 409 veto.
+
 ## The runner
 
 Some work happens after a change commits rather than inside it:
@@ -192,7 +228,7 @@ cannot be done while a task it waits on is open.
 | Config | `schemas`: the schemas a blocker may belong to, each composing Workflow (the type's own when absent); `gatedStates`: the terminal states a transition into waits on (every terminal state when absent) |
 | Field | `blocked`: whether any blocker is not yet in a terminal state of its own Workflow |
 | Operations | `addBlocker({ schema?, id })`, `removeBlocker({ schema?, id })`, and the read-only `listBlockers` and `listDependents`, which page with `limit` and `cursor` |
-| Guard | a transition into a gated state while `blocked` is `vetoed` (409), naming the open blockers |
+| Guard | a transition into a gated state while `blocked` is `vetoed` (409) with `details.code` `blocked`, naming the open blockers, which `details.details.blockers` lists |
 
 ```ts
 engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });

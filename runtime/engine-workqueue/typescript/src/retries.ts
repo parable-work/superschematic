@@ -387,9 +387,9 @@ export const retries = defineBehavior<RetriesConfig>({
     }
     if (operation === 'Workflow.transition') {
       const to = view.config.exhaustedState;
-      return request.params.to === to ? undefined : `its retries are exhausted, so its status moves only to ${to}`;
+      return request.params.to === to ? undefined : { reason: `its retries are exhausted, so its status moves only to ${to}`, code: 'exhausted' };
     }
-    return 'its retries are exhausted, so it is not taken again';
+    return { reason: 'its retries are exhausted, so it is not taken again', code: 'exhausted' };
   },
 
   operations: {
@@ -403,7 +403,10 @@ export const retries = defineBehavior<RetriesConfig>({
       }
       const state = stateOf(context);
       if (state.exhausted) {
-        throw new BehaviorVetoError(NAME, 'recordAttempt', context.schema, context.id, `its retries are exhausted${state.stuck ? ', stuck on one failure' : ''}`);
+        throw new BehaviorVetoError(NAME, 'recordAttempt', context.schema, context.id, {
+          reason: `its retries are exhausted${state.stuck ? ', stuck on one failure' : ''}`,
+          code: 'exhausted',
+        });
       }
       const failure = params.failure as string | undefined;
       const score = params.score as number | undefined;

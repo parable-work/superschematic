@@ -27,7 +27,9 @@ const engine = openEngine({ path: 'jobs.db', policy, behaviors: workQueueBehavio
 engine.runner.start();   // the lease sweep runs on the runner
 
 const { claimed } = engine.instances.invokeSchema(worker, 'jobs', 'claimNext', { match: { topic: 'search' } });
-engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { token: claimed.token });
+const fenced = { preconditions: { Lease: { token: claimed.token } } };
+engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', {}, fenced);
+engine.instances.invoke(worker, 'jobs', claimed.id, 'transition', { to: 'done' }, fenced);
 ```
 
 ## Registering the behaviors
@@ -72,13 +74,14 @@ and numbered by a fencing token.
 
 | | |
 | --- | --- |
-| Config | `ttlMs` (at least 1000; 60000 when absent), `heartbeatMs` (less than `ttlMs`; a third of it when absent), `sweepMs` (at least 1000; 5000 when absent), `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; all optional |
-| Fields | `lease`: `{ holder, token, acquiredAt, expiresAt, active, expiries }`, `holder`, `acquiredAt` and `expiresAt` null when it is free |
-| Operations | `acquire({ ttlMs? })` -> `{ token, expiresAt, heartbeatMs }`; `heartbeat({ token })` -> `{ expiresAt, directives }`; `release({ token? })` -> `{}`; `expire({ holder? })` -> `{ expired }`; `direct({ name, data? })` -> `{ id }`; `acknowledge({ token, ids })` -> `{}`; `resetExpiries()` -> `{ expiries }`; schema-level `expireHolder({ holder })` -> `{ expired }`. All write |
+| Config | `ttlMs` (at least 1000; 60000 when absent), `heartbeatMs` (at most half of `ttlMs`; a third of it when absent), `sweepMs` (at least 1000; 5000 when absent), `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`; all optional |
+| Precondition | `{ token }`, the lease's current token: `preconditions: { Lease: { token } }` on any write |
+| Fields | `lease`: `{ holder, token, acquiredAt, expiresAt, active, expiries, ended }`, `holder`, `acquiredAt` and `expiresAt` null when it is free; `ended`, `{ reason, at }`, how the last lease ended, null while one is held |
+| Operations | `acquire({ ttlMs? })` -> `{ token, expiresAt, heartbeatMs }`; `heartbeat()` -> `{ expiresAt, directives }`; `release({ abandon? })` -> `{}`; `expire({ holder? })` -> `{ expired, reason? }`; `direct({ name, data? })` -> `{ id }`; `acknowledge({ ids })` -> `{}`; `resetExpiries()` -> `{ expiries }`; schema-level `expireHolder({ holder })` -> `{ expired, reasons }`. All write; `heartbeat`, `acknowledge` and the holder's `release` present the token |
 | Schedules | `expire`, every `sweepMs`, on the engine's runner |
-| Guards | while a lease is active, an update, a delete or a writing operation of another behavior by any principal but the holder is `vetoed`, except an `exempt` operation, a read-only one, Queue's `refresh` and a principal with `overridePermission`; once the lease has lapsed, the holder's are; while a lease is held, a change to `maxHoldField` without `overridePermission` is `vetoed`; a principal's `direct` needs its permission (below) |
-| Refusals | `acquire` while a lease is active, the holder's own included, and at `maxExpiries` (`vetoed`), without `acquirePermission` (`forbidden`), with a `ttlMs` past the config's (`invalid_argument`); `heartbeat` and `acknowledge` by another principal, with another token, or once the lease has lapsed (`vetoed`); `release` by another principal (`forbidden` without `overridePermission` when the config names one, `vetoed` when it names none), with another token or once the lease has lapsed (`vetoed`), by the holder without its token (`invalid_argument`); `direct` by a principal without its permission (`forbidden`) or with no permission in the config (`vetoed`), and with no active lease (`vetoed`); `expire` with a `holder`, and `expireHolder`, without `overridePermission` (`forbidden`, the config naming none included); `acknowledge` of an id not sent under the token (`invalid_argument`); `resetExpiries` without `overridePermission` (`forbidden`, or `vetoed` when the config names none) |
-| Events | each operation's event; a heartbeat is a write, with its event |
+| Guards | a write that presents a token other than the current one, whoever calls (`token_stale`); while a lease is active, an update, a delete or a writing operation of another behavior by any principal but the holder (`held_by_another`), except an `exempt` operation, a read-only one, Queue's `refresh` and a principal with `overridePermission`; with `requireToken`, such a write by the holder that presents no token (`token_required`); once the lease has lapsed, the holder's writes (`lapsed`); while a lease is held, a change to `maxHoldField` without `overridePermission` (`hold_limit_fixed`); a principal's `direct` needs its permission (below). All `vetoed` |
+| Refusals | `acquire` while a lease is active (`held_by_caller`, `held_by_another`) and at `maxExpiries` (`max_expiries`, details `{ expiries, maxExpiries }`), without `acquirePermission` (`forbidden`), with a `ttlMs` past the config's (`invalid_argument`); `heartbeat` and `acknowledge` with no lease (`not_leased`), by another principal (`not_holder`), with no token (`token_required`) or once the lease has lapsed (`lapsed`); `release` with no lease (`not_leased`), by another principal (`forbidden` without `overridePermission` when the config names one, `not_holder` when it names none), by the holder with no token (`token_required`), once the lease has lapsed (`lapsed`); `direct` by a principal without its permission (`forbidden`) or with no permission in the config (`not_configured`), and with no active lease (`not_leased`, `lapsed`); `expire` with a `holder`, and `expireHolder`, without `overridePermission` (`forbidden`, the config naming none included); `acknowledge` of an id not sent under the token (`invalid_argument`); `resetExpiries` without `overridePermission` (`forbidden`, or `not_configured` when the config names none). Each code is a veto's (`vetoed`) |
+| Events | each operation's event; a heartbeat is a write, with its event; the event of a release, an abandon and an expiry carries `lease.ended` in its patch |
 | `configChange` | any config may change. Added to a schema with instances, which start free at token 0; not removed from one, since their leases and directives would stay behind |
 
 ```json
@@ -96,13 +99,40 @@ and numbered by a fencing token.
 
 The token is a per-instance integer that starts at 0 and advances at
 every acquire, every release and every expiry, so an instance and a token
-name one lease. `acquire` returns it; `heartbeat`, `release` and
-`acknowledge` take it and refuse any other, and refuse every principal
-but the holder. It is not a capability: the `lease` field shows it to
-every reader, and the guard checks who calls, not what token they hold.
-It tells two leases of one principal apart, so a worker's process that
-lost its lease cannot renew or release the one the same principal took
-again.
+name one lease. `acquire` returns it, and a caller presents it as Lease's
+precondition, the one way any write presents it:
+
+```ts
+const fenced = { preconditions: { Lease: { token } } };
+engine.instances.invoke(worker, 'jobs', id, 'heartbeat', {}, fenced);
+engine.instances.update(worker, 'jobs', id, { title: 'Indexed' }, fenced);
+```
+
+Over HTTP it is the `Preconditions` header, `{"Lease": {"token": 7}}`,
+and over MCP the tools' `preconditions` argument
+(`runtime/engine/README.md`, "Vetoes and preconditions").
+
+- The guard refuses a write that presents a token other than the current
+  one, whoever calls (`token_stale`, details `{ token, current }`), on a
+  free instance too. A worker fleet usually runs as one principal: a
+  process whose lease lapsed and was taken again by a sibling holds a
+  stale token, and its writes are refused, while the sibling's go
+  through. A lease that ended leaves its token stale, and the current
+  token on a free instance makes `acquire` a compare-and-set.
+- `heartbeat`, `acknowledge` and the holder's `release` need the token
+  (`token_required`) and the holder. A principal with
+  `overridePermission` releases without one.
+- With `requireToken`, every other write under an active lease needs it
+  too, the holder's own included (`token_required`). Exempt and read-only
+  operations, Queue's `refresh`, a request a behavior's own code makes,
+  Lease's own operations (the runner's `expire` among them) and a
+  principal with `overridePermission` are not held to it. Without it, a
+  write that presents no token is its caller's, and the guard checks who
+  calls.
+
+It is not a capability: the `lease` field shows it to every reader, and
+the guard still checks who calls. It fences one principal's processes
+from each other; principals are fenced by who holds the lease.
 
 ### Active, lapsed and expired
 
@@ -114,13 +144,17 @@ hold, so a lease is never held longer, however often it is renewed. Each
 lease keeps the length it was acquired with: `acquire({ ttlMs })` takes a
 length up to the config's, and returns `heartbeatMs` scaled to it.
 
+`heartbeatMs` is at most half of `ttlMs`, so a heartbeat can be late by
+a whole interval and the lease holds; `parseConfig` refuses more.
+
 A lease past either time has lapsed. It gives its holder nothing: the
-holder's heartbeat, release, acknowledgement and writes are refused, and
-other principals' writes go through as on a free instance. Only its
-expiry can follow. `expire` applies it, and any principal who may write
-the instance may call it; on an instance whose lease is free or active it
-returns `{ expired: false }`, and its event is all it writes. `acquire` over a
-lapsed lease applies its expiry first, and so does Queue's `claim`.
+holder's heartbeat, release, acknowledgement and writes are refused
+(`lapsed`), and other principals' writes go through as on a free
+instance. Only its expiry can follow. `expire` applies it, and any
+principal who may write the instance may call it; on an instance whose
+lease is free or active it returns `{ expired: false }`, and its event is
+all it writes. `acquire` over a lapsed lease applies its expiry first,
+and so does Queue's `claim`.
 
 An expiry clears the holder, advances the token and counts the expiry,
 unless the instance is in a terminal state of its Workflow: a holder that
@@ -137,14 +171,30 @@ leaves the lease lapsed. `parseConfig` checks that the type lists
 Workflow, that every state is one of its states, and that a transition
 leads from each `from` state to the target.
 
-Once the instance has had `maxExpiries` expiries, `acquire` is refused,
-and so is an acquire whose expiry of a lapsed lease would reach the cap.
-`resetExpiries`, which needs `overridePermission`, sets the count back to
-0.
+Once the instance has had `maxExpiries` expiries, `acquire` is refused
+(`max_expiries`), and so is an acquire whose expiry of a lapsed lease
+would reach the cap. `resetExpiries`, which needs `overridePermission`,
+sets the count back to 0.
 
 A release applies `onExpiry` too, without counting an expiry, so a holder
-that gives up leaves its work where it can be taken again, and one that
-finished it leaves it finished.
+that hands work back leaves it where it can be taken again, and one that
+finished it leaves it finished. A holder that gives the work up as
+failed releases with `abandon: true`: that counts as an expiry, as the
+lapse of its lease would, `onExpiry` or at the cap `escalate` moves the
+status, and an instance a worker keeps taking and dropping reaches
+`maxExpiries` instead of looping. An abandon in a terminal state does not
+count.
+
+An expiry says why (`reason`): `ttl`, its holder stopped renewing it;
+`maxHold`, it reached its longest hold, so its holder renewed it and did
+not finish; `holder`, it was active and `expire({ holder })` or
+`expireHolder` expired it by its holder's name (a lapsed lease expired
+that way gives its lapse). `expireHolder` returns `{ expired, reasons }`,
+how many for each reason. The `lease` field's `ended` records how the
+last lease ended, `{ reason, at }`, with `release` and `abandon` beside
+the expiry reasons, and `acquire` clears it, so the operation event of
+every end carries it in its patch. An expiry that an `acquire` or a
+claim applies first shows only as the count and the token.
 
 ### Expiry on the runner, and a gone holder
 
@@ -171,9 +221,12 @@ expired; a presence check calls it as the runner's principal. Both need
 
 ### The guard
 
-While a lease is active, the guard refuses an update, a delete and every
-writing operation of another behavior by any principal but the holder,
-reading `writes` from the operation's guard request. These pass:
+First, the guard refuses a write that presents a stale token, whoever
+calls (above). While a lease is active, it refuses an update, a delete
+and every writing operation of another behavior by any principal but the
+holder (`held_by_another`), reading `writes` from the operation's guard
+request, and with `requireToken` the holder's that presents no token.
+These pass:
 
 - an operation `exempt` lists, as `<Behavior>.<operation>` of a behavior
   the type lists (`parseConfig` checks the behavior);
@@ -208,7 +261,7 @@ usage runs over tells the holder so as the principal that recorded the
 usage. It attaches to the current token and is numbered within it, 1, 2, 3, ....
 Every heartbeat returns the directives of its lease that are not
 acknowledged, oldest first, as `{ id, name, data?, createdAt, createdBy }`;
-delivery is at least once, and `acknowledge({ token, ids })` stops it.
+delivery is at least once, and `acknowledge({ ids })`, with the token, stops it.
 When the token advances, by a release, an expiry or a new acquire, the
 directives of the lease it ends are deleted, so none reaches the next
 holder. Deleting the instance deletes its directives.
@@ -576,8 +629,8 @@ in time: an instance that may run again may be taken again at once.
 | Config | `classes` (required, by name: `{ attempts }` of at least 1, or `"terminal"`), `totalAttempts` (required, at least 1), `exhaustedState` (required, a Workflow state), `limitsField` (an object field of the type), `keepBest` (`{ minDelta?, neverRegress? }`), `stuckAfter` (at least 1), `resultField` (a field of the type), `from` (Workflow states, each with a transition to `exhaustedState`), `permission` |
 | Fields | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
 | Operations | `recordAttempt({ failure?, score?, result?, signature?, predicates? })` -> `{ failure, score, kept, total, classAttempts, exhausted, stuck }`, writes |
-| Guards | once exhausted, a `Workflow` transition into any state but `exhaustedState`, Lease's `acquire` and Queue's `claim`: `vetoed` |
-| Refusals | an unknown class, and a result without `resultField` (`invalid_argument`); a result the field's type refuses (`invalid_instance`); an attempt once exhausted (`vetoed`); without `permission` (`forbidden`) |
+| Guards | once exhausted, a `Workflow` transition into any state but `exhaustedState`, Lease's `acquire` and Queue's `claim`: `vetoed` (`exhausted`) |
+| Refusals | an unknown class, and a result without `resultField` (`invalid_argument`); a result the field's type refuses (`invalid_instance`); an attempt once exhausted (`vetoed`, `exhausted`); without `permission` (`forbidden`) |
 | Events | each attempt's operation event, by its caller |
 | `configChange` | any config may change. Added to a schema with instances, which start with no attempts; not removed from one |
 
@@ -636,7 +689,7 @@ resets it.
 
 `recordAttempt` needs `permission` when the config names one, and while
 a lease is active, `Lease`'s guard keeps it to the holder, as any writing
-operation.
+operation, and to the current token when the caller presents one.
 
 ## Development
 

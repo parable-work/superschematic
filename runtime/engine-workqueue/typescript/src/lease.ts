@@ -2,12 +2,16 @@
 Lease, an exclusive, time-bounded lease on an instance (D16), held by one
 principal and numbered by a fencing token. The token is a per-instance
 integer that starts at 0 and advances at every acquire, every release and
-every applied expiry, so (instance, token) names one lease: a heartbeat,
-a release or an acknowledgement under any other token is refused, and so
-is one from a principal that does not hold the lease. The token is no
-capability: the guard below checks who calls, and the token tells two
-leases of one principal apart, a worker's process that lost its lease
-from the one that took a new one.
+every applied expiry, so (instance, token) names one lease. A caller
+presents it as Lease's precondition (`preconditions: { Lease: { token } }`),
+the one way any write presents it: the guard refuses a write that
+presents another token, whoever calls (token_stale), so a process of the
+holder's principal that lost its lease cannot write once a sibling holds
+a new one. A heartbeat, an acknowledgement and the holder's release need
+the token; with requireToken, so does every other write while a lease is
+active, the holder's own included. The token is no capability: the lease
+field shows it to every reader, and the guard still checks who calls. It
+fences a principal's processes from each other, not principals.
 
 A lease is active while it is held, before its expiry time and within its
 longest hold since acquire (maxHoldMs, or the instance's own maxHoldField).
@@ -20,8 +24,9 @@ sweepMs as its principal, calls it on every lapsed lease of the schema,
 found through the lease columns across the schema (sql.instances()) and
 their index. A principal with overridePermission expires a given holder's
 lease at once, active or not (expire with holder), and every lease that
-holder has on the schema (expireHolder), for a holder that is gone. An expiry clears the holder, advances the token, counts the expiry
-unless the instance is in a terminal state of its Workflow (a holder that
+holder has on the schema (expireHolder), for a holder that is gone. An
+expiry clears the holder, advances the token, counts the expiry unless
+the instance is in a terminal state of its Workflow (a holder that
 finished and died before releasing has not failed), and moves the status
 with onExpiry, or escalate at the expiry that reaches maxExpiries, only
 from the config's from states and only through Workflow's transition,
@@ -29,12 +34,20 @@ whose guards run. A transition a guard vetoes leaves the status as it is
 and the lease expired. Once the instance has had maxExpiries expiries, it
 cannot be leased until a principal with overridePermission resets them.
 A release applies onExpiry too, without counting an expiry, so a holder
-that gives up leaves the work where it can be taken again.
+that hands work back leaves it where it can be taken again; a release
+with abandon is the holder giving the work up as failed, and counts as
+an expiry, escalate included, so a worker that keeps taking and dropping
+an instance reaches maxExpiries. The lease field's ended says how the
+last lease ended: release, abandon, or the expiry's reason, ttl (its
+holder stopped renewing it), maxHold (it reached its longest hold) or
+holder (it was active and expired by its holder's name). acquire clears
+it, so every end's event carries it.
 
 The guard keeps a lease exclusive. While a lease is active it refuses an
 update, a delete and every writing operation of another behavior by any
 principal but the holder, except an operation the config exempts and a
-principal with overridePermission. A read-only operation passes, and so
+principal with overridePermission; with requireToken, it refuses the
+holder's too unless they present the token. A read-only operation passes, and so
 does a request a behavior's own code makes (call() or update(), which
 name it as caller): the operation that made it was asked already. Queue's
 refresh passes too: it only recomputes Queue's own copies of the
@@ -56,6 +69,10 @@ the principal it runs for, with none, as a budget does when its usage
 runs over. When the token advances, the directives
 of the lease it ends are deleted, so none reaches the next holder.
 
+Every refusal is a veto with a code the declaration lists: held_by_another,
+held_by_caller, not_leased, not_holder, lapsed, token_stale,
+token_required, max_expiries, hold_limit_fixed and not_configured.
+
 configChange: any config may change. Lease can be added to a schema that
 has instances, which start free at token 0, and cannot be removed from
 one: the leases and directives its instances hold would stay behind.
@@ -63,6 +80,7 @@ one: the leases and directives its instances hold would stay behind.
 
 import {
   BehaviorConfigError,
+  BehaviorError,
   BehaviorVetoError,
   EngineError,
   OperationParamsError,
@@ -71,6 +89,8 @@ import {
   type BehaviorScope,
   type ConfigTarget,
   type FrozenJSON,
+  type GuardAnswer,
+  type GuardRequest,
   type InstanceView,
   type OperationContext,
   type Row,
@@ -92,6 +112,12 @@ const BATCH = 100;
 /** The most leases one run of the expire schedule expires; the rest wait for the next. */
 export const MAX_SWEEP = 1000;
 
+/** Why expire applied an expiry. */
+export type ExpiryReason = 'ttl' | 'maxHold' | 'holder';
+
+/** How a lease ended: a release, an abandon, or an expiry for its reason. */
+export type LeaseEnd = 'release' | 'abandon' | ExpiryReason;
+
 /** A move of the status a lease's end makes: to transition, from one of from. */
 export interface LeaseTransition {
   readonly transition: string;
@@ -110,6 +136,8 @@ export interface LeaseConfig {
   readonly escalate?: LeaseTransition;
   /** The writing operations other principals may run while a lease is active, as `<Behavior>.<operation>`. */
   readonly exempt: readonly string[];
+  /** Whether every write under an active lease presents the current token. */
+  readonly requireToken: boolean;
   readonly acquirePermission?: string;
   readonly overridePermission?: string;
   readonly directPermission?: string;
@@ -125,8 +153,10 @@ export interface LeaseRecord {
   readonly expiresAt: number | null;
   /** Whether it is held and neither expired nor past its longest hold. */
   readonly active: boolean;
-  /** How many expiries the instance has had. */
+  /** How many expiries the instance has had, abandons included. */
   readonly expiries: number;
+  /** How and when the last lease ended; null while one is held, and before the first. */
+  readonly ended: { readonly reason: LeaseEnd; readonly at: number } | null;
 }
 
 /** A directive, as heartbeat returns it. */
@@ -150,6 +180,8 @@ interface Held {
   /** The length the lease was acquired with, which each heartbeat renews it by. */
   readonly ttlMs: number | null;
   readonly expiries: number;
+  readonly endedReason: LeaseEnd | null;
+  readonly endedAt: number | null;
 }
 
 function key(view: InstanceView<unknown>): [string, string, string] {
@@ -166,6 +198,8 @@ function held(view: InstanceView<LeaseConfig>): Held {
     expiresAt: number(columns.expires_at),
     ttlMs: number(columns.ttl_ms),
     expiries: Number(columns.expiries),
+    endedReason: columns.ended_reason === null || columns.ended_reason === undefined ? null : (String(columns.ended_reason) as LeaseEnd),
+    endedAt: number(columns.ended_at),
   };
 }
 
@@ -195,12 +229,53 @@ function isActive(view: InstanceView<LeaseConfig>, lease: Held): boolean {
   return lease.holder !== null && view.now < deadline(view, lease);
 }
 
+// lapseReason is why a held lease stopped being active: its longest hold
+// when that came no later than its expiry time, else its expiry time.
+function lapseReason(view: InstanceView<LeaseConfig>, lease: Held): ExpiryReason {
+  const limit = holdLimit(view);
+  return limit !== undefined && (lease.acquiredAt ?? 0) + limit <= (lease.expiresAt ?? 0) ? 'maxHold' : 'ttl';
+}
+
 function time(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-function vetoed(view: InstanceView<unknown>, operation: string, reason: string): BehaviorVetoError {
-  return new BehaviorVetoError(NAME, operation, view.schema, view.id, reason);
+/** The codes Lease's vetoes carry, as its declaration lists them. */
+type LeaseVeto =
+  | 'held_by_another'
+  | 'held_by_caller'
+  | 'not_leased'
+  | 'not_holder'
+  | 'lapsed'
+  | 'token_stale'
+  | 'token_required'
+  | 'max_expiries'
+  | 'hold_limit_fixed'
+  | 'not_configured';
+
+function veto(reason: string, code: LeaseVeto, details?: Record<string, unknown>): GuardAnswer {
+  return details === undefined ? { reason, code } : { reason, code, details };
+}
+
+function vetoed(view: InstanceView<unknown>, operation: string, reason: string, code: LeaseVeto, details?: Record<string, unknown>): BehaviorVetoError {
+  return new BehaviorVetoError(NAME, operation, view.schema, view.id, details === undefined ? { reason, code } : { reason, code, details });
+}
+
+// presented is the token a request presents as Lease's precondition.
+function presented(request: GuardRequest): number | undefined {
+  const token = request.precondition?.token;
+  return typeof token === 'number' ? token : undefined;
+}
+
+function stale(token: number, lease: Held): GuardAnswer {
+  return veto(`token ${token} is stale: the lease is at token ${lease.token}`, 'token_stale', { token, current: lease.token });
+}
+
+// lapsed is the veto of a call that needs an active lease, its reason
+// written for the time the lease lapsed.
+function lapsed(view: InstanceView<LeaseConfig>, lease: Held, reason: (at: string) => string): GuardAnswer {
+  const at = deadline(view, lease);
+  return veto(reason(time(at)), 'lapsed', { expiredAt: at });
 }
 
 function forbidden(view: InstanceView<unknown>, what: string, permission: string): EngineError {
@@ -239,10 +314,20 @@ function counts(status: Status | undefined): boolean {
   return status === undefined || !isTerminalState(status.flow, status.status);
 }
 
-// end clears the holder and advances the token, deleting the directives
-// of the lease it ends, so none of them reaches the next holder.
-function end(context: OperationContext<LeaseConfig>, lease: Held, expiries: number): void {
-  context.columns.set({ holder: null, token: lease.token + 1, acquired_at: null, expires_at: null, ttl_ms: null, expiries });
+// end clears the holder and advances the token, recording how the lease
+// ended, and deletes the directives of the lease it ends, so none of them
+// reaches the next holder.
+function end(context: OperationContext<LeaseConfig>, lease: Held, expiries: number, ended: LeaseEnd): void {
+  context.columns.set({
+    holder: null,
+    token: lease.token + 1,
+    acquired_at: null,
+    expires_at: null,
+    ttl_ms: null,
+    expiries,
+    ended_reason: ended,
+    ended_at: context.now,
+  });
   context.sql.run(`DELETE FROM ${context.sql.table('directives')} WHERE namespace = ? AND schema = ? AND id = ? AND token = ?`, [
     ...key(context),
     lease.token,
@@ -265,32 +350,80 @@ function move(context: OperationContext<LeaseConfig>, rule: LeaseTransition | un
   }
 }
 
-// applyExpiry ends a lapsed lease as an expiry: the one code expire and
-// acquire share.
-function applyExpiry(context: OperationContext<LeaseConfig>, lease: Held): void {
+// applyExpiry ends a lease as an expiry: the one code expire, acquire and
+// an abandon share.
+function applyExpiry(context: OperationContext<LeaseConfig>, lease: Held, ended: LeaseEnd): void {
   const { config } = context;
   const status = statusOf(context);
   const counted = counts(status);
   const expiries = lease.expiries + (counted ? 1 : 0);
-  end(context, lease, expiries);
+  end(context, lease, expiries, ended);
   const capped = counted && config.maxExpiries !== undefined && expiries >= config.maxExpiries;
   move(context, capped && config.escalate !== undefined ? config.escalate : config.onExpiry, status);
 }
 
-// checkHolder holds heartbeat and acknowledge to the holder of an active
-// lease, with its current token.
-function checkHolder(context: OperationContext<LeaseConfig>, operation: string, lease: Held, token: number): void {
+// holding holds heartbeat and acknowledge to the holder of an active
+// lease, presenting its token; the guard has refused a stale one.
+function holding(view: InstanceView<LeaseConfig>, lease: Held, token: number | undefined): GuardAnswer {
   if (lease.holder === null) {
-    throw vetoed(context, operation, 'it is not leased');
+    return veto('it is not leased', 'not_leased');
   }
-  if (lease.holder !== context.principal.subject) {
-    throw vetoed(context, operation, 'another principal holds its lease');
+  if (lease.holder !== view.principal.subject) {
+    return veto('another principal holds its lease', 'not_holder');
   }
-  if (token !== lease.token) {
-    throw vetoed(context, operation, `token ${token} is stale: the lease is at token ${lease.token}`);
+  if (token === undefined) {
+    return veto("the holder presents its token as Lease's precondition", 'token_required');
   }
-  if (!isActive(context, lease)) {
-    throw vetoed(context, operation, `its lease expired at ${time(deadline(context, lease))}; expire applies the expiry, and acquire takes a new lease`);
+  if (!isActive(view, lease)) {
+    return lapsed(view, lease, (at) => `its lease expired at ${at}; expire applies the expiry, and acquire takes a new lease`);
+  }
+  return undefined;
+}
+
+// releasing holds release to the holder of an active lease, presenting its
+// token, or a principal with overridePermission, who need not.
+function releasing(view: InstanceView<LeaseConfig>, lease: Held, token: number | undefined): GuardAnswer {
+  if (lease.holder === null) {
+    return veto('it is not leased', 'not_leased');
+  }
+  const override = overrides(view);
+  if (lease.holder !== view.principal.subject && !override) {
+    if (view.config.overridePermission !== undefined) {
+      throw forbidden(view, "release another principal's lease of", view.config.overridePermission);
+    }
+    return veto('another principal holds its lease, and only the holder may release it', 'not_holder');
+  }
+  if (token === undefined && !override) {
+    return veto("the holder releases its lease presenting its token as Lease's precondition", 'token_required');
+  }
+  if (!isActive(view, lease)) {
+    return lapsed(view, lease, (at) => `its lease expired at ${at}; expire applies the expiry`);
+  }
+  return undefined;
+}
+
+// ownOperation is the guard of Lease's own operations: who may send a
+// directive, and the holder and the token heartbeat, acknowledge and
+// release need. A behavior's call() of direct was asked already.
+function ownOperation(view: InstanceView<LeaseConfig>, request: GuardRequest & { kind: 'operation' }, lease: Held, token: number | undefined): GuardAnswer {
+  switch (request.operation) {
+    case 'direct':
+      return request.caller === undefined ? directGuard(view) : undefined;
+    case 'heartbeat':
+    case 'acknowledge':
+      return holding(view, lease, token);
+    case 'release':
+      return releasing(view, lease, token);
+    default:
+      return undefined;
+  }
+}
+
+// checkGuarded is a handler's own check that the guard let only the holder
+// of an active lease through: anything else is a defect.
+function checkGuarded(context: OperationContext<LeaseConfig>, operation: string, lease: Held): void {
+  if (lease.holder !== context.principal.subject || !isActive(context, lease)) {
+    throw new BehaviorError(NAME, `${operation} reached its handler without its guard`);
   }
 }
 
@@ -361,10 +494,10 @@ function requireOverride(scope: BehaviorScope<LeaseConfig>, what: string): void 
 // directGuard is who may send a directive: a principal with
 // directPermission, or overridePermission when that is absent. A
 // behavior's call() is not asked (the guard passes it).
-function directGuard(view: InstanceView<LeaseConfig>): string | undefined {
+function directGuard(view: InstanceView<LeaseConfig>): GuardAnswer {
   const permission = view.config.directPermission ?? view.config.overridePermission;
   if (permission === undefined) {
-    return 'its config names no permission that sends directives (directPermission or overridePermission)';
+    return veto('its config names no permission that sends directives (directPermission or overridePermission)', 'not_configured');
   }
   if (!view.can(permission)) {
     throw forbidden(view, 'send a directive to the holder of', permission);
@@ -386,16 +519,17 @@ function holdSql(config: LeaseConfig): { sql?: string; params: SqlValue[] } {
   };
 }
 
-// expireOne invokes expire on one instance for a sweep or expireHolder. A
-// guard's veto leaves that instance for the next sweep and the others go
-// on; any other failure, a principal the policy refuses say, fails the
-// run, so the deployment sees it.
-function expireOne(context: BehaviorScope<LeaseConfig>, id: string, params: { holder?: string }): boolean {
+// expireOne invokes expire on one instance for a sweep or expireHolder,
+// and returns why it expired, or undefined. A guard's veto leaves that
+// instance for the next sweep and the others go on; any other failure, a
+// principal the policy refuses say, fails the run, so the deployment
+// sees it.
+function expireOne(context: BehaviorScope<LeaseConfig>, id: string, params: { holder?: string }): ExpiryReason | undefined {
   try {
-    return (context.instances.invoke(context.schema, id, 'expire', params as FrozenJSON) as { expired: boolean }).expired;
+    return (context.instances.invoke(context.schema, id, 'expire', params as FrozenJSON) as { reason?: ExpiryReason }).reason;
   } catch (error) {
     if (error instanceof BehaviorVetoError) {
-      return false;
+      return undefined;
     }
     throw error;
   }
@@ -417,14 +551,15 @@ export const lease = defineBehavior<LeaseConfig>({
       maxExpiries?: number;
       escalate?: LeaseTransition;
       exempt?: string[];
+      requireToken?: boolean;
       acquirePermission?: string;
       overridePermission?: string;
       directPermission?: string;
     };
     const ttlMs = raw.ttlMs ?? DEFAULT_TTL_MS;
     const heartbeatMs = raw.heartbeatMs ?? Math.floor(ttlMs / 3);
-    if (heartbeatMs >= ttlMs) {
-      throw new BehaviorConfigError(`heartbeatMs (${heartbeatMs}) is not less than ttlMs (${ttlMs}): a lease would expire between heartbeats`);
+    if (heartbeatMs * 2 > ttlMs) {
+      throw new BehaviorConfigError(`heartbeatMs (${heartbeatMs}) is more than half of ttlMs (${ttlMs}): one late heartbeat would lose the lease`);
     }
     if (raw.maxHoldField !== undefined) {
       checkIntegerField(target, raw.maxHoldField);
@@ -467,6 +602,7 @@ export const lease = defineBehavior<LeaseConfig>({
       ...(raw.maxExpiries === undefined ? {} : { maxExpiries: raw.maxExpiries }),
       ...(raw.escalate === undefined ? {} : { escalate: { transition: raw.escalate.transition, from: [...raw.escalate.from] } }),
       exempt: [...(raw.exempt ?? [])],
+      requireToken: raw.requireToken === true,
       ...(raw.acquirePermission === undefined ? {} : { acquirePermission: raw.acquirePermission }),
       ...(raw.overridePermission === undefined ? {} : { overridePermission: raw.overridePermission }),
       ...(raw.directPermission === undefined ? {} : { directPermission: raw.directPermission }),
@@ -510,18 +646,22 @@ export const lease = defineBehavior<LeaseConfig>({
         ) STRICT`);
       },
     },
+    // How the last lease ended, which its event carries.
+    { version: 2, name: 'ended', columns: { ended_reason: { type: 'text' }, ended_at: { type: 'integer' } } },
   ],
 
-  // The lease's exclusion: see the header.
+  // The lease's exclusion and its fence: see the header.
   guard(view, request) {
-    if (request.kind === 'operation' && request.behavior === NAME) {
-      return request.operation === 'direct' && request.caller === undefined ? directGuard(view) : undefined;
-    }
     const lease = held(view);
-    if (lease.holder === null) {
-      return undefined;
+    const writes = request.kind !== 'operation' || request.writes;
+    const token = presented(request);
+    if (writes && token !== undefined && token !== lease.token) {
+      return stale(token, lease);
     }
-    if (request.kind === 'operation' && (!request.writes || (request.behavior === 'Queue' && request.operation === 'refresh'))) {
+    if (request.kind === 'operation' && request.behavior === NAME) {
+      return ownOperation(view, request, lease, token);
+    }
+    if (lease.holder === null || !writes || (request.kind === 'operation' && request.behavior === 'Queue' && request.operation === 'refresh')) {
       return undefined;
     }
     if (overrides(view)) {
@@ -529,7 +669,7 @@ export const lease = defineBehavior<LeaseConfig>({
     }
     const field = view.config.maxHoldField;
     if (request.kind === 'update' && field !== undefined && Object.prototype.hasOwnProperty.call(request.patch, field)) {
-      return `${field} limits how long its lease may be held, so it cannot change while the lease is held`;
+      return veto(`${field} limits how long its lease may be held, so it cannot change while the lease is held`, 'hold_limit_fixed');
     }
     if (request.kind !== 'delete' && request.caller !== undefined) {
       return undefined;
@@ -539,9 +679,15 @@ export const lease = defineBehavior<LeaseConfig>({
     }
     const mine = lease.holder === view.principal.subject;
     if (isActive(view, lease)) {
-      return mine ? undefined : `another principal holds its lease, until ${time(deadline(view, lease))}`;
+      if (!mine) {
+        const until = deadline(view, lease);
+        return veto(`another principal holds its lease, until ${time(until)}`, 'held_by_another', { expiresAt: until });
+      }
+      return view.config.requireToken && token === undefined
+        ? veto("its config requires every write under the lease to present the lease's token as Lease's precondition", 'token_required')
+        : undefined;
     }
-    return mine ? `the caller's lease expired at ${time(deadline(view, lease))}, so it no longer holds the instance` : undefined;
+    return mine ? lapsed(view, lease, (at) => `the caller's lease expired at ${at}, so it no longer holds the instance`) : undefined;
   },
 
   operations: {
@@ -556,35 +702,47 @@ export const lease = defineBehavior<LeaseConfig>({
       }
       let lease = held(context);
       if (isActive(context, lease)) {
-        throw vetoed(
-          context,
-          'acquire',
-          lease.holder === context.principal.subject
-            ? `the caller already holds its lease, until ${time(deadline(context, lease))}; heartbeat renews it`
-            : `another principal holds its lease, until ${time(deadline(context, lease))}`
-        );
+        const until = deadline(context, lease);
+        throw lease.holder === context.principal.subject
+          ? vetoed(context, 'acquire', `the caller already holds its lease, until ${time(until)}; heartbeat renews it`, 'held_by_caller', { expiresAt: until })
+          : vetoed(context, 'acquire', `another principal holds its lease, until ${time(until)}`, 'held_by_another', { expiresAt: until });
       }
       const lapsed = lease.holder !== null;
       if (config.maxExpiries !== undefined) {
         const expiries = lease.expiries + (lapsed && counts(statusOf(context)) ? 1 : 0);
         if (expiries >= config.maxExpiries) {
-          throw vetoed(context, 'acquire', `its lease has expired ${expiries} times, the most its config allows; resetExpiries lets it be leased again`);
+          throw vetoed(
+            context,
+            'acquire',
+            `its lease has expired ${expiries} times, the most its config allows; resetExpiries lets it be leased again`,
+            'max_expiries',
+            { expiries, maxExpiries: config.maxExpiries }
+          );
         }
       }
       if (lapsed) {
-        applyExpiry(context, lease);
+        applyExpiry(context, lease, lapseReason(context, lease));
         lease = held(context);
       }
       const token = lease.token + 1;
       const limit = holdLimit(context);
       const expiresAt = limit === undefined ? context.now + ttl : context.now + Math.min(ttl, limit);
-      context.columns.set({ holder: context.principal.subject, token, acquired_at: context.now, expires_at: expiresAt, ttl_ms: ttl });
+      context.columns.set({
+        holder: context.principal.subject,
+        token,
+        acquired_at: context.now,
+        expires_at: expiresAt,
+        ttl_ms: ttl,
+        ended_reason: null,
+        ended_at: null,
+      });
       return { token, expiresAt, heartbeatMs: heartbeatFor(config, ttl) };
     },
 
-    heartbeat(context, params) {
+    // The guard holds it to the holder of an active lease, with its token.
+    heartbeat(context) {
       const lease = held(context);
-      checkHolder(context, 'heartbeat', lease, params.token as number);
+      checkGuarded(context, 'heartbeat', lease);
       const ttl = lease.ttlMs ?? context.config.ttlMs;
       const limit = holdLimit(context);
       const expiresAt = limit === undefined ? context.now + ttl : Math.min(context.now + ttl, (lease.acquiredAt as number) + limit);
@@ -599,31 +757,20 @@ export const lease = defineBehavior<LeaseConfig>({
       return { expiresAt, directives };
     },
 
+    // The guard holds it to the holder of an active lease, with its token,
+    // or a principal with overridePermission. An abandon is an expiry.
     release(context, params) {
       const { config } = context;
       const lease = held(context);
-      if (lease.holder === null) {
-        throw vetoed(context, 'release', 'it is not leased');
+      if (lease.holder === null || !isActive(context, lease)) {
+        throw new BehaviorError(NAME, 'release reached its handler without its guard');
       }
-      const override = overrides(context);
-      const token = params.token as number | undefined;
-      if (lease.holder !== context.principal.subject && !override) {
-        if (config.overridePermission !== undefined) {
-          throw forbidden(context, "release another principal's lease of", config.overridePermission);
-        }
-        throw vetoed(context, 'release', 'another principal holds its lease, and only the holder may release it');
-      }
-      if (token === undefined && !override) {
-        throw new OperationParamsError(NAME, 'release', [{ path: '/token', message: 'the holder releases its lease with its token' }]);
-      }
-      if (token !== undefined && token !== lease.token) {
-        throw vetoed(context, 'release', `token ${token} is stale: the lease is at token ${lease.token}`);
-      }
-      if (!isActive(context, lease)) {
-        throw vetoed(context, 'release', `its lease expired at ${time(deadline(context, lease))}; expire applies the expiry`);
+      if (params.abandon === true) {
+        applyExpiry(context, lease, 'abandon');
+        return {};
       }
       const status = config.onExpiry === undefined ? undefined : statusOf(context);
-      end(context, lease, lease.expiries);
+      end(context, lease, lease.expiries, 'release');
       move(context, config.onExpiry, status);
       return {};
     },
@@ -637,15 +784,19 @@ export const lease = defineBehavior<LeaseConfig>({
       if (lease.holder === null || (holder === undefined ? isActive(context, lease) : lease.holder !== holder)) {
         return { expired: false };
       }
-      applyExpiry(context, lease);
-      return { expired: true };
+      const reason: ExpiryReason = isActive(context, lease) ? 'holder' : lapseReason(context, lease);
+      applyExpiry(context, lease, reason);
+      return { expired: true, reason };
     },
 
     // Who may send one is the guard's question (directGuard).
     direct(context, params) {
       const lease = held(context);
+      if (lease.holder === null) {
+        throw vetoed(context, 'direct', 'no lease is active, so there is no holder to direct', 'not_leased');
+      }
       if (!isActive(context, lease)) {
-        throw vetoed(context, 'direct', 'no lease is active, so there is no holder to direct');
+        throw vetoed(context, 'direct', 'no lease is active, so there is no holder to direct', 'lapsed', { expiredAt: deadline(context, lease) });
       }
       const table = context.sql.table('directives');
       const last = context.sql.get(`SELECT MAX(directive) AS last FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND token = ?`, [
@@ -661,9 +812,10 @@ export const lease = defineBehavior<LeaseConfig>({
       return { id };
     },
 
+    // The guard holds it to the holder of an active lease, with its token.
     acknowledge(context, params) {
       const lease = held(context);
-      checkHolder(context, 'acknowledge', lease, params.token as number);
+      checkGuarded(context, 'acknowledge', lease);
       const ids = params.ids as number[];
       const table = context.sql.table('directives');
       const marks = ids.map(() => '?').join(', ');
@@ -692,7 +844,7 @@ export const lease = defineBehavior<LeaseConfig>({
     resetExpiries(context) {
       const permission = context.config.overridePermission;
       if (permission === undefined) {
-        throw vetoed(context, 'resetExpiries', 'its config names no overridePermission, which resetting its expiries needs');
+        throw vetoed(context, 'resetExpiries', 'its config names no overridePermission, which resetting its expiries needs', 'not_configured');
       }
       if (!context.can(permission)) {
         throw forbidden(context, 'reset the expiries of', permission);
@@ -712,18 +864,21 @@ export const lease = defineBehavior<LeaseConfig>({
       const holder = params.holder as string;
       const relation = context.sql.instances();
       let expired = 0;
+      const reasons: Partial<Record<ExpiryReason, number>> = {};
       let after = '';
       for (;;) {
         const ids = context.sql
           .all(`SELECT id FROM ${relation} WHERE holder = ? AND id > ? ORDER BY id LIMIT ?`, [holder, after, BATCH])
           .map((row) => String(row.id));
         for (const id of ids) {
-          if (expireOne(context, id, { holder })) {
+          const reason = expireOne(context, id, { holder });
+          if (reason !== undefined) {
             expired += 1;
+            reasons[reason] = (reasons[reason] ?? 0) + 1;
           }
         }
         if (ids.length < BATCH) {
-          return { expired };
+          return { expired, reasons };
         }
         after = ids[ids.length - 1];
       }
@@ -772,6 +927,7 @@ export const lease = defineBehavior<LeaseConfig>({
         expiresAt: lease.holder === null ? null : deadline(view, lease),
         active: isActive(view, lease),
         expiries: lease.expiries,
+        ended: lease.endedReason === null ? null : { reason: lease.endedReason, at: lease.endedAt as number },
       };
     },
   },

@@ -105,20 +105,64 @@ export class InstanceValidationError extends EngineError {
   }
 }
 
-/** A guard of a behavior on the type refused an update, a delete or an operation. */
+/**
+ * A behavior's refusal, as a guard returns it and a handler throws it: a
+ * reason, and optionally a code the behavior's declaration lists (its
+ * `vetoes`), so a client branches on the code rather than the prose, with
+ * details that are a JSON object.
+ */
+export interface Veto {
+  readonly reason: string;
+  /** Lowercase snake case, one its behavior's declaration lists; read beside the behavior's name. */
+  readonly code?: string;
+  readonly details?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * A behavior refused an update, a delete or an operation: its guard, or
+ * the handler of one of its operations. vetoCode and vetoDetails are the
+ * veto's code and details; the problem document carries them as
+ * details.code and details.details.
+ */
 export class BehaviorVetoError extends EngineError {
-  /** The behavior whose guard refused. */
+  /** The behavior that refused. */
   readonly behavior: string;
   /** What it refused: `update`, `delete`, or the operation's name. */
   readonly action: string;
   readonly reason: string;
+  /** The veto's code, one its behavior's declaration lists; undefined for a veto that gives none. */
+  readonly vetoCode: string | undefined;
+  /** The veto's details, a JSON object; undefined when it gives none. */
+  readonly vetoDetails: Readonly<Record<string, unknown>> | undefined;
 
-  constructor(behavior: string, action: string, schema: string, id: string, reason: string) {
+  constructor(behavior: string, action: string, schema: string, id: string, veto: string | Veto) {
+    const { reason, code, details } = typeof veto === 'string' ? { reason: veto, code: undefined, details: undefined } : veto;
     super('vetoed', `behavior ${behavior} vetoes ${action} of ${schema} ${id}: ${reason}`);
     this.name = 'BehaviorVetoError';
     this.behavior = behavior;
     this.action = action;
     this.reason = reason;
+    this.vetoCode = code;
+    this.vetoDetails = details;
+  }
+}
+
+/**
+ * The preconditions of an update, a delete or an operation, refused: an
+ * entry for a behavior the type does not compose or that declares no
+ * preconditionSchema, or one its schema refuses. Each issue is at a JSON
+ * pointer into the preconditions, `/<Behavior>/<member>`.
+ */
+export class PreconditionsError extends EngineError {
+  readonly issues: SchemaIssue[];
+
+  constructor(schema: string, issues: SchemaIssue[]) {
+    super(
+      'invalid_argument',
+      `preconditions of ${schema}: ${issues.map((issue) => (issue.path ? `${issue.path}: ${issue.message}` : issue.message)).join('; ')}`
+    );
+    this.name = 'PreconditionsError';
+    this.issues = issues;
   }
 }
 

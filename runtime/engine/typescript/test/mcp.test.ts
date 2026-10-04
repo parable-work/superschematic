@@ -19,7 +19,7 @@ import { Hono } from 'hono';
 import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
-import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
+import { hold, holdDeclaration, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, documentsDocument, notesDocument, openTestEngine, orderDocument, projectsDocument, tasksDocument } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
@@ -371,6 +371,38 @@ describe('tools/call', () => {
     const defect = await refused('item_explode', { id: 'i1' });
     assert.deepEqual([defect.status, defect.code, defect.detail], [500, 'internal_error', 'An unexpected error occurred']);
     assert.ok(!JSON.stringify(defect).includes('secret'));
+  });
+
+  test("a schema's writes take preconditions when a behavior declares them, and a veto's code and details reach the tool error", async () => {
+    const { url, engine } = await served({ behaviors: [...testBehaviors, hold] }, {}, (engine) => {
+      publishItem(engine, [{ name: 'test.Counter' }, { name: 'test.Hold' }]);
+      engine.instances.create(everything, 'Item', { title: 'Desk' }, { id: 'i1' });
+    });
+    const { client } = await connect(endpoint(url));
+    const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+    for (const name of ['item_update', 'item_delete', 'item_increment', 'item_advance']) {
+      const properties = byName.get(name)?.inputSchema.properties as Record<string, any>;
+      assert.deepEqual(properties.preconditions.properties, { 'test.Hold': holdDeclaration.preconditionSchema }, name);
+      assert.equal(properties.preconditions.additionalProperties, false);
+    }
+    for (const name of ['item_create', 'item_get', 'item_list']) {
+      assert.equal((byName.get(name)?.inputSchema.properties as Record<string, unknown>).preconditions, undefined, name);
+    }
+    const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as CallToolResult;
+    const fenced = (generation: number) => ({ 'test.Hold': { generation } });
+
+    assert.deepEqual((await call('item_advance', { id: 'i1', preconditions: fenced(0) })).structuredContent, { generation: 1 });
+    const stale = problemOf(await call('item_update', { id: 'i1', patch: { title: 'Late' }, preconditions: fenced(0) }));
+    assert.deepEqual([stale.status, stale.code, stale.details], [
+      409,
+      'vetoed',
+      { behavior: 'test.Hold', action: 'update', reason: 'generation 0 is stale: the instance is at 1', code: 'stale', details: { generation: 0, current: 1 } },
+    ]);
+    const invalid = problemOf(await call('item_delete', { id: 'i1', preconditions: { 'test.Nope': {} } }));
+    assert.deepEqual([invalid.status, invalid.code, invalid.details.issues], [400, 'invalid_argument', [{ path: '/test.Nope', message: 'Item composes no behavior test.Nope' }]]);
+    assert.equal(problemOf(await call('item_increment', { id: 'i1', preconditions: 'test.Hold' })).code, 'invalid_argument');
+    assert.equal((await call('item_increment', { id: 'i1', preconditions: fenced(1) })).isError, undefined);
+    assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 1);
   });
 
   test('an unknown tool, or one the caller may not read, is a JSON-RPC invalid-params error', async () => {

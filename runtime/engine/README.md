@@ -322,6 +322,10 @@ holds instances in the namespace that creates them.
   that does not exist is still `not_found` for `update` and `invoke` and
   `false` for `delete`. This is optimistic concurrency, the HTTP API's
   `If-Match`.
+- They also take `preconditions`, entries by behavior name such as
+  `{ Lease: { token: 7 } }`, which each behavior's guard checks ("Vetoes
+  and preconditions" under "Behaviors"), the HTTP API's `Preconditions`
+  header.
 - `invoke` calls a behavior operation on the instance (see "Behaviors")
   and returns its result; `operate` returns `{ result, seq }`, the result
   and the instance's sequence after the call.
@@ -551,11 +555,12 @@ status: `invalid_schema` (`SchemaDocumentError`, with its issues),
 `incompatible_change` (`IncompatibleChangeError`, with its changes),
 `invalid_instance` (`InstanceValidationError`, with its issues),
 `name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`,
-`invalid_argument` (`OperationParamsError` for an operation's parameters,
-with its issues), `seq_mismatch`, `vetoed` (`BehaviorVetoError`: a
-behavior's guard refused the change) and `unavailable` (the live version
-composes a behavior this engine has no implementation for, or whose
-implementation refuses its config). A message names only what the call
+`invalid_argument` (`OperationParamsError` for an operation's parameters
+and `PreconditionsError` for a call's preconditions, with their issues),
+`seq_mismatch`, `vetoed` (`BehaviorVetoError`: a behavior refused the
+change, with the veto's `vetoCode` and `vetoDetails` when it gives them)
+and `unavailable` (the live version composes a behavior this engine has
+no implementation for, or whose implementation refuses its config). A message names only what the call
 named: `name_taken` in the shared namespace does not say which namespace
 holds the name. "Statuses" under "HTTP" gives each code's status.
 
@@ -579,14 +584,14 @@ import { defineBehavior, openEngine } from '@superschematic/engine';
 import declaration from './counter.behavior.json' with { type: 'json' };
 
 // counter.behavior.json declares test.Counter: a `limit` config, the field
-// `count` and the writing operation `increment`.
+// `count`, the writing operation `increment` and the veto code `at_limit`.
 export const counter = defineBehavior<{ limit?: number }>({
   declaration,
   migrations: [{ version: 1, name: 'count', columns: { count: { type: 'integer', notNull: true, default: 0 } } }],
   guard(view, request) {
     if (request.kind === 'operation' && request.operation === 'increment' && view.config.limit !== undefined
         && Number(view.columns.get().count) >= view.config.limit) {
-      return `the count is at its limit, ${view.config.limit}`;
+      return { reason: `the count is at its limit, ${view.config.limit}`, code: 'at_limit', details: { limit: view.config.limit } };
     }
   },
   operations: {
@@ -625,12 +630,12 @@ function is synchronous (D16): one that returns a promise is a
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
 | `initialize(context)` | sets up its state for a new instance |
-| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
-| `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext` |
+| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason, or `{ reason, code?, details? }`, vetoes ("Vetoes and preconditions"). An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does. `precondition` is the behavior's own entry of the caller's preconditions |
+| `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext` ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
-| `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"); the view is the referencing instance's |
+| `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"), as a guard does; the view is the referencing instance's, and the request carries no precondition |
 | `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference |
 | `reactions` | `{ react(context, event), watches?(config, schema) }`: reactions to committed events, which the runner runs after the commit ("Reactions and schedules") |
 | `schedules` | named timed work, `{ <name>: { everyMs, run(context) } }`, which the runner runs on each schema that composes the behavior; `everyMs` is a number or a function of the schema's config ("Schedules" under "The runner") |
@@ -643,14 +648,60 @@ without a `react` function; a schedule whose name is not camelCase, whose
 has no `run`; a declaration of the wrong shape, with an operation named
 `create`, `get`, `list`, `update` or `delete`, or with a schema that does
 not compile; and malformed migrations, columns or indexes, an index over
-a column no migration up to its own adds included. An operation's `paramsSchema` sets
+a column no migration up to its own adds included; a veto code that is
+not lowercase snake case of at most 64 characters, or is listed twice.
+An operation's `paramsSchema` sets
 `additionalProperties: false`, so the handler and every guard read the
-same declared parameters and no alias reaches one and not the other; the
-compiler refuses the same declaration when it registers. The engine adds
+same declared parameters and no alias reaches one and not the other; a
+`preconditionSchema` does too; the compiler refuses the same
+declaration when it registers. The engine adds
 one rule to the compiler's: a name is `<extension>.<Name>` with an
 extension name of a letter, then letters, digits, `_` and `-` (or a core
 `<Name>`), since the migration ledger is keyed by it. A name registers
 once.
+
+### Vetoes and preconditions
+
+A refusal a client branches on carries a code (D16, amended). A guard
+answers `undefined` to allow, a reason, or a `Veto`, `{ reason, code?,
+details? }`; a handler, `initialize` and `afterChange` throw
+`new BehaviorVetoError(behavior, action, schema, id, reason | veto)`. A
+code is lowercase snake case and one the behavior's declaration lists:
+
+```json
+"vetoes": [{ "code": "at_limit", "description": "The count is at its config's limit." }]
+```
+
+The error carries `behavior`, `action`, `reason`, `vetoCode` and
+`vetoDetails`; the problem document's `details` is `{ behavior, action,
+reason, code?, details? }`. A code the declaration does not list, details
+that are not a JSON object, or an answer of another shape is a
+`BehaviorError`. The describe document lists each behavior's codes.
+
+A caller asserts what a behavior keeps with preconditions, entries by
+behavior name, on `update`, `delete`, `invoke` and `operate` (and a
+behavior's `instances.invoke`). A behavior declares its entry's schema,
+a closed object schema:
+
+```json
+"preconditionSchema": { "type": "object", "additionalProperties": false, "required": ["generation"],
+                        "properties": { "generation": { "type": "integer", "minimum": 0 } } }
+```
+
+```ts
+engine.instances.update(me, 'Item', id, { title: 'Desk' }, { preconditions: { 'acme.Hold': { generation: 3 } } });
+```
+
+- The engine checks them before any guard runs: an entry for a behavior
+  the type does not compose, for one that declares no schema, or that
+  its schema refuses is a `PreconditionsError` (`invalid_argument`) with
+  issues at `/<Behavior>/<member>`.
+- Each guard gets its own behavior's entry as `request.precondition`, and
+  decides what it asserts; a failed one is its veto, with its code. A
+  request a behavior's own code makes (`call()`, `update()`) and a
+  `guardReference` request carry none.
+- A read-only operation's guards get them too; a patch that changes
+  nothing asks no guard. A precondition fences a write.
 
 ### Contexts
 
@@ -727,7 +778,7 @@ if (milestone && flow && !isTerminalState(flow, String(milestone.data.status))) 
 | --- | --- | --- |
 | `instances.get(schema, id, { fields? })` | the instance's record, deep-frozen, with every behavior field, the ones `fields` names, or none for `[]`; `undefined` when there is none | `read` on the schema |
 | `instances.getMany(schema, ids, { fields? })` | a `Map` by id of the instances of one schema, at most 500, in one query; ids with none are left out | `read` on the schema, once |
-| `instances.invoke(schema, id, operation, params?)` | runs an instance operation of another instance, or of this one, as `engine.instances.invoke` would, and returns its result | `write` or `read` with the operation's name |
+| `instances.invoke(schema, id, operation, params?, { preconditions? })` | runs an instance operation of another instance, or of this one, as `engine.instances.invoke` would, its guards asked with the preconditions given, and returns its result | `write` or `read` with the operation's name |
 | `instances.invokeSchema(schema, operation, params?)` | runs a schema-level operation of a schema, its own or another, as `engine.instances.invokeSchema` would, a writing one in a savepoint, and returns its result | `write` or `read` with the operation's name |
 | `instances.create(schema, data, { id? })` | creates an instance of the namespace as `engine.instances.create` would: validates `data`, the instance's own fields, against the live version, runs every behavior's `initialize` and `afterChange` and appends its create event, in a savepoint; returns the record, deep-frozen. Without an `id`, the engine's `ids` makes one | `write` on the schema |
 | `schemas.config(schema, behavior)` | the config a schema's live version gives a behavior, as the schema holds it (`{}` when none); `undefined` when it does not compose it | `read`, unless the schema is the call's own |
@@ -1193,7 +1244,7 @@ A state machine on the instance's `status`.
 | Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }` |
 | Fields | `status` |
 | Operations | `transition({ to })` -> `{ from, to }`, writes |
-| Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in, a transition the config does not list and a move out of a terminal state are `vetoed`; a transition that names a permission the caller lacks (`can`) is `forbidden` |
+| Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in (`already_in_state`), a transition the config does not list (`transition_not_allowed`, details `{ from, to, allowed }`) and a move out of a terminal state (`terminal_state`) are `vetoed`, as is an instance without a status (`no_status`); a transition that names a permission the caller lacks (`can`) is `forbidden` |
 | Events | `transition`'s operation event, `patch: { status }` |
 | `configChange` | every old state stays; transitions, permissions and `initial` may change. Not added to or removed from a schema with instances |
 
@@ -1277,8 +1328,8 @@ Blockers between instances, which hold up the type's Workflow.
 | Config | `schemas`: the schemas a blocker may be an instance of, each composing Workflow (the type's own when absent); `gatedStates`: the terminal states of the type's Workflow a transition into waits for every blocker (every terminal state when absent). Requires `Workflow` |
 | Fields | `blocked`: whether a blocker's status is not a terminal state of its own schema's Workflow |
 | Operations | `addBlocker({ schema?, id })` -> `{ schema, id, status?, open }`, writes; `removeBlocker({ schema?, id })` -> `{ schema, id }`, writes; `listBlockers({ limit?, cursor? })` -> a page of `{ schema, id, status?, open }`, read-only; `listDependents({ limit?, cursor? })` -> a page of `{ schema, id }`, read-only |
-| Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed`, naming the open blockers |
-| Refusals | `addBlocker`: the instance itself, a schema the config does not list, one without Workflow, an instance that does not exist (`invalid_argument`); a blocker already added, an edge that would close a cycle, an open blocker of an instance in a gated state (`vetoed`). `removeBlocker` of an instance that does not block it (`invalid_argument`) |
+| Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed` (`blocked`), naming the open blockers, details `{ blockers: [{ schema, id, status? }] }` |
+| Refusals | `addBlocker`: the instance itself, a schema the config does not list, one without Workflow, an instance that does not exist (`invalid_argument`); a blocker already added (`already_blocking`), an edge that would close a cycle (`cycle`), an open blocker of an instance in a gated state (`gated`), all `vetoed`. `removeBlocker` of an instance that does not block it (`invalid_argument`) |
 | Deletes | deleting a blocker removes its edges: its reference hook invokes `removeBlocker` on each dependent, as the caller, each with its own event. Deleting a dependent deletes its edges |
 | Events | `addBlocker`'s and `removeBlocker`'s operation events carry `blocked` when it changes |
 | `configChange` | `schemas` and `gatedStates` may change (edges made before stay); added to a schema with instances, which start with none; not removed from one, since its edges and references would stay behind |
@@ -1597,9 +1648,9 @@ engine does not raise.
 | GET | `/namespaces/{namespace}/schemas/{name}/instances?limit=&cursor=` | `instances.list` | 200, `{items, next}` |
 | POST | `/namespaces/{namespace}/schemas/{name}/instances` | `instances.create`, body `{"id"?, "data"}` | 201, the instance, `ETag`, `Location` |
 | GET | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.get` | 200, the instance, `ETag` |
-| PATCH | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.update`, body: a merge patch; `If-Match` | 200, the instance, `ETag` |
-| DELETE | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.delete`; `If-Match` | 200, `null` |
-| POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/operations/{operation}` | `instances.operate`, body: the parameters; `If-Match` | 200, the result, `ETag` |
+| PATCH | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.update`, body: a merge patch; `If-Match`, `Preconditions` | 200, the instance, `ETag` |
+| DELETE | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.delete`; `If-Match`, `Preconditions` | 200, `null` |
+| POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/operations/{operation}` | `instances.operate`, body: the parameters; `If-Match`, `Preconditions` | 200, the result, `ETag` |
 | POST | `/namespaces/{namespace}/schemas/{name}/operations/{operation}` | `instances.invokeSchema`, body: the parameters of a schema-level operation | 200, the result |
 | GET | `/namespaces/{namespace}/schemas/{name}/describe` | `tools.describe` | 200, the describe document ("Tools") |
 | GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
@@ -1624,8 +1675,8 @@ operation of the other scope.
 
 | Status | `code` | When |
 | --- | --- | --- |
-| 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), `details.issues` |
-| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data}`, a path that is not valid percent-encoding |
+| 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), or preconditions the engine refuses (`PreconditionsError`), `details.issues` |
+| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data}`, a `Preconditions` header that is not a JSON object, a path that is not valid percent-encoding |
 | 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject |
 | 403 | `forbidden` | the access policy refused, or a behavior refused a caller without the permission its config names |
 | 404 | `not_found` | no such version, draft or instance in the namespace, or no such route |
@@ -1633,8 +1684,8 @@ operation of the other scope.
 | 409 | `conflict` | an instance with the id exists |
 | 409 | `name_taken` | the name is defined on the other side of the shared lookup |
 | 409 | `incompatible_change` | the version breaks the compatibility rule; `details.changes` |
-| 409 | `vetoed` | a behavior's guard refused the update, the delete or the operation; `details` is `{behavior, action, reason}` |
-| 412 | `seq_mismatch` | `If-Match` names a sequence the instance is no longer at |
+| 409 | `vetoed` | a behavior refused the update, the delete or the operation; `details` is `{behavior, action, reason, code?, details?}`, the veto's code and details when it gives them |
+| 412 | `seq_mismatch` | `If-Match` names a sequence the instance is no longer at; a failed precondition is the behavior's veto, 409 |
 | 413 | `payload_too_large` | the body exceeds `bodyLimitBytes` |
 | 415 | `unsupported_media_type` | the body is not of the route's media type |
 | 422 | `invalid_schema` | the document is refused; `details.issues` |
@@ -1670,6 +1721,19 @@ only that the instance exist; a weak tag never matches. An instance that does no
 would otherwise succeed. A writing behavior operation moves `seq` too
 ("Instances and events" under "Behaviors"), so a tag read before it no
 longer matches.
+
+`If-Match` cannot hold across writes that move `seq` while a caller
+works, a lease's heartbeats say. What a caller assumes of one behavior
+travels in the `Preconditions` header instead: a JSON object of entries
+by behavior name, `Preconditions: {"Lease": {"token": 7}}`, on PATCH,
+DELETE and an operation's POST, which the engine passes to `update`,
+`delete` and `operate` as `preconditions` ("Vetoes and preconditions"
+under "Behaviors"). A header that is not a JSON object is 400
+`bad_request`, an entry the engine refuses 400 `invalid_argument`, and a
+precondition a guard finds false that behavior's 409 veto, with its
+code. Other routes ignore the header. It is a header because the bodies
+are taken: an update's is a merge patch of the instance, an operation's
+its closed parameters.
 
 ### The event stream
 
@@ -1737,7 +1801,8 @@ a schema's live version:
     "required": ["title"]
   },
   "behaviors": [{"name": "test.Counter", "description": "Counts up.", "config": {"start": 0},
-                 "fields": [{"name": "count", "description": "The count."}], "operations": ["increment"]}],
+                 "fields": [{"name": "count", "description": "The count."}], "operations": ["increment"],
+                 "vetoes": [{"code": "at_limit", "description": "The count is at its config's limit."}]}],
   "operations": [
     {"name": "create", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
      "params": {"type": "object", "additionalProperties": false, "properties": {"data": {...}, "id": {...}}, "required": ["data"]},
@@ -1751,6 +1816,8 @@ a schema's live version:
 - `instance` is the JSON Schema of an instance's `data`: closed, its own
   fields, then its behaviors' fields, `readOnly` and without a type, since
   a declaration gives a field only a name and a description.
+- `behaviors` lists each behavior's config, fields, operations and the
+  codes its vetoes carry (`vetoes`).
 - `operations` lists `create`, `get`, `list`, `update`, `delete`, then each
   behavior's operations in the type's list order. `params` is the
   operation's tool arguments (below), `result` the JSON Schema of what it
@@ -1788,9 +1855,9 @@ reaches that the principal may read, by name, after three schema tools.
 | create | `<schema>.create` | `<schema>_create` | `id` (optional), `data` |
 | get | `<schema>.get` | `<schema>_get` | `id` |
 | list | `<schema>.list` | `<schema>_list` | `limit`, `cursor` |
-| update | `<schema>.update` | `<schema>_update` | `id`, `patch` (a merge patch; nothing required), `expectedSeq` |
-| delete | `<schema>.delete` | `<schema>_delete` | `id`, `expectedSeq` |
-| a behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `id`, `params` (its `paramsSchema`), `expectedSeq` |
+| update | `<schema>.update` | `<schema>_update` | `id`, `patch` (a merge patch; nothing required), `expectedSeq`, `preconditions` |
+| delete | `<schema>.delete` | `<schema>_delete` | `id`, `expectedSeq`, `preconditions` |
+| a behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `id`, `params` (its `paramsSchema`), `expectedSeq`, `preconditions` |
 | a schema-level behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `params` (its `paramsSchema`) |
 | list schemas | `engine.listSchemas` | `list_schemas` | none |
 | describe a schema | `engine.describeSchema` | `describe_schema` | `name` |
@@ -1807,6 +1874,10 @@ refuses the principal is hidden too, with that reason. `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
 `replay` is `read_only`, and `inputSchemaDigest` hashes the arguments as
 the Go encoder writes them.
+
+`preconditions` is there only when a behavior of the schema declares a
+`preconditionSchema`: an object with an optional entry per such
+behavior, each its schema.
 
 No tool publishes. `define_schema` stores a draft as `schemas.define`
 does; the draft goes live only through the HTTP publish route, which the
@@ -1893,8 +1964,8 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:
   `isError`, with the problem document the HTTP API answers with as text
-  and as `structuredContent` (a behavior's defect is the 500 problem, its
-  failure off the wire). A tool the namespace does not have, or one of a
+  and as `structuredContent`, a veto's `details.code` included (a
+  behavior's defect is the 500 problem, its failure off the wire). A tool the namespace does not have, or one of a
   schema the caller may not read, is a JSON-RPC invalid-params error
   (-32602); a malformed message is the SDK's JSON-RPC error.
 - `serverInfo` (the package's name and version by default) and

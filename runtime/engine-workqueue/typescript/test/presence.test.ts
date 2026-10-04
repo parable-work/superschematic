@@ -18,7 +18,7 @@ import {
   type Principal,
 } from '@superschematic/engine';
 
-import { Clock, alice, cleanup, drivers, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import { Clock, alice, cleanup, drivers, fenced, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -273,7 +273,7 @@ for (const driver of drivers) {
       engine.instances.invoke(wren, 'Worker', 'w2', 'beat', {});
       // The holders renew their leases, so none lapses before the second worker is missed.
       for (const [id, who] of [['j1', wren], ['j2', wren], ['j3', otto]] as const) {
-        engine.instances.invoke(who, 'Job', id, 'heartbeat', { token: 1 });
+        engine.instances.invoke(who, 'Job', id, 'heartbeat', {}, fenced(1));
       }
       engine.runner.runDue();
       assert.deepEqual([presenceOf(engine).missed, presenceOf(engine, 'w2').missed], [true, false]);

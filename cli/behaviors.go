@@ -191,6 +191,9 @@ func behaviorDeclarationFile(declaration registry.BehaviorDeclaration) ([]byte, 
 		operations[i] = operation
 	}
 	declaration.Operations = operations
+	if declaration.PreconditionSchema, err = canonicalSchema(declaration.PreconditionSchema); err != nil {
+		return nil, fmt.Errorf("preconditionSchema: %w", err)
+	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)

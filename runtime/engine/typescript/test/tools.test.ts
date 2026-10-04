@@ -109,6 +109,7 @@ describe('the describe document', () => {
         config: { start: 2, limit: 9 },
         fields: [{ name: 'count', description: 'The count.' }],
         operations: ['increment', 'history'],
+        vetoes: [],
       },
       {
         name: 'test.Flag',
@@ -119,6 +120,7 @@ describe('the describe document', () => {
           { name: 'flagReason', description: 'Why; absent when it is not flagged.' },
         ],
         operations: ['flag', 'unflag'],
+        vetoes: [],
       },
     ]);
     const properties = described.instance.properties as Record<string, unknown>;

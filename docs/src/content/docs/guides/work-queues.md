@@ -123,25 +123,40 @@ publish in the engine. A worker's loop then looks like this:
 const { claimed } = engine.instances.invokeSchema(worker, 'jobs', 'claimNext', { match: { topic: 'search' } });
 // claimed: { id: 'reindex', token: 1, expiresAt: 1030000, heartbeatMs: 10000 }, or null
 
+// Every write under the lease presents its token as Lease's precondition,
+// so a process that lost the lease cannot write once another holds it.
+const fenced = { preconditions: { Lease: { token: claimed.token } } };
+
 // Renew the lease every heartbeatMs. The result carries any directives
 // sent to the holder.
-engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { token: claimed.token });
+engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', {}, fenced);
 
 // Report what the work used, and failures by class.
-engine.instances.invoke(worker, 'jobs', claimed.id, 'recordUsage', { meter: 'cpuSeconds', amount: 100 });
-engine.instances.invoke(worker, 'jobs', claimed.id, 'recordAttempt', { failure: 'timeout' });
+engine.instances.invoke(worker, 'jobs', claimed.id, 'recordUsage', { meter: 'cpuSeconds', amount: 100 }, fenced);
+engine.instances.invoke(worker, 'jobs', claimed.id, 'recordAttempt', { failure: 'timeout' }, fenced);
 
 // Finish, and give the lease back.
-engine.instances.invoke(worker, 'jobs', claimed.id, 'transition', { to: 'done' });
-engine.instances.invoke(worker, 'jobs', claimed.id, 'release', { token: claimed.token });
+engine.instances.invoke(worker, 'jobs', claimed.id, 'transition', { to: 'done' }, fenced);
+engine.instances.invoke(worker, 'jobs', claimed.id, 'release', {}, fenced);
 ```
 
 Over HTTP, `claimNext` is a schema-level route and the rest are instance
-operations:
+operations, each with the token in the `Preconditions` header:
 
 ```
 POST /namespaces/default/schemas/jobs/operations/claimNext                 {"match": {"topic": "search"}}
-POST /namespaces/default/schemas/jobs/instances/{id}/operations/heartbeat  {"token": 1}
+POST /namespaces/default/schemas/jobs/instances/{id}/operations/heartbeat  Preconditions: {"Lease": {"token": 1}}
+```
+
+A refusal carries a code to branch on. A worker whose lease is gone gets
+409 `vetoed` with `details.behavior` `Lease` and `details.code`
+`token_stale` (another lease replaced it) or `lapsed` (it ran out), and
+stops:
+
+```json
+{ "status": 409, "code": "vetoed",
+  "details": { "behavior": "Lease", "action": "transition", "reason": "token 1 is stale: the lease is at token 3",
+               "code": "token_stale", "details": { "token": 1, "current": 3 } } }
 ```
 
 A worker that dies stops renewing. Once its lease passes `expiresAt`, or
@@ -154,7 +169,8 @@ After the test's run, a job that timed out reads:
 {
   "title": "index", "topic": "search", "priority": 5, "timeLimitMs": 45000,
   "status": "queued",
-  "lease": { "holder": null, "token": 2, "acquiredAt": null, "expiresAt": null, "active": false, "expiries": 1 },
+  "lease": { "holder": null, "token": 2, "acquiredAt": null, "expiresAt": null, "active": false, "expiries": 1,
+             "ended": { "reason": "maxHold", "at": 1045000 } },
   "budget": { "cpuSeconds": { "used": 100, "reserved": 0, "limit": 3600, "remaining": 3500 } },
   "retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "bestScore": null, "exhausted": false, "stuck": false }
 }
@@ -166,15 +182,23 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 
 | | |
 | --- | --- |
-| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission` |
-| Field | `lease`: `{ holder, token, acquiredAt, expiresAt, active, expiries }` |
-| Operations | `acquire({ ttlMs? })`, `heartbeat({ token })`, `release({ token? })`, `expire({ holder? })`, `direct({ name, data? })`, `acknowledge({ token, ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder })` |
+| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission` |
+| Precondition | `{ token }`: `preconditions: { Lease: { token } }`, or the `Preconditions` header over HTTP |
+| Field | `lease`: `{ holder, token, acquiredAt, expiresAt, active, expiries, ended }` |
+| Operations | `acquire({ ttlMs? })`, `heartbeat()`, `release({ abandon? })`, `expire({ holder? })`, `direct({ name, data? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder })` |
 | Schedule | `expire`, every `sweepMs`, on the runner |
-| Guard | while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, and principals with `overridePermission` |
+| Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, and principals with `overridePermission` |
 
 - **The token is a fencing counter, not a secret.** It advances at every
-  acquire, release and expiry, so a worker process that lost its lease
-  cannot renew or release the one its principal took again.
+  acquire, release and expiry. A write presents it as Lease's
+  precondition, and one that presents an old token is refused
+  (`token_stale`), so a worker process that lost its lease cannot write,
+  renew or release after another process of the same principal took the
+  job again. `heartbeat`, `acknowledge` and `release` need it.
+- **`requireToken: true`** makes every write under an active lease
+  present the token, the holder's own included, so a fleet under one
+  principal cannot write unfenced by mistake. Exempt and read-only
+  operations, the runner's sweep and overrides are not held to it.
 - **Lapsed is not held.** A lease past `expiresAt`, or past its longest
   hold (`maxHoldField` on the instance, else `maxHoldMs`), gives its
   holder nothing. A heartbeat never extends past the longest hold.
@@ -183,6 +207,15 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   failed), and `acquire` is refused until `resetExpiries`. An expiry on
   an instance already in a terminal state is not counted: a holder that
   finished and died before releasing has not failed.
+- **Give up with `abandon`.** `release({ abandon: true })` counts as an
+  expiry, so a job that every worker takes and drops reaches
+  `maxExpiries` and escalates. A plain `release` hands it back without
+  counting.
+- **Expiries say why.** `expire` returns `reason`: `ttl` (the holder
+  stopped renewing), `maxHold` (it renewed past its longest hold, so it
+  is stuck) or `holder` (an active lease expired by its holder's name).
+  `lease.ended` keeps how the last lease ended, and the event of each end
+  carries it.
 - **Directives** are messages to the holder: `direct` sends one, every
   heartbeat returns those not yet acknowledged, and `acknowledge` stops
   them. They end with the lease.
@@ -334,7 +367,7 @@ once.
 | Config | `classes` (required: `{ attempts }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `keepBest`, `stuckAfter`, `resultField`, `from`, `permission` |
 | Field | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
 | Operation | `recordAttempt({ failure?, score?, result?, signature?, predicates? })` |
-| Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` |
+| Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` (`exhausted`) |
 
 - An attempt without `failure` is a success.
 - A terminal class, a class out of room, or the total reaching its cap

@@ -21,7 +21,7 @@ import {
   type Principal,
 } from '@superschematic/engine';
 
-import { Clock, alice, cleanup, drivers, jobFlow, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import { Clock, alice, cleanup, drivers, fenced, jobFlow, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -149,7 +149,7 @@ for (const driver of drivers) {
         directed: false,
       });
       assert.deepEqual(meterOf(engine, 'Step', 's1'), { used: 25, reserved: 35, limit: 80, remaining: 20 });
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       assert.deepEqual(meterOf(engine, 'Step', 's1'), { used: 25, reserved: 0, limit: 80, remaining: 55 });
     });
 
@@ -203,7 +203,7 @@ for (const driver of drivers) {
         directed: true,
       });
       assert.deepEqual(meterOf(engine, 'Step', 's1'), { used: 100, reserved: 0, limit: 80, remaining: -20 });
-      const directives = (invoke(engine, worker, 'Step', 's1', 'heartbeat', { token: 1 }) as { directives: unknown[] }).directives;
+      const directives = (engine.instances.invoke(worker, 'Step', 's1', 'heartbeat', {}, fenced(1)) as { directives: unknown[] }).directives;
       assert.deepEqual(directives, [
         { id: 1, name: 'meterExceeded', data: { meter: 'cpu', used: 100, limit: 80, scope: { schema: 'Step', id: 's1' } }, createdAt: T0, createdBy: 'wren' },
       ]);
@@ -214,8 +214,8 @@ for (const driver of drivers) {
       );
       // Once per meter per lease: the next overrun under the same token sends none.
       assert.equal((invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 5 }) as { directed: boolean }).directed, false);
-      assert.equal((invoke(engine, worker, 'Step', 's1', 'heartbeat', { token: 1 }) as { directives: unknown[] }).directives.length, 1);
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      assert.equal((engine.instances.invoke(worker, 'Step', 's1', 'heartbeat', {}, fenced(1)) as { directives: unknown[] }).directives.length, 1);
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       // A caller without a lease learns of the overrun from the result alone.
       assert.deepEqual(invoke(engine, other, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 1 }), {
         meter: 'cpu',
@@ -227,7 +227,7 @@ for (const driver of drivers) {
       // A new lease is a new token, which gets its own directive.
       invoke(engine, worker, 'Step', 's1', 'acquire');
       assert.equal((invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 1 }) as { directed: boolean }).directed, true);
-      assert.deepEqual((invoke(engine, worker, 'Step', 's1', 'heartbeat', { token: 3 }) as { directives: Array<{ data: unknown }> }).directives[0].data, {
+      assert.deepEqual((engine.instances.invoke(worker, 'Step', 's1', 'heartbeat', {}, fenced(3)) as { directives: Array<{ data: unknown }> }).directives[0].data, {
         meter: 'cpu',
         used: 107,
         limit: 80,
@@ -249,7 +249,7 @@ for (const driver of drivers) {
       const { engine } = chain();
       claim(engine);
       assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Pool', 'p1')], [meter(0, 60, null), meter(0, 60, null), meter(0, 60, 100)]);
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Pool', 'p1')], [meter(0, 0, null), meter(0, 0, null), meter(0, 0, 100)]);
     });
 
@@ -259,7 +259,7 @@ for (const driver of drivers) {
       assert.deepEqual(invoke(engine, sweeper, 'Step', 's1', 'expire'), { expired: false });
       assert.deepEqual(meterOf(engine, 'Pool', 'p1'), meter(0, 60, 100));
       clock.advance(60000);
-      assert.deepEqual(invoke(engine, sweeper, 'Step', 's1', 'expire'), { expired: true });
+      assert.deepEqual(invoke(engine, sweeper, 'Step', 's1', 'expire'), { expired: true, reason: 'ttl' });
       assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Pool', 'p1')], [meter(0, 0, null), meter(0, 0, null), meter(0, 0, 100)]);
     });
 
@@ -271,7 +271,7 @@ for (const driver of drivers) {
       assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Pool', 'p1')], [meter(0, 0, null), meter(0, 0, 100)]);
       // The new holder's own reservation is made under its token, and lasts.
       invoke(engine, other, 'Step', 's1', 'reserve');
-      invoke(engine, other, 'Step', 's1', 'heartbeat', { token: 3 });
+      engine.instances.invoke(other, 'Step', 's1', 'heartbeat', {}, fenced(3));
       assert.deepEqual(meterOf(engine, 'Pool', 'p1'), meter(0, 60, 100));
     });
 
@@ -300,7 +300,7 @@ for (const driver of drivers) {
       assert.deepEqual(seqs(), before);
       assert.equal(engine.storage.get("SELECT COUNT(*) AS n FROM bhv_budget__holds WHERE inner_id = 's2'")?.n, 0);
       // Once the first claim's lease ends, the second fits.
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       assert.deepEqual(invoke(engine, worker, 'Step', 's2', 'reserve'), { reserved: { cpu: 60 } });
     });
 
@@ -352,7 +352,7 @@ for (const driver of drivers) {
       const { engine } = chain();
       claim(engine);
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 30 });
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Pool', 'p1')], [meter(30, 0, null), meter(30, 0, null), meter(30, 0, 100)]);
     });
 
@@ -364,7 +364,7 @@ for (const driver of drivers) {
       claim(engine, 's2', other);
       assert.deepEqual(meterOf(engine, 'Run', 'r1'), meter(0, 110, null));
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 10 });
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       assert.deepEqual([meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Pool', 'p1')], [meter(10, 80, null), meter(10, 80, 200)]);
       // An instance without a positive estimate reserves nothing of the meter.
       engine.instances.create(alice, 'Step', { title: 'Unsized' }, { id: 's3' });
@@ -382,7 +382,7 @@ for (const driver of drivers) {
         overruns: [{ schema: 'Pool', id: 'p1', used: 120, limit: 100 }],
         directed: true,
       });
-      const directives = (invoke(engine, worker, 'Step', 's1', 'heartbeat', { token: 1 }) as { directives: Array<{ name: string; data: unknown }> }).directives;
+      const directives = (engine.instances.invoke(worker, 'Step', 's1', 'heartbeat', {}, fenced(1)) as { directives: Array<{ name: string; data: unknown }> }).directives;
       assert.deepEqual(
         directives.map((one) => [one.name, one.data]),
         [['meterExceeded', { meter: 'cpu', used: 120, limit: 100, scope: { schema: 'Pool', id: 'p1' } }]]
@@ -520,7 +520,7 @@ for (const driver of drivers) {
       const { engine, clock } = queued([['s1', 'r1']]);
       assert.equal(claimNext(engine)?.token, 1);
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 10 });
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       assert.deepEqual(stepOf(engine, 's1'), ['queued', null, 2]);
       assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Pool', 'p1')], [meter(10, 0, null), meter(10, 0, 100)]);
 
@@ -545,7 +545,7 @@ for (const driver of drivers) {
       assert.equal(claimNext(engine, other), null);
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 30 });
       invoke(engine, worker, 'Step', 's1', 'transition', { to: 'done' });
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       assert.deepEqual(meterOf(engine, 'Pool', 'p1'), meter(30, 0, 100));
       assert.equal(claimNext(engine, other)?.id, 's2');
       assert.deepEqual([meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Run', 'r2'), meterOf(engine, 'Pool', 'p1')], [meter(30, 0, null), meter(0, 60, null), meter(30, 60, 100)]);
@@ -588,7 +588,7 @@ for (const driver of drivers) {
       const { engine } = single({ meters: { cpu: { limit: 80, reserve: 60 } }, limitPermission: 'budget.limit' });
       claim(engine);
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 10 });
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       const refused = thrown(() => invoke(engine, other, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 200 }), EngineError);
       assert.deepEqual([refused.code, refused.message], ['forbidden', 'otto may not change a limit of Step s1: it needs permission budget.limit']);
       assert.equal(veto(() => invoke(engine, operator, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 9 })).reason, 'meter cpu has 10 used and reserved, more than the limit 9');
@@ -652,7 +652,7 @@ for (const driver of drivers) {
       const stored = () => engine.storage.get("SELECT used, period_start FROM bhv_budget__meters WHERE schema = 'Pool' AND id = 'p1'");
       claim(engine);
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 90 });
-      invoke(engine, worker, 'Step', 's1', 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       invoke(engine, other, 'Step', 's2', 'acquire');
       assert.equal(veto(() => invoke(engine, other, 'Step', 's2', 'reserve')).reason, 'meter cpu has 10 of its limit 100 left, not 60');
       assert.deepEqual(stored(), { used: 90, period_start: 0 });

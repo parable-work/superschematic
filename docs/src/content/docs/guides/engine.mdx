@@ -377,8 +377,10 @@ curl -s $API/schemas/notes/instances/launch/operations/transition \
 }
 ```
 
-A transition the config does not list is 409 `vetoed`, and a state it
-does not name is 400 `invalid_argument`.
+A transition the config does not list is 409 `vetoed`, with
+`details.behavior` `Workflow` and `details.code` `transition_not_allowed`
+for a client to branch on, and a state it does not name is 400
+`invalid_argument`.
 
 ### Comments
 
@@ -480,7 +482,9 @@ the npm package that implements it. The engine half is a
 operation, a reader per field, guards, and migrations for its own
 storage, and optionally schema-level operations, reactions and schedules
 for the runner, and hooks that run when an instance it references
-changes. A server registers it with `openEngine({ behaviors, metaSchema })`,
+changes. A guard's veto carries a code the declaration lists, and a
+caller can send a behavior a precondition with a write, which its guard
+checks: `Lease`'s token is one (`Preconditions` header over HTTP). A server registers it with `openEngine({ behaviors, metaSchema })`,
 where `metaSchema` is the extension binary's `json-schema` output, which
 declares it. `acme.Rating` in `examples/acme-schematic` is the worked
 example, and

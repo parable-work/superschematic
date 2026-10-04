@@ -201,5 +201,11 @@
       },
       "writes": true
     }
+  ],
+  "vetoes": [
+    {
+      "code": "exhausted",
+      "description": "The instance's retries are exhausted: it takes no more attempts, its status moves only to exhaustedState, and it is not acquired or claimed again."
+    }
   ]
 }

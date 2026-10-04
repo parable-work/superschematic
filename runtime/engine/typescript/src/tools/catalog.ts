@@ -10,7 +10,10 @@ each one.
 A tool is one operation: create, get, list, update and delete of every
 live schema the namespace reaches, each operation its behaviors add (a
 schema-level one takes its parameters and no instance id), and three
-tools for writing schemas: list, describe and define a draft. No
+tools for writing schemas: list, describe and define a draft. The update,
+delete and instance operation tools of a schema one of whose behaviors
+declares a preconditionSchema take `preconditions`, each such behavior's
+entry by its name, as the HTTP API's Preconditions header carries them. No
 tool publishes: a draft goes live only through an HTTP call the access
 policy governs, so an MCP client cannot put a schema live on its own.
 
@@ -84,6 +87,8 @@ export interface DescribedBehavior {
   config: unknown;
   fields: Array<{ name: string; description?: string }>;
   operations: string[];
+  /** The codes its vetoes carry, as its declaration lists them. */
+  vetoes: Array<{ code: string; description?: string }>;
 }
 
 /**
@@ -193,6 +198,8 @@ interface ToolSpec {
   operation?: BehaviorOperationDeclaration;
   /** Why the tool is hidden; absent for a visible one. */
   hidden?: string;
+  /** The preconditions argument of an update, a delete or an instance operation; absent when no behavior declares one. */
+  preconditions?: Property;
 }
 
 const TOOL_SCHEMA = 'https://json-schema.org/draft/2020-12/schema';
@@ -246,6 +253,10 @@ export class ToolCatalog {
           ...(field.description ? { description: field.description } : {}),
         })),
         operations: (bound.declaration.operations ?? []).map((operation) => operation.name),
+        vetoes: (bound.declaration.vetoes ?? []).map((veto) => ({
+          code: veto.code,
+          ...(veto.description ? { description: veto.description } : {}),
+        })),
       })),
       operations: tools.map((tool) => ({
         name: tool.methodName,
@@ -339,26 +350,30 @@ export class ToolCatalog {
         return this.instances.list(principal, schema, { namespace, ...(limit !== undefined ? { limit } : {}), ...(cursor !== undefined ? { cursor } : {}) });
       }
       case 'update': {
-        only(tool, input, ['id', 'patch', 'expectedSeq']);
+        only(tool, input, ['id', 'patch', 'expectedSeq', ...preconditionsArgument(tool)]);
         const id = requiredString(tool, input, 'id');
         if (!('patch' in input)) {
           throw new EngineError('invalid_argument', `${tool.handle}: patch, a JSON merge patch of the instance, is required`);
         }
-        return this.instances.update(principal, schema, id, input.patch, { namespace, ...expectedSeqOf(tool, input) });
+        return this.instances.update(principal, schema, id, input.patch, { namespace, ...expectedSeqOf(tool, input), ...preconditionsOf(tool, input) });
       }
       case 'delete': {
-        only(tool, input, ['id', 'expectedSeq']);
+        only(tool, input, ['id', 'expectedSeq', ...preconditionsArgument(tool)]);
         const id = requiredString(tool, input, 'id');
-        if (!this.instances.delete(principal, schema, id, { namespace, ...expectedSeqOf(tool, input) })) {
+        if (!this.instances.delete(principal, schema, id, { namespace, ...expectedSeqOf(tool, input), ...preconditionsOf(tool, input) })) {
           throw new EngineError('not_found', `${schema} ${id} does not exist in namespace ${namespace}`);
         }
         return null;
       }
       case 'operation': {
-        only(tool, input, ['id', 'params', 'expectedSeq']);
+        only(tool, input, ['id', 'params', 'expectedSeq', ...preconditionsArgument(tool)]);
         const id = requiredString(tool, input, 'id');
         const params = input.params ?? {};
-        return this.instances.invoke(principal, schema, id, tool.methodName, params, { namespace, ...expectedSeqOf(tool, input) });
+        return this.instances.invoke(principal, schema, id, tool.methodName, params, {
+          namespace,
+          ...expectedSeqOf(tool, input),
+          ...preconditionsOf(tool, input),
+        });
       }
       case 'schemaOperation': {
         only(tool, input, ['params']);
@@ -480,6 +495,8 @@ export class ToolCatalog {
       schema: record,
       ...parts,
     });
+    const preconditions = preconditionsProperty(behaviors);
+    const fenced = preconditions === undefined ? {} : { preconditions };
     const tools: ToolSpec[] = [
       spec('create', 'create', {
         title: `Create ${name}`,
@@ -512,6 +529,7 @@ export class ToolCatalog {
         policy: invocation.update,
         httpMethod: 'PATCH',
         httpPath: `${instances}/{id}`,
+        ...fenced,
       }),
       spec('delete', 'delete', {
         title: `Delete ${name}`,
@@ -520,6 +538,7 @@ export class ToolCatalog {
         policy: invocation.delete,
         httpMethod: 'DELETE',
         httpPath: `${instances}/{id}`,
+        ...fenced,
       }),
     ];
     for (const behavior of behaviors) {
@@ -535,6 +554,7 @@ export class ToolCatalog {
             httpPath: `${schemaLevel ? schemaPath : `${instances}/{id}`}/operations/${encodeURIComponent(operation.name)}`,
             behavior,
             operation,
+            ...(schemaLevel ? {} : fenced),
           })
         );
       }
@@ -646,6 +666,7 @@ export class ToolCatalog {
             ['id', id],
             ['patch', patchOf(this.dataProperty(tool.schema as SchemaRecord), `A JSON merge patch of the ${(tool.schema as SchemaRecord).instanceType}`)],
             ['expectedSeq', expectedSeq],
+            ...preconditionsEntry(tool),
           ],
           ['id', 'patch']
         );
@@ -654,6 +675,7 @@ export class ToolCatalog {
           [
             ['id', id],
             ['expectedSeq', expectedSeq],
+            ...preconditionsEntry(tool),
           ],
           ['id']
         );
@@ -665,6 +687,7 @@ export class ToolCatalog {
             ['id', id],
             ['params', { raw: params }],
             ['expectedSeq', expectedSeq],
+            ...preconditionsEntry(tool),
           ],
           required ? ['id', 'params'] : ['id']
         );
@@ -859,6 +882,49 @@ function optionalString(tool: ToolSpec, args: Record<string, unknown>, key: stri
     throw new EngineError('invalid_argument', `${tool.handle}: ${key} is a string`);
   }
   return value;
+}
+
+// preconditionsProperty is the preconditions argument of a schema's
+// writes: an entry for each behavior that declares a preconditionSchema,
+// none required; undefined when none does.
+function preconditionsProperty(behaviors: ComposedBehavior[]): Property | undefined {
+  const properties = new Map<string, Property>();
+  for (const behavior of behaviors) {
+    if (behavior.declaration.preconditionSchema !== undefined) {
+      properties.set(behavior.name, { raw: behavior.declaration.preconditionSchema });
+    }
+  }
+  if (properties.size === 0) {
+    return undefined;
+  }
+  return {
+    type: 'object',
+    description: "Preconditions by behavior: each entry is checked against its behavior's schema and handed to its guard, which refuses the call when it does not hold",
+    additionalProperties: false,
+    properties,
+    required: [],
+  };
+}
+
+// preconditionsArgument names the preconditions argument when the tool takes one.
+function preconditionsArgument(tool: ToolSpec): string[] {
+  return tool.preconditions === undefined ? [] : ['preconditions'];
+}
+
+function preconditionsEntry(tool: ToolSpec): Array<[string, Property]> {
+  return tool.preconditions === undefined ? [] : [['preconditions', tool.preconditions]];
+}
+
+// preconditionsOf reads the preconditions argument, which the engine checks.
+function preconditionsOf(tool: ToolSpec, args: Record<string, unknown>): { preconditions?: Record<string, unknown> } {
+  const value = args.preconditions;
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (!isPlainObject(value)) {
+    throw new EngineError('invalid_argument', `${tool.handle}: preconditions is a JSON object of each behavior's entry by its name`);
+  }
+  return { preconditions: value };
 }
 
 function expectedSeqOf(tool: ToolSpec, args: Record<string, unknown>): { expectedSeq?: number } {

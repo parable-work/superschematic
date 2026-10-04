@@ -722,6 +722,8 @@ shape is `BehaviorDeclaration`:
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name` and `description` |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
+| `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
 
 An operation's `scope` says what a call names: `instance`, one instance
 by id, or `schema`, the schema as a whole with no instance, which an
@@ -739,7 +741,9 @@ registering extension's `Name()`; inside `Use` the spec's `Extension` must
 be the extension whose `Register` is running, so an extension cannot
 declare a core name. An operation may not be named `create`, `get`,
 `list`, `update` or `delete`, which every schema has (D16), or declare a
-scope other than `instance` or `schema`. `Finalize`
+scope other than `instance` or `schema`. A `preconditionSchema` is held
+to a `paramsSchema`'s rule, and a veto code that is not lowercase snake
+case, or is listed twice, is refused (D16, amended). `Finalize`
 checks `requires`, `conflicts` and the invocation policy values, since the
 policy is fixed only once every extension has registered.
 `Registry.Behavior(name)` returns a registered `Behavior`: the declaration,
@@ -836,7 +840,8 @@ therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
 types their configs. None names an invocation policy, since a
 distribution's policy need not have the core's values; each operation
-takes the policy's default. Every
+takes the policy's default. `Workflow`, `Dependencies`, `Lease` and
+`Retries` list the codes of their vetoes. Every
 `paramsSchema` sets `additionalProperties: false`. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
@@ -862,7 +867,7 @@ engine; without them the engine refuses a schema that composes one.
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
 | `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
 | `Reactions` | `rules` (each a `when`, `enters` or `allTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
-| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; optional; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
+| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`; optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
 | `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required; `@superschematic/engine-workqueue` | `presence` | `beat`, `miss` |

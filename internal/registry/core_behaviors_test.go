@@ -106,6 +106,33 @@ func TestCoreBehaviors(t *testing.T) {
 			}
 		}
 	}
+	// Lease alone takes a precondition, its token; the refusals a client
+	// branches on carry codes.
+	for _, b := range reg.Behaviors() {
+		if (len(b.PreconditionSchema) > 0) != (b.Name == "Lease") {
+			t.Errorf("%s preconditionSchema = %s", b.Name, b.PreconditionSchema)
+		}
+	}
+	codes := func(b Behavior) []string {
+		var out []string
+		for _, veto := range b.Vetoes {
+			out = append(out, veto.Code)
+		}
+		return out
+	}
+	for _, want := range []struct {
+		behavior Behavior
+		codes    []string
+	}{
+		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
+		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
+		{retries, []string{"exhausted"}},
+		{lease, []string{"held_by_another", "held_by_caller", "not_leased", "not_holder", "lapsed", "token_stale", "token_required", "max_expiries", "hold_limit_fixed", "not_configured"}},
+	} {
+		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
+			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
+		}
+	}
 
 	for _, test := range []struct {
 		behavior Behavior

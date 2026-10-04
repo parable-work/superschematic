@@ -11,7 +11,12 @@ Authenticator returned.
 An instance's sequence is its entity tag. A response that carries an
 instance, or a behavior operation's result, sends `ETag: "<seq>"`, and
 PATCH, DELETE and an operation honour `If-Match` inside the write
-transaction (expectedSeq), so a lost update answers 412.
+transaction (expectedSeq), so a lost update answers 412. They also take
+the `Preconditions` header, a JSON object of each behavior's entry by its
+name (`{"Lease": {"token": 7}}`), which the engine checks against each
+behavior's preconditionSchema and hands to its guard: a header, because
+an update's body is a merge patch of the instance and an operation's is
+its closed parameters, and neither has room for anything else.
 
 A schema-level behavior operation, which has no instance, has a route of
 its own under the schema; it sends no ETag, since it names no instance.
@@ -69,6 +74,8 @@ export interface EngineHttpOptions extends RouterRuntimeOptions {
 export const JSON_MEDIA_TYPE = 'application/json';
 /** The media type of an instance update, RFC 7386. */
 export const MERGE_PATCH_MEDIA_TYPE = 'application/merge-patch+json';
+/** The request header that carries a write's preconditions, a JSON object by behavior name. */
+export const PRECONDITIONS_HEADER = 'Preconditions';
 
 const SCHEMAS = '/namespaces/{namespace}/schemas';
 const SCHEMA = `${SCHEMAS}/{name}`;
@@ -210,7 +217,7 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     const { namespace, name, id } = path as { namespace: string; name: string; id: string };
     const principal = principalOf(ctx);
     const expectedSeq = expectedSeqOf(ctx, () => engine.instances.get(principal, name, id, { namespace }));
-    const record = engine.instances.update(principal, name, id, input, { namespace, expectedSeq });
+    const record = engine.instances.update(principal, name, id, input, { namespace, expectedSeq, ...preconditionsOf(ctx) });
     return new OperationResult(record, 200, { etag: etagOf(record) });
   });
 
@@ -218,7 +225,7 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     const { namespace, name, id } = path as { namespace: string; name: string; id: string };
     const principal = principalOf(ctx);
     const expectedSeq = expectedSeqOf(ctx, () => engine.instances.get(principal, name, id, { namespace }));
-    if (!engine.instances.delete(principal, name, id, { namespace, expectedSeq })) {
+    if (!engine.instances.delete(principal, name, id, { namespace, expectedSeq, ...preconditionsOf(ctx) })) {
       throw notFound(`${name} ${id} does not exist in namespace ${namespace}`);
     }
     return null;
@@ -233,7 +240,7 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     const { namespace, name, id, operation } = path as { namespace: string; name: string; id: string; operation: string };
     const principal = principalOf(ctx);
     const expectedSeq = expectedSeqOf(ctx, () => engine.instances.get(principal, name, id, { namespace }));
-    const outcome = engine.instances.operate(principal, name, id, operation, input ?? {}, { namespace, expectedSeq });
+    const outcome = engine.instances.operate(principal, name, id, operation, input ?? {}, { namespace, expectedSeq, ...preconditionsOf(ctx) });
     return new OperationResult(outcome.result, 200, { etag: `"${outcome.seq}"` });
   });
 
@@ -350,6 +357,28 @@ function expectedSeqOf(ctx: RequestContext, current: () => InstanceRecord | unde
   }
   const seq = current()?.seq;
   return seq !== undefined && seqs.has(seq) ? seq : 0;
+}
+
+/**
+ * The preconditions the Preconditions header carries: a JSON object, which
+ * the engine checks against each behavior's preconditionSchema. A header
+ * that is not one is 400. Other routes ignore the header.
+ */
+function preconditionsOf(ctx: RequestContext): { preconditions?: Record<string, unknown> } {
+  const header = ctx.headers.get(PRECONDITIONS_HEADER);
+  if (header === null) {
+    return {};
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(header);
+  } catch {
+    throw badRequest(`${PRECONDITIONS_HEADER} is a JSON object of each behavior's entry by its name`);
+  }
+  if (!isPlainObject(value)) {
+    throw badRequest(`${PRECONDITIONS_HEADER} is a JSON object of each behavior's entry by its name`);
+  }
+  return { preconditions: value };
 }
 
 /** A 415 problem, with Accept-Patch on PATCH, unless the body is of the media type the route takes. */

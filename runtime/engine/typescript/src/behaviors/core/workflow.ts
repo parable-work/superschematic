@@ -126,17 +126,21 @@ export const workflow = defineBehavior<WorkflowConfig>({
     }
     const from = view.columns.get().status;
     if (typeof from !== 'string') {
-      return `${view.schema} ${view.id} has no status`;
+      return { reason: `${view.schema} ${view.id} has no status`, code: 'no_status' };
     }
     if (from === to) {
-      return `${view.schema} ${view.id} is already ${to}`;
+      return { reason: `${view.schema} ${view.id} is already ${to}`, code: 'already_in_state', details: { from, to } };
     }
     const move = config.transitions.find((transition) => transition.from === from && transition.to === to);
     if (!move) {
       const next = targets(config, from);
       return next.length === 0
-        ? `${from} is a terminal state: no transition leaves it`
-        : `no transition leads from ${from} to ${to}; from ${from} it can move to ${next.join(', ')}`;
+        ? { reason: `${from} is a terminal state: no transition leaves it`, code: 'terminal_state', details: { from, to } }
+        : {
+            reason: `no transition leads from ${from} to ${to}; from ${from} it can move to ${next.join(', ')}`,
+            code: 'transition_not_allowed',
+            details: { from, to, allowed: next },
+          };
     }
     if (move.permission !== undefined && !view.can(move.permission)) {
       throw new EngineError(

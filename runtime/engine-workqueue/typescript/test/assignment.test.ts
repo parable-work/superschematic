@@ -7,7 +7,7 @@ import { afterEach, describe, test } from 'node:test';
 
 import { BehaviorVetoError, EngineError, IncompatibleChangeError, type Engine, type Principal } from '@superschematic/engine';
 
-import { Clock, alice, cleanup, drivers, jobFlow, jobsDocument, openTestEngine, publish, thrown } from './helpers.ts';
+import { Clock, alice, cleanup, drivers, fenced, jobFlow, jobsDocument, openTestEngine, publish, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -88,7 +88,7 @@ for (const driver of drivers) {
       const refused = veto(() => invoke(engine, other, 'acquire'));
       assert.deepEqual([refused.behavior, refused.action, refused.reason], ['Assignment', 'acquire', 'it is assigned to another principal, who alone may take it']);
       assert.equal((invoke(engine, worker, 'acquire') as { token: number }).token, 1);
-      invoke(engine, worker, 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(1));
       invoke(engine, worker, 'unassign');
       assert.equal((invoke(engine, other, 'acquire') as { token: number }).token, 3);
     });

@@ -18,7 +18,7 @@ import {
   type Principal,
 } from '@superschematic/engine';
 
-import { Clock, alice, cleanup, drivers, jobFlow, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import { Clock, alice, cleanup, drivers, fenced, jobFlow, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -133,7 +133,7 @@ for (const driver of drivers) {
         stuck: false,
       });
       assert.equal(dataOf(engine).status, 'failed');
-      invoke(engine, worker, 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(1 as number));
       assert.equal(veto(() => invoke(engine, other, 'acquire')).reason, 'its retries are exhausted, so it is not taken again');
       assert.equal(veto(() => attempt(engine, { failure: 'timeout' })).reason, 'its retries are exhausted');
     });
@@ -356,13 +356,13 @@ for (const driver of drivers) {
         const claimed = claimNext(engine);
         assert.equal(claimed?.id, 'j1');
         assert.equal(attempt(engine, { failure: 'timeout' }).exhausted, false);
-        invoke(engine, worker, 'release', { token: claimed?.token });
+        engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(claimed?.token as number));
         assert.equal(dataOf(engine).status, 'queued');
       }
       const last = claimNext(engine);
       assert.deepEqual(attempt(engine, { failure: 'invalid' }), { ...attempt0(4), failure: 'invalid', classAttempts: counts(3, 1, 0), exhausted: true });
       assert.equal(dataOf(engine).status, 'failed');
-      invoke(engine, worker, 'release', { token: last?.token });
+      engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(last?.token as number));
       assert.equal(dataOf(engine).status, 'failed');
       assert.equal(claimNext(engine)?.id, 'j2');
     });

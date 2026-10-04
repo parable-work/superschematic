@@ -51,7 +51,7 @@ operations, so its guards always run, on this instance or another.
 */
 
 import type { Principal } from '../access.js';
-import type { ValidationIssue } from '../errors.js';
+import type { ValidationIssue, Veto } from '../errors.js';
 import type { EngineEvent } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
@@ -204,12 +204,13 @@ export interface Instances {
    * guard of that instance, its handler and its result, then for a writing
    * operation that instance's afterChange, its next seq and its operation
    * event, all in this call's transaction, in a savepoint that rolls back
-   * alone when it throws. From a guard, a field reader and a read-only
-   * operation it reaches read-only operations only. Invoking a writing
-   * operation of an instance whose write is still running up the call is
-   * a cycle, and refused (BehaviorError).
+   * alone when it throws. options.preconditions are checked and handed to
+   * that instance's guards as a caller's are. From a guard, a field reader
+   * and a read-only operation it reaches read-only operations only.
+   * Invoking a writing operation of an instance whose write is still
+   * running up the call is a cycle, and refused (BehaviorError).
    */
-  invoke(schema: string, id: string, operation: string, params?: FrozenJSON): unknown;
+  invoke(schema: string, id: string, operation: string, params?: FrozenJSON, options?: InstancesInvokeOptions): unknown;
   /**
    * Runs a schema-level operation of a schema, its own or another, as
    * engine.instances.invokeSchema would: the parameters against its
@@ -235,6 +236,16 @@ export interface Instances {
    * running up the call.
    */
   create(schema: string, data: FrozenJSON, options?: { readonly id?: string }): InstanceRecord;
+}
+
+/** How a behavior invokes another instance's operation. */
+export interface InstancesInvokeOptions {
+  /**
+   * The preconditions of the call, by behavior: each entry is checked
+   * against its behavior's preconditionSchema and handed to that
+   * behavior's guard, as a caller's are (engine.instances.invoke).
+   */
+  readonly preconditions?: Readonly<Record<string, unknown>>;
 }
 
 /** The schemas the namespace reaches, as the call's principal may read them. */
@@ -460,7 +471,14 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
   validateUpdate(patch: FrozenJSON): readonly ValidationIssue[];
 }
 
-/** What a guard is asked to allow. The instance before the change is the view's data. */
+/**
+ * What a guard is asked to allow. The instance before the change is the
+ * view's data. precondition is the guard's own behavior's entry in the
+ * preconditions the caller sent with the update, the delete or the
+ * operation, checked against its preconditionSchema; absent when the
+ * caller sent none for it, and always for a request a behavior's own
+ * code makes (caller).
+ */
 export type GuardRequest =
   | {
       readonly kind: 'update';
@@ -468,8 +486,9 @@ export type GuardRequest =
       readonly after: FrozenJSON;
       /** The behavior whose operation applied it with update(); absent for a caller's update. */
       readonly caller?: string;
+      readonly precondition?: FrozenJSON;
     }
-  | { readonly kind: 'delete' }
+  | { readonly kind: 'delete'; readonly precondition?: FrozenJSON }
   | {
       readonly kind: 'operation';
       /** The behavior whose operation it is. */
@@ -484,7 +503,14 @@ export type GuardRequest =
       readonly writes: boolean;
       /** The behavior whose code made the call, for a call(); absent for a caller's. */
       readonly caller?: string;
+      readonly precondition?: FrozenJSON;
     };
+
+/**
+ * What a guard returns: nothing to allow, or a veto, a reason or a Veto
+ * with a code its declaration lists and details.
+ */
+export type GuardAnswer = string | Veto | undefined | void;
 
 /** What changed, for afterChange. */
 export type InstanceChange =
@@ -650,13 +676,19 @@ export interface BehaviorImplementation<Config = unknown> {
 
   /**
    * May veto an update, a delete or an operation of any behavior on the
-   * type: return a reason. Every behavior's guard runs in list order and
+   * type: return a reason, or a Veto with a code its declaration lists
+   * (vetoes) and details. Every behavior's guard runs in list order and
    * the first veto wins; the change is refused with a BehaviorVetoError
-   * (vetoed).
+   * (vetoed). A code the declaration does not list is a BehaviorError.
    */
-  guard?(context: InstanceView<Config>, request: GuardRequest): string | undefined | void;
+  guard?(context: InstanceView<Config>, request: GuardRequest): GuardAnswer;
 
-  /** A handler per declared operation of scope instance (the default). */
+  /**
+   * A handler per declared operation of scope instance (the default). A
+   * handler refuses a call with a BehaviorVetoError, whose veto may carry
+   * a code its declaration lists, as a guard's may; any other code is a
+   * BehaviorError. So does a schema-level one, initialize and afterChange.
+   */
   readonly operations?: Readonly<Record<string, OperationHandler<Config>>>;
 
   /** A handler per declared operation of scope schema. */
@@ -675,11 +707,13 @@ export interface BehaviorImplementation<Config = unknown> {
   /**
    * May veto an update, a delete or a writing operation of an instance the
    * behavior's instance refers to (a recorded reference), whoever the
-   * caller: return a reason. The view is the referencing instance's. It
-   * runs with the referenced instance's own guards, after them, for each
-   * reference; the first veto wins (BehaviorVetoError, vetoed).
+   * caller: return a reason or a Veto, as guard does. The view is the
+   * referencing instance's. It runs with the referenced instance's own
+   * guards, after them, for each reference; the first veto wins
+   * (BehaviorVetoError, vetoed). Its request carries no precondition: the
+   * caller's preconditions are for the referenced instance's behaviors.
    */
-  guardReference?(view: InstanceView<Config>, reference: Reference, request: GuardRequest): string | undefined | void;
+  guardReference?(view: InstanceView<Config>, reference: Reference, request: GuardRequest): GuardAnswer;
 
   /**
    * Runs after an update, a delete or a writing operation of an instance

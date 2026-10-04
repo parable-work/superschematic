@@ -229,7 +229,11 @@ export const dependencies = defineBehavior<DependenciesConfig>({
     if (open.length === 0) {
       return undefined;
     }
-    return `${view.schema} ${view.id} cannot move to ${to} while it is blocked by ${open.map(describe).join(', ')}`;
+    return {
+      reason: `${view.schema} ${view.id} cannot move to ${to} while it is blocked by ${open.map(describe).join(', ')}`,
+      code: 'blocked',
+      details: { blockers: open.map((blocker) => ({ schema: blocker.schema, id: blocker.id, ...(blocker.status === undefined ? {} : { status: blocker.status }) })) },
+    };
   },
 
   operations: {
@@ -256,7 +260,10 @@ export const dependencies = defineBehavior<DependenciesConfig>({
           target.id,
         ])
       ) {
-        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, `${target.schema} ${target.id} already blocks it`);
+        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, {
+          reason: `${target.schema} ${target.id} already blocks it`,
+          code: 'already_blocking',
+        });
       }
       if (reaches(context, target, { schema: context.schema, id: context.id })) {
         throw new BehaviorVetoError(
@@ -264,13 +271,19 @@ export const dependencies = defineBehavior<DependenciesConfig>({
           'addBlocker',
           context.schema,
           context.id,
-          `${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`
+          {
+            reason: `${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`,
+            code: 'cycle',
+          }
         );
       }
       const [blocker] = blockers(context, [{ edge: 0, ...target }]);
       const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
       if (blocker.open && typeof status === 'string' && context.config.gatedStates.includes(status)) {
-        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, `it is ${status}, a gated state, so it takes no blocker that is not done: ${describe(blocker)}`);
+        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, {
+          reason: `it is ${status}, a gated state, so it takes no blocker that is not done: ${describe(blocker)}`,
+          code: 'gated',
+        });
       }
       context.sql.run(`INSERT INTO ${table} (namespace, schema, id, blocker_schema, blocker_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
         ...key(context),
