@@ -55,9 +55,9 @@ type app struct {
 	exts []registry.Extension
 }
 
-// New builds the root command with build, build-all, json-schema, format and
-// behaviors, plus the subcommands of any extension that implements
-// CommandProvider.
+// New builds the root command with build, build-all, migrate, json-schema,
+// format and behaviors, plus the subcommands of any extension that
+// implements CommandProvider.
 func New(cfg Config, exts ...registry.Extension) *cobra.Command {
 	name := cfg.Name
 	if name == "" {
@@ -86,6 +86,7 @@ kinds, decorators, documents, generators, auth providers and subcommands.`, name
 	}
 	root.AddCommand(newBuildCmd(a))
 	root.AddCommand(newBuildAllCmd(a))
+	root.AddCommand(newMigrateCmd(a))
 	root.AddCommand(newJSONSchemaCmd(a))
 	root.AddCommand(newFormatCmd(a))
 	root.AddCommand(newBehaviorsCmd(a))
