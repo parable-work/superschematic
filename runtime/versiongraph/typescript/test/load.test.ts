@@ -10,7 +10,7 @@ const wasmBytes = readFileSync(wasmUrl);
 
 const input: TreeInput = {
   descriptor: {
-    version: 2,
+    version: 3,
     root: { table: "recipe", key: "id" },
     refTable: "recipe_ref",
     commitTable: "recipe_commit",
@@ -28,6 +28,7 @@ const input: TreeInput = {
         tombstone: "deleted_on_ref",
         version: "_version",
         singleton: true,
+        history: { exclude: [] },
         columns: { entity_key: "uuid", id: "uuid", ref: "uuid", _version: "integer", title: "string", deleted_on_ref: "boolean" },
       },
     ],
@@ -120,6 +121,24 @@ test("an input that is not JSON is a VersionGraphError", async () => {
   expect(thrown).toBeInstanceOf(VersionGraphError);
   expect((thrown as VersionGraphError).code).toBe("invalid_json");
   expect((thrown as VersionGraphError).name).toBe("VersionGraphError");
+});
+
+test("a descriptor as version 2 wrote it, without each kind's history, is invalid_descriptor", async () => {
+  const graph = await init(wasmBytes);
+  const v2 = {
+    ...input.descriptor,
+    version: 2,
+    kinds: input.descriptor.kinds.map(({ history: _history, ...kind }) => kind),
+  };
+  let thrown: unknown;
+  try {
+    graph.run("validate", JSON.stringify({ descriptor: v2, tree: {} }));
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(VersionGraphError);
+  expect((thrown as VersionGraphError).code).toBe("invalid_descriptor");
+  expect((thrown as VersionGraphError).message).toContain("version 2 is not supported");
 });
 
 test("run returns the output document as text", async () => {

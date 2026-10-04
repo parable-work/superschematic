@@ -161,6 +161,9 @@ def conforms(value: Any, annotation: Any, where: str) -> None:
     if annotation is bool:
         assert isinstance(value, bool), f"{where}: {value!r} is not a boolean"
         return
+    if annotation is int:
+        assert isinstance(value, int) and not isinstance(value, bool), f"{where}: {value!r} is not an integer"
+        return
     if annotation is str:
         assert isinstance(value, str) and not isinstance(value, Number), f"{where}: {value!r} is not a string"
         return

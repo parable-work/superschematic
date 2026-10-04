@@ -1,6 +1,6 @@
 // Package postgres is the Postgres storage adapter of the version-graph
 // engine (D19). It builds its statements at run time from a graph's
-// descriptor (version 2), which names the graph's tables, each kind's role
+// descriptor (version 3), which names the graph's tables, each kind's role
 // columns and every column's value class, and it returns every row as a
 // canonical row through package canonical.
 //
@@ -120,8 +120,8 @@ func New(raw json.RawMessage, opts Options) (*Adapter, error) {
 	if err := json.Unmarshal(raw, &d); err != nil {
 		return nil, fmt.Errorf("postgres: read the descriptor: %w", err)
 	}
-	if d.Version != 2 {
-		return nil, fmt.Errorf("postgres: descriptor version %d; this adapter reads version 2", d.Version)
+	if d.Version != 3 {
+		return nil, fmt.Errorf("postgres: descriptor version %d; this adapter reads version 3", d.Version)
 	}
 	for member, value := range map[string]string{"root table": d.Root.Table, "root key": d.Root.Key, "refTable": d.RefTable, "commitTable": d.CommitTable, "patchTable": d.PatchTable, "releaseTable": d.ReleaseTable, "snapshotTable": d.SnapshotTable} {
 		if value == "" {

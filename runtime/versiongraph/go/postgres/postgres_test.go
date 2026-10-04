@@ -31,7 +31,8 @@ func readDescriptor(t *testing.T) json.RawMessage {
 
 // TestNew: the adapter takes the fixture's descriptor and refuses one that
 // leaves out what it builds statements from: a graph table, a kind's root
-// column, or a role column the kind's columns do not declare.
+// column, or a role column the kind's columns do not declare. It refuses a
+// descriptor of version 2 too.
 func TestNew(t *testing.T) {
 	kind := func(d map[string]any) map[string]any { return d["kinds"].([]any)[0].(map[string]any) }
 	for _, c := range []struct {
@@ -49,6 +50,7 @@ func TestNew(t *testing.T) {
 		{"a role column missing from the kind's columns", func(d map[string]any) {
 			delete(kind(d)["columns"].(map[string]any), "_version")
 		}, `version column "_version" is not in its columns`},
+		{"a descriptor of version 2", func(d map[string]any) { d["version"] = 2 }, "reads version 3"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var descriptor map[string]any

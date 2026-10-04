@@ -1102,7 +1102,7 @@ func assertCanonicalRows(t *testing.T, db *Database, pool *pgxpool.Pool) {
 			Columns      map[string]string ` + "`json:\"columns\"`" + `
 		} ` + "`json:\"kinds\"`" + `
 	}
-	if err := json.Unmarshal([]byte(RecipeGraphDescriptor), &descriptor); err != nil || descriptor.Version != 2 {
+	if err := json.Unmarshal([]byte(RecipeGraphDescriptor), &descriptor); err != nil || descriptor.Version != 3 {
 		t.Fatalf("read the descriptor: version %d, %v", descriptor.Version, err)
 	}
 	// Read under a session time zone other than the writers': a live row's

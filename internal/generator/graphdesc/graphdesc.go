@@ -1,8 +1,9 @@
 // Package graphdesc builds the descriptor of each version graph a schema
-// declares (D17, D19): the JSON that tells the version-graph core which
+// declares (D17, D19, D32): the JSON that tells the version-graph core which
 // column of a member kind's rows plays which role, how each column merges,
 // and which columns are not content, and tells a storage adapter which
-// tables hold the graph and the value class of every column.
+// tables hold the graph, the value class of every column and what each
+// kind's history keeps.
 // runtime/versiongraph/README.md is its contract.
 //
 // The ORM generator writes a graph's descriptor as a constant beside its
@@ -33,7 +34,7 @@ const (
 )
 
 // Version is the descriptor format this package writes and the core reads.
-const Version = 2
+const Version = 3
 
 // Descriptor is a graph descriptor as the core reads it.
 type Descriptor struct {
@@ -75,8 +76,25 @@ type Kind struct {
 	Singleton bool              `json:"singleton,omitempty"`
 	Units     map[string]string `json:"units,omitempty"`
 	Excluded  []string          `json:"excluded,omitempty"`
+	// History is what the kind's history images keep.
+	History History `json:"history"`
 	// Columns gives every column of the kind's table its value class.
 	Columns map[string]string `json:"columns"`
+}
+
+// History is what a kind's history keeps (D32): the retention, exclusions
+// and actor column the sql generator writes its capture trigger and prune
+// function from, computed by the same code (sqlutil.VersionedHistory).
+type History struct {
+	// RetentionDays is how many days of history pruning keeps; absent when
+	// the kind declares no retention.
+	RetentionDays int `json:"retentionDays,omitempty"`
+	// Exclude are the columns every history image leaves out, empty when
+	// it leaves out none.
+	Exclude []string `json:"exclude"`
+	// Actor is the column a delete's image names its actor in; absent when
+	// the kind has neither deleted_by nor updated_by, or excludes it.
+	Actor string `json:"actor,omitempty"`
 }
 
 // Parent is a kind's containment edge: the column holding the parent row's
@@ -206,6 +224,11 @@ func describe(schema *ir.Schema, root, td *ir.TypeDef, sqlTypes map[string]strin
 	if _, ok := columns["updatedBy"]; ok {
 		kind.Author = columns["updatedBy"]
 	}
+	kept := sqlutil.VersionedHistory(td.VersionedConfig, func(column string) bool {
+		_, ok := kind.Columns[column]
+		return ok
+	})
+	kind.History = History{RetentionDays: kept.RetentionDays, Exclude: append([]string{}, kept.Exclude...), Actor: kept.Actor}
 	if p := td.GraphMember.Parent; p != nil {
 		kind.Parent = &Parent{Key: columns[p.Key], Kind: codegen.ToSnakeCase(p.Of)}
 	}

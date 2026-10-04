@@ -1,7 +1,7 @@
-//! The graph descriptor (version 2): which columns of each kind's rows play
+//! The graph descriptor (version 3): which columns of each kind's rows play
 //! which role, how each content column merges, and the value class of every
-//! column. It also names the graph's tables, which only a storage adapter
-//! reads.
+//! column. It also names the graph's tables and what each kind's history
+//! keeps, which only a storage adapter reads.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::error::Error;
 
 /// The descriptor format this core reads.
-pub const VERSION: u64 = 2;
+pub const VERSION: u64 = 3;
 
 /// The descriptor as it crosses the boundary.
 #[derive(Debug, Deserialize)]
@@ -68,7 +68,37 @@ struct KindDescriptor {
     units: BTreeMap<String, Unit>,
     #[serde(default)]
     excluded: Vec<String>,
+    /// What the kind's history keeps, for a storage adapter. Every kind
+    /// has it, so a descriptor written before it is refused rather than
+    /// read as keeping everything forever.
+    history: HistoryDescriptor,
     columns: BTreeMap<String, ValueClass>,
+}
+
+/// What a kind's history images keep. The core checks it against the
+/// kind's columns and does not read it otherwise.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct HistoryDescriptor {
+    /// Days of history pruning keeps; absent for no retention. Read as a
+    /// value, so the check names the kind.
+    #[serde(default, deserialize_with = "present")]
+    retention_days: Option<Value>,
+    /// The columns every history image leaves out.
+    exclude: Vec<String>,
+    /// The column a delete's image names its actor in; absent for none.
+    #[serde(default, deserialize_with = "present")]
+    actor: Option<String>,
+}
+
+/// Reads a member that is present, so an absent member is `None` and a
+/// `null` one is read as the member's type, which refuses it.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
@@ -408,6 +438,7 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
         }
     };
     let excluded: BTreeSet<String> = raw.excluded.into_iter().collect();
+    let history = raw.history;
     let kind = Kind {
         name,
         key: raw.key,
@@ -475,5 +506,77 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
             )));
         }
     }
+    check_history(&kind, &history)?;
     Ok(kind)
+}
+
+/// The role columns a history image is found and read by: the kind's
+/// roles less its author, which only names who wrote a row.
+fn history_roles(kind: &Kind) -> impl Iterator<Item = (&'static str, &str)> {
+    [
+        ("key", kind.key.as_str()),
+        ("id", kind.id.as_str()),
+        ("ref", kind.ref_column.as_str()),
+        ("tombstone", kind.tombstone.as_str()),
+        ("version", kind.version.as_str()),
+    ]
+    .into_iter()
+    .chain(kind.root.as_deref().map(|c| ("root", c)))
+}
+
+/// A retention is a positive whole number of days. An excluded column is
+/// one of the kind's columns, once, and is not content, since a commit is
+/// read back from history images; nor is it a role column a history image
+/// is found and read by. The actor is a column of the kind that history
+/// keeps, and is not one of those role columns either.
+fn check_history(kind: &Kind, history: &HistoryDescriptor) -> Result<(), Error> {
+    let name = &kind.name;
+    if let Some(days) = &history.retention_days {
+        if days.as_u64().is_none_or(|days| days == 0) {
+            return Err(Error::descriptor(format!(
+                "descriptor: kind {name:?} history retentionDays is {days}, not a positive integer"
+            )));
+        }
+    }
+    let mut excluded = BTreeSet::new();
+    for column in &history.exclude {
+        if !kind.columns.contains_key(column) {
+            return Err(Error::descriptor(format!(
+                "descriptor: kind {name:?} history excludes {column:?}, which is not in its columns"
+            )));
+        }
+        if let Some((role, _)) = history_roles(kind).find(|(_, c)| c == column) {
+            return Err(Error::descriptor(format!(
+                "descriptor: kind {name:?} history excludes its {role} column {column:?}; history images are found and read by it"
+            )));
+        }
+        if kind.is_content(column) {
+            return Err(Error::descriptor(format!(
+                "descriptor: kind {name:?} history excludes {column:?}, which is content; a commit's rows are read back from history images"
+            )));
+        }
+        if !excluded.insert(column.as_str()) {
+            return Err(Error::descriptor(format!(
+                "descriptor: kind {name:?} history excludes {column:?} more than once"
+            )));
+        }
+    }
+    if let Some(actor) = &history.actor {
+        if !kind.columns.contains_key(actor) {
+            return Err(Error::descriptor(format!(
+                "descriptor: kind {name:?} history actor column {actor:?} is not in its columns"
+            )));
+        }
+        if let Some((role, _)) = history_roles(kind).find(|(_, c)| c == actor) {
+            return Err(Error::descriptor(format!(
+                "descriptor: kind {name:?} history actor column {actor:?} is its {role} column"
+            )));
+        }
+        if excluded.contains(actor.as_str()) {
+            return Err(Error::descriptor(format!(
+                "descriptor: kind {name:?} history actor column {actor:?} is excluded from history, so a delete's image cannot name its actor in it"
+            )));
+        }
+    }
+    Ok(())
 }

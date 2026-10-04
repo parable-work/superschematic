@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "graph": "recipe",
   "root": {
     "table": "recipe",
@@ -25,6 +25,9 @@
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "deleted_on_ref": "boolean",
@@ -55,6 +58,10 @@
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "retentionDays": 365,
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "deleted_on_ref": "boolean",
@@ -84,6 +91,9 @@
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "body": "string",
@@ -117,6 +127,13 @@
         "created_by",
         "updated_at"
       ],
+      "history": {
+        "retentionDays": 365,
+        "exclude": [
+          "scratch"
+        ],
+        "actor": "updated_by"
+      },
       "columns": {
         "_version": "integer",
         "created_at": "dateTime",
@@ -147,6 +164,9 @@
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "bites": "integer[][]",
@@ -182,6 +202,9 @@
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "deleted_on_ref": "boolean",
