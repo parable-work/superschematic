@@ -92,7 +92,9 @@ func untar(r io.Reader, dir string) error {
 			return err
 		}
 		name := filepath.FromSlash(header.Name)
-		if !insideRoot(root, name) {
+		// filepath.IsLocal refuses an absolute name and one that climbs out
+		// through ".."; insideRoot then follows the links extracted so far.
+		if !filepath.IsLocal(name) || !insideRoot(root, name) {
 			return fmt.Errorf("archive entry %q is outside the archive", header.Name)
 		}
 		target := filepath.Join(root, name)
