@@ -15,8 +15,8 @@
 // (D32), over the fixed layout in an in-memory database, and needs no
 // server: once through bun:sqlite on transactions of the adapter's own, and
 // once through node:sqlite in a transaction the runner holds, as D16's
-// engine holds a behavior's, with every statement the adapter runs held to
-// D16's rules for a behavior's SQL.
+// engine holds a behavior's, with the layout under a behavior's names and
+// every statement the adapter runs held to D16's rules for a behavior's SQL.
 import { beforeAll, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
@@ -50,10 +50,10 @@ import {
 } from "../dist/engine.js";
 import { init, initSync, type VersionGraph } from "../dist/index.js";
 import { PostgresAdapter, pgClient, pgPool } from "../dist/postgres.js";
-import { SqliteAdapter, type SqliteClient } from "../dist/sqlite.js";
+import { defaultTableName, SqliteAdapter, sqliteTables, type SqliteClient } from "../dist/sqlite.js";
 import { dsn, descriptor, rawTypes, scratchSchema, type Scratch } from "./postgres.js";
 import { replayed } from "./replay.js";
-import { bunBinding, checkedClient, inCallerTransaction, nodeBinding, type Binding, type Database } from "./sqlite.js";
+import { behaviorTable, bunBinding, checkedClient, inCallerTransaction, nodeBinding, type Binding, type Database } from "./sqlite.js";
 
 // The schema epoch and snapshot interval the fixture's Recipe graph declares,
 // which the engine of every step runs at unless the step names another.
@@ -349,7 +349,7 @@ const passes: Pass[] = [
   { backend: "sqlite", label: " on SQLite (bun:sqlite)", open: async () => SqliteBackend.open(bun, false), skip: false },
   {
     backend: "sqlite",
-    label: " on SQLite (node:sqlite, in the caller's transaction, D16's rules)",
+    label: " on SQLite (node:sqlite, in the caller's transaction, under a behavior's names, D16's rules)",
     open: async () => SqliteBackend.open(node, true),
     skip: false,
   },
@@ -657,6 +657,8 @@ class SqliteBackend implements Backend {
     readonly database: Database,
     readonly storage: SyncStorage,
     readonly engine: SyncEngine,
+    /** An sql step's statement as it runs here, written against the layout's default names. */
+    readonly statement: (sql: string) => string,
   ) {}
 
   static open(binding: Binding, callerTransaction: boolean): SqliteBackend {
@@ -664,8 +666,14 @@ class SqliteBackend implements Backend {
     const raw = database.client;
     raw.exec!("PRAGMA foreign_keys = ON");
     let storage: SyncStorage;
+    let statement = (sql: string) => sql;
     if (callerTransaction) {
-      const adapter = new SqliteAdapter(descriptor, { graph: sqliteGraph, callerTransaction: true });
+      // The layout under a behavior's names, as D16's sql.table gives them,
+      // so D16's checks see the names a behavior's statements would carry;
+      // an sql step's statement names the same tables.
+      const adapter = new SqliteAdapter(descriptor, { graph: sqliteGraph, callerTransaction: true, tableName: behaviorTable });
+      const defaultNames = new RegExp(`\\b${defaultTableName("")}(${sqliteTables.join("|")})\\b`, "g");
+      statement = (sql) => sql.replace(defaultNames, (_, local: string) => behaviorTable(local));
       const checked: SqliteClient = checkedClient(raw, "write");
       inCallerTransaction(raw, () => adapter.createTables(checkedClient(raw, "migrate")));
       const inner = adapter.storage(checked);
@@ -679,7 +687,7 @@ class SqliteBackend implements Backend {
       schemaEpoch: fixtureSchemaEpoch,
       snapshotEvery: fixtureSnapshotEvery,
     });
-    return new SqliteBackend(database, storage, engine);
+    return new SqliteBackend(database, storage, engine, statement);
   }
 
   engineAt(options: EngineOptions): SyncEngine {
@@ -707,7 +715,7 @@ class SqliteBackend implements Backend {
    * casts what it selects, as on Postgres every column reads as text.
    */
   async sql(statement: string, args: string[]): Promise<string[]> {
-    return this.database.client.all(statement, args).map((row) => {
+    return this.database.client.all(this.statement(statement), args).map((row) => {
       for (const [column, value] of Object.entries(row)) {
         if (value !== null && typeof value !== "string") {
           throw new Error(`column ${column} is ${typeof value}, not text: cast it in the statement`);
