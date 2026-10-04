@@ -227,6 +227,9 @@ func runMigratePlan(cmd *cobra.Command, a *app, flags *migratePlanFlags, service
 		return err
 	}
 	name := service.Name
+	if err := current.requireDialect(name, in.dialect); err != nil {
+		return err
+	}
 
 	if flags.printModel {
 		model, err := current.model(name, in.dialect)

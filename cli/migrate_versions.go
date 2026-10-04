@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -124,6 +125,25 @@ func (v *schemaVersion) requireDatabase(service buildplan.Service) error {
 		}
 	}
 	return fmt.Errorf("migrate plan: %s is of kind %s, which has no database; plan a DB service", service.Name, kind)
+}
+
+// requireDialect refuses to plan the named service for a dialect its
+// outputs.sql.dialects does not list: no build of it writes that
+// dialect's create.sql, so no database of it is in that dialect.
+func (v *schemaVersion) requireDialect(name string, dialect sqlmigrate.Dialect) error {
+	_, cfg, err := v.load(name)
+	if err != nil {
+		return err
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, v.reg)
+	if err != nil {
+		return fmt.Errorf("schema config for %s: %w", name, err)
+	}
+	if !outputs.SQLDialect(string(dialect)) {
+		return fmt.Errorf("migrate plan: %s is built for %s, not %s: add %s to its outputs.sql.dialects to plan for it",
+			name, strings.Join(outputs.SQLDialects(), ", "), dialect, dialect)
+	}
+	return nil
 }
 
 // readsSources reports whether service's kind may hold @source views,
