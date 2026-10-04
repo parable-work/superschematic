@@ -12,6 +12,7 @@
         ]
       }
     },
+    { "name": "Constants", "config": { "fields": ["step", "topic"] } },
     { "name": "Dependencies" },
     { "name": "Links", "config": { "links": { "batch": { "schema": "batches", "required": true } } } }
   ],

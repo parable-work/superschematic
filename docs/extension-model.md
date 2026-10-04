@@ -719,6 +719,7 @@ shape is `BehaviorDeclaration`:
 | `name` | bare (`Workflow`) for a core behavior, `<extension>.<Name>` for an extension's |
 | `description` | what the behavior adds |
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
+| `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name` and `description` |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
@@ -757,6 +758,19 @@ so its parameters are exactly the ones it declares`. The value must be
 `false` itself: a schema that closes the object another way, with
 `unevaluatedProperties: false` or `additionalProperties: {"not": {}}`, is
 refused too.
+
+A `createParamsSchema` is an object schema too, but its
+`additionalProperties` may be a schema as well as `false`: a create's
+parameters may be keyed by names the config gives (`Links` takes its
+links by name), so the schema admits keys it does not list, and checks
+each one's value. `RegisterBehavior` refuses one that does not compile,
+is not an object schema, or leaves further keys unchecked (absent or
+`true`), as the engine does and in its words: `behavior <B>
+createParamsSchema must set "additionalProperties": false or a schema,
+so no create parameter goes unchecked`. Neither the loader nor a schema
+document reads it: a create gives the parameters to an engine
+(`runtime/engine/README.md`, "Create parameters"), and the `behaviors`
+command copies it with the rest of the declaration.
 
 In the IR a type lists its behaviors in `TypeDef.Behaviors`, a list of
 `ir.BehaviorRef{Name, Config}` written after `implements` and omitted when
@@ -827,7 +841,8 @@ No core generator sets the flag. `build --emit-ir`, `format` and
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
-`Dependencies`, `Links`, `Rollups`, `Search` and `Reactions`. It
+`Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`
+and `Variants`. It
 declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
@@ -837,12 +852,15 @@ Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
 types their configs. None names an invocation policy, since a
 distribution's policy need not have the core's values; each operation
 takes the policy's default. Every
-`paramsSchema` sets `additionalProperties: false`. A config a
+`paramsSchema` sets `additionalProperties: false`. `Links` and
+`Dependencies` declare a `createParamsSchema`: a create's links by name
+and its blockers. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
-that names a state the config does not list, a gated state of
-`Dependencies` that is not a terminal state of the type's Workflow, or a
-rollup whose linked schema has no such link, say);
+that names a state the config does not list, a Workflow outcome for a
+state a transition leaves, a gated state of `Dependencies` that is not a
+state of the type's Workflow, or a rollup whose linked schema has no
+such link, say);
 `runtime/engine/README.md`, "Core behaviors", has each engine
 behavior's config, fields and operations, and
 `runtime/engine-workqueue/README.md` each work-queue behavior's. The
@@ -854,14 +872,14 @@ engine; without them the engine refuses a schema that composes one.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
-| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`); required | `status` | `transition` |
+| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status` | `transition` |
 | `Comments` | none | `commentCount` | `comment`, `listComments` |
 | `Revisions` | `review` (`permission`), optional | `revision` | `listRevisions`, `propose`, `approve`, `reject`, `listProposals` |
-| `Dependencies` | `schemas`, `gatedStates`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
+| `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
-| `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
+| `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
-| `Reactions` | `rules` (each a `when`, `enters` or `allTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
+| `Reactions` | `rules` (each a `when`, `enters`, `allTerminal` or `anyTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 | `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; optional; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
@@ -891,8 +909,8 @@ TypeScript twin to the same IR as well.
 applies its rules after a change commits (D16, amended), and a rule's
 links and states are checked by the engine, which sees the type's
 Workflow and Links configs. `make cli-smoke` loads
-`fixture-reactions-json`, whose projects start and finish their parent,
-and its TypeScript twin loads to the same IR.
+`fixture-reactions-json`, whose projects start, finish and fail their
+parent, and its TypeScript twin loads to the same IR.
 
 `Lease`, `Assignment`, `Queue`, `Budget` and `Retries` name the type's
 fields (`maxHoldField`, `priorityField`, `match`, `limitField`,
@@ -942,8 +960,9 @@ with `--package @superschematic/engine` and
 declarations it implements, and `make behaviors-check`, part of `make
 test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
-Schema's object keys sorted, two-space indents and a final newline, so
-it changes only when the declaration does.
+Schema's object keys sorted (`createParamsSchema` included), two-space
+indents and a final newline, so it changes only when the declaration
+does.
 
 ## 4. The open IR
 
@@ -1376,7 +1395,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

@@ -1,6 +1,6 @@
 {
   "name": "Dependencies",
-  "description": "Blockers between instances. An instance is blocked while one of its blockers is in a state that is not terminal in its own schema's Workflow, and a transition of its own Workflow into a gated state waits until none blocks it. A blocker is an instance of the type's own schema, or of a schema the config lists, that composes Workflow; an edge that would close a cycle is refused. Deleting a blocker removes its edges.",
+  "description": "Blockers between instances. A blocker is finished once its status is a terminal state of its own schema's Workflow whose outcome the config accepts, a success by default. An instance is blocked while a blocker is not finished, and a transition of its own Workflow into a gated state waits until none blocks it. A blocker is an instance of the type's own schema, or of a schema the config lists, that composes Workflow; an edge that would close a cycle is refused. A create may give its blockers. Deleting a blocker removes its edges.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -13,22 +13,49 @@
         "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" }
       },
       "gatedStates": {
-        "description": "The terminal states of the type's Workflow that a transition into waits for every blocker to reach a terminal state of its own; every terminal state when absent.",
+        "description": "The states of the type's Workflow that a transition into waits for every blocker to finish; every terminal state when absent.",
         "type": "array",
         "minItems": 1,
         "uniqueItems": true,
         "items": { "type": "string", "minLength": 1 }
+      },
+      "satisfiedBy": {
+        "description": "The outcomes of a blocker's terminal state that finish it; success when absent. A blocker in a terminal state whose outcome the list lacks blocks until it is removed.",
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "enum": ["success", "failure", "neutral"] }
+      }
+    }
+  },
+  "createParamsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "blockers": {
+        "description": "The instance's blockers from its create, each held to addBlocker's rules.",
+        "type": "array",
+        "maxItems": 500,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "schema": { "description": "The blocker's schema; the instance's own when absent.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+            "id": { "description": "The blocker's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" }
+          }
+        }
       }
     }
   },
   "requires": ["Workflow"],
   "fields": [
-    { "name": "blocked", "description": "Whether a blocker is in a state that is not terminal in its schema's Workflow." }
+    { "name": "blocked", "description": "Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts." }
   ],
   "operations": [
     {
       "name": "addBlocker",
-      "description": "Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state takes no blocker that is not in a terminal state.",
+      "description": "Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -47,7 +74,7 @@
           "schema": { "type": "string" },
           "id": { "type": "string" },
           "status": { "description": "The blocker's Workflow status.", "type": "string" },
-          "open": { "description": "Whether its status is not a terminal state of its schema's Workflow, so it blocks.", "type": "boolean" }
+          "open": { "description": "Whether it is not finished, so it blocks: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.", "type": "boolean" }
         }
       },
       "writes": true
@@ -102,7 +129,7 @@
                 "schema": { "type": "string" },
                 "id": { "type": "string" },
                 "status": { "description": "The blocker's Workflow status.", "type": "string" },
-                "open": { "description": "Whether its status is not a terminal state of its schema's Workflow, so it blocks.", "type": "boolean" }
+                "open": { "description": "Whether it is not finished, so it blocks: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.", "type": "boolean" }
               }
             }
           },

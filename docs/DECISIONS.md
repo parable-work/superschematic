@@ -1065,11 +1065,13 @@ Status: built are the schema-file types and meta-schema
 `@behavior` decorator (section 3.16 of `docs/extension-model.md`), and
 `@superschematic/engine` (`runtime/engine/README.md`) with its HTTP API,
 event stream, MCP tools, the reach and publish hook of the first
-amendment below and the runner of the second. The core declares
-`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`,
-`Search` (full-text, on FTS5) and `Reactions`, and the engine registers
-them when it opens, which meets D10's done criterion (`make cli-smoke`,
-`test/core-behaviors.test.ts`, acme's `scripts/smoke.sh`). The core also
+amendment below, the runner of the second, create parameters and the
+validation hook of the last two. The core declares `Workflow`,
+`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`
+(full-text, on FTS5), `Reactions`, `Constants` and `Variants`, and the
+engine registers them when it opens, which meets D10's done criterion
+(`make cli-smoke`, `test/core-behaviors.test.ts`, acme's
+`scripts/smoke.sh`). The core also
 declares the work-queue behaviors `Lease`, `Assignment`, `Queue`,
 `Presence`, `Blueprint`, `Budget` and `Retries`, each registered with the
 npm package that implements it, and `superschematic behaviors --package`
@@ -1167,6 +1169,104 @@ claim itself runs with that instance's guards and appends its event.
 | A migration lists indexes on the behavior's own columns (`indexes`), which the engine creates on the instances table led by the namespace and the schema, so a claim's query reads one namespace's instances of one schema in index order. Registration refuses an index over a column no migration up to its own adds. An index is only added: no later migration drops or changes one yet. | Scanning every row in JavaScript inside the write lock, as the source implementation's claim did |
 | A behavior creates an instance wherever it may invoke a writing operation (`instances.create`): as the caller, asking `write` on the schema, with the live version's validation, every behavior's `initialize` and `afterChange`, and the create event, which records the runner's cause in the runner's work. It runs in the call's transaction, in a savepoint that rolls back alone when the behavior catches its failure, and nests like an invoke. A guard, a field reader and a read-only operation cannot create. A schema-level operation and the runner's work, which the amendments above hold to changing state through the operations they invoke, change it through the instances they create too, each with its hooks and its event. | An operation on the target schema that creates, which every schema would have to compose; creating after the commit only, which cannot create a parent's children in the parent's transaction |
 | A schedule's interval may be a function of the config of the schema it runs on, which the runner calls when it finds the schedule there, at its first pass and after each publish. A function that throws or gives no valid interval fails the schedule on that schema as a failing run does: `engine.runner.status()` shows the error, and the runner tries again after the backoff, while the schedule on other schemas and the runner go on. | One interval per behavior, which makes a lease sweep as slow as the slowest schema's lease |
+
+### D16, amended: terminal states carry an outcome
+
+A Workflow terminal state was only a state no transition leaves, and
+the behaviors that read other instances took any terminal state to mean
+the work was done. A blocker that failed released its dependents, so a
+failed check let the step after it start. An `all` rollup and an
+`allTerminal` rule held for a parent whose children had all failed. A
+rule on the last child that failed its parent and the parent's
+`allTerminal` rule that completed it ran in two subscriptions, so which
+won was not defined. And a gate on the start of work, a move from `todo`
+to `doing`, could not be written, since `gatedStates` took only terminal
+states, so only a work queue's claim waited on blockers. Each terminal
+state now has an outcome, and the behaviors that read one say which
+outcomes they count. This changes the `Dependencies` and `Reactions`
+rows of the amendments above: a blocker must finish, not only end, and a
+gated state need not be terminal.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A terminal state of `Workflow` has an outcome, `success`, `failure` or `neutral`, which the config's `outcomes` names per state. A terminal state it does not name is a `success`, so a config without `outcomes` keeps its meaning. A key that is not a state, or that names a state a transition leaves, is a `BehaviorConfigError`. `stateOutcome(config, state)`, exported beside `isTerminalState`, reads it from a config as a schema holds it and is undefined for a state that is not terminal. Workflow reads no outcome itself. | States listed per outcome, which can leave a state in two lists or in none; an outcome on a state a transition leaves, which a reader would take for the end of work still running; outcome names of the schema's own, which no reader in another schema can interpret; `failure` as the default, which changes the meaning of every config written before outcomes |
+| A new version may change `outcomes`, as it may change the transitions that make a state terminal or not. Nothing stores either: blockers, rollups and rules read the live config when they run, for the instances already in the state, and nothing that already moved is moved back. | Freezing a state's outcome once the schema has instances, while transitions, which decide whether the state is terminal at all, stay free |
+| `Dependencies` takes `satisfiedBy`, the outcomes that finish a blocker, `["success"]` when absent. A blocker is finished when its status is a terminal state of its own schema's Workflow and its outcome is listed, and open until then: one that ended with another outcome stays open until `removeBlocker` takes it off. A blocker whose schema names no outcomes finishes in any terminal state, as before. | Releasing on any terminal state, which lets a failed check through; failing the dependent when a blocker fails, which is a rule's work after the commit, not a guard's |
+| `gatedStates` may name any state of the type's Workflow, terminal or not, and is every terminal state when absent, as before. A gate on `doing` refuses the start of work while a blocker is open, a caller's transition as a claim's. | Gating only terminal states, which leaves a manual start ungated where a claim waits; a second list of start gates beside `gatedStates`, the same check under another name |
+| An instance in a gated state that no transition leaves takes no open blocker (`vetoed`), as before: it never moves again, and its gate let it in with every blocker finished. One in a gated state that a transition leaves takes one, which holds up its next move into a gated state, not the state it is in. | Refusing an open blocker in every gated state, so a dependency found during the work could be recorded only after moving the instance back out of `doing`; refusing one in every terminal state, gated or not, which no gate relies on |
+| `Rollups`' `all` and `any` take `outcomes`: they count a linked instance in a terminal state whose outcome the list holds, and every terminal state without it. It is an argument of two functions from a closed set of three values, as `field` is of `sum`, so the set of functions stays closed. | A function per outcome, which triples `all` and `any`; a filter over the linked instances, which makes the config a query language |
+| `Reactions`' `allTerminal` takes `outcomes`, with `Rollups`' meaning. `when: { anyTerminal: { schema, link, outcomes } }`, its `outcomes` required, fires when an instance of `schema` that links here through `link` enters a terminal state whose outcome is listed, by a create or a transition, or is linked here while in one; an event that moves neither its status nor that link does not fire it again. `parseConfig` holds an `anyTerminal` on the type's own schema to its own link, as it holds `allTerminal`. It is how a parent says on its own schema that a child's failure fails it. | Firing on every event of a linking instance in such a state, which an update of a failed child would turn into failing a parent that had been retried; firing only on the move into the state, which misses a failed child linked to a running parent |
+| A parent's `allTerminal` with `["success"]` and `anyTerminal` with `["failure"]` run in its schema's one subscription, on each child's event in log order, and `allTerminal` reads every child as it is when it runs. A terminal state is final, so the parent completes only once every child has succeeded and never while one has failed, whatever order the children's events, the rules and the runner's passes come in. A test runs each order. | Ordering subscriptions across schemas so a child's rule runs before its parent's, which D16's independent subscriptions rule out, and which leaves an `allTerminal` without outcomes completing a parent whose children failed when no child's rule exists |
+
+### D16, amended: behaviors take parameters at create
+
+A create carried the instance's own fields and nothing for its
+behaviors: `initialize` took no parameters, so a link or a blocker came
+from a second call after the create, in a transaction of its own. In
+between, a queue could claim an instance that had no parent or blockers
+yet, and a refused second call left an orphan. A `required` link only
+meant that once set it could not be unlinked, so nothing could require
+one from birth, and a blueprint that read its steps through a link was
+stamped only by a later `link`. No guard could refuse a create, short of
+throwing from `initialize`. A create now gives each behavior parameters,
+which the engine checks and the behavior applies in the create's
+transaction, and every guard is asked first.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior's declaration takes an optional `createParamsSchema`: an object schema whose `additionalProperties` is `false` or a schema. The Go registry and the engine refuse any other, in one wording; the `behaviors` command copies it; no schema document or loader reads it. | Requiring `"additionalProperties": false`, as an operation's `paramsSchema` does, which cannot take `Links`' links keyed by the config's names; input-only fields on the instance type, which the stored data, the compatibility rule and every generator would have to leave out |
+| A create gives them under `behaviors`, by behavior name, in every form: `engine.instances.create(principal, schema, data, { id?, behaviors? })`, the create route's body `{ id?, data, behaviors? }`, the create tool's `behaviors` argument, and a behavior's `instances.create(schema, data, { id?, behaviors? })`, so a parent, an operation or a reaction creates an instance with its links and edges at once. The create tool and the describe document carry each composing behavior's schema under `behaviors`, as its declaration holds it; a schema whose behaviors take none has no such argument. | `params`, an operation's word, where a create's data is a parameter too; a member per behavior at the top of the body, beside `id` and `data`; a create operation per behavior |
+| The engine checks the parameters before the insert: an entry for a behavior the type does not compose or that declares no `createParamsSchema`, or one its schema refuses, is a `CreateParamsError` (`invalid_argument`) with every issue at a JSON pointer into the create's arguments, `/behaviors/<behavior>/...`. A behavior with a schema and no entry is checked as `{}`, so a schema can require its entry. | Ignoring an entry for a behavior the type does not compose, which drops a misspelled one silently; checking only the entries given, so no behavior could require one |
+| A create asks every guard with `{ kind: 'create', data, behaviors }` once its row is inserted and before any `initialize`: the view's `data` is the new instance's own fields and its columns hold their defaults. A veto is `vetoed` with action `create` and leaves nothing. No `guardReference` is asked, since nothing refers to a new instance. Every guard of the core and the work-queue package lets a create through. | Before the insert, where a view's columns would read no row; after every `initialize`, so a guard would refuse after behaviors wrote, and judge state they made rather than what the caller asked; a veto only by throwing from `initialize` |
+| `initialize(context, params)` gets its behavior's own entry, `{}` without one. A parameter the config refuses (a link name it does not give) throws `CreateParamsError` at a pointer under the entry, and a check the matching operation would veto is `vetoed`, action `create`. All of it is the create's transaction and its one event, which carries what the parameters set. | A hook of its own beside `initialize`, which would run in an order of its own against the other behaviors'; every behavior getting every entry |
+| `Links` takes its links at create, by name: a target's id, or `{ id, revision? }`, set with `link`'s checks in `initialize`. `required` now means every instance holds the link: every create gives it (a create without it is `invalid_argument`), it is moved and never unlinked, and its target's delete is refused. As a field cannot become required, a link cannot: `configChange` refuses a link made required and a new required link, and adding `Links` with a required link to a schema with instances. A required link to the type's own schema would leave a root nothing to point at, so the cross-instance fixture's task now requires its `project` and its `parent` is optional. | A separate key beside `required`, which keeps a required link an instance may lack; allowing a link to become required, which leaves instances the live version accepted without it |
+| `Dependencies` takes `{ blockers: [{ schema?, id }] }`, each added with `addBlocker`'s checks in `initialize`, so every behavior's `afterChange` (Queue's copy of `blocked`) sees the edges and the instance is blocked in its create event. Its status at create is its Workflow's initial state, whichever the type lists first, and the amendment above holds there as for `addBlocker`: a blocker is open until it finishes by `satisfiedBy`, an initial state that is gated and that no transition leaves takes no open blocker, and one a transition leaves takes any. | Adding them in `afterChange`, which a behavior listed before `Dependencies` runs ahead of |
+| `Blueprint` creates each child with its parent link, its copied links and its edges as create parameters, so a child schema's `parentLink` can be required and each child is one event. A create that gives the `from` link stamps in the create, and a refused stamp refuses it; a later `link` still stamps an instance created without it. `copyLinks` works with inline steps too, copying the links the create gives. The create governance the work-queue README listed as not ported is schema config: a required `parentLink`. | `link` and `addBlocker` on each child after its create, which cannot stamp a child whose parent link is required; stamping a `from` blueprint only on a later `link` |
+
+### D16, amended: behaviors judge the fields a write stores
+
+Work is routed by what an instance is: a step's kind, the key a
+blueprint stamped it with, the fields a child copied from its parent.
+Any writer could change them after the create, the holder of a lease
+included, so a worker could turn the step it held into another one, and
+three work-queue behaviors each kept one field of their own from
+changing. A field whose shape depends on another, a step's result per
+kind, could only be `Generic.JSON`, since the engine refuses a union the
+schema runtime does not check, so a result in the wrong shape was stored
+without a word. A guard could refuse either write, but only as a veto
+(409) with a reason and no field, and `validateUpdate()`, which
+`Revisions` asks before it stores a proposal, did not see it. A behavior
+now judges the fields a write would store, as the live version does,
+and two core behaviors use it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior's `validate(context, request)` returns issues, `{ path, rule, message }` as the live version writes them (`result.checks[0].ok`), or nothing. `request` is `{ kind: 'create', data }` or `{ kind: 'update', before, after, caller? }`, the instance's own fields. It runs on every write of the fields: a caller's create and update, a behavior's `instances.create`, an operation's `update()`; `validateUpdate()` reports what it returns without writing. Every behavior's runs, in list order, and their issues together are one `InstanceValidationError` (`invalid_instance`, 422), as the live version's are. | A guard's veto, which carries no field, is a 409 rather than a refused instance, and is not in `validateUpdate()`; JSON pointers, `CreateParamsError`'s form, which would give `invalid_instance` two path forms |
+| It runs once the live version accepts the fields and before anything else: before a create's parameters are checked and its row inserted, so before every guard, and before an update's "nothing changed" check, as the live version's validation is. A hook sees only fields of their declared types; a write refused for a field is never asked of a guard. | Beside the live version's checks, with every issue at once, where a hook would read a value of the wrong type; after the guards, where a veto would hide a refused field |
+| Its context has the behavior, its config, the call (`namespace`, `schema`, `version`, `id`, `principal`, `now`), `can()` and `checkType()`, and no storage, other instance or schema. | A guard's view, whose columns a create's row does not have yet; reads of other instances, which are a guard's to make |
+| `checkType(type, value, path)` holds a value to a type of the schema document as the live version holds a field of that type: a JSON object, each field, no undeclared key at any depth. It reaches only the types the implementation's `checkedTypes(config)` names; `define` refuses a name that is not a type of the document besides the instance type, and a type it reaches whose field the schema runtime cannot check (a union, a map). | Any type of the document, which the compatibility rule could not know to protect |
+| The compatibility rule already left types no field reaches free to change, so a new version could add a required field to a type a stored value was checked against, and refuse that instance at its next update. It now walks, beside the instance type, each type that both versions' configs of a behavior name in `checkedTypes`. One only the new config names checked no stored value; one only the old names checks none from now on; whether a config may make either change is the behavior's `configChange`. | Diffing every type of the document, which refuses changes to types nothing reads; leaving it to each behavior's `configChange`, which sees configs, not types |
+| `instanceSchema(config, form, typeSchema)` returns JSON Schemas the describe document's `instance`, the create tool's `data` and the update tool's `patch` carry under `allOf`, so a client or an agent sees the shape a write takes. `form` is `instance` or `patch`, and `typeSchema` renders a type `checkedTypes` names as a nested type is rendered, with nothing required in a patch. | A hook that edits the whole argument schema; JSON Schema the engine writes for one behavior by name |
+| `schemas.validate` stays the version's own rules. | Asking `validate` there, which has no instance before an update and so cannot answer for a rule like `Constants` |
+
+The first behavior built on it is `Constants`:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Constants` is a plain noun for fields whose value does not change, as `Comments` and `Revisions` are. Its config lists the type's own top-level fields (`fields`) and optionally a `permission`. | `Identity`, which a budget's limit is not, and which names a principal elsewhere; `WriteOnce` and `Immutable`, not nouns; a field flag in the IR, which every generator would have to honor |
+| An update that changes a listed field, compared as JSON, is refused with the rule `constant` at the field, whoever makes it, a caller or an operation's `update()` (a `Revisions` approval, a `Retries` result), unless the caller holds `permission`. A create is never refused. | Exempting behaviors' operations, through which an approval could rename a step; a veto |
+| A field the create leaves absent stays absent: setting it later is a change. Absent and null are one value, as a merge patch has it. | The first write wins, so any writer could give a step its kind after the create, the failure it prevents; requiring the field at create, which `required` already says and the compatibility rule governs |
+| `configChange` allows any change, and it is added to and removed from a schema with instances: it keeps no state, and stored instances satisfy any list. | Freezing the list once instances exist |
+| `Blueprint` requires that its child schema compose `Constants` over `keyField` and every copied field, checked through `ConfigTarget.schemas` when the parent schema is defined or published, as its other checks of the child are. A later version of the child can drop them; the first amendment keeps a published version from being refused for that. | Blueprint guarding its children's updates itself, which a guard on another schema cannot; leaving the stamped fields open |
+
+The second is `Variants`:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Variants` is a plain noun for the shapes a field takes. Its config is `{ field, by, types }`: `field` an own field whose values are open JSON objects (`Generic.JSON`, or a scalar whose values are objects), `by` an own string or enum field, `types` a type of the document besides the instance type for each value of `by`, each a member when `by` is an enum. `parseConfig` checks all of it. A type lists a behavior once, so one field per type. | `Union`, a type the engine refuses; a union field in the IR, which every generator would have to render; a list of fields, which no case needs yet |
+| While `by` holds a listed value, `field`, when it holds a value, is held to that value's type with `checkType`. While `by` holds another value or none, `field` holds none, refused with the rule `variant`. So a required `field` admits only the listed values. | Leaving `field` open for an unlisted value, which lets a result in the wrong shape through and makes giving that value a type later break stored instances; refusing the value of `by`, which its enum or the type's own rules decide |
+| `instanceSchema` writes an `if`/`then` per listed value (`if` `by` is the value, `then` `field` is the type) and one more (`if` `by` is none of them, `then` `field` is null), under `allOf`. In a patch, `if` needs `by` in the patch, since a patch that leaves it alone does not show it. | `oneOf` over whole objects, which needs a branch for every other value, holds exactly one, and reports a failure as matching none of them |
+| `checkedTypes` names the types, so the compatibility rule holds them. `configChange` keeps `field` and `by`, keeps each value's type, and lets a value gain one, since no stored instance holds a value for it; it is removed from a schema with instances, not added to one, whose values no type checked. | Allowing a value's type to change to another that accepts as much, which would compare two types where the rule compares versions of one |
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -1897,6 +1997,31 @@ a schema without `@hmacVerified` is unchanged byte for byte.
 
 The rule is reversible until the first release.
 
+## D30. A stack model deploys a schema tree through platforms and provisioners
+
+superschematic generates the code of a tree of services but nothing that
+runs it. An engineer writes the server's `main`, the connection string, the
+deploy configuration and the CI by hand, and so restates what the schemas
+already say: `authDb` names an API's database, yet `examples/acme-shop`
+connects with `os.Getenv("DATABASE_URL")`. A distribution built a deploy
+family on the source tree. It works, but it holds its model in executable
+TypeScript, flattens typed references to strings and checks the same facts
+in three places. This entry records a general design before any of it is
+built. `docs/stack-model.md` is the design; its section 16 says what came
+from the distribution and what did not.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A stack is a service of a new core kind, `Stack`, read statically like any schema. It declares entry points, deployables that differ from the defaults, and environments. Each API service is one server and each DB service one database unless a declaration says otherwise. | An executable TypeScript model run under bun, as the source tree's is, which flattened references to strings and re-validated them in Go; an extension kind, whose output the core generators (env config, entrypoints) could not consume |
+| Wiring is derived. A server's database comes from each served API's `authDb`, and the one wiring fact a person writes is `calls`, as service handles. Each edge adds a typed field to the server's generated config, and the platform fills it. | A values document per environment that names each connection string, as `extensions/deploy` does; environment variables declared by hand in `@envVars` and checked for agreement |
+| Platforms (a deployable kind on a runtime), connectors (an edge between two platforms), targets (a bundle of platforms) and provisioners (a tool that applies resources) are four registrations. Cloud Run with Cloud SQL is the first target. GKE, hosted Kubernetes and Cloudflare are later registrations, not core edits. | One target per cloud owning everything, which ties Cloud Run to Cloud SQL and makes GKE a rewrite; a closed set of environment kinds, as the source tree has |
+| Platforms and connectors lower to a resource graph whose vocabulary is Pulumi's package schemas, pinned and checked in for offline validation. Provisioners read only that graph. | Platforms written as Pulumi Go components, which ties every platform to Pulumi; a vocabulary of our own, which would re-model every cloud resource |
+| Pulumi is the first provisioner. superschematic drives it from Go through the Automation API, renders the program as Pulumi YAML from the graph, and keeps state in a GCS bucket with a Cloud KMS secrets provider that bootstrap creates. Code outside the stack reaches its resources through a generated, typed binding over the stack's outputs. | A generated, typed Pulumi Go program, which needs schema-aware code generation and a compile on every run for checks the offline graph validation already makes; OpenTofu first, which superschematic could drive only by running its CLI; Config Connector or Crossplane, which need a cluster; Pulumi Cloud for state, an account beyond the GCP project |
+| superschematic generates each server's entrypoint and Dockerfile. The engineer writes the implementation interfaces and one constructor whose signature is generated. | Pointing a deployable at an image the engineer maintains, which leaves the wiring in a hand-written `main` |
+| Migrations belong to `sqlgen`, for Postgres and SQLite, and get their own entry. The stack model consumes an offline plan with hazards, and an apply step. | A schema-diff step inside the deploy, which SQLite (the engine, D16) could not share |
+| End-user auth and service auth are separate concepts. Platforms admit callers along edges, and an application-level service principal travels in its own header beside the end user's `Authorization`. | Service calls through the end-user auth provider with a minted token, which merges the two principals |
+
+Nothing here is built. The design is reversible until the first release.
 ## D28. No SDK has a method for a `@webhook` operation
 
 `@webhook` marks an operation a third party calls. The Go and TypeScript

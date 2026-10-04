@@ -33,6 +33,7 @@ export type {
   BlueprintSteps,
   BudgetConfig,
   BudgetMeter,
+  ConstantsConfig,
   DependenciesConfig,
   LeaseConfig,
   LeaseTransition,
@@ -41,6 +42,7 @@ export type {
   PresenceConfig,
   PresenceTransition,
   ReactionRule,
+  ReactionSource,
   ReactionThen,
   ReactionWhen,
   QueueConfig,
@@ -51,7 +53,9 @@ export type {
   RollupSource,
   RollupsConfig,
   SearchConfig,
+  VariantsConfig,
   WorkflowConfig,
+  WorkflowOutcome,
   WorkflowTransition,
 } from "./behavior";
 export { trait } from "./trait";

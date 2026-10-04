@@ -39,6 +39,10 @@ export interface BehaviorConfigs {
   Search: SearchConfig;
   /** Rules that move Workflow statuses after a change commits; it requires Workflow. */
   Reactions: ReactionsConfig;
+  /** Fields of the type that its create sets and nothing changes after. */
+  Constants: ConstantsConfig;
+  /** Types an open JSON field of the type by the value of another of its fields. */
+  Variants: VariantsConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -63,7 +67,15 @@ export interface WorkflowConfig {
   readonly initial?: string;
   /** The moves the status may make. A state that no transition leaves is terminal. */
   readonly transitions: readonly WorkflowTransition[];
+  /**
+   * The outcome of each terminal state it names. A terminal state it does
+   * not name is a success; a state a transition leaves has no outcome.
+   */
+  readonly outcomes?: Readonly<Record<string, WorkflowOutcome>>;
 }
+
+/** The outcome of a Workflow's terminal state, which blockers, rollups and reactions read. */
+export type WorkflowOutcome = "success" | "failure" | "neutral";
 
 /** One move a Workflow's status may make. */
 export interface WorkflowTransition {
@@ -87,11 +99,16 @@ export interface DependenciesConfig {
   /** The schemas whose instances may block this type's, each composing Workflow; the type's own schema when absent. */
   readonly schemas?: readonly string[];
   /**
-   * The terminal states of the type's Workflow that a transition into
-   * waits for every blocker to reach a terminal state of its own; every
-   * terminal state when absent.
+   * The states of the type's Workflow that a transition into waits for
+   * every blocker to finish; every terminal state when absent.
    */
   readonly gatedStates?: readonly string[];
+  /**
+   * The outcomes of a blocker's terminal state that finish it; success
+   * when absent. A blocker in a terminal state with another outcome blocks
+   * until it is removed.
+   */
+  readonly satisfiedBy?: readonly WorkflowOutcome[];
 }
 
 /** Links' config. */
@@ -104,7 +121,7 @@ export interface LinksConfig {
 export interface LinkConfig {
   /** The schema of the instance the link points at. */
   readonly schema: string;
-  /** Once set, the link can be moved to another target but not unlinked, and the delete of its target is refused. */
+  /** Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused. */
   readonly required?: boolean;
   /** The link records the target's revision and reports whether the target has moved past it; the schema must compose Revisions. */
   readonly pinned?: boolean;
@@ -128,7 +145,8 @@ export interface RollupSource {
  * One rollup of a Rollups config. count, all and any take no field;
  * countBy takes a string, enum or boolean field, or status, and sum, min
  * and max a number or integer field. all and any may gate states of the
- * type's Workflow.
+ * type's Workflow, and count only terminal states with the outcomes they
+ * list.
  */
 export type RollupConfig =
   | (RollupSource & { readonly function: "count" })
@@ -137,6 +155,8 @@ export type RollupConfig =
       readonly function: "all" | "any";
       /** The states of the type's Workflow that a transition into waits for the rollup to hold. */
       readonly gatedStates?: readonly string[];
+      /** The outcomes a linked instance's terminal state must have to count; every outcome when absent. */
+      readonly outcomes?: readonly WorkflowOutcome[];
     });
 
 /** Search's config. */
@@ -159,7 +179,7 @@ export interface ReactionRule {
   readonly then: ReactionThen;
 }
 
-/** What sets a rule off: one of enters and allTerminal. */
+/** What sets a rule off: one of enters, allTerminal and anyTerminal. */
 export type ReactionWhen =
   | {
       /** A state of the type's Workflow: the rule fires when the instance's status becomes it, by a create or a transition. */
@@ -169,11 +189,28 @@ export type ReactionWhen =
       /**
        * The rule fires on an instance when an instance of schema that links
        * to it through link changes or goes, and every instance that links to
-       * it there is in a terminal state of its own schema's Workflow, at
-       * least one.
+       * it there is in a terminal state of its own schema's Workflow, with
+       * an outcome outcomes lists when it is given, at least one.
        */
-      readonly allTerminal: { readonly schema: string; readonly link: string };
+      readonly allTerminal: ReactionSource & { readonly outcomes?: readonly WorkflowOutcome[] };
+    }
+  | {
+      /**
+       * The rule fires on an instance when an instance of schema that links
+       * to it through link enters a terminal state of its own schema's
+       * Workflow whose outcome outcomes lists, or is linked to it while in
+       * one.
+       */
+      readonly anyTerminal: ReactionSource & { readonly outcomes: readonly WorkflowOutcome[] };
     };
+
+/** The instances an allTerminal or anyTerminal rule hears. */
+export interface ReactionSource {
+  /** The schema of the linking instances, which composes Links and Workflow. */
+  readonly schema: string;
+  /** The link of that schema's Links config that points at this type's schema. */
+  readonly link: string;
+}
 
 /** What a rule does: move the instance, or the instance its link points to, to a state through Workflow's transition. */
 export interface ReactionThen {
@@ -181,6 +218,32 @@ export interface ReactionThen {
   readonly transition: string;
   /** A link of the type's Links config: the target is the instance it points to. The instance itself when absent. */
   readonly link?: string;
+}
+
+/** Constants' config. */
+export interface ConstantsConfig {
+  /**
+   * The type's own top-level fields, by JSON key, that keep the value their
+   * create gives them: an update that changes one is refused. A field the
+   * create leaves absent stays absent.
+   */
+  readonly fields: readonly string[];
+  /** The permission a caller needs to change them after the create; nobody may when absent. */
+  readonly permission?: string;
+}
+
+/** Variants' config. */
+export interface VariantsConfig {
+  /** The type's own field the variants type: a Generic.JSON field, or one of a scalar whose values are JSON objects. */
+  readonly field: string;
+  /** The type's own string or enum field whose value picks the type. */
+  readonly by: string;
+  /**
+   * By a value of by, the type of the schema document, besides the instance
+   * type, that field holds while by holds the value. While by holds another
+   * value or none, field holds none.
+   */
+  readonly types: Readonly<Record<string, string>>;
 }
 
 /** Lease's config. */
@@ -266,7 +329,7 @@ export type BlueprintConfig = BlueprintBase & ({ readonly steps: BlueprintSteps;
 
 /** What every Blueprint config gives. */
 export interface BlueprintBase {
-  /** The child schema: it composes Links with parentLink, Dependencies when a step comes after another, and not Blueprint. */
+  /** The child schema: it composes Links with parentLink, Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint. */
   readonly schema: string;
   /** The link of the child schema's Links config that points at this schema. */
   readonly parentLink: string;
@@ -274,7 +337,7 @@ export interface BlueprintBase {
   readonly keyField: string;
   /** Fields of this type copied to every child. */
   readonly copyFields?: readonly string[];
-  /** Links of this type copied to every child, keeping a pinned one's revision; only with from. */
+  /** Links of this type copied to every child, keeping a pinned one's revision: the ones the instance holds when it is stamped. */
   readonly copyLinks?: readonly string[];
 }
 

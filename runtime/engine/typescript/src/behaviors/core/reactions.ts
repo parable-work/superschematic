@@ -10,14 +10,30 @@ A rule is one when and one then:
 
 - when.enters: the instance's status became the state, by a create or a
   transition, as the event's change records it.
-- when.allTerminal { schema, link }: an instance of schema that links
-  here through link changed, linked, unlinked or went, and every instance
-  that links here through it is now in a terminal state of its own
-  schema's Workflow, at least one. Both the instance it links to now and
-  the one it linked to before the event (before(), all a delete leaves)
-  are looked at; the linking instances are found with Links' listLinked.
+- when.allTerminal { schema, link, outcomes? }: an instance of schema
+  that links here through link changed, linked, unlinked or went, and
+  every instance that links here through it is now in a terminal state of
+  its own schema's Workflow, at least one, and, with outcomes, one whose
+  outcome (stateOutcome) the list holds. Both the instance it links to now
+  and the one it linked to before the event (before(), all a delete
+  leaves) are looked at; the linking instances are found with Links'
+  listLinked.
+- when.anyTerminal { schema, link, outcomes }: an instance of schema that
+  links here through link entered a terminal state whose outcome the list
+  holds, by a create or a transition, or was linked here while in one.
+  It is the parent's own way to hear that a child failed.
 - then { transition, link? }: move the instance, or the one its link
   points to, to the state.
+
+A parent that completes when its children all succeed and fails when one
+fails says so in one config, allTerminal with outcomes [success] and
+anyTerminal with outcomes [failure], so one subscription runs both rules
+on each child's event, in order. allTerminal reads every child as it is
+when the rule runs, so it never completes a parent one of whose children
+is in a failure state, whatever order the events and the rules come in;
+the anyTerminal rule fails that parent. A rule on the child that fails
+its parent runs in the child schema's own subscription instead, which
+may run before or after the parent's.
 
 A rule acts only where it can. A target already in the state, with no
 transition to it from where it is, or whose guards veto the transition
@@ -30,10 +46,11 @@ the deployment's config is wrong, and only it can say what to do.
 parseConfig checks what the type's own configs show: every state of an
 enters rule and of a rule on the instance itself against the type's
 Workflow, every link a then names against its Links, and an allTerminal
-on the type's own schema against its own link. It refuses a rule on the
-instance itself that no transition of the type's Workflow allows, and
-enters rules on the instance itself whose states form a cycle. A linked
-schema's states and links are checked when a rule runs.
+or anyTerminal on the type's own schema against its own link. It
+refuses a rule on the instance itself that no transition of the type's
+Workflow allows, and enters rules on the instance itself whose states
+form a cycle. A linked schema's states and links are checked when a rule
+runs.
 
 configChange: rules hold no state, so any change is allowed, and
 Reactions may be added to and removed from a schema with instances.
@@ -43,12 +60,21 @@ import { BehaviorError, BehaviorVetoError } from '../../errors.js';
 import type { EngineEvent, OperationChange } from '../../events/log.js';
 import { BehaviorConfigError, defineBehavior, type FrozenJSON, type ReactionContext } from '../behavior.js';
 import declaration from './declarations/Reactions.behavior.json' with { type: 'json' };
-import { isTerminalState, type WorkflowStates } from './workflow.js';
+import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
+
+/** The instances an allTerminal or anyTerminal rule hears: those of schema that link here through link. */
+export interface ReactionsTerminal {
+  readonly schema: string;
+  readonly link: string;
+  /** The outcomes a terminal state must have to count; every outcome when absent, which only allTerminal allows. */
+  readonly outcomes?: readonly WorkflowOutcome[];
+}
 
 /** What sets a rule off. */
 export type ReactionsWhen =
   | { readonly enters: string }
-  | { readonly allTerminal: { readonly schema: string; readonly link: string } };
+  | { readonly allTerminal: ReactionsTerminal }
+  | { readonly anyTerminal: ReactionsTerminal & { readonly outcomes: readonly WorkflowOutcome[] } };
 
 /** What a rule does: move the instance, or the one its link points to, to a state. */
 export interface ReactionsThen {
@@ -118,14 +144,29 @@ function parents(context: ReactionContext<ReactionsConfig>, event: EngineEvent, 
   return [...found];
 }
 
-// allTerminal reports whether every instance of schema that links to
-// parent through link is in a terminal state of its schema's Workflow,
-// and there is at least one.
-function allTerminal(context: ReactionContext<ReactionsConfig>, schema: string, link: string, parent: string): boolean {
+// flowOf reads the Workflow config of the schema an allTerminal or
+// anyTerminal rule hears.
+function flowOf(context: ReactionContext<ReactionsConfig>, form: string, schema: string): WorkflowStates {
   const flow = context.schemas.config(schema, 'Workflow') as WorkflowStates | undefined;
   if (flow === undefined) {
-    throw new BehaviorError(NAME, `allTerminal names ${schema}, which does not compose Workflow, so its instances have no terminal state`);
+    throw new BehaviorError(NAME, `${form} names ${schema}, which does not compose Workflow, so its instances have no terminal state`);
   }
+  return flow;
+}
+
+// counts reports whether a status is a terminal state whose outcome the
+// list holds; every terminal state counts when there is no list.
+function counts(flow: WorkflowStates, status: unknown, outcomes: readonly WorkflowOutcome[] | undefined): boolean {
+  const outcome = typeof status === 'string' ? stateOutcome(flow, status) : undefined;
+  return outcome !== undefined && (outcomes === undefined || outcomes.includes(outcome));
+}
+
+// allTerminal reports whether every instance of schema that links to
+// parent through link is in a terminal state of its schema's Workflow
+// with an outcome the rule counts, and there is at least one.
+function allTerminal(context: ReactionContext<ReactionsConfig>, terminal: ReactionsTerminal, parent: string): boolean {
+  const { schema, link, outcomes } = terminal;
+  const flow = flowOf(context, 'allTerminal', schema);
   let cursor: string | undefined;
   let any = false;
   do {
@@ -141,8 +182,7 @@ function allTerminal(context: ReactionContext<ReactionsConfig>, schema: string, 
       { fields: ['status'] }
     );
     for (const item of page.items) {
-      const status = found.get(item.id)?.data.status;
-      if (typeof status !== 'string' || !isTerminalState(flow, status)) {
+      if (!counts(flow, found.get(item.id)?.data.status, outcomes)) {
         return false;
       }
       any = true;
@@ -150,6 +190,36 @@ function allTerminal(context: ReactionContext<ReactionsConfig>, schema: string, 
     cursor = page.next ?? undefined;
   } while (cursor !== undefined);
   return any;
+}
+
+// anyTerminal lists the instance of the home schema that an event's
+// instance links to through the rule's link, when the event moved its
+// status into a terminal state whose outcome the rule lists, or moved the
+// link here while its status is one; none otherwise. A later event that
+// leaves both alone, a comment say, does not set the rule off again.
+function anyTerminal(context: ReactionContext<ReactionsConfig>, event: EngineEvent, terminal: ReactionsTerminal): string[] {
+  if (event.kind === 'delete') {
+    return [];
+  }
+  const flow = flowOf(context, 'anyTerminal', terminal.schema);
+  const data = context.instances.get(event.schema, event.instanceId as string, { fields: ['links', 'status'] })?.data;
+  const now = linkOf(data, terminal.link);
+  if (now?.schema !== context.schema) {
+    return [];
+  }
+  const state = entered(event);
+  if (state !== undefined) {
+    return counts(flow, state, terminal.outcomes) ? [now.id] : [];
+  }
+  const patch = event.kind === 'operation' ? (event.change as OperationChange).patch : undefined;
+  if (patch === undefined || !Object.prototype.hasOwnProperty.call(patch, 'links')) {
+    return [];
+  }
+  const was = linkOf(context.before(event), terminal.link);
+  if (was?.schema === now.schema && was.id === now.id) {
+    return [];
+  }
+  return counts(flow, data?.status, terminal.outcomes) ? [now.id] : [];
 }
 
 // apply moves a rule's target to its state, where it can. from, for an
@@ -188,6 +258,18 @@ function apply(context: ReactionContext<ReactionsConfig>, then: ReactionsThen, i
       throw error;
     }
   }
+}
+
+// terminalOf reads the instances an allTerminal or anyTerminal rule hears;
+// undefined for an enters rule.
+function terminalOf(when: ReactionsWhen): { form: 'allTerminal' | 'anyTerminal'; terminal: ReactionsTerminal } | undefined {
+  if ('allTerminal' in when) {
+    return { form: 'allTerminal', terminal: when.allTerminal };
+  }
+  if ('anyTerminal' in when) {
+    return { form: 'anyTerminal', terminal: when.anyTerminal };
+  }
+  return undefined;
 }
 
 // cycle finds a cycle among the moves of enters rules on the instance
@@ -248,10 +330,11 @@ export const reactions = defineBehavior<ReactionsConfig>({
       if ('enters' in rule.when && !flow.states.includes(rule.when.enters)) {
         throw new BehaviorConfigError(`${at}: when.enters ${states(rule.when.enters)}`);
       }
-      if ('allTerminal' in rule.when && rule.when.allTerminal.schema === target.schema) {
-        const { link } = rule.when.allTerminal;
+      const heard = terminalOf(rule.when);
+      if (heard !== undefined && heard.terminal.schema === target.schema) {
+        const { link } = heard.terminal;
         if (links?.[link]?.schema !== target.schema) {
-          throw new BehaviorConfigError(`${at}: when.allTerminal names link ${link} of ${target.schema}, which has no such link to ${target.schema}`);
+          throw new BehaviorConfigError(`${at}: when.${heard.form} names link ${link} of ${target.schema}, which has no such link to ${target.schema}`);
         }
       }
       if (rule.then.link !== undefined) {
@@ -288,7 +371,7 @@ export const reactions = defineBehavior<ReactionsConfig>({
 
   reactions: {
     watches(config) {
-      return [...new Set(config.rules.flatMap((rule) => ('allTerminal' in rule.when ? [rule.when.allTerminal.schema] : [])))];
+      return [...new Set(config.rules.flatMap((rule) => terminalOf(rule.when)?.terminal.schema ?? []))];
     },
 
     react(context, event) {
@@ -299,16 +382,23 @@ export const reactions = defineBehavior<ReactionsConfig>({
           }
           continue;
         }
-        const { schema, link } = rule.when.allTerminal;
+        const { form, terminal } = terminalOf(rule.when) as { form: string; terminal: ReactionsTerminal };
+        const { schema, link } = terminal;
         if (event.schema !== schema) {
           continue;
         }
         const spec = (context.schemas.config(schema, 'Links') as { links?: Record<string, { schema?: string }> } | undefined)?.links?.[link];
         if (spec?.schema !== context.schema) {
-          throw new BehaviorError(NAME, `allTerminal names link ${link} of ${schema}, which has no such link to ${context.schema}`);
+          throw new BehaviorError(NAME, `${form} names link ${link} of ${schema}, which has no such link to ${context.schema}`);
+        }
+        if (form === 'anyTerminal') {
+          for (const parent of anyTerminal(context, event, terminal)) {
+            apply(context, rule.then, parent);
+          }
+          continue;
         }
         for (const parent of parents(context, event, link)) {
-          if (allTerminal(context, schema, link, parent)) {
+          if (allTerminal(context, terminal, parent)) {
             apply(context, rule.then, parent);
           }
         }

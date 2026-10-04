@@ -71,7 +71,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Pinned", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Pinned", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -150,6 +150,11 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"extension name malformed", "acme", declaration("acme.rating", nil), `behavior name "acme.rating" is malformed`},
 		{"extension name nested", "acme", declaration("acme.Rating.Stars", nil), `behavior name "acme.Rating.Stars" is malformed`},
 		{"config schema", "acme", declaration("acme.Rating", map[string]any{"configSchema": map[string]any{"type": 7}}), "behavior acme.Rating configSchema: "},
+		{"create params schema", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": map[string]any{"type": 7}}), "behavior acme.Rating createParamsSchema: "},
+		{"create params not an object", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": map[string]any{"type": "array", "additionalProperties": false}}), `behavior acme.Rating createParamsSchema must be an object schema ("type": "object")`},
+		{"create params a boolean schema", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": true}), `behavior acme.Rating createParamsSchema must be an object schema ("type": "object")`},
+		{"create params open", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": objectSchema}), `behavior acme.Rating createParamsSchema must set "additionalProperties": false or a schema, so no create parameter goes unchecked`},
+		{"create params open by true", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": map[string]any{"type": "object", "additionalProperties": true}}), `createParamsSchema must set "additionalProperties": false or a schema`},
 		{"field name", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "rating count"}}}), `behavior acme.Rating field name "rating count" is not an identifier`},
 		{"field twice", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "stars"}, map[string]any{"name": "stars"}}}), `behavior acme.Rating declares field "stars" twice`},
 		{"operation not camelCase", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("Rate", nil)}}), `behavior acme.Rating operation name "Rate" is not camelCase`},
@@ -242,6 +247,27 @@ func TestRegisterBehaviorRefusesOpenParams(t *testing.T) {
 	}
 }
 
+// A create's parameters for a behavior may be keyed by names its config
+// gives (a link's name), so createParamsSchema may admit further keys, but
+// only through "additionalProperties" set to a schema that checks them.
+func TestRegisterBehaviorTakesCreateParams(t *testing.T) {
+	for _, params := range []string{
+		`{"type":"object","additionalProperties":false,"properties":{"blockers":{"type":"array"}}}`,
+		`{"type":"object","propertyNames":{"pattern":"^[a-z]+$"},"additionalProperties":{"type":"string"}}`,
+	} {
+		reg := New(naming.Default())
+		if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Rating", map[string]any{
+			"createParamsSchema": json.RawMessage(params),
+		})}); err != nil {
+			t.Fatalf("%s: %v", params, err)
+		}
+		rating, _ := reg.Behavior("acme.Rating")
+		if string(rating.CreateParamsSchema) != params {
+			t.Errorf("CreateParamsSchema = %s, want %s", rating.CreateParamsSchema, params)
+		}
+	}
+}
+
 // An extension registers its behaviors under its own name only: Use holds
 // the spec's Extension to the extension whose Register is running, so an
 // extension cannot declare a bare core name or another extension's.
@@ -288,7 +314,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},

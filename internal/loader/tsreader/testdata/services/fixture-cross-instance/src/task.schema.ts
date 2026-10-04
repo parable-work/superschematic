@@ -13,8 +13,8 @@ import { Validate, behavior } from "@superschematic/schema";
 @behavior("Links", {
   links: {
     spec: { schema: "documents", pinned: true },
-    parent: { schema: "tasks", required: true },
-    project: { schema: "projects" },
+    parent: { schema: "tasks" },
+    project: { schema: "projects", required: true },
   },
 })
 export abstract class Task {

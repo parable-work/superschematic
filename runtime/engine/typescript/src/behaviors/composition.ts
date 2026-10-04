@@ -25,14 +25,18 @@ its declaration.
 configChanges is the behaviors' half of the compatibility rule: a new
 version keeps a behavior's config unless the implementation allows the
 change, and adds or removes a behavior on a schema with instances only
-when the implementation opts in.
+when the implementation opts in. checkedTypes names the types a
+behavior's validate holds values to under both versions, which the rule
+(registry/compat.ts) then diffs as it diffs a type a field reaches; a
+behavior's checkedTypes must name types of the document besides the
+instance type.
 */
 
 import type { Document, TypeDef } from '@superschematic/schema-ir/schema-file';
 
 import { BehaviorError, type SchemaChange, type SchemaIssue } from '../errors.js';
 import { isPlainObject, jsonEqual } from '../instances/patch.js';
-import { jsonKey, pointer } from '../registry/document.js';
+import { fieldTypeIssue, jsonKey, pointer, reachableTypes } from '../registry/document.js';
 import { FieldSchemas, renderProperty } from '../tools/schema.js';
 import { BehaviorConfigError, type ConfigSchema, type ConfigSchemas, type ConfigTarget } from './behavior.js';
 import { deepFreeze } from './json.js';
@@ -48,6 +52,8 @@ export interface BoundBehavior {
   readonly json: unknown;
   /** What parseConfig returned, or the JSON config; deep-frozen. */
   readonly config: unknown;
+  /** The types of the document its validate checks values against: what checkedTypes returned for the config. */
+  readonly checked: readonly string[];
 }
 
 /** The behaviors of a schema's instance type, in list order. */
@@ -143,8 +149,41 @@ export function compose(
       issues.push({ path: `${path}/config`, message: `type ${target.instanceType}: ${parsed.problem}` });
       return;
     }
-    bound.push({ behavior, index, json: parsed.json, config: parsed.config });
+    const checked = checkedTypesOf(behavior, parsed.config);
+    const unknown = checked.filter((name) => !configTarget.types.includes(name));
+    if (unknown.length > 0) {
+      issues.push({
+        path: `${path}/config`,
+        message: `type ${target.instanceType}: behavior ${ref.name} checks values against ${unknown.join(', ')}, which ${unknown.length === 1 ? 'is not a type' : 'are not types'} of the document besides ${target.instanceType}`,
+      });
+      return;
+    }
+    bound.push({ behavior, index, json: parsed.json, config: parsed.config, checked });
   });
+
+  // A value checked against a type is held to its fields as an instance's
+  // field is, so the types a behavior checks, and the ones they reach,
+  // hold only field types the schema runtime validates, as the ones the
+  // instance type reaches do (registry/document.ts checks those).
+  const fromInstance = new Set(reachableTypes(target.document, target.instanceType));
+  const checkedOnly = new Set<string>();
+  for (const { checked } of bound) {
+    for (const root of checked) {
+      for (const typeName of reachableTypes(target.document, root)) {
+        if (!fromInstance.has(typeName)) {
+          checkedOnly.add(typeName);
+        }
+      }
+    }
+  }
+  for (const typeName of [...checkedOnly].sort()) {
+    (types[typeName].fields ?? []).forEach((field, index) => {
+      const issue = fieldTypeIssue(target.document, typeName, field);
+      if (issue) {
+        issues.push({ path: `${pointer('types', typeName)}/fields/${index}/typeRef`, message: issue });
+      }
+    });
+  }
 
   const fieldOwner = new Map<string, string>();
   const operationOwner = new Map<string, string>();
@@ -257,6 +296,57 @@ export function configChanges(
   return changes;
 }
 
+/**
+ * checkedTypes lists, sorted, the types of the document whose values a
+ * behavior's validate checks under both versions' configs, for each
+ * behavior both versions compose: the compatibility rule holds a new
+ * version to each as to a type a field reaches, since a stored instance
+ * holds values the live version checked against it. A type only the new
+ * config names checked no stored value, and one only the old config names
+ * checks none from now on; which of those changes a config may make is
+ * the behavior's configChange to decide. A config either version's
+ * implementation refuses counts as naming none.
+ */
+export function checkedTypes(before: ComposeTarget, after: ComposeTarget, registry: BehaviorRegistry): string[] {
+  const beforeRefs = (before.document.types ?? {})[before.instanceType]?.behaviors ?? [];
+  const afterRefs = (after.document.types ?? {})[after.instanceType]?.behaviors ?? [];
+  const named = (behavior: RegisteredBehavior, json: unknown, target: ComposeTarget): readonly string[] => {
+    const parsed = parseConfig(behavior, json, targetOf(target));
+    return 'problem' in parsed ? [] : checkedTypesOf(behavior, parsed.config);
+  };
+  const carried = new Set<string>();
+  for (const ref of beforeRefs) {
+    const behavior = registry.lookup(ref.name);
+    const later = afterRefs.find((candidate) => candidate.name === ref.name);
+    if (!behavior?.implementation.checkedTypes || later === undefined) {
+      continue;
+    }
+    const kept = named(behavior, later.config, after);
+    for (const name of named(behavior, ref.config, before)) {
+      if (kept.includes(name)) {
+        carried.add(name);
+      }
+    }
+  }
+  return [...carried].sort();
+}
+
+// checkedTypesOf asks an implementation which types its validate checks
+// values against under a parsed config: a list of type names, none
+// without checkedTypes.
+function checkedTypesOf(behavior: RegisteredBehavior, config: unknown): readonly string[] {
+  const checkedTypes = behavior.implementation.checkedTypes;
+  if (!checkedTypes) {
+    return [];
+  }
+  const names: unknown = checkedTypes.call(behavior.implementation, config);
+  synchronous(behavior.name, 'checkedTypes', names);
+  if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) {
+    throw new BehaviorError(behavior.name, 'checkedTypes returns a list of type names');
+  }
+  return deepFreeze([...new Set(names as string[])]);
+}
+
 /** A behavior whose config a published version adds, removes or changes. */
 export interface ConfigTransition {
   readonly behavior: RegisteredBehavior;
@@ -321,6 +411,9 @@ function targetOf(target: ComposeTarget, schemas?: ConfigSchemas): ConfigTarget 
     type: target.instanceType,
     fields: (typeDef.fields ?? []).map(jsonKey),
     fieldSchemas,
+    types: Object.keys(target.document.types ?? {})
+      .filter((name) => name !== target.instanceType)
+      .sort(),
     behaviors: refs.map((ref) => ref.name),
     configs: configsOf(refs),
     ...(schemas === undefined ? {} : { schemas }),

@@ -242,7 +242,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [Auth and permissions](docs/src/content/docs/guides/auth-and-permissions.mdx): which routes need a caller, permissions, and credentials in each SDK.
 - [Client SDKs](docs/src/content/docs/guides/client-sdks.mdx): generate and call a client in Go, TypeScript, Python and Rust.
 - [The engine](docs/src/content/docs/guides/engine.mdx): run a schema with no generated code, over HTTP, an event stream and MCP.
-- [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search and Reactions.
+- [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search, Reactions, Constants and Variants.
 - [Work queues](docs/src/content/docs/guides/work-queues.md): claimable work with `@superschematic/engine-workqueue`: leases, claims, worker heartbeats, blueprints, budgets and retries.
 
 **Languages**: what the generated code offers in
@@ -331,7 +331,7 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
 | [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config}` |
-| [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python |
+| [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python, and the helpers the generated Rust validators call |
 | [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
 | [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
 | [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code |
