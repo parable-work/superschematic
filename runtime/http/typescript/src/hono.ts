@@ -27,10 +27,11 @@ mountOperation once per @rest operation with the operation's spec and a
 handler that forwards decoded arguments to the service's implementation; the
 adapter owns the request pipeline:
 
-  request id -> @hmacVerified -> @rateLimit -> [hono/timeout:
-  hono/bearer-auth + permission gate -> path/query decoding ->
-  hono/body-limit + JSON parse -> strict input parser -> implementation]
-  -> envelope
+  request id -> @hmacVerified -> [hono/timeout: hono/body-limit (a
+  declared Content-Length over the cap answers 413 here) ->
+  hono/bearer-auth -> @rateLimit -> permission gate -> path/query
+  decoding -> JSON parse (a streamed body over the cap answers 413 here)
+  -> strict input parser -> implementation] -> envelope
 
 and turns every failure into the problem envelope. Operations marked
 @manualRouteRegistration are mounted through mountManualOperation: the
@@ -52,7 +53,7 @@ Streaming, multipart and file uploads are not modelled by this adapter; an
 operation that needs them is a manual route.
 */
 
-/** Default JSON body cap for operations without @bodyLimit: 1 MiB, the Go router's convention. */
+/** Default JSON body cap for operations without @bodyLimit: 1 MiB. The Go router has no default; only @bodyLimit caps its routes. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
 
 const extractedBearer = new WeakMap<Request, string>();
