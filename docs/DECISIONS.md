@@ -2496,7 +2496,7 @@ and each changes a D16 rule.
 | 5 | What D16 gains, the scalar catalog's value classes, and `Branches`: its declaration and registration in Go, its implementation in `@superschematic/engine`, and the docs. |
 | Later | SQLite adapters in Go (a `database/sql` seam), Python (`sqlite3`) and Rust (`rusqlite`), each running every scenario on SQLite, as D19 built its Postgres adapters. |
 
-Phases 1, 2 and 3 do not depend on each other. Phase 4 needs all three,
+Phases 1, 2 and 3 do not depend on each other; phase 4 needs all three,
 and phase 5 needs phase 4.
 
 Nothing here is built.
