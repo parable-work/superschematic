@@ -10,7 +10,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
@@ -97,6 +97,15 @@ func TestCoreBehaviors(t *testing.T) {
 	if !budget.ConfigRequired() || !retries.ConfigRequired() || len(budget.Requires) != 0 || !slices.Equal(retries.Requires, []string{"Workflow"}) {
 		t.Errorf("Budget: config required %v, requires %v; Retries: config required %v, requires %v; want true, none, true, [Workflow]",
 			budget.ConfigRequired(), budget.Requires, retries.ConfigRequired(), retries.Requires)
+	}
+	// Constants and Variants judge the fields a write stores: no field, no
+	// operation, no requirement.
+	constants, _ := reg.Behavior("Constants")
+	variants, _ := reg.Behavior("Variants")
+	for _, b := range []Behavior{constants, variants} {
+		if b.Package != EnginePackage || !b.ConfigRequired() || len(b.Requires) != 0 || len(b.Fields) != 0 || len(b.Operations) != 0 {
+			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field or operation", b.Name, b)
+		}
 	}
 	// Every work-queue operation writes; claimNext and expireHolder are schema-level.
 	for _, b := range []Behavior{lease, assignment, queue, presence, budget, retries} {
@@ -209,6 +218,23 @@ func TestCoreBehaviors(t *testing.T) {
 		{reactions, `{"rules": [{"when": {"anyTerminal": {"schema": "steps", "link": "run", "outcomes": []}}, "then": {"transition": "failed"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "steps", "link": "run", "outcomes": ["passed"]}}, "then": {"transition": "completed"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "steps", "link": "run"}, "anyTerminal": {"schema": "steps", "link": "run", "outcomes": ["failure"]}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{constants, `{"fields": ["kind", "key"]}`, ""},
+		{constants, `{"fields": ["kind"], "permission": "steps.rename"}`, ""},
+		{constants, ``, "behavior Constants config: "},
+		{constants, `{"fields": []}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind", "kind"]}`, "behavior Constants config: "},
+		{constants, `{"fields": [""]}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind"], "permission": ""}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind"], "roles": ["admin"]}`, "behavior Constants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult", "review": "ReviewResult"}}`, ""},
+		{variants, ``, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind"}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"": "VerifyResult"}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": ""}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": ["VerifyResult"]}}`, "behavior Variants config: "},
+		{variants, `{"field": "", "by": "kind", "types": {"verify": "VerifyResult"}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult"}, "otherwise": "AnyResult"}`, "behavior Variants config: "},
 		{lease, ``, ""},
 		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "sweepMs": 2000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
 			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},

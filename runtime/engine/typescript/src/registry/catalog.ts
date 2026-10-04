@@ -38,7 +38,7 @@ import type { SchemaFileLoader } from '@superschematic/schema-runtime';
 import type { Document } from '@superschematic/schema-ir/schema-file';
 
 import type { ConfigSchema, ConfigSchemas } from '../behaviors/behavior.js';
-import { compose, configChanges, configSchemaOf, configTransitions, type Composition } from '../behaviors/composition.js';
+import { checkedTypes, compose, configChanges, configSchemaOf, configTransitions, type Composition } from '../behaviors/composition.js';
 import type { Prefixes } from '../behaviors/execution.js';
 import { afterConfigChanges } from '../behaviors/publish.js';
 import type { BehaviorRegistry } from '../behaviors/registry.js';
@@ -365,7 +365,7 @@ export class SchemaCatalog {
 
   private checkCompatible(namespace: string, live: Row, model: SchemaModel): void {
     const before = modelOf(String(live.document));
-    const changes = incompatibleChanges(before, model);
+    const changes = incompatibleChanges(before, model, before.instanceType === model.instanceType ? checkedTypes(before, model, this.behaviors) : []);
     if (before.instanceType === model.instanceType) {
       changes.push(...configChanges(before, model, this.behaviors, () => this.hasInstances(namespace, model.name)));
     }
