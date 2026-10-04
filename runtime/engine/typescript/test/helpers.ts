@@ -180,3 +180,18 @@ export function projectTreeDocument(): Record<string, unknown> {
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-reactions-json/src/project.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
+
+/**
+ * stepsDocument is the General schema-file document the core binary loads
+ * with no extension linked beside the others (make cli-smoke,
+ * fixture-variants-json), a schema named Step like its instance type,
+ * which composes Constants, which keeps the kind its create gives it, and
+ * Variants, which types its result by its kind: a VerifyResult (with its
+ * list of Checks) for a verify step, a ReviewResult for a review, and
+ * none for a note.
+ */
+export function stepsDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-variants-json/src/step.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}

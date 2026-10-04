@@ -562,6 +562,10 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   the prefix. Only the core declares bare names.
 - `configSchema` is the JSON Schema of what a type passes; leave it out
   for a behavior that takes no config.
+- `createParamsSchema`, optional, is the JSON Schema of the parameters a
+  create gives the behavior for the new instance, which its
+  `initialize` gets: an object schema whose `additionalProperties` is
+  `false` or a schema, so every key is checked.
 - `requires` and `conflicts` name other behaviors a type must, or may not,
   list with this one.
 - `fields` carry a name and a description. The loader refuses a field
@@ -692,8 +696,10 @@ operations, so those guards always run. Where a config names a permission, the
 behavior asks `can(permission)`, which the permission matcher the
 deployment gives the engine answers. An operation can change the
 instance's own fields with `update(patch)`, which runs the checks and
-guards of an update. The engine's README ("Behaviors") has the whole
-interface.
+guards of an update. A `validate` function judges the fields a create or
+an update would store and returns issues at their paths, which refuse
+the write as `invalid_instance`, as the live version's own do. The
+engine's README ("Behaviors") has the whole interface.
 
 A deployment registers the implementation with the engine and passes the
 meta-schema its binary writes, which declares the behavior, and the tool
@@ -713,8 +719,8 @@ engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
 
 An engine without the implementation refuses a schema that composes the
 behavior. The engine registers the core's own behaviors, `Workflow`,
-`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search` and
-`Reactions`, when it opens; `behaviors` adds yours beside them, as it adds
+`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
+`Reactions`, `Constants` and `Variants`, when it opens; `behaviors` adds yours beside them, as it adds
 the core's [work-queue behaviors](/superschematic/guides/work-queues/)
 from `@superschematic/engine-workqueue`. No core operation names an
 invocation policy, so their tools take the default of the policy you
