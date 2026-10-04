@@ -1987,10 +1987,44 @@ compute them; an author never declares one.
 | The runner's tests apply plan vectors the compiler writes to `runtime/migrate/testdata/plans`, as the version graph's vectors are shared (D17): a second run does nothing, a failure injected after any step resumes to the same catalog, two runners serialize, and a plan from the wrong baseline is refused. | Runner tests over hand-written plans, which can drift from what the compiler writes |
 | SQLite runs the same convergence and runner tests with the pure-Go driver, in every CI run, with no service. | |
 
-Status: nothing is built. Postgres comes first, in this order: the model
-and the diff, the plan and the hazards with `migrate plan` (`--from`,
-`--from-ref`, `--rename`, `--fail-on`); the readers and `api-breaking`;
-the runner module; a reference page "Schema migrations". SQLite follows
-through the same dialect seam: its model and `create.sql`, its steps
-with the copy-table rebuild, and its runner driver. Each change that
-lands a piece updates this paragraph.
+Status: Postgres is built. `internal/sqlmigrate` resolves a schema to its
+model (`BuildModel`) and plans between two models (`Diff`) through a
+dialect seam, with Postgres implemented; `sqlgen` renders each derived
+object once, for `create.sql` and the model, and `create.sql` is unchanged
+byte for byte. `superschematic migrate plan` takes the previous version as
+`--from` or `--from-ref`, with `--rename`, `--reader`, `--fail-on`,
+`--allow` and `--print-model`, and prints the plan as JSON, SQL or
+Markdown. The runner is the sixth Go module, `runtime/migrate/go`, with a
+Postgres and a SQLite driver and the binary `superschematic-migrate`
+(`runtime/migrate/README.md`). The reference page is "Schema migrations".
+Plan goldens cover 57 pairs; every pair and every `sqlgen` fixture
+converges on Postgres; the runner applies the compiler's vectors, resumes
+after a failure at every step, and serializes two runners. Rules settled
+as they were built: the model records a `@versioned` table's excluded
+columns (`historyExclude`), which the history seed and an `exclude` change
+read; renaming a column of a versioned table is `history` too, since old
+images keep the old key; a column dropped in `contract` keeps its
+`NOT NULL` in `expand` when it has a default, which new servers' inserts
+fill; dropping a generated column is not `destructive`; pool schemas, like
+extensions, are created and never dropped; a unique `@index` added to an
+existing table is `compat` and `data-dependent`, as a unique constraint is;
+a type change that is not binary-coercible casts with `USING col::T`, so a
+narrowing cast truncates and is `destructive` rather than failing; a
+foreign key whose `onDelete` alone changes is replaced in `contract` with
+no hazard; an index is dropped with a plain `DROP INDEX` in a transaction;
+`Diff` refuses a `partitionBy` change on an existing table, an impossible
+cast, a primary key change and a change between a generated and a stored
+column; a change to a graph member's content set with no DDL change has no
+step, so no hazard; `--reader` services are read against both models;
+`--from-ref` extracts the previous schemas root beside the checkout's, so
+the paths its `tsconfig` reaches resolve, and each version uses its own
+naming file; a service is a reader when its kind allows `@source`; a
+second runner polls `pg_try_advisory_lock`, since one blocked in
+`pg_advisory_lock` deadlocks with the first runner's
+`CREATE INDEX CONCURRENTLY`; starting a plan clears the step log an
+earlier run of the same plan left, since A to B, B to A and A to B again
+repeat a plan hash; and the runner refuses a non-transactional step on
+SQLite and `foreignKeysOff` on Postgres. SQLite comes next through the
+same seam: its model and `create.sql`, its steps with the copy-table
+rebuild, and `outputs.sql.dialects`; its runner driver is built. Each
+change that lands a piece updates this paragraph.
