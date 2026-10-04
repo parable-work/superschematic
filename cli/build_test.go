@@ -160,3 +160,79 @@ func TestBuildCommand_SchemaError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot import @superschematic/db")
 }
+
+// TestBuildCommand_APILanguageOverridesTheTarget: --api-language builds the
+// target's API server in another language than its config names (here
+// fixture-nested-arrays-api, a Go server with Rust and TypeScript types),
+// and accepts any case.
+func TestBuildCommand_APILanguageOverridesTheTarget(t *testing.T) {
+	// A Rust server's crate points at the http runtime through [paths],
+	// which is relative to the repository root, the schemas root's parent.
+	schemasRoot, err := filepath.Abs(filepath.Join(tsreaderTestdata, ".."))
+	require.NoError(t, err)
+	runtimeRust, err := filepath.Abs("../runtime/http/rust")
+	require.NoError(t, err)
+	rel, err := filepath.Rel(filepath.Dir(schemasRoot), runtimeRust)
+	require.NoError(t, err)
+	namingFile := filepath.Join(t.TempDir(), "superschematic.toml")
+	require.NoError(t, os.WriteFile(namingFile, []byte("[paths]\nhttp_runtime_rust = \""+filepath.ToSlash(rel)+"\"\n"), 0o644))
+
+	for flag, manifest := range map[string]string{"RUST": "Cargo.toml", "typescript": "package.json", "Go": "go.mod"} {
+		t.Run(flag, func(t *testing.T) {
+			outDir := t.TempDir()
+			root := New(Config{})
+			root.SetOut(new(bytes.Buffer))
+			root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-nested-arrays-api"), "--out", outDir, "--naming", namingFile, "--api-language", flag})
+
+			require.NoError(t, root.Execute())
+			assert.FileExists(t, filepath.Join(outDir, "api", "fixture-nested-arrays-api", manifest))
+		})
+	}
+}
+
+// TestBuildCommand_APILanguageNeedsItsTypes: the override is checked as a
+// committed language is: a Rust server needs outputs.types.rust.
+func TestBuildCommand_APILanguageNeedsItsTypes(t *testing.T) {
+	root := New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-api"), "--out", t.TempDir(), "--api-language", "RUST"})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outputs.types")
+}
+
+func TestBuildCommand_APILanguageRefusesAnUnknownLanguageOrNoAPI(t *testing.T) {
+	root := New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-api"), "--out", t.TempDir(), "--api-language", "COBOL"})
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `--api-language "COBOL": want GO, RUST or TYPESCRIPT`)
+
+	root = New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", t.TempDir(), "--api-language", "RUST"})
+	err = root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--api-language RUST: fixture-db does not enable outputs.api")
+}
+
+// TestBuildCommand_APILanguageWithDepsAppliesToTheTargetOnly: with
+// --with-deps the dependencies build as their configs say. fixture-db
+// enables no outputs.api, so applying the override to it would refuse the
+// build; only the target's server takes the flag.
+func TestBuildCommand_APILanguageWithDepsAppliesToTheTargetOnly(t *testing.T) {
+	servicesRoot := prepareTSServicesRoot(t, "fixture-db", "fixture-api")
+	outDir := t.TempDir()
+	buf := new(bytes.Buffer)
+	root := New(Config{})
+	root.SetOut(buf)
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build", "--with-deps", "--api-language", "go", filepath.Join(servicesRoot, "fixture-api"), "--out", outDir})
+
+	require.NoError(t, root.Execute(), buf.String())
+	assert.Contains(t, buf.String(), "Built 2 schema services for fixture-api")
+	assert.FileExists(t, filepath.Join(outDir, "api", "fixture-api", "go.mod"))
+	assert.DirExists(t, filepath.Join(outDir, "types", "go", "fixture-db"))
+}
