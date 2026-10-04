@@ -175,9 +175,7 @@ func TestQueryListsSDKCrateBuildsAndRuns(t *testing.T) {
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 
-[patch.crates-io]
-superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
-`)
+`+testpaths.RustPatch(paths, naming.Default()))
 	crate := strings.ReplaceAll(sdkOutput.CrateName, "-", "_")
 	writeFile(t, filepath.Join(sdkDir, "tests", "query_lists.rs"), strings.ReplaceAll(queryListsSDKTest, "SDK_CRATE", crate))
 

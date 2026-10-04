@@ -69,3 +69,34 @@ func Local(t *testing.T) naming.LocalPaths {
 		HTTPRuntimeRust:        filepath.Join(root, "runtime", "http", "rust"),
 	}
 }
+
+// RustPatch is a Cargo [patch.crates-io] table that resolves the runtime
+// crates a generated Rust crate names by version, which are not on
+// crates.io yet, from paths: the scalar crate and the schema runtime the
+// generated validators call. A test that writes a generated crate without
+// rustgen.SetLocalPaths appends it to the crate's Cargo.toml.
+func RustPatch(paths naming.LocalPaths, n naming.Naming) string {
+	n = n.OrDefault()
+	table := "[patch.crates-io]\n"
+	for _, entry := range []struct{ crate, dir string }{
+		{n.ScalarRustCrate, paths.ScalarRust},
+		{n.SchemaRuntimeRustCrate, paths.SchemaRuntimeRust},
+	} {
+		if entry.dir != "" {
+			table += entry.crate + ` = { path = "` + filepath.ToSlash(entry.dir) + "\" }\n"
+		}
+	}
+	return table
+}
+
+// TempDir is t.TempDir with symlinks resolved (macOS's /var is
+// /private/var), so a relative path a generator computes from it resolves
+// where the build tool looks.
+func TempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("testpaths: resolve temp dir: %v", err)
+	}
+	return dir
+}

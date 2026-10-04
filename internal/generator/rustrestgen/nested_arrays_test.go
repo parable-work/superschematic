@@ -197,9 +197,7 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 
-[patch.crates-io]
-superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
-`)...)
+`+testpaths.RustPatch(paths, naming.Default()))...)
 	if err := os.WriteFile(filepath.Join(apiDir, "Cargo.toml"), cargoToml, 0o644); err != nil {
 		t.Fatal(err)
 	}

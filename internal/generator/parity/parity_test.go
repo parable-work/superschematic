@@ -1,6 +1,6 @@
 // Package parity runs the same JSON payloads through the validators superschematic
-// generates for Go, TypeScript, and Python and asserts every language returns
-// the same verdicts. One schema (built in a temp dir, JSON-authored so the
+// generates for Go, TypeScript, Python and Rust and asserts every language
+// returns the same verdicts. One schema (built in a temp dir, JSON-authored so the
 // real loader runs), one vector table, one expected-outcome column: a
 // validator semantic that drifts in any language fails here. This is the
 // generator-layer counterpart of superscalar's shared conformance corpus
@@ -33,7 +33,9 @@
 // a null list element, which json.Unmarshal alone would decode to the
 // element type's zero value; pydantic's strict parse refuses a value or
 // element of the wrong type, a bad enum element and a nested object
-// element with a bad field.
+// element with a bad field. The Rust validators run on the JSON value
+// before serde decodes it, as the TypeScript ones do, so Rust is listed
+// only where its validator accepts a payload that serde then refuses.
 //
 // Verdict comparison is about semantics, not field-name idiom: the Python
 // driver maps validate_all's snake_case attribute keys back to wire names
@@ -55,6 +57,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/pygen"
+	"github.com/parable-work/superschematic/internal/generator/rustgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
@@ -536,9 +539,10 @@ type parityVector struct {
 	typeName string
 	payload  string
 	want     map[string][]string
-	// decodeRejects lists the generated languages ("go", "python") whose
-	// typed decoder refuses the payload before the validator runs. Their
-	// driver reports decodeRejected instead of validator verdicts. This is
+	// decodeRejects lists the generated languages ("go", "python", "rust")
+	// whose typed decoder refuses the payload. Their driver reports
+	// decodeRejected instead of validator verdicts: Go and Python decode
+	// before the validator runs, Rust after it accepts the payload. This is
 	// the expected answer for those languages, not a pin: see the package
 	// comment.
 	decodeRejects []string
@@ -1307,7 +1311,7 @@ var vectors = []parityVector{
 		typeName:      "StructuredMatrix",
 		payload:       `{"reqMap": "{\"k\": \"v\"}", "optMap": "{}", "mapList": ["{\"a\": \"b\"}"], "reqVec": "[0.5, -1]", "optVec": "[]", "vecList": ["[1, 2.5]"]}`,
 		want:          map[string][]string{},
-		decodeRejects: []string{"go"},
+		decodeRejects: []string{"go", "rust"},
 	},
 	{
 		// An array where an object belongs, a number and a boolean are "type".
@@ -1783,6 +1787,67 @@ for (const [name, vector] of Object.entries(vectors) as [string, { type: string;
 writeFileSync(process.env.PARITY_RESULTS as string, JSON.stringify(results, null, 2));
 `
 
+// rustDriver parses each payload as the type the vector names with the
+// generated parse_<type>, which fills defaults, runs validate_<type> and
+// decodes the validated value. A payload the validator refuses reports its
+// errors; one it accepts that serde then refuses reports decodeRejected.
+// TYPES_CRATE is replaced with the generated crate's name.
+const rustDriver = `use std::collections::BTreeMap;
+
+use serde_json::Value;
+use TYPES_CRATE::validators;
+
+type Verdicts = BTreeMap<String, Vec<String>>;
+
+fn verdicts<T>(parsed: Result<T, superschematic_schema_runtime::ParseError>) -> Verdicts {
+    use superschematic_schema_runtime::ParseError;
+    let mut out = Verdicts::new();
+    match parsed {
+        Ok(_) => {}
+        Err(ParseError::Invalid(errors)) => {
+            for (path, errs) in errors.flatten() {
+                let mut names: Vec<String> = errs.into_iter().map(|e| e.validator).collect();
+                names.sort();
+                out.insert(path, names);
+            }
+        }
+        Err(ParseError::Decode(_)) => {
+            out.insert("$decode".to_owned(), vec!["rejected".to_owned()]);
+        }
+        Err(other) => panic!("unexpected parse error: {other}"),
+    }
+    out
+}
+
+fn check(type_name: &str, payload: Value) -> Verdicts {
+    use superschematic_schema_runtime::UnknownFields::Allow;
+    match type_name {
+        "ParityMatrix" => verdicts(validators::parse_parity_matrix(payload, Allow)),
+        "ListMatrix" => verdicts(validators::parse_list_matrix(payload, Allow)),
+        "JsonMatrix" => verdicts(validators::parse_json_matrix(payload, Allow)),
+        "StructuredMatrix" => verdicts(validators::parse_structured_matrix(payload, Allow)),
+        "ScalarRuleMatrix" => verdicts(validators::parse_scalar_rule_matrix(payload, Allow)),
+        "PatternMatrix" => verdicts(validators::parse_pattern_matrix(payload, Allow)),
+        other => panic!("unknown type {other}"),
+    }
+}
+
+#[test]
+fn validation_parity_driver() {
+    let (Ok(vectors_path), Ok(results_path)) = (std::env::var("PARITY_VECTORS"), std::env::var("PARITY_RESULTS")) else {
+        return;
+    };
+    let vectors: BTreeMap<String, Value> =
+        serde_json::from_str(&std::fs::read_to_string(vectors_path).unwrap()).unwrap();
+    let mut results = BTreeMap::new();
+    for (name, vector) in vectors {
+        let type_name = vector["type"].as_str().unwrap().to_owned();
+        results.insert(name, check(&type_name, vector["payload"].clone()));
+    }
+    std::fs::write(results_path, serde_json::to_string_pretty(&results).unwrap()).unwrap();
+}
+`
+
 // pyDriver decodes via model_fields alias mapping + model_construct so
 // validate_all sees the payload without pydantic's own decode validation in
 // the way (mirrors how Go and TS drive their validators directly). A vector
@@ -1951,6 +2016,53 @@ func TestGeneratedValidatorParity(t *testing.T) {
 			t.Fatalf("typescript driver failed: %v\n%s", err, out)
 		}
 		assertVerdicts(t, "typescript", readResults(t, resultsPath))
+	})
+
+	t.Run("rust", func(t *testing.T) {
+		cargoPath, err := exec.LookPath("cargo")
+		if err != nil {
+			t.Skip("cargo not available; skipping Rust parity check")
+		}
+		paths := testpaths.Local(t)
+
+		output, err := rustgen.Generate(schema, rustgen.Options{
+			SchemaName: "parity-fixture",
+			Clock:      fixedClock,
+		})
+		if err != nil {
+			t.Fatalf("generate rust: %v", err)
+		}
+		tempRoot, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatalf("resolve temp dir: %v", err)
+		}
+		outDir := filepath.Join(tempRoot, "parity-fixture")
+		if err := rustgen.SetLocalPaths(output, paths, outDir); err != nil {
+			t.Fatalf("set local paths: %v", err)
+		}
+		if err := rustgen.WriteTypes(output, outDir); err != nil {
+			t.Fatalf("write rust types: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(outDir, "tests"), 0o755); err != nil {
+			t.Fatalf("mkdir tests: %v", err)
+		}
+		driver := strings.ReplaceAll(rustDriver, "TYPES_CRATE", strings.ReplaceAll(output.CrateName, "-", "_"))
+		if err := os.WriteFile(filepath.Join(outDir, "tests", "parity_driver.rs"), []byte(driver), 0o644); err != nil {
+			t.Fatalf("write rust driver: %v", err)
+		}
+
+		targetDir := os.Getenv("CARGO_TARGET_DIR")
+		if targetDir == "" {
+			targetDir = filepath.Join(tempRoot, "target")
+		}
+		resultsPath := filepath.Join(sharedDir, "results-rust.json")
+		run := exec.Command(cargoPath, "test", "--quiet", "--test", "parity_driver")
+		run.Dir = outDir
+		run.Env = append(os.Environ(), "CARGO_TARGET_DIR="+targetDir, "PARITY_VECTORS="+vectorsPath, "PARITY_RESULTS="+resultsPath)
+		if out, err := run.CombinedOutput(); err != nil {
+			t.Fatalf("rust driver failed: %v\n%s", err, out)
+		}
+		assertVerdicts(t, "rust", readResults(t, resultsPath))
 	})
 
 	t.Run("python", func(t *testing.T) {

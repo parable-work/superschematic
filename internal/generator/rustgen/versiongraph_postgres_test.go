@@ -59,10 +59,7 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	}
 	outDir := filepath.Join(root, output.CrateName)
 	paths := testpaths.Local(t)
-	if err := SetScalarLibPath(output, paths, outDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetVersionGraphPath(output, paths, outDir); err != nil {
+	if err := SetLocalPaths(output, paths, outDir); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteTypes(output, outDir); err != nil {

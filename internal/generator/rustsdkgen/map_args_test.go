@@ -91,9 +91,7 @@ func TestMapArgumentsSDKCrateSendsJSONObjects(t *testing.T) {
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 
-[patch.crates-io]
-superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
-`)
+`+testpaths.RustPatch(paths, naming.Default()))
 	crate := strings.ReplaceAll(sdkOutput.CrateName, "-", "_")
 	writeFile(t, filepath.Join(sdkDir, "tests", "map_args.rs"), strings.ReplaceAll(mapArgsSDKTest, "SDK_CRATE", crate))
 	cargoClippyAndTest(t, cargoPath, sdkDir)

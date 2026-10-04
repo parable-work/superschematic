@@ -368,10 +368,7 @@ func (r run) generateRustTypes() error {
 	}
 
 	dir := TypesDir(r.Options.OutputRoot, "rust", r.Config.Name)
-	if err := rustgen.SetScalarLibPath(output, r.Options.Paths, dir); err != nil {
-		return fmt.Errorf("generator: rust types for %s: %w", r.Config.Name, err)
-	}
-	if err := rustgen.SetVersionGraphPath(output, r.Options.Paths, dir); err != nil {
+	if err := rustgen.SetLocalPaths(output, r.Options.Paths, dir); err != nil {
 		return fmt.Errorf("generator: rust types for %s: %w", r.Config.Name, err)
 	}
 	if err := rustgen.WriteTypes(output, dir); err != nil {

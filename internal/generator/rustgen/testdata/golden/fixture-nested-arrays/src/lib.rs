@@ -6,6 +6,7 @@
 
 pub mod enums;
 pub mod types;
+pub mod validators;
 
 pub use enums::*;
 pub use types::*;

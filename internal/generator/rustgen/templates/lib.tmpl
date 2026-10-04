@@ -16,6 +16,9 @@ pub mod types;
 {{if gt (len .Unions) 0 -}}
 pub mod unions;
 {{end -}}
+{{if .Validators -}}
+pub mod validators;
+{{end -}}
 {{range .VersionGraphs -}}
 pub mod versiongraph_{{.FileName}};
 {{end}}

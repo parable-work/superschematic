@@ -60,9 +60,7 @@ func TestOptionalJSONSDKCrateSendsNullApartFromAbsent(t *testing.T) {
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 
-[patch.crates-io]
-superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
-`)
+`+testpaths.RustPatch(paths, naming.Default()))
 	crate := strings.ReplaceAll(sdkOutput.CrateName, "-", "_")
 	writeFile(t, filepath.Join(sdkDir, "tests", "optional_json.rs"), strings.ReplaceAll(optionalJSONSDKTest, "SDK_CRATE", crate))
 	cargoClippyAndTest(t, cargoPath, sdkDir)

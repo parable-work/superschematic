@@ -22,6 +22,13 @@ such module calls:
   read as ASCII, as Go's RE2 reads them, where the `regex` crate would read
   them as Unicode.
 - `index_path`, `key_path` and `bracket_key_path`.
+- `Rule`, with `check_list_rules` and `check_value_rules`: a field's own
+  `@validate` rules, each on a value of its own JSON type.
+- `check_nested`, `require_object`, `check_rows`, `require_elements` and
+  `require_grid_elements`: a nested object's errors under its path, the
+  rows of a `T[][]` field, and list elements that must not be null.
+- `fill_default`, `check_unknown_fields`, `UnknownFields` and
+  `ParseError`: what a generated `parse_<type>` shares.
 
 Unlike the Go, TypeScript and Python schema runtimes, it reads no IR and
 does not assert `../testdata/validation_parity.json`: the generated Rust
