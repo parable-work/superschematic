@@ -286,6 +286,9 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 
 	namespaceMap := make(map[string]*NamespaceInfo)
 	for _, endpoint := range apiOutput.Endpoints {
+		if endpoint.IsWebhook {
+			continue
+		}
 		nsName := endpoint.Namespace
 		if nsName == "" {
 			nsName = "root"
@@ -362,7 +365,8 @@ func extractInputSchemasForValidation(apiOutput *apigen.APIOutput) (string, map[
 	for _, endpoint := range apiOutput.Endpoints {
 		// File upload endpoints split payload fields and files separately.
 		// Skip strict input-schema validation to avoid requiring file placeholders.
-		if endpoint.HasFileUpload {
+		// The SDK has no method for a webhook, so nothing validates its input.
+		if endpoint.HasFileUpload || endpoint.IsWebhook {
 			continue
 		}
 		for _, arg := range endpoint.BodyArgs {
@@ -439,7 +443,7 @@ func extractInputSchemasForValidation(apiOutput *apigen.APIOutput) (string, map[
 
 	mapValueSchemas := make(map[string]bool)
 	for _, endpoint := range apiOutput.Endpoints {
-		if endpoint.HasFileUpload {
+		if endpoint.HasFileUpload || endpoint.IsWebhook {
 			continue
 		}
 		for _, arg := range endpoint.BodyArgs {
