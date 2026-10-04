@@ -1,6 +1,6 @@
 ---
 title: Schema migrations
-description: Plan the change of a DB service's database between two versions of its schema with migrate plan; the two phases, the hazard classes, readers and renames, versioned tables and version graphs, the superschematic-migrate runner and its state, and the limits.
+description: Plan the change of a DB service's database between two versions of its schema with migrate plan; the two phases, the hazard classes, readers and renames, versioned tables and version graphs, SQLite and its copy-table rebuild, the superschematic-migrate runner and its state, and the limits.
 sidebar:
   order: 9
 ---
@@ -76,7 +76,7 @@ and to `--out` as JSON.
 | `--from-ref` | none | the previous version: the schemas root at this git ref; cannot be combined with `--from` |
 | `--rename` | none | `old=new` for a table, `oldTable.oldColumn=newTable.newColumn` for a column ([Renames](#renames)); repeatable |
 | `--reader` | none | an API or General service directory outside the schemas root whose `@source` views read the database ([Readers](#readers)); repeatable |
-| `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` once that dialect lands |
+| `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` for a service whose `outputs.sql.dialects` lists it ([SQLite](#sqlite)) |
 | `--out` | none | write the plan JSON to this file, in canonical form |
 | `--format` | `sql` | print the plan to stdout as `json`, `sql` or `markdown` |
 | `--fail-on` | none | hazard classes, comma-separated, or `all`: exit non-zero when the plan has a hazard of one of them that no `--allow` names |
@@ -183,6 +183,7 @@ reverse dependency order. Extensions are created and never dropped, as
 
 A step on a table the previous version already has uses the online form
 where Postgres has one. A table the plan creates gets the plain forms.
+SQLite has no online forms; [SQLite](#sqlite) says what its steps do.
 
 | Change | Online form |
 | --- | --- |
@@ -288,6 +289,145 @@ change to a member's content columns is `history`: commits made before it
 hash and merge rows of the old shape. The hazard says whether the graph's
 `schemaEpoch` rose.
 
+## SQLite
+
+A DB service is built for Postgres, and for SQLite too when its
+`outputs.sql.dialects` lists `sqlite`:
+
+```ts
+export default defineConfig({
+  name: "shop-db",
+  kind: SchemaKind.DB,
+  outputs: {
+    types: { [TargetLanguage.Go]: { enabled: true } },
+    sql: { dialects: ["postgres", "sqlite"] }
+  }
+});
+```
+
+`dialects` is `["postgres"]` when unset. The list must hold `postgres`,
+since the Go ORM the kind always generates runs on Postgres. A list without
+it, with a dialect other than `postgres` and `sqlite`, or with a dialect
+twice fails the build and says why.
+
+With `sqlite` listed, the build also writes
+`<out>/sql/<service>/sqlite/create.sql`: the SQLite plan from an empty
+database, its steps' statements as one script. `migrate plan --dialect
+sqlite` plans the service's SQLite database, and refuses a service that
+does not list `sqlite`. The Postgres DDL is the same whether `sqlite` is
+listed or not.
+
+### Types and defaults
+
+SQLite stores each type as the type its values need:
+
+| Schema type (Postgres) | SQLite |
+| --- | --- |
+| `UUID`, `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `DATE`, `TIME`, `TIMESTAMP`, `TIMESTAMPTZ`, `INTERVAL`, `INET` | `TEXT` |
+| `CITEXT` | `TEXT COLLATE NOCASE` |
+| `SMALLINT`, `INTEGER`, `BIGINT`, `BOOLEAN` | `INTEGER` |
+| `REAL`, `DOUBLE PRECISION` | `REAL` |
+| `NUMERIC(p, s)` | `NUMERIC`, SQLite's numeric affinity |
+| `JSONB`, `JSON`, and every list (`T[]`) | `TEXT` that holds JSON |
+| `BYTEA` | `BLOB` |
+
+A default writes the form the schema runtime reads:
+
+| Postgres default | SQLite default |
+| --- | --- |
+| `gen_random_uuid()` | a version 4 UUID string, from `randomblob` |
+| `CURRENT_TIMESTAMP` | `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`: an RFC 3339 UTC instant |
+| `CURRENT_DATE` | `strftime('%Y-%m-%d', 'now')` |
+| `CURRENT_TIME` | `strftime('%H:%M:%f', 'now')` |
+| `'{}'` on a list | `'[]'` |
+| a JSON platform default (`'{...}'::jsonb`) | its text, `'{...}'` |
+| a number or a string | the same |
+
+The primary key is part of `CREATE TABLE`, and so is each foreign key. A
+unique field is a unique index under the name Postgres gives its
+constraint (`customer_email_key`), so adding or dropping one is a
+statement of its own, not a rebuild. SQLite names neither a primary key
+nor a foreign key, so renaming one is no step. SQLite keeps no comments.
+
+### Steps
+
+Every SQLite step runs in a transaction, which the runner opens with
+`BEGIN IMMEDIATE`. SQLite changes a table in place only where its
+`ALTER TABLE` can:
+
+| Change | Step |
+| --- | --- |
+| a table or a column renamed | `ALTER TABLE ... RENAME TO`, `RENAME COLUMN` |
+| a column added | `ADD COLUMN`, unless the column is `NOT NULL` without a constant default, has a default that is not a constant (the UUID and time defaults above), or has a foreign key and is `NOT NULL` or has a default |
+| a column dropped | `DROP COLUMN` (`blocking`: SQLite rewrites the table). Its indexes are dropped before it, and a foreign key over it makes its table's rebuild drop it instead |
+| an index or a unique field added or dropped | `CREATE INDEX`, `CREATE UNIQUE INDEX`, `DROP INDEX`; building an index on a table the previous version has is `blocking` |
+| an index or a unique field renamed | the index dropped and built again under its new name (`blocking`): SQLite cannot rename an index |
+| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs |
+
+Every other change to a table rebuilds it: a type, a nullability, a
+default, a foreign key added over a column the table has, changed or
+dropped, and a column `ADD COLUMN` cannot add. The rebuild is SQLite's
+copy-table procedure, in one step:
+
+1. create the table as the phase leaves it under a temporary name
+   (`_new_order`), with its primary key and foreign keys;
+2. copy the rows, mapping each column to its name after the renames, filling
+   the columns the table gains from their defaults, and casting a column
+   whose type changes;
+3. drop the old table;
+4. rename the new one;
+5. create its unique indexes and indexes again.
+
+Every change the phase makes to a table shares one rebuild: a table is
+rebuilt at most once in `expand` and once in `contract`, and the rebuild
+also adds the columns and indexes the phase adds to it. Renames of the
+table and its columns run before it, in place. The rebuild is `copy-table`
+and `blocking`, and carries the hazards of every change it makes.
+
+The step runs with foreign keys off (`foreignKeysOff` in the plan). With
+them on, dropping the old table would delete its rows first and run the
+`ON DELETE` actions of the tables that reference it: a `CASCADE` would
+delete their rows and a `RESTRICT` would fail. SQLite turns them off only
+outside a transaction, so the runner does that around the step, runs
+`PRAGMA foreign_key_check` before the commit, and fails the step on any
+violation. The tables that reference the rebuilt one name it, and the name
+resolves again once the new table takes it. A table renamed with `RENAME
+TO` keeps the references to it too: SQLite rewrites the foreign keys of
+the tables that reference it.
+
+SQLite's `CAST` never fails: text that is not a number becomes `0`, and a
+fraction is cut toward zero as an `INTEGER`. So a type change that cannot
+keep every value is `destructive`, not `data-dependent`. A `NOT NULL` a
+rebuild adds, a required column without a default, and a unique index
+fail on the rows that break them, as on Postgres (`data-dependent`).
+
+### Refusals
+
+SQLite has no form of these, so a service that lists `sqlite` and uses one
+fails its build, and `migrate plan --dialect sqlite` fails, each naming
+the feature and the dialect:
+
+- `@versioned` and `@optimistic`, whose triggers SQLite's adapter does not
+  read yet;
+- `@searchField`, a stored generated column with a trigram index;
+- projections;
+- `GIN` and `GIST` indexes: an `@index` over a list, a JSON or an `LTREE`
+  column;
+- the types SQLite has no storage for: `LTREE` and the PostGIS types
+  (`POINT`, `GEOGRAPHY`, `GEOMETRY`).
+
+A plan that drops two tables that reference each other fails too: SQLite
+can drop the foreign key that closes the cycle only by rebuilding a table
+the plan drops. Drop one of the relations in a version of its own first.
+
+### What SQLite does not keep
+
+- `VARCHAR(n)` and `NUMERIC(p, s)` are `TEXT` and `NUMERIC`: SQLite does
+  not enforce the length, the precision or the scale, so a change of
+  them is no step.
+- A list, a JSON value and text are all `TEXT`, so a field that changes
+  between them is no step either, and the plan converts no value.
+
 ## The runner
 
 `superschematic-migrate` applies a plan. It is the Go module
@@ -377,7 +517,8 @@ adopt.
 - A custom cast, a backfill or a column split is written by hand, ordered
   around the plan or applied and then adopted.
 - A change the plan cannot express fails the plan and names it.
-- Postgres is the only dialect so far. SQLite, with its copy-table rebuild
-  and its runner driver, comes later through `--dialect sqlite`.
+- SQLite refuses `@versioned`, `@optimistic`, `@searchField`, projections,
+  `GIN` and `GIST` indexes, and `LTREE` and the PostGIS types
+  ([Refusals](#refusals)).
 - The engine's own storage is the engine's: it creates its tables and runs
   its behaviors' migrations, and no plan covers them.

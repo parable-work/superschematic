@@ -1987,20 +1987,25 @@ compute them; an author never declares one.
 | The runner's tests apply plan vectors the compiler writes to `runtime/migrate/testdata/plans`, as the version graph's vectors are shared (D17): a second run does nothing, a failure injected after any step resumes to the same catalog, two runners serialize, and a plan from the wrong baseline is refused. | Runner tests over hand-written plans, which can drift from what the compiler writes |
 | SQLite runs the same convergence and runner tests with the pure-Go driver, in every CI run, with no service. | |
 
-Status: Postgres is built. `internal/sqlmigrate` resolves a schema to its
-model (`BuildModel`) and plans between two models (`Diff`) through a
-dialect seam, with Postgres implemented; `sqlgen` renders each derived
-object once, for `create.sql` and the model, and `create.sql` is unchanged
-byte for byte. `superschematic migrate plan` takes the previous version as
-`--from` or `--from-ref`, with `--rename`, `--reader`, `--fail-on`,
-`--allow` and `--print-model`, and prints the plan as JSON, SQL or
-Markdown. The runner is the sixth Go module, `runtime/migrate/go`, with a
-Postgres and a SQLite driver and the binary `superschematic-migrate`
-(`runtime/migrate/README.md`). The reference page is "Schema migrations".
-Plan goldens cover 57 pairs; every pair and every `sqlgen` fixture
-converges on Postgres; the runner applies the compiler's vectors, resumes
-after a failure at every step, and serializes two runners. Rules settled
-as they were built: the model records a `@versioned` table's excluded
+Status: Postgres and SQLite are built. `internal/sqlmigrate` resolves a
+schema to its model (`BuildModel`) and plans between two models (`Diff`)
+through a dialect seam, with both dialects implemented; `sqlgen` renders
+each derived object once, for `create.sql` and the model, and `create.sql`
+is unchanged byte for byte. `outputs.sql.dialects` lists `sqlite` beside
+`postgres` to have the build write `sqlite/create.sql`, the SQLite plan
+from an empty database. `superschematic migrate plan` takes the previous
+version as `--from` or `--from-ref`, with `--rename`, `--reader`,
+`--fail-on`, `--allow`, `--print-model` and `--dialect`, and prints the
+plan as JSON, SQL or Markdown. The runner is the sixth Go module,
+`runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
+`superschematic-migrate` (`runtime/migrate/README.md`). The reference page
+is "Schema migrations".
+Plan goldens cover 55 pairs for Postgres and 39 for SQLite, 9 of them
+rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
+every SQLite pair and fixture converges on SQLite in every test run; the
+runner applies the compiler's vectors of both dialects, resumes after a
+failure at every step, and serializes two runners. Rules settled as they
+were built: the model records a `@versioned` table's excluded
 columns (`historyExclude`), which the history seed and an `exclude` change
 read; renaming a column of a versioned table is `history` too, since old
 images keep the old key; a column dropped in `contract` keeps its
@@ -2024,7 +2029,37 @@ second runner polls `pg_try_advisory_lock`, since one blocked in
 `CREATE INDEX CONCURRENTLY`; starting a plan clears the step log an
 earlier run of the same plan left, since A to B, B to A and A to B again
 repeat a plan hash; and the runner refuses a non-transactional step on
-SQLite and `foreignKeysOff` on Postgres. SQLite comes next through the
-same seam: its model and `create.sql`, its steps with the copy-table
-rebuild, and `outputs.sql.dialects`; its runner driver is built. Each
-change that lands a piece updates this paragraph.
+SQLite and `foreignKeysOff` on Postgres. Rules settled building SQLite:
+its model is the Postgres model's tables in SQLite's types, so a unique
+field's index keeps the name Postgres gives the constraint, and the
+primary key and foreign keys keep their names in the model only, since
+SQLite names neither and renaming one is no step; SQLite keeps no
+comments; `INTERVAL` and `INET` are `TEXT`, a `CURRENT_DATE` default is
+`strftime('%Y-%m-%d', 'now')`, a `CURRENT_TIME` default
+`strftime('%H:%M:%f', 'now')`, and a JSON platform default its text; any
+other type has no storage, and a default with no SQLite form fails the
+model; SQLite's `CAST` never fails, so a type change that cannot keep
+every value is `destructive`, never `data-dependent`, and a change between
+`BLOB` and a number is impossible; a table the dialect rebuilds in a phase
+takes every change the phase makes to it but the renames of the table and
+its columns, which run first and in place, so the rebuild starts from the
+table with the renames applied, sits at the first change `ALTER TABLE`
+cannot make, and also adds the columns and indexes the phase adds; a
+foreign key added in `expand` is over a column the plan adds, and
+`ADD COLUMN ... REFERENCES` declares it when that column is nullable with
+no default; SQLite cannot rename an index, so an index or unique field
+renamed is dropped and built again (`blocking`), and building an index on
+a table that exists and `DROP COLUMN`, which rewrites the table, are
+`blocking`; `DROP COLUMN` runs in place, since the column's indexes are
+dropped before it and a foreign key over it rebuilds the table; a dropped
+table is dropped with foreign keys off, since with them on `DROP TABLE`
+deletes its rows first, which a `RESTRICT` on the table itself refuses;
+a plan that drops two tables that reference each other fails on SQLite,
+since dropping the foreign key that closes the cycle needs a rebuild of a
+table the plan drops; a change between a list, a JSON value and text, all
+`TEXT`, is no step and converts no value; `migrate plan --dialect sqlite`
+refuses a service whose new version does not list `sqlite`, and builds
+the previous version's SQLite model without checking its list; and the
+SQLite convergence test compares a column's collation through an index
+it builds and rolls back, since no pragma reports it. Each change that
+lands a piece updates this paragraph.
