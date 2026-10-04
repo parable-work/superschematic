@@ -3,12 +3,15 @@
 The schema runtime reads, writes, validates, masks and merges schema
 documents (the IR that `superschematic build` emits) in Go, TypeScript and
 Python. It is the compiler's runtime, not scalar behaviour: it calls the
-scalar functions in superscalar and adds nothing to them.
+scalar functions in superscalar and adds nothing to them. The Rust crate is
+narrower: it reads no IR, and holds only what the validators in a generated
+Rust types crate share (see [`rust/README.md`](rust/README.md)).
 
 ```
 go/          github.com/parable-work/superschematic/runtime/schema/go: ir, parse, validate, mask, merge, serialize
 typescript/  @superschematic/schema-runtime: JSON/YAML reader and writer, IR reader, strict schema-file loader, parse, validate, mask, merge
 python/      superschematic-schema-runtime: JSON/YAML reader, parse, validate, mask, merge, serialize
+rust/        superschematic-schema-runtime: the helpers the generated Rust validators call
 testdata/    fixtures the runtime suites share
 ```
 
