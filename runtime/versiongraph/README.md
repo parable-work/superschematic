@@ -424,12 +424,12 @@ roots, and runs each step in order. It reads the whole scenario before the
 first step, and refuses one with an unknown member or one that breaks a
 rule below.
 
-`roots` lists the roots the scenario uses, in order: at least one, each
-named once (`["Bread", "Soup"]`). Before the first step a runner seeds them
-as its backend needs. On Postgres it inserts, in one statement, a `recipe`
-row per root whose `id` is the root, whose `title` is the root's name and
-whose `created_by` is `Cook`, so `recipe_ref.root_id`'s foreign key finds
-it. A root the scenario does not list has no row.
+`roots` lists the roots the scenario uses, in order: at least one, each a
+name and named once (`["Bread", "Soup"]`). Before the first step a runner
+seeds them as its backend needs. On Postgres it inserts, in one statement,
+a `recipe` row per root whose `id` is the root, whose `title` is the root's
+name and whose `created_by` is `Cook`, so `recipe_ref.root_id`'s foreign
+key finds it. A root the scenario does not list has no row.
 
 A step is `{"op", ...arguments, "expect"?}`. `as` names the ref or commit a
 step returns, and later steps name it: `ref`, `from`, `source` and `target`
@@ -446,10 +446,11 @@ actors are UUIDs written in their canonical form, which reads as a word
 
 A step may list the backends that run it (`backends`): a non-empty list of
 known backends, each named once. A runner skips a step whose list leaves
-out its own backend; a step without the member runs on every backend. The
-sweep scenario's `holdSweepLock`, `releaseSweepLock` and the sweep between
-them that expects to be skipped run on `postgres` only, since under
-SQLite's one writer no transaction can hold the lock while a sweep runs.
+out its own backend; a step without the member, or with it `null`, runs on
+every backend. The sweep scenario's `holdSweepLock`, `releaseSweepLock` and
+the sweep between them that expects to be skipped run on `postgres` only,
+since under SQLite's one writer no transaction can hold the lock while a
+sweep runs.
 
 | `op` | Arguments | Runs |
 |---|---|---|
@@ -476,11 +477,12 @@ SQLite's one writer no transaction can hold the lock while a sweep runs.
 | `sql` | `statement`: `{"<backend>": "<statement>"}`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text on Postgres | The runner's backend's statement on the scenario's schema; with `rows` expected, a query whose rows the step returns |
 
 An `sql` step's `statement` is an object of one statement per backend,
-`{"postgres": "...", "sqlite": "..."}`. A runner refuses a plain string, a
-statement for a backend it does not know, a statement that is not text, and
-an `sql` step it runs that has no statement for its backend, so no step is
-skipped silently; a step it skips needs none. The scenarios give `postgres`
-statements only until a runner runs on SQLite.
+`{"postgres": "...", "sqlite": "..."}`; a `null` statement is none. On any
+step that has one, a runner refuses a plain string, a statement for a
+backend it does not know, and a statement that is not text (`null`
+included). It refuses an `sql` step it runs that has no statement for its
+backend, so no step is skipped silently; a step it skips needs none. The
+scenarios give `postgres` statements only until a runner runs on SQLite.
 
 `expect` holds what the step must return; a step without `error` must
 succeed.

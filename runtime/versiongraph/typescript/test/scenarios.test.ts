@@ -196,12 +196,13 @@ function names(value: JsonValue, what: string): string[] {
 
 /**
  * Reads a scenario as the format says (runtime/versiongraph/README.md,
- * "Scenarios") for a runner of `runnerBackend`. It refuses an unknown member, a
- * scenario with no steps or no roots or one that names a root twice, a
- * backends list that is empty, names a backend twice or names one no runner
- * knows, a statement that is not an object of one statement per backend or
- * that names an unknown backend, and an sql step that runs on
- * `runnerBackend` with no statement for it.
+ * "Scenarios") for a runner of `runnerBackend`. It refuses an unknown
+ * member; a scenario with no steps or no roots; a list of roots or backends
+ * that holds a value other than a name or names one twice; an empty
+ * backends list or one that names a backend no runner knows; a statement,
+ * on any step, that is not an object of one string per backend or that
+ * names an unknown backend; and an sql step that runs on `runnerBackend`
+ * with no statement for it. A null `backends` or `statement` is none.
  */
 function readScenario(text: string, where: string, runnerBackend: string): Scenario {
   const scenario = object(parseJson(text), "scenario", where);
@@ -330,16 +331,22 @@ const formatCases: [string, string, string][] = [
   ["a statement that is not text", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": 1}}`), "a statement is an object of one statement per backend"],
   ["an sql step without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"sqlite": "SELECT 1"}}`), "the sql step has no postgres statement"],
   ["an sql step with no statement", formatScenario(`["Bread"]`, `{"op": "sql"}`), "the sql step has no postgres statement"],
+  ["a null statement for the runner's backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": null}}`), "a statement is an object of one statement per backend"],
+  ["a null statement on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": null}`), ""],
+  ["a statement for an unknown backend on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": {"mysql": "x"}}`), `a statement for unknown backend "mysql"`],
+  ["a plain string statement on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": "x"}`), "a statement is an object of one statement per backend"],
   ["a statement for an unknown backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "mysql": "SELECT 1"}}`), `a statement for unknown backend "mysql"`],
   ["an sql step for another backend, without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "backends": ["sqlite"], "statement": {"sqlite": "SELECT 1"}}`), ""],
   ["backends listing the runner's", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["sqlite", "postgres"]}`), ""],
   ["backends listing an unknown backend", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "mysql"]}`), `backends lists unknown backend "mysql"`],
   ["an empty backends", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": []}`), "backends lists no backend"],
+  ["null backends", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": null}`), ""],
   ["backends listing a backend twice", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "postgres"]}`), `backends lists "postgres" twice`],
   ["no roots", formatScenario("", createPrimaryStep), "a scenario names its roots"],
   ["null roots", formatScenario("null", createPrimaryStep), "a scenario names its roots"],
   ["empty roots", formatScenario("[]", createPrimaryStep), "a scenario names at least one root"],
   ["a root named twice", formatScenario(`["Bread", "Soup", "Bread"]`, createPrimaryStep), `roots lists "Bread" twice`],
+  ["a null root", formatScenario("[null]", createPrimaryStep), "roots lists null, not a name"],
   ["no steps", formatScenario(`["Bread"]`), "a scenario has steps"],
   ["an unknown scenario member", `{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": [${createPrimaryStep}]}`, `unknown scenario member "backend"`],
   ["an unknown step member", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}`), `unknown step member "backend"`],

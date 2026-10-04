@@ -54,15 +54,17 @@ var knownBackends = []string{"postgres", "sqlite"}
 var fixtureDir = filepath.Join("..", "..", "testdata", "fixture")
 
 type scenario struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Roots       []string `json:"roots"`
-	Steps       []step   `json:"steps"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Roots       json.RawMessage `json:"roots"`
+	Steps       []step          `json:"steps"`
+	// roots are the names Roots lists, once parseScenario has read them.
+	roots []string
 }
 
 type step struct {
 	Op            string                    `json:"op"`
-	Backends      []string                  `json:"backends"`
+	Backends      json.RawMessage           `json:"backends"`
 	As            string                    `json:"as"`
 	Actor         *string                   `json:"actor"`
 	Root          string                    `json:"root"`
@@ -87,34 +89,77 @@ type step struct {
 	Statement     statements                `json:"statement"`
 	Args          []sqlArg                  `json:"args"`
 	Expect        expect                    `json:"expect"`
+	// backends are the names Backends lists, once parseScenario has read
+	// them; nil when the step lists none.
+	backends []string
 }
 
 // statements are an sql step's statement, one per backend.
 type statements map[string]string
 
 // UnmarshalJSON reads a statement as an object of one statement per
-// backend, and refuses any other form, a plain string included. A null
+// backend, each a string, and refuses any other form: a plain string, and
+// an object with a null or another value that is not text. A null
 // statement is none.
 func (s *statements) UnmarshalJSON(data []byte) error {
 	trimmed := bytes.TrimSpace(data)
 	if string(trimmed) == "null" {
 		return nil
 	}
-	if !bytes.HasPrefix(trimmed, []byte("{")) {
-		return fmt.Errorf("a statement is an object of one statement per backend, not %s", trimmed)
+	refused := fmt.Errorf("a statement is an object of one statement per backend, not %s", trimmed)
+	var members map[string]json.RawMessage
+	if !bytes.HasPrefix(trimmed, []byte("{")) || json.Unmarshal(trimmed, &members) != nil {
+		return refused
 	}
-	var m map[string]string
-	if err := json.Unmarshal(trimmed, &m); err != nil {
-		return fmt.Errorf("a statement is an object of one statement per backend: %w", err)
+	m := statements{}
+	for name, value := range members {
+		text, ok := jsonString(value)
+		if !ok {
+			return refused
+		}
+		m[name] = text
 	}
 	*s = m
 	return nil
 }
 
+// jsonString reads a JSON value that is a string; null is not one.
+func jsonString(value json.RawMessage) (string, bool) {
+	var text string
+	if !bytes.HasPrefix(bytes.TrimSpace(value), []byte(`"`)) || json.Unmarshal(value, &text) != nil {
+		return "", false
+	}
+	return text, true
+}
+
+// names reads a list of names, each a string and each named once. An
+// absent or null list is none (nil); an empty one is not nil.
+func names(raw json.RawMessage, what string) ([]string, error) {
+	if len(raw) == 0 || string(bytes.TrimSpace(raw)) == "null" {
+		return nil, nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, fmt.Errorf("%s is a list, not %s", what, raw)
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		name, ok := jsonString(item)
+		if !ok {
+			return nil, fmt.Errorf("%s lists %s, not a name", what, item)
+		}
+		if slices.Contains(out, name) {
+			return nil, fmt.Errorf("%s lists %q twice", what, name)
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
 // runsOn reports whether the step runs on the backend: a step runs on
 // every backend unless it lists the ones it runs on.
 func (st step) runsOn(backend string) bool {
-	return st.Backends == nil || slices.Contains(st.Backends, backend)
+	return st.backends == nil || slices.Contains(st.backends, backend)
 }
 
 type kindEdits struct {
@@ -237,10 +282,12 @@ func readScenario(t *testing.T, file string) scenario {
 
 // parseScenario reads a scenario as the format says
 // (runtime/versiongraph/README.md, "Scenarios") for a runner of backend. It
-// refuses an unknown member, a scenario with no steps or no roots or one
-// that names a root twice, a backends list that is empty, names a backend
-// twice or names one no runner knows, a statement for an unknown backend,
-// and an sql step that runs on backend with no statement for it.
+// refuses an unknown member; a scenario with no steps or no roots; a list
+// of roots or backends that holds a value other than a name or names one
+// twice; an empty backends list or one that names a backend no runner
+// knows; a statement, on any step, that is not an object of one string per
+// backend or that names an unknown backend; and an sql step that runs on
+// backend with no statement for it.
 func parseScenario(text []byte, backend string) (scenario, error) {
 	decoder := json.NewDecoder(bytes.NewReader(text))
 	decoder.DisallowUnknownFields()
@@ -251,38 +298,40 @@ func parseScenario(text []byte, backend string) (scenario, error) {
 	if len(s.Steps) == 0 {
 		return scenario{}, errors.New("a scenario has steps")
 	}
-	if s.Roots == nil {
+	roots, err := names(s.Roots, "roots")
+	if err != nil {
+		return scenario{}, err
+	}
+	if roots == nil {
 		return scenario{}, errors.New("a scenario names its roots")
 	}
-	if len(s.Roots) == 0 {
+	if len(roots) == 0 {
 		return scenario{}, errors.New("a scenario names at least one root")
 	}
-	if root, ok := repeated(s.Roots); ok {
-		return scenario{}, fmt.Errorf("the scenario names root %q twice", root)
-	}
-	for i, st := range s.Steps {
-		if err := checkStep(st, backend); err != nil {
-			return scenario{}, fmt.Errorf("step %d (%s): %w", i, st.Op, err)
+	s.roots = roots
+	for i := range s.Steps {
+		if err := checkStep(&s.Steps[i], backend); err != nil {
+			return scenario{}, fmt.Errorf("step %d (%s): %w", i, s.Steps[i].Op, err)
 		}
 	}
 	return s, nil
 }
 
-// checkStep checks a step's backends and statement.
-func checkStep(st step, backend string) error {
-	if st.Backends != nil {
-		if len(st.Backends) == 0 {
-			return errors.New("backends lists no backend")
-		}
-		for _, name := range st.Backends {
-			if !slices.Contains(knownBackends, name) {
-				return fmt.Errorf("backends lists unknown backend %q", name)
-			}
-		}
-		if name, ok := repeated(st.Backends); ok {
-			return fmt.Errorf("backends lists %q twice", name)
+// checkStep reads a step's backends and checks them and its statement.
+func checkStep(st *step, backend string) error {
+	backends, err := names(st.Backends, "backends")
+	if err != nil {
+		return err
+	}
+	if backends != nil && len(backends) == 0 {
+		return errors.New("backends lists no backend")
+	}
+	for _, name := range backends {
+		if !slices.Contains(knownBackends, name) {
+			return fmt.Errorf("backends lists unknown backend %q", name)
 		}
 	}
+	st.backends = backends
 	for _, name := range slices.Sorted(maps.Keys(st.Statement)) {
 		if !slices.Contains(knownBackends, name) {
 			return fmt.Errorf("a statement for unknown backend %q", name)
@@ -296,23 +345,11 @@ func checkStep(st step, backend string) error {
 	return nil
 }
 
-// repeated returns a name the list holds twice.
-func repeated(names []string) (string, bool) {
-	seen := map[string]bool{}
-	for _, name := range names {
-		if seen[name] {
-			return name, true
-		}
-		seen[name] = true
-	}
-	return "", false
-}
-
 // runScenario seeds the scenario's roots and runs each step that runs on
 // the runner's backend, in order.
 func runScenario(t *testing.T, r *runner, s scenario) {
 	t.Helper()
-	r.seed(t, s.Roots)
+	r.seed(t, s.roots)
 	for i, st := range s.Steps {
 		if !st.runsOn(backend) {
 			continue

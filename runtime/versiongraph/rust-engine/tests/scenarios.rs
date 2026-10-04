@@ -34,7 +34,7 @@ struct Scenario {
     name: String,
     #[allow(dead_code)]
     description: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "root_names")]
     roots: Option<Vec<String>>,
     steps: Vec<Step>,
 }
@@ -43,6 +43,7 @@ struct Scenario {
 #[serde(deny_unknown_fields, default)]
 struct Step {
     op: String,
+    #[serde(deserialize_with = "backend_names")]
     backends: Option<Vec<String>>,
     #[serde(rename = "as")]
     as_: String,
@@ -183,7 +184,8 @@ impl Step {
 }
 
 /// Reads an sql step's statement as an object of one statement per
-/// backend, and refuses any other form, a plain string included. A null
+/// backend, each a string, and refuses any other form: a plain string, and
+/// an object with a null or another value that is not text. A null
 /// statement is none.
 fn statements<'de, D: Deserializer<'de>>(
     deserializer: D,
@@ -206,6 +208,42 @@ fn statements<'de, D: Deserializer<'de>>(
             .map(Some),
         _ => Err(refused()),
     }
+}
+
+/// Reads a list of names, each a string; a null list is none. Serde calls
+/// it only for a member that is present.
+fn names<'de, D: Deserializer<'de>>(
+    deserializer: D,
+    what: &str,
+) -> Result<Option<Vec<String>>, D::Error> {
+    match Value::deserialize(deserializer)? {
+        Value::Null => Ok(None),
+        Value::Array(items) => items
+            .into_iter()
+            .map(|item| match item {
+                Value::String(name) => Ok(name),
+                other => Err(serde::de::Error::custom(format!(
+                    "{what} lists {other}, not a name"
+                ))),
+            })
+            .collect::<Result<_, _>>()
+            .map(Some),
+        other => Err(serde::de::Error::custom(format!(
+            "{what} is a list, not {other}"
+        ))),
+    }
+}
+
+/// A scenario's roots.
+fn root_names<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Vec<String>>, D::Error> {
+    names(deserializer, "roots")
+}
+
+/// The backends a step lists.
+fn backend_names<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error> {
+    names(deserializer, "backends")
 }
 
 /// A member given as `null` is `Some(Value::Null)`; only a missing one is
@@ -288,8 +326,6 @@ impl Runner {
         }
     }
 
-    /// A ref named by an earlier step's `as`, or a literal id written
-    /// `id:<uuid>`.
     /// Gives each root the row a root has on Postgres: a recipe whose id is
     /// the root, whose title is the root's name and whose creator is the
     /// default actor, all in one statement.
@@ -325,6 +361,8 @@ impl Runner {
             .unwrap_or_else(|e| panic!("seed the roots {roots:?}: {e}"));
     }
 
+    /// A ref named by an earlier step's `as`, or a literal id written
+    /// `id:<uuid>`.
     fn ref_id(&self, name: &str) -> String {
         if let Some(literal) = name.strip_prefix("id:") {
             return literal.to_owned();
@@ -1081,11 +1119,13 @@ fn read_scenario(path: &std::path::Path) -> Scenario {
 }
 
 /// Reads a scenario as the format says (runtime/versiongraph/README.md,
-/// "Scenarios") for a runner of `backend`. It refuses an unknown member, a
-/// scenario with no steps or no roots or one that names a root twice, a
-/// backends list that is empty, names a backend twice or names one no
-/// runner knows, a statement for an unknown backend, and an sql step that
-/// runs on `backend` with no statement for it.
+/// "Scenarios") for a runner of `backend`. It refuses an unknown member; a
+/// scenario with no steps or no roots; a list of roots or backends that
+/// holds a value other than a name or names one twice; an empty backends
+/// list or one that names a backend no runner knows; a statement, on any
+/// step, that is not an object of one string per backend or that names an
+/// unknown backend; and an sql step that runs on `backend` with no
+/// statement for it. A null `backends` or `statement` is none.
 fn parse_scenario(text: &str, backend: &str) -> Result<Scenario, String> {
     let scenario: Scenario = serde_json::from_str(text).map_err(|e| e.to_string())?;
     if scenario.steps.is_empty() {
@@ -1286,6 +1326,40 @@ fn scenario_format() {
             "the sql step has no postgres statement",
         ),
         (
+            "a null statement for the runner's backend",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "sql", "statement": {"postgres": null}}"#],
+            ),
+            "a statement is an object of one statement per backend",
+        ),
+        (
+            "a null statement on a step that is not sql",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "createPrimary", "root": "Bread", "name": "main", "statement": null}"#],
+            ),
+            "",
+        ),
+        (
+            "a statement for an unknown backend on a step that is not sql",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[
+                    r#"{"op": "createPrimary", "root": "Bread", "name": "main", "statement": {"mysql": "x"}}"#,
+                ],
+            ),
+            r#"a statement for unknown backend "mysql""#,
+        ),
+        (
+            "a plain string statement on a step that is not sql",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "createPrimary", "root": "Bread", "name": "main", "statement": "x"}"#],
+            ),
+            "a statement is an object of one statement per backend",
+        ),
+        (
             "a statement for an unknown backend",
             format_scenario(
                 r#"["Bread"]"#,
@@ -1330,6 +1404,14 @@ fn scenario_format() {
             "backends lists no backend",
         ),
         (
+            "null backends",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "createPrimary", "root": "Bread", "name": "main", "backends": null}"#],
+            ),
+            "",
+        ),
+        (
             "backends listing a backend twice",
             format_scenario(
                 r#"["Bread"]"#,
@@ -1360,6 +1442,11 @@ fn scenario_format() {
             r#"the scenario names root "Bread" twice"#,
         ),
         (
+            "a null root",
+            format_scenario("[null]", &[CREATE_PRIMARY]),
+            "roots lists null, not a name",
+        ),
+        (
             "no steps",
             format_scenario(r#"["Bread"]"#, &[]),
             "a scenario has steps",
@@ -1380,17 +1467,19 @@ fn scenario_format() {
             "unknown field `backend`",
         ),
     ];
+    let mut failures = Vec::new();
     for (name, text, refused) in cases {
         match parse_scenario(&text, BACKEND) {
             Ok(_) if refused.is_empty() => {}
-            Ok(_) => panic!("{name}: read, want it refused with {refused:?}"),
-            Err(error) if refused.is_empty() => panic!("{name}: refused: {error}"),
-            Err(error) => assert!(
-                error.contains(refused),
-                "{name}: refused with {error:?}, want {refused:?}"
-            ),
+            Ok(_) => failures.push(format!("{name}: read, want it refused with {refused:?}")),
+            Err(error) if refused.is_empty() => failures.push(format!("{name}: refused: {error}")),
+            Err(error) if !error.contains(refused) => {
+                failures.push(format!("{name}: refused with {error:?}, want {refused:?}"))
+            }
+            Err(_) => {}
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// A scenario whose steps list their backends: a save listed for SQLite

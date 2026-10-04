@@ -183,12 +183,13 @@ def names(value: Any, what: str) -> List[str]:
 
 def read_scenario(source: str, where: str, backend: str) -> Scenario:
     """Reads a scenario as the format says (runtime/versiongraph/README.md,
-    "Scenarios") for a runner of backend. It refuses an unknown member, a
-    scenario with no steps or no roots or one that names a root twice, a
-    backends list that is empty, names a backend twice or names one no
-    runner knows, a statement that is not an object of one statement per
-    backend or that names an unknown backend, and an sql step that runs on
-    backend with no statement for it."""
+    "Scenarios") for a runner of backend. It refuses an unknown member; a
+    scenario with no steps or no roots; a list of roots or backends that
+    holds a value other than a name or names one twice; an empty backends
+    list or one that names a backend no runner knows; a statement, on any
+    step, that is not an object of one string per backend or that names an
+    unknown backend; and an sql step that runs on backend with no statement
+    for it. A null backends or statement is none."""
     scenario = obj(loads(source), "scenario", where)
     steps = scenario.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -309,6 +310,28 @@ FORMAT_CASES = [
         "the sql step has no postgres statement",
     ),
     (
+        "a null statement for the runner's backend",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": null}}'),
+        "a statement is an object of one statement per backend",
+    ),
+    (
+        "a null statement on a step that is not sql",
+        format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "statement": null}'),
+        "",
+    ),
+    (
+        "a statement for an unknown backend on a step that is not sql",
+        format_scenario(
+            '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "statement": {"mysql": "x"}}'
+        ),
+        "a statement for unknown backend 'mysql'",
+    ),
+    (
+        "a plain string statement on a step that is not sql",
+        format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "statement": "x"}'),
+        "a statement is an object of one statement per backend",
+    ),
+    (
         "a statement for an unknown backend",
         format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": "SELECT 1", "mysql": "SELECT 1"}}'),
         "a statement for unknown backend 'mysql'",
@@ -338,6 +361,11 @@ FORMAT_CASES = [
         "backends lists no backend",
     ),
     (
+        "null backends",
+        format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": null}'),
+        "",
+    ),
+    (
         "backends listing a backend twice",
         format_scenario(
             '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "postgres"]}'
@@ -348,6 +376,7 @@ FORMAT_CASES = [
     ("null roots", format_scenario("null", CREATE_PRIMARY), "a scenario names its roots"),
     ("empty roots", format_scenario("[]", CREATE_PRIMARY), "a scenario names at least one root"),
     ("a root named twice", format_scenario('["Bread", "Soup", "Bread"]', CREATE_PRIMARY), "roots lists 'Bread' twice"),
+    ("a null root", format_scenario("[null]", CREATE_PRIMARY), "roots lists null, not a name"),
     ("no steps", format_scenario('["Bread"]'), "a scenario has steps"),
     (
         "an unknown scenario member",
