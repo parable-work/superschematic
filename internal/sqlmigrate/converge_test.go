@@ -52,6 +52,9 @@ func TestConvergenceOnPostgres(t *testing.T) {
 	writeEmptyCase(t, filepath.Join(cases, "empty-names"), namesSchema(), sqlgen.Options{SchemaName: "names"})
 	// The runner's vectors, each case's plans one after another.
 	for name, run := range planVectors(t) {
+		if run.dialect != Postgres {
+			continue
+		}
 		dir := filepath.Join(cases, "vectors-"+name)
 		for i, plan := range run.plans {
 			writeJSON(t, filepath.Join(dir, fmt.Sprintf("plan-%02d.json", i+1)), plan)
@@ -137,7 +140,7 @@ func writePlanCase(t *testing.T, dir string, pc planCase) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed, checks := seedRows(t, from, to, r)
+	seed, checks := seedRows(t, from, to, r, postgresSeeds)
 	t.Logf("%s: %d rows seeded, %d checks", pc.name, strings.Count(seed, "INSERT"), len(checks))
 	writeFile(t, filepath.Join(dir, "seed.sql"), []byte(seed))
 	writeJSON(t, filepath.Join(dir, "checks.json"), checks)
@@ -177,12 +180,22 @@ type seedCheck struct {
 	SQL  string `json:"sql"`
 }
 
+// seeds is how a dialect seeds rows: value is a literal of a column type,
+// or false for a type it has none for, and same compares a column with a
+// literal, true when both are null.
+type seeds struct {
+	value func(sqlType string, n, i int) (string, bool)
+	same  string
+}
+
+var postgresSeeds = seeds{value: seedValue, same: "IS NOT DISTINCT FROM"}
+
 // seedRows inserts one row into every entity and join table of from, with
 // a value in every column it can give one, and returns the checks that
 // each row is still there after the plan, under the new names, with the
 // values of the columns the plan keeps and does not retype. A table that
 // becomes versioned must have one history image per row.
-func seedRows(t *testing.T, from, to *Model, r *renames) (string, []seedCheck) {
+func seedRows(t *testing.T, from, to *Model, r *renames, dialect seeds) (string, []seedCheck) {
 	t.Helper()
 	keys := map[string]string{} // table -> literal of its seeded row's key
 	values := map[string]map[string]string{}
@@ -202,7 +215,7 @@ func seedRows(t *testing.T, from, to *Model, r *renames) (string, []seedCheck) {
 		sort.Strings(names)
 		for _, name := range names {
 			table := pending[name]
-			row, ok := seedRow(table, len(order)+1, keys)
+			row, ok := seedRow(table, len(order)+1, keys, dialect.value)
 			if !ok {
 				continue
 			}
@@ -241,7 +254,7 @@ func seedRows(t *testing.T, from, to *Model, r *renames) (string, []seedCheck) {
 			if !ok || newCol == nil || newCol.Type != col.Type {
 				continue
 			}
-			conds = append(conds, fmt.Sprintf("%s IS NOT DISTINCT FROM %s", q(newCol.Name), v))
+			conds = append(conds, fmt.Sprintf("%s %s %s", q(newCol.Name), dialect.same, v))
 		}
 		checks = append(checks, seedCheck{
 			Name: "row of " + table.Name + " survives",
@@ -268,7 +281,7 @@ func seedRows(t *testing.T, from, to *Model, r *renames) (string, []seedCheck) {
 // seedRow picks a value for every column of table it can: a foreign key
 // takes the seeded key of the table it references, which must be seeded
 // first unless the column is nullable.
-func seedRow(table *Table, n int, keys map[string]string) (map[string]string, bool) {
+func seedRow(table *Table, n int, keys map[string]string, value func(sqlType string, n, i int) (string, bool)) (map[string]string, bool) {
 	row := map[string]string{}
 	refs := map[string]string{}
 	for _, fk := range table.ForeignKeys {
@@ -288,7 +301,7 @@ func seedRow(table *Table, n int, keys map[string]string) (map[string]string, bo
 			}
 			continue
 		}
-		v, ok := seedValue(col.Type, n, i)
+		v, ok := value(col.Type, n, i)
 		if !ok {
 			if !col.Nullable && col.Default == "" {
 				return nil, false

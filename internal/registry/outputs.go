@@ -96,6 +96,41 @@ type SQLOutputConfig struct {
 	// ViewOwner is the Postgres role the migrations create the views as
 	// (SET ROLE around the view DDL). Empty creates them as the runner.
 	ViewOwner string `json:"viewOwner,omitempty"`
+
+	// Dialects are the databases the service is built for (D27): postgres,
+	// and sqlite for sqlite/create.sql and SQLite migration plans. Unset is
+	// ["postgres"]. ParseOutputs refuses a list without postgres, since the
+	// DB kind always generates the Go ORM, which runs on Postgres.
+	Dialects []string `json:"dialects,omitempty"`
+}
+
+// SQL dialects outputs.sql.dialects may list (the SqlDialect type in
+// @superschematic/schema-config), in the order messages name them.
+const (
+	SQLDialectPostgres = "postgres"
+	SQLDialectSQLite   = "sqlite"
+)
+
+// SQLDialectNames lists every SQL dialect.
+var SQLDialectNames = []string{SQLDialectPostgres, SQLDialectSQLite}
+
+// checkSQLDialects refuses an outputs.sql.dialects list with an unknown or
+// repeated dialect, or without postgres.
+func checkSQLDialects(dialects []string) error {
+	seen := map[string]bool{}
+	for _, dialect := range dialects {
+		if !containsString(SQLDialectNames, dialect) {
+			return fmt.Errorf("outputs.sql.dialects: unknown dialect %q (want %s)", dialect, strings.Join(SQLDialectNames, " or "))
+		}
+		if seen[dialect] {
+			return fmt.Errorf("outputs.sql.dialects lists %s twice", dialect)
+		}
+		seen[dialect] = true
+	}
+	if !seen[SQLDialectPostgres] {
+		return errors.New("outputs.sql.dialects must list postgres: the DB kind always generates the Go ORM, which runs on Postgres")
+	}
+	return nil
 }
 
 // API server language and protocol values.
@@ -201,6 +236,13 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		if err := dec.Decode(&sql); err != nil {
 			return nil, fmt.Errorf("outputs.sql: %w", err)
 		}
+		// An empty list is given and lacks postgres; only an absent one
+		// takes the default.
+		if sql.Dialects != nil {
+			if err := checkSQLDialects(sql.Dialects); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return outputs, nil
@@ -280,6 +322,19 @@ func (o *Outputs) SQLViewOwner() string {
 		return ""
 	}
 	return o.SQL.ViewOwner
+}
+
+// SQLDialects returns outputs.sql.dialects, or ["postgres"] when unset.
+func (o *Outputs) SQLDialects() []string {
+	if o == nil || o.SQL == nil || o.SQL.Dialects == nil {
+		return []string{SQLDialectPostgres}
+	}
+	return append([]string(nil), o.SQL.Dialects...)
+}
+
+// SQLDialect reports whether outputs.sql.dialects lists dialect.
+func (o *Outputs) SQLDialect(dialect string) bool {
+	return containsString(o.SQLDialects(), dialect)
 }
 
 // APIEnabled reports whether the REST API server output is enabled.

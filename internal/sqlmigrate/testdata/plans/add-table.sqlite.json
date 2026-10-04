@@ -1,0 +1,22 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "3d5d4baf776575d0a1cc248ea92b82d5233af85e94d89ecd498a2f6ec18c7162",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"coupon\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"percent\" INTEGER NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE UNIQUE INDEX \"coupon_code_key\" ON \"coupon\" (\"code\")"
+      ],
+      "subject": "table/coupon",
+      "transactional": true
+    }
+  ],
+  "to": "2da9ddd0af188aa75b4d58dd693851cb4dc5cfac0235df463b762bd99f2b24b4",
+  "toModel": null,
+  "version": 1
+}

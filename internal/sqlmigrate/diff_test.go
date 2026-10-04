@@ -88,13 +88,6 @@ func TestDiffRefuses(t *testing.T) {
 	}
 }
 
-func TestBuildModelSQLite(t *testing.T) {
-	_, err := BuildModel(ir.NewSchema("x", ir.SchemaKindDB), sqlgen.Options{SchemaName: "x"}, SQLite)
-	if err == nil || !strings.Contains(err.Error(), "sqlite is not supported yet") {
-		t.Fatalf("BuildModel(sqlite) = %v, want sqlite is not supported yet", err)
-	}
-}
-
 func TestBuildModelWithoutTables(t *testing.T) {
 	model, err := BuildModel(ir.NewSchema("x", ir.SchemaKindDB), sqlgen.Options{SchemaName: "x"}, Postgres)
 	if err != nil {
@@ -257,8 +250,9 @@ func TestRenameInView(t *testing.T) {
 
 // TestDialectSeam plans through a dialect whose ALTER TABLE cannot change
 // a column's type or drop a column, as SQLite's cannot change a type: the
-// planner hands those changes, by table and phase, to rebuild, and every
-// other change to render, with no change to the diff.
+// planner hands those changes, by table and phase, to rebuild, with the
+// other changes of the table in that phase, and every other change to
+// render, with no change to the diff.
 func TestDialectSeam(t *testing.T) {
 	pc := planCase{after: func(s *ir.Schema) {
 		fieldNamed(s, "OrderLine", "sku").TypeRef = ir.TypeRef{Name: "Contact.PhoneNumber"}

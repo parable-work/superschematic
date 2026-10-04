@@ -1,0 +1,40 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "520cb0b00b2019a71531c5b8de6ae3dd67a28143dcae83402acd9d0975fe854c",
+  "service": "shop-db",
+  "steps": [
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order",
+          "reason": "Copying order holds the database's write lock for time that grows with the table.",
+          "subject": "table/order"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order",
+          "reason": "SQLite's ALTER TABLE cannot add shipped_at with a default that is not a constant, so the step rebuilds order: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "subject": "table/order"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"shipped_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "DROP TABLE \"order\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    }
+  ],
+  "to": "70881bba4f899494dda5abeaf804e260f375152e80ea70a8e08c50865248b843",
+  "toModel": null,
+  "version": 1
+}

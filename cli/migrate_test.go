@@ -662,6 +662,76 @@ func TestMigratePlanReaders(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// sqliteDB is migrateDB with outputs.sql.dialects listing sqlite.
+func sqliteDB(fields ...string) map[string]string {
+	files := migrateDB(fields...)
+	files["schema.config.json"] = `{"name": "shop-db", "kind": "DB", "outputs": {"types": {"go": {"enabled": true}}, "sql": {"dialects": ["postgres", "sqlite"]}}}`
+	return files
+}
+
+// TestMigratePlanSQLite: --dialect sqlite plans a service whose
+// outputs.sql.dialects lists sqlite, with a rebuild for what SQLite's ALTER
+// TABLE cannot change, and refuses one that does not list it.
+func TestMigratePlanSQLite(t *testing.T) {
+	postgresOnly := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{
+		"shop-db": migrateDB(orderIDField, orderTotalField),
+	})
+	for _, args := range [][]string{{"--dialect", "sqlite"}, {"--dialect", "sqlite", "--print-model"}} {
+		_, _, err := runMigratePlanCmd(t, append([]string{filepath.Join(postgresOnly, "shop-db")}, args...)...)
+		require.Error(t, err, "%v", args)
+		assert.Contains(t, err.Error(), "shop-db is built for postgres, not sqlite: add sqlite to its outputs.sql.dialects to plan for it")
+	}
+
+	// A data-form config is checked against its JSON Schema first, which
+	// names the dialects; the registry says why for the rest.
+	for list, want := range map[string]string{
+		`["mysql", "postgres"]`:    "at '/outputs/sql/dialects/0': value must be one of 'postgres', 'sqlite'",
+		`["sqlite"]`:               "outputs.sql.dialects must list postgres",
+		`["postgres", "postgres"]`: "outputs.sql.dialects lists postgres twice",
+	} {
+		files := migrateDB(orderIDField)
+		files["schema.config.json"] = `{"name": "shop-db", "kind": "DB", "outputs": {"types": {"go": {"enabled": true}}, "sql": {"dialects": ` + list + `}}}`
+		root := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{"shop-db": files})
+		_, _, err := runMigratePlanCmd(t, filepath.Join(root, "shop-db"), "--print-model")
+		require.Error(t, err, list)
+		assert.Contains(t, err.Error(), want, list)
+	}
+
+	previous := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{
+		"shop-db": sqliteDB(orderIDField, orderTotalField),
+	})
+	current := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{
+		"shop-db": sqliteDB(orderIDField, `{"name": "total", "typeRef": {"name": "number"}}`, orderNoteField),
+	})
+	service := filepath.Join(current, "shop-db")
+
+	stdout, _, err := runMigratePlanCmd(t, service, "--dialect", "sqlite", "--print-model")
+	require.NoError(t, err)
+	var model sqlmigrate.Model
+	require.NoError(t, json.Unmarshal([]byte(stdout), &model))
+	assert.Equal(t, sqlmigrate.SQLite, model.Dialect)
+
+	stdout, _, err = runMigratePlanCmd(t, service, "--dialect", "sqlite", "--from", filepath.Join(previous, "shop-db"), "--format", "json")
+	require.NoError(t, err)
+	plan := decodePlan(t, stdout)
+	assert.Equal(t, sqlmigrate.SQLite, plan.Dialect)
+	var ops []string
+	for _, step := range plan.Steps {
+		ops = append(ops, string(step.Phase)+" "+step.Op+" "+step.Subject)
+		assert.True(t, step.Transactional, "step %d", step.Index)
+	}
+	// The rebuild that drops total's NOT NULL adds note too.
+	require.Equal(t, []string{"expand copyTable table/order"}, ops)
+	assert.True(t, plan.Steps[0].ForeignKeysOff)
+	assert.Contains(t, strings.Join(plan.Steps[0].Statements, "\n"), `"note" TEXT`)
+	assert.Contains(t, hazardIDs(plan), "copy-table:table/order")
+
+	// Postgres plans the same service too.
+	stdout, _, err = runMigratePlanCmd(t, service, "--from", filepath.Join(previous, "shop-db"), "--format", "json")
+	require.NoError(t, err)
+	assert.Equal(t, sqlmigrate.Postgres, decodePlan(t, stdout).Dialect)
+}
+
 func TestMigratePlanRename(t *testing.T) {
 	previous := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{
 		"shop-db": migrateDB(orderIDField, orderTotalField),

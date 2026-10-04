@@ -1,0 +1,58 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "024da299614aa70db86578707ffcda6c1ff3b75e238d5789fe97648dc0523237",
+  "renames": [
+    "order.customer_id=order.buyer_id"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/buyer_id",
+          "reason": "order.customer_id is renamed to order.buyer_id (Order.buyer): servers built from the previous version still use the old name.",
+          "subject": "table/order/column/buyer_id"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:table/order/column/buyer_id@shop-api/OrderView.customer",
+          "reader": "shop-api/OrderView.customer",
+          "reason": "shop-api reads order.customer_id through OrderView.customer, and this step renames it to order.buyer_id.",
+          "subject": "table/order/column/buyer_id"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME COLUMN \"customer_id\" TO \"buyer_id\""
+      ],
+      "subject": "table/order/column/buyer_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order/index/idx_order_buyer_placed_at",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with order.",
+          "subject": "table/order/index/idx_order_buyer_placed_at"
+        }
+      ],
+      "index": 2,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"idx_order_customer_placed_at\"",
+        "CREATE INDEX \"idx_order_buyer_placed_at\" ON \"order\" (\"buyer_id\", \"placed_at\")"
+      ],
+      "subject": "table/order/index/idx_order_buyer_placed_at",
+      "transactional": true
+    }
+  ],
+  "to": "02cd2dd0ea7443b73266b0877dc1ef7921e453ee49160eef053b3abf5cd6e659",
+  "toModel": null,
+  "version": 1
+}

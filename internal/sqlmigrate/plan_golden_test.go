@@ -46,13 +46,15 @@ func checkGolden(t *testing.T, path string, got []byte) {
 }
 
 // TestPlanGoldens plans every case of planCases and compares the plan with
-// testdata/plans/<case>.json. The golden leaves out toModel, the new
-// model's canonical JSON, which the test checks against the model instead;
-// its hash is the plan's to. Regenerate with:
+// testdata/plans/<case>.json, and every case of sqlitePlanCases with
+// testdata/plans/<case>.sqlite.json. The golden leaves out toModel, the
+// new model's canonical JSON, which the test checks against the model
+// instead; its hash is the plan's to. Regenerate with:
 // go test ./internal/sqlmigrate -run TestPlanGoldens -update
 func TestPlanGoldens(t *testing.T) {
-	for _, pc := range planCases {
-		t.Run(pc.name, func(t *testing.T) {
+	cases := append(append([]planCase(nil), planCases...), sqlitePlanCases()...)
+	for _, pc := range cases {
+		t.Run(pc.golden(), func(t *testing.T) {
 			_, to := pc.models(t)
 			plan := pc.plan(t)
 
@@ -81,7 +83,7 @@ func TestPlanGoldens(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			checkGolden(t, filepath.Join("testdata", "plans", pc.name+".json"), indentedJSON(t, canonical))
+			checkGolden(t, filepath.Join("testdata", "plans", pc.golden()+".json"), indentedJSON(t, canonical))
 		})
 	}
 }

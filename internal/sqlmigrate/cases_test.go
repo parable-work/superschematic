@@ -40,6 +40,27 @@ type planCase struct {
 	// noSeed applies it to tables with no rows, each with the reason.
 	noConverge string
 	noSeed     string
+	// dialect is the dialect the case plans for: Postgres when empty.
+	// noSQLite leaves a Postgres case out of the SQLite cases
+	// (sqlitePlanCases), with the reason.
+	dialect  Dialect
+	noSQLite string
+}
+
+func (pc planCase) dialectOrDefault() Dialect {
+	if pc.dialect == "" {
+		return Postgres
+	}
+	return pc.dialect
+}
+
+// golden names the case's golden file, without .json: the case's name, and
+// <name>.sqlite for SQLite.
+func (pc planCase) golden() string {
+	if pc.dialectOrDefault() == SQLite {
+		return pc.name + ".sqlite"
+	}
+	return pc.name
 }
 
 func (pc planCase) load(t *testing.T, change func(*ir.Schema)) *ir.Schema {
@@ -79,10 +100,10 @@ func (pc planCase) models(t *testing.T) (from, to *Model) {
 	t.Helper()
 	fromSchema, toSchema, fromOpts, toOpts := pc.versions(t)
 	var err error
-	if from, err = BuildModel(fromSchema, fromOpts, Postgres); err != nil {
+	if from, err = BuildModel(fromSchema, fromOpts, pc.dialectOrDefault()); err != nil {
 		t.Fatalf("model of the previous version: %v", err)
 	}
-	if to, err = BuildModel(toSchema, toOpts, Postgres); err != nil {
+	if to, err = BuildModel(toSchema, toOpts, pc.dialectOrDefault()); err != nil {
 		t.Fatalf("model of the new version: %v", err)
 	}
 	return from, to
@@ -242,7 +263,7 @@ var planCases = []planCase{
 	{name: "rename-table-with-dependents", after: func(s *ir.Schema) { renameType(s, "Order", "Purchase") },
 		renames:       []Rename{{From: "order", To: "purchase"}},
 		readersBefore: []Read{{Reader: "shop-api", Via: "OrderView.total", Table: "order", Column: "total"}}},
-	{name: "rename-versioned-table",
+	{name: "rename-versioned-table", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30)}) },
 		after: func(s *ir.Schema) {
 			versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30)})
@@ -282,61 +303,61 @@ var planCases = []planCase{
 	{name: "drop-join-table", after: func(s *ir.Schema) { dropField(s, "Order", "labels") }},
 
 	// @searchField.
-	{name: "add-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Customer", "name").SearchField = true }},
-	{name: "change-search-fields", after: func(s *ir.Schema) {
+	{name: "add-search-field", noSQLite: "sqlite does not support @searchField", after: func(s *ir.Schema) { fieldNamed(s, "Customer", "name").SearchField = true }},
+	{name: "change-search-fields", noSQLite: "sqlite does not support @searchField", after: func(s *ir.Schema) {
 		addField(s, "Product", &ir.FieldDef{Name: "blurb", TypeRef: stringRef, SearchField: true})
 	}},
-	{name: "drop-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").SearchField = false }},
-	{name: "retype-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").TypeRef = stringRef }},
+	{name: "drop-search-field", noSQLite: "sqlite does not support @searchField", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").SearchField = false }},
+	{name: "retype-search-field", noSQLite: "sqlite does not support @searchField", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").TypeRef = stringRef }},
 
 	// @versioned and @optimistic.
-	{name: "versioned-on", after: func(s *ir.Schema) { versioned(s, "Order", nil) }},
-	{name: "versioned-on-with-exclude", after: func(s *ir.Schema) {
+	{name: "versioned-on", noSQLite: "sqlite does not support @versioned", after: func(s *ir.Schema) { versioned(s, "Order", nil) }},
+	{name: "versioned-on-with-exclude", noSQLite: "sqlite does not support @versioned", after: func(s *ir.Schema) {
 		versioned(s, "Order", &ir.VersionedConfig{Exclude: []string{"note"}})
 	}},
-	{name: "versioned-off", before: func(s *ir.Schema) { versioned(s, "Order", nil) }},
-	{name: "versioned-retention",
+	{name: "versioned-off", noSQLite: "sqlite does not support @versioned", before: func(s *ir.Schema) { versioned(s, "Order", nil) }},
+	{name: "versioned-retention", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", nil) },
 		after:  func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30)}) }},
-	{name: "versioned-retention-change",
+	{name: "versioned-retention-change", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30)}) },
 		after:  func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(90)}) }},
-	{name: "versioned-prune-keep",
+	{name: "versioned-prune-keep", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30)}) },
 		after: func(s *ir.Schema) {
 			versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30), PruneKeepReferencedBy: []*ir.PruneReference{
 				{Table: "order_line", KeyColumn: "order_id", VersionColumn: "quantity"},
 			}})
 		}},
-	{name: "versioned-exclude",
+	{name: "versioned-exclude", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", nil) },
 		after:  func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{Exclude: []string{"note"}}) }},
-	{name: "versioned-partitioned-on", after: func(s *ir.Schema) {
+	{name: "versioned-partitioned-on", noSQLite: "sqlite does not support @versioned", after: func(s *ir.Schema) {
 		versioned(s, "Order", &ir.VersionedConfig{PartitionBy: "month"})
 	}},
-	{name: "versioned-partitioned-retention",
+	{name: "versioned-partitioned-retention", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{PartitionBy: "month"}) },
 		after: func(s *ir.Schema) {
 			versioned(s, "Order", &ir.VersionedConfig{PartitionBy: "month", RetentionDays: intPtr(30)})
 		}},
-	{name: "versioned-retype",
+	{name: "versioned-retype", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", nil) },
 		after: func(s *ir.Schema) {
 			versioned(s, "Order", nil)
 			fieldNamed(s, "Order", "total").TypeRef = ir.TypeRef{Name: "number"}
 			fieldNamed(s, "OrderSummary", "total").TypeRef = ir.TypeRef{Name: "number"}
 		}},
-	{name: "optimistic-on", after: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
-	{name: "optimistic-off", before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
-	{name: "optimistic-to-versioned",
+	{name: "optimistic-on", noSQLite: "sqlite does not support @optimistic", after: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
+	{name: "optimistic-off", noSQLite: "sqlite does not support @optimistic", before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
+	{name: "optimistic-to-versioned", noSQLite: "sqlite does not support @optimistic or @versioned",
 		before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true },
 		after:  func(s *ir.Schema) { versioned(s, "Product", nil) }},
-	{name: "versioned-to-optimistic",
+	{name: "versioned-to-optimistic", noSQLite: "sqlite does not support @optimistic or @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Product", nil) },
 		after:  func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 
 	// Projections.
-	{name: "add-projection", after: func(s *ir.Schema) {
+	{name: "add-projection", noSQLite: "sqlite does not support projections", after: func(s *ir.Schema) {
 		s.Types["CustomerDirectory"] = &ir.TypeDef{
 			Name: "CustomerDirectory", Role: ir.RoleProjection, Comment: "Customers by name.",
 			Projection: &ir.ProjectionDef{Pool: "report", Name: "customer_directory", Migration: "20260102000000", Source: "Customer"},
@@ -346,20 +367,20 @@ var planCases = []planCase{
 			},
 		}
 	}},
-	{name: "drop-projection", after: func(s *ir.Schema) { delete(s.Types, "OrderSummary") }},
-	{name: "change-projection", after: func(s *ir.Schema) {
+	{name: "drop-projection", noSQLite: "sqlite does not support projections", after: func(s *ir.Schema) { delete(s.Types, "OrderSummary") }},
+	{name: "change-projection", noSQLite: "sqlite does not support projections", after: func(s *ir.Schema) {
 		addField(s, "OrderSummary", &ir.FieldDef{
 			Name: "placedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true,
 		})
 	}},
-	{name: "projection-owner", viewOwner: "report_owner", noConverge: "the role report_owner does not exist"},
+	{name: "projection-owner", noSQLite: "sqlite does not support projections", viewOwner: "report_owner", noConverge: "the role report_owner does not exist"},
 
 	// Version graphs.
-	{name: "graph-content-retype", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
+	{name: "graph-content-retype", noSQLite: "the version graph fixture is @versioned", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
 		fieldNamed(s, "Note", "body").TypeRef = ir.TypeRef{Name: "Generic.JSON"}
 		typeNamed(s, "Recipe").VersionGraph.SchemaEpoch = 2
 	}, noSeed: "the seeded text is not JSON"},
-	{name: "graph-content-add", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
+	{name: "graph-content-add", noSQLite: "the version graph fixture is @versioned", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
 		addField(s, "Cover", &ir.FieldDef{Name: "caption", TypeRef: stringRef})
 	}},
 }

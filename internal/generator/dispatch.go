@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
+	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -418,8 +421,37 @@ func (r run) generateSQL() error {
 		r.Logf("  + sql projections: %d view migration(s) in %s\n", len(output.Projections), migrationsDir)
 	}
 
+	if r.Outputs.SQLDialect(registry.SQLDialectSQLite) {
+		if err := writeSQLiteDDL(r.Schema, opts, dir); err != nil {
+			return fmt.Errorf("generator: sql for %s: %w", r.Config.Name, err)
+		}
+	}
+
 	r.Done("sql", dir)
 	return nil
+}
+
+// SQLiteSubdir is the directory under the SQL output where the SQLite DDL
+// is written, for a service whose outputs.sql.dialects lists sqlite.
+const SQLiteSubdir = "sqlite"
+
+// writeSQLiteDDL writes <dir>/sqlite/create.sql: the SQLite plan from an
+// empty database, rendered as one script (D27). A schema that uses a
+// feature the SQLite dialect does not support fails the build.
+func writeSQLiteDDL(schema *ir.Schema, opts sqlgen.Options, dir string) error {
+	model, err := sqlmigrate.BuildModel(schema, opts, sqlmigrate.SQLite)
+	if err != nil {
+		return err
+	}
+	script, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		return err
+	}
+	sqliteDir := filepath.Join(dir, SQLiteSubdir)
+	if err := os.MkdirAll(sqliteDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(sqliteDir, "create.sql"), []byte(script), 0o644)
 }
 
 // generateORM emits the Go ORM for DB schemas.

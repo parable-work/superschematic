@@ -1,0 +1,87 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "c7547b3443185696de9b7af3df0a244575c3b12efb1d23acd201ac41dcd14686",
+  "renames": [
+    "label=tag"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_tag",
+          "reason": "Table order_label is renamed to order_tag, following --rename label=tag: servers built from the previous version still use the old name.",
+          "subject": "table/order_tag"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_label\" RENAME TO \"order_tag\""
+      ],
+      "subject": "table/order_tag",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/tag",
+          "reason": "Table label is renamed to tag: servers built from the previous version still use the old name.",
+          "subject": "table/tag"
+        }
+      ],
+      "index": 2,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"label\" RENAME TO \"tag\""
+      ],
+      "subject": "table/tag",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_tag/column/tag_id",
+          "reason": "order_label.label_id is renamed to order_tag.tag_id, following --rename label=tag: servers built from the previous version still use the old name.",
+          "subject": "table/order_tag/column/tag_id"
+        }
+      ],
+      "index": 3,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_tag\" RENAME COLUMN \"label_id\" TO \"tag_id\""
+      ],
+      "subject": "table/order_tag/column/tag_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/tag/constraint/tag_name_key",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with tag.",
+          "subject": "table/tag/constraint/tag_name_key"
+        }
+      ],
+      "index": 4,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"label_name_key\"",
+        "CREATE UNIQUE INDEX \"tag_name_key\" ON \"tag\" (\"name\")"
+      ],
+      "subject": "table/tag/constraint/tag_name_key",
+      "transactional": true
+    }
+  ],
+  "to": "21e5db4707e8ca380d85641e78c9b8d7968289c7ca05bd21f70574ef95a65421",
+  "toModel": null,
+  "version": 1
+}
