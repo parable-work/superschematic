@@ -1,0 +1,60 @@
+{
+  "kind": "General",
+  "name": "Step",
+  "description": "A step an engine runs with the core's Constants and Variants and no extension: its kind is set at create and never changes, and its result has the shape its kind gives it, a VerifyResult for a verify step and a ReviewResult for a review, and none for a note.",
+  "scalars": {
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "languagePrimitive": "object"
+    }
+  },
+  "enums": {
+    "StepKind": {
+      "name": "StepKind",
+      "values": [
+        { "name": "Verify", "serializedAs": "verify" },
+        { "name": "Review", "serializedAs": "review" },
+        { "name": "Note", "serializedAs": "note" }
+      ]
+    }
+  },
+  "types": {
+    "Step": {
+      "name": "Step",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        { "name": "Constants", "config": { "fields": ["kind"] } },
+        { "name": "Variants", "config": { "field": "result", "by": "kind", "types": { "verify": "VerifyResult", "review": "ReviewResult" } } }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true },
+        { "name": "kind", "typeRef": { "name": "StepKind" }, "required": true },
+        { "name": "result", "typeRef": { "name": "Generic.JSON" } }
+      ]
+    },
+    "VerifyResult": {
+      "name": "VerifyResult",
+      "role": "EmbeddedStruct",
+      "fields": [
+        { "name": "passed", "typeRef": { "name": "boolean" }, "required": true },
+        { "name": "checks", "typeRef": { "name": "Check", "isArray": true } }
+      ]
+    },
+    "Check": {
+      "name": "Check",
+      "role": "EmbeddedStruct",
+      "fields": [
+        { "name": "name", "typeRef": { "name": "string" }, "required": true },
+        { "name": "ok", "typeRef": { "name": "boolean" }, "required": true }
+      ]
+    },
+    "ReviewResult": {
+      "name": "ReviewResult",
+      "role": "EmbeddedStruct",
+      "fields": [
+        { "name": "approved", "typeRef": { "name": "boolean" }, "required": true },
+        { "name": "notes", "typeRef": { "name": "string" } }
+      ]
+    }
+  }
+}

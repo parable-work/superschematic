@@ -8,15 +8,20 @@ validated after the merge. Each write appends its event in the same
 transaction (events/log.ts).
 
 The behaviors of the live version run with every call (behaviors/): a
-create runs their initialize, then their afterChange; an update and a
-delete ask their guards first and run afterChange after; a read adds the
-fields they declare beside the instance's own, which are theirs to change:
-a create or an update that sets one is refused (readOnly). invoke calls one
-of their operations: it checks the parameters, asks the policy for write
-or read as the operation's declaration says, and runs every guard, then
-the handler, in the write transaction for an operation that writes, which
-appends an operation event. invokeSchema calls a schema-level operation,
-which has no instance. Anything that throws rolls the whole call back.
+create and an update ask their validate about the fields the write would
+store once the live version accepts them, whose issues refuse it as the
+live version's do; a create checks the parameters it gives them, asks
+their guards, then runs their initialize, each with its own parameters,
+then their afterChange; an update and a delete ask their guards first
+and run afterChange after;
+a read adds the fields they declare beside the instance's own, which are
+theirs to change: a create or an update that sets one is refused
+(readOnly). invoke calls one of their operations: it checks the
+parameters, asks the policy for write or read as the operation's
+declaration says, and runs every guard, then the handler, in the write
+transaction for an operation that writes, which appends an operation
+event. invokeSchema calls a schema-level operation, which has no
+instance. Anything that throws rolls the whole call back.
 
 Each call is one Chain (behaviors/execution.ts) across every instance its
 behaviors reach. The store is their reach (D16, amended): it reads other
@@ -39,8 +44,18 @@ import type { PermissionMatcher } from '@superschematic/http-runtime';
 
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
 import type { BoundBehavior } from '../behaviors/composition.js';
-import type { FrozenJSON, GuardRequest, InstanceChange, Reference } from '../behaviors/behavior.js';
-import { Chain, Execution, SchemaExecution, checkParams, vetoReason, type Reach, type ReferenceSource } from '../behaviors/execution.js';
+import type { FrozenJSON, GuardRequest, InstanceChange, Reference, ValidationRequest } from '../behaviors/behavior.js';
+import {
+  Chain,
+  Execution,
+  SchemaExecution,
+  checkCreateParams,
+  checkParams,
+  validationIssues,
+  vetoReason,
+  type Reach,
+  type ReferenceSource,
+} from '../behaviors/execution.js';
 import { deepFreeze } from '../behaviors/json.js';
 import type { OperationSpec } from '../behaviors/registry.js';
 import { synchronous } from '../behaviors/storage.js';
@@ -89,6 +104,13 @@ export interface InstanceTarget {
 export interface CreateOptions extends InstanceTarget {
   /** The id; the engine's id generator makes one when absent. */
   id?: string;
+  /**
+   * The parameters the create gives the type's behaviors, by behavior
+   * name, each held to that behavior's createParamsSchema and handed to
+   * its initialize: Links' links and Dependencies' blockers, say, which
+   * then hold from the create on, in its transaction.
+   */
+  behaviors?: Record<string, unknown>;
 }
 
 export interface UpdateOptions extends InstanceTarget {
@@ -165,7 +187,7 @@ export class InstanceStore {
       read: (chain, schema, ids, fields) => this.readFor(chain, schema, ids, fields),
       invoke: (chain, from, schema, id, operation, params, writes) => this.invokeFor(chain, from, schema, id, operation, params, writes),
       invokeSchema: (chain, from, schema, operation, params, writes) => this.invokeSchemaFor(chain, from, schema, operation, params, writes),
-      create: (chain, from, schema, data, id, writes) => this.createFor(chain, from, schema, data, id, writes),
+      create: (chain, from, schema, data, id, behaviors, writes) => this.createFor(chain, from, schema, data, id, behaviors, writes),
       allowRead: (chain, schema) => {
         checkSchemaName(schema);
         this.access.require(chain.principal, 'read', chain.namespace, schema);
@@ -183,26 +205,34 @@ export class InstanceStore {
     };
   }
 
-  /** create validates data against the schema's live version and stores it under a new id. */
+  /**
+   * create validates data against the schema's live version and the
+   * behaviors' parameters against their createParamsSchema, and stores the
+   * instance under a new id once every guard allows it.
+   */
   create(principal: Principal, schema: string, data: unknown, options: CreateOptions = {}): InstanceRecord {
     const namespace = this.target(principal, 'write', schema, options);
     const id = options.id ?? this.ids();
     checkId(id);
     const chain = this.chain(principal, namespace);
-    return this.storage.transaction(() => this.insert(chain, schema, id, data));
+    return this.storage.transaction(() => this.insert(chain, schema, id, data, options.behaviors));
   }
 
   // insert creates an instance in the chain's namespace inside the
-  // chain's transaction: validate, insert, every initialize, every
-  // afterChange, then the create event, which records the chain's cause.
-  // The policy has been asked.
-  private insert(chain: Chain, schema: string, id: string, data: unknown): InstanceRecord {
+  // chain's transaction: validate the data, against the live version and
+  // then the behaviors' validate, and the behaviors' parameters, insert,
+  // every guard, every initialize with its parameters, every afterChange,
+  // then the create event, which records the chain's cause. The policy has
+  // been asked.
+  private insert(chain: Chain, schema: string, id: string, data: unknown, behaviors: unknown): InstanceRecord {
     const namespace = chain.namespace;
     const subject = chain.principal.subject;
     return chain.write(schema, id, () => {
       const record = this.live(namespace, schema);
       const runtime = this.catalog.runtimeOf(record);
       this.validate(namespace, record, runtime, data);
+      this.validateBehaviors(chain, record, runtime, id, { kind: 'create', data: JSON.parse(JSON.stringify(data)) as FrozenJSON });
+      const params = checkCreateParams(runtime.composition, schema, behaviors);
       const json = JSON.stringify(data);
       const seq = nextSeq(this.storage, namespace, schema, id);
       const inserted = this.storage.run(
@@ -216,7 +246,9 @@ export class InstanceStore {
         throw new EngineError('conflict', `${schema} ${id} already exists in namespace ${namespace}`);
       }
       const execution = this.execution(chain, runtime, record, id, JSON.parse(json) as Record<string, unknown>, true);
-      execution.initialize();
+      // Nothing refers to a new instance, so no guardReference is asked.
+      execution.guard({ kind: 'create', data: execution.current(), behaviors: params }, false);
+      execution.initialize(params);
       execution.afterChange({ kind: 'create' });
       const instance = toInstance(this.row(namespace, schema, id) as Row, execution.fields());
       appendEvent(this.storage, {
@@ -295,6 +327,11 @@ export class InstanceStore {
         const current = JSON.parse(String(row.data)) as Record<string, unknown>;
         const merged = mergePatch(current, patch) as Record<string, unknown>;
         this.validate(namespace, record, runtime, merged);
+        this.validateBehaviors(chain, record, runtime, id, {
+          kind: 'update',
+          before: JSON.parse(String(row.data)) as FrozenJSON,
+          after: JSON.parse(JSON.stringify(merged)) as FrozenJSON,
+        });
         if (jsonEqual(merged, current)) {
           return this.read(chain, runtime, record, row);
         }
@@ -593,7 +630,15 @@ export class InstanceStore {
   // a savepoint, so a failure the behavior catches leaves nothing of it.
   // A read cannot create, and neither can a call up which the same
   // instance is being written (deleted, say).
-  private createFor(chain: Chain, from: string, schema: string, data: Record<string, unknown>, id: string | undefined, writes: boolean): InstanceRecord {
+  private createFor(
+    chain: Chain,
+    from: string,
+    schema: string,
+    data: Record<string, unknown>,
+    id: string | undefined,
+    behaviors: Record<string, unknown> | undefined,
+    writes: boolean
+  ): InstanceRecord {
     if (!writes) {
       throw new BehaviorError(
         from,
@@ -607,7 +652,7 @@ export class InstanceStore {
     if (chain.writing(schema, instanceId)) {
       throw new BehaviorError(from, `creating ${schema} ${instanceId} is a cycle: a write of ${schema} ${instanceId} is still running up this call`);
     }
-    return deepFreeze(this.storage.transaction(() => this.insert(chain, schema, instanceId, data)));
+    return deepFreeze(this.storage.transaction(() => this.insert(chain, schema, instanceId, data, behaviors)));
   }
 
   // invokeSchemaFor runs a schema-level operation a behavior invokes, as
@@ -807,6 +852,16 @@ export class InstanceStore {
     const issues = runtime.validator.validate(data);
     if (issues.length > 0) {
       throw new InstanceValidationError(namespace, record.name, record.version as number, issues);
+    }
+  }
+
+  // validateBehaviors asks each behavior's validate about the own fields a
+  // write would store, which the live version accepts; their issues refuse
+  // the write as the live version's do.
+  private validateBehaviors(chain: Chain, record: SchemaRecord, runtime: VersionRuntime, id: string, request: ValidationRequest): void {
+    const issues = validationIssues(runtime, chain, { schema: record.name, version: record.version as number, id }, request);
+    if (issues.length > 0) {
+      throw new InstanceValidationError(chain.namespace, record.name, record.version as number, issues);
     }
   }
 

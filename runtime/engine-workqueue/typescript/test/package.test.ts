@@ -55,6 +55,7 @@ for (const driver of drivers) {
         'Blueprint',
         'Budget',
         'Comments',
+        'Constants',
         'Dependencies',
         'Lease',
         'Links',
@@ -65,6 +66,7 @@ for (const driver of drivers) {
         'Revisions',
         'Rollups',
         'Search',
+        'Variants',
         'Workflow',
       ]);
     });

@@ -15,19 +15,29 @@ the new version:
   required field made optional, and any change that does not affect which
   values validate (descriptions, comments, defaults, UI metadata) pass.
 
-Types, enums and scalars no field reaches are free to change. Scalars are
-compared as the schema runtime reads them, the document's definition over
-the builtin catalog.
+The walk also starts at each type a behavior's validate checks values
+against under both versions (checkedTypes, behaviors/composition.ts), a
+Variants type say: a stored instance holds values the live version
+checked against it, so it is held to the rule as a type a field reaches.
+Other types, enums and scalars no field reaches are free to change.
+Scalars are compared as the schema runtime reads them to validate: a
+scalar the builtin catalog holds is the catalog's, whatever the document
+declares for it (runtimeDocument), and any other is the document's.
 */
 
 import { parseSchemaIR, type ScalarDef, type Schema } from '@superschematic/schema-runtime';
-import type { EnumDef, FieldDef, TypeDef, TypeRef } from '@superschematic/schema-ir/schema-file';
+import type { EnumDef, FieldDef, TypeRef } from '@superschematic/schema-ir/schema-file';
 
 import type { SchemaChange } from '../errors.js';
-import { arrayDepth, jsonKey, refKind, scalarKey, type SchemaModel } from './document.js';
+import { arrayDepth, jsonKey, refKind, runtimeDocument, scalarKey, type SchemaModel } from './document.js';
 
-/** incompatibleChanges lists every change from before to after that the rule refuses; empty means compatible. */
-export function incompatibleChanges(before: SchemaModel, after: SchemaModel): SchemaChange[] {
+/**
+ * incompatibleChanges lists every change from before to after that the
+ * rule refuses; empty means compatible. checked names the types besides
+ * the instance type a behavior checks values against under both versions,
+ * which the walk starts from too.
+ */
+export function incompatibleChanges(before: SchemaModel, after: SchemaModel, checked: readonly string[] = []): SchemaChange[] {
   const changes: SchemaChange[] = [];
   if (before.instanceType !== after.instanceType) {
     changes.push({
@@ -42,14 +52,17 @@ export function incompatibleChanges(before: SchemaModel, after: SchemaModel): Sc
   const enums = new Set<string>();
   const scalars = new Set<string>();
   const seen = new Set<string>();
-  const queue = [before.instanceType];
+  const queue = [before.instanceType, ...checked];
   while (queue.length > 0) {
     const typeName = queue.shift() as string;
     if (seen.has(typeName)) {
       continue;
     }
     seen.add(typeName);
-    const oldType = oldTypes[typeName] as TypeDef;
+    const oldType = oldTypes[typeName];
+    if (oldType === undefined) {
+      continue;
+    }
     const newType = newTypes[typeName];
     if (newType === undefined) {
       changes.push({ path: typeName, message: `type ${typeName} is removed` });
@@ -79,8 +92,8 @@ export function incompatibleChanges(before: SchemaModel, after: SchemaModel): Sc
   }
 
   if (scalars.size > 0) {
-    const oldSchema = parseSchemaIR(before.document);
-    const newSchema = parseSchemaIR(after.document);
+    const oldSchema = parseSchemaIR(runtimeDocument(before.document));
+    const newSchema = parseSchemaIR(runtimeDocument(after.document));
     for (const scalarName of [...scalars].sort()) {
       compareScalar(scalarName, oldSchema, newSchema, changes);
     }
