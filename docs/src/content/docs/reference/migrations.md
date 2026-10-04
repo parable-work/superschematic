@@ -293,7 +293,14 @@ hash and merge rows of the old shape. The hazard says whether the graph's
 `superschematic-migrate` applies a plan. It is the Go module
 `github.com/parable-work/superschematic/runtime/migrate/go`, which holds the
 database drivers, so a migration job needs the plan and that binary, not the
-compiler. It never computes a plan.
+compiler. It never computes a plan. It needs no cgo, so one static binary
+serves a container job:
+
+```
+CGO_ENABLED=0 go install github.com/parable-work/superschematic/runtime/migrate/go/cmd/superschematic-migrate@latest
+```
+
+`runtime/migrate/README.md` has a Dockerfile for a Cloud Run job.
 
 ```
 superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
