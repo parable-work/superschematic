@@ -130,9 +130,13 @@ python:
 # The version-graph crates' tests run again with serde_json's preserve_order
 # on, which superscalar turns on and Cargo unifies into every crate of a
 # build that uses it: a content hash and a canonical row must not depend on
-# the order a serde_json map keeps.
+# the order a serde_json map keeps. The schema runtime's run again with
+# arbitrary_precision too, which superscalar's default lossless-json feature
+# turns on: an error map and a number check must not depend on either.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
+		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test \
 		&& cargo test --features serde_json/preserve_order
