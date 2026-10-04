@@ -1,9 +1,10 @@
 // Rollups, the core's values derived from linked instances: every
 // function over the instances that point at one through a Links link,
 // computed at each read with no event on the instance read, the bound of
-// 500 linked instances, reads as the caller, the Workflow gate, the
-// config rules at define and publish, a rollup over its own schema, a
-// link that no longer points at the schema, and configChange.
+// 500 linked instances, reads as the caller, the Workflow gate, all and
+// any limited to outcomes, the config rules at define and publish, a
+// rollup over its own schema, a link that no longer points at the
+// schema, and configChange.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -257,6 +258,44 @@ for (const driver of drivers) {
       assert.deepEqual(move(engine, 'Project', 'p1', 'dropped'), { from: 'active', to: 'dropped' });
     });
 
+    test('all and any with outcomes count only the linked instances in a terminal state whose outcome they list', () => {
+      const engine = open();
+      publish(engine, tasks([{ name: 'Workflow', config: { ...taskFlow, outcomes: { dropped: 'failure' } } }, { name: 'Links', config: { links: { project: { schema: 'Project' } } } }]));
+      publish(
+        engine,
+        projects({
+          finished: rollup('all'),
+          succeeded: rollup('all', { outcomes: ['success'], gatedStates: ['done'] }),
+          failed: rollup('any', { outcomes: ['failure'], gatedStates: ['dropped'] }),
+        })
+      );
+      for (const id of ['p1', 'p2']) {
+        engine.instances.create(alice, 'Project', { title: id }, { id });
+      }
+      task(engine, 't1', {}, 'p1');
+      task(engine, 't2', {}, 'p1');
+      assert.deepEqual(rollupsOf(engine, 'p1'), { failed: false, finished: false, succeeded: false });
+      move(engine, 'Task', 't1', 'doing');
+      move(engine, 'Task', 't1', 'done');
+      move(engine, 'Task', 't2', 'dropped');
+      assert.deepEqual(rollupsOf(engine, 'p1'), { failed: true, finished: true, succeeded: false }, 'without outcomes, every terminal state counts');
+      assert.equal(
+        thrown(() => move(engine, 'Project', 'p1', 'done'), BehaviorVetoError).reason,
+        'Project p1 cannot move to done until rollup succeeded holds: 1 of the 2 instances of Task that point at it through project are not in a terminal state whose outcome is success'
+      );
+      assert.deepEqual(move(engine, 'Project', 'p1', 'dropped'), { from: 'active', to: 'dropped' });
+      // All of none holds and any of none does not, outcomes or not.
+      assert.deepEqual(rollupsOf(engine, 'p2'), { failed: false, finished: true, succeeded: true });
+      task(engine, 't3', {}, 'p2');
+      move(engine, 'Task', 't3', 'doing');
+      move(engine, 'Task', 't3', 'done');
+      assert.equal(
+        thrown(() => move(engine, 'Project', 'p2', 'dropped'), BehaviorVetoError).reason,
+        'Project p2 cannot move to dropped until rollup failed holds: none of the 1 instances of Task that point at it through project is in a terminal state whose outcome is failure'
+      );
+      assert.deepEqual(move(engine, 'Project', 'p2', 'done'), { from: 'active', to: 'done' });
+    });
+
     test(`a rollup reads at most ${MAX_ROLLUP_READ} linked instances: past that it is {over: true}, and its gate does not hold`, () => {
       const engine = open();
       publish(engine, tasks());
@@ -341,6 +380,9 @@ for (const driver of drivers) {
       assert.ok(shape({ total: rollup('sum') }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups/total'));
       assert.ok(shape({ tasks: rollup('count', { field: 'title' }) }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups/tasks'));
       assert.ok(shape({ tasks: rollup('count', { gatedStates: ['done'] }) }).some((issue) => issue.path.startsWith('/types/Project/behaviors/1/config/rollups/tasks')));
+      assert.ok(shape({ tasks: rollup('count', { outcomes: ['success'] }) }).some((issue) => issue.path.startsWith('/types/Project/behaviors/1/config/rollups/tasks')));
+      assert.ok(shape({ finished: rollup('all', { outcomes: [] }) }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups/finished/outcomes'));
+      assert.ok(shape({ finished: rollup('all', { outcomes: ['done'] }) }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups/finished/outcomes/0'));
       assert.ok(shape({ mean: rollup('average', { field: 'estimate' }) }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups/mean/function'));
       // What passes: every function, on every kind of field it takes.
       publish(engine, projects());

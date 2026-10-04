@@ -11,8 +11,10 @@ function from a closed set:
 - sum, min and max: of a number or integer field, over the instances
   that hold a value. min and max of none have no value;
 - all and any: whether every one, or some one, is in a terminal state of
-  its schema's Workflow (isTerminalState). all of none holds; any of none
-  does not.
+  its schema's Workflow (isTerminalState) and, when the rollup lists
+  outcomes, one whose outcome (stateOutcome) it lists. all of none holds;
+  any of none does not. outcomes is an argument of these two functions,
+  from the same closed set of three, not a filter over the instances.
 
 The set is closed so that each function is one pass over the records it
 reads, has one JSON type, and has a rule parseConfig can check against
@@ -64,7 +66,7 @@ import type { InstanceRecord } from '../../instances/store.js';
 import { setMember } from '../../instances/patch.js';
 import { BehaviorConfigError, defineBehavior, type ConfigSchema, type ConfigTarget, type FrozenJSON, type InstanceView } from '../behavior.js';
 import declaration from './declarations/Rollups.behavior.json' with { type: 'json' };
-import { isTerminalState, type WorkflowStates } from './workflow.js';
+import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
 /** The functions a rollup computes. */
 export type RollupFunction = 'count' | 'countBy' | 'sum' | 'min' | 'max' | 'all' | 'any';
@@ -80,6 +82,8 @@ export interface RollupSpec {
   readonly field?: string;
   /** For all and any, the states of the type's Workflow a transition into waits for the rollup to hold; none when absent. */
   readonly gatedStates: readonly string[];
+  /** For all and any, the outcomes a linked instance's terminal state must have to count; every outcome when absent. */
+  readonly outcomes?: readonly WorkflowOutcome[];
 }
 
 /** Rollups' config, parsed. */
@@ -110,8 +114,9 @@ type Linked =
     };
 
 // What a rollup computed: its value (none for min and max of no value),
-// or over the bound; for all and any, how many are in a terminal state.
-type Outcome =
+// or over the bound; for all and any, how many are in a terminal state
+// with an outcome the rollup counts.
+type Computed =
   | { readonly over: true }
   | { readonly over: false; readonly value?: unknown; readonly total: number; readonly terminal?: number };
 
@@ -154,10 +159,10 @@ function linked(view: InstanceView<RollupsConfig>, group: Group): Linked {
   return { over: false, ids, records, ...(flow === undefined ? {} : { flow }) };
 }
 
-// outcome computes one rollup over the instances read for its link. An id
+// compute computes one rollup over the instances read for its link. An id
 // listLinked gave whose instance is gone, which only happens while its
 // delete runs, holds no value and is not in a terminal state.
-function outcome(spec: RollupSpec, set: Linked): Outcome {
+function compute(spec: RollupSpec, set: Linked): Computed {
   if (set.over) {
     return { over: true };
   }
@@ -196,7 +201,8 @@ function outcome(spec: RollupSpec, set: Linked): Outcome {
       const flow = set.flow;
       const terminal = data.filter((record) => {
         const status = record?.status;
-        return flow !== undefined && typeof status === 'string' && isTerminalState(flow, status);
+        const outcome = flow !== undefined && typeof status === 'string' ? stateOutcome(flow, status) : undefined;
+        return outcome !== undefined && (spec.outcomes === undefined || spec.outcomes.includes(outcome));
       }).length;
       return { over: false, value: spec.function === 'all' ? terminal === total : terminal > 0, total, terminal };
     }
@@ -207,7 +213,7 @@ function outcome(spec: RollupSpec, set: Linked): Outcome {
  * evaluate computes the named rollups for one instance, reading each
  * schema and link they name once, with the fields every one of them needs.
  */
-function evaluate(view: InstanceView<RollupsConfig>, names: readonly string[]): Map<string, Outcome> {
+function evaluate(view: InstanceView<RollupsConfig>, names: readonly string[]): Map<string, Computed> {
   const groups = new Map<string, Group>();
   for (const name of names) {
     const spec = view.config.rollups[name];
@@ -222,11 +228,16 @@ function evaluate(view: InstanceView<RollupsConfig>, names: readonly string[]): 
   for (const [key, group] of groups) {
     sets.set(key, linked(view, group));
   }
-  return new Map(names.map((name) => [name, outcome(view.config.rollups[name], sets.get(groupKey(view.config.rollups[name])) as Linked)]));
+  return new Map(names.map((name) => [name, compute(view.config.rollups[name], sets.get(groupKey(view.config.rollups[name])) as Linked)]));
+}
+
+// counted names the states an all or any rollup counts, in a sentence.
+function counted(spec: RollupSpec): string {
+  return spec.outcomes === undefined ? 'a terminal state' : `a terminal state whose outcome is ${spec.outcomes.join(' or ')}`;
 }
 
 // refusal says why a gating rollup does not hold.
-function refusal(view: InstanceView<RollupsConfig>, to: string, name: string, result: Outcome): string {
+function refusal(view: InstanceView<RollupsConfig>, to: string, name: string, result: Computed): string {
   const spec = view.config.rollups[name];
   const through = `instances of ${spec.schema} that point at it through ${spec.link}`;
   if (result.over) {
@@ -235,10 +246,10 @@ function refusal(view: InstanceView<RollupsConfig>, to: string, name: string, re
   const terminal = result.terminal ?? 0;
   const detail =
     spec.function === 'all'
-      ? `${result.total - terminal} of the ${result.total} ${through} are not in a terminal state`
+      ? `${result.total - terminal} of the ${result.total} ${through} are not in ${counted(spec)}`
       : result.total === 0
         ? `no instance of ${spec.schema} points at it through ${spec.link}`
-        : `none of the ${result.total} ${through} is in a terminal state`;
+        : `none of the ${result.total} ${through} is in ${counted(spec)}`;
   return `${view.schema} ${view.id} cannot move to ${to} until rollup ${name} holds: ${detail}`;
 }
 
@@ -321,7 +332,7 @@ export const rollups = defineBehavior<RollupsConfig>({
   // schema is defined or published, each rollup to the schema it names.
   parseConfig(json, target) {
     const raw = json as {
-      rollups: Record<string, { schema: string; link: string; function: RollupFunction; field?: string; gatedStates?: string[] }>;
+      rollups: Record<string, { schema: string; link: string; function: RollupFunction; field?: string; gatedStates?: string[]; outcomes?: WorkflowOutcome[] }>;
     };
     const flow = target.configs.Workflow as Partial<WorkflowStates> | undefined;
     const parsed: Record<string, RollupSpec> = {};
@@ -332,6 +343,7 @@ export const rollups = defineBehavior<RollupsConfig>({
         function: entry.function,
         ...(entry.field === undefined ? {} : { field: entry.field }),
         gatedStates: entry.gatedStates ?? [],
+        ...(entry.outcomes === undefined ? {} : { outcomes: [...entry.outcomes] }),
       };
       if (spec.gatedStates.length > 0) {
         if (!target.behaviors.includes('Workflow')) {

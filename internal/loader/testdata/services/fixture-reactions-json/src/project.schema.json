@@ -1,7 +1,7 @@
 {
   "kind": "General",
   "name": "projects",
-  "description": "A project an engine runs with the core's behaviors and no extension: it moves from todo through doing to done, may be part of a parent project, starts its parent when it starts, and is done once every project under it is.",
+  "description": "A project an engine runs with the core's behaviors and no extension: it moves from todo through doing to done, or fails, may be part of a parent project, starts its parent when it starts, is done once every project under it is done, and fails when one of them fails.",
   "types": {
     "Project": {
       "name": "Project",
@@ -10,11 +10,13 @@
         {
           "name": "Workflow",
           "config": {
-            "states": ["todo", "doing", "done"],
+            "states": ["todo", "doing", "done", "failed"],
             "transitions": [
               { "from": "todo", "to": "doing" },
-              { "from": "doing", "to": "done" }
-            ]
+              { "from": "doing", "to": "done" },
+              { "from": "doing", "to": "failed" }
+            ],
+            "outcomes": { "failed": "failure" }
           }
         },
         { "name": "Links", "config": { "links": { "parent": { "schema": "projects" } } } },
@@ -23,7 +25,8 @@
           "config": {
             "rules": [
               { "when": { "enters": "doing" }, "then": { "link": "parent", "transition": "doing" } },
-              { "when": { "allTerminal": { "schema": "projects", "link": "parent" } }, "then": { "transition": "done" } }
+              { "when": { "allTerminal": { "schema": "projects", "link": "parent", "outcomes": ["success"] } }, "then": { "transition": "done" } },
+              { "when": { "anyTerminal": { "schema": "projects", "link": "parent", "outcomes": ["failure"] } }, "then": { "transition": "failed" } }
             ]
           }
         }
