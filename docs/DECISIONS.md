@@ -1705,7 +1705,7 @@ imported by the package's `__init__`, so the types load without the
 engine. Every language's engine is now built, Go, TypeScript, Rust and
 Python, and each passes every scenario against Postgres; what stays open
 is schema-epoch transforms (`Materialize` still refuses a commit from a
-newer epoch) and a SQLite adapter for D16's engine.
+newer epoch) and a SQLite adapter for D16's engine, which D32 designs.
 
 ## D20. An `EncryptedField<T>` argument encrypts its operation's request body
 
@@ -1984,3 +1984,137 @@ golden tree pins each SDK. Output for a schema without `@webhook` is
 unchanged byte for byte.
 
 The rule is reversible until the first release.
+
+## D32. The version graph on SQLite, and a behavior that hosts one
+
+D19 left one adapter open: "a SQLite adapter for D16's engine". D16's
+engine keeps everything in one SQLite file, runs behavior code
+synchronously inside its write transaction, and lets a behavior write
+only its own tables, through SQL it checks. The version graph as D19
+built it fits none of that:
+
+- **An asynchronous engine.** The TypeScript engine and its `Storage` and `Tx` return promises, because the `pg` driver does. A behavior cannot await.
+- **Postgres does the versioning.** plpgsql triggers bump `_version` and write every history image, a transaction-local setting names a delete's actor, a function per kind prunes history, and row and advisory locks order writers. SQLite triggers cannot assign `NEW`, D16 refuses a trigger in a behavior's migration, and SQLite has no settings, no `to_jsonb` and no `uuid` type.
+- **Tables per kind.** A graph's member tables follow its kinds, and only sqlgen writes them, for Postgres. A behavior's tables are fixed by its migrations, whatever a schema's config says.
+- **Nothing to declare a graph with.** A D16 schema cannot say that its instances are graph roots.
+
+This entry closes them. It records the design before any of it is built.
+A human decided on 2026-10-04 that a core behavior hosts a graph, that the
+TypeScript engine is written once and run by a synchronous and an
+asynchronous driver, that TypeScript comes first, that the SQLite adapter
+owns one fixed layout, and that the shared scenarios run against SQLite
+with their roots declared and their SQL given per backend. Names and rules
+are reversible until the first release.
+
+### One engine, two drivers
+
+A behavior cannot await because of how the engine holds its file. Its
+transaction belongs to its one connection, not to a call: an await inside
+it would let the event loop run another request's statements in the same
+transaction. A second connection does not help: `node:sqlite` and
+`bun:sqlite` block the thread while a connection waits for the write lock,
+and the transaction holding it, on the same thread, cannot go on to
+release it. And the engine's cycle check, nesting limit, savepoints and
+`afterCommit` queue lean on one synchronous call stack. The graph engine's
+operations await only their storage calls: over SQLite each of those is
+synchronous, and so is the wasm core once it is instantiated.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The TypeScript engine's operations are written once, as generator functions that yield each storage call. `Engine` runs them asynchronously over `Storage` and `Tx`, with its API as it is. `SyncEngine` runs them synchronously over `SyncStorage` and `SyncTx`, which have the same methods returning values. A storage call's failure is thrown back into the generator, so the engine handles it the same way under both (a sweep's discard of a ref that moved, say). | A second engine, synchronous and written by hand, which repeats commit, merge and rebase and leaves only the scenarios to keep the two equal; asynchronous D16 transactions, the later entry D16 names, which convert every guard, hook, the store and the runner and still order writes on one SQLite writer; an asynchronous SQLite adapter that runs outside D16's transaction, which a behavior could not call |
+| `@superschematic/versiongraph` gains `initSync`, which compiles and instantiates the wasm module synchronously and, given no source under bun and Node, reads the module the package ships. A `SyncEngine` is built over a core already instantiated. | A `SyncEngine.create` that awaits `init`, which D16's synchronous `Engine.open` cannot call |
+| Over SQLite only the `SyncEngine` runs. The asynchronous engine's transactions, on one connection, would interleave at each await. | An asynchronous wrapper with a queue per connection, which a behavior could not call either |
+| The Go, Python and Rust engines keep their shape. Go's and Python's are synchronous already. Rust's `Storage` and `Tx` traits stay as they are, and its SQLite client holds a `rusqlite` connection behind a mutex, blocking the executor while a statement runs. | |
+
+### The layout
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The SQLite adapter owns one fixed set of tables, the same for every graph: `ref`, `ref_history`, `commit`, `patch`, `snapshot_entry`, `release`, `release_history`, `member` and `member_history`, under a prefix its caller gives (`graph_` by default). Every row carries its graph's name, so one file holds several graphs. The adapter creates the tables, and lists their statements for a caller that runs its own migrations. | Tables per kind, built from the descriptor when the adapter opens, which a behavior's fixed migrations cannot create; a SQLite dialect in sqlgen, which serves compiled schemas only, needs a second `UPDATE` in an `AFTER` trigger to bump `_version`, and puts triggers where D16 refuses them |
+| This departs, for SQLite, from D17's rule that a graph's tables are generated per graph with relations to the root. The layout has no root table, so no foreign key checks a ref's root: in D16 the root is an instance, which the behavior's tables cannot reference, and the behavior deletes a root's graph with it. Foreign keys still check every edge inside the layout (a ref's parent, base and head, a commit's ref and parent, a patch's and a snapshot entry's commit, a member's ref, a pointer's commit), and ids are UUIDs, unique across graphs. That a row's graph and kind agree with its ref's is the adapter's check, not a key's. | Per-graph tables, which a behavior's fixed migrations cannot create |
+| A member row holds its kind and its role columns (id, entity key, ref, root, tombstone, version) as columns, and its other columns as one canonical JSON object. The adapter reads from the descriptor only the kinds, their roles, columns, value classes and history (below); the tables the descriptor names are the Postgres adapter's. Content is not in typed columns: readers of released content read `Released` or `Materialize` (D19), not member tables. | Typed columns per field, which need tables per kind |
+| Every table is `STRICT`, so a value of the wrong type is refused rather than stored. An id is `TEXT` in canonical form; a version, a sequence, a tombstone and a time are `INTEGER`. | Tables without `STRICT`, which store a value of the wrong type silently |
+| The adapter writes history in the statements of the transaction that changes a row. An insert or an update writes the row's image at its new version, and a delete writes the tombstone image at the old version plus 1, with the kind's actor column set to the delete's actor. `_version` starts at 1 and every update sets it to the old version plus 1, so every version is the one Postgres's triggers give. An image leaves out the kind's history-excluded columns. Refs and release pointers keep history too, as `@versioned` tables, and the release pointer's history is the release log (D19). A member's image is its canonical row less those columns, so it hashes as the live row it was taken from does. | Triggers, which cannot assign `NEW` in SQLite and which D16 refuses in a behavior's migration; a side table that such triggers read for a delete's actor |
+| The times of refs, commits, release pointers and history images are `INTEGER` microseconds since the Unix epoch, which order and subtract as numbers; the adapter returns them as canonical date-times. A transaction reads its time once, when it begins, from a clock its caller gives (the system clock by default), so every write in it has one time, as Postgres's `now()` does. History images take that time too, where Postgres's `clock_timestamp()` gives each its own; only pruning reads an image's time, and it compares in days. A member's audit times are canonical text in its JSON object, which no statement compares. | `CURRENT_TIMESTAMP`, which has second precision; canonical text, whose trimmed trailing zeros sort `…00.5Z` before `…00Z` |
+| The adapter generates every id Postgres takes from `gen_random_uuid()`: a version-4 UUID for each new ref, commit, release pointer, patch, snapshot entry, row, history image and entity key. | A UUID function registered on the connection, which D16's driver seam has no way to register |
+| Values are stored in canonical form. The adapter canonicalizes each value it writes by its class, with the rules the canonical module already has for input, so it reads with no rules of its own. The canonical vectors run against SQLite as a round trip: each case's canonical value, written in a row, reads back unchanged. | Each class in a native SQLite form, which needs read rules per class as Postgres's text does |
+
+D30 gives sqlgen SQLite migrations for compiled schemas. A graph on SQLite
+needs none of them, since its layout is the adapter's and changes only
+through the adapter's own migrations.
+
+### The descriptor's history
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each kind gains `history`, from what sqlgen's triggers and prune function hold today: `retentionDays` (absent for none), `exclude` (the columns images leave out) and `actor` (the column a delete's image names its actor in: `deleted_by`, else `updated_by`, and absent when there is neither or the column is excluded from history). The descriptor's version rises to 3, and the core reads version 3 only. The Postgres adapters do not read `history`, since their triggers and prune functions hold the same facts. | An optional member of version 2, which a descriptor written before it would give the SQLite adapter as no retention and no exclusions, silently; settings passed to the adapter beside the descriptor, which the compiler already knows and every caller would restate |
+
+Generated output for a schema without a version graph is unchanged. The
+descriptor of each graph changes: the core's vectors, the scenario
+fixture's `recipe.json`, acme's `Planogram`, each facade's descriptor
+constant and the generators' goldens of graph schemas.
+
+### Locking and transactions
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One process writes the file (D16). On a connection of its own, the adapter begins every transaction with `BEGIN IMMEDIATE`, which takes the file's write lock at once, and one begun inside another is a savepoint. Inside D16 it issues no transaction control, which a behavior's `sql` refuses: the graph runs in the transaction of the operation that calls it, and an invoked operation's savepoint rolls the graph's writes back with the rest. Either way the write lock orders every writer, so `lockRef` reads a ref as `readRef` does, `nextSequence` reads the root's highest sequence plus one, and `sweepLock` reports true. | Lock rows, which a single writer never waits on; a lock table shared across processes, which D16's one writer per file rules out |
+| A name already taken is the partial unique index on live refs' names, read from `SQLITE_CONSTRAINT_UNIQUE`. | A read before the insert alone, without the index behind it |
+
+### Scenarios
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every shared scenario runs against SQLite through the TypeScript `SyncEngine`, from `recipe.json`, over the fixed layout. It needs no database server, so `make versiongraph-scenarios-ts` runs the SQLite pass with or without a Postgres URL. | A SQLite copy of the scenario files, which drifts |
+| A scenario names its roots (`roots`), and each runner seeds them as its backend needs before the first step: on Postgres it inserts the fixture's root rows, on SQLite nothing, since the layout has no root table. This replaces the 18 `sql` steps that seed roots. | The same seeding statement in an `sql` step of every file, once per backend |
+| An `sql` step's `statement` gives one statement per backend, `{"postgres", "sqlite"}`, and a runner refuses a step that lacks its backend's, so no step is skipped silently. A SQLite statement numbers its placeholders `?1`, `?2`, and takes UUID arguments in canonical form, as the layout stores them; a Postgres statement takes them hyphenated, as today. | Named test operations, one per purpose (backdate a ref, age history, drop pins), which every runner in every language would implement |
+| A step may name the backends that run it (`backends`), and a runner refuses a name it does not know. The sweep scenario's two lock steps, and the sweep between them that expects to be skipped, run on Postgres only: under one writer, no transaction can hold the lock while a sweep runs. The adapter's own tests check that a second connection's transaction waits. | |
+| The Go, Python and Rust runners learn the new forms and run Postgres as they do now. Their SQLite passes come with their adapters. | |
+
+### The `Branches` behavior
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Branches` is a core behavior, a plain noun as the others are. A schema that composes it makes each instance a graph root. The root is never overlaid and is in no commit (D17), so the instance's own fields stay outside the graph: they are the root's. | `Versions`, which D16 already uses for a schema's versions; `Drafts`, which D16 uses for a defined schema not yet published; a name that is not a plain noun |
+| The config names the graph's kinds: `kinds: { <kind>: { type, parent?, order?, singleton?, units?, retentionDays? } }`. `type` is another type of the schema (a nested value, in D16's terms), whose fields are the kind's content. `parent: { key, of }`, `order` and `singleton` are `@graphMember`'s, `units` sets a field's conflict unit as `@conflictUnit` does, `retentionDays` is `@versioned`'s, and `snapshotEvery` (default 64) is `@versionGraph`'s. `parseConfig` derives the graph's descriptor from the config and the types, which it reads through `ConfigTarget.types` (What D16 gains, below). A kind's images exclude nothing, and its actor column is `updated_by`. | Members as instances of other schemas, which a ref cannot overlay; one kind holding the instance's own fields, which `Revisions` already versions |
+| A member's role and audit columns have fixed names: `id`, `entity_key`, `ref_id`, `root_id`, `deleted_on_ref`, `_version`, `created_at`, `created_by`, `updated_at` and `updated_by` (the author). D16 puts no rule on a field's name, so `parseConfig` refuses a kind whose type has a field with one of those JSON keys. | Names the config chooses, which every reader of the descriptor would look up |
+| A field's value class follows graphdesc's rule for a compiled field: a primitive's from its name (`string`, `String` and `ID` are `string`, `Int` is `integer`, `number` and `Float` are `number`, `boolean` and `Boolean` are `boolean`), an enum's is `enum`, a nested type's `json`, and each list level adds `[]`. A builtin scalar's class comes from the scalar catalog in `@superschematic/schema-runtime`, which gains each scalar's class, computed with graphdesc's rule by the Go tool that writes the catalog, under the catalog's existing `-check`. A scalar the document defines, under a new name or a builtin's, takes the class its JSON type gives (`string`, `integer`, `number`, `boolean`, and `json` for an object or an array), as the document's definition decides its validation. | A second scalar rule in TypeScript, which drifts from graphdesc's |
+| `save` checks each written row's content against its kind's type, with the live version's validator, before the engine sees it. | Checking only the tree's structure, which the core already does |
+| The operations, all of instance scope. Writing: `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `release` and `discard`. Read-only: `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history`. Each but `refs` and `releases` takes what the engine's operation takes, refs and commits by id, and every write through a ref its expected version. Who may merge or release is the deployment's access policy, which is asked `write` or `read` with the operation's name (D16), as D17 left that policy to the distribution. Each writing operation appends the instance's operation event. | Permissions in the config, as `Revisions` names one for review, which the access policy already answers per operation |
+| `refs` and `releases` read the behavior's own tables, since the engine has no such operations: a root's live refs, and its release pointer's history, which is the release log (D19). | |
+| `initialize` creates an instance's primary line, named by `primary` in the config (default `main`). An instance created before its schema composed `Branches` gets its primary line at its first writing operation, in that operation's transaction. | Creating every instance's primary line in `afterConfigChange`, which acts for no principal, while a ref records its creator |
+| An actor is a UUID and a principal's subject is any string, so the actor of a write is the version-5 UUID of the subject, in one fixed namespace the implementation records. The behavior records each subject it maps, and its reads return subjects. | Widening the actor to any string, in every language's engine |
+| A root's id is the version-5 UUID of its instance's id, in another fixed namespace, since an instance id is any string the create gives (D16), not always a UUID. | The instance id itself, which holds only for the engine's default ids |
+| The graph's tables are the behavior's own (`bhv_<key>__…`), created by its migration from the adapter's statements. The adapter reaches them through the behavior's `sql`, whose checks its statements pass: one statement at a time, on the behavior's own tables, with no trigger and no transaction control. A graph is named by its namespace and schema, so the behavior's tables hold every schema's graphs. | |
+| A new version of the schema may add a kind, and change a kind's fields as D16 allows a field to change. `configChange` refuses anything else: removing a kind, or changing a parent, an order, a singleton or a unit. A retention may change. `Branches` can be added to a schema that has instances, and not removed from one, as `Revisions` can. The schema epoch stays 0, since every version reads every stored row. | Epoch transforms, which stay open (D19) |
+| Deleting an instance deletes its graph, as deleting one deletes its revisions. | A guard that refuses the delete of a root with commits, which a deployment's access policy can already refuse |
+| `sweep` in the config (an interval, the discard grace, the prune batch and `abandonAfter`) turns a schedule on for the schema; without it the schedule does not run there, as D19's sweep is off by default. Each run discards idle drafts by invoking `discard` on each instance, with the draft and its version, so each discard runs its guards and appends its event. It then runs the engine's sweep with abandoning off, writing the behavior's tables as a schedule may (What D16 gains, below): history past retention, rows of refs discarded past the grace, and missing snapshots. | A sweep operation on each instance, which writes an event per instance per run for maintenance no reader sees, and needs a sweep scoped to one root in every language's engine |
+| `@superschematic/engine` depends on `@superschematic/versiongraph` and instantiates the core with `initSync` when it first runs a schema that composes `Branches`. | An optional peer dependency, which leaves a core behavior unregistered in a default engine |
+
+### What D16 gains
+
+`Branches` needs four things a behavior cannot do today. Each is general,
+and each changes a D16 rule.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `ConfigTarget` gains `types`: each other type of the schema, by name, with each field's JSON key, its type's name and kind (primitive, scalar, enum or type), its list depth and whether it is optional. A type `parseConfig` reads through it counts as reachable from the instance type for that version. The engine's document checks then cover the type's fields, map fields refused included, and a new version must keep them as D16's rule keeps the instance type's. Today a type no field reaches can change freely between versions, which would break every stored row of a kind. | The nested types inlined in `fieldSchemas`, which reach only the types the instance type's fields use and drop each field's scalar name; a list of kinds' types that the compatibility rule reads apart from the config |
+| A behavior's context can check a value against another type of its schema, with the live version's validator and the closed-object checks a nested value gets (`validate(type, value)`). Today a behavior checks only its own instance's fields (`validateUpdate`). | Each behavior building a validator of its own from `ConfigTarget.types`, which drifts from the engine's |
+| A schedule's interval function may return none for a schema, which runs nothing there until a publish changes its config. Today a schedule runs on every schema that composes its behavior, and a function that gives no interval fails it. | An interval long enough to be ignored, which still wakes the runner for nothing |
+| A schedule may write its behavior's own tables when the write changes nothing an operation returns: history that no commit or snapshot pins, rows of refs that no operation can read any more, and snapshots, which only shorten a read. It runs in the schedule's transaction, as the runner's principal. A change an operation does show, such as discarding a draft, still goes through the operation the schedule invokes. Like `afterConfigChange`, it writes only the behavior's own storage. | Schedules that only read, invoke and create, as D16's amendments have them, which makes the sweep an operation with an event per instance per run |
+
+### Phases
+
+| Phase | Scope |
+|-------|-------|
+| 1 | Descriptor version 3, with `history`: graphdesc writes it, the core reads it, and every binding, engine, facade, vector, golden and fixture moves to it. |
+| 2 | The scenario format: `roots`, `statement` per backend and `backends`, in the four runners and the 18 files, on Postgres only. |
+| 3 | The TypeScript engine as generators, `SyncEngine`, `SyncStorage`, `SyncTx` and `initSync`. Every scenario still passes on Postgres. |
+| 4 | The SQLite adapter, at `./sqlite` of `@superschematic/versiongraph`: the layout, a small synchronous client seam with bindings for `node:sqlite` and `bun:sqlite`, every scenario and the canonical round trip on SQLite, and the adapter's tests. |
+| 5 | What D16 gains, the scalar catalog's value classes, and `Branches`: its declaration and registration in Go, its implementation in `@superschematic/engine`, and the docs. |
+| Later | SQLite adapters in Go (a `database/sql` seam), Python (`sqlite3`) and Rust (`rusqlite`), each running every scenario on SQLite, as D19 built its Postgres adapters. |
+
+Phases 1, 2 and 3 do not depend on each other. Phase 4 needs all three,
+and phase 5 needs phase 4.
+
+Nothing here is built.
