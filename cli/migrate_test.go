@@ -105,15 +105,6 @@ func runMigratePlanCmd(t *testing.T, args ...string) (stdout, stderr string, err
 	return out.String(), errOut.String(), err
 }
 
-// skipWithoutPlanner skips an end-to-end test while sqlmigrate's BuildModel
-// and Diff are stubs. Each caller carries the reminder to remove it.
-func skipWithoutPlanner(t *testing.T, err error) {
-	t.Helper()
-	if err != nil && strings.Contains(err.Error(), "not implemented") {
-		t.Skipf("the planner is not built: %v", err)
-	}
-}
-
 func TestMigratePlanFlagErrors(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
@@ -556,8 +547,6 @@ func TestMigratePlanFromAnEmptyDatabase(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "plan.json")
 	stdout, stderr, err := runMigratePlanCmd(t, filepath.Join(servicesRoot, "shop-db"), "--format", "json", "--out", out)
 	assert.Contains(t, stderr, "no previous version (--from, --from-ref); planning from an empty database")
-	// planner lands separately; remove this skip at integration
-	skipWithoutPlanner(t, err)
 	require.NoError(t, err)
 
 	plan := decodePlan(t, stdout)
@@ -575,8 +564,6 @@ func TestMigratePlanPrintModel(t *testing.T) {
 		"shop-db": migrateDB(orderIDField, orderTotalField),
 	})
 	stdout, _, err := runMigratePlanCmd(t, filepath.Join(servicesRoot, "shop-db"), "--print-model")
-	// planner lands separately; remove this skip at integration
-	skipWithoutPlanner(t, err)
 	require.NoError(t, err)
 
 	var model sqlmigrate.Model
@@ -608,8 +595,6 @@ func TestMigratePlanFromRef(t *testing.T) {
 	service := filepath.Join(schemasRoot, "services", "shop-db")
 
 	stdout, stderr, err := runMigratePlanCmd(t, service, "--from-ref", "main", "--format", "markdown", "--fail-on", "destructive")
-	// planner lands separately; remove this skip at integration
-	skipWithoutPlanner(t, err)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not allowed")
 	assert.Contains(t, stdout, "## Migration plan for `shop-db`")
@@ -637,8 +622,6 @@ func TestMigratePlanFromRefWithoutTheService(t *testing.T) {
 
 	stdout, stderr, err := runMigratePlanCmd(t, filepath.Join(schemasRoot, "services", "shop-db"), "--from-ref", "main", "--format", "json")
 	assert.Contains(t, stderr, "at main there is no service shop-db; planning from an empty database")
-	// planner lands separately; remove this skip at integration
-	skipWithoutPlanner(t, err)
 	require.NoError(t, err)
 	assert.Empty(t, decodePlan(t, stdout).From)
 }
@@ -664,8 +647,6 @@ func TestMigratePlanReaders(t *testing.T) {
 	from := filepath.Join(previous, "shop-db")
 
 	stdout, _, err := runMigratePlanCmd(t, service, "--from", from, "--format", "json", "--fail-on", "api-breaking")
-	// planner lands separately; remove this skip at integration
-	skipWithoutPlanner(t, err)
 	require.NoError(t, err)
 	for _, id := range hazardIDs(decodePlan(t, stdout)) {
 		assert.NotContains(t, id, "api-breaking:", "no reader after the rollout reads total")
@@ -692,8 +673,6 @@ func TestMigratePlanRename(t *testing.T) {
 	from := filepath.Join(previous, "shop-db")
 
 	stdout, _, err := runMigratePlanCmd(t, service, "--from", from, "--format", "json")
-	// planner lands separately; remove this skip at integration
-	skipWithoutPlanner(t, err)
 	require.NoError(t, err)
 	assert.Contains(t, hazardIDs(decodePlan(t, stdout)), "destructive:table/order/column/total", "without --rename the change is a drop and an add")
 
