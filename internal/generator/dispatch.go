@@ -385,15 +385,9 @@ func (r run) generateSQL() error {
 	if err != nil {
 		return err
 	}
-	names := r.Options.Naming.OrDefault()
-	output, err := sqlgen.Generate(r.Schema, sqlgen.Options{
-		SchemaName:          r.Config.Name,
-		Dependencies:        deps,
-		Clock:               r.Options.Clock,
-		ViewOwner:           r.Outputs.SQLViewOwner(),
-		MetadataKeyPrefix:   names.MetadataKeyPrefix,
-		HistoryActorSetting: names.HistoryActorSetting,
-	})
+	opts := SQLOptions(r.Config, r.Outputs, deps, r.Options.Naming)
+	opts.Clock = r.Options.Clock
+	output, err := sqlgen.Generate(r.Schema, opts)
 	if err != nil {
 		return fmt.Errorf("generator: sql for %s: %w", r.Config.Name, err)
 	}
