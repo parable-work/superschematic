@@ -201,7 +201,7 @@ func TestSQLiteHazardClasses(t *testing.T) {
 			reason: "add shipped_at with a default that is not a constant"},
 		{plan: "rebuild-add-uuid-column", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable}},
 		{plan: "rebuild-batched", op: "copyTable", subject: "table/order", phase: Expand,
-			want: []HazardClass{destructive, blockingClass, compat, copyTable},
+			want:   []HazardClass{destructive, blockingClass, compat, copyTable},
 			reason: "cannot add shipped_at with a default that is not a constant, drop NOT NULL from code, drop NOT NULL from placed_at and change the type of total, so"},
 		{plan: "rebuild-batched", op: "copyTable", subject: "table/order", phase: Contract,
 			want: []HazardClass{destructive, blockingClass, dataDependent, copyTable}},
