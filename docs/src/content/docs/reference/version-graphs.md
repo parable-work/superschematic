@@ -197,10 +197,13 @@ calls the crate's Rust API through a PyO3 extension instead
 
 ### The descriptor
 
-The ORM generator builds each graph's descriptor from the IR and writes it
-twice: as the constant `<Name>GraphDescriptor` in the ORM package, and as
-`versiongraph/<name>.json` in the Go types module, where a browser or
-another runtime reads the same one. Writing the types module removes each
+Each graph's descriptor is built once from the IR, and every generated
+package that runs the graph embeds the same one: the constant
+`<Name>GraphDescriptor` in the Go ORM package and in the TypeScript types
+package's `versiongraph/<name>.ts`, and `<NAME>_GRAPH_DESCRIPTOR` in the
+Rust and Python types packages. The Go types module also writes it as
+`versiongraph/<name>.json`, where a browser or another runtime reads the
+same one. Writing the types module removes each
 `versiongraph/*.json` that no graph of the schema writes and leaves any
 other file there.
 
@@ -309,7 +312,9 @@ history images by `(id, _version)`, read and write commits, patches,
 snapshots and the release pointer, take the next sequence under a root
 lock, walk commits, read discarded refs and idle change sets, prune and
 take the sweep lock. It asks the adapter for one transaction per
-operation.
+operation. Postgres is the only adapter, in Go and in every other
+language's engine; another database needs its own implementation of that
+interface.
 
 Package `postgres` is the Postgres adapter. It builds its statements at run
 time from the descriptor, reads live rows with `to_jsonb` and history
@@ -400,7 +405,9 @@ Otherwise, in order, it:
 It writes as `SweepOptions.Actor` and returns a `SweepReport` of what it
 did. `RunSweeper(ctx, interval, options, onPass)` runs a pass at once and
 then every `interval` until `ctx` is done; since each pass takes the lock,
-one replica sweeps at a time.
+one replica sweeps at a time. Every language's adapter takes the lock
+under the same key, so sweepers written in different languages exclude
+each other too.
 
 `engine.ErrorCode(err)` names an error with a code every language's engine
 shares (`version_conflict`, `ref_sealed`, `primary_merge_only`,
@@ -422,9 +429,30 @@ every graph's facade shares (`GraphEdits`, `GraphSweepOptions`,
 `RecipeGraph`, which runs each operation on the engine and its Postgres
 adapter. Every method but `Sweep` and `RunSweeper` runs in one transaction
 of the ORM's pool and needs a user in the context (`WithUserID`), the actor
-of its writes; a sweep writes as `GraphSweepOptions.Actor`. Every write through a ref takes the ref's expected
+of its writes, else it returns `ErrNoUserInContext`; a sweep writes as `GraphSweepOptions.Actor`. Every write through a ref takes the ref's expected
 `_version` and fails with `ErrVersionConflict` when the ref has moved on.
 A ref or commit that does not exist, or a discarded ref, is `ErrNotFound`.
+
+From the ORM's own tests, a recipe's first draft branched, edited,
+committed, merged as a tagged version and released:
+
+```go
+ctx := WithUserID(context.Background(), cook)
+g := db.RecipeGraph()
+
+main, err := g.CreatePrimary(ctx, *recipe.Id, "main")
+draft, err := g.Branch(ctx, *main.Id, "first draft")
+saved, err := g.Save(ctx, *draft.Id, draft.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{
+	{Position: 1, Instruction: "Mix", Timings: types.GenericJSON(`{"knead": 10, "rest": 30}`)},
+	{Position: 2, Instruction: "Bake", Timings: types.GenericJSON(`{"oven": 40}`)},
+}}})
+_, err = g.Commit(ctx, *draft.Id, saved.Ref.Version, RecipeCommitOptions{Message: "first draft"})
+
+// The only write a primary line takes is a merge. Tag makes the commit published version 1.
+first, err := g.Merge(ctx, *draft.Id, *main.Id, main.Version, nil, RecipeCommitOptions{Message: "first", Tag: true})
+release, err := g.Release(ctx, *recipe.Id, *first.Commit.Id, 0) // 0: the first release
+released, err := g.Released(ctx, *recipe.Id)                    // the pointer and the released tree
+```
 
 | Method | Does |
 | --- | --- |

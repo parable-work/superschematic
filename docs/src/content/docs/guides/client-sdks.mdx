@@ -100,12 +100,24 @@ The Go, TypeScript and Python SDKs check an input against its type and
 constraints before sending it, and fail with a `ValidationError` without a
 request. The error names each broken rule at its path, the same in all
 three (`lines` for `listMin`, `lines[1].quantity` for `min`), except that
-Go keys a map value `field[key]` where TypeScript and Python key it
-`field.key`. The Python SDK checks with the generated types package,
+for a map field inside an input type Go keys a value `field[key]` where
+TypeScript and Python key it `field.key`. A map argument is keyed
+`name[key]` in all three. The Python SDK checks with the generated types package,
 pydantic for the types and `validate_all` for the constraints, so it
 needs that package installed. The Rust SDK checks an input against the
 schema before sending too, and fails with one `SDKError::Config` message
 that names each path.
+
+## Path parameters
+
+Every SDK percent-encodes a path parameter's value once, as one path
+segment, so a value holding `/`, `%`, `?`, `#`, a space or non-ASCII text
+reaches the route intact: `a/b` as the label in `grids/{id}/cells/{label}`
+is one segment, not two. Every generated server decodes it exactly once
+before your implementation sees it, and answers 400 to an escape that does
+not decode. The one value that cannot be sent is `.` or `..` through the
+TypeScript or Rust SDK, whose URL parsers remove a dot segment; the Go and
+Python SDKs send it as it is.
 
 ## Timeouts, retries and hooks
 

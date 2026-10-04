@@ -54,7 +54,8 @@ make build
 bin/superschematic --help
 ```
 
-It lists `build`, `build-all`, `format` and `json-schema`.
+It lists the core's five commands: `build`, `build-all`, `format`,
+`json-schema` and `behaviors`.
 
 ## Compile generated Go code
 
