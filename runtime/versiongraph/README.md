@@ -482,7 +482,11 @@ adapter returns as canonical date-times.
 A member row holds its kind's role columns (id, entity key, ref, root,
 tombstone, version) as columns and every other column the descriptor
 declares as one canonical JSON object, `data`; read back, it is the
-kind's canonical row, keyed by the descriptor's column names. Foreign keys
+kind's canonical row, keyed by the descriptor's column names, with every
+column the kind declares: one the stored row lacks, because the kind
+gained it after the row was written, reads as `null`, as a Postgres row
+reads a column added after it. An image likewise reads with every column
+the kind declares and its history does not exclude. Foreign keys
 check every edge inside the layout, immediately: a ref is written before a
 commit of it, and its head moves to a commit only once the commit is
 written. There is no root table, so no key checks a root; the adapter

@@ -142,7 +142,8 @@ graph's name, `options.graph`, so one file holds several graphs, and
 `options.tableName` names each table and index from its local name
 (`graph_` before it by default), so a D16 behavior can pass its
 `sql.table`. It reads from the descriptor only its kinds' role columns,
-value classes and `history`. `createTables` creates the layout where it is
+value classes and `history`, and returns each row with every column its
+kind declares, `null` where the stored row lacks one. `createTables` creates the layout where it is
 missing, and `sqliteLayout(tableName)` returns its statements, one each,
 with no trigger and no transaction control, for a caller that runs its own
 migrations. `runtime/versiongraph/README.md` ("SQLite") holds the layout
