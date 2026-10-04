@@ -10,7 +10,7 @@ is a recorded deviation from superscalar, which only builds docs in
 
 `docs/DECISIONS.md` is the decision log for this repository,
 `docs/extension-model.md` is the design of the extension seam and
-`docs/stack-model.md` is the design of the stack model (D26). None is a
+`docs/stack-model.md` is the design of the stack model (D30). None is a
 Starlight page; source comments cite them by path.
 
 ## Local development

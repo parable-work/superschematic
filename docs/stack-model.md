@@ -2,7 +2,7 @@
 
 This is the design of the stack model: how a schema tree declares what
 runs where, how superschematic resolves the wiring between the services in
-it, and how it deploys them. Nothing in it is built yet. D26 in
+it, and how it deploys them. Nothing in it is built yet. D30 in
 `docs/DECISIONS.md` records the decisions; this document is the design they
 point at.
 
