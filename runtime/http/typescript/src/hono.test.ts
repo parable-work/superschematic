@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { createHmac } from 'node:crypto';
 import { parseIdentityUUID } from 'superscalar/scalars';
 import { Hono } from 'hono';
 import { HttpProblem, MemoryRateLimitStore, OperationResult, type OperationSpec, type Principal, type RateLimitStore } from './index';
-import { errorHandler, honoPath, mountManualOperation, mountOperation, notFoundHandler, parseJsonBody } from './hono';
+import { errorHandler, honoPath, mountManualOperation, mountOperation, notFoundHandler, parseJsonBody, type WebhookVerifier } from './hono';
 
 const getOrder: OperationSpec = {
   name: 'getOrder',
@@ -527,5 +528,97 @@ describe('@timeout', () => {
     });
     expect((await app.request('/api/gated')).status).toBe(504);
     expect((await app.request('/api/slow-manual')).status).toBe(504);
+  });
+});
+
+describe('@hmacVerified', () => {
+  const secret = 'whsec_test';
+  const signed: OperationSpec = { ...createOrder, name: 'receiveEvent', path: '/api/webhooks/shop', rateLimitPerMinute: 1, webhookProvider: 'shop' };
+  const signedManual: OperationSpec = { ...stream, name: 'receiveRawEvent', path: '/api/webhooks/shop/raw', webhookProvider: 'shop' };
+
+  function signatureOf(body: string): string {
+    return createHmac('sha256', secret).update(body).digest('hex');
+  }
+
+  // verifyShop reads the body with c.req.text(), as a provider's SDK does,
+  // and refuses a request whose signature header is not the body's HMAC.
+  const verifyShop: WebhookVerifier = async (c, next) => {
+    const body = await c.req.text();
+    if (c.req.header('x-shop-signature') !== signatureOf(body)) {
+      throw new HttpProblem(401, 'The webhook signature does not match', { code: 'invalid_signature' });
+    }
+    await next();
+  };
+
+  function webhookApp(verifier: WebhookVerifier = verifyShop) {
+    const app = new Hono();
+    const options = { authenticate: async (ctx: { headers: Headers }) => principals[ctx.headers.get('x-user') ?? ''] ?? null };
+    mountOperation(app, signed, async (_ctx, request) => ({ received: request.input }), options, { webhookVerifier: verifier });
+    mountManualOperation(app, signedManual, async c => c.text(`raw ${await c.req.text()}`), options, { webhookVerifier: verifier });
+    return app;
+  }
+
+  function post(app: Hono, path: string, body: string, headers: Record<string, string> = {}) {
+    return app.request(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-real-ip': '198.51.100.9', ...headers }, body });
+  }
+
+  test('an operation that names a provider is not mounted without a verifier', () => {
+    const app = new Hono();
+    expect(() => mountOperation(app, signed, async () => null)).toThrow("receiveEvent is @hmacVerified({ provider: 'shop' }) and was mounted without a webhook verifier");
+    expect(() => mountManualOperation(app, signedManual, undefined)).toThrow("receiveRawEvent is @hmacVerified({ provider: 'shop' }) and was mounted without a webhook verifier");
+  });
+
+  test('a signed request reaches the implementation with the body the verifier read', async () => {
+    const body = JSON.stringify({ name: 'paid' });
+    const response = await post(webhookApp(), '/api/webhooks/shop', body, { 'x-shop-signature': signatureOf(body), 'x-user': 'writer' });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toEqual({ received: { name: 'paid' } });
+  });
+
+  test('the verifier runs before the rate limit, the body limit and the gate', async () => {
+    const app = webhookApp();
+    const body = JSON.stringify({ name: 'paid' });
+    const large = JSON.stringify({ name: 'x'.repeat(100) });
+    const unsigned = async (sent: string, headers: Record<string, string> = {}) => {
+      const response = await post(app, '/api/webhooks/shop', sent, { 'x-shop-signature': 'forged', ...headers });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ status: 401, code: 'invalid_signature' });
+    };
+    // Past the 64-byte body limit and without a caller: the signature is refused first.
+    await unsigned(large);
+    await unsigned(body);
+    // A refused signature took no rate-limit token.
+    expect((await post(app, '/api/webhooks/shop', body, { 'x-shop-signature': signatureOf(body), 'x-user': 'writer' })).status).toBe(200);
+    expect((await post(app, '/api/webhooks/shop', body, { 'x-shop-signature': signatureOf(body), 'x-user': 'writer' })).status).toBe(429);
+    await unsigned(body, { 'x-user': 'writer' });
+
+    const fresh = webhookApp();
+    expect((await post(fresh, '/api/webhooks/shop', large, { 'x-shop-signature': signatureOf(large), 'x-user': 'writer' })).status).toBe(413);
+    const anonymous = await post(fresh, '/api/webhooks/shop', body, { 'x-shop-signature': signatureOf(body) });
+    expect(anonymous.status).toBe(401);
+    expect(await anonymous.json()).toMatchObject({ code: 'unauthorized' });
+  });
+
+  test('a manual route is verified before the service handler, which can still read the body', async () => {
+    const app = webhookApp();
+    const body = '{"raw":true}';
+    const accepted = await post(app, '/api/webhooks/shop/raw', body, { 'x-shop-signature': signatureOf(body), 'x-user': 'writer' });
+    expect(accepted.status).toBe(200);
+    expect(await accepted.text()).toBe(`raw ${body}`);
+    const refused = await post(app, '/api/webhooks/shop/raw', body, { 'x-shop-signature': 'forged', 'x-user': 'writer' });
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toMatchObject({ code: 'invalid_signature' });
+  });
+
+  test("a verifier's own response is the route's answer", async () => {
+    let called = false;
+    const app = webhookApp(async c => {
+      called = true;
+      return c.text('go away', 403);
+    });
+    const response = await post(app, '/api/webhooks/shop', '{"name":"paid"}', { 'x-user': 'writer' });
+    expect(called).toBe(true);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe('go away');
   });
 });
