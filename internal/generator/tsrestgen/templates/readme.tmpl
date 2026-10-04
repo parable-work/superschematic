@@ -11,6 +11,11 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   class with typed arguments (path params as scalar types, query params
   optional unless required, the input type from the generated types package)
   and the `Implementations` record the router takes.
+{{- if .WebhookProviders }} Its
+  `webhookVerifiers` holds the verifier of each `@hmacVerified` provider
+  ({{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}`{{ $p }}`{{ end }}), Hono middleware that checks a request's signature
+  before every other step of the provider's routes.
+{{- end }}
 - `router.ts`: `buildRouter(implementations, options)` returns a Hono router
   that mounts every `@rest` operation under `/api`, decodes parameters,
   parses JSON bodies through the generated strict `parse<Input>FromJSON`
@@ -26,7 +31,7 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
 | Method | Path | Operation | Auth |
 | --- | --- | --- | --- |
 {{- range .Endpoints }}
-| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .ManualRouteRegistration }} (manual){{ end }} | {{ if .PublicRoute }}public{{ else if .RequiredPerms }}{{ join .RequiredPerms ", " }}{{ else if .RequiresAuth }}authenticated{{ else }}none{{ end }} |
+| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ if .PublicRoute }}public{{ else if .RequiredPerms }}{{ join .RequiredPerms ", " }}{{ else if .RequiresAuth }}authenticated{{ else }}none{{ end }} |
 {{- end }}
 
 ## Usage
@@ -36,7 +41,18 @@ import { Hono } from 'hono';
 import { errorHandler, notFoundHandler } from '{{ .RuntimePackage }}/hono';
 import { buildRouter, type Implementations } from '{{ .PackageName }}';
 
+{{ if .WebhookProviders -}}
+const implementations: Implementations = {
+  /* one object per operation class */
+  webhookVerifiers: {
+{{- range .WebhookProviders }}
+    {{ tsString . }}: async (c, next) => { /* refuse a bad signature, else */ await next(); },
+{{- end }}
+  },
+};
+{{ else -}}
 const implementations: Implementations = { /* one object per operation class */ };
+{{ end -}}
 const app = new Hono();
 app.route('/', buildRouter(implementations, {
   authenticate: async ctx => /* the caller, or null */ null,

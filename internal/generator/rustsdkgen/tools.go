@@ -111,6 +111,11 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 
 	endpointsByNamespace := make(map[string][]apigen.EndpointInfo)
 	for _, endpoint := range apiOutput.Endpoints {
+		// A webhook has no SDK method, so no tool, as in the TypeScript
+		// and Go SDKs, whose tools come from the TypeScript SDK's methods.
+		if endpoint.IsWebhook {
+			continue
+		}
 		nsName := endpoint.Namespace
 		if strings.TrimSpace(nsName) == "" {
 			nsName = "root"
