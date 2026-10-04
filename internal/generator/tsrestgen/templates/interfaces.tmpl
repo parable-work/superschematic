@@ -8,6 +8,9 @@
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
 
 import type { OperationResult, RequestContext } from '{{ .RuntimePackage }}';
+{{- if .WebhookProviders }}
+import type { WebhookVerifier } from '{{ .RuntimePackage }}/hono';
+{{- end }}
 {{- if .ScalarImports }}
 import type {
 {{- range .ScalarImports }}
@@ -66,5 +69,17 @@ export interface {{ .InterfaceName }} {
 export interface Implementations {
 {{- range .Namespaces }}
   {{ .Property }}: {{ .InterfaceName }};
+{{- end }}
+{{- if .WebhookProviders }}
+  /**
+   * The verifier of each @hmacVerified provider, which checks the signature
+   * of the provider's requests before every other step of their routes.
+   * buildRouter throws without one for every provider.
+   */
+  webhookVerifiers: {
+{{- range .WebhookProviders }}
+    {{ tsString . }}: WebhookVerifier;
+{{- end }}
+  };
 {{- end }}
 }

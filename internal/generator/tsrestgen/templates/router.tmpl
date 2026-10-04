@@ -73,6 +73,9 @@ export const operationSpecs = {
 {{- if .TimeoutSeconds }}
     timeoutSeconds: {{ .TimeoutSeconds }},
 {{- end }}
+{{- if .WebhookProvider }}
+    webhookProvider: {{ tsString .WebhookProvider }},
+{{- end }}
     manual: {{ .ManualRouteRegistration }},
   },
 {{- end }}
@@ -100,14 +103,31 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
 {{- end }}
 }
 
+{{ if .WebhookProviders -}}
+/**
+ * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
+ * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
+ */
+{{ else -}}
 /** Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application. */
+{{ end -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
+{{- if .WebhookProviders }}
+  for (const provider of [{{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}{{ tsString $p }}{{ end }}] as const) {
+    if (!implementations.webhookVerifiers?.[provider]) {
+      throw new Error(`Implementations.webhookVerifiers for provider ${provider} is required`);
+    }
+  }
+{{- end }}
   const router = new Hono<E>();
 {{- range .Endpoints }}
 {{- if .ManualRouteRegistration }}
   mountManualOperation(router, operationSpecs.{{ .Name }}, options.manualRoutes?.{{ .Name }}, options, {
     rateLimitPerMinute: options.rateLimits?.{{ .Name }},
     timeoutSeconds: options.timeouts?.{{ .Name }},
+{{- if .WebhookProvider }}
+    webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
+{{- end }}
   });
 {{- else }}
   mountOperation(
@@ -140,6 +160,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       bodyLimitBytes: options.bodyLimits?.{{ .Name }},
       rateLimitPerMinute: options.rateLimits?.{{ .Name }},
       timeoutSeconds: options.timeouts?.{{ .Name }},
+{{- if .WebhookProvider }}
+      webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
+{{- end }}
     }
   );
 {{- end }}

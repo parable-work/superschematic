@@ -37,5 +37,10 @@
     "@types/node": "22.19.9",
     "typescript": "5.9.3"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/parable-work/superschematic",
+    "directory": "runtime/engine-workqueue/typescript"
+  }
 }

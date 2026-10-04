@@ -125,17 +125,28 @@ func addImportOperation(t *testing.T, schema *ir.Schema) {
 	t.Fatalf("schema %s has no GridMutations operation set", schema.Name)
 }
 
-// TestNestedArraysAPICrateBuildsAndRoutes generates the Rust types crate
-// and the Rust API crate of fixture-nested-arrays-api, with grid.paint and
-// grid.importGrid added, into a temp tree laid out as a build writes it,
-// and runs cargo test on the API crate with nestedArraysRouterTest: a
-// list-of-lists body reaches the implementation as nested JSON arrays, a
-// list-of-lists result comes back in the success envelope, a path
-// parameter reaches it decoded exactly once, and the manual grid.importGrid
-// has no trait method and no route until the service adds one. The types
-// crate resolves superscalar from the checkout scripts/superscalar-dep.sh
-// stands up. CARGO_TARGET_DIR is honored when set.
+// TestNestedArraysAPICrateBuildsAndRoutes runs cargo test on the Rust API
+// crate of fixture-nested-arrays-api, with grid.paint and grid.importGrid
+// added, with nestedArraysRouterTest: a list-of-lists body reaches the
+// implementation as nested JSON arrays, a list-of-lists result comes back in
+// the success envelope, a path parameter reaches it decoded exactly once,
+// and the manual grid.importGrid has no trait method and no route until the
+// service adds one.
 func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
+	schema := loadNestedArraysSchema(t, true)
+	addImportOperation(t, schema)
+	cargoTestAPICrate(t, nestedArraysService, schema, "nested_arrays", nestedArraysRouterTest)
+}
+
+// cargoTestAPICrate generates the Rust types crate and the Rust API crate of
+// schema into a temp tree laid out as a build writes it, adds test as
+// tests/<testName>.rs of the API crate, with API_CRATE and RUNTIME_CRATE
+// replaced by the crates' module names, and runs cargo test on the API
+// crate. The types crate resolves superscalar from the checkout
+// scripts/superscalar-dep.sh stands up. CARGO_TARGET_DIR is honored when
+// set.
+func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName, test string) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
 	}
@@ -144,8 +155,6 @@ func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 		t.Skip("cargo not available; skipping the Rust API build")
 	}
 	paths := testpaths.Local(t)
-	schema := loadNestedArraysSchema(t, true)
-	addImportOperation(t, schema)
 
 	// The http-runtime dependency is a path relative to the crate, which
 	// cargo resolves from the real directory (macOS /var is /private/var).
@@ -153,16 +162,26 @@ func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	typesDir := filepath.Join(root, "types", "rust", nestedArraysService)
-	apiDir := filepath.Join(root, "api", nestedArraysService)
-	typesOutput, err := rustgen.Generate(schema, rustgen.Options{SchemaName: nestedArraysService, Clock: nestedArraysClock})
+	typesDir := filepath.Join(root, "types", "rust", service)
+	apiDir := filepath.Join(root, "api", service)
+	typesOutput, err := rustgen.Generate(schema, rustgen.Options{SchemaName: service, Clock: nestedArraysClock})
 	if err != nil {
 		t.Fatalf("rustgen.Generate: %v", err)
 	}
 	if err := rustgen.WriteTypes(typesOutput, typesDir); err != nil {
 		t.Fatalf("rustgen.WriteTypes: %v", err)
 	}
-	output := generateNestedArraysAPI(t, schema, typesDir, apiDir)
+	output, err := Generate(schema, Options{
+		AuthProvider: sessionauth.Provider{},
+		SchemaName:   service,
+		TypesCrate:   naming.Default().RustTypesCrate(service),
+		TypesDir:     typesDir,
+		OutputDir:    apiDir,
+		Clock:        nestedArraysClock,
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
 	if err := SetReplacePaths(output, paths, apiDir); err != nil {
 		t.Fatalf("set replace paths: %v", err)
 	}
@@ -184,11 +203,11 @@ superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
 	if err := os.WriteFile(filepath.Join(apiDir, "Cargo.toml"), cargoToml, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	test := strings.NewReplacer("API_CRATE", strings.ReplaceAll(output.CrateName, "-", "_"), "RUNTIME_CRATE", output.RuntimeCrateIdent).Replace(nestedArraysRouterTest)
+	test = strings.NewReplacer("API_CRATE", strings.ReplaceAll(output.CrateName, "-", "_"), "RUNTIME_CRATE", output.RuntimeCrateIdent).Replace(test)
 	if err := os.MkdirAll(filepath.Join(apiDir, "tests"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(apiDir, "tests", "nested_arrays.rs"), []byte(test), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(apiDir, "tests", testName+".rs"), []byte(test), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

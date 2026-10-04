@@ -59,7 +59,7 @@ as their support lands in every generator.
 | `@requireOwnership` | method | the route needs a caller; your implementation checks ownership | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@publicRoute` | method | marks a route anyone may call | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@webhook` | method | an operation a third party calls; the Go and TypeScript SDKs leave it out | [API routes](/superschematic/guides/api-routes/#webhooks) |
-| `@hmacVerified({ provider })` | method | the Go server checks the request's signature with the provider's verifier | [API routes](/superschematic/guides/api-routes/#webhooks) |
+| `@hmacVerified({ provider })` | method | every server checks the request's signature with the provider's verifier before every other step | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | `@rateLimit`, `@bodyLimit`, `@timeout` | class, method | bound a route's requests per minute, body size and duration | [API routes](/superschematic/guides/api-routes/#traffic-controls) |
 | `@manualRouteRegistration` | method | the Go and Rust routers leave the route for your service to mount; the TypeScript router gates it and hands it to your handler | [TypeScript](/superschematic/install/typescript/#serve-a-generated-api), [Rust](/superschematic/install/rust/#serve-a-generated-api) |
 | `@docs`, `@icon` | method | the operation's documentation and icon | [Documentation](/superschematic/reference/documentation/) |
