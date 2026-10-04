@@ -21,8 +21,8 @@ import { workflow } from './workflow.js';
 /** The core's behaviors, in the order the engine registers them. */
 export const coreBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([workflow, comments, revisions, dependencies, links, rollups, search, reactions]);
 
-export { isTerminalState } from './workflow.js';
-export type { WorkflowConfig, WorkflowStates, WorkflowTransition } from './workflow.js';
+export { isTerminalState, stateOutcome } from './workflow.js';
+export type { WorkflowConfig, WorkflowOutcome, WorkflowStates, WorkflowTransition } from './workflow.js';
 export type { CommentRecord } from './comments.js';
 export type { ProposalRecord, ProposalState, RevisionRecord, RevisionsConfig } from './revisions.js';
 export type { BlockerRecord, DependenciesConfig, DependentRecord } from './dependencies.js';
@@ -30,4 +30,4 @@ export type { LinkRecord, LinkSpec, LinksConfig } from './links.js';
 export { MAX_ROLLUP_READ } from './rollups.js';
 export type { RollupFunction, RollupOver, RollupSpec, RollupsConfig } from './rollups.js';
 export type { SearchConfig, SearchHit, SnippetPart } from './search.js';
-export type { ReactionsConfig, ReactionsRule, ReactionsThen, ReactionsWhen } from './reactions.js';
+export type { ReactionsConfig, ReactionsRule, ReactionsTerminal, ReactionsThen, ReactionsWhen } from './reactions.js';

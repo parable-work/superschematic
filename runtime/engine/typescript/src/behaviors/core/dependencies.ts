@@ -2,20 +2,28 @@
 Dependencies, the core's blockers between instances (D16, amended). An
 edge says a blocker holds up its dependent. A blocker is an instance of
 the dependent's own schema, or of one the config lists, in the same
-namespace, and its schema composes Workflow. It is open while its status
-is not a terminal state of its own schema's Workflow config
-(isTerminalState), and the dependent is blocked while any blocker is
-open. One function, openBlockers, answers that for the blocked field and
-the guard alike, over every blocker, whatever its schema.
+namespace, and its schema composes Workflow. It is finished once its
+status is a terminal state of its own schema's Workflow config whose
+outcome (stateOutcome) the dependent's satisfiedBy lists, success by
+default, and open until then: a blocker that failed stays open, so it
+does not let its dependents through, until it is removed. The dependent
+is blocked while any blocker is open. One function, openBlockers,
+answers that for the blocked field and the guard alike, over every
+blocker, whatever its schema.
 
 The guard gates the type's own Workflow: a transition into a gated state
-(every terminal state of the type's Workflow, or the ones the config
-lists, which must be terminal) is refused while the instance is blocked.
-It reads the state from transition's to, which Workflow's closed
+(every terminal state of the type's Workflow, or the states the config
+lists, terminal or not) is refused while the instance is blocked. A gate
+on a state that is not terminal holds up the start of work, a move from
+todo to doing say, as a gate on a terminal one holds up its end. It
+reads the state from transition's to, which Workflow's closed
 paramsSchema makes the only parameter, and it runs for every transition
 request, a caller's, another behavior's call() and another instance's
-invoke alike, before any handler. An instance in a gated state takes no
-open blocker, so a finished instance is never blocked.
+invoke alike, before any handler. An instance in a gated state that is
+terminal takes no open blocker: no transition leaves it, and its gate let
+it in with every blocker finished, so it is never blocked. One in a gated
+state that is not terminal takes one, which holds up its next move into
+a gated state; it is how a dependency found during the work is recorded.
 
 addBlocker refuses an edge that would close a cycle, in any schema: the
 new blocker must not be blocked by the dependent, directly or through
@@ -26,8 +34,8 @@ Deleting a dependent deletes its edges. Blockers are read as the caller,
 so a caller who may not read a blocker's schema cannot read whether its
 dependents are blocked.
 
-configChange: schemas and gatedStates may change (existing edges stay,
-and parseConfig holds gatedStates to the new Workflow's terminal
+configChange: schemas, gatedStates and satisfiedBy may change (existing
+edges stay, and parseConfig holds gatedStates to the new Workflow's
 states). Dependencies can be added to a schema that has instances, which
 start with no blockers, and cannot be removed from one: its edges and
 references would stay behind.
@@ -38,14 +46,18 @@ import type { Row } from '../../storage/driver.js';
 import { BehaviorConfigError, defineBehavior, type InstanceContext, type InstanceView } from '../behavior.js';
 import { page, pageRequest } from '../paging.js';
 import declaration from './declarations/Dependencies.behavior.json' with { type: 'json' };
-import { isTerminalState, type WorkflowStates } from './workflow.js';
+import { isTerminalState, stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
 /** Dependencies' config, parsed: the defaults filled in. */
 export interface DependenciesConfig {
   /** The schemas a blocker may be an instance of. */
   readonly schemas: readonly string[];
-  /** The states of the type's Workflow a transition into waits for every blocker. */
+  /** The states of the type's Workflow a transition into waits for every blocker to finish. */
   readonly gatedStates: readonly string[];
+  /** The outcomes of a blocker's terminal state that finish it. */
+  readonly satisfiedBy: readonly WorkflowOutcome[];
+  /** The gated states no transition of the type's Workflow leaves: an instance in one takes no open blocker. */
+  readonly terminalGatedStates: readonly string[];
 }
 
 /** A blocker, as addBlocker and listBlockers return it. */
@@ -54,7 +66,7 @@ export interface BlockerRecord {
   readonly id: string;
   /** Its Workflow status; absent when it has none. */
   readonly status?: string;
-  /** Whether its status is not a terminal state of its schema's Workflow. */
+  /** Whether it is not finished: its status is not a terminal state of its schema's Workflow whose outcome satisfiedBy lists. */
   readonly open: boolean;
 }
 
@@ -91,12 +103,13 @@ function edges(view: InstanceView<unknown>, after = 0, limit = -1): Edge[] {
 /**
  * blockers reads each blocker's status as the caller: its schema's
  * Workflow config and the instance's status field. A blocker is open
- * unless its status is a terminal state of that config. One whose row is
- * gone while its edge remains, which only happens while its delete runs
- * the hook that removes the edge, stays open until the edge goes, so the
- * dependent's removeBlocker event records blocked changing.
+ * unless its status is a terminal state of that config whose outcome the
+ * dependent's satisfiedBy lists. One whose row is gone while its edge
+ * remains, which only happens while its delete runs the hook that removes
+ * the edge, stays open until the edge goes, so the dependent's
+ * removeBlocker event records blocked changing.
  */
-function blockers(view: InstanceView<unknown>, list: readonly Edge[]): BlockerRecord[] {
+function blockers(view: InstanceView<DependenciesConfig>, list: readonly Edge[]): BlockerRecord[] {
   const bySchema = new Map<string, string[]>();
   for (const edge of list) {
     bySchema.set(edge.schema, [...(bySchema.get(edge.schema) ?? []), edge.id]);
@@ -107,8 +120,9 @@ function blockers(view: InstanceView<unknown>, list: readonly Edge[]): BlockerRe
     for (let start = 0; start < ids.length; start += BATCH) {
       for (const [id, record] of view.instances.getMany(schema, ids.slice(start, start + BATCH), { fields: ['status'] })) {
         const status = typeof record.data.status === 'string' ? record.data.status : undefined;
-        const done = flow !== undefined && status !== undefined && isTerminalState(flow, status);
-        found.set(`${schema}\u0000${id}`, { schema, id, ...(status === undefined ? {} : { status }), open: !done });
+        const outcome = flow !== undefined && status !== undefined ? stateOutcome(flow, status) : undefined;
+        const finished = outcome !== undefined && view.config.satisfiedBy.includes(outcome);
+        found.set(`${schema}\u0000${id}`, { schema, id, ...(status === undefined ? {} : { status }), open: !finished });
       }
     }
   }
@@ -116,7 +130,7 @@ function blockers(view: InstanceView<unknown>, list: readonly Edge[]): BlockerRe
 }
 
 /** openBlockers is the one rule the blocked field and the guard share: the blockers that are open. */
-function openBlockers(view: InstanceView<unknown>): BlockerRecord[] {
+function openBlockers(view: InstanceView<DependenciesConfig>): BlockerRecord[] {
   return blockers(view, edges(view)).filter((blocker) => blocker.open);
 }
 
@@ -164,27 +178,26 @@ export const dependencies = defineBehavior<DependenciesConfig>({
   declaration,
 
   // The configSchema holds the shape; this holds gatedStates to the
-  // terminal states of the type's Workflow, whose config it is given.
+  // states of the type's Workflow, whose config it is given, and fills
+  // in every terminal state when the config names none.
   parseConfig(json, target) {
-    const raw = json as { schemas?: string[]; gatedStates?: string[] };
+    const raw = json as { schemas?: string[]; gatedStates?: string[]; satisfiedBy?: WorkflowOutcome[] };
     const flow = target.configs.Workflow as Partial<WorkflowStates> | undefined;
     const schemas = raw.schemas ?? [target.schema];
+    const satisfiedBy = raw.satisfiedBy ?? ['success'];
     if (flow === undefined || !Array.isArray(flow.states) || !Array.isArray(flow.transitions)) {
       // The type does not list Workflow, or gives it a config it refuses:
       // the requires check or Workflow's own config check refuses it.
-      return { schemas, gatedStates: raw.gatedStates ?? [] };
+      return { schemas, gatedStates: raw.gatedStates ?? [], satisfiedBy, terminalGatedStates: [] };
     }
     const states = flow as WorkflowStates;
-    const terminal = states.states.filter((state) => isTerminalState(states, state));
     for (const state of raw.gatedStates ?? []) {
       if (!states.states.includes(state)) {
         throw new BehaviorConfigError(`gated state "${state}" is not a state of the type's Workflow (${states.states.join(', ')})`);
       }
-      if (!terminal.includes(state)) {
-        throw new BehaviorConfigError(`gated state "${state}" is not a terminal state of the type's Workflow: a transition leaves it`);
-      }
     }
-    return { schemas, gatedStates: raw.gatedStates ?? terminal };
+    const gatedStates = raw.gatedStates ?? states.states.filter((state) => isTerminalState(states, state));
+    return { schemas, gatedStates, satisfiedBy, terminalGatedStates: gatedStates.filter((state) => isTerminalState(states, state)) };
   },
 
   configChange(before, after) {
@@ -267,10 +280,19 @@ export const dependencies = defineBehavior<DependenciesConfig>({
           `${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`
         );
       }
+      // An instance in a gated state no transition leaves has passed its
+      // last gate: a blocker could hold up nothing, and blocked would say
+      // it waits.
       const [blocker] = blockers(context, [{ edge: 0, ...target }]);
       const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
-      if (blocker.open && typeof status === 'string' && context.config.gatedStates.includes(status)) {
-        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, `it is ${status}, a gated state, so it takes no blocker that is not done: ${describe(blocker)}`);
+      if (blocker.open && typeof status === 'string' && context.config.terminalGatedStates.includes(status)) {
+        throw new BehaviorVetoError(
+          NAME,
+          'addBlocker',
+          context.schema,
+          context.id,
+          `it is ${status}, a gated state no transition leaves, so it takes no blocker that is not finished: ${describe(blocker)}`
+        );
       }
       context.sql.run(`INSERT INTO ${table} (namespace, schema, id, blocker_schema, blocker_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
         ...key(context),

@@ -1,6 +1,6 @@
 {
   "name": "Reactions",
-  "description": "Rules that move Workflow statuses after a change commits: when the instance's status enters a state, or when every instance that links to it through a link is in a terminal state, move the instance, or the instance one of its links points to, to a state. An engine runs them after the commit, as the principal it names for its runner, so a rule never refuses the change that set it off. A target already in the state, with no transition to it, or whose guards refuse is left as it is.",
+  "description": "Rules that move Workflow statuses after a change commits: when the instance's status enters a state, when every instance that links to it through a link is in a terminal state, optionally one with a listed outcome, or when one of them enters a terminal state with a listed outcome, move the instance, or the instance one of its links points to, to a state. An engine runs them after the commit, as the principal it names for its runner, so a rule never refuses the change that set it off. A target already in the state, with no transition to it, or whose guards refuse is left as it is.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -17,7 +17,7 @@
           "required": ["when", "then"],
           "properties": {
             "when": {
-              "description": "What sets the rule off: one of enters and allTerminal.",
+              "description": "What sets the rule off: one of enters, allTerminal and anyTerminal.",
               "type": "object",
               "additionalProperties": false,
               "minProperties": 1,
@@ -29,13 +29,37 @@
                   "minLength": 1
                 },
                 "allTerminal": {
-                  "description": "The rule fires on an instance when an instance of schema that links to it through link changes or goes, and every instance that links to it there is in a terminal state of its own schema's Workflow, at least one.",
+                  "description": "The rule fires on an instance when an instance of schema that links to it through link changes or goes, and every instance that links to it there is in a terminal state of its own schema's Workflow, with an outcome outcomes lists when it is given, at least one.",
                   "type": "object",
                   "additionalProperties": false,
                   "required": ["schema", "link"],
                   "properties": {
                     "schema": { "description": "The schema of the linking instances, which composes Links and Workflow.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
-                    "link": { "description": "The link of that schema's Links config that points at this type's schema.", "type": "string", "pattern": "^[a-z][A-Za-z0-9]{0,63}$" }
+                    "link": { "description": "The link of that schema's Links config that points at this type's schema.", "type": "string", "pattern": "^[a-z][A-Za-z0-9]{0,63}$" },
+                    "outcomes": {
+                      "description": "The outcomes a linking instance's terminal state must have; every outcome when absent.",
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": { "enum": ["success", "failure", "neutral"] }
+                    }
+                  }
+                },
+                "anyTerminal": {
+                  "description": "The rule fires on an instance when an instance of schema that links to it through link enters a terminal state of its own schema's Workflow whose outcome outcomes lists, by a create or a transition, or is linked to it while in one.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["schema", "link", "outcomes"],
+                  "properties": {
+                    "schema": { "description": "The schema of the linking instances, which composes Links and Workflow.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+                    "link": { "description": "The link of that schema's Links config that points at this type's schema.", "type": "string", "pattern": "^[a-z][A-Za-z0-9]{0,63}$" },
+                    "outcomes": {
+                      "description": "The outcomes of the terminal states that set the rule off.",
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": { "enum": ["success", "failure", "neutral"] }
+                    }
                   }
                 }
               }

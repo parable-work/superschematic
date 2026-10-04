@@ -5,7 +5,8 @@
 // whose tasks wait on tasks and documents and link to both and to a
 // project, fixture-rollups-json, whose projects roll their tasks up,
 // fixture-search-json, whose notes are searched, and
-// fixture-reactions-json, whose projects start and finish their parent.
+// fixture-reactions-json, whose projects start, finish and fail their
+// parent.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -249,7 +250,7 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.invoke(writer, 'projects', 'launch', 'transition', { to: 'done' }), { from: 'active', to: 'done' });
     });
 
-    test('it runs the project tree document: a project starts its parent, and the last to finish finishes it, after the commit', () => {
+    test('it runs the project tree document: a project starts its parent, the last to finish finishes it, and one that fails fails it, after the commit', () => {
       const runner: Principal = { subject: 'runner', permissions: [] };
       const engine = openTestEngine({ driver, runner: { principal: runner } });
       engine.schemas.define(alice, projectTreeDocument());
@@ -278,6 +279,22 @@ for (const driver of drivers) {
           ['runner', { to: 'doing' }, 'Reactions', 1],
           ['runner', { to: 'done' }, 'Reactions', 1],
         ]
+      );
+
+      // A tree with a failed project fails its parent, and is never done.
+      for (const id of ['release', 'docs', 'site']) {
+        engine.instances.create(writer, 'projects', { title: id }, { id });
+      }
+      for (const id of ['docs', 'site']) {
+        engine.instances.invoke(writer, 'projects', id, 'link', { name: 'parent', id: 'release' });
+        engine.instances.invoke(writer, 'projects', id, 'transition', { to: 'doing' });
+      }
+      engine.instances.invoke(writer, 'projects', 'docs', 'transition', { to: 'failed' });
+      engine.instances.invoke(writer, 'projects', 'site', 'transition', { to: 'done' });
+      engine.runner.runDue();
+      assert.deepEqual(
+        ['release', 'docs', 'site'].map((id) => engine.instances.get(alice, 'projects', id)?.data.status),
+        ['failed', 'failed', 'done']
       );
     });
   });

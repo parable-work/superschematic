@@ -70,12 +70,25 @@ type Naming struct {
 	ScalarPythonModule string `toml:"scalar_python_module"`
 	ScalarRustCrate    string `toml:"scalar_rust_crate"`
 
+	// ScalarRustRegistry is the Rust expression a generated validator
+	// reads the scalar registry from, of type `&'static Registry` of the
+	// scalar crate. Unset, it is the crate's builtin registry
+	// (`<scalar crate>::Registry::builtin()`); a scalar crate that adds
+	// its own scalars names the function that returns the assembled one,
+	// so their values are not refused as unknown scalars.
+	ScalarRustRegistry string `toml:"scalar_rust_registry"`
+
 	// Runtime module coordinates the generated Go modules require.
 	SchemaIRGoModule      string `toml:"schema_ir_go_module"`
 	SchemaRuntimeGoModule string `toml:"schema_runtime_go_module"`
 	HTTPRuntimeGoModule   string `toml:"http_runtime_go_module"`
 	HTTPRuntimeRustCrate  string `toml:"http_runtime_rust_crate"`
 	PtrGoModule           string `toml:"ptr_go_module"`
+
+	// SchemaRuntimeRustCrate is the crate a generated Rust types crate's
+	// validators call: the error map, the JSON type checks and compiled
+	// patterns.
+	SchemaRuntimeRustCrate string `toml:"schema_runtime_rust_crate"`
 
 	// VersionGraphGoModule is the Go binding of the version-graph core
 	// (D17), which a generated ORM imports when its schema declares a
@@ -227,6 +240,9 @@ type PathsConfig struct {
 	SchemaIR string `toml:"schema_ir"`
 	// SchemaRuntimeGo holds the schema runtime Go module.
 	SchemaRuntimeGo string `toml:"schema_runtime_go"`
+	// SchemaRuntimeRust holds the schema runtime Rust crate the generated
+	// Rust validators call.
+	SchemaRuntimeRust string `toml:"schema_runtime_rust"`
 	// VersionGraphGo holds the version-graph core's Go binding module.
 	VersionGraphGo string `toml:"versiongraph_go"`
 	// VersionGraphTypeScript holds the version-graph runtime's npm package
@@ -253,6 +269,7 @@ type LocalPaths struct {
 	ScalarRust             string
 	SchemaIR               string
 	SchemaRuntimeGo        string
+	SchemaRuntimeRust      string
 	VersionGraphGo         string
 	VersionGraphTypeScript string
 	VersionGraphRust       string
@@ -276,6 +293,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		ScalarRust:             resolve(n.Paths.ScalarRust),
 		SchemaIR:               resolve(n.Paths.SchemaIR),
 		SchemaRuntimeGo:        resolve(n.Paths.SchemaRuntimeGo),
+		SchemaRuntimeRust:      resolve(n.Paths.SchemaRuntimeRust),
 		VersionGraphGo:         resolve(n.Paths.VersionGraphGo),
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
@@ -296,6 +314,7 @@ func (p PathsConfig) checkRelative() error {
 		{"scalar_rust", p.ScalarRust},
 		{"schema_ir", p.SchemaIR},
 		{"schema_runtime_go", p.SchemaRuntimeGo},
+		{"schema_runtime_rust", p.SchemaRuntimeRust},
 		{"versiongraph_go", p.VersionGraphGo},
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
@@ -395,6 +414,7 @@ func Default() Naming {
 		ScalarRustCrate:          "superscalar",
 		SchemaIRGoModule:         "github.com/parable-work/superschematic/ir",
 		SchemaRuntimeGoModule:    "github.com/parable-work/superschematic/runtime/schema/go",
+		SchemaRuntimeRustCrate:   "superschematic-schema-runtime",
 		VersionGraphGoModule:     "github.com/parable-work/superschematic/runtime/versiongraph/go",
 		VersionGraphRustCrate:    "superschematic-versiongraph-engine",
 		HTTPRuntimeGoModule:      "github.com/parable-work/superschematic/runtime/http/go",
@@ -443,6 +463,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.ScalarRustCrate, d.ScalarRustCrate)
 	fill(&n.SchemaIRGoModule, d.SchemaIRGoModule)
 	fill(&n.SchemaRuntimeGoModule, d.SchemaRuntimeGoModule)
+	fill(&n.SchemaRuntimeRustCrate, d.SchemaRuntimeRustCrate)
 	fill(&n.VersionGraphGoModule, d.VersionGraphGoModule)
 	fill(&n.VersionGraphRustCrate, d.VersionGraphRustCrate)
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
@@ -623,6 +644,23 @@ func (n Naming) RustAPICrate(schemaName string) string {
 // Cargo name with '-' folded to '_'.
 func (n Naming) ScalarRustCrateIdent() string {
 	return strings.ReplaceAll(n.ScalarRustCrate, "-", "_")
+}
+
+// ScalarRustRegistryExpr is the Rust expression a generated validator
+// reads the scalar registry from: scalar_rust_registry when the naming file
+// sets it, otherwise the scalar crate's builtin registry, spelled with the
+// crate's identifier so a renamed scalar crate keeps a working default.
+func (n Naming) ScalarRustRegistryExpr() string {
+	if n.ScalarRustRegistry != "" {
+		return n.ScalarRustRegistry
+	}
+	return n.ScalarRustCrateIdent() + "::Registry::builtin()"
+}
+
+// SchemaRuntimeRustCrateIdent is the schema runtime crate as Rust source
+// spells it: the Cargo name with '-' folded to '_'.
+func (n Naming) SchemaRuntimeRustCrateIdent() string {
+	return strings.ReplaceAll(n.SchemaRuntimeRustCrate, "-", "_")
 }
 
 // VersionGraphRustCrateIdent is the version graph's Rust engine crate as

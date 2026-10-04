@@ -1,7 +1,9 @@
 // Dependencies, the core's blockers: the blocked field and the Workflow
-// gate over one rule, across schemas; the edges addBlocker refuses; the
-// lists; a blocker's delete, which removes its edges as the caller; reads
-// as the caller; and its config rules.
+// gate over one rule, across schemas; a blocker's outcome, which finishes
+// it only when satisfiedBy lists it; gates on states a transition leaves;
+// the edges addBlocker refuses; the lists; a blocker's delete, which
+// removes its edges as the caller; reads as the caller; and its config
+// rules.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -40,6 +42,18 @@ const taskFlow = {
 
 // A milestone is active until it ships.
 const milestoneFlow = { states: ['active', 'shipped'], transitions: [{ from: 'active', to: 'shipped' }] };
+
+// A check runs until it passes, fails or is skipped: a failure and a
+// neutral outcome beside the success its config leaves unnamed.
+const checkFlow = {
+  states: ['running', 'passed', 'failed', 'skipped'],
+  transitions: [
+    { from: 'running', to: 'passed' },
+    { from: 'running', to: 'failed' },
+    { from: 'running', to: 'skipped' },
+  ],
+  outcomes: { failed: 'failure', skipped: 'neutral' },
+};
 
 function schema(name: string, behaviors: Array<{ name: string; config?: unknown }>): Record<string, unknown> {
   const document = schemaDocument(name, [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as {
@@ -185,15 +199,85 @@ for (const driver of drivers) {
       assert.equal(thrown(() => add('t2', { id: 't1' }), BehaviorVetoError).reason, 'Task t1 is blocked by Task t2, directly or through others: the edge would close a cycle');
     });
 
-    test('an instance in a gated state takes no open blocker, and one that is done', () => {
+    test('an instance in a gated state no transition leaves takes no open blocker, and one that is finished', () => {
       const engine = world();
       move(engine, 't1', 'doing');
       move(engine, 't1', 'done');
       const refused = thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' }), BehaviorVetoError);
-      assert.equal(refused.reason, 'it is done, a gated state, so it takes no blocker that is not done: Task t2 (todo)');
+      assert.equal(refused.reason, 'it is done, a gated state no transition leaves, so it takes no blocker that is not finished: Task t2 (todo)');
       move(engine, 't3', 'dropped');
       assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't3' }), { schema: 'Task', id: 't3', status: 'dropped', open: false });
       assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false);
+    });
+
+    test('a blocker is finished only in a terminal state whose outcome satisfiedBy lists, success by default', () => {
+      const engine = open();
+      publish(engine, schema('Check', [{ name: 'Workflow', config: checkFlow }]));
+      publish(engine, schema('Milestone', [{ name: 'Workflow', config: milestoneFlow }]));
+      publish(engine, tasks({ schemas: ['Task', 'Check', 'Milestone'], gatedStates: ['done'] }));
+      for (const id of ['t1', 't2']) {
+        engine.instances.create(alice, 'Task', { title: id }, { id });
+      }
+      for (const id of ['c1', 'c2', 'c3']) {
+        engine.instances.create(alice, 'Check', { title: id }, { id });
+      }
+      engine.instances.create(alice, 'Milestone', { title: 'Launch' }, { id: 'm1' });
+      const check = (id: string, to: string) => engine.instances.invoke(alice, 'Check', id, 'transition', { to });
+      const blocked = (id: string) => engine.instances.get(alice, 'Task', id)?.data.blocked;
+
+      // A failed check does not let the step after it through.
+      engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { schema: 'Check', id: 'c1' });
+      move(engine, 't1', 'doing');
+      check('c1', 'failed');
+      assert.equal(blocked('t1'), true);
+      assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'listBlockers', {}), { items: [{ schema: 'Check', id: 'c1', status: 'failed', open: true }], next: null });
+      assert.equal(thrown(() => move(engine, 't1', 'done'), BehaviorVetoError).reason, 'Task t1 cannot move to done while it is blocked by Check c1 (failed)');
+      // So does a skipped one, whose outcome is neutral; a passed one and a shipped milestone, whose config names no outcome, are successes.
+      engine.instances.invoke(alice, 'Task', 't1', 'removeBlocker', { schema: 'Check', id: 'c1' });
+      assert.equal(blocked('t1'), false, 'removing the failed blocker is how the work goes on without it');
+      engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { schema: 'Check', id: 'c2' });
+      check('c2', 'skipped');
+      assert.equal(blocked('t1'), true);
+      engine.instances.invoke(alice, 'Task', 't1', 'removeBlocker', { schema: 'Check', id: 'c2' });
+      engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { schema: 'Check', id: 'c3' });
+      engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { schema: 'Milestone', id: 'm1' });
+      check('c3', 'passed');
+      engine.instances.invoke(alice, 'Milestone', 'm1', 'transition', { to: 'shipped' });
+      assert.equal(blocked('t1'), false);
+      assert.deepEqual(move(engine, 't1', 'done'), { from: 'doing', to: 'done' });
+      // An instance in a terminal gated state takes no blocker that failed: it is not finished.
+      assert.equal(
+        thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { schema: 'Check', id: 'c1' }), BehaviorVetoError).reason,
+        'it is done, a gated state no transition leaves, so it takes no blocker that is not finished: Check c1 (failed)'
+      );
+
+      // A dependent whose satisfiedBy lists neutral goes on past a skipped check, and still not past a failed one.
+      publish(engine, tasks({ schemas: ['Task', 'Check', 'Milestone'], gatedStates: ['done'], satisfiedBy: ['success', 'neutral'] }));
+      engine.instances.invoke(alice, 'Task', 't2', 'addBlocker', { schema: 'Check', id: 'c2' });
+      assert.equal(blocked('t2'), false);
+      assert.deepEqual(engine.instances.invoke(alice, 'Task', 't2', 'addBlocker', { schema: 'Check', id: 'c1' }), { schema: 'Check', id: 'c1', status: 'failed', open: true });
+      assert.equal(blocked('t2'), true);
+    });
+
+    test('a gate on a state a transition leaves holds the start of work; a blocker found during the work holds its end', () => {
+      const engine = world({}, { schemas: ['Task', 'Milestone'], gatedStates: ['doing', 'done'] });
+      engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
+      const refused = thrown(() => move(engine, 't1', 'doing'), BehaviorVetoError);
+      assert.deepEqual([refused.behavior, refused.reason], ['Dependencies', 'Task t1 cannot move to doing while it is blocked by Task t2 (todo)']);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.status, 'todo');
+      move(engine, 't2', 'dropped');
+      assert.deepEqual(move(engine, 't1', 'doing'), { from: 'todo', to: 'doing' }, 'dropped is terminal and a success: the blocker is finished');
+      // An instance in doing, a gated state a transition leaves, takes an open blocker, which holds its move to done.
+      assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { schema: 'Milestone', id: 'm1' }), {
+        schema: 'Milestone',
+        id: 'm1',
+        status: 'active',
+        open: true,
+      });
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, true);
+      assert.equal(thrown(() => move(engine, 't1', 'done'), BehaviorVetoError).reason, 'Task t1 cannot move to done while it is blocked by Milestone m1 (active)');
+      engine.instances.invoke(alice, 'Milestone', 'm1', 'transition', { to: 'shipped' });
+      assert.deepEqual(move(engine, 't1', 'done'), { from: 'doing', to: 'done' });
     });
 
     test('removeBlocker removes an edge; one that is not an edge is refused', () => {
@@ -290,14 +374,16 @@ for (const driver of drivers) {
       assert.equal(thrown(() => engine.instances.invoke(bob, 'Task', 't2', 'addBlocker', { schema: 'Milestone', id: 'm1' }), EngineError).code, 'forbidden');
     });
 
-    test('its config: gated states are terminal states of the type Workflow, every one by default; blockers of the own schema by default', () => {
+    test('its config: gated states are states of the type Workflow, every terminal one by default; blockers of the own schema by default', () => {
       const engine = open();
       const refusal = (config: Record<string, unknown>) => thrown(() => engine.schemas.define(alice, tasks(config)), SchemaDocumentError);
       assert.match(refusal({ gatedStates: ['lost'] }).message, /behavior Dependencies config: gated state "lost" is not a state of the type's Workflow \(todo, doing, done, dropped\)/);
-      assert.match(refusal({ gatedStates: ['doing'] }).message, /gated state "doing" is not a terminal state of the type's Workflow: a transition leaves it/);
       // The core meta-schema holds the config to the declaration's configSchema first.
       assert.ok(refusal({ gatedStates: [] }).issues.some((issue) => issue.path === '/types/Task/behaviors/1/config/gatedStates'));
       assert.ok(refusal({ schemas: ['task list'] }).issues.some((issue) => issue.path === '/types/Task/behaviors/1/config/schemas/0'));
+      assert.ok(refusal({ satisfiedBy: [] }).issues.some((issue) => issue.path === '/types/Task/behaviors/1/config/satisfiedBy'));
+      assert.ok(refusal({ satisfiedBy: ['done'] }).issues.some((issue) => issue.path === '/types/Task/behaviors/1/config/satisfiedBy/0'));
+      assert.ok(refusal({ satisfiedBy: ['success', 'success'] }).issues.some((issue) => issue.path === '/types/Task/behaviors/1/config/satisfiedBy'));
       assert.match(
         thrown(() => engine.schemas.define(alice, schema('Task', [{ name: 'Dependencies' }])), SchemaDocumentError).message,
         /behavior Dependencies requires behavior Workflow, which the type does not list/
@@ -311,7 +397,7 @@ for (const driver of drivers) {
       assert.equal(thrown(() => move(engine, 't1', 'dropped'), BehaviorVetoError).behavior, 'Dependencies');
     });
 
-    test('configChange: schemas and gated states may change; it may be added to a schema with instances, not removed', () => {
+    test('configChange: schemas, gated states and satisfiedBy may change; it may be added to a schema with instances, not removed', () => {
       const engine = open();
       publish(engine, schema('Milestone', [{ name: 'Workflow', config: milestoneFlow }]));
       publish(engine, schema('Task', [{ name: 'Workflow', config: taskFlow }]));
@@ -323,6 +409,8 @@ for (const driver of drivers) {
       publish(engine, tasks({ schemas: ['Task', 'Milestone'] }));
       move(engine, 't1', 'doing');
       assert.equal(thrown(() => move(engine, 't1', 'dropped'), BehaviorVetoError).behavior, 'Dependencies', 'dropped is gated now');
+      publish(engine, tasks({ schemas: ['Task', 'Milestone'], gatedStates: ['doing', 'done'], satisfiedBy: ['success', 'neutral'] }));
+      assert.deepEqual(move(engine, 't1', 'dropped'), { from: 'doing', to: 'dropped' }, 'dropped is not gated now');
       engine.schemas.define(alice, tasks({ schemas: ['Milestone'] }));
       assert.equal(engine.schemas.publish(alice, 'Task').published, true);
       assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, true, 'an edge made before stays');

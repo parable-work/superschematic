@@ -318,12 +318,16 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	assert.JSONEq(t, `{"fields": ["title", "body"], "weights": {"title": 3}}`, string(searchJSON.Behaviors[0].Config))
 	assert.Equal(t, searchJSON, load(filepath.Join(tsreaderTestdata, "fixture-search")).Types["Note"])
 
-	// Reactions, whose rules name a link and a schema, loads in both forms
-	// to the same IR.
+	// Reactions, whose rules name a link, a schema and outcomes of a
+	// Workflow's terminal states, loads in both forms to the same IR.
 	reactionsJSON := load(filepath.Join(loaderTestdata, "fixture-reactions-json")).Types["Project"]
 	require.Len(t, reactionsJSON.Behaviors, 3)
 	assert.Equal(t, "Reactions", reactionsJSON.Behaviors[2].Name)
-	assert.JSONEq(t, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "parent", "transition": "doing"}}, {"when": {"allTerminal": {"schema": "projects", "link": "parent"}}, "then": {"transition": "done"}}]}`, string(reactionsJSON.Behaviors[2].Config))
+	assert.JSONEq(t, `{"states": ["todo", "doing", "done", "failed"], "transitions": [{"from": "todo", "to": "doing"}, {"from": "doing", "to": "done"}, {"from": "doing", "to": "failed"}],
+		"outcomes": {"failed": "failure"}}`, string(reactionsJSON.Behaviors[0].Config))
+	assert.JSONEq(t, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "parent", "transition": "doing"}},
+		{"when": {"allTerminal": {"schema": "projects", "link": "parent", "outcomes": ["success"]}}, "then": {"transition": "done"}},
+		{"when": {"anyTerminal": {"schema": "projects", "link": "parent", "outcomes": ["failure"]}}, "then": {"transition": "failed"}}]}`, string(reactionsJSON.Behaviors[2].Config))
 	assert.Equal(t, reactionsJSON, load(filepath.Join(tsreaderTestdata, "fixture-reactions")).Types["Project"])
 
 	// Lease, Assignment, Queue, Budget and Retries, whose configs name the

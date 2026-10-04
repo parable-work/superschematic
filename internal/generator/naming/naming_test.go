@@ -137,7 +137,7 @@ func TestParseRejectsUnknownTopLevelKeyNextToExtensionTable(t *testing.T) {
 }
 
 func TestParseReadsPathsTable(t *testing.T) {
-	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\n"), "test")
+	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\n"), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +150,9 @@ func TestParseReadsPathsTable(t *testing.T) {
 	}
 	if want := filepath.Join("/repo", "runtime", "http", "rust"); local.HTTPRuntimeRust != want {
 		t.Fatalf("LocalPaths.HTTPRuntimeRust = %q, want %q", local.HTTPRuntimeRust, want)
+	}
+	if want := filepath.Join("/repo", "runtime", "schema", "rust"); local.SchemaRuntimeRust != want {
+		t.Fatalf("LocalPaths.SchemaRuntimeRust = %q, want %q", local.SchemaRuntimeRust, want)
 	}
 	if local.SchemaIR != "" {
 		t.Fatalf("unset key must resolve to empty, got %q", local.SchemaIR)
@@ -316,6 +319,32 @@ func TestOrDefaultFillsEmptyFields(t *testing.T) {
 	}
 	if got.ScalarRustCrateIdent() != "superscalar" {
 		t.Errorf("ScalarRustCrateIdent = %q", got.ScalarRustCrateIdent())
+	}
+}
+
+// TestRustValidatorCoordinates: a generated Rust validator imports the
+// schema runtime crate and reads the scalar registry through
+// ScalarRustRegistryExpr, whose default follows a renamed scalar crate.
+func TestRustValidatorCoordinates(t *testing.T) {
+	d := Default()
+	if d.SchemaRuntimeRustCrate != "superschematic-schema-runtime" || d.SchemaRuntimeRustCrateIdent() != "superschematic_schema_runtime" {
+		t.Errorf("schema runtime crate = %q (%q)", d.SchemaRuntimeRustCrate, d.SchemaRuntimeRustCrateIdent())
+	}
+	if got := d.ScalarRustRegistryExpr(); got != "superscalar::Registry::builtin()" {
+		t.Errorf("default ScalarRustRegistryExpr = %q", got)
+	}
+	if got := (Naming{ScalarRustCrate: "acme-scalars-core"}).OrDefault().ScalarRustRegistryExpr(); got != "acme_scalars_core::Registry::builtin()" {
+		t.Errorf("renamed scalar crate: ScalarRustRegistryExpr = %q", got)
+	}
+	n, err := Parse([]byte("scalar_rust_crate = \"acme-scalars-core\"\nscalar_rust_registry = \"acme_scalars_core::registry()\"\nschema_runtime_rust_crate = \"acme-schema-runtime\"\n"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := n.ScalarRustRegistryExpr(); got != "acme_scalars_core::registry()" {
+		t.Errorf("ScalarRustRegistryExpr = %q, want the configured expression", got)
+	}
+	if got := n.SchemaRuntimeRustCrateIdent(); got != "acme_schema_runtime" {
+		t.Errorf("SchemaRuntimeRustCrateIdent = %q", got)
 	}
 }
 
