@@ -18,7 +18,7 @@ import {
   type SyncTx,
   type Tx,
 } from "../dist/engine.js";
-import { init, initSync, type TreeInput, type VersionGraph } from "../dist/index.js";
+import { init, initSync, type Descriptor, type TreeInput, type VersionGraph } from "../dist/index.js";
 import { descriptor } from "./postgres.js";
 
 const wasmBytes = readFileSync(new URL("../dist/superschematic_versiongraph.wasm", import.meta.url));
@@ -26,34 +26,14 @@ const wasmBytes = readFileSync(new URL("../dist/superschematic_versiongraph.wasm
 // The smallest valid module: the magic number and version, nothing else.
 const emptyModule = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
 
+// The scenarios' fixture descriptor, whatever version it is at, and a tree
+// with two rows of its singleton kind, cover.
 const input: TreeInput = {
-  descriptor: {
-    version: 2,
-    root: { table: "recipe", key: "id" },
-    refTable: "recipe_ref",
-    commitTable: "recipe_commit",
-    patchTable: "recipe_patch",
-    releaseTable: "recipe_release",
-    snapshotTable: "recipe_snapshot_entry",
-    kinds: [
-      {
-        kind: "step",
-        table: "step",
-        historyTable: "step_history",
-        key: "entity_key",
-        id: "id",
-        ref: "ref",
-        tombstone: "deleted_on_ref",
-        version: "_version",
-        singleton: true,
-        columns: { entity_key: "uuid", id: "uuid", ref: "uuid", _version: "integer", title: "string", deleted_on_ref: "boolean" },
-      },
-    ],
-  },
+  descriptor: JSON.parse(descriptor) as Descriptor,
   tree: {
-    step: [
-      { entity_key: "a", id: "1", ref: "r", _version: 1, title: "Chop" },
-      { entity_key: "b", id: "2", ref: "r", _version: 1, title: "Boil" },
+    cover: [
+      { entity_key: "Front", id: "One", ref_id: "Draft", recipe_id: "Bread", _version: 1, photo_url: "front.jpg" },
+      { entity_key: "Back", id: "Two", ref_id: "Draft", recipe_id: "Bread", _version: 1, photo_url: "back.jpg" },
     ],
   },
 };
