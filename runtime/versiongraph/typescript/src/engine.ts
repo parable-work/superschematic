@@ -3,6 +3,15 @@
 // core's wasm build. It ports the Go engine (runtime/versiongraph/go/engine)
 // operation for operation, with the same rules and the same error codes.
 //
+// The operations are written once, as generator functions that yield each
+// storage call (D32), and two drivers run them. Engine runs them over
+// Storage and Tx, awaiting each call, and SyncEngine over SyncStorage and
+// SyncTx, whose calls return their values, for a database whose driver
+// blocks, as SQLite's does under D16's engine. Either driver sends a call's
+// value back into the operation and throws a call's error into it, so an
+// operation handles a failed call the same way under both. The core is
+// synchronous once instantiated, so nothing else in an operation waits.
+//
 // The engine reads and writes canonical rows only: JSON objects keyed by
 // column name whose values are each column's canonical JSON
 // (runtime/versiongraph/README.md), carried as JSON text so a number keeps
@@ -55,6 +64,8 @@ import {
   type Release,
   type SnapshotEntry,
   type Storage,
+  type SyncStorage,
+  type SyncTx,
   type Tx,
 } from "./storage.js";
 
@@ -70,7 +81,7 @@ export const DefaultSnapshotEvery = 64;
 /** How long after a ref is discarded sweep keeps its member rows, in milliseconds: seven days. */
 export const DefaultDiscardGrace = 7 * 24 * 60 * 60 * 1000;
 
-/** Configure an Engine. */
+/** Configure an Engine or a SyncEngine. */
 export interface EngineOptions {
   /** The graph's schema epoch: every commit records it, and materialize refuses a commit from a newer one. 0 when absent. */
   schemaEpoch?: number;
@@ -270,16 +281,119 @@ function actorID(actor: string): string {
   return id("actor", actor);
 }
 
-/** Runs one graph's operations. */
+/** A storage call's name: a method of SyncTx, and so of Tx. */
+type Method = keyof SyncTx;
+
+/** Each storage call's arguments. */
+type Args = { [M in Method]: Parameters<SyncTx[M]> };
+
+/** Each storage call's value. */
+type Value = { [M in Method]: ReturnType<SyncTx[M]> };
+
+/** One storage call an operation yields: the method and its arguments. */
+type Call<M extends Method = Method> = { [K in M]: { method: K; args: Args[K] } }[M];
+
+/** An operation's steps: they yield each storage call, receive its value, and return T. */
+type Steps<T> = Generator<Call, T, unknown>;
+
+/** A transaction as an operation's steps reach it: each method yields its call and returns the call's value. */
+type Calls = { [M in Method]: (...args: Args[M]) => Steps<Value[M]> };
+
+/** An operation's transaction, which a driver runs in one transaction of its storage. */
+type Body<T> = (tx: Calls) => Steps<T>;
+
+/** The steps of one storage call: yield it, and return the value the driver sends back. */
+function call<M extends Method>(method: M): Calls[M] {
+  return function* (...args: Args[M]): Steps<Value[M]> {
+    return (yield { method, args } as Call) as Value[M];
+  } as Calls[M];
+}
+
+const calls: Calls = {
+  createRef: call("createRef"),
+  readRef: call("readRef"),
+  lockRef: call("lockRef"),
+  updateRef: call("updateRef"),
+  discardRef: call("discardRef"),
+  rows: call("rows"),
+  upsertRow: call("upsertRow"),
+  removeRow: call("removeRow"),
+  images: call("images"),
+  readCommit: call("readCommit"),
+  insertCommit: call("insertCommit"),
+  insertPatches: call("insertPatches"),
+  walk: call("walk"),
+  refCommits: call("refCommits"),
+  patches: call("patches"),
+  nextSequence: call("nextSequence"),
+  snapshot: call("snapshot"),
+  insertSnapshot: call("insertSnapshot"),
+  commits: call("commits"),
+  readRelease: call("readRelease"),
+  writeRelease: call("writeRelease"),
+  prune: call("prune"),
+  discardedRefs: call("discardedRefs"),
+  idleDrafts: call("idleDrafts"),
+  removeRefRows: call("removeRefRows"),
+  sweepLock: call("sweepLock"),
+};
+
+/** Tx as the asynchronous driver calls it: each of SyncTx's methods, returning a promise of its value. */
+type AsyncCalls = { [M in Method]: (...args: Args[M]) => Promise<Value[M]> };
+
+/** SyncTx as the synchronous driver calls it. */
+type SyncCalls = { [M in Method]: (...args: Args[M]) => Value[M] };
+
+function callAsync<M extends Method>(tx: AsyncCalls, c: Call<M>): Promise<Value[M]> {
+  return tx[c.method](...c.args);
+}
+
+function callSync<M extends Method>(tx: SyncCalls, c: Call<M>): Value[M] {
+  return tx[c.method](...c.args);
+}
+
+/**
+ * Runs an operation's steps over an asynchronous transaction: it awaits each
+ * call, sends its value back into the steps, and throws its error into them.
+ */
+async function drive<T>(steps: Steps<T>, tx: Tx): Promise<T> {
+  let next = steps.next();
+  while (!next.done) {
+    let value: unknown;
+    try {
+      value = await callAsync(tx, next.value);
+    } catch (err) {
+      next = steps.throw(err);
+      continue;
+    }
+    next = steps.next(value);
+  }
+  return next.value;
+}
+
+/**
+ * Runs an operation's steps over a synchronous transaction: it sends each
+ * call's value back into the steps, and throws its error into them.
+ */
+function driveSync<T>(steps: Steps<T>, tx: SyncTx): T {
+  let next = steps.next();
+  while (!next.done) {
+    let value: unknown;
+    try {
+      value = callSync(tx, next.value);
+    } catch (err) {
+      next = steps.throw(err);
+      continue;
+    }
+    next = steps.next(value);
+  }
+  return next.value;
+}
+
+/** Runs one graph's operations over asynchronous storage. */
 export class Engine {
-  readonly #core: VersionGraph;
-  readonly #descriptor: string;
-  readonly #kinds: KindRoles[];
-  readonly #byName: Map<string, KindRoles>;
+  readonly #ops: Operations;
   readonly #storage: Storage;
-  readonly #schemaEpoch: number;
-  readonly #walkCeiling: number;
-  readonly #snapshotEvery: number;
 
   /**
    * Returns the engine of the graph descriptor describes (version 2, as
@@ -294,33 +408,16 @@ export class Engine {
 
   /** Engine.create with a core already instantiated. */
   constructor(core: VersionGraph, descriptor: string | Descriptor, storage: Storage, options: EngineOptions = {}) {
-    const text = typeof descriptor === "string" ? descriptor : JSON.stringify(descriptor);
-    core.run("validate", `{"descriptor":${text},"tree":{}}`);
-    const parsed = JSON.parse(text) as {
-      kinds: { kind: string; key: string; id: string; tombstone: string; version: string }[];
-    };
-    this.#core = core;
-    this.#descriptor = text;
-    this.#kinds = parsed.kinds.map((k) => ({
-      name: k.kind,
-      key: k.key,
-      id: k.id,
-      tombstone: k.tombstone,
-      version: k.version,
-    }));
-    this.#byName = new Map(this.#kinds.map((k) => [k.name, k]));
+    this.#ops = new Operations(core, descriptor, options);
     this.#storage = storage;
-    this.#schemaEpoch = options.schemaEpoch ?? 0;
-    this.#walkCeiling = options.walkCeiling !== undefined && options.walkCeiling > 0 ? options.walkCeiling : DefaultWalkCeiling;
-    this.#snapshotEvery =
-      options.snapshotEvery !== undefined && options.snapshotEvery > 0 ? options.snapshotEvery : DefaultSnapshotEvery;
   }
 
   #copy(changes: { storage?: Storage; walkCeiling?: number }): Engine {
-    return new Engine(this.#core, this.#descriptor, changes.storage ?? this.#storage, {
-      schemaEpoch: this.#schemaEpoch,
-      walkCeiling: changes.walkCeiling ?? this.#walkCeiling,
-      snapshotEvery: this.#snapshotEvery,
+    const ops = this.#ops;
+    return new Engine(ops.core, ops.descriptor, changes.storage ?? this.#storage, {
+      schemaEpoch: ops.schemaEpoch,
+      walkCeiling: changes.walkCeiling ?? ops.walkCeiling,
+      snapshotEvery: ops.snapshotEvery,
     });
   }
 
@@ -338,33 +435,19 @@ export class Engine {
     return this.#copy({ walkCeiling: n > 0 ? n : DefaultWalkCeiling });
   }
 
-  #kind(name: string): KindRoles {
-    const k = this.#byName.get(name);
-    if (k === undefined) {
-      throw new Error(`engine: unknown kind ${JSON.stringify(name)}`);
-    }
-    return k;
-  }
-
-  #transact<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-    return this.#storage.transact(fn);
+  /** Runs an operation's transaction in one transaction of the storage. */
+  #transact<T>(body: Body<T>): Promise<T> {
+    return this.#storage.transact((tx) => drive(body(calls), tx));
   }
 
   /** Creates a primary line of root: a ref with no parent. */
   async createPrimary(actor: string, root: string, name: string): Promise<Ref> {
-    actor = actorID(actor);
-    root = id("id", root);
-    return this.#transact((tx) => tx.createRef({ root, parent: null, base: null, name, actor }));
+    return this.#transact(this.#ops.createPrimary(actor, root, name));
   }
 
   /** Creates a change set of fromRef whose base is fromRef's head. */
   async branch(actor: string, fromRef: string, name: string): Promise<Ref> {
-    actor = actorID(actor);
-    fromRef = id("id", fromRef);
-    return this.#transact(async (tx) => {
-      const from = await this.#readRef(tx, fromRef, undefined, false);
-      return tx.createRef({ root: from.root, parent: from.id, base: from.head, name, actor });
-    });
+    return this.#transact(this.#ops.branch(actor, fromRef, name));
   }
 
   /**
@@ -372,43 +455,7 @@ export class Engine {
    * a primary line with PrimaryMergeOnlyError.
    */
   async save(actor: string, ref: string, version: number, edits: Edits): Promise<SaveResult> {
-    actor = actorID(actor);
-    ref = id("id", ref);
-    for (const name of Object.keys(edits)) {
-      this.#kind(name);
-    }
-    return this.#transact(async (tx) => {
-      const saved: Tree = {};
-      const r = await this.#readDraft(tx, ref, version);
-      let deletes = false;
-      for (const k of this.#kinds) {
-        for (const row of edits[k.name]?.upsert ?? []) {
-          const stored = await this.#writeRow(tx, k.name, r, row, false, actor);
-          (saved[k.name] ??= []).push(stored);
-        }
-        deletes ||= (edits[k.name]?.delete?.length ?? 0) > 0;
-      }
-      if (deletes) {
-        const { tree: composed } = await this.#compose(tx, r);
-        const byKey = this.#index(composed);
-        for (const k of this.#kinds) {
-          for (const key of edits[k.name]?.delete ?? []) {
-            await this.#deleteEntity(tx, r, byKey, k.name, id("id", key), actor);
-          }
-        }
-      }
-      for (const k of this.#kinds) {
-        for (const key of edits[k.name]?.unset ?? []) {
-          const entityKey = id("id", key);
-          const removed = await tx.removeRow(k.name, r.id, entityKey, actor);
-          if (!removed) {
-            throw new EntityNotFoundError(`entity not found on the ref: no ${k.name} override of ${entityKey}`);
-          }
-        }
-      }
-      const moved = await tx.updateRef({ id: r.id, version: r.version, head: null, base: null, seal: false, actor });
-      return { ref: moved, saved };
-    });
+    return this.#transact(this.#ops.save(actor, ref, version, edits));
   }
 
   /**
@@ -418,32 +465,16 @@ export class Engine {
    * an InvalidTreeError when the composed tree breaks the graph's rules, and
    * PrimaryMergeOnlyError for a primary line, whose commits merge writes.
    */
-  commit(actor: string, ref: string, version: number, options: CommitOptions = {}): Promise<CommitResult> {
-    return this.#commitRef(actor, ref, version, options, false, false);
+  async commit(actor: string, ref: string, version: number, options: CommitOptions = {}): Promise<CommitResult> {
+    return this.#transact(this.#ops.commit(actor, ref, version, options));
   }
 
   /**
    * Commits a change set at version when it has changes, and seals it: the
    * ref then refuses writes. A primary line is PrimaryMergeOnlyError.
    */
-  seal(actor: string, ref: string, version: number): Promise<CommitResult> {
-    return this.#commitRef(actor, ref, version, {}, true, true);
-  }
-
-  async #commitRef(
-    actor: string,
-    ref: string,
-    version: number,
-    options: CommitOptions,
-    allowEmpty: boolean,
-    seal: boolean,
-  ): Promise<CommitResult> {
-    actor = actorID(actor);
-    ref = id("id", ref);
-    return this.#transact(async (tx) => {
-      const r = await this.#readDraft(tx, ref, version);
-      return this.#commitAndMove(tx, r, options, allowEmpty, seal, actor);
-    });
+  async seal(actor: string, ref: string, version: number): Promise<CommitResult> {
+    return this.#transact(this.#ops.seal(actor, ref, version));
   }
 
   /**
@@ -461,25 +492,7 @@ export class Engine {
     resolutions: readonly Resolution[] = [],
     options: CommitOptions = {},
   ): Promise<MergeResult> {
-    actor = actorID(actor);
-    source = id("id", source);
-    target = id("id", target);
-    return this.#transact(async (tx) => {
-      const t = await this.#readRef(tx, target, targetVersion, true);
-      const s = await this.#readRef(tx, source, undefined, false);
-      if (s.root !== t.root) {
-        throw new RootMismatchError();
-      }
-      if (s.id === t.id) {
-        throw new MergeIntoItselfError();
-      }
-      const conflicts = await this.#merge(tx, s, t, resolutions, actor);
-      if (conflicts.length > 0) {
-        return { ref: t, commit: null, conflicts };
-      }
-      const moved = await this.#commitAndMove(tx, t, options, true, false, actor);
-      return { ...moved, conflicts: [] };
-    });
+    return this.#transact(this.#ops.merge(actor, source, target, targetVersion, resolutions, options));
   }
 
   /**
@@ -494,46 +507,7 @@ export class Engine {
    * parent to rebase onto: NoParentError.
    */
   async rebase(actor: string, draft: string, version: number, resolutions: readonly Resolution[] = []): Promise<MergeResult> {
-    actor = actorID(actor);
-    draft = id("id", draft);
-    return this.#transact(async (tx) => {
-      const d = await this.#readRef(tx, draft, version, true);
-      if (d.parent === null) {
-        throw new NoParentError();
-      }
-      const parent = await this.#readRef(tx, d.parent, undefined, false);
-      if (parent.head === d.base) {
-        // Already on the parent's head: nothing to merge.
-        const moved = await tx.updateRef({ id: d.id, version: d.version, head: null, base: null, seal: false, actor });
-        return { ref: moved, commit: null, conflicts: [] };
-      }
-      const base = await this.#materialize(tx, d.base);
-      const theirs = await this.#materialize(tx, parent.head);
-      const { tree: ours, own } = await this.#compose(tx, d);
-      const merged = this.#coreMerge(base, ours, theirs, resolutions);
-      if (merged.conflicts.length > 0) {
-        return { ref: d, commit: null, conflicts: merged.conflicts };
-      }
-      const moved: Ref = { ...d, base: parent.head };
-      await this.#overlay(tx, moved, theirs, merged.merged, ours, own, actor);
-      let written: Commit | null = null;
-      try {
-        written = await this.#commit(tx, moved, {}, actor);
-      } catch (err) {
-        if (!(err instanceof NothingToCommitError)) {
-          throw err;
-        }
-      }
-      const ref = await tx.updateRef({
-        id: d.id,
-        version: d.version,
-        head: written?.id ?? null,
-        base: parent.head,
-        seal: false,
-        actor,
-      });
-      return { ref, commit: written, conflicts: [] };
-    });
+    return this.#transact(this.#ops.rebase(actor, draft, version, resolutions));
   }
 
   /**
@@ -542,19 +516,7 @@ export class Engine {
    * line is PrimaryMergeOnlyError: revert a change set of it and merge that.
    */
   async revert(actor: string, ref: string, version: number, toCommit: string): Promise<CommitResult> {
-    actor = actorID(actor);
-    ref = id("id", ref);
-    toCommit = id("id", toCommit);
-    return this.#transact(async (tx) => {
-      const r = await this.#readDraft(tx, ref, version);
-      const commit = await tx.readCommit(toCommit);
-      if (commit.root !== r.root) {
-        throw new RootMismatchError();
-      }
-      const tree = await this.#materialize(tx, toCommit);
-      await this.#revert(tx, r, tree, actor);
-      return this.#commitAndMove(tx, r, {}, true, false, actor);
-    });
+    return this.#transact(this.#ops.revert(actor, ref, version, toCommit));
   }
 
   /**
@@ -565,30 +527,12 @@ export class Engine {
    * untagged commit is NotTaggedError; another root's is RootMismatchError.
    */
   async release(actor: string, root: string, commit: string, version: number): Promise<Release> {
-    actor = actorID(actor);
-    root = id("id", root);
-    commit = id("id", commit);
-    return this.#transact(async (tx) => {
-      const c = await tx.readCommit(commit);
-      if (c.root !== root) {
-        throw new RootMismatchError();
-      }
-      if (c.sequence === null) {
-        throw new NotTaggedError();
-      }
-      await this.#ensureSnapshot(tx, c);
-      return tx.writeRelease({ root, commit: c.id, version, actor });
-    });
+    return this.#transact(this.#ops.release(actor, root, commit, version));
   }
 
   /** Reads root's release pointer and the tree of the commit it names. A root never released is NotFoundError. */
   async released(root: string): Promise<ReleasedResult> {
-    root = id("id", root);
-    return this.#transact(async (tx) => {
-      const release = await tx.readRelease(root);
-      const tree = this.#order(await this.#materialize(tx, release.commit));
-      return { release, ...this.#treeResult(tree, []) };
-    });
+    return this.#transact(this.#ops.released(root));
   }
 
   /**
@@ -597,54 +541,27 @@ export class Engine {
    * the entity.
    */
   async materialize(commit: string): Promise<TreeResult> {
-    commit = id("id", commit);
-    return this.#transact(async (tx) => {
-      const tree = this.#order(await this.#materialize(tx, commit));
-      return this.#treeResult(tree, []);
-    });
+    return this.#transact(this.#ops.materialize(commit));
   }
 
   /** Reads a ref's tree: its base commit's tree with the ref's own rows laid over it. */
   async compose(ref: string): Promise<TreeResult> {
-    ref = id("id", ref);
-    return this.#transact(async (tx) => {
-      const r = await this.#readRef(tx, ref, undefined, false);
-      const { tree, findings } = await this.#compose(tx, r);
-      return this.#treeResult(tree, findings);
-    });
+    return this.#transact(this.#ops.compose(ref));
   }
 
   /** Lists the entities the trees of two commits differ on. */
   async diff(from: string, to: string): Promise<Change[]> {
-    from = id("id", from);
-    to = id("id", to);
-    return this.#transact(async (tx) => {
-      const fromTree = await this.#materialize(tx, from);
-      const toTree = await this.#materialize(tx, to);
-      return this.#diff(fromTree, toTree);
-    });
+    return this.#transact(this.#ops.diff(from, to));
   }
 
   /** Lists the commits a ref wrote, newest first. */
   async history(ref: string): Promise<Commit[]> {
-    ref = id("id", ref);
-    return this.#transact(async (tx) => {
-      const r = await this.#readRef(tx, ref, undefined, false);
-      if (r.head === null) {
-        return [];
-      }
-      return tx.refCommits(r.id, r.head, this.#walkCeiling);
-    });
+    return this.#transact(this.#ops.history(ref));
   }
 
   /** Soft-deletes a ref at version, which frees its name. */
   async discard(actor: string, ref: string, version: number): Promise<void> {
-    actor = actorID(actor);
-    ref = id("id", ref);
-    return this.#transact(async (tx) => {
-      await this.#readRef(tx, ref, version, false);
-      await tx.discardRef(ref, version, actor);
-    });
+    return this.#transact(this.#ops.discard(actor, ref, version));
   }
 
   /**
@@ -659,58 +576,7 @@ export class Engine {
    * call for and it lacks. Nothing calls sweep unless a service does.
    */
   async sweep(options: SweepOptions): Promise<SweepReport> {
-    const actor = actorID(options.actor);
-    const grace = options.discardGrace !== undefined && options.discardGrace !== 0 ? options.discardGrace : DefaultDiscardGrace;
-    return this.#transact(async (tx) => {
-      const report: SweepReport = {
-        skipped: false,
-        abandoned: 0,
-        collectedRefs: 0,
-        collectedRows: {},
-        pruned: {},
-        snapshots: 0,
-      };
-      if (!(await tx.sweepLock())) {
-        report.skipped = true;
-        return report;
-      }
-      if (options.abandonAfter !== undefined && options.abandonAfter > 0) {
-        for (const ref of await tx.idleDrafts(options.abandonAfter)) {
-          // A write that reached the ref after idleDrafts read it moved its
-          // version, so the ref is no longer idle: leave it.
-          try {
-            await tx.discardRef(ref.id, ref.version, actor);
-          } catch (err) {
-            if (err instanceof VersionConflictError) {
-              continue;
-            }
-            throw err;
-          }
-          report.abandoned++;
-        }
-      }
-      for (const ref of await tx.discardedRefs(grace)) {
-        let rows = 0;
-        for (const k of this.#kinds) {
-          const n = await tx.removeRefRows(k.name, ref.id, actor);
-          if (n > 0) {
-            report.collectedRows[k.name] = (report.collectedRows[k.name] ?? 0) + n;
-            rows += n;
-          }
-        }
-        if (rows > 0) {
-          report.collectedRefs++;
-        }
-      }
-      for (const k of this.#kinds) {
-        const n = await tx.prune(k.name, 0, options.pruneBatch ?? 0);
-        if (n > 0) {
-          report.pruned[k.name] = n;
-        }
-      }
-      report.snapshots = await this.#backfill(tx);
-      return report;
-    });
+    return this.#transact(this.#ops.sweep(options));
   }
 
   /**
@@ -748,13 +614,492 @@ export class Engine {
       next = Math.max(next, Date.now());
     }
   }
+}
+
+/**
+ * Runs one graph's operations over synchronous storage (D32): Engine's
+ * operations, with its rules and errors, each returning its value or
+ * throwing. It has no runSweeper, since a loop that waits between passes
+ * would block its thread; its host schedules sweep.
+ */
+export class SyncEngine {
+  readonly #ops: Operations;
+  readonly #storage: SyncStorage;
+
+  /**
+   * Returns the engine of the graph descriptor describes (version 2, as
+   * JSON text or an object), over storage, on a core already instantiated
+   * (initSync instantiates one synchronously). options.core is not read.
+   * The core checks the descriptor.
+   */
+  constructor(core: VersionGraph, descriptor: string | Descriptor, storage: SyncStorage, options: EngineOptions = {}) {
+    this.#ops = new Operations(core, descriptor, options);
+    this.#storage = storage;
+  }
+
+  #copy(changes: { storage?: SyncStorage; walkCeiling?: number }): SyncEngine {
+    const ops = this.#ops;
+    return new SyncEngine(ops.core, ops.descriptor, changes.storage ?? this.#storage, {
+      schemaEpoch: ops.schemaEpoch,
+      walkCeiling: changes.walkCeiling ?? ops.walkCeiling,
+      snapshotEvery: ops.snapshotEvery,
+    });
+  }
+
+  /** A copy of this engine over storage. */
+  withStorage(storage: SyncStorage): SyncEngine {
+    return this.#copy({ storage });
+  }
+
+  /** Engine's withWalkCeiling: a copy that walks at most n commits, n <= 0 being DefaultWalkCeiling. */
+  withWalkCeiling(n: number): SyncEngine {
+    return this.#copy({ walkCeiling: n > 0 ? n : DefaultWalkCeiling });
+  }
+
+  /** Runs an operation's transaction in one transaction of the storage. */
+  #transact<T>(body: Body<T>): T {
+    return this.#storage.transact((tx) => driveSync(body(calls), tx));
+  }
+
+  /** Engine's createPrimary: creates a primary line of root. */
+  createPrimary(actor: string, root: string, name: string): Ref {
+    return this.#transact(this.#ops.createPrimary(actor, root, name));
+  }
+
+  /** Engine's branch: creates a change set of fromRef whose base is fromRef's head. */
+  branch(actor: string, fromRef: string, name: string): Ref {
+    return this.#transact(this.#ops.branch(actor, fromRef, name));
+  }
+
+  /** Engine's save: applies edits to a change set at version. */
+  save(actor: string, ref: string, version: number, edits: Edits): SaveResult {
+    return this.#transact(this.#ops.save(actor, ref, version, edits));
+  }
+
+  /** Engine's commit: commits a change set at version and moves its head. */
+  commit(actor: string, ref: string, version: number, options: CommitOptions = {}): CommitResult {
+    return this.#transact(this.#ops.commit(actor, ref, version, options));
+  }
+
+  /** Engine's seal: commits a change set at version when it has changes, and seals it. */
+  seal(actor: string, ref: string, version: number): CommitResult {
+    return this.#transact(this.#ops.seal(actor, ref, version));
+  }
+
+  /** Engine's merge: merges source's head into target at targetVersion. */
+  merge(
+    actor: string,
+    source: string,
+    target: string,
+    targetVersion: number,
+    resolutions: readonly Resolution[] = [],
+    options: CommitOptions = {},
+  ): MergeResult {
+    return this.#transact(this.#ops.merge(actor, source, target, targetVersion, resolutions, options));
+  }
+
+  /** Engine's rebase: moves a change set at version onto its parent's head. */
+  rebase(actor: string, draft: string, version: number, resolutions: readonly Resolution[] = []): MergeResult {
+    return this.#transact(this.#ops.rebase(actor, draft, version, resolutions));
+  }
+
+  /** Engine's revert: makes a change set at version compose to the tree of toCommit, and commits it. */
+  revert(actor: string, ref: string, version: number, toCommit: string): CommitResult {
+    return this.#transact(this.#ops.revert(actor, ref, version, toCommit));
+  }
+
+  /** Engine's release: points root's release at a tagged commit of root. */
+  release(actor: string, root: string, commit: string, version: number): Release {
+    return this.#transact(this.#ops.release(actor, root, commit, version));
+  }
+
+  /** Engine's released: reads root's release pointer and the tree of the commit it names. */
+  released(root: string): ReleasedResult {
+    return this.#transact(this.#ops.released(root));
+  }
+
+  /** Engine's materialize: reads a commit's tree. */
+  materialize(commit: string): TreeResult {
+    return this.#transact(this.#ops.materialize(commit));
+  }
+
+  /** Engine's compose: reads a ref's tree. */
+  compose(ref: string): TreeResult {
+    return this.#transact(this.#ops.compose(ref));
+  }
+
+  /** Engine's diff: lists the entities the trees of two commits differ on. */
+  diff(from: string, to: string): Change[] {
+    return this.#transact(this.#ops.diff(from, to));
+  }
+
+  /** Engine's history: lists the commits a ref wrote, newest first. */
+  history(ref: string): Commit[] {
+    return this.#transact(this.#ops.history(ref));
+  }
+
+  /** Engine's discard: soft-deletes a ref at version. */
+  discard(actor: string, ref: string, version: number): void {
+    return this.#transact(this.#ops.discard(actor, ref, version));
+  }
+
+  /** Engine's sweep: runs one maintenance pass in one transaction, under the graph's sweep lock. */
+  sweep(options: SweepOptions): SweepReport {
+    return this.#transact(this.#ops.sweep(options));
+  }
+}
+
+/**
+ * One graph's operations, written once for both drivers. Each operation
+ * checks its arguments, throwing before any transaction begins, and returns
+ * its transaction as steps that yield each storage call; Engine and
+ * SyncEngine run the steps in one transaction of their storage.
+ */
+class Operations {
+  readonly core: VersionGraph;
+  readonly descriptor: string;
+  readonly schemaEpoch: number;
+  readonly walkCeiling: number;
+  readonly snapshotEvery: number;
+  readonly #kinds: KindRoles[];
+  readonly #byName: Map<string, KindRoles>;
+
+  constructor(core: VersionGraph, descriptor: string | Descriptor, options: EngineOptions) {
+    const text = typeof descriptor === "string" ? descriptor : JSON.stringify(descriptor);
+    core.run("validate", `{"descriptor":${text},"tree":{}}`);
+    const parsed = JSON.parse(text) as {
+      kinds: { kind: string; key: string; id: string; tombstone: string; version: string }[];
+    };
+    this.core = core;
+    this.descriptor = text;
+    this.#kinds = parsed.kinds.map((k) => ({
+      name: k.kind,
+      key: k.key,
+      id: k.id,
+      tombstone: k.tombstone,
+      version: k.version,
+    }));
+    this.#byName = new Map(this.#kinds.map((k) => [k.name, k]));
+    this.schemaEpoch = options.schemaEpoch ?? 0;
+    this.walkCeiling = options.walkCeiling !== undefined && options.walkCeiling > 0 ? options.walkCeiling : DefaultWalkCeiling;
+    this.snapshotEvery =
+      options.snapshotEvery !== undefined && options.snapshotEvery > 0 ? options.snapshotEvery : DefaultSnapshotEvery;
+  }
+
+  #kind(name: string): KindRoles {
+    const k = this.#byName.get(name);
+    if (k === undefined) {
+      throw new Error(`engine: unknown kind ${JSON.stringify(name)}`);
+    }
+    return k;
+  }
+
+  /** An operation's transaction: body with this bound, for a driver to run. */
+  #transaction<T>(body: (this: Operations, tx: Calls) => Steps<T>): Body<T> {
+    return (tx) => body.call(this, tx);
+  }
+
+  createPrimary(actor: string, root: string, name: string): Body<Ref> {
+    actor = actorID(actor);
+    root = id("id", root);
+    return (tx) => tx.createRef({ root, parent: null, base: null, name, actor });
+  }
+
+  branch(actor: string, fromRef: string, name: string): Body<Ref> {
+    actor = actorID(actor);
+    fromRef = id("id", fromRef);
+    return this.#transaction(function* (tx) {
+      const from = yield* this.#readRef(tx, fromRef, undefined, false);
+      return yield* tx.createRef({ root: from.root, parent: from.id, base: from.head, name, actor });
+    });
+  }
+
+  save(actor: string, ref: string, version: number, edits: Edits): Body<SaveResult> {
+    actor = actorID(actor);
+    ref = id("id", ref);
+    for (const name of Object.keys(edits)) {
+      this.#kind(name);
+    }
+    return this.#transaction(function* (tx) {
+      const saved: Tree = {};
+      const r = yield* this.#readDraft(tx, ref, version);
+      let deletes = false;
+      for (const k of this.#kinds) {
+        for (const row of edits[k.name]?.upsert ?? []) {
+          const stored = yield* this.#writeRow(tx, k.name, r, row, false, actor);
+          (saved[k.name] ??= []).push(stored);
+        }
+        deletes ||= (edits[k.name]?.delete?.length ?? 0) > 0;
+      }
+      if (deletes) {
+        const { tree: composed } = yield* this.#compose(tx, r);
+        const byKey = this.#index(composed);
+        for (const k of this.#kinds) {
+          for (const key of edits[k.name]?.delete ?? []) {
+            yield* this.#deleteEntity(tx, r, byKey, k.name, id("id", key), actor);
+          }
+        }
+      }
+      for (const k of this.#kinds) {
+        for (const key of edits[k.name]?.unset ?? []) {
+          const entityKey = id("id", key);
+          const removed = yield* tx.removeRow(k.name, r.id, entityKey, actor);
+          if (!removed) {
+            throw new EntityNotFoundError(`entity not found on the ref: no ${k.name} override of ${entityKey}`);
+          }
+        }
+      }
+      const moved = yield* tx.updateRef({ id: r.id, version: r.version, head: null, base: null, seal: false, actor });
+      return { ref: moved, saved };
+    });
+  }
+
+  commit(actor: string, ref: string, version: number, options: CommitOptions): Body<CommitResult> {
+    return this.#commitRef(actor, ref, version, options, false, false);
+  }
+
+  seal(actor: string, ref: string, version: number): Body<CommitResult> {
+    return this.#commitRef(actor, ref, version, {}, true, true);
+  }
+
+  #commitRef(
+    actor: string,
+    ref: string,
+    version: number,
+    options: CommitOptions,
+    allowEmpty: boolean,
+    seal: boolean,
+  ): Body<CommitResult> {
+    actor = actorID(actor);
+    ref = id("id", ref);
+    return this.#transaction(function* (tx) {
+      const r = yield* this.#readDraft(tx, ref, version);
+      return yield* this.#commitAndMove(tx, r, options, allowEmpty, seal, actor);
+    });
+  }
+
+  merge(
+    actor: string,
+    source: string,
+    target: string,
+    targetVersion: number,
+    resolutions: readonly Resolution[],
+    options: CommitOptions,
+  ): Body<MergeResult> {
+    actor = actorID(actor);
+    source = id("id", source);
+    target = id("id", target);
+    return this.#transaction(function* (tx) {
+      const t = yield* this.#readRef(tx, target, targetVersion, true);
+      const s = yield* this.#readRef(tx, source, undefined, false);
+      if (s.root !== t.root) {
+        throw new RootMismatchError();
+      }
+      if (s.id === t.id) {
+        throw new MergeIntoItselfError();
+      }
+      const conflicts = yield* this.#merge(tx, s, t, resolutions, actor);
+      if (conflicts.length > 0) {
+        return { ref: t, commit: null, conflicts };
+      }
+      const moved = yield* this.#commitAndMove(tx, t, options, true, false, actor);
+      return { ...moved, conflicts: [] };
+    });
+  }
+
+  rebase(actor: string, draft: string, version: number, resolutions: readonly Resolution[]): Body<MergeResult> {
+    actor = actorID(actor);
+    draft = id("id", draft);
+    return this.#transaction(function* (tx) {
+      const d = yield* this.#readRef(tx, draft, version, true);
+      if (d.parent === null) {
+        throw new NoParentError();
+      }
+      const parent = yield* this.#readRef(tx, d.parent, undefined, false);
+      if (parent.head === d.base) {
+        // Already on the parent's head: nothing to merge.
+        const moved = yield* tx.updateRef({ id: d.id, version: d.version, head: null, base: null, seal: false, actor });
+        return { ref: moved, commit: null, conflicts: [] };
+      }
+      const base = yield* this.#materialize(tx, d.base);
+      const theirs = yield* this.#materialize(tx, parent.head);
+      const { tree: ours, own } = yield* this.#compose(tx, d);
+      const merged = this.#coreMerge(base, ours, theirs, resolutions);
+      if (merged.conflicts.length > 0) {
+        return { ref: d, commit: null, conflicts: merged.conflicts };
+      }
+      const moved: Ref = { ...d, base: parent.head };
+      yield* this.#overlay(tx, moved, theirs, merged.merged, ours, own, actor);
+      let written: Commit | null = null;
+      try {
+        written = yield* this.#commit(tx, moved, {}, actor);
+      } catch (err) {
+        if (!(err instanceof NothingToCommitError)) {
+          throw err;
+        }
+      }
+      const ref = yield* tx.updateRef({
+        id: d.id,
+        version: d.version,
+        head: written?.id ?? null,
+        base: parent.head,
+        seal: false,
+        actor,
+      });
+      return { ref, commit: written, conflicts: [] };
+    });
+  }
+
+  revert(actor: string, ref: string, version: number, toCommit: string): Body<CommitResult> {
+    actor = actorID(actor);
+    ref = id("id", ref);
+    toCommit = id("id", toCommit);
+    return this.#transaction(function* (tx) {
+      const r = yield* this.#readDraft(tx, ref, version);
+      const commit = yield* tx.readCommit(toCommit);
+      if (commit.root !== r.root) {
+        throw new RootMismatchError();
+      }
+      const tree = yield* this.#materialize(tx, toCommit);
+      yield* this.#revert(tx, r, tree, actor);
+      return yield* this.#commitAndMove(tx, r, {}, true, false, actor);
+    });
+  }
+
+  release(actor: string, root: string, commit: string, version: number): Body<Release> {
+    actor = actorID(actor);
+    root = id("id", root);
+    commit = id("id", commit);
+    return this.#transaction(function* (tx) {
+      const c = yield* tx.readCommit(commit);
+      if (c.root !== root) {
+        throw new RootMismatchError();
+      }
+      if (c.sequence === null) {
+        throw new NotTaggedError();
+      }
+      yield* this.#ensureSnapshot(tx, c);
+      return yield* tx.writeRelease({ root, commit: c.id, version, actor });
+    });
+  }
+
+  released(root: string): Body<ReleasedResult> {
+    root = id("id", root);
+    return this.#transaction(function* (tx) {
+      const release = yield* tx.readRelease(root);
+      const tree = this.#order(yield* this.#materialize(tx, release.commit));
+      return { release, ...this.#treeResult(tree, []) };
+    });
+  }
+
+  materialize(commit: string): Body<TreeResult> {
+    commit = id("id", commit);
+    return this.#transaction(function* (tx) {
+      const tree = this.#order(yield* this.#materialize(tx, commit));
+      return this.#treeResult(tree, []);
+    });
+  }
+
+  compose(ref: string): Body<TreeResult> {
+    ref = id("id", ref);
+    return this.#transaction(function* (tx) {
+      const r = yield* this.#readRef(tx, ref, undefined, false);
+      const { tree, findings } = yield* this.#compose(tx, r);
+      return this.#treeResult(tree, findings);
+    });
+  }
+
+  diff(from: string, to: string): Body<Change[]> {
+    from = id("id", from);
+    to = id("id", to);
+    return this.#transaction(function* (tx) {
+      const fromTree = yield* this.#materialize(tx, from);
+      const toTree = yield* this.#materialize(tx, to);
+      return this.#diff(fromTree, toTree);
+    });
+  }
+
+  history(ref: string): Body<Commit[]> {
+    ref = id("id", ref);
+    return this.#transaction(function* (tx) {
+      const r = yield* this.#readRef(tx, ref, undefined, false);
+      if (r.head === null) {
+        return [];
+      }
+      return yield* tx.refCommits(r.id, r.head, this.walkCeiling);
+    });
+  }
+
+  discard(actor: string, ref: string, version: number): Body<void> {
+    actor = actorID(actor);
+    ref = id("id", ref);
+    return this.#transaction(function* (tx) {
+      yield* this.#readRef(tx, ref, version, false);
+      yield* tx.discardRef(ref, version, actor);
+    });
+  }
+
+  sweep(options: SweepOptions): Body<SweepReport> {
+    const actor = actorID(options.actor);
+    const grace = options.discardGrace !== undefined && options.discardGrace !== 0 ? options.discardGrace : DefaultDiscardGrace;
+    return this.#transaction(function* (tx) {
+      const report: SweepReport = {
+        skipped: false,
+        abandoned: 0,
+        collectedRefs: 0,
+        collectedRows: {},
+        pruned: {},
+        snapshots: 0,
+      };
+      if (!(yield* tx.sweepLock())) {
+        report.skipped = true;
+        return report;
+      }
+      if (options.abandonAfter !== undefined && options.abandonAfter > 0) {
+        for (const ref of yield* tx.idleDrafts(options.abandonAfter)) {
+          // A write that reached the ref after idleDrafts read it moved its
+          // version, so the ref is no longer idle: leave it.
+          try {
+            yield* tx.discardRef(ref.id, ref.version, actor);
+          } catch (err) {
+            if (err instanceof VersionConflictError) {
+              continue;
+            }
+            throw err;
+          }
+          report.abandoned++;
+        }
+      }
+      for (const ref of yield* tx.discardedRefs(grace)) {
+        let rows = 0;
+        for (const k of this.#kinds) {
+          const n = yield* tx.removeRefRows(k.name, ref.id, actor);
+          if (n > 0) {
+            report.collectedRows[k.name] = (report.collectedRows[k.name] ?? 0) + n;
+            rows += n;
+          }
+        }
+        if (rows > 0) {
+          report.collectedRefs++;
+        }
+      }
+      for (const k of this.#kinds) {
+        const n = yield* tx.prune(k.name, 0, options.pruneBatch ?? 0);
+        if (n > 0) {
+          report.pruned[k.name] = n;
+        }
+      }
+      report.snapshots = yield* this.#backfill(tx);
+      return report;
+    });
+  }
 
   /**
    * Reads a ref. With expected set it locks the ref's row and refuses a ref
    * at another version, and with write set a sealed ref.
    */
-  async #readRef(tx: Tx, refID: string, expected: number | undefined, write: boolean): Promise<Ref> {
-    const ref = expected !== undefined ? await tx.lockRef(refID) : await tx.readRef(refID);
+  *#readRef(tx: Calls, refID: string, expected: number | undefined, write: boolean): Steps<Ref> {
+    const ref = expected !== undefined ? yield* tx.lockRef(refID) : yield* tx.readRef(refID);
     if (ref.discarded) {
       throw new NotFoundError();
     }
@@ -768,8 +1113,8 @@ export class Engine {
   }
 
   /** Reads a ref to write through at version: a live, unsealed change set. A primary line takes writes only from merge. */
-  async #readDraft(tx: Tx, refID: string, version: number): Promise<Ref> {
-    const ref = await this.#readRef(tx, refID, version, true);
+  *#readDraft(tx: Calls, refID: string, version: number): Steps<Ref> {
+    const ref = yield* this.#readRef(tx, refID, version, true);
     if (ref.parent === null) {
       throw new PrimaryMergeOnlyError();
     }
@@ -830,10 +1175,10 @@ export class Engine {
   }
 
   /** Reads every row a ref holds, tombstones included. */
-  async #ownRows(tx: Tx, ref: string): Promise<Tree> {
+  *#ownRows(tx: Calls, ref: string): Steps<Tree> {
     const tree: Tree = {};
     for (const k of this.#kinds) {
-      const rows = await tx.rows(k.name, ref);
+      const rows = yield* tx.rows(k.name, ref);
       if (rows.length > 0) {
         tree[k.name] = rows;
       }
@@ -851,19 +1196,19 @@ export class Engine {
    * from before its first commit. An empty commit is the empty set at
    * distance 0.
    */
-  async #resolve(tx: Tx, commit: string | null): Promise<{ pins: PinSet; distance: number }> {
+  *#resolve(tx: Calls, commit: string | null): Steps<{ pins: PinSet; distance: number }> {
     const pins: PinSet = new Map();
     if (commit === null || commit === "") {
       return { pins, distance: 0 };
     }
-    const chain = await tx.walk(commit, this.#walkCeiling);
+    const chain = yield* tx.walk(commit, this.walkCeiling);
     if (chain.length === 0) {
       throw new NotFoundError();
     }
     for (const c of chain) {
-      if (c.schemaEpoch > this.#schemaEpoch) {
+      if (c.schemaEpoch > this.schemaEpoch) {
         throw new SchemaEpochError(
-          `the commit is from a newer schema epoch: commit ${c.id} has epoch ${c.schemaEpoch}, this graph ${this.#schemaEpoch}`,
+          `the commit is from a newer schema epoch: commit ${c.id} has epoch ${c.schemaEpoch}, this graph ${this.schemaEpoch}`,
         );
       }
     }
@@ -871,19 +1216,19 @@ export class Engine {
     let distance = chain.length;
     let patched = chain;
     if (last.snapshot) {
-      for (const entry of await tx.snapshot(last.id)) {
+      for (const entry of yield* tx.snapshot(last.id)) {
         pins.set(entity(entry.kind, entry.entityKey), entry);
       }
       distance = chain.length - 1;
       patched = chain.slice(0, -1);
     } else if (last.parent !== null) {
-      throw new WalkCeilingError(`the commit walk passed its ceiling: ${this.#walkCeiling} commits`);
+      throw new WalkCeilingError(`the commit walk passed its ceiling: ${this.walkCeiling} commits`);
     }
     if (patched.length === 0) {
       return { pins, distance };
     }
     const depth = new Map(patched.map((c, i) => [c.id, i]));
-    const patches = await tx.patches(patched.map((c) => c.id));
+    const patches = yield* tx.patches(patched.map((c) => c.id));
     const nearest = new Map<string, Patch>();
     for (const p of patches) {
       const at = entity(p.kind, p.entityKey);
@@ -897,7 +1242,7 @@ export class Engine {
   }
 
   /** Reads the history image of every row version a pin set holds. */
-  async #images(tx: Tx, pins: PinSet): Promise<Tree> {
+  *#images(tx: Calls, pins: PinSet): Steps<Tree> {
     const byKind = new Map<string, { id: string; version: number }[]>();
     for (const entry of pins.values()) {
       let list = byKind.get(entry.kind);
@@ -912,7 +1257,7 @@ export class Engine {
       if (want.length === 0) {
         continue;
       }
-      const images = await tx.images(k.name, want);
+      const images = yield* tx.images(k.name, want);
       if (images.length !== want.length) {
         throw new HistoryMissingError(
           `a row version a commit names is missing from history: ${want.length - images.length} of ${want.length} ${k.name} rows`,
@@ -924,14 +1269,14 @@ export class Engine {
   }
 
   /** Reads a commit's tree: the row versions its pin set holds, read from history. An empty commit is the empty tree. */
-  async #materialize(tx: Tx, commit: string | null): Promise<Tree> {
-    return (await this.#materializePins(tx, commit)).tree;
+  *#materialize(tx: Calls, commit: string | null): Steps<Tree> {
+    return (yield* this.#materializePins(tx, commit)).tree;
   }
 
   /** materialize, with the commit's pin set and its distance from the nearest snapshot (see resolve). */
-  async #materializePins(tx: Tx, commit: string | null): Promise<{ tree: Tree; pins: PinSet; distance: number }> {
-    const { pins, distance } = await this.#resolve(tx, commit);
-    const tree = await this.#images(tx, pins);
+  *#materializePins(tx: Calls, commit: string | null): Steps<{ tree: Tree; pins: PinSet; distance: number }> {
+    const { pins, distance } = yield* this.#resolve(tx, commit);
+    const tree = yield* this.#images(tx, pins);
     return { tree, pins, distance };
   }
 
@@ -939,34 +1284,34 @@ export class Engine {
    * Snapshots a commit that has no snapshot yet. Reports whether it wrote
    * one: a commit whose tree is empty has no entries to write.
    */
-  async #ensureSnapshot(tx: Tx, commit: { id: string; snapshot: boolean }): Promise<boolean> {
+  *#ensureSnapshot(tx: Calls, commit: { id: string; snapshot: boolean }): Steps<boolean> {
     if (commit.snapshot) {
       return false;
     }
-    const { pins } = await this.#resolve(tx, commit.id);
+    const { pins } = yield* this.#resolve(tx, commit.id);
     if (pins.size === 0) {
       return false;
     }
-    await tx.insertSnapshot(commit.id, pinEntries(pins));
+    yield* tx.insertSnapshot(commit.id, pinEntries(pins));
     return true;
   }
 
   /** core.compose(materialize(ref.base) or empty, the ref's own rows), with the core's findings and the own rows. */
-  async #compose(tx: Tx, ref: Ref): Promise<{ tree: Tree; findings: Finding[]; own: Tree }> {
-    const base = await this.#materialize(tx, ref.base);
-    const own = await this.#ownRows(tx, ref.id);
-    const output = this.#run("compose", `{"descriptor":${this.#descriptor},"base":${treeJson(base)},"overlay":${treeJson(own)}}`);
+  *#compose(tx: Calls, ref: Ref): Steps<{ tree: Tree; findings: Finding[]; own: Tree }> {
+    const base = yield* this.#materialize(tx, ref.base);
+    const own = yield* this.#ownRows(tx, ref.id);
+    const output = this.#run("compose", `{"descriptor":${this.descriptor},"base":${treeJson(base)},"overlay":${treeJson(own)}}`);
     return { tree: decodeTree(output.get("tree")!), findings: decodeFindings(output.get("findings")!), own };
   }
 
   /** tree in the core's order: rows by their order column, then by entity key. */
   #order(tree: Tree): Tree {
-    const output = this.#run("compose", `{"descriptor":${this.#descriptor},"base":${treeJson(tree)},"overlay":{}}`);
+    const output = this.#run("compose", `{"descriptor":${this.descriptor},"base":${treeJson(tree)},"overlay":{}}`);
     return decodeTree(output.get("tree")!);
   }
 
   #contentHash(tree: Tree): string {
-    const output = this.#run("content_hash", `{"descriptor":${this.#descriptor},"tree":${treeJson(tree)}}`);
+    const output = this.#run("content_hash", `{"descriptor":${this.descriptor},"tree":${treeJson(tree)}}`);
     return output.get("contentHash") as string;
   }
 
@@ -975,7 +1320,7 @@ export class Engine {
   }
 
   #diff(from: Tree, to: Tree): Change[] {
-    const output = this.#run("diff", `{"descriptor":${this.#descriptor},"from":${treeJson(from)},"to":${treeJson(to)}}`);
+    const output = this.#run("diff", `{"descriptor":${this.descriptor},"from":${treeJson(from)},"to":${treeJson(to)}}`);
     return (output.get("changes") as JsonValue[]).map((value) => {
       const change = value as Map<string, JsonValue>;
       const out: Change = {
@@ -993,7 +1338,7 @@ export class Engine {
 
   /** Runs one core operation on a JSON request and parses its output exactly. */
   #run(operation: OperationName, request: string): Map<string, JsonValue> {
-    return parseJson(this.#core.run(operation, request)) as Map<string, JsonValue>;
+    return parseJson(this.core.run(operation, request)) as Map<string, JsonValue>;
   }
 
   /**
@@ -1001,7 +1346,7 @@ export class Engine {
    * tombstone set, the row that deletes the entity on the ref. Returns the
    * row as stored.
    */
-  #writeRow(tx: Tx, kind: string, ref: Ref, row: string, tombstone: boolean, actor: string): Promise<string> {
+  #writeRow(tx: Calls, kind: string, ref: Ref, row: string, tombstone: boolean, actor: string): Steps<string> {
     return tx.upsertRow(kind, { ref: ref.id, root: ref.root, row, tombstone, actor });
   }
 
@@ -1009,28 +1354,28 @@ export class Engine {
    * Writes the row that deletes an entity on a ref: a copy of the entity's
    * effective row, so every required column holds, with its tombstone set.
    */
-  async #deleteEntity(tx: Tx, ref: Ref, composed: Index, kind: string, key: string, actor: string): Promise<void> {
+  *#deleteEntity(tx: Calls, ref: Ref, composed: Index, kind: string, key: string, actor: string): Steps<void> {
     const row = composed.get(kind)?.get(key);
     if (row === undefined) {
       throw new EntityNotFoundError(`entity not found on the ref: ${kind} ${key}`);
     }
-    await this.#writeRow(tx, kind, ref, row, true, actor);
+    yield* this.#writeRow(tx, kind, ref, row, true, actor);
   }
 
   /**
    * Composes the ref, diffs it against its last commit (or its base) and
    * writes a commit with a patch per changed entity. Returns the new commit,
-   * or rejects with NothingToCommitError. The caller moves the ref's head.
+   * or throws NothingToCommitError. The caller moves the ref's head.
    */
-  async #commit(tx: Tx, ref: Ref, options: CommitOptions, actor: string): Promise<Commit> {
-    const { tree: composed, own } = await this.#compose(tx, ref);
-    const validated = this.#run("validate", `{"descriptor":${this.#descriptor},"tree":${treeJson(composed)}}`);
+  *#commit(tx: Calls, ref: Ref, options: CommitOptions, actor: string): Steps<Commit> {
+    const { tree: composed, own } = yield* this.#compose(tx, ref);
+    const validated = this.#run("validate", `{"descriptor":${this.descriptor},"tree":${treeJson(composed)}}`);
     const findings = decodeFindings(validated.get("findings")!);
     if (findings.length > 0) {
       throw new InvalidTreeError(findings);
     }
     const parent = ref.head ?? ref.base;
-    const previous = await this.#materializePins(tx, parent);
+    const previous = yield* this.#materializePins(tx, parent);
     const changes = this.#diff(previous.tree, composed);
     if (changes.length === 0) {
       throw new NothingToCommitError();
@@ -1078,26 +1423,26 @@ export class Engine {
     const contentHash = this.#contentHash(composed);
     let sequence: number | null = null;
     if (options.tag === true) {
-      sequence = await tx.nextSequence(ref.root);
+      sequence = yield* tx.nextSequence(ref.root);
     }
-    const written = await tx.insertCommit({
+    const written = yield* tx.insertCommit({
       root: ref.root,
       ref: ref.id,
       parent,
       message: options.message ?? "",
-      schemaEpoch: this.#schemaEpoch,
+      schemaEpoch: this.schemaEpoch,
       contentHash,
       sequence,
       actor,
     });
-    await tx.insertPatches(written.id, patches);
+    yield* tx.insertPatches(written.id, patches);
     // A tagged commit is snapshotted, and so is one snapshotEvery commits
     // past the nearest snapshot on its chain: its parent's pins with its own
     // patches laid over them.
-    if (options.tag === true || previous.distance + 1 >= this.#snapshotEvery) {
+    if (options.tag === true || previous.distance + 1 >= this.snapshotEvery) {
       applyPatches(previous.pins, nearest);
       if (previous.pins.size > 0) {
-        await tx.insertSnapshot(written.id, pinEntries(previous.pins));
+        yield* tx.insertSnapshot(written.id, pinEntries(previous.pins));
         written.snapshot = true;
       }
     }
@@ -1109,23 +1454,23 @@ export class Engine {
    * commit is not an error when allowEmpty is set: the ref's version still
    * moves and the returned commit is null.
    */
-  async #commitAndMove(
-    tx: Tx,
+  *#commitAndMove(
+    tx: Calls,
     ref: Ref,
     options: CommitOptions,
     allowEmpty: boolean,
     seal: boolean,
     actor: string,
-  ): Promise<CommitResult> {
+  ): Steps<CommitResult> {
     let written: Commit | null = null;
     try {
-      written = await this.#commit(tx, ref, options, actor);
+      written = yield* this.#commit(tx, ref, options, actor);
     } catch (err) {
       if (!(allowEmpty && err instanceof NothingToCommitError)) {
         throw err;
       }
     }
-    const moved = await tx.updateRef({ id: ref.id, version: ref.version, head: written?.id ?? null, base: null, seal, actor });
+    const moved = yield* tx.updateRef({ id: ref.id, version: ref.version, head: written?.id ?? null, base: null, seal, actor });
     return { ref: moved, commit: written };
   }
 
@@ -1134,13 +1479,13 @@ export class Engine {
    * conflicts it writes every entity the target does not already hold as
    * the merge left it: the merged row, or the row that deletes the entity.
    */
-  async #merge(tx: Tx, source: Ref, target: Ref, resolutions: readonly Resolution[], actor: string): Promise<Conflict[]> {
-    const base = await this.#materialize(tx, source.base);
+  *#merge(tx: Calls, source: Ref, target: Ref, resolutions: readonly Resolution[], actor: string): Steps<Conflict[]> {
+    const base = yield* this.#materialize(tx, source.base);
     let theirs = base;
     if (source.head !== null) {
-      theirs = await this.#materialize(tx, source.head);
+      theirs = yield* this.#materialize(tx, source.head);
     }
-    const { tree: ours } = await this.#compose(tx, target);
+    const { tree: ours } = yield* this.#compose(tx, target);
     const result = this.#coreMergeResult(base, ours, theirs, resolutions);
     const conflicts = decodeConflicts(result.get("conflicts")!);
     if (conflicts.length > 0) {
@@ -1160,14 +1505,14 @@ export class Engine {
         continue;
       }
       if (outcome.get("deleted") === true) {
-        await this.#deleteEntity(tx, target, oursByKey, kind, entityKey, actor);
+        yield* this.#deleteEntity(tx, target, oursByKey, kind, entityKey, actor);
         continue;
       }
       const row = mergedByKey.get(kind)?.get(entityKey);
       if (row === undefined) {
         throw new Error(`engine: the merge left no ${kind} row for ${entityKey}`);
       }
-      await this.#writeRow(tx, kind, target, row, false, actor);
+      yield* this.#writeRow(tx, kind, target, row, false, actor);
     }
     return [];
   }
@@ -1188,7 +1533,7 @@ export class Engine {
       }
       return "{" + members.join(",") + "}";
     });
-    let request = `{"descriptor":${this.#descriptor},"base":${treeJson(base)},"ours":${treeJson(ours)},"theirs":${treeJson(theirs)}`;
+    let request = `{"descriptor":${this.descriptor},"base":${treeJson(base)},"ours":${treeJson(ours)},"theirs":${treeJson(theirs)}`;
     if (encoded.length > 0) {
       request += `,"resolutions":[${encoded.join(",")}]`;
     }
@@ -1218,7 +1563,7 @@ export class Engine {
    * it; every other row the ref holds is removed, so the entity reads
    * through the base.
    */
-  async #overlay(tx: Tx, ref: Ref, base: Tree, want: Tree, current: Tree, own: Tree, actor: string): Promise<void> {
+  *#overlay(tx: Calls, ref: Ref, base: Tree, want: Tree, current: Tree, own: Tree, actor: string): Steps<void> {
     const changes = this.#diff(base, want);
     const moved = this.#diff(current, want);
     const differs = new Set(moved.map((change) => entity(change.kind, change.entityKey)));
@@ -1235,20 +1580,20 @@ export class Engine {
         if (ownRow !== undefined && tombstone) {
           continue;
         }
-        await this.#deleteEntity(tx, ref, baseByKey, change.kind, change.entityKey, actor);
+        yield* this.#deleteEntity(tx, ref, baseByKey, change.kind, change.entityKey, actor);
         continue;
       }
       if (ownRow !== undefined && !tombstone && !differs.has(at)) {
         continue;
       }
-      await this.#writeRow(tx, change.kind, ref, change.row!, false, actor);
+      yield* this.#writeRow(tx, change.kind, ref, change.row!, false, actor);
     }
     for (const k of this.#kinds) {
       for (const key of ownByKey.get(k.name)?.keys() ?? []) {
         if (kept.has(entity(k.name, key))) {
           continue;
         }
-        await tx.removeRow(k.name, ref.id, key, actor);
+        yield* tx.removeRow(k.name, ref.id, key, actor);
       }
     }
   }
@@ -1258,16 +1603,16 @@ export class Engine {
    * holds that the ref composes differently is written from tree, and each
    * entity only the ref holds is deleted on it.
    */
-  async #revert(tx: Tx, ref: Ref, tree: Tree, actor: string): Promise<void> {
-    const { tree: current } = await this.#compose(tx, ref);
+  *#revert(tx: Calls, ref: Ref, tree: Tree, actor: string): Steps<void> {
+    const { tree: current } = yield* this.#compose(tx, ref);
     const changes = this.#diff(current, tree);
     const currentByKey = this.#index(current);
     for (const change of changes) {
       if (change.operation === "DELETE") {
-        await this.#deleteEntity(tx, ref, currentByKey, change.kind, change.entityKey, actor);
+        yield* this.#deleteEntity(tx, ref, currentByKey, change.kind, change.entityKey, actor);
         continue;
       }
-      await this.#writeRow(tx, change.kind, ref, change.row!, false, actor);
+      yield* this.#writeRow(tx, change.kind, ref, change.row!, false, actor);
     }
   }
 
@@ -1279,8 +1624,8 @@ export class Engine {
    * takes stops at a snapshot at most snapshotEvery commits away. Returns
    * how many snapshots it wrote.
    */
-  async #backfill(tx: Tx): Promise<number> {
-    const nodes = await tx.commits();
+  *#backfill(tx: Calls): Steps<number> {
+    const nodes = yield* tx.commits();
     const byID = new Map(nodes.map((n) => [n.id, n]));
     // Each visited commit's distance from the nearest snapshot on its
     // chain, 0 for a snapshotted commit.
@@ -1305,8 +1650,8 @@ export class Engine {
           continue;
         }
         let d = (n.parent !== null ? (distance.get(n.parent) ?? 0) : 0) + 1;
-        if (n.tagged || d >= this.#snapshotEvery) {
-          if (await this.#ensureSnapshot(tx, { id: n.id, snapshot: false })) {
+        if (n.tagged || d >= this.snapshotEvery) {
+          if (yield* this.#ensureSnapshot(tx, { id: n.id, snapshot: false })) {
             written++;
           }
           d = 0;

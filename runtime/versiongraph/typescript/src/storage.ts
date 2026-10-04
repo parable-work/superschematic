@@ -4,12 +4,15 @@
 // package storage.
 //
 // The engine reaches storage only through this interface, and asks for one
-// transaction per operation. Every row an adapter returns, live or from
-// history, is a canonical row (runtime/versiongraph/README.md, "Canonical
-// rows") as JSON text, so its numbers keep their digits. Every row the
-// engine hands an adapter is canonical too, and every id, of a ref, a
-// commit, a root, a row or an actor, is a UUID in its canonical form
-// (base62).
+// transaction per operation. Engine runs over Storage and Tx, whose methods
+// return promises; SyncEngine runs the same operations over SyncStorage and
+// SyncTx, whose methods return their values, for a database whose driver
+// blocks, as SQLite's does in bun and Node (D32). Every row an adapter
+// returns, live or from history, is a canonical row
+// (runtime/versiongraph/README.md, "Canonical rows") as JSON text, so its
+// numbers keep their digits. Every row the engine hands an adapter is
+// canonical too, and every id, of a ref, a commit, a root, a row or an
+// actor, is a UUID in its canonical form (base62).
 //
 // The module has no dependencies, so an adapter can implement it without
 // loading the core.
@@ -150,6 +153,120 @@ export interface Tx {
    * without waiting, when another transaction holds it.
    */
   sweepLock(): Promise<boolean>;
+}
+
+/**
+ * Holds one version graph for a SyncEngine: Storage whose transaction runs
+ * synchronously. An adapter builds it from the graph's descriptor.
+ */
+export interface SyncStorage {
+  /**
+   * Runs fn in one transaction. It commits when fn returns and rolls back
+   * when it throws, throwing fn's error.
+   */
+  transact<T>(fn: (tx: SyncTx) => T): T;
+}
+
+/**
+ * One synchronous transaction's view of a graph: every method of Tx, each
+ * returning its value where Tx's resolves and throwing where Tx's rejects.
+ */
+export interface SyncTx {
+  /** Writes a ref and returns it. */
+  createRef(ref: NewRef): Ref;
+  /** Reads a ref, a discarded one included. A ref that does not exist is NotFoundError. */
+  readRef(id: string): Ref;
+  /** Reads a ref as readRef does and locks it until the transaction ends. */
+  lockRef(id: string): Ref;
+  /**
+   * Moves a ref's head or base, seals it, or only bumps its version, fenced
+   * by the version it expects. Returns the ref as written, or throws
+   * VersionConflictError.
+   */
+  updateRef(update: RefUpdate): Ref;
+  /**
+   * Soft-deletes a live ref at the version it expects, or throws
+   * VersionConflictError and leaves the transaction usable.
+   */
+  discardRef(id: string, version: number, actor: string): void;
+
+  /** Reads every row a ref holds of one kind, tombstones included, in no particular order. */
+  rows(kind: string, ref: string): string[];
+  /**
+   * Writes a row as the ref's row of its entity: an update of the ref's row
+   * of the entity when it has one, else a new row. Returns the row as
+   * stored.
+   */
+  upsertRow(kind: string, write: RowWrite): string;
+  /**
+   * Hard-deletes the ref's row of an entity, recording actor as the
+   * delete's actor in history. Reports whether there was one.
+   */
+  removeRow(kind: string, ref: string, entityKey: string, actor: string): boolean;
+  /** Reads the history images of row versions. A pin whose image history no longer holds is left out. */
+  images(kind: string, pins: readonly Pin[]): string[];
+
+  /** Reads a commit, or throws NotFoundError. */
+  readCommit(id: string): Commit;
+  /** Writes a commit and returns it. */
+  insertCommit(commit: NewCommit): Commit;
+  /** Writes a commit's patches. */
+  insertPatches(commit: string, patches: readonly Patch[]): void;
+  /**
+   * Reads a commit and its parents, nearest first, at most limit of them,
+   * and stops after the first that has a snapshot. A commit that does not
+   * exist reads as no commits.
+   */
+  walk(commit: string, limit: number): Commit[];
+  /** Reads head and the parents of it that ref wrote, nearest first, at most limit of them. */
+  refCommits(ref: string, head: string, limit: number): Commit[];
+  /** Reads every patch of the commits. */
+  patches(commits: readonly string[]): Patch[];
+  /**
+   * Locks the root against other taggers until the transaction ends, and
+   * returns the root's next published sequence.
+   */
+  nextSequence(root: string): number;
+
+  /** Reads a commit's snapshot: its full pin set, in no particular order. A commit without one reads as no entries. */
+  snapshot(commit: string): SnapshotEntry[];
+  /** Writes a commit's snapshot. */
+  insertSnapshot(commit: string, entries: readonly SnapshotEntry[]): void;
+  /** Reads every commit of the graph, in no particular order, with whether each is tagged and snapshotted. */
+  commits(): CommitNode[];
+
+  /** Reads a root's release pointer, or throws NotFoundError when the root has none. */
+  readRelease(root: string): Release;
+  /**
+   * Points a root's release at a commit, fenced by the pointer's version:
+   * version 0 writes the root's first pointer, and any other moves the
+   * pointer at that version. A pointer at another version, or one that
+   * already exists when version is 0, is VersionConflictError. Returns the
+   * pointer as written.
+   */
+  writeRelease(write: ReleaseWrite): Release;
+
+  /**
+   * Deletes the history images of one kind older than retentionDays (0 for
+   * the kind's declared retention), keeping every image a patch or a
+   * snapshot pins, at most batchSize of them (0 for no limit). Returns how
+   * many it deleted.
+   */
+  prune(kind: string, retentionDays: number, batchSize: number): number;
+  /** Reads the refs discarded longer ago than graceMs milliseconds. */
+  discardedRefs(graceMs: number): Ref[];
+  /** Reads the live change sets whose last write is older than idleMs milliseconds. */
+  idleDrafts(idleMs: number): Ref[];
+  /**
+   * Hard-deletes every row a ref holds of one kind, recording actor as each
+   * delete's actor in history. Returns how many it deleted.
+   */
+  removeRefRows(kind: string, ref: string, actor: string): number;
+  /**
+   * Takes the graph's sweep lock until the transaction ends. Reports false,
+   * without waiting, when another transaction holds it.
+   */
+  sweepLock(): boolean;
 }
 
 /** A ref's graph columns. An absent reference is null. */
