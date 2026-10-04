@@ -279,6 +279,9 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	jsonTypesByNamespace := make(map[string]map[string]struct{})
 
 	for _, endpoint := range apiOutput.Endpoints {
+		if endpoint.IsWebhook {
+			continue
+		}
 		namespaceName := endpoint.Namespace
 		if namespaceName == "" {
 			namespaceName = "root"

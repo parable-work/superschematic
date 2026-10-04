@@ -1168,6 +1168,34 @@ claim itself runs with that instance's guards and appends its event.
 | A behavior creates an instance wherever it may invoke a writing operation (`instances.create`): as the caller, asking `write` on the schema, with the live version's validation, every behavior's `initialize` and `afterChange`, and the create event, which records the runner's cause in the runner's work. It runs in the call's transaction, in a savepoint that rolls back alone when the behavior catches its failure, and nests like an invoke. A guard, a field reader and a read-only operation cannot create. A schema-level operation and the runner's work, which the amendments above hold to changing state through the operations they invoke, change it through the instances they create too, each with its hooks and its event. | An operation on the target schema that creates, which every schema would have to compose; creating after the commit only, which cannot create a parent's children in the parent's transaction |
 | A schedule's interval may be a function of the config of the schema it runs on, which the runner calls when it finds the schedule there, at its first pass and after each publish. A function that throws or gives no valid interval fails the schedule on that schema as a failing run does: `engine.runner.status()` shows the error, and the runner tries again after the backoff, while the schedule on other schemas and the runner go on. | One interval per behavior, which makes a lease sweep as slow as the slowest schema's lease |
 
+### D16, amended: terminal states carry an outcome
+
+A Workflow terminal state was only a state no transition leaves, and
+the behaviors that read other instances took any terminal state to mean
+the work was done. A blocker that failed released its dependents, so a
+failed check let the step after it start. An `all` rollup and an
+`allTerminal` rule held for a parent whose children had all failed. A
+rule on the last child that failed its parent and the parent's
+`allTerminal` rule that completed it ran in two subscriptions, so which
+won was not defined. And a gate on the start of work, a move from `todo`
+to `doing`, could not be written, since `gatedStates` took only terminal
+states, so only a work queue's claim waited on blockers. Each terminal
+state now has an outcome, and the behaviors that read one say which
+outcomes they count. This changes the `Dependencies` and `Reactions`
+rows of the amendments above: a blocker must finish, not only end, and a
+gated state need not be terminal.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A terminal state of `Workflow` has an outcome, `success`, `failure` or `neutral`, which the config's `outcomes` names per state. A terminal state it does not name is a `success`, so a config without `outcomes` keeps its meaning. A key that is not a state, or that names a state a transition leaves, is a `BehaviorConfigError`. `stateOutcome(config, state)`, exported beside `isTerminalState`, reads it from a config as a schema holds it and is undefined for a state that is not terminal. Workflow reads no outcome itself. | States listed per outcome, which can leave a state in two lists or in none; an outcome on a state a transition leaves, which a reader would take for the end of work still running; outcome names of the schema's own, which no reader in another schema can interpret; `failure` as the default, which changes the meaning of every config written before outcomes |
+| A new version may change `outcomes`, as it may change the transitions that make a state terminal or not. Nothing stores either: blockers, rollups and rules read the live config when they run, for the instances already in the state, and nothing that already moved is moved back. | Freezing a state's outcome once the schema has instances, while transitions, which decide whether the state is terminal at all, stay free |
+| `Dependencies` takes `satisfiedBy`, the outcomes that finish a blocker, `["success"]` when absent. A blocker is finished when its status is a terminal state of its own schema's Workflow and its outcome is listed, and open until then: one that ended with another outcome stays open until `removeBlocker` takes it off. A blocker whose schema names no outcomes finishes in any terminal state, as before. | Releasing on any terminal state, which lets a failed check through; failing the dependent when a blocker fails, which is a rule's work after the commit, not a guard's |
+| `gatedStates` may name any state of the type's Workflow, terminal or not, and is every terminal state when absent, as before. A gate on `doing` refuses the start of work while a blocker is open, a caller's transition as a claim's. | Gating only terminal states, which leaves a manual start ungated where a claim waits; a second list of start gates beside `gatedStates`, the same check under another name |
+| An instance in a gated state that no transition leaves takes no open blocker (`vetoed`), as before: it never moves again, and its gate let it in with every blocker finished. One in a gated state that a transition leaves takes one, which holds up its next move into a gated state, not the state it is in. | Refusing an open blocker in every gated state, so a dependency found during the work could be recorded only after moving the instance back out of `doing`; refusing one in every terminal state, gated or not, which no gate relies on |
+| `Rollups`' `all` and `any` take `outcomes`: they count a linked instance in a terminal state whose outcome the list holds, and every terminal state without it. It is an argument of two functions from a closed set of three values, as `field` is of `sum`, so the set of functions stays closed. | A function per outcome, which triples `all` and `any`; a filter over the linked instances, which makes the config a query language |
+| `Reactions`' `allTerminal` takes `outcomes`, with `Rollups`' meaning. `when: { anyTerminal: { schema, link, outcomes } }`, its `outcomes` required, fires when an instance of `schema` that links here through `link` enters a terminal state whose outcome is listed, by a create or a transition, or is linked here while in one; an event that moves neither its status nor that link does not fire it again. `parseConfig` holds an `anyTerminal` on the type's own schema to its own link, as it holds `allTerminal`. It is how a parent says on its own schema that a child's failure fails it. | Firing on every event of a linking instance in such a state, which an update of a failed child would turn into failing a parent that had been retried; firing only on the move into the state, which misses a failed child linked to a running parent |
+| A parent's `allTerminal` with `["success"]` and `anyTerminal` with `["failure"]` run in its schema's one subscription, on each child's event in log order, and `allTerminal` reads every child as it is when it runs. A terminal state is final, so the parent completes only once every child has succeeded and never while one has failed, whatever order the children's events, the rules and the runner's passes come in. A test runs each order. | Ordering subscriptions across schemas so a child's rule runs before its parent's, which D16's independent subscriptions rule out, and which leaves an `allTerminal` without outcomes completing a parent whose children failed when no child's rule exists |
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.
@@ -1858,5 +1886,101 @@ secret masks only; the validators, the parsers and the SDKs' path and query
 arguments are unchanged. `internal/generator/tsgen/branded_scalars_test.go`
 checks the types, the casts and the masks with tsc and under Bun, and
 type-checks a package with a field of every scalar in the linked catalog.
+
+The rule is reversible until the first release.
+
+## D26. Every server runs an `@hmacVerified` provider's verifier first
+
+`@hmacVerified({ provider })` reached only the Go server. apigen read the
+provider, `Implementations` gained a `WebhookVerifiers` map that
+`ValidateImplementations` required for every provider, and the route ran
+the provider's verifier ahead of the rate limit, the body limit and the
+permission check. The TypeScript and Rust server generators never read the
+provider, so a webhook route served by either took unsigned requests, and
+nothing said so.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The TypeScript and Rust servers enforce it, as the Go server does: `Implementations` has a verifier for each provider the schema names (`webhookVerifiers`, `webhook_verifiers`), the server does not start without one for every provider, and a provider's verifier runs before every other step of its routes. | Refusing such an operation at build time unless it is `@manualRouteRegistration`, as both servers refuse an encrypted one (D15, D20 amended). That is less code, but it leaves the signature check to a hand-written route in two servers of three. |
+| The TypeScript verifier is Hono middleware (`WebhookVerifier`, exported by `@superschematic/http-runtime/hono`), the counterpart of Go's `func(http.Handler) http.Handler`. The operation table names the provider (`webhookProvider`), and `mountOperation` and `mountManualOperation` throw at mount when such a spec has no verifier. `webhookVerifiers` has a property per provider, so tsc catches a missing one; `buildRouter` throws `Implementations.webhookVerifiers for provider <provider> is required`, as Go and Rust word it, for a caller tsc did not check. | A predicate the runtime calls with the headers and the raw body, answering 401 itself. It is simpler to write, but it fixes the refusal's status and body, and the Go verifier answers for itself. |
+| The TypeScript verifier may read the body. The route reads a copy of the request (`Request.clone()`) taken before the verifier ran. | Asking the verifier to read a clone. One that calls `c.req.text()`, as provider examples do, would leave the route a used body and a 500. |
+| The TypeScript router runs the verifier on a `@manualRouteRegistration` route too, before the service's handler, as it runs the rate limit and the gate there. | |
+| The Rust verifier is an async trait whose `verify(request, next)` is axum middleware, the counterpart of `axum::middleware::from_fn`. `webhook_verifiers` is a `HashMap<String, Arc<dyn WebhookVerifier>>` keyed by provider, as Go's map is. `webhook_verified(route, verifier)` adds it with `route_layer`, so it runs before the handler's extractors read the body and not on a 405. `build_router` panics without a verifier for every provider, as axum panics on a route it cannot mount; `validate_implementations` returns the message. | A struct with a field per provider, which the compiler would check, but which needs a Rust identifier from every provider string and keys the verifiers differently from Go and TypeScript; `build_router` returning a `Result`, which changes its signature for every crate |
+| `build_router` does not mount a `@manualRouteRegistration` operation (D20 amended), so it applies no verifier to one. The service wraps the route it adds in `webhook_verified`, and `build_router`'s doc says so for each such operation. Its provider still needs a verifier in `webhook_verifiers`, as in Go and TypeScript. | Requiring verifiers only for the providers of mounted operations, which gives the three servers different rules |
+
+In all three servers the verifier runs before the body limit, so it reads
+a body of any size; a verifier that cares caps its own read, as the Rust
+one must in `to_bytes`. The Rust router applies none of the other traffic
+controls or the permission check, so there the verifier is the only step
+before the handler. The Python and Rust SDKs still generate a method for a
+`@webhook` operation, which the Go and TypeScript SDKs leave out; this
+entry does not change that.
+
+`fixture-webhooks-api` declares two providers, a manual webhook and a
+route that is not one. `runtime/http/typescript/src/hono.test.ts`,
+`internal/generator/tsrestgen/webhooks_test.go` (under Bun) and
+`internal/generator/rustrestgen/webhooks_test.go` (under cargo) check the
+order, the refusal at startup and the body the route receives. Output for
+a schema without `@hmacVerified` is unchanged byte for byte.
+
+The rule is reversible until the first release.
+
+## D30. A stack model deploys a schema tree through platforms and provisioners
+
+superschematic generates the code of a tree of services but nothing that
+runs it. An engineer writes the server's `main`, the connection string, the
+deploy configuration and the CI by hand, and so restates what the schemas
+already say: `authDb` names an API's database, yet `examples/acme-shop`
+connects with `os.Getenv("DATABASE_URL")`. A distribution built a deploy
+family on the source tree. It works, but it holds its model in executable
+TypeScript, flattens typed references to strings and checks the same facts
+in three places. This entry records a general design before any of it is
+built. `docs/stack-model.md` is the design; its section 16 says what came
+from the distribution and what did not.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A stack is a service of a new core kind, `Stack`, read statically like any schema. It declares entry points, deployables that differ from the defaults, and environments. Each API service is one server and each DB service one database unless a declaration says otherwise. | An executable TypeScript model run under bun, as the source tree's is, which flattened references to strings and re-validated them in Go; an extension kind, whose output the core generators (env config, entrypoints) could not consume |
+| Wiring is derived. A server's database comes from each served API's `authDb`, and the one wiring fact a person writes is `calls`, as service handles. Each edge adds a typed field to the server's generated config, and the platform fills it. | A values document per environment that names each connection string, as `extensions/deploy` does; environment variables declared by hand in `@envVars` and checked for agreement |
+| Platforms (a deployable kind on a runtime), connectors (an edge between two platforms), targets (a bundle of platforms) and provisioners (a tool that applies resources) are four registrations. Cloud Run with Cloud SQL is the first target. GKE, hosted Kubernetes and Cloudflare are later registrations, not core edits. | One target per cloud owning everything, which ties Cloud Run to Cloud SQL and makes GKE a rewrite; a closed set of environment kinds, as the source tree has |
+| Platforms and connectors lower to a resource graph whose vocabulary is Pulumi's package schemas, pinned and checked in for offline validation. Provisioners read only that graph. | Platforms written as Pulumi Go components, which ties every platform to Pulumi; a vocabulary of our own, which would re-model every cloud resource |
+| Pulumi is the first provisioner. superschematic drives it from Go through the Automation API, renders the program as Pulumi YAML from the graph, and keeps state in a GCS bucket with a Cloud KMS secrets provider that bootstrap creates. Code outside the stack reaches its resources through a generated, typed binding over the stack's outputs. | A generated, typed Pulumi Go program, which needs schema-aware code generation and a compile on every run for checks the offline graph validation already makes; OpenTofu first, which superschematic could drive only by running its CLI; Config Connector or Crossplane, which need a cluster; Pulumi Cloud for state, an account beyond the GCP project |
+| superschematic generates each server's entrypoint and Dockerfile. The engineer writes the implementation interfaces and one constructor whose signature is generated. | Pointing a deployable at an image the engineer maintains, which leaves the wiring in a hand-written `main` |
+| Migrations belong to `sqlgen`, for Postgres and SQLite, and get their own entry. The stack model consumes an offline plan with hazards, and an apply step. | A schema-diff step inside the deploy, which SQLite (the engine, D16) could not share |
+| End-user auth and service auth are separate concepts. Platforms admit callers along edges, and an application-level service principal travels in its own header beside the end user's `Authorization`. | Service calls through the end-user auth provider with a minted token, which merges the two principals |
+
+Nothing here is built. The design is reversible until the first release.
+## D28. No SDK has a method for a `@webhook` operation
+
+`@webhook` marks an operation a third party calls. The Go and TypeScript
+SDKs have skipped one since the bootstrap commit (`0b783d15`), which
+brought the check over from the source tree with no recorded reason; those
+two checks were the only readers of `IsWebhook`. The Python and Rust SDK
+generators never read it, so both generated a client method for every
+webhook. The Rust SDK also listed it in its tool schema and audit
+documents and validated its input type before a request. D26 noted the
+gap and left it; this entry supersedes that sentence.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@webhook` means a third party calls the route, and no SDK has a method for it. An SDK is the client for the service's own callers. A webhook's caller is the provider (Stripe, GitHub), which sends its own request from its own servers, so a generated method has no real user. | Dropping the skip in every SDK. Each SDK would gain a method nobody can use, and a reader of the SDK would take the route for one its callers call. |
+| Under `@hmacVerified` such a method cannot work: no SDK signs a request, so the provider's verifier refuses every call it sends (D26). Making it work would put the provider's signing secret in a client. | Skipping only `@hmacVerified` webhooks, which makes `@webhook` mean two things: a route a third party calls, and one the service's clients call unsigned |
+| A route the service's own clients or services call, an internal callback say, is an ordinary route and is not declared `@webhook`. | |
+| The Python and Rust SDKs skip an operation whose `EndpointInfo.IsWebhook` is set, where the Go and TypeScript SDKs do: it has no method, and a namespace whose operations are all webhooks is not generated. The Rust SDK's tool documents leave it out too, as the Go and TypeScript SDKs' already did, since theirs come from the TypeScript SDK's methods. The Rust SDK's validation schemas leave out the webhook's input type, which no method validates. | Rust tool documents that follow the operations rather than the SDK's methods, which would list tools the Rust crate has no method for and the other SDKs leave out |
+
+The OpenAPI document keeps the route, since it tells the provider where to
+post. The provider tool lists (`openai.json`, `anthropic.json`) hold only
+operations published through `@mcp`, so they change only for a webhook a
+schema published that way, which only the Rust lists carried. An SDK still
+carries its auth surface when only a webhook needs a caller, since
+`APIOutput.HasAuth` counts every operation (D15, amended); all four SDKs
+agree on that.
+
+`internal/generator/pysdkgen/webhooks_test.go` and
+`internal/generator/rustsdkgen/webhooks_test.go` check that the SDK of
+`fixture-webhooks-api` (D26) has `event.get_event` and no other method,
+and the Rust test that its tools and validation schemas hold no webhook. A
+golden tree pins each SDK. Output for a schema without `@webhook` is
+unchanged byte for byte.
 
 The rule is reversible until the first release.

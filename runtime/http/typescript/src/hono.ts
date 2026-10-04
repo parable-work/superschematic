@@ -27,14 +27,20 @@ mountOperation once per @rest operation with the operation's spec and a
 handler that forwards decoded arguments to the service's implementation; the
 adapter owns the request pipeline:
 
-  request id -> @rateLimit -> [hono/timeout: hono/bearer-auth + permission
-  gate -> path/query decoding -> hono/body-limit + JSON parse -> strict
-  input parser -> implementation] -> envelope
+  request id -> @hmacVerified -> @rateLimit -> [hono/timeout:
+  hono/bearer-auth + permission gate -> path/query decoding ->
+  hono/body-limit + JSON parse -> strict input parser -> implementation]
+  -> envelope
 
 and turns every failure into the problem envelope. Operations marked
-@manualRouteRegistration are mounted through mountManualOperation: the rate
-limit, timeout and gate still run, then the service's own handler receives
-the Hono context (a streaming response cannot be expressed as a JSON result).
+@manualRouteRegistration are mounted through mountManualOperation: the
+webhook verifier, rate limit, timeout and gate still run, then the service's
+own handler receives the Hono context (a streaming response cannot be
+expressed as a JSON result).
+
+An @hmacVerified operation is mounted with its provider's WebhookVerifier,
+which runs before every other step, as the Go router runs the provider's
+WebhookVerifier: a request without a valid signature costs nothing else.
 
 @rateLimit stays in this package (Go uses httprate). @timeout and the body
 cap are hono/timeout and hono/body-limit; Bearer extraction is
@@ -85,7 +91,19 @@ export interface MountOptions {
   rateLimitPerMinute?: number;
   /** Seconds for this mount, overriding the spec's @timeout; 0 disables the timeout. */
   timeoutSeconds?: number;
+  /** Checks the request before every other step. Required when the spec names a webhookProvider. */
+  webhookVerifier?: WebhookVerifier;
 }
+
+/**
+ * Checks a webhook's signature (@hmacVerified) before every other step of
+ * its route. It is Hono middleware: it answers a request it refuses, or
+ * throws an HttpProblem, and calls next() for one it accepts. It may read
+ * the body (c.req.text(), c.req.arrayBuffer()); the route reads a copy taken
+ * before it ran. It runs before the body limit, so it reads a body of any
+ * size.
+ */
+export type WebhookVerifier = MiddlewareHandler;
 
 /** The decoded arguments of one request, keyed by wire name. */
 export interface DecodedRequest {
@@ -372,8 +390,39 @@ function successResponse(result: unknown, requestId: string, spec: OperationSpec
   return envelopeResponse(shape(result) ?? null, requestId);
 }
 
-function routeMiddleware(spec: OperationSpec, timeoutSeconds: number | undefined, bodyLimitBytes: number | undefined): MiddlewareHandler[] {
+/**
+ * The mount's webhook verifier. An @hmacVerified operation is never mounted
+ * without one, so a missing verifier fails at startup, not on a request.
+ */
+function webhookVerifierOf(spec: OperationSpec, mount: MountOptions): WebhookVerifier | undefined {
+  if (spec.webhookProvider !== undefined && !mount.webhookVerifier) {
+    throw new Error(`${spec.name} is @hmacVerified({ provider: '${spec.webhookProvider}' }) and was mounted without a webhook verifier`);
+  }
+  return mount.webhookVerifier;
+}
+
+/**
+ * Runs the webhook verifier. It may read the body to check the signature,
+ * so the rest of the route reads a copy of the request taken before it ran.
+ */
+function webhookMiddleware(verifier: WebhookVerifier): MiddlewareHandler {
+  return async (c, next) => {
+    const unread = c.req.raw.clone();
+    return verifier(c, async () => {
+      c.req.raw = unread;
+      await next();
+    });
+  };
+}
+
+function routeMiddleware(
+  spec: OperationSpec,
+  timeoutSeconds: number | undefined,
+  bodyLimitBytes: number | undefined,
+  webhookVerifier: WebhookVerifier | undefined
+): MiddlewareHandler[] {
   const middleware: MiddlewareHandler[] = [];
+  if (webhookVerifier) middleware.push(webhookMiddleware(webhookVerifier));
   if (timeoutSeconds) middleware.push(timeoutMiddleware(timeoutSeconds));
   if (bodyLimitBytes !== undefined) middleware.push(jsonBodyLimit(bodyLimitBytes));
   if (!spec.auth.public && spec.auth.required) middleware.push(bearerMiddleware());
@@ -394,7 +443,7 @@ export function mountOperation<E extends Env>(
 ): void {
   const limitBytes = mount.bodyLimitBytes ?? spec.bodyLimitBytes ?? options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
-  const middleware = routeMiddleware(spec, timeoutSeconds, hasBody(spec) ? limitBytes : undefined);
+  const middleware = routeMiddleware(spec, timeoutSeconds, hasBody(spec) ? limitBytes : undefined, webhookVerifierOf(spec, mount));
   app.on(spec.method, honoPath(mount.path ?? spec.path), async c => {
     const deadline = deadlineOf(timeoutSeconds);
     try {
@@ -423,8 +472,9 @@ export function mountOperation<E extends Env>(
 }
 
 /**
- * Mounts a @manualRouteRegistration operation: the rate limit, timeout and
- * auth gate run, then the service's handler owns the request and response.
+ * Mounts a @manualRouteRegistration operation: the webhook verifier, rate
+ * limit, timeout and auth gate run, then the service's handler owns the
+ * request and response.
  * A timeout covers the handler's return of a Response; a streaming body it
  * has started is not cut. Without a handler the route answers 501 so a
  * forgotten hook is visible, not a 404.
@@ -438,7 +488,7 @@ export function mountManualOperation<E extends Env>(
 ): void {
   const limitBytes = mount.bodyLimitBytes ?? spec.bodyLimitBytes;
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
-  const middleware = routeMiddleware(spec, timeoutSeconds, limitBytes);
+  const middleware = routeMiddleware(spec, timeoutSeconds, limitBytes, webhookVerifierOf(spec, mount));
   app.on(spec.method, honoPath(mount.path ?? spec.path), async c => {
     const deadline = deadlineOf(timeoutSeconds);
     try {

@@ -379,10 +379,23 @@
                 "additionalProperties": false,
                 "properties": {
                   "gatedStates": {
-                    "description": "The terminal states of the type's Workflow that a transition into waits for every blocker to reach a terminal state of its own; every terminal state when absent.",
+                    "description": "The states of the type's Workflow that a transition into waits for every blocker to finish; every terminal state when absent.",
                     "items": {
                       "minLength": 1,
                       "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "satisfiedBy": {
+                    "description": "The outcomes of a blocker's terminal state that finish it; success when absent. A blocker in a terminal state whose outcome the list lacks blocks until it is removed.",
+                    "items": {
+                      "enum": [
+                        "success",
+                        "failure",
+                        "neutral"
+                      ]
                     },
                     "minItems": 1,
                     "type": "array",
@@ -798,18 +811,31 @@
                         },
                         "when": {
                           "additionalProperties": false,
-                          "description": "What sets the rule off: one of enters and allTerminal.",
+                          "description": "What sets the rule off: one of enters, allTerminal and anyTerminal.",
                           "maxProperties": 1,
                           "minProperties": 1,
                           "properties": {
                             "allTerminal": {
                               "additionalProperties": false,
-                              "description": "The rule fires on an instance when an instance of schema that links to it through link changes or goes, and every instance that links to it there is in a terminal state of its own schema's Workflow, at least one.",
+                              "description": "The rule fires on an instance when an instance of schema that links to it through link changes or goes, and every instance that links to it there is in a terminal state of its own schema's Workflow, with an outcome outcomes lists when it is given, at least one.",
                               "properties": {
                                 "link": {
                                   "description": "The link of that schema's Links config that points at this type's schema.",
                                   "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                                   "type": "string"
+                                },
+                                "outcomes": {
+                                  "description": "The outcomes a linking instance's terminal state must have; every outcome when absent.",
+                                  "items": {
+                                    "enum": [
+                                      "success",
+                                      "failure",
+                                      "neutral"
+                                    ]
+                                  },
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "uniqueItems": true
                                 },
                                 "schema": {
                                   "description": "The schema of the linking instances, which composes Links and Workflow.",
@@ -820,6 +846,41 @@
                               "required": [
                                 "schema",
                                 "link"
+                              ],
+                              "type": "object"
+                            },
+                            "anyTerminal": {
+                              "additionalProperties": false,
+                              "description": "The rule fires on an instance when an instance of schema that links to it through link enters a terminal state of its own schema's Workflow whose outcome outcomes lists, by a create or a transition, or is linked to it while in one.",
+                              "properties": {
+                                "link": {
+                                  "description": "The link of that schema's Links config that points at this type's schema.",
+                                  "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                                  "type": "string"
+                                },
+                                "outcomes": {
+                                  "description": "The outcomes of the terminal states that set the rule off.",
+                                  "items": {
+                                    "enum": [
+                                      "success",
+                                      "failure",
+                                      "neutral"
+                                    ]
+                                  },
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "schema": {
+                                  "description": "The schema of the linking instances, which composes Links and Workflow.",
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "schema",
+                                "link",
+                                "outcomes"
                               ],
                               "type": "object"
                             },
@@ -1067,6 +1128,23 @@
                               }
                             }
                           }
+                        },
+                        {
+                          "if": {
+                            "required": [
+                              "outcomes"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "function": {
+                                "enum": [
+                                  "all",
+                                  "any"
+                                ]
+                              }
+                            }
+                          }
                         }
                       ],
                       "properties": {
@@ -1076,7 +1154,7 @@
                           "type": "string"
                         },
                         "function": {
-                          "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow.",
+                          "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow, with an outcome outcomes lists when it is given.",
                           "enum": [
                             "count",
                             "countBy",
@@ -1101,6 +1179,19 @@
                           "description": "The link of that schema's Links config that points at this schema.",
                           "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                           "type": "string"
+                        },
+                        "outcomes": {
+                          "description": "For all and any, the outcomes a linked instance's terminal state must have to count; every outcome when absent.",
+                          "items": {
+                            "enum": [
+                              "success",
+                              "failure",
+                              "neutral"
+                            ]
+                          },
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "schema": {
                           "description": "The schema whose instances point at this one; it composes Links.",
@@ -1198,6 +1289,22 @@
                   "initial": {
                     "description": "The state a new instance starts in; the first of states when absent.",
                     "type": "string"
+                  },
+                  "outcomes": {
+                    "additionalProperties": {
+                      "enum": [
+                        "success",
+                        "failure",
+                        "neutral"
+                      ]
+                    },
+                    "description": "The outcome of each terminal state it names: success, failure or neutral. A terminal state it does not name is a success. Each key is a terminal state of states.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                    },
+                    "type": "object"
                   },
                   "states": {
                     "description": "Every state an instance can be in.",
