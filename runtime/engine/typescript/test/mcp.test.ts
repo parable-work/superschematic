@@ -520,18 +520,20 @@ describe("the core's behaviors", () => {
     assert.deepEqual([refused.status, refused.code, refused.details.issues[0].path], [400, 'invalid_argument', '/query']);
   });
 
-  test('Dependencies and Links are tools: listLinked takes no id; a gated transition and a required target\'s delete are tool errors with the 409 problem', async () => {
+  test('Dependencies and Links are tools: create takes their parameters, listLinked takes no id; a gated transition and a required target\'s delete are tool errors with the 409 problem', async () => {
     const { url, engine } = await withDocument();
-    engine.schemas.define(everything, tasksDocument());
-    engine.schemas.publish(everything, 'tasks');
-    engine.instances.create(everything, 'tasks', { title: 'Plan' }, { id: 'plan' });
-    engine.instances.create(everything, 'tasks', { title: 'Build' }, { id: 'build' });
+    for (const document of [tasksDocument(), projectsDocument()]) {
+      engine.schemas.define(everything, document);
+      engine.schemas.publish(everything, document.name as string);
+    }
+    engine.instances.create(everything, 'projects', { title: 'Launch' }, { id: 'launch' });
+    engine.instances.create(everything, 'tasks', { title: 'Plan' }, { id: 'plan', behaviors: { Links: { project: 'launch' } } });
     const { client } = await connect(endpoint(url));
     const tools = (await client.listTools()).tools.filter((tool) => tool.name.startsWith('tasks_'));
     assert.deepEqual(
       tools.map((tool) => [tool.name, tool.annotations?.readOnlyHint, Object.keys(tool.inputSchema.properties ?? {}).join(' ')]),
       [
-        ['tasks_create', false, 'data id'],
+        ['tasks_create', false, 'behaviors data id'],
         ['tasks_get', true, 'id'],
         ['tasks_list', true, 'cursor limit'],
         ['tasks_update', false, 'expectedSeq id patch'],
@@ -546,13 +548,29 @@ describe("the core's behaviors", () => {
         ['tasks_list_linked', true, 'params'],
       ]
     );
-    assert.deepEqual((await call(client, 'tasks_add_blocker', { id: 'build', params: { id: 'plan' } })).structuredContent, {
-      schema: 'tasks',
-      id: 'plan',
+    const behaviors = (tools[0].inputSchema.properties as Record<string, { properties: Record<string, unknown> }>).behaviors;
+    assert.deepEqual(Object.keys(behaviors.properties), ['Dependencies', 'Links']);
+    assert.deepEqual(behaviors.properties.Links, engine.behaviors.declaration('Links')?.createParamsSchema);
+    // A create gives the required project, and build's parent and blocker, in one event.
+    const missing = problemOf(await call(client, 'tasks_create', { id: 'build', data: { title: 'Build' } }));
+    assert.deepEqual([missing.status, missing.code, missing.details.issues], [400, 'invalid_argument', [{ path: '/behaviors/Links', message: 'link project is required, so a create of tasks gives it' }]]);
+    const created = await call(client, 'tasks_create', {
+      id: 'build',
+      data: { title: 'Build' },
+      behaviors: { Links: { project: 'launch', parent: 'plan' }, Dependencies: { blockers: [{ id: 'plan' }] } },
+    });
+    assert.deepEqual((created.structuredContent as { seq: number; data: unknown }).data, {
+      title: 'Build',
       status: 'todo',
+      blocked: true,
+      links: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } },
+    });
+    assert.deepEqual((await call(client, 'tasks_add_blocker', { id: 'build', params: { schema: 'documents', id: 'doc-1' } })).structuredContent, {
+      schema: 'documents',
+      id: 'doc-1',
+      status: 'draft',
       open: true,
     });
-    await call(client, 'tasks_link', { id: 'build', params: { name: 'parent', id: 'plan' } });
     await call(client, 'tasks_link', { id: 'build', params: { name: 'spec', id: 'doc-1' } });
     await call(client, 'tasks_transition', { id: 'build', params: { to: 'doing' } });
     const gated = problemOf(await call(client, 'tasks_transition', { id: 'build', params: { to: 'done' } }));
@@ -560,9 +578,9 @@ describe("the core's behaviors", () => {
     const { client: reader } = await connect(endpoint(url), 'reader');
     const linked = await call(reader, 'tasks_list_linked', { params: { name: 'spec', id: 'doc-1' } });
     assert.deepEqual(linked.structuredContent, { items: [{ id: 'build', revision: 1, stale: false }], next: null });
-    const required = problemOf(await call(client, 'tasks_delete', { id: 'plan' }));
+    const required = problemOf(await call(client, 'projects_delete', { id: 'launch' }));
     assert.deepEqual([required.status, required.code, required.details.behavior], [409, 'vetoed', 'Links']);
-    assert.ok(engine.instances.get(alice, 'tasks', 'plan'));
+    assert.ok(engine.instances.get(alice, 'projects', 'launch'));
   });
 
   test('Rollups adds a field and no tool: get carries the rollups, computed at the read, and a gated transition is a tool error with the 409 problem', async () => {
@@ -572,8 +590,7 @@ describe("the core's behaviors", () => {
       engine.schemas.publish(everything, document.name as string);
     }
     engine.instances.create(everything, 'projects', { title: 'Launch' }, { id: 'launch' });
-    engine.instances.create(everything, 'tasks', { title: 'Plan' }, { id: 'plan' });
-    engine.instances.invoke(everything, 'tasks', 'plan', 'link', { name: 'project', id: 'launch' });
+    engine.instances.create(everything, 'tasks', { title: 'Plan' }, { id: 'plan', behaviors: { Links: { project: 'launch' } } });
     const { client } = await connect(endpoint(url));
     assert.deepEqual(
       (await client.listTools()).tools.filter((tool) => tool.name.startsWith('projects_')).map((tool) => tool.name),

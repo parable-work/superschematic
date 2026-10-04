@@ -1,7 +1,10 @@
 // Reactions, the core's rules that move Workflow statuses after a change
 // commits: a task that starts moves its project to active, a project whose
 // tasks are all finished is done, as the runner's principal, through
-// Workflow's transition, whose events record the cause. A rule leaves a
+// Workflow's transition, whose events record the cause. allTerminal and
+// anyTerminal read the outcomes of the linking instances' terminal
+// states, so a run completes when its steps all pass and fails when one
+// fails, in whatever order the events and the rules come. A rule leaves a
 // target it cannot move; a misconfigured one halts its subscription.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -55,7 +58,36 @@ const taskFlow: BehaviorRef = {
   },
 };
 
+// A step of a run is done when it passes or fails, and failed is a
+// failure; a run is open until it completes or fails, and may be retried.
+const stepFlow: BehaviorRef = {
+  name: 'Workflow',
+  config: {
+    states: ['todo', 'doing', 'passed', 'failed'],
+    transitions: [
+      { from: 'todo', to: 'doing' },
+      { from: 'doing', to: 'passed' },
+      { from: 'doing', to: 'failed' },
+    ],
+    outcomes: { failed: 'failure' },
+  },
+};
+
+const runFlow: BehaviorRef = {
+  name: 'Workflow',
+  config: {
+    states: ['open', 'completed', 'failed'],
+    transitions: [
+      { from: 'open', to: 'completed' },
+      { from: 'open', to: 'failed' },
+      { from: 'failed', to: 'open' },
+    ],
+  },
+};
+
 const closeWhenTasksFinish = { when: { allTerminal: { schema: 'Task', link: 'project' } }, then: { transition: 'done' } };
+const completeWhenStepsPass = { when: { allTerminal: { schema: 'Step', link: 'run', outcomes: ['success'] } }, then: { transition: 'completed' } };
+const failWhenAStepFails = { when: { anyTerminal: { schema: 'Step', link: 'run', outcomes: ['failure'] } }, then: { transition: 'failed' } };
 const startProjectWithTask = { when: { enters: 'doing' }, then: { link: 'project', transition: 'active' } };
 
 function projects(extra: BehaviorRef[] = [], rules: unknown[] = [closeWhenTasksFinish]): Record<string, unknown> {
@@ -64,6 +96,14 @@ function projects(extra: BehaviorRef[] = [], rules: unknown[] = [closeWhenTasksF
 
 function tasks(rules: unknown[] = [startProjectWithTask]): Record<string, unknown> {
   return schema('Task', [taskFlow, { name: 'Links', config: { links: { project: { schema: 'Project' } } } }, { name: 'Reactions', config: { rules } }]);
+}
+
+function runs(rules: unknown[] = [completeWhenStepsPass, failWhenAStepFails]): Record<string, unknown> {
+  return schema('Run', [runFlow, { name: 'Reactions', config: { rules } }]);
+}
+
+function steps(rules?: unknown[]): Record<string, unknown> {
+  return schema('Step', [stepFlow, { name: 'Links', config: { links: { run: { schema: 'Run' } } } }, ...(rules === undefined ? [] : [{ name: 'Reactions', config: { rules } }])]);
 }
 
 function publish(engine: Engine, document: Record<string, unknown>): void {
@@ -197,6 +237,107 @@ for (const driver of drivers) {
       assert.ok(subscriptions(engine).every((subscription) => subscription.state === 'active' && subscription.failure === null));
     });
 
+    test('allTerminal with outcomes fires only when every linking instance is in a terminal state whose outcome it lists', () => {
+      const engine = open();
+      publish(engine, runs([completeWhenStepsPass]));
+      publish(engine, steps());
+      for (const [run, ids] of [['r1', ['s1', 's2']], ['r2', ['s3']]] as const) {
+        engine.instances.create(alice, 'Run', { title: run }, { id: run });
+        for (const id of ids) {
+          engine.instances.create(alice, 'Step', { title: id }, { id });
+          engine.instances.invoke(alice, 'Step', id, 'link', { name: 'run', id: run });
+          move(engine, 'Step', id, 'doing');
+        }
+      }
+      engine.runner.runDue();
+      move(engine, 'Step', 's1', 'passed');
+      move(engine, 'Step', 's2', 'failed');
+      const passed = move(engine, 'Step', 's3', 'passed');
+      engine.runner.runDue();
+      assert.deepEqual([status(engine, 'Run', 'r1'), status(engine, 'Run', 'r2')], ['open', 'completed']);
+      assert.deepEqual(last(engine, 'Run', 'r2').cause, { behavior: 'Reactions', event: passed.cursor, depth: 1 });
+    });
+
+    test('anyTerminal fires when a linking instance enters a terminal state with a listed outcome, or is linked here in one, and on nothing else', () => {
+      const engine = open();
+      publish(engine, runs([failWhenAStepFails]));
+      publish(engine, steps());
+      for (const id of ['r1', 'r2', 'r3']) {
+        engine.instances.create(alice, 'Run', { title: id }, { id });
+      }
+      for (const id of ['s1', 's2', 's3']) {
+        engine.instances.create(alice, 'Step', { title: id }, { id });
+        move(engine, 'Step', id, 'doing');
+      }
+      for (const id of ['s1', 's2']) {
+        engine.instances.invoke(alice, 'Step', id, 'link', { name: 'run', id: 'r1' });
+      }
+      move(engine, 'Step', 's1', 'passed');
+      engine.runner.runDue();
+      assert.equal(status(engine, 'Run', 'r1'), 'open', 'a success is not a listed outcome');
+      const failed = move(engine, 'Step', 's2', 'failed');
+      engine.runner.runDue();
+      assert.equal(status(engine, 'Run', 'r1'), 'failed');
+      assert.deepEqual(last(engine, 'Run', 'r1').cause, { behavior: 'Reactions', event: failed.cursor, depth: 1 });
+
+      // A retried run is not failed again by a change of the failed step that moves neither its status nor its link.
+      move(engine, 'Run', 'r1', 'open');
+      engine.instances.update(alice, 'Step', 's2', { title: 'flaky' });
+      engine.runner.runDue();
+      assert.equal(status(engine, 'Run', 'r1'), 'open');
+
+      // A failed step linked to a run, or moved to another, fails that run.
+      move(engine, 'Step', 's3', 'failed');
+      engine.runner.runDue();
+      assert.equal(status(engine, 'Run', 'r3'), 'open', 'a step that links nowhere has no run to fail');
+      engine.instances.invoke(alice, 'Step', 's3', 'link', { name: 'run', id: 'r3' });
+      engine.instances.invoke(alice, 'Step', 's2', 'link', { name: 'run', id: 'r2' });
+      engine.runner.runDue();
+      assert.deepEqual(['r1', 'r2', 'r3'].map((id) => status(engine, 'Run', id)), ['open', 'failed', 'failed']);
+      engine.instances.invoke(alice, 'Step', 's2', 'unlink', { name: 'run' });
+      move(engine, 'Run', 'r2', 'open');
+      engine.runner.runDue();
+      assert.equal(status(engine, 'Run', 'r2'), 'open', 'an unlink fails nothing');
+      assert.ok(subscriptions(engine).every((subscription) => subscription.state === 'active' && subscription.failure === null));
+    });
+
+    test('allTerminal with [success] and anyTerminal with [failure] never complete a run with a failed step, whatever order the events and rules come in', () => {
+      // A rule on the step that fails its run too, which runs in the steps' own subscription.
+      const failTheRun = { when: { enters: 'failed' }, then: { link: 'run', transition: 'failed' } };
+      for (const rules of [
+        [completeWhenStepsPass, failWhenAStepFails],
+        [failWhenAStepFails, completeWhenStepsPass],
+      ]) {
+        for (const stepRules of [undefined, [failTheRun]]) {
+          for (const lastStep of ['passed', 'failed']) {
+            for (const eager of [true, false]) {
+              const label = JSON.stringify({ rules: rules.map((rule) => Object.keys(rule.when)[0]), stepRules: stepRules !== undefined, lastStep, eager });
+              const engine = open();
+              publish(engine, runs(rules));
+              publish(engine, steps(stepRules));
+              engine.instances.create(alice, 'Run', { title: 'r1' }, { id: 'r1' });
+              for (const id of ['s1', 's2']) {
+                engine.instances.create(alice, 'Step', { title: id }, { id });
+                engine.instances.invoke(alice, 'Step', id, 'link', { name: 'run', id: 'r1' });
+                move(engine, 'Step', id, 'doing');
+              }
+              const settle = () => (eager ? engine.runner.runDue() : undefined);
+              settle();
+              move(engine, 'Step', 's1', lastStep === 'passed' ? 'failed' : 'passed');
+              settle();
+              move(engine, 'Step', 's2', lastStep);
+              engine.runner.runDue();
+              const moves = engine.events
+                .read(alice, { schema: 'Run', instanceId: 'r1' })
+                .events.filter((event) => event.kind === 'operation')
+                .map((event) => (event.change as OperationChange).params);
+              assert.deepEqual(moves, [{ to: 'failed' }], label);
+            }
+          }
+        }
+      }
+    });
+
     test('rules on the instance itself chain, and one whose state the instance has left does nothing', () => {
       const engine = open();
       publish(
@@ -273,16 +414,18 @@ for (const driver of drivers) {
     });
 
     test('a linked schema that does not link here halts the subscription with what is wrong', () => {
-      const engine = open({ runner: { principal: runnerPrincipal, maxAttempts: 1 } });
-      publish(engine, schema('Note', [taskFlow]));
-      publish(engine, projects([], [{ when: { allTerminal: { schema: 'Note', link: 'project' } }, then: { transition: 'done' } }]));
-      engine.instances.create(alice, 'Note', { title: 'n1' }, { id: 'n1' });
-      engine.runner.runDue();
-      const project = subscriptions(engine).find((subscription) => subscription.schema === 'Project') as SubscriptionStatus;
-      assert.deepEqual(
-        [project.state, project.failure?.error],
-        ['halted', 'BehaviorError: behavior Reactions: allTerminal names link project of Note, which has no such link to Project']
-      );
+      for (const when of [{ allTerminal: { schema: 'Note', link: 'project' } }, { anyTerminal: { schema: 'Note', link: 'project', outcomes: ['failure'] } }]) {
+        const engine = open({ runner: { principal: runnerPrincipal, maxAttempts: 1 } });
+        publish(engine, schema('Note', [taskFlow]));
+        publish(engine, projects([], [{ when, then: { transition: 'done' } }]));
+        engine.instances.create(alice, 'Note', { title: 'n1' }, { id: 'n1' });
+        engine.runner.runDue();
+        const project = subscriptions(engine).find((subscription) => subscription.schema === 'Project') as SubscriptionStatus;
+        assert.deepEqual(
+          [project.state, project.failure?.error],
+          ['halted', `BehaviorError: behavior Reactions: ${Object.keys(when)[0]} names link project of Note, which has no such link to Project`]
+        );
+      }
     });
 
     test("parseConfig refuses rules the type's own configs show are wrong", () => {
@@ -302,6 +445,14 @@ for (const driver of drivers) {
         [[taskFlow, reactions({ when: { enters: 'todo' }, then: { transition: 'done' } })], "rule 1: no transition of the type's Workflow leads from todo to done, so the rule could never move the instance"],
         [[taskFlow, linksTo('Task'), reactions({ when: { allTerminal: { schema: 'Task', link: 'project' } }, then: { transition: 'todo' } })], "rule 1: no transition of the type's Workflow leads to todo, so the rule could never move the instance"],
         [[taskFlow, linksTo('Project'), reactions({ when: { allTerminal: { schema: 'Task', link: 'project' } }, then: { transition: 'done' } })], 'rule 1: when.allTerminal names link project of Task, which has no such link to Task'],
+        [
+          [taskFlow, linksTo('Project'), reactions({ when: { anyTerminal: { schema: 'Task', link: 'project', outcomes: ['failure'] } }, then: { transition: 'dropped' } })],
+          'rule 1: when.anyTerminal names link project of Task, which has no such link to Task',
+        ],
+        [
+          [taskFlow, linksTo('Task'), reactions({ when: { anyTerminal: { schema: 'Task', link: 'project', outcomes: ['failure'] } }, then: { transition: 'todo' } })],
+          "rule 1: no transition of the type's Workflow leads to todo, so the rule could never move the instance",
+        ],
       ] as Array<[BehaviorRef[], string]>) {
         assert.equal(refused(behaviors), prefix + message);
       }
@@ -319,6 +470,14 @@ for (const driver of drivers) {
       assert.match(
         refused([taskFlow, reactions({ when: { enters: 'doing', allTerminal: { schema: 'Task', link: 'project' } }, then: { transition: 'done' } })]),
         /must NOT have more than 1 properties/
+      );
+      // anyTerminal names its outcomes, and an outcome is one of three.
+      assert.match(refused([taskFlow, reactions({ when: { anyTerminal: { schema: 'Project', link: 'project' } }, then: { transition: 'dropped' } })]), /must have required property 'outcomes'/);
+      assert.match(refused([taskFlow, reactions({ when: { allTerminal: { schema: 'Project', link: 'project', outcomes: ['lost'] } }, then: { transition: 'done' } })]), /must be one of "success", "failure", "neutral"/);
+      // A rule on a task that fails its parent task when a subtask fails passes: the link is the type's own.
+      engine.schemas.define(
+        alice,
+        schema('Task', [taskFlow, linksTo('Task'), reactions({ when: { anyTerminal: { schema: 'Task', link: 'project', outcomes: ['failure'] } }, then: { transition: 'dropped' } })])
       );
     });
 

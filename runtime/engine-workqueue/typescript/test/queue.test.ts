@@ -300,6 +300,24 @@ for (const driver of drivers) {
       assert.equal(refreshed?.actor, 'otto');
     });
 
+    test('an instance a create gives its blockers is no candidate from its create, and hears them as addBlocker would', () => {
+      const { engine } = world({ extra: [{ name: 'Dependencies', config: { schemas: ['Job', 'Step'] } }] });
+      publish(engine, { kind: 'General', name: 'Step', types: { Step: { name: 'Step', role: 'EmbeddedStruct', behaviors: [{ name: 'Workflow', config: stepFlow }], fields: [{ name: 'title', typeRef: { name: 'string' }, required: true }] } } });
+      engine.instances.create(alice, 'Step', { title: 'Approve' }, { id: 's1' });
+      engine.instances.create(alice, 'Job', { title: 'j1' }, { id: 'j1', behaviors: { Dependencies: { blockers: [{ schema: 'Step', id: 's1' }] } } });
+      const copies = engine.storage.get(`SELECT bhv_queue__status AS status, bhv_queue__blocked AS blocked FROM engine_instances WHERE schema = 'Job' AND id = 'j1'`);
+      assert.deepEqual({ ...copies }, { status: 'queued', blocked: 1 });
+      assert.equal(next(engine, worker), null);
+      assert.equal((engine.instances.invokeSchema(worker, 'Job', 'countClaimable', {}) as { count: number }).count, 0);
+      // Its create event is its only one: the copies were set in it.
+      assert.deepEqual(
+        engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.map((event) => event.kind),
+        ['create']
+      );
+      engine.instances.invoke(other, 'Step', 's1', 'transition', { to: 'done' });
+      assert.equal(next(engine, worker), 'j1');
+    });
+
     test("a blocker's change refreshes a dependent another principal holds the lease of: Lease's guard lets refresh through", () => {
       const { engine } = world({ extra: [{ name: 'Dependencies', config: { schemas: ['Job', 'Step'] } }] });
       publish(engine, { kind: 'General', name: 'Step', types: { Step: { name: 'Step', role: 'EmbeddedStruct', behaviors: [{ name: 'Workflow', config: stepFlow }], fields: [{ name: 'title', typeRef: { name: 'string' }, required: true }] } } });
@@ -470,6 +488,24 @@ for (const driver of drivers) {
         ['a3', 'pam'],
       ]);
       assert.deepEqual([next(engine, worker), next(engine, worker), next(engine, worker), next(engine, worker)], ['a1', 'a2', 'a3', null]);
+    });
+
+    test('an instance a create links to a scope without room is excluded from its create, and hears the scope', () => {
+      const { engine } = pooled();
+      const pam: Principal = { subject: 'pam', permissions: ['pools.limit'] };
+      engine.instances.invoke(pam, 'Pool', 'p1', 'setLimit', { meter: 'cpu', limit: 5 });
+      engine.instances.create(alice, 'Job', { title: 'a1', priority: 1 }, { id: 'a1', behaviors: { Links: { pool: 'p1' } } });
+      engine.instances.create(alice, 'Job', { title: 'b1', priority: 1 }, { id: 'b1', behaviors: { Links: { pool: 'p2' } } });
+      const excluded = (id: string) =>
+        Number(engine.storage.get(`SELECT bhv_queue__excluded_until AS until FROM engine_instances WHERE schema = 'Job' AND id = ?`, [id])?.until);
+      assert.deepEqual([excluded('a1'), excluded('b1')], [Number.MAX_SAFE_INTEGER, 0]);
+      assert.equal(count(engine), 1);
+      assert.deepEqual([next(engine, worker), next(engine, worker)], ['b1', null]);
+      // p1's new limit refreshes a1, which heard p1 from its create.
+      const cursor = cursorOf(engine);
+      engine.instances.invoke(pam, 'Pool', 'p1', 'setLimit', { meter: 'cpu', limit: 30 });
+      assert.deepEqual(refreshes(engine, cursor), [['a1', 'pam']]);
+      assert.equal(next(engine, worker), 'a1');
     });
 
     test("an instance over its own daily limit waits for the next day, which lets it in with no change", () => {

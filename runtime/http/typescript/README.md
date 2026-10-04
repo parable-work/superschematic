@@ -51,7 +51,10 @@ Two entry points:
   parser, the implementation, and the envelope. It maps every failure to the
   problem envelope. `mountManualOperation` gates a `@manualRouteRegistration`
   operation and hands the Hono context to the service's own handler (a
-  streaming response, say). The runtime has no step that decrypts a request
+  streaming response, say). An `@hmacVerified` operation's spec names its
+  `webhookProvider`, and both mount it only with a `webhookVerifier`, Hono
+  middleware that runs before every other step. It may read the body to
+  check the signature; the route reads a copy taken before it ran. The runtime has no step that decrypts a request
   body or reads a multipart one, so the generator refuses an encrypted
   operation or a file upload that is not `@manualRouteRegistration`; the
   service's handler decrypts or reads the body itself. `notFoundHandler` and `errorHandler` cover the

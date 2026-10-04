@@ -317,6 +317,35 @@ fails with the operation named when one is not:
   payload and decodes it.
 - An operation that uploads files. The router has no multipart adapter.
 
+An `@hmacVerified` operation
+([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
+provider's verifier before every other step, a manual one's included.
+`Implementations` has a `webhookVerifiers` property for each provider, so
+tsc fails without one, and `buildRouter` throws. A verifier is Hono
+middleware: it throws an `HttpProblem` for a signature that does not
+match, and awaits `next()` for one that does. It may read the body; the
+route reads a copy taken before the verifier ran.
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { HttpProblem } from "@superschematic/http-runtime";
+import type { WebhookVerifier } from "@superschematic/http-runtime/hono";
+
+const verifyGitHub: WebhookVerifier = async (c, next) => {
+  const expected = Buffer.from("sha256=" + createHmac("sha256", secret).update(await c.req.text()).digest("hex"));
+  const sent = Buffer.from(c.req.header("x-hub-signature-256") ?? "");
+  if (sent.length !== expected.length || !timingSafeEqual(sent, expected)) {
+    throw new HttpProblem(401, "The webhook signature does not match", { code: "invalid_signature" });
+  }
+  await next();
+};
+
+const implementations: Implementations = {
+  // ...one object per operation namespace
+  webhookVerifiers: { github: verifyGitHub },
+};
+```
+
 The generated package ships TypeScript sources, so run it with Bun, a
 bundler or a TypeScript loader. The runtime ships compiled JavaScript with
 declarations. `examples/acme-schematic`

@@ -547,6 +547,9 @@ for (const driver of drivers) {
       engine.instances.update(operator, 'Job', 'j1', { title: 'Overridden' });
       assert.deepEqual(invoke(engine, worker, 'heartbeat', {}, 'j1', token), { expiresAt: T0 + 120000, directives: [] });
       assert.deepEqual(invoke(engine, other, 'expire'), { expired: false });
+      // A create holds no lease, so it presents no token, whoever creates.
+      assert.equal(engine.instances.create(worker, 'Job', { title: 'New' }, { id: 'j2' }).seq, 1);
+      assert.equal(leaseOf(engine, 'j2').holder, null);
       // Once the lease is released, nothing is held to the token.
       invoke(engine, worker, 'release', {}, 'j1', token);
       engine.instances.update(worker, 'Job', 'j1', { title: 'Free' });

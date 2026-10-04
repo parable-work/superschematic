@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureWebhooksApiSdk Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-webhooks-api API",
+  "tools": [
+    {
+      "name": "event.getEvent",
+      "operationId": "EventGetEventHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "A received event. Not a webhook, so no verifier runs.",
+      "namespace": "event",
+      "methodName": "get_event",
+      "httpMethod": "GET",
+      "httpPath": "/api/events/{id}",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:8ded2d8faa3d6e06bea67f0f23a3d8c5798ee8a66397486ae290c977c2b73b19",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","type":"string"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "EventReceipt object"
+      }
+    }
+  ]
+}

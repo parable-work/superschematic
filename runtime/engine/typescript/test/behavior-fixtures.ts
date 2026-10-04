@@ -321,11 +321,15 @@ export const holdRequests: GuardRequest[] = [];
 
 // A write that presents a generation other than the instance's is
 // refused; with require, so is one that presents none. A behavior's own
-// requests (caller) never present one.
+// requests (caller) never present one, and a create, which has nothing
+// to fence yet, is let through unrecorded.
 export const hold = defineBehavior<{ require?: boolean }>({
   declaration: holdDeclaration,
   migrations: [{ version: 1, name: 'generation', columns: { generation: { type: 'integer', notNull: true, default: 0 } } }],
   guard(view, request) {
+    if (request.kind === 'create') {
+      return undefined;
+    }
     holdRequests.push(request);
     if (request.kind === 'operation' && !request.writes) {
       return undefined;

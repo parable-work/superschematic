@@ -16,7 +16,9 @@ the `Preconditions` header, a JSON object of each behavior's entry by its
 name (`{"Lease": {"token": 7}}`), which the engine checks against each
 behavior's preconditionSchema and hands to its guard: a header, because
 an update's body is a merge patch of the instance and an operation's is
-its closed parameters, and neither has room for anything else.
+its closed parameters, and neither has room for anything else. A create
+has no instance to fence and ignores the header; its body carries
+`behaviors` beside `data`, the parameters it gives the type's behaviors.
 
 A schema-level behavior operation, which has no instance, has a route of
 its own under the schema; it sends no ETag, since it names no instance.
@@ -196,8 +198,8 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     const refused = mediaTypeRefusal(ctx, JSON_MEDIA_TYPE);
     if (refused) return refused;
     const { namespace, name } = path as { namespace: string; name: string };
-    const { id, data } = createInput(input);
-    const record = engine.instances.create(principalOf(ctx), name, data, { namespace, id });
+    const { id, data, behaviors } = createInput(input);
+    const record = engine.instances.create(principalOf(ctx), name, data, { namespace, id, behaviors });
     return new OperationResult(record, 201, {
       etag: etagOf(record),
       location: `${ctx.path.replace(/\/+$/u, '')}/${encodeURIComponent(record.id)}`,
@@ -310,14 +312,18 @@ function schemaView(record: SchemaRecord): Omit<SchemaRecord, 'canonical'> {
   return view;
 }
 
-/** The body of a create: `{ "data": {...} }`, with an optional `"id"`. */
-function createInput(input: unknown): { id?: string; data: unknown } {
+/**
+ * The body of a create: `{ "data": {...} }`, with an optional `"id"` and
+ * optional `"behaviors"`, the parameters it gives the type's behaviors by
+ * behavior name, which the engine checks (null is none).
+ */
+function createInput(input: unknown): { id?: string; data: unknown; behaviors?: Record<string, unknown> } {
   if (!isPlainObject(input)) {
     throw badRequest('A create body is a JSON object with the instance as "data"');
   }
-  const unknown = Object.keys(input).filter((key) => key !== 'id' && key !== 'data');
+  const unknown = Object.keys(input).filter((key) => key !== 'id' && key !== 'data' && key !== 'behaviors');
   if (unknown.length > 0) {
-    throw badRequest(`A create body has only "id" and "data", not ${unknown.map((key) => JSON.stringify(key)).join(', ')}`);
+    throw badRequest(`A create body has only "id", "data" and "behaviors", not ${unknown.map((key) => JSON.stringify(key)).join(', ')}`);
   }
   if (!('data' in input)) {
     throw badRequest('A create body needs the instance as "data"');
@@ -325,7 +331,12 @@ function createInput(input: unknown): { id?: string; data: unknown } {
   if (input.id !== undefined && typeof input.id !== 'string') {
     throw badRequest('"id" is a string');
   }
-  return { ...(input.id !== undefined ? { id: input.id } : {}), data: input.data };
+  const behaviors = input.behaviors ?? undefined;
+  return {
+    ...(input.id !== undefined ? { id: input.id } : {}),
+    data: input.data,
+    ...(behaviors !== undefined ? { behaviors: behaviors as Record<string, unknown> } : {}),
+  };
 }
 
 function etagOf(record: InstanceRecord): string {

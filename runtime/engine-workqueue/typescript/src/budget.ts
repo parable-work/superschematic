@@ -848,6 +848,12 @@ export const budget = defineBehavior<BudgetConfig>({
   ],
 
   guard(view, request) {
+    // A create is let through: the scope links and the limitField it gives
+    // are the instance's from its start, before anything is used or
+    // reserved through them.
+    if (request.kind === 'create') {
+      return undefined;
+    }
     // A scope link stays put while a reservation is held through it, so
     // a reservation is released where it is held.
     if (request.kind === 'operation' && request.behavior === 'Links' && (request.operation === 'link' || request.operation === 'unlink')) {

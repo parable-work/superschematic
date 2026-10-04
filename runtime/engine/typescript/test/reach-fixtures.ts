@@ -356,7 +356,7 @@ export const holder = defineBehavior<HolderConfig>({
     },
   },
   guardReference(view, reference, request) {
-    if ((view.config.veto ?? []).includes(request.kind)) {
+    if ((view.config.veto ?? []).some((kind) => kind === request.kind)) {
       return `${view.schema} ${view.id} holds it (${reference.key || 'no key'})`;
     }
     return undefined;

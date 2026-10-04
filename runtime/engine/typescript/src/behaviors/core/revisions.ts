@@ -19,7 +19,9 @@ call, which it gets as `write` with the operation `propose`.
 listProposals is read-only and never takes the write path. A patch
 applies to the instance as it is at approval, not as it was proposed:
 `base` records the revision it was made against, so a reviewer can see
-the instance moved since. Without review, the four refuse.
+the instance moved since. Without review, the four refuse (no_review),
+and approve and reject refuse a proposal that is not pending
+(not_pending): vetoes with the codes the declaration lists.
 
 Numbers (revisions, proposals) are per instance, 1, 2, 3, .... Deleting
 the instance deletes its revisions and proposals.
@@ -134,7 +136,11 @@ function pending(context: InstanceContext<RevisionsConfig>, operation: string, i
     throw new OperationParamsError('Revisions', operation, [{ path: '/proposal', message: `${context.schema} ${context.id} has no proposal ${id}` }]);
   }
   if (row.state !== 'pending') {
-    throw new BehaviorVetoError('Revisions', operation, context.schema, context.id, `proposal ${id} is ${String(row.state)}, not pending`);
+    throw new BehaviorVetoError('Revisions', operation, context.schema, context.id, {
+      reason: `proposal ${id} is ${String(row.state)}, not pending`,
+      code: 'not_pending',
+      details: { proposal: id, state: String(row.state) },
+    });
   }
   return row;
 }
@@ -212,7 +218,7 @@ export const revisions = defineBehavior<RevisionsConfig>({
     }
     const review = view.config.review;
     if (review === undefined) {
-      return `${view.schema} has no review step: its Revisions config sets no review`;
+      return { reason: `${view.schema} has no review step: its Revisions config sets no review`, code: 'no_review' };
     }
     if ((request.operation === 'approve' || request.operation === 'reject') && !view.can(review.permission)) {
       throw new EngineError(

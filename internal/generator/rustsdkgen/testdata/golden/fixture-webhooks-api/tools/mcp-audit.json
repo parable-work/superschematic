@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "apiId": "fixture-webhooks-api",
+  "registryDigestInputs": [
+    {
+      "apiId": "fixture-webhooks-api",
+      "namespace": "event",
+      "operationId": "EventGetEventHandler",
+      "method": "GET",
+      "path": "/api/events/{id}",
+      "handle": "",
+      "title": "",
+      "description": "A received event. Not a webhook, so no verifier runs.",
+      "icon": null,
+      "hidden": true,
+      "hiddenReason": "",
+      "invocationPolicy": "",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "capability": "",
+      "lifecycle": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "inputSchemaDigest": "sha256:8ded2d8faa3d6e06bea67f0f23a3d8c5798ee8a66397486ae290c977c2b73b19",
+      "bindingStatus": "ready"
+    }
+  ]
+}

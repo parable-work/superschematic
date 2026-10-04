@@ -1,6 +1,6 @@
 {
   "name": "Links",
-  "description": "Named, single-valued links from the instance to instances of the schemas its config names. A pinned link records the target's revision (its schema composes Revisions) and reports whether the target has moved past it. A required link can be moved to another target but not unlinked, and the delete of its target is refused; an optional link is cleared when its target is deleted.",
+  "description": "Named, single-valued links from the instance to instances of the schemas its config names, set by link or given at create. A pinned link records the target's revision (its schema composes Revisions) and reports whether the target has moved past it. A required link is given at create, can be moved to another target but not unlinked, and the delete of its target is refused; an optional link is cleared when its target is deleted.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -13,7 +13,7 @@
               "type": "boolean"
             },
             "required": {
-              "description": "Once set, the link can be moved to another target but not unlinked, and the delete of its target is refused.",
+              "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused.",
               "type": "boolean"
             },
             "schema": {
@@ -38,6 +38,37 @@
     "required": [
       "links"
     ],
+    "type": "object"
+  },
+  "createParamsSchema": {
+    "additionalProperties": {
+      "additionalProperties": false,
+      "description": "The target: its id, or an object with its id and, for a pinned link, the revision to record.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+      "properties": {
+        "id": {
+          "description": "The target's id.",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "type": "string"
+        },
+        "revision": {
+          "description": "For a pinned link, the target's revision to record, one it has had; its latest when absent.",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": [
+        "string",
+        "object"
+      ]
+    },
+    "description": "The links the instance holds from its create, by name, each held to link's rules. Every required link is given here.",
+    "propertyNames": {
+      "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+    },
     "type": "object"
   },
   "fields": [
@@ -224,6 +255,20 @@
         "type": "object"
       },
       "scope": "schema"
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "no_revision",
+      "description": "A pinned link, by link or a create's links, to a target that has no revision to pin yet."
+    },
+    {
+      "code": "required_link",
+      "description": "unlink of a required link, which link moves and nothing unlinks."
+    },
+    {
+      "code": "required_target",
+      "description": "The delete of an instance a required link points at, whoever the caller."
     }
   ]
 }

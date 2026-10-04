@@ -7,10 +7,14 @@ file it is given need not be the one a binary embedded. An operation's
 paramsSchema sets `additionalProperties: false`, so its parameters are
 exactly the ones it declares: a guard and the handler read the same
 validated object, and no key they do not both know can reach one of them.
-A preconditionSchema, the entry a caller sends for the behavior in a
-write's preconditions, is held to the same rule. Each veto code is
-lowercase snake case, listed once. The compiler's registry refuses the
-same declarations, with the same wording.
+A createParamsSchema, the parameters a create gives the behavior, is an
+object schema too, whose additionalProperties is false or a schema: its
+keys may be names the config gives (a link's name), but each value is
+checked. A preconditionSchema, the entry a caller sends for the behavior
+in a write's preconditions, is an object schema with
+`additionalProperties: false`. Each veto code is lowercase snake case,
+listed once. The compiler's registry refuses the same declarations, with
+the same wording.
 
 The engine adds one rule of its own: a name is `<extension>.<Name>` with
 an extension name of a letter, then letters, digits, `_` and `-`, or a
@@ -28,6 +32,13 @@ export interface BehaviorDeclaration {
   readonly description?: string;
   /** The JSON Schema of the config a type gives it; absent, it takes none. */
   readonly configSchema?: JSONSchema;
+  /**
+   * The JSON Schema of the parameters a create gives it for the new
+   * instance, which its initialize gets: an object schema whose
+   * additionalProperties is false or a schema. Absent, a create gives it
+   * none.
+   */
+  readonly createParamsSchema?: JSONSchema;
   /** Behaviors a type that lists this one must also list. */
   readonly requires?: readonly string[];
   /** Behaviors a type that lists this one may not list. */
@@ -99,7 +110,18 @@ export const VETO_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 const OPERATION_NAME = /^[a-z][A-Za-z0-9]*$/;
 const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-const DECLARATION_KEYS = new Set(['name', 'description', 'configSchema', 'requires', 'conflicts', 'fields', 'operations', 'preconditionSchema', 'vetoes']);
+const DECLARATION_KEYS = new Set([
+  'name',
+  'description',
+  'configSchema',
+  'createParamsSchema',
+  'requires',
+  'conflicts',
+  'fields',
+  'operations',
+  'preconditionSchema',
+  'vetoes',
+]);
 const FIELD_KEYS = new Set(['name', 'description']);
 const VETO_KEYS = new Set(['code', 'description']);
 const OPERATION_KEYS = new Set(['name', 'description', 'paramsSchema', 'resultSchema', 'writes', 'scope', 'invocationPolicy']);
@@ -122,6 +144,7 @@ export function checkDeclaration(value: unknown): string[] {
   if (value.configSchema !== undefined && !isSchema(value.configSchema)) {
     problems.push('configSchema is a JSON Schema: an object, or true or false');
   }
+  checkCreateParams(value.createParamsSchema, problems);
   const requires = names(value.requires, 'requires', problems);
   const conflicts = names(value.conflicts, 'conflicts', problems);
   for (const other of [...requires, ...conflicts]) {
@@ -174,6 +197,20 @@ function checkVetoes(vetoes: unknown, problems: string[]): void {
     }
     seen.add(veto.code);
   });
+}
+
+// checkCreateParams holds a createParamsSchema to an object schema whose
+// additionalProperties is false or a schema, so no create parameter goes
+// unchecked.
+function checkCreateParams(schema: unknown, problems: string[]): void {
+  if (schema === undefined) {
+    return;
+  }
+  if (!isPlainObject(schema) || schema.type !== 'object') {
+    problems.push('createParamsSchema must be an object schema ("type": "object")');
+  } else if (schema.additionalProperties !== false && !isPlainObject(schema.additionalProperties)) {
+    problems.push('createParamsSchema must set "additionalProperties": false or a schema, so no create parameter goes unchecked');
+  }
 }
 
 function checkFields(fields: unknown, problems: string[]): void {

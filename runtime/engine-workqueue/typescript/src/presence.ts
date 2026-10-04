@@ -314,7 +314,8 @@ export const presence = defineBehavior<PresenceConfig>({
     context.columns.set({ deadline: context.now + context.config.ttlMs, missed: 0 });
   },
 
-  // The instance stays the principal's: see the header.
+  // The instance stays the principal's: see the header. A create sets
+  // principalField, an update only while it holds none.
   guard(view, request) {
     if (request.kind !== 'update') {
       return undefined;

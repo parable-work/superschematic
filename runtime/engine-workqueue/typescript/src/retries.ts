@@ -419,8 +419,12 @@ export const retries = defineBehavior<RetriesConfig>({
   ],
 
   // Once exhausted, the instance moves only to exhaustedState and is not
-  // taken again; limitsField changes only as a limit does.
+  // taken again; limitsField changes only as a limit does. A create sets
+  // the caps it is created with, which no permission guards.
   guard(view, request) {
+    if (request.kind === 'create') {
+      return undefined;
+    }
     if (request.kind === 'update') {
       return limitsGuard(view, request.after);
     }

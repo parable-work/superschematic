@@ -180,6 +180,9 @@ func behaviorDeclarationFile(declaration registry.BehaviorDeclaration) ([]byte, 
 	if declaration.ConfigSchema, err = canonicalSchema(declaration.ConfigSchema); err != nil {
 		return nil, fmt.Errorf("configSchema: %w", err)
 	}
+	if declaration.CreateParamsSchema, err = canonicalSchema(declaration.CreateParamsSchema); err != nil {
+		return nil, fmt.Errorf("createParamsSchema: %w", err)
+	}
 	operations := make([]registry.BehaviorOperation, len(declaration.Operations))
 	for i, operation := range declaration.Operations {
 		if operation.ParamsSchema, err = canonicalSchema(operation.ParamsSchema); err != nil {

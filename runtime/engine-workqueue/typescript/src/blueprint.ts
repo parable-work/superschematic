@@ -4,25 +4,32 @@ key, says which children an instance has: one instance of the child
 schema per step, linked to its parent through the child's parentLink and
 blocked, through the child's Dependencies, by the children of the steps
 it comes after. Stamping creates them all in one transaction, as the
-principal that made the change: instances.create for each child, then
-the child's own Links.link and Dependencies.addBlocker, so every child
-runs its behaviors' initialize and afterChange, its guards and its
-events. Anything that fails refuses the change, and the transaction
-rolls back whole: no child, link or edge is left behind. That principal
-therefore needs write on the child schema (the create, link and
-addBlocker) and read on this schema (link reads its target).
+principal that made the change: instances.create for each child, which
+gives the child's Links its parentLink and copied links and its
+Dependencies its blockers as create parameters, so a child holds them
+from its create (a required parentLink included) and is never claimable
+before its edges exist. Every child runs its behaviors' guards,
+initialize and afterChange and gets its create event. Anything that
+fails refuses the change, and the transaction rolls back whole: no
+child, link or edge is left behind. That principal therefore needs write
+on the child schema (the create) and read on this schema (a link reads
+its target).
 
 The steps are inline in the config (steps), stamped in afterChange of
 the instance's create, or kept as an instance (from): a pinned link of
 the type's Links config to an instance whose field holds a map of the
-same form. A create sets no link, since links are set by Links.link on
-an instance that exists, so a from blueprint stamps when its link is
-first set, in afterChange of that link: the link and the children
-commit together, or neither does. It reads the map from the revision the
-link pins, through Revisions' listRevisions on the definition, as the
+same form. A from blueprint stamps when its link is first set: in
+afterChange of the create when the create gives the link (Links' create
+parameters), else in afterChange of the first link, so the link and the
+children commit together, or neither does, and a refused stamp refuses
+the create or the link. It reads the map from the revision the link
+pins, through Revisions' listRevisions on the definition, as the
 principal, so a later revision of the definition changes only what is
 stamped from then on. Once stamped, the guard refuses moving the from
-link: the children came from the revision it pins.
+link: the children came from the revision it pins. Each refusal is a
+veto with a code the declaration lists: stamped for the guard's, and
+no_revision, unreadable, invalid_steps and no_dependencies for a stamp
+that cannot go ahead, on the create or the link that stamps.
 
 A step's when holds when this instance's field equals a JSON value, or
 is a list that includes one, compared as JSON, without coercion. A step
@@ -43,9 +50,10 @@ JSON type; when's fields are fields of this type, a list for includes;
 inline steps name only steps the map has in after, form no cycle, and
 set no keyField in data. A map read through from is held to the same
 rules (against this type) when it is stamped, and an invalid one refuses
-the link. copyLinks are links of both Links configs to one schema,
-copied with the revision a pinned one records; they need from, since an
-instance holds no link when it is created.
+the change that stamps. copyLinks are links of both Links configs to one
+schema, copied with the revision a pinned one records: the ones the
+instance holds when it is stamped, which for inline steps are the ones
+its create gives.
 
 What was stamped is kept in Blueprint's own table: the blueprint field
 lists each step's key and its child's id, in the order they were
@@ -392,8 +400,11 @@ function checkSource(from: { link: string; field: string }, schema: string, sour
   }
 }
 
-function vetoed(view: InstanceView<unknown>, operation: string, reason: string): BehaviorVetoError {
-  return new BehaviorVetoError(NAME, operation, view.schema, view.id, reason);
+/** The codes of Blueprint's vetoes, as its declaration lists them. */
+type BlueprintVeto = 'stamped' | 'no_dependencies' | 'no_revision' | 'unreadable' | 'invalid_steps';
+
+function vetoed(view: InstanceView<unknown>, operation: string, reason: string, code: BlueprintVeto): BehaviorVetoError {
+  return new BehaviorVetoError(NAME, operation, view.schema, view.id, { reason, code });
 }
 
 function key(view: InstanceView<unknown>): [string, string, string] {
@@ -423,13 +434,14 @@ function revisionData(context: InstanceContext<BlueprintConfig>, schema: string,
   return found?.revision === revision ? found.data : undefined;
 }
 
-// stamp creates the children of the steps for this instance, links each
-// to it and to the copied links, adds the edges, and records them.
+// stamp creates the children of the steps for this instance, each with
+// its link to it, the copied links and its edges as create parameters,
+// and records them.
 function stamp(context: InstanceContext<BlueprintConfig>, steps: readonly BlueprintStep[], operation: string): void {
   const { config } = context;
   const plan = effectiveSteps(steps, context.data);
   if (plan.some((step) => step.after.length > 0) && context.schemas.config(config.schema, 'Dependencies') === undefined) {
-    throw vetoed(context, operation, `${config.schema} does not compose Dependencies, so a step's after cannot block its child`);
+    throw vetoed(context, operation, `${config.schema} does not compose Dependencies, so a step's after cannot block its child`, 'no_dependencies');
   }
   const copied: Record<string, unknown> = {};
   for (const field of config.copyFields) {
@@ -442,20 +454,21 @@ function stamp(context: InstanceContext<BlueprintConfig>, steps: readonly Bluepr
   const ids = new Map<string, string>();
   const table = context.sql.table('children');
   plan.forEach((step, position) => {
-    const child = context.instances.create(config.schema, { [config.keyField]: step.key, ...copied, ...step.data } as FrozenJSON);
-    ids.set(step.key, child.id);
-    context.instances.invoke(config.schema, child.id, 'link', { name: config.parentLink, id: context.id } as FrozenJSON);
+    const links: Record<string, unknown> = { [config.parentLink]: context.id };
     for (const name of config.copyLinks) {
       const link = hasOwn(held, name) ? held[name] : undefined;
       if (link === undefined) {
         continue;
       }
       const keep = linkOf(childLinks, name)?.pinned === true && link.revision !== undefined;
-      context.instances.invoke(config.schema, child.id, 'link', (keep ? { name, id: link.id, revision: link.revision } : { name, id: link.id }) as FrozenJSON);
+      links[name] = keep ? { id: link.id, revision: link.revision } : link.id;
     }
-    for (const blocker of step.after) {
-      context.instances.invoke(config.schema, child.id, 'addBlocker', { id: ids.get(blocker) as string } as FrozenJSON);
+    const behaviors: Record<string, unknown> = { Links: links };
+    if (step.after.length > 0) {
+      behaviors.Dependencies = { blockers: step.after.map((blocker) => ({ id: ids.get(blocker) as string })) };
     }
+    const child = context.instances.create(config.schema, { [config.keyField]: step.key, ...copied, ...step.data } as FrozenJSON, { behaviors });
+    ids.set(step.key, child.id);
     context.sql.run(`INSERT INTO ${table} (namespace, schema, id, position, step, child_id) VALUES (?, ?, ?, ?, ?, ?)`, [
       ...key(context),
       position,
@@ -467,16 +480,17 @@ function stamp(context: InstanceContext<BlueprintConfig>, steps: readonly Bluepr
 }
 
 // stampFrom stamps the map the from link's pinned revision holds, which
-// it holds to the rules inline steps follow; an invalid one refuses the link.
-function stampFrom(context: InstanceContext<BlueprintConfig>, from: { link: string; field: string }): void {
+// it holds to the rules inline steps follow; an invalid one refuses the
+// change that stamps: the create that gives the link, or the link.
+function stampFrom(context: InstanceContext<BlueprintConfig>, from: { link: string; field: string }, operation: string): void {
   const link = linksOf(context)[from.link];
   if (link === undefined || link.revision === undefined) {
-    throw vetoed(context, 'link', `link ${from.link} records no revision to read its steps from`);
+    throw vetoed(context, operation, `link ${from.link} records no revision to read its steps from`, 'no_revision');
   }
   const source = `${link.schema} ${link.id} revision ${link.revision}`;
   const data = revisionData(context, link.schema, link.id, link.revision);
   if (data === undefined) {
-    throw vetoed(context, 'link', `${source} cannot be read`);
+    throw vetoed(context, operation, `${source} cannot be read`, 'unreadable');
   }
   let steps: BlueprintStep[];
   try {
@@ -487,11 +501,11 @@ function stampFrom(context: InstanceContext<BlueprintConfig>, from: { link: stri
     checkSteps(context.config, context.schema, steps);
   } catch (error) {
     if (error instanceof StepsError) {
-      throw vetoed(context, 'link', `the steps of ${source} are invalid: ${error.message}`);
+      throw vetoed(context, operation, `the steps of ${source} are invalid: ${error.message}`, 'invalid_steps');
     }
     throw error;
   }
-  stamp(context, steps, 'link');
+  stamp(context, steps, operation);
 }
 
 export const blueprint = defineBehavior<BlueprintConfig>({
@@ -532,9 +546,6 @@ export const blueprint = defineBehavior<BlueprintConfig>({
       }
     }
     for (const name of raw.copyLinks ?? []) {
-      if (raw.from === undefined) {
-        throw new BehaviorConfigError('copyLinks needs from: inline steps are stamped when the instance is created, before it holds any link');
-      }
       if (name === raw.parentLink) {
         throw new BehaviorConfigError(`copyLinks names ${name}, the link each child points at its parent through`);
       }
@@ -606,7 +617,7 @@ export const blueprint = defineBehavior<BlueprintConfig>({
     if (request.params.name !== from.link || !stamped(view)) {
       return undefined;
     }
-    return `its children were stamped from the revision its link ${from.link} pins, so the link cannot move`;
+    return { reason: `its children were stamped from the revision its link ${from.link} pins, so the link cannot move`, code: 'stamped' };
   },
 
   fields: {
@@ -628,6 +639,8 @@ export const blueprint = defineBehavior<BlueprintConfig>({
       case 'create':
         if (config.steps !== undefined) {
           stamp(context, config.steps, 'create');
+        } else if (config.from !== undefined && linksOf(context)[config.from.link] !== undefined) {
+          stampFrom(context, config.from, 'create');
         }
         return;
       case 'operation':
@@ -638,7 +651,7 @@ export const blueprint = defineBehavior<BlueprintConfig>({
           change.params.name === config.from.link &&
           !stamped(context)
         ) {
-          stampFrom(context, config.from);
+          stampFrom(context, config.from, 'link');
         }
         return;
       case 'delete':

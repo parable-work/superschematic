@@ -698,8 +698,12 @@ export const lease = defineBehavior<LeaseConfig>({
     },
   ],
 
-  // The lease's exclusion and its fence: see the header.
+  // The lease's exclusion and its fence: see the header. A new instance
+  // holds no lease, so a create has nothing to exclude or fence.
   guard(view, request) {
+    if (request.kind === 'create') {
+      return undefined;
+    }
     const lease = held(view);
     const writes = request.kind !== 'operation' || request.writes;
     const token = presented(request);

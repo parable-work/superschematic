@@ -262,6 +262,14 @@ takes its lease and moves its status.
 then acquires the lease, reserves `Budget` when the type composes it, and
 transitions to `claim.to`. A refusal at any step leaves nothing behind.
 
+A claim waits on blockers; a plain `transition` to `claim.to` does not,
+unless `Dependencies` gates that state too. List it in `gatedStates`
+(`{ "gatedStates": ["running", "done"] }` on a schema like `jobs` above)
+and a manual start waits for the blockers as a claim does. A blocker
+counts as finished only in a terminal state whose outcome the
+dependent's `satisfiedBy` lists, a success by default
+([Outcomes](/superschematic/guides/engine-behaviors/#outcomes)).
+
 `claimNext` tries candidates highest priority first (an instance with no
 priority last), then oldest, then by id, skipping work that is blocked,
 assigned to another principal, at `maxExpiries`, exhausted by `Retries`
@@ -333,6 +341,7 @@ of a child schema an instance has, and which block which.
 | Config | `schema` (the child schema), `parentLink` (its link back here) and `keyField` (a string field of the child), required; `steps` inline or `from` (`{ link, field }`, a map read from a pinned revision); `copyFields`, `copyLinks` |
 | Steps | by key: `{ after?, when?, data? }`; `after` lists the steps that block this one, `when` is `{ field, equals }` or `{ field, includes }` |
 | Field | `blueprint`: `{ children: [{ key, id }] }` |
+| Guard | once stamped, moving the `from` link is `vetoed` (`stamped`); a stamp that cannot read its steps is too (`no_revision`, `unreadable`, `invalid_steps`, `no_dependencies`), which refuses the create or the link that stamps |
 
 ```ts
 @behavior("Blueprint", {
@@ -352,13 +361,24 @@ export abstract class Batch {
 }
 ```
 
-Creating a batch creates its steps, links each to the batch, and adds
-their `Dependencies` edges, in one transaction with the batch. A step
-whose `when` does not hold is left out and the chain closes over it: a
-batch with `topic: "copy"` gets `fetch` and `index`, with `index` blocked
-by `fetch`. When the child schema composes `Queue`, `claimNext` claims
-each step once its blockers finish. The child schema needs `Links` with
-the `parentLink`, and `Dependencies` when steps use `after`.
+Creating a batch creates its steps in one transaction with the batch,
+each step created with its link to the batch and its `Dependencies`
+edges as
+[create parameters](/superschematic/guides/engine-behaviors/#create-parameters),
+so a step is blocked from its first event and `claimNext` never finds it
+early. A step whose `when` does not hold is left out and the chain
+closes over it: a batch with `topic: "copy"` gets `fetch` and `index`,
+with `index` blocked by `fetch`. When the child schema composes `Queue`,
+`claimNext` claims each step once its blockers finish. A step that ends
+in a failure state (`outcomes: { failed: "failure" }` on the child's
+`Workflow`) stays a blocker, so the steps after it are not claimed until
+someone removes the edge. The child schema needs `Links` with the
+`parentLink`, and `Dependencies` when steps use `after`. Make the
+`parentLink` `required` and no step can be created without its batch, by
+Blueprint or anyone else. With `from`, a create that gives the
+definition's link stamps the steps in that create. To settle the parent
+from its steps, give it `Reactions` with `allTerminal` and `anyTerminal`
+rules ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
 
 ## Budget
 

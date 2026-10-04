@@ -5,4 +5,4 @@ pub mod interfaces;
 pub mod router;
 
 pub use interfaces::*;
-pub use router::{build_router, RouterState};
+pub use router::{build_router, {{ if .WebhookProviders }}webhook_verified, {{ end }}RouterState};

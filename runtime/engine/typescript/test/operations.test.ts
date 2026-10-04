@@ -313,19 +313,31 @@ describe("the core's behaviors over HTTP", () => {
     });
   });
 
-  test('Dependencies and Links through the routes: a gated transition and a required target\'s delete are 409, listLinked is on the schema', async () => {
+  test('Dependencies and Links through the routes: a create body gives their parameters, a gated transition and a required target\'s delete are 409, listLinked is on the schema', async () => {
     const { app, engine } = withDocument();
-    engine.schemas.define(alice, tasksDocument());
-    engine.schemas.publish(alice, 'tasks');
-    engine.instances.create(alice, 'tasks', { title: 'Plan' }, { id: 'plan' });
-    engine.instances.create(alice, 'tasks', { title: 'Build' }, { id: 'build' });
+    for (const document of [tasksDocument(), projectsDocument()]) {
+      engine.schemas.define(alice, document);
+      engine.schemas.publish(alice, document.name as string);
+    }
+    engine.instances.create(alice, 'projects', { title: 'Launch' }, { id: 'launch' });
+    engine.instances.create(alice, 'tasks', { title: 'Plan' }, { id: 'plan', behaviors: { Links: { project: 'launch' } } });
     const TASKS = '/namespaces/default/schemas/tasks';
     const build = (name: string) => `${TASKS}/instances/build/operations/${name}`;
+    // A create's body gives build its required project and its parent.
+    const missing = await problem(call(app, 'POST', `${TASKS}/instances`, { body: { id: 'build', data: { title: 'Build' } } }), 400);
+    assert.deepEqual([missing.code, missing.details.issues], ['invalid_argument', [{ path: '/behaviors/Links', message: 'link project is required, so a create of tasks gives it' }]]);
+    const unknown = await problem(call(app, 'POST', `${TASKS}/instances`, { body: { data: { title: 'Build' }, behaviors: { Workflow: {}, Links: { project: 'launch' } } } }), 400);
+    assert.deepEqual(unknown.details.issues, [{ path: '/behaviors/Workflow', message: 'behavior Workflow takes no create parameters' }]);
+    assert.equal((await problem(call(app, 'POST', `${TASKS}/instances`, { body: { data: { title: 'Build' }, params: {} } }), 400)).code, 'bad_request');
+    const created = await data(
+      call(app, 'POST', `${TASKS}/instances`, { body: { id: 'build', data: { title: 'Build' }, behaviors: { Links: { project: 'launch', parent: 'plan' } } } }),
+      201
+    );
+    assert.deepEqual([created.etag, created.data.data.links], ['"1"', { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } }]);
     assert.deepEqual(await data(call(app, 'POST', build('addBlocker'), { body: { id: 'plan' }, headers: { 'if-match': '"1"' } })), {
       data: { schema: 'tasks', id: 'plan', status: 'todo', open: true },
       etag: '"2"',
     });
-    await data(call(app, 'POST', build('link'), { body: { name: 'parent', id: 'plan' } }));
     assert.deepEqual((await data(call(app, 'POST', build('link'), { body: { name: 'spec', id: 'doc-1' } }))).data, {
       name: 'spec',
       schema: 'documents',
@@ -343,13 +355,13 @@ describe("the core's behaviors over HTTP", () => {
       data: { items: [{ id: 'build', revision: 1, stale: false }], next: null },
       etag: null,
     });
-    const required = await problem(call(app, 'DELETE', `${TASKS}/instances/plan`), 409);
+    const required = await problem(call(app, 'DELETE', '/namespaces/default/schemas/projects/instances/launch'), 409);
     assert.deepEqual([required.code, required.details.behavior, required.details.action], ['vetoed', 'Links', 'delete']);
     // A reader may not delete the design; alice may, and its delete clears build's edge and link.
     assert.equal((await problem(call(app, 'DELETE', DOCUMENT, { token: 'reader' }), 403)).code, 'forbidden');
     await data(call(app, 'DELETE', DOCUMENT));
     const read = await data(call(app, 'GET', `${TASKS}/instances/build`));
-    assert.deepEqual([read.data.data.blocked, read.data.data.links], [true, { parent: { schema: 'tasks', id: 'plan' } }]);
+    assert.deepEqual([read.data.data.blocked, read.data.data.links], [true, { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } }]);
   });
 
   test("Rollups through the routes: describe lists its field, a read carries it, a gated transition is 409, and a task's change moves no ETag", async () => {
@@ -359,10 +371,9 @@ describe("the core's behaviors over HTTP", () => {
       engine.schemas.publish(alice, document.name as string);
     }
     engine.instances.create(alice, 'projects', { title: 'Launch' }, { id: 'launch' });
-    engine.instances.create(alice, 'tasks', { title: 'Plan' }, { id: 'plan' });
+    engine.instances.create(alice, 'tasks', { title: 'Plan' }, { id: 'plan', behaviors: { Links: { project: 'launch' } } });
     const PROJECTS = '/namespaces/default/schemas/projects';
     const plan = (name: string) => `/namespaces/default/schemas/tasks/instances/plan/operations/${name}`;
-    await data(call(app, 'POST', plan('link'), { body: { name: 'project', id: 'launch' } }));
     const described = (await data(call(app, 'GET', `${PROJECTS}/describe`, { token: 'reader' }))).data;
     const rollups = described.behaviors.find((behavior: { name: string }) => behavior.name === 'Rollups');
     assert.deepEqual(
