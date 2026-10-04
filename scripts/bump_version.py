@@ -88,7 +88,7 @@ NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config"]
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is
 # vX.Y.Z.
-GO_MODULES = ["ir", "runtime/schema/go", "runtime/http/go", "runtime/versiongraph/go", ""]
+GO_MODULES = ["ir", "runtime/schema/go", "runtime/http/go", "runtime/versiongraph/go", "runtime/migrate/go", ""]
 
 SEMVER = re.compile(
     r"^(?P<core>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"

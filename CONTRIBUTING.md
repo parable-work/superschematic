@@ -105,11 +105,11 @@ of them; run them locally before pushing.
 
 | Target                | What it checks                                                      |
 | --------------------- | ------------------------------------------------------------------- |
-| `make go-build`       | `go build ./...` in the five Go modules                              |
-| `make go-vet`         | `go vet ./...` in the five Go modules                                |
-| `make go-test`        | `go test -count=1 ./...` in the five Go modules                      |
+| `make go-build`       | `go build ./...` in the six Go modules                               |
+| `make go-vet`         | `go vet ./...` in the six Go modules                                 |
+| `make go-test`        | `go test -count=1 ./...` in the six Go modules                       |
 | `make go-fmt-check`   | `gofmt -l` is empty                                                  |
-| `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the five Go modules      |
+| `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the six Go modules       |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make behaviors-check` | The copies of the core's behavior declarations in the packages that implement them (`runtime/engine/typescript/src/behaviors/core/declarations`, `runtime/engine-workqueue/typescript/src/declarations`) match the core registry; `make behaviors` rewrites them |
@@ -192,7 +192,7 @@ PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
 (`superschematic-http-runtime`, and `superschematic-versiongraph`,
 `superschematic-versiongraph-engine` and
-`superschematic-versiongraph-python`, which are not published) and the five
+`superschematic-versiongraph-python`, which are not published) and the six
 Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing
 that writes it. `bump_version.py check` fails when any site disagrees; CI
@@ -201,7 +201,8 @@ building anything. `0.0.0` means unreleased.
 
 The Go modules are versioned by tags, one per module because each is its own
 module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
-`runtime/http/go/vX.Y.Z` and `runtime/versiongraph/go/vX.Y.Z`. The `require`
+`runtime/http/go/vX.Y.Z`, `runtime/versiongraph/go/vX.Y.Z` and
+`runtime/migrate/go/vX.Y.Z`. The `require`
 lines between them carry the release version so a consumer at a tag resolves
 the siblings from their tags; the `replace` lines next to them keep local
 builds on the checkout.
@@ -241,8 +242,9 @@ A release is three steps, each started by a person. For the first release,
 3. `go-module-tag.yml` checks the tree carries the tag's version and that
    every sub-module's path matches its directory, then creates
    `ir/v0.1.0-alpha.1`, `runtime/schema/go/v0.1.0-alpha.1`,
-   `runtime/http/go/v0.1.0-alpha.1` and
-   `runtime/versiongraph/go/v0.1.0-alpha.1` on the same commit. `release.yml` runs
+   `runtime/http/go/v0.1.0-alpha.1`,
+   `runtime/versiongraph/go/v0.1.0-alpha.1` and
+   `runtime/migrate/go/v0.1.0-alpha.1` on the same commit. `release.yml` runs
    the full CI, builds the CLI for linux and darwin on x64 and arm64 (each on
    a runner of that os/arch, linked against the superscalar archive built
    from the pinned checkout), refuses a set not built from the tag's commit,
@@ -254,7 +256,8 @@ A release is three steps, each started by a person. For the first release,
 
 After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
 (and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@`,
-`.../runtime/versiongraph/go@` at the same version) resolves. The Go modules
+`.../runtime/versiongraph/go@`, `.../runtime/migrate/go@` at the same
+version) resolves. The migration runner needs no cgo. The other Go modules
 still link superscalar through cgo from a pseudo-version pin, so a consumer
 needs `CGO_LDFLAGS` from `scripts/superscalar-dep.sh --print` until
 superscalar publishes its `go/vX.Y.Z` tags; the docs quickstart says so. The
