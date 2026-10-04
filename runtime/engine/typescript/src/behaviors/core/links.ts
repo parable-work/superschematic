@@ -20,9 +20,15 @@ Each link is also a reference the engine records, under the link's
 name. A required link is given at create, which refuses an instance
 without it, can be moved and not unlinked, and the delete of the target
 it points at is refused by guardReference, whoever the caller: an
-instance always holds it. An optional link's target can be deleted: afterReferenceChange
-unlinks it on each instance that points at it, as the caller, and that
-instance's own event records it. Deleting an instance deletes its links.
+instance always holds it. An optional link's target can be deleted:
+afterReferenceChange unlinks it on each instance that points at it, as
+the caller, and that instance's own event records it. Deleting an
+instance deletes its links.
+
+Every veto carries a code the declaration lists: no_revision for a
+pinned link's target with none yet, at link or at create (with the
+pointer of the create's entry), required_link for unlinking a required
+link, and required_target for deleting what one points at.
 
 listLinked is schema-level: the instances of the schema whose link
 points at a target, with each pinned link's revision and staleness, a
@@ -101,20 +107,24 @@ function held(view: InstanceView<LinksConfig>): Row[] {
   return view.sql.all(`SELECT ${COLUMNS} FROM ${view.sql.table('links')} WHERE namespace = ? AND schema = ? AND id = ? ORDER BY name`, key(view));
 }
 
+/** The codes of Links' vetoes, as its declaration lists them. */
+type LinksVeto = 'no_revision' | 'required_link' | 'required_target';
+
 /**
  * How a link's checks refuse: at the parameter they name (the link's
- * name, the target's id, the revision), or as a veto. link refuses its own
- * parameters; a create, the link's entry of its parameters.
+ * name, the target's id, the revision), or as a veto with its declared
+ * code. link refuses its own parameters; a create, the link's entry of
+ * its parameters, and its veto is the create's.
  */
 interface LinkRefusals {
   param(at: 'name' | 'id' | 'revision', message: string): Error;
-  veto(reason: string): Error;
+  veto(reason: string, code: LinksVeto): Error;
 }
 
 function operationRefusals(context: InstanceContext<LinksConfig>): LinkRefusals {
   return {
     param: (at, message) => new OperationParamsError(NAME, 'link', [{ path: `/${at}`, message }]),
-    veto: (reason) => new BehaviorVetoError(NAME, 'link', context.schema, context.id, reason),
+    veto: (reason, code) => new BehaviorVetoError(NAME, 'link', context.schema, context.id, { reason, code }),
   };
 }
 
@@ -125,7 +135,7 @@ function createRefusals(context: InstanceContext<LinksConfig>, name: string, idO
   return {
     param: (at, message) =>
       new CreateParamsError(context.schema, [{ path: at === 'name' || (at === 'id' && idOnly) ? entry : `${entry}/${at}`, message }]),
-    veto: (reason) => new BehaviorVetoError(NAME, 'create', context.schema, context.id, reason),
+    veto: (reason, code) => new BehaviorVetoError(NAME, 'create', context.schema, context.id, { reason, code, details: { path: entry } }),
   };
 }
 
@@ -158,7 +168,7 @@ function setLink(
   if (link.pinned) {
     const current = typeof target.data.revision === 'number' ? target.data.revision : undefined;
     if (current === undefined) {
-      throw refuse.veto(`${link.schema} ${id} has no revision to pin yet`);
+      throw refuse.veto(`${link.schema} ${id} has no revision to pin yet`, 'no_revision');
     }
     if (wanted !== undefined && wanted > current) {
       throw refuse.param('revision', `${link.schema} ${id} has revisions 1 to ${current}, not ${wanted}`);
@@ -299,7 +309,10 @@ export const links = defineBehavior<LinksConfig>({
         throw new OperationParamsError(NAME, 'unlink', [{ path: '/name', message: `${context.schema} ${context.id} has no link ${name}` }]);
       }
       if (link.required) {
-        throw new BehaviorVetoError(NAME, 'unlink', context.schema, context.id, `link ${name} is required: it can be moved with link, not unlinked`);
+        throw new BehaviorVetoError(NAME, 'unlink', context.schema, context.id, {
+          reason: `link ${name} is required: it can be moved with link, not unlinked`,
+          code: 'required_link',
+        });
       }
       context.sql.run(`DELETE FROM ${table} WHERE row = ?`, [Number(row.row)]);
       context.references.remove(String(row.target_schema), String(row.target_id), name);
@@ -356,7 +369,7 @@ export const links = defineBehavior<LinksConfig>({
   // caller may not be able to read.
   guardReference(view, reference, request) {
     if (request.kind === 'delete' && view.config.links[reference.key]?.required === true) {
-      return `an instance of ${view.schema} links to it through its required link ${reference.key}`;
+      return { reason: `an instance of ${view.schema} links to it through its required link ${reference.key}`, code: 'required_target' };
     }
     return undefined;
   },

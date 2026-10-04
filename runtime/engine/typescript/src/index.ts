@@ -19,9 +19,10 @@ export {
   IncompatibleChangeError,
   InstanceValidationError,
   OperationParamsError,
+  PreconditionsError,
   SchemaDocumentError,
 } from './errors.js';
-export type { EngineErrorCode, SchemaChange, SchemaIssue, ValidationIssue } from './errors.js';
+export type { EngineErrorCode, SchemaChange, SchemaIssue, ValidationIssue, Veto } from './errors.js';
 
 export { DEFAULT_NAMESPACE, NAMESPACE_NAME, Namespaces } from './namespaces.js';
 export type { NamespaceOptions } from './namespaces.js';
@@ -80,12 +81,14 @@ export type {
   CreateInstanceOptions,
   FieldReader,
   FrozenJSON,
+  GuardAnswer,
   GuardRequest,
   InstanceChange,
   InstanceContext,
   InstanceSchemaForm,
   InstanceView,
   Instances,
+  InstancesInvokeOptions,
   OperationContext,
   OperationHandler,
   PublishContext,
@@ -110,11 +113,12 @@ export type {
   WorkContext,
   WritableColumns,
 } from './behaviors/behavior.js';
-export { BEHAVIOR_NAME, BUILTIN_OPERATIONS, OPERATION_SCOPES } from './behaviors/declaration.js';
+export { BEHAVIOR_NAME, BUILTIN_OPERATIONS, OPERATION_SCOPES, VETO_CODE } from './behaviors/declaration.js';
 export type {
   BehaviorDeclaration,
   BehaviorFieldDeclaration,
   BehaviorOperationDeclaration,
+  BehaviorVetoDeclaration,
   JSONSchema,
   OperationScope,
 } from './behaviors/declaration.js';

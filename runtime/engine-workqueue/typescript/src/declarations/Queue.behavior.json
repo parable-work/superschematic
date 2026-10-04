@@ -1,6 +1,6 @@
 {
   "name": "Queue",
-  "description": "Makes the type's instances claimable work. claim checks that an instance can be claimed, takes its lease and moves its Workflow status from a claimable state to the claimed one, in one transaction; claimNext claims the first instance that can be claimed, highest priority first, then oldest. Requires Workflow and Lease.",
+  "description": "Makes the type's instances claimable work. claim checks that an instance can be claimed, takes its lease and moves its Workflow status from a claimable state to the claimed one, in one transaction; claimNext claims the first instance that can be claimed, highest priority first, then oldest, and countClaimable counts them. Candidates come from copies of what a claim checks, kept current as the instance and what it waits on change, so work that cannot be claimed now (blocked, over budget, exhausted) is not tried. Requires Workflow and Lease.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -31,7 +31,7 @@
         "type": "object"
       },
       "match": {
-        "description": "The type's own top-level scalar fields claimNext may filter on, by equality.",
+        "description": "The type's own top-level scalar fields claimNext and countClaimable may filter on, by equality with a value or membership in a list of values.",
         "items": {
           "minLength": 1,
           "type": "string"
@@ -108,20 +108,45 @@
     },
     {
       "name": "claimNext",
-      "description": "Claims the first instance of the schema the caller can claim, highest priority first, then oldest, skipping each one whose claim is refused, up to maxCandidates; null when none can be claimed.",
+      "description": "Claims the first instance of the schema the caller can claim, highest priority first, then oldest, skipping each one whose claim is refused (vetoed, conflict or forbidden), up to maxCandidates; null when none can be claimed. An instance its copies show blocked, at maxExpiries, assigned to another principal, over its budget or exhausted is no candidate.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
+          "assignedOnly": {
+            "description": "Only instances assigned to the caller; the type composes Assignment.",
+            "type": "boolean"
+          },
           "match": {
             "additionalProperties": {
-              "type": [
-                "string",
-                "number",
-                "boolean"
+              "anyOf": [
+                {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                {
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "maxItems": 100,
+                  "minItems": 1,
+                  "type": "array"
+                }
               ]
             },
-            "description": "Values of the config's match fields an instance must hold.",
+            "description": "Values of the config's match fields an instance must hold: a value, or a list of values one of which it holds.",
             "type": "object"
+          },
+          "ttlMs": {
+            "description": "The lease's length, as claim takes it.",
+            "minimum": 1000,
+            "type": "integer"
           }
         },
         "type": "object"
@@ -167,8 +192,63 @@
       "scope": "schema"
     },
     {
+      "name": "countClaimable",
+      "description": "Counts the instances of the schema claimNext would try for the caller, with the same eligibility and no maxCandidates: a signal of the work waiting, which reads and changes nothing else.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assignedOnly": {
+            "description": "As claimNext's assignedOnly.",
+            "type": "boolean"
+          },
+          "match": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                {
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "maxItems": 100,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "description": "As claimNext's match.",
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "How many instances are candidates now.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "type": "object"
+      },
+      "scope": "schema"
+    },
+    {
       "name": "refresh",
-      "description": "Recomputes what claimNext reads of the instance: whether its status is claimable, whether a blocker holds it up, its assignee, its priority and whether its lease has reached maxExpiries. Queue invokes it itself when a blocker changes.",
+      "description": "Recomputes what claimNext reads of the instance: whether its status is claimable, whether a blocker holds it up, its assignee, its priority, whether its lease has reached maxExpiries, and until when Budget's checkReserve or Retries' exhaustion keeps it out. Queue invokes it itself when a blocker or an enclosing budget scope changes.",
       "paramsSchema": {
         "additionalProperties": false,
         "type": "object"
@@ -178,6 +258,20 @@
         "type": "object"
       },
       "writes": true
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "not_claimable",
+      "description": "The instance's status is not one of the states it is claimed from."
+    },
+    {
+      "code": "blocked",
+      "description": "A blocker of Dependencies holds the instance up."
+    },
+    {
+      "code": "claim_required",
+      "description": "The lease of a claimable instance is taken by claiming it, not by Lease's acquire."
     }
   ]
 }

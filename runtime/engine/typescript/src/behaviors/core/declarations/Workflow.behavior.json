@@ -113,5 +113,23 @@
       },
       "writes": true
     }
+  ],
+  "vetoes": [
+    {
+      "code": "already_in_state",
+      "description": "The instance is already in the state the transition names."
+    },
+    {
+      "code": "terminal_state",
+      "description": "The instance is in a terminal state: no transition leaves it."
+    },
+    {
+      "code": "transition_not_allowed",
+      "description": "No transition of the config leads from the instance's state to the one named."
+    },
+    {
+      "code": "no_status",
+      "description": "The instance has no status to move from."
+    }
   ]
 }

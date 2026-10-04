@@ -7,7 +7,7 @@
     "required": ["classes", "totalAttempts", "exhaustedState"],
     "properties": {
       "classes": {
-        "description": "The failure classes, by name: each its own cap of attempts, or terminal, which exhausts the instance at its first failure.",
+        "description": "The failure classes, by name: each its own cap of attempts, with an optional hint for the next attempt, or terminal, which exhausts the instance at its first failure.",
         "type": "object",
         "minProperties": 1,
         "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$", "not": { "const": "totalAttempts" } },
@@ -18,7 +18,13 @@
               "additionalProperties": false,
               "required": ["attempts"],
               "properties": {
-                "attempts": { "description": "How many failures of the class an instance may have.", "type": "integer", "minimum": 1 }
+                "attempts": { "description": "How many failures of the class an instance may have.", "type": "integer", "minimum": 1 },
+                "hint": {
+                  "description": "What recordAttempt returns for a failure of the class, to steer the worker's next attempt.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                }
               }
             },
             { "const": "terminal" }
@@ -27,7 +33,12 @@
       },
       "totalAttempts": { "description": "How many failures of every class together an instance may have.", "type": "integer", "minimum": 1 },
       "limitsField": {
-        "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored.",
+        "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored. Once the instance exists, only a principal with limitsPermission changes it, and the holder of its active lease does not.",
+        "type": "string",
+        "minLength": 1
+      },
+      "limitsPermission": {
+        "description": "The permission a principal needs to change limitsField once the instance exists. Absent, the caps an instance is created with do not change.",
         "type": "string",
         "minLength": 1
       },
@@ -80,7 +91,7 @@
   "operations": [
     {
       "name": "recordAttempt",
-      "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+      "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -89,6 +100,7 @@
           "score": { "description": "The attempt's score; higher is better.", "type": "number" },
           "result": { "description": "The attempt's result, written to resultField when it is kept; needs resultField." },
           "signature": { "description": "What identifies the failure, for stuckAfter: the same signature in a row is the same failure.", "type": "string", "minLength": 1, "maxLength": 512 },
+          "detail": { "description": "Anything about the attempt worth keeping, such as validation errors: recorded in the operation's event and nowhere else.", "type": "object" },
           "predicates": {
             "description": "Named checks the attempt passed or failed, for keepBest's neverRegress; a predicate absent here counts as failed.",
             "type": "object",
@@ -99,7 +111,7 @@
       "resultSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["failure", "score", "kept", "total", "classAttempts", "exhausted", "stuck"],
+        "required": ["failure", "score", "kept", "total", "classAttempts", "exhausted", "stuck", "hint"],
         "properties": {
           "failure": { "description": "The failure class; null for a success.", "type": ["string", "null"] },
           "score": { "type": ["number", "null"] },
@@ -107,10 +119,16 @@
           "total": { "description": "Failures counted so far.", "type": "integer" },
           "classAttempts": { "description": "Failures counted so far, by class.", "type": "object", "additionalProperties": { "type": "integer" } },
           "exhausted": { "type": "boolean" },
-          "stuck": { "description": "Whether a repeated signature exhausted the instance.", "type": "boolean" }
+          "stuck": { "description": "Whether a repeated signature exhausted the instance.", "type": "boolean" },
+          "hint": { "description": "The failure class's hint; null for a success and a class without one.", "type": ["string", "null"] }
         }
       },
       "writes": true
     }
+  ],
+  "vetoes": [
+    { "code": "exhausted", "description": "The instance's retries are exhausted: it takes no more attempts, its status moves only to exhaustedState, and it is not acquired or claimed again." },
+    { "code": "limits_fixed", "description": "The holder of the instance's active lease does not change limitsField: a worker never raises its own caps." },
+    { "code": "not_configured", "description": "The config names no limitsPermission, so limitsField does not change once the instance exists." }
   ]
 }

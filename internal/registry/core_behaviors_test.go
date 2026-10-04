@@ -99,20 +99,59 @@ func TestCoreBehaviors(t *testing.T) {
 			budget.ConfigRequired(), budget.Requires, retries.ConfigRequired(), retries.Requires)
 	}
 	// Constants and Variants judge the fields a write stores: no field, no
-	// operation, no requirement.
+	// operation, no requirement, and no veto code or precondition, since
+	// what they refuse is an issue at a field (invalid_instance).
 	constants, _ := reg.Behavior("Constants")
 	variants, _ := reg.Behavior("Variants")
 	for _, b := range []Behavior{constants, variants} {
-		if b.Package != EnginePackage || !b.ConfigRequired() || len(b.Requires) != 0 || len(b.Fields) != 0 || len(b.Operations) != 0 {
-			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field or operation", b.Name, b)
+		if b.Package != EnginePackage || !b.ConfigRequired() || len(b.Requires) != 0 || len(b.Fields) != 0 || len(b.Operations) != 0 ||
+			len(b.Vetoes) != 0 || len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
+			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
 		}
 	}
-	// Every work-queue operation writes; claimNext and expireHolder are schema-level.
+	// Every work-queue operation writes but countClaimable and checkReserve,
+	// which read; claimNext, countClaimable and expireHolder are schema-level.
+	reads := []string{"countClaimable", "checkReserve"}
+	schemaLevel := []string{"claimNext", "countClaimable", "expireHolder"}
 	for _, b := range []Behavior{lease, assignment, queue, presence, budget, retries} {
 		for _, op := range b.Operations {
-			if !op.Writes || (op.Scope == OperationScopeSchema) != (op.Name == "claimNext" || op.Name == "expireHolder") {
+			if op.Writes == slices.Contains(reads, op.Name) || (op.Scope == OperationScopeSchema) != slices.Contains(schemaLevel, op.Name) {
 				t.Errorf("%s.%s: writes %v, scope %q", b.Name, op.Name, op.Writes, op.Scope)
 			}
+		}
+	}
+	// Lease alone takes a precondition, its token; the refusals a client
+	// branches on carry codes.
+	for _, b := range reg.Behaviors() {
+		if (len(b.PreconditionSchema) > 0) != (b.Name == "Lease") {
+			t.Errorf("%s preconditionSchema = %s", b.Name, b.PreconditionSchema)
+		}
+	}
+	codes := func(b Behavior) []string {
+		var out []string
+		for _, veto := range b.Vetoes {
+			out = append(out, veto.Code)
+		}
+		return out
+	}
+	for _, want := range []struct {
+		behavior Behavior
+		codes    []string
+	}{
+		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
+		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
+		{links, []string{"no_revision", "required_link", "required_target"}},
+		{revisions, []string{"no_review", "not_pending"}},
+		{retries, []string{"exhausted", "limits_fixed", "not_configured"}},
+		{lease, []string{"held_by_another", "held_by_caller", "not_leased", "not_holder", "lapsed", "token_stale", "token_required", "max_expiries", "hold_limit_fixed", "not_configured"}},
+		{assignment, []string{"assigned_to_another", "already_assigned", "not_assigned", "not_configured"}},
+		{queue, []string{"not_claimable", "blocked", "claim_required"}},
+		{presence, []string{"no_principal", "not_principal", "principal_fixed"}},
+		{budget, []string{"over_limit", "not_leased", "scope_moved", "scope_reserved", "below_committed", "exceeds_reservation", "not_configured"}},
+		{blueprint, []string{"stamped", "no_dependencies", "not_constant", "no_revision", "unreadable", "invalid_steps"}},
+	} {
+		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
+			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
 		}
 	}
 
@@ -287,28 +326,32 @@ func TestCoreBehaviors(t *testing.T) {
 		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {}}, "stamp": "steps"}`, "behavior Blueprint config: "},
 		{budget, `{"meters": {"cpuSeconds": {"limit": 3600, "reserve": 600, "reset": "daily"}}}`, ""},
 		{budget, `{"meters": {"cpuSeconds": {"limitField": "cpuLimit", "reserveField": "cpuEstimate", "scope": "pool"}, "requests": {}},
-			"limitPermission": "jobs.budget", "onExceeded": {"direct": "budgetExceeded"}}`, ""},
+			"limitPermission": "jobs.budget", "onExceeded": {"direct": "budgetExceeded"}, "escalate": {"transition": "paused", "from": ["running"]}}`, ""},
+		{budget, `{"meters": {"cpuSeconds": {"reserve": 5, "reserveField": "cpuEstimate"}}}`, ""},
 		{budget, ``, "behavior Budget config: "},
 		{budget, `{"meters": {}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"CpuSeconds": {}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"limit": 0}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"limit": 10, "limitField": "cpuLimit"}}}`, "behavior Budget config: "},
-		{budget, `{"meters": {"cpuSeconds": {"reserve": 5, "reserveField": "cpuEstimate"}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {}}, "escalate": {"transition": "paused"}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {}}, "escalate": {"transition": "paused", "from": []}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"reset": "weekly"}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"scope": "Pool"}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {}}, "onExceeded": {}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {}}, "limitPermission": ""}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {}}, "raiseLimitKinds": ["person"]}`, "behavior Budget config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}, "rejected": "terminal"}, "totalAttempts": 4, "exhaustedState": "failed"}`, ""},
-		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "limitsField": "caps", "keepBest": {"minDelta": 0.5, "neverRegress": ["compiles"]},
-			"stuckAfter": 2, "resultField": "result", "exhaustedState": "failed", "from": ["running"], "permission": "jobs.work"}`, ""},
+		{retries, `{"classes": {"timeout": {"attempts": 3, "hint": "Give it more time."}}, "totalAttempts": 4, "limitsField": "caps", "limitsPermission": "jobs.caps",
+			"keepBest": {"minDelta": 0.5, "neverRegress": ["compiles"]}, "stuckAfter": 2, "resultField": "result", "exhaustedState": "failed", "from": ["running"],
+			"permission": "jobs.work"}`, ""},
 		{retries, ``, "behavior Retries config: "},
 		{retries, `{"classes": {}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 0}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": "fatal"}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
-		{retries, `{"classes": {"timeout": {"attempts": 3, "hint": "wait"}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3, "delay": "wait"}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3, "hint": ""}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"totalAttempts": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "stuckAfter": 0}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "from": []}`, "behavior Retries config: "},

@@ -10,7 +10,9 @@ import { afterEach, describe, test } from 'node:test';
 
 import {
   BehaviorError,
+  BehaviorVetoError,
   InstanceValidationError,
+  PreconditionsError,
   SchemaDocumentError,
   defineBehavior,
   type Engine,
@@ -18,7 +20,7 @@ import {
   type Principal,
   type ValidationIssue,
 } from '../dist/index.js';
-import { openMetaSchema } from './behavior-fixtures.ts';
+import { hold, holdRequests, openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
 
 /** What the test behaviors saw, in order. */
@@ -131,6 +133,8 @@ const defect = defineBehavior<{ mode: string }>({
         return Promise.resolve([]) as unknown as ValidationIssue[];
       case 'type':
         return context.checkType('Shape', {}, 'extra');
+      case 'veto':
+        throw new BehaviorVetoError(context.behavior, 'create', context.schema, context.id, { reason: 'no', code: 'nope' });
       default:
         return undefined;
     }
@@ -173,7 +177,7 @@ const editor: Principal = { subject: 'eve', permissions: ['items.edit'] };
 
 for (const driver of drivers) {
   function open(): Engine {
-    return openTestEngine({ driver, metaSchema: openMetaSchema(), behaviors: [shape, second, writer, defect] });
+    return openTestEngine({ driver, metaSchema: openMetaSchema(), behaviors: [shape, second, writer, defect, hold] });
   }
 
   describe(`a behavior's validate (${driver})`, () => {
@@ -261,6 +265,54 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'write', { patch: { extra: { size: 2 } } }), { title: 'plain', extra: { size: 2 } });
     });
 
+    test("an update's preconditions are checked with its arguments, before any validate, and judged by their guard after every validate, which never sees one", () => {
+      const engine = open();
+      publishItem(engine, [{ name: 'test.Shape', config: { ban: 'secret' } }, { name: 'test.Hold' }, { name: 'test.Writer' }]);
+      engine.instances.create(alice, 'Item', { title: 'plain' }, { id: 'i1' });
+      engine.instances.invoke(alice, 'Item', 'i1', 'advance', {}, { preconditions: { 'test.Hold': { generation: 0 } } });
+      const stale = { preconditions: { 'test.Hold': { generation: 0 } } };
+      seen.length = 0;
+      holdRequests.length = 0;
+      // A malformed entry is a wrong argument: no validate, no guard.
+      const malformed = thrown(() => engine.instances.update(alice, 'Item', 'i1', { title: 'secret' }, { preconditions: { 'test.Hold': {} } }), PreconditionsError);
+      assert.equal(malformed.code, 'invalid_argument');
+      assert.deepEqual([seen.length, holdRequests.length], [0, 0]);
+      // Fields a validate refuses are invalid_instance, whatever the precondition says: no guard is asked.
+      const refused = thrown(() => engine.instances.update(alice, 'Item', 'i1', { title: 'secret' }, stale), InstanceValidationError);
+      assert.deepEqual(
+        refused.issues.map((issue) => issue.rule),
+        ['banned']
+      );
+      assert.deepEqual([seen.map((entry) => entry.step), holdRequests.length], [['validate'], 0]);
+      // Fields every validate accepts reach the guards, which judge the precondition.
+      seen.length = 0;
+      const vetoed = thrown(() => engine.instances.update(alice, 'Item', 'i1', { title: 'fine' }, stale), BehaviorVetoError);
+      assert.deepEqual([vetoed.behavior, vetoed.vetoCode], ['test.Hold', 'stale']);
+      assert.deepEqual(
+        seen.map((entry) => entry.step),
+        ['validate', 'guard']
+      );
+      assert.ok(seen.every((entry) => entry.step !== 'validate' || !Object.keys(entry.request as object).includes('precondition')));
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.title, 'plain');
+      // In an operation, its guards judge the caller's preconditions before
+      // the handler; the validate and the guards of its update() get none.
+      seen.length = 0;
+      holdRequests.length = 0;
+      engine.instances.invoke(alice, 'Item', 'i1', 'write', { patch: { title: 'better' } }, { preconditions: { 'test.Hold': { generation: 1 } } });
+      assert.deepEqual(
+        seen.map((entry) => entry.step),
+        ['guard', 'validate', 'guard']
+      );
+      assert.deepEqual(
+        holdRequests.map((request) => [request.kind, request.precondition]),
+        [
+          ['operation', { generation: 1 }],
+          ['update', undefined],
+        ]
+      );
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.title, 'better');
+    });
+
     test("a behavior's instances.create asks it too, and a refusal the behavior catches leaves nothing", () => {
       const engine = open();
       publishItem(engine, [{ name: 'test.Shape', config: { ban: 'secret' } }, { name: 'test.Writer' }]);
@@ -316,6 +368,8 @@ for (const driver of drivers) {
       assert.match(broken('shape').message, /validate returns a list of issues/);
       assert.match(broken('promise').message, /behavior test\.Defect: validate is synchronous \(D16\): it returned a promise/);
       assert.match(broken('type').message, /behavior test\.Defect: checkType: Shape is not a type its checkedTypes names \(Inner\)/);
+      // validate refuses with issues; a veto it throws anyway is held to its declaration's codes.
+      assert.match(broken('veto').message, /behavior test\.Defect: a veto's code "nope" is not one its declaration lists \(none\)/);
       assert.equal(engine.instances.list(alice, 'Item').items.length, 0);
       for (const member of ['validate', 'checkedTypes', 'instanceSchema']) {
         assert.throws(

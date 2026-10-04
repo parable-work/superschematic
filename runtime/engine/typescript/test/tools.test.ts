@@ -18,8 +18,8 @@ import {
   type Principal,
   type ToolDefinition,
 } from '../dist/index.js';
-import { counterDeclaration, flagDeclaration, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
+import { counterDeclaration, flagDeclaration, hold, holdDeclaration, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
+import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown, track } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 afterEach(cleanup);
@@ -109,6 +109,7 @@ describe('the describe document', () => {
         config: { start: 2, limit: 9 },
         fields: [{ name: 'count', description: 'The count.' }],
         operations: ['increment', 'history'],
+        vetoes: [],
       },
       {
         name: 'test.Flag',
@@ -119,6 +120,7 @@ describe('the describe document', () => {
           { name: 'flagReason', description: 'Why; absent when it is not flagged.' },
         ],
         operations: ['flag', 'unflag'],
+        vetoes: [],
       },
     ]);
     const properties = described.instance.properties as Record<string, unknown>;
@@ -144,6 +146,47 @@ describe('the describe document', () => {
     assert.deepEqual(increment.result, counterDeclaration.operations?.[0].resultSchema);
     // flag's parameters require a reason, so the tool requires params.
     assert.deepEqual(operationOf(engine, 'Item', 'flag').params.required, ['id', 'params']);
+  });
+
+  test("shows a schema's create parameters, preconditions, veto codes and what its behaviors' validate holds the fields to, side by side", () => {
+    // Step composes Constants and Variants (instanceSchema), Links (create
+    // parameters, codes) and test.Hold (a precondition, codes).
+    const engine = openBehaviorEngine({ behaviors: [...testBehaviors, hold] });
+    const document = stepsDocument() as { types: { Step: { behaviors: unknown[] } } };
+    document.types.Step.behaviors.push({ name: 'Links', config: { links: { parent: { schema: 'Step' } } } }, { name: 'test.Hold' });
+    publish(engine, document);
+    const described = engine.tools.describe(alice, 'Step');
+    const linksDeclaration = engine.schemas.behaviors(alice, 'Step').find((bound) => bound.name === 'Links')?.declaration;
+    assert.deepEqual(
+      described.behaviors.map((behavior) => [behavior.name, behavior.vetoes.map((veto) => veto.code)]),
+      [
+        ['Constants', []],
+        ['Variants', []],
+        ['Links', ['no_revision', 'required_link', 'required_target']],
+        ['test.Hold', ['stale', 'required', 'refused']],
+      ]
+    );
+    // Variants' if/then per kind with a value, and one for every other kind.
+    const rules = described.instance.allOf as unknown[];
+    assert.equal(rules.length, 3);
+    const argumentsOf = (name: string) => operationOf(engine, 'Step', name).params.properties as Record<string, any>;
+    const create = argumentsOf('create');
+    assert.deepEqual(create.data.allOf, rules);
+    assert.deepEqual(create.behaviors.properties, { Links: linksDeclaration?.createParamsSchema });
+    assert.equal(create.preconditions, undefined, 'a create has nothing to fence');
+    const update = argumentsOf('update');
+    assert.equal((update.patch.allOf as unknown[]).length, 3);
+    assert.notDeepEqual(update.patch.allOf, rules, 'the patch form');
+    for (const name of ['update', 'delete', 'advance', 'link']) {
+      const properties = argumentsOf(name);
+      assert.deepEqual(properties.preconditions.properties, { 'test.Hold': holdDeclaration.preconditionSchema }, name);
+      assert.equal(properties.behaviors, undefined, name);
+    }
+    // The tools document carries the same arguments.
+    const createTool = tool(engine, 'step.create').parameters.properties as Record<string, any>;
+    const updateTool = tool(engine, 'step.update').parameters.properties as Record<string, any>;
+    assert.deepEqual([createTool.data.allOf, createTool.behaviors, createTool.preconditions], [create.data.allOf, create.behaviors, undefined]);
+    assert.deepEqual([updateTool.patch.allOf, updateTool.preconditions], [update.patch.allOf, update.preconditions]);
   });
 
   test('describes a behavior operation with its scope; a schema-level one takes params and no id, and says where it is served', () => {

@@ -98,6 +98,50 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 }
 
+// A declaration may give the schema of the precondition a caller sends
+// for the behavior, held to a paramsSchema's rule, and the codes its
+// vetoes carry, each lowercase snake case and listed once, beside the
+// schema of the parameters a create gives it.
+func TestRegisterBehaviorPreconditionAndVetoes(t *testing.T) {
+	precondition := map[string]any{"type": "object", "additionalProperties": false, "required": []any{"token"}, "properties": map[string]any{"token": map[string]any{"type": "integer"}}}
+	createParams := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"holder": map[string]any{"type": "string"}}}
+	reg := New(naming.Default())
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Hold", map[string]any{
+		"createParamsSchema": createParams,
+		"preconditionSchema": precondition,
+		"vetoes":             []any{map[string]any{"code": "held", "description": "Another holds it."}, map[string]any{"code": "token_stale"}},
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	hold, _ := reg.Behavior("acme.Hold")
+	if len(hold.CreateParamsSchema) == 0 || len(hold.PreconditionSchema) == 0 || len(hold.Vetoes) != 2 || hold.Vetoes[0] != (BehaviorVeto{Code: "held", Description: "Another holds it."}) || hold.Vetoes[1].Code != "token_stale" {
+		t.Fatalf("acme.Hold = %+v", hold)
+	}
+
+	for _, test := range []struct {
+		name    string
+		members map[string]any
+		want    string
+	}{
+		{"precondition does not compile", map[string]any{"preconditionSchema": map[string]any{"type": 7}}, "registry: behavior acme.Hold preconditionSchema: "},
+		{"precondition not an object", map[string]any{"preconditionSchema": map[string]any{"type": "integer"}}, `registry: behavior acme.Hold preconditionSchema must be an object schema ("type": "object")`},
+		{"precondition open", map[string]any{"preconditionSchema": map[string]any{"type": "object"}}, `registry: behavior acme.Hold preconditionSchema must set "additionalProperties": false, so its members are exactly the ones it declares`},
+		{"code camelCase", map[string]any{"vetoes": []any{map[string]any{"code": "tokenStale"}}}, `registry: behavior acme.Hold veto code "tokenStale" is not lowercase snake case of at most 64 characters`},
+		{"code empty", map[string]any{"vetoes": []any{map[string]any{"code": ""}}}, `registry: behavior acme.Hold veto code "" is not lowercase snake case`},
+		{"code double underscore", map[string]any{"vetoes": []any{map[string]any{"code": "token__stale"}}}, `veto code "token__stale" is not lowercase snake case`},
+		{"code too long", map[string]any{"vetoes": []any{map[string]any{"code": strings.Repeat("a", 65)}}}, "is not lowercase snake case of at most 64 characters"},
+		{"code twice", map[string]any{"vetoes": []any{map[string]any{"code": "held"}, map[string]any{"code": "held"}}}, `registry: behavior acme.Hold declares veto code "held" twice`},
+		{"veto unknown key", map[string]any{"vetoes": []any{map[string]any{"code": "held", "status": 409}}}, `unknown field "status"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Hold", test.members)})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestBehaviorValidateConfig(t *testing.T) {
 	reg := New(naming.Default())
 	for _, decl := range []json.RawMessage{ratingDeclaration(), declaration("acme.Flag", nil)} {

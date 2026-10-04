@@ -40,6 +40,11 @@ records it. Deleting a dependent deletes its edges. Blockers are read as
 the caller, so a caller who may not read a blocker's schema cannot read
 whether its dependents are blocked.
 
+Every veto carries a code the declaration lists: the gate's blocked,
+with the open blockers in its details, and an edge's already_blocking,
+cycle and gated, which a create's blocker gets as addBlocker's would,
+with the pointer of its entry.
+
 configChange: schemas, gatedStates and satisfiedBy may change (existing
 edges stay, and parseConfig holds gatedStates to the new Workflow's
 states). Dependencies can be added to a schema that has instances, which
@@ -167,27 +172,32 @@ function reaches(view: InstanceView<unknown>, from: { schema: string; id: string
   return false;
 }
 
+/** The codes of Dependencies' vetoes, as its declaration lists them. */
+type DependenciesVeto = 'blocked' | 'already_blocking' | 'cycle' | 'gated';
+
 /**
  * How an edge's checks refuse: at the parameter they name (the blocker's
- * schema or id), or as a veto. addBlocker and removeBlocker refuse their
- * own parameters; a create, the blocker's entry of its parameters.
+ * schema or id), or as a veto with its declared code. addBlocker and
+ * removeBlocker refuse their own parameters; a create, the blocker's entry
+ * of its parameters, and its veto is the create's.
  */
 interface EdgeRefusals {
   param(at: 'schema' | 'id', message: string): Error;
-  veto(reason: string): Error;
+  veto(reason: string, code: DependenciesVeto): Error;
 }
 
 function operationRefusals(context: InstanceContext<DependenciesConfig>, operation: string): EdgeRefusals {
   return {
     param: (at, message) => new OperationParamsError(NAME, operation, [{ path: `/${at}`, message }]),
-    veto: (reason) => new BehaviorVetoError(NAME, operation, context.schema, context.id, reason),
+    veto: (reason, code) => new BehaviorVetoError(NAME, operation, context.schema, context.id, { reason, code }),
   };
 }
 
 function createRefusals(context: InstanceContext<DependenciesConfig>, index: number): EdgeRefusals {
   return {
     param: (at, message) => new CreateParamsError(context.schema, [{ path: `/behaviors/${NAME}/blockers/${index}/${at}`, message }]),
-    veto: (reason) => new BehaviorVetoError(NAME, 'create', context.schema, context.id, reason),
+    veto: (reason, code) =>
+      new BehaviorVetoError(NAME, 'create', context.schema, context.id, { reason, code, details: { path: `/behaviors/${NAME}/blockers/${index}` } }),
   };
 }
 
@@ -241,10 +251,13 @@ function addEdge(context: InstanceContext<DependenciesConfig>, params: Readonly<
       target.id,
     ])
   ) {
-    throw refuse.veto(`${target.schema} ${target.id} already blocks it`);
+    throw refuse.veto(`${target.schema} ${target.id} already blocks it`, 'already_blocking');
   }
   if (reaches(context, target, { schema: context.schema, id: context.id })) {
-    throw refuse.veto(`${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`);
+    throw refuse.veto(
+      `${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`,
+      'cycle'
+    );
   }
   // An instance in a gated state no transition leaves has passed its
   // last gate: a blocker could hold up nothing, and blocked would say it
@@ -253,7 +266,7 @@ function addEdge(context: InstanceContext<DependenciesConfig>, params: Readonly<
   const [blocker] = blockers(context, [{ edge: 0, ...target }]);
   const status = statusOf(context);
   if (blocker.open && status !== undefined && context.config.terminalGatedStates.includes(status)) {
-    throw refuse.veto(`it is ${status}, a gated state no transition leaves, so it takes no blocker that is not finished: ${describe(blocker)}`);
+    throw refuse.veto(`it is ${status}, a gated state no transition leaves, so it takes no blocker that is not finished: ${describe(blocker)}`, 'gated');
   }
   context.sql.run(`INSERT INTO ${table} (namespace, schema, id, blocker_schema, blocker_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
     ...key(context),
@@ -338,7 +351,11 @@ export const dependencies = defineBehavior<DependenciesConfig>({
     if (open.length === 0) {
       return undefined;
     }
-    return `${view.schema} ${view.id} cannot move to ${to} while it is blocked by ${open.map(describe).join(', ')}`;
+    return {
+      reason: `${view.schema} ${view.id} cannot move to ${to} while it is blocked by ${open.map(describe).join(', ')}`,
+      code: 'blocked',
+      details: { blockers: open.map((blocker) => ({ schema: blocker.schema, id: blocker.id, ...(blocker.status === undefined ? {} : { status: blocker.status }) })) },
+    };
   },
 
   // A create's blockers, each added with addBlocker's checks.

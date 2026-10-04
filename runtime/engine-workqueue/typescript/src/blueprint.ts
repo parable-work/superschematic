@@ -26,7 +26,10 @@ the create or the link. It reads the map from the revision the link
 pins, through Revisions' listRevisions on the definition, as the
 principal, so a later revision of the definition changes only what is
 stamped from then on. Once stamped, the guard refuses moving the from
-link: the children came from the revision it pins.
+link: the children came from the revision it pins. Each refusal is a
+veto with a code the declaration lists: stamped for the guard's, and
+no_revision, unreadable, invalid_steps, no_dependencies and not_constant
+for a stamp that cannot go ahead, on the create or the link that stamps.
 
 A step's when holds when this instance's field equals a JSON value, or
 is a list that includes one, compared as JSON, without coercion. A step
@@ -57,10 +60,13 @@ A child is routed by what the stamp set: the step it is, in keyField, and
 the fields it copied. Any writer of the child, the holder of its lease
 included, could change them after, and turn the child into another
 step, so the child schema's Constants keeps them as the stamp set them.
-A later version of the child schema can drop them from Constants; the
-check runs again only when this schema is defined or published (D16,
-amended: a published version is not refused for another schema's
-change).
+A later version of the child schema can drop them from Constants, and
+this schema's published version is not refused for that (D16, amended:
+a published version is not refused for another schema's change). A
+stamp checks again, against the child schema's live version, as it
+checks Dependencies for a step's after: one whose Constants no longer
+keeps them refuses the change that stamps (not_constant), so no child is
+stamped whose route a writer could change.
 
 What was stamped is kept in Blueprint's own table: the blueprint field
 lists each step's key and its child's id, in the order they were
@@ -418,8 +424,11 @@ function checkSource(from: { link: string; field: string }, schema: string, sour
   }
 }
 
-function vetoed(view: InstanceView<unknown>, operation: string, reason: string): BehaviorVetoError {
-  return new BehaviorVetoError(NAME, operation, view.schema, view.id, reason);
+/** The codes of Blueprint's vetoes, as its declaration lists them. */
+type BlueprintVeto = 'stamped' | 'no_dependencies' | 'not_constant' | 'no_revision' | 'unreadable' | 'invalid_steps';
+
+function vetoed(view: InstanceView<unknown>, operation: string, reason: string, code: BlueprintVeto, details?: Record<string, unknown>): BehaviorVetoError {
+  return new BehaviorVetoError(NAME, operation, view.schema, view.id, details === undefined ? { reason, code } : { reason, code, details });
 }
 
 function key(view: InstanceView<unknown>): [string, string, string] {
@@ -456,7 +465,23 @@ function stamp(context: InstanceContext<BlueprintConfig>, steps: readonly Bluepr
   const { config } = context;
   const plan = effectiveSteps(steps, context.data);
   if (plan.some((step) => step.after.length > 0) && context.schemas.config(config.schema, 'Dependencies') === undefined) {
-    throw vetoed(context, operation, `${config.schema} does not compose Dependencies, so a step's after cannot block its child`);
+    throw vetoed(context, operation, `${config.schema} does not compose Dependencies, so a step's after cannot block its child`, 'no_dependencies');
+  }
+  // The child schema's live version may have dropped what parseConfig
+  // required of its Constants since this schema was published.
+  const constant = [config.keyField, ...config.copyFields];
+  const kept = (context.schemas.config(config.schema, 'Constants') as { fields?: readonly string[] } | undefined)?.fields;
+  const loose = constant.filter((field) => !(kept ?? []).includes(field));
+  if (loose.length > 0) {
+    throw vetoed(
+      context,
+      operation,
+      kept === undefined
+        ? `${config.schema} does not compose Constants, so the fields each stamp sets in a child could change after it`
+        : `${config.schema}'s Constants does not list ${loose.join(', ')}, which each stamp sets and nothing may change after`,
+      'not_constant',
+      { fields: loose }
+    );
   }
   const copied: Record<string, unknown> = {};
   for (const field of config.copyFields) {
@@ -500,12 +525,12 @@ function stamp(context: InstanceContext<BlueprintConfig>, steps: readonly Bluepr
 function stampFrom(context: InstanceContext<BlueprintConfig>, from: { link: string; field: string }, operation: string): void {
   const link = linksOf(context)[from.link];
   if (link === undefined || link.revision === undefined) {
-    throw vetoed(context, operation, `link ${from.link} records no revision to read its steps from`);
+    throw vetoed(context, operation, `link ${from.link} records no revision to read its steps from`, 'no_revision');
   }
   const source = `${link.schema} ${link.id} revision ${link.revision}`;
   const data = revisionData(context, link.schema, link.id, link.revision);
   if (data === undefined) {
-    throw vetoed(context, operation, `${source} cannot be read`);
+    throw vetoed(context, operation, `${source} cannot be read`, 'unreadable');
   }
   let steps: BlueprintStep[];
   try {
@@ -516,7 +541,7 @@ function stampFrom(context: InstanceContext<BlueprintConfig>, from: { link: stri
     checkSteps(context.config, context.schema, steps);
   } catch (error) {
     if (error instanceof StepsError) {
-      throw vetoed(context, operation, `the steps of ${source} are invalid: ${error.message}`);
+      throw vetoed(context, operation, `the steps of ${source} are invalid: ${error.message}`, 'invalid_steps');
     }
     throw error;
   }
@@ -632,7 +657,7 @@ export const blueprint = defineBehavior<BlueprintConfig>({
     if (request.params.name !== from.link || !stamped(view)) {
       return undefined;
     }
-    return `its children were stamped from the revision its link ${from.link} pins, so the link cannot move`;
+    return { reason: `its children were stamped from the revision its link ${from.link} pins, so the link cannot move`, code: 'stamped' };
   },
 
   fields: {
