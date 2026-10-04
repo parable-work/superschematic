@@ -338,13 +338,16 @@ const calls: Calls = {
   sweepLock: call("sweepLock"),
 };
 
+/** A storage call's value as Tx resolves it: void where SyncTx returns undefined. */
+type Resolved<V> = undefined extends V ? V | void : V;
+
 /** Tx as the asynchronous driver calls it: each of SyncTx's methods, returning a promise of its value. */
-type AsyncCalls = { [M in Method]: (...args: Args[M]) => Promise<Value[M]> };
+type AsyncCalls = { [M in Method]: (...args: Args[M]) => Promise<Resolved<Value[M]>> };
 
 /** SyncTx as the synchronous driver calls it. */
 type SyncCalls = { [M in Method]: (...args: Args[M]) => Value[M] };
 
-function callAsync<M extends Method>(tx: AsyncCalls, c: Call<M>): Promise<Value[M]> {
+function callAsync<M extends Method>(tx: AsyncCalls, c: Call<M>): Promise<Resolved<Value[M]>> {
   return tx[c.method](...c.args);
 }
 
@@ -373,7 +376,9 @@ async function drive<T>(steps: Steps<T>, tx: Tx): Promise<T> {
 
 /**
  * Runs an operation's steps over a synchronous transaction: it sends each
- * call's value back into the steps, and throws its error into them.
+ * call's value back into the steps, and throws its error into them. A call
+ * that returns a promise, which a SyncTx must not, ends the operation with
+ * a TypeError that names the method, outside the steps' reach.
  */
 function driveSync<T>(steps: Steps<T>, tx: SyncTx): T {
   let next = steps.next();
@@ -385,9 +390,20 @@ function driveSync<T>(steps: Steps<T>, tx: SyncTx): T {
       next = steps.throw(err);
       continue;
     }
+    if (isThenable(value)) {
+      throw new TypeError(`engine: SyncTx.${next.value.method} returned a promise; a SyncEngine needs synchronous storage`);
+    }
     next = steps.next(value);
   }
   return next.value;
+}
+
+/** Whether a value is a promise or another thenable: an object or a function with a callable then. */
+function isThenable(value: unknown): boolean {
+  return (
+    ((typeof value === "object" && value !== null) || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
 }
 
 /** Runs one graph's operations over asynchronous storage. */
@@ -656,9 +672,16 @@ export class SyncEngine {
     return this.#copy({ walkCeiling: n > 0 ? n : DefaultWalkCeiling });
   }
 
-  /** Runs an operation's transaction in one transaction of the storage. */
+  /**
+   * Runs an operation's transaction in one transaction of the storage, and
+   * refuses a storage whose transact returns a promise.
+   */
   #transact<T>(body: Body<T>): T {
-    return this.#storage.transact((tx) => driveSync(body(calls), tx));
+    const result: unknown = this.#storage.transact((tx) => driveSync(body(calls), tx));
+    if (isThenable(result)) {
+      throw new TypeError("engine: SyncStorage.transact returned a promise; a SyncEngine needs synchronous storage");
+    }
+    return result as T;
   }
 
   /** Engine's createPrimary: creates a primary line of root. */
@@ -751,9 +774,11 @@ export class SyncEngine {
 
 /**
  * One graph's operations, written once for both drivers. Each operation
- * checks its arguments, throwing before any transaction begins, and returns
- * its transaction as steps that yield each storage call; Engine and
- * SyncEngine run the steps in one transaction of their storage.
+ * checks its actor and its ids, and save the kinds its edits name, before
+ * any transaction begins, and returns its transaction as steps that yield
+ * each storage call; Engine and SyncEngine run the steps in one transaction
+ * of their storage. The entity keys of save's deletes and unsets and of a
+ * merge's or a rebase's resolutions are checked inside the transaction.
  */
 class Operations {
   readonly core: VersionGraph;

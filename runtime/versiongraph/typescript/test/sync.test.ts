@@ -1,13 +1,14 @@
 // initSync and SyncEngine (D32), where the record and replay of every
 // scenario (test/replay.ts) does not reach: each source initSync takes, an
 // error a storage call throws back into an operation and caught where the
-// operation catches it, under both drivers, and a SyncEngine's plain values
-// and errors. None of it needs a database.
+// operation catches it, under both drivers, a SyncEngine's plain values and
+// errors, its refusal of storage that returns promises, and every
+// operation's refusal of an actor or an id before a transaction begins.
+// None of it needs a database.
 import { expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   Engine,
-  NoActorError,
   NotFoundError,
   SyncEngine,
   VersionConflictError,
@@ -72,6 +73,15 @@ test("initSync takes bytes: a Buffer, an ArrayBuffer, a typed array and a DataVi
   expectWorks(initSync(buffer));
   expectWorks(initSync(new Uint8Array(buffer)));
   expectWorks(initSync(new DataView(buffer)));
+});
+
+// A view is compiled as its own bytes, not its whole buffer: here the module
+// sits between other bytes of a larger buffer.
+test("initSync takes a view at an offset of a larger buffer", () => {
+  const larger = new Uint8Array(16 + wasmBytes.byteLength + 16).fill(0xff);
+  larger.set(wasmBytes, 16);
+  expectWorks(initSync(larger.subarray(16, 16 + wasmBytes.byteLength)));
+  expectWorks(initSync(new DataView(larger.buffer, 16, wasmBytes.byteLength)));
 });
 
 test("initSync takes a compiled module", () => {
@@ -279,30 +289,147 @@ test("SyncEngine returns plain values", () => {
   expect(log).toEqual(["createRef", "lockRef", "discardRef", "sweepLock"]);
 });
 
-// An argument the operation refuses throws before a transaction begins:
-// synchronously from a SyncEngine, as a rejection from an Engine.
-test("a refused argument opens no transaction, under both drivers", async () => {
+// Each operation refuses an empty actor or an id that is not a UUID before
+// a transaction begins: an Engine with a rejected promise, never a throw,
+// and a SyncEngine with a throw.
+const refusals: Record<string, { args: unknown[]; error: string }> = {
+  createPrimary: { args: ["", root, "main"], error: "NoActorError" },
+  branch: { args: ["", "Main", "draft"], error: "NoActorError" },
+  save: { args: ["", "Draft", 1, {}], error: "NoActorError" },
+  commit: { args: ["", "Draft", 1], error: "NoActorError" },
+  seal: { args: ["", "Draft", 1], error: "NoActorError" },
+  merge: { args: ["", "Draft", "Main", 1], error: "NoActorError" },
+  rebase: { args: ["", "Draft", 1], error: "NoActorError" },
+  revert: { args: ["", "Draft", 1, "Tagged"], error: "NoActorError" },
+  release: { args: ["", root, "Tagged", 0], error: "NoActorError" },
+  released: { args: ["not a uuid!"], error: "CanonicalError" },
+  materialize: { args: ["not a uuid!"], error: "CanonicalError" },
+  compose: { args: ["not a uuid!"], error: "CanonicalError" },
+  diff: { args: ["Tagged", "not a uuid!"], error: "CanonicalError" },
+  history: { args: ["not a uuid!"], error: "CanonicalError" },
+  discard: { args: ["", "Draft", 1], error: "NoActorError" },
+  sweep: { args: [{ actor: "" }], error: "NoActorError" },
+};
+
+type Operations = Record<string, (...args: unknown[]) => unknown>;
+
+test("a refused actor or id opens no transaction: Engine rejects and SyncEngine throws, for every operation", async () => {
+  const operations = Object.getOwnPropertyNames(Engine.prototype).filter(
+    (name) => !["constructor", "withStorage", "withWalkCeiling", "runSweeper"].includes(name),
+  );
+  expect(Object.keys(refusals).sort()).toEqual(operations.sort());
   const syncTransactions = { count: 0 };
-  const sync = new SyncEngine(initSync(), descriptor, syncStorage({}, [], syncTransactions));
-  expect(() => sync.createPrimary("", root, "main")).toThrow(NoActorError);
-  expect(() => sync.commit(actor, "not a uuid!", 1)).toThrow("engine: id");
+  const sync = new SyncEngine(initSync(), descriptor, syncStorage({}, [], syncTransactions)) as unknown as Operations;
   const asyncTransactions = { count: 0 };
-  const engine = new Engine(await init(), descriptor, asyncStorage({}, [], asyncTransactions));
-  const pending = engine.createPrimary("", root, "main");
-  expect(pending).toBeInstanceOf(Promise);
-  await expect(pending).rejects.toBeInstanceOf(NoActorError);
+  const engine = new Engine(await init(), descriptor, asyncStorage({}, [], asyncTransactions)) as unknown as Operations;
+  const outcomes: Record<string, string> = {};
+  for (const [name, { args }] of Object.entries(refusals)) {
+    let pending: unknown;
+    try {
+      pending = engine[name]!(...args);
+    } catch (err) {
+      outcomes[name] = `Engine threw ${(err as Error).name}`;
+      continue;
+    }
+    if (!(pending instanceof Promise)) {
+      outcomes[name] = "Engine returned no promise";
+      continue;
+    }
+    const rejected = await pending.then(
+      () => "nothing",
+      (err: Error) => err.name,
+    );
+    let thrown = "nothing";
+    try {
+      sync[name]!(...args);
+    } catch (err) {
+      thrown = (err as Error).name;
+    }
+    outcomes[name] = `Engine rejects with ${rejected}, SyncEngine throws ${thrown}`;
+  }
+  expect(outcomes).toEqual(
+    Object.fromEntries(
+      Object.entries(refusals).map(([name, { error }]) => [name, `Engine rejects with ${error}, SyncEngine throws ${error}`]),
+    ),
+  );
   expect([syncTransactions.count, asyncTransactions.count]).toEqual([0, 0]);
 });
 
-// SyncEngine offers each of Engine's operations, which the replay of every
-// scenario runs; Engine's runSweeper loops on a timer and is Engine's alone.
-test("SyncEngine has every method of Engine but runSweeper", () => {
-  const methods = (prototype: object) =>
-    Object.getOwnPropertyNames(prototype)
-      .filter((name) => name !== "constructor")
-      .sort();
-  expect(methods(SyncEngine.prototype)).toEqual(methods(Engine.prototype).filter((name) => name !== "runSweeper"));
-  expect("runSweeper" in SyncEngine.prototype).toBe(false);
+// A SyncTx must return its values, not promises of them. Its methods with no
+// value return undefined, so tsc refuses an async one (each @ts-expect-error
+// below fails the type check if it ever accepts one), and a SyncEngine
+// refuses a promise from any method, or from transact, with a TypeError that
+// names it, ending the operation there.
+test("SyncEngine refuses a SyncTx method that returns a promise", () => {
+  const log: string[] = [];
+  const engine = new SyncEngine(
+    initSync(),
+    descriptor,
+    syncStorage(
+      {
+        lockRef: () => ref("Draft", 1),
+        // @ts-expect-error An async function does not type-check as a SyncTx method with no value.
+        discardRef: async () => undefined,
+      },
+      log,
+    ),
+  );
+  expect(() => engine.discard(actor, "Draft", 1)).toThrow(
+    new TypeError("engine: SyncTx.discardRef returned a promise; a SyncEngine needs synchronous storage"),
+  );
+  expect(log).toEqual(["lockRef", "discardRef"]);
+});
+
+test("SyncEngine refuses a promise from a SyncTx method with a value, so a sweep does not take a promise for its lock", () => {
+  const log: string[] = [];
+  const engine = new SyncEngine(
+    initSync(),
+    descriptor,
+    syncStorage(
+      {
+        // @ts-expect-error An async function does not type-check as a SyncTx method that returns a boolean.
+        sweepLock: async () => true,
+        idleDrafts: () => [],
+        discardedRefs: () => [],
+        prune: () => 0,
+        commits: () => [],
+      },
+      log,
+    ),
+  );
+  expect(() => engine.sweep({ actor, abandonAfter: 1000 })).toThrow(
+    new TypeError("engine: SyncTx.sweepLock returned a promise; a SyncEngine needs synchronous storage"),
+  );
+  expect(log).toEqual(["sweepLock"]);
+});
+
+// Any thenable is a promise to the guard, not only a Promise: an object or a
+// function with a callable then.
+test("SyncEngine refuses any thenable a SyncTx method returns", () => {
+  const thenableObject = { then: () => undefined };
+  const thenableFunction = Object.assign(() => undefined, { then: () => undefined });
+  for (const thenable of [thenableObject, thenableFunction]) {
+    const log: string[] = [];
+    const engine = new SyncEngine(initSync(), descriptor, syncStorage({ readRef: () => thenable as unknown as Ref }, log));
+    expect(() => engine.compose("Draft")).toThrow(
+      new TypeError("engine: SyncTx.readRef returned a promise; a SyncEngine needs synchronous storage"),
+    );
+    expect(log).toEqual(["readRef"]);
+  }
+});
+
+test("SyncEngine refuses a SyncStorage whose transact returns a promise", () => {
+  const created = ref("Main", 1);
+  const log: string[] = [];
+  const storage: SyncStorage = {
+    // @ts-expect-error An async transact does not type-check as SyncStorage's.
+    transact: async (fn) => fn(fakeTx({ createRef: () => created }, log)),
+  };
+  const engine = new SyncEngine(initSync(), descriptor, storage);
+  expect(() => engine.createPrimary(actor, root, "main")).toThrow(
+    new TypeError("engine: SyncStorage.transact returned a promise; a SyncEngine needs synchronous storage"),
+  );
+  expect(log).toEqual(["createRef"]);
 });
 
 test("SyncEngine's copies keep its storage and options", () => {

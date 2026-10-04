@@ -162,7 +162,8 @@ export interface Tx {
 export interface SyncStorage {
   /**
    * Runs fn in one transaction. It commits when fn returns and rolls back
-   * when it throws, throwing fn's error.
+   * when it throws, throwing fn's error. It returns fn's value itself, not a
+   * promise of it.
    */
   transact<T>(fn: (tx: SyncTx) => T): T;
 }
@@ -170,6 +171,10 @@ export interface SyncStorage {
 /**
  * One synchronous transaction's view of a graph: every method of Tx, each
  * returning its value where Tx's resolves and throwing where Tx's rejects.
+ * The methods with no value return undefined, not void, so an async
+ * function, which returns a promise, does not type-check as one; a class
+ * that implements them declares them `: undefined`. A SyncEngine refuses a
+ * promise from any method with a TypeError.
  */
 export interface SyncTx {
   /** Writes a ref and returns it. */
@@ -188,7 +193,7 @@ export interface SyncTx {
    * Soft-deletes a live ref at the version it expects, or throws
    * VersionConflictError and leaves the transaction usable.
    */
-  discardRef(id: string, version: number, actor: string): void;
+  discardRef(id: string, version: number, actor: string): undefined;
 
   /** Reads every row a ref holds of one kind, tombstones included, in no particular order. */
   rows(kind: string, ref: string): string[];
@@ -211,7 +216,7 @@ export interface SyncTx {
   /** Writes a commit and returns it. */
   insertCommit(commit: NewCommit): Commit;
   /** Writes a commit's patches. */
-  insertPatches(commit: string, patches: readonly Patch[]): void;
+  insertPatches(commit: string, patches: readonly Patch[]): undefined;
   /**
    * Reads a commit and its parents, nearest first, at most limit of them,
    * and stops after the first that has a snapshot. A commit that does not
@@ -231,7 +236,7 @@ export interface SyncTx {
   /** Reads a commit's snapshot: its full pin set, in no particular order. A commit without one reads as no entries. */
   snapshot(commit: string): SnapshotEntry[];
   /** Writes a commit's snapshot. */
-  insertSnapshot(commit: string, entries: readonly SnapshotEntry[]): void;
+  insertSnapshot(commit: string, entries: readonly SnapshotEntry[]): undefined;
   /** Reads every commit of the graph, in no particular order, with whether each is tagged and snapshotted. */
   commits(): CommitNode[];
 
