@@ -89,10 +89,21 @@ uses; siblings outside the closure are not built. It writes no
 `.deps.json` and runs no `BuildAllHook`s, since both describe the whole
 services root. It cannot be combined with `--emit-ir`.
 
+`--api-language` builds the target's API server in another language
+(`GO`, `RUST` or `TYPESCRIPT`, any case) than its config's
+`outputs.api.language`, for example a Rust server of a service whose
+committed config builds a Go one. It changes the target only, never a
+dependency that `--with-deps` builds, and leaves the config on disk as it
+was. The target must enable `outputs.api` and the types of that language,
+as a committed language must. Pair it with `--out`, so the two servers do
+not share an output root; a build's cache stamps come from `build-all`,
+which has no such flag.
+
 ```
 superschematic build ./schemas/services/shop-db
 superschematic build ./schemas/services/shop-db --emit-ir | jq .types
 superschematic build --with-deps ./schemas/services/shop-api
+superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust ./schemas/services/shop-api
 ```
 
 | Flag | Default | Meaning |
@@ -103,6 +114,7 @@ superschematic build --with-deps ./schemas/services/shop-api
 | `--profile` | false | emit build phase timings to stderr |
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
+| `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
 
 ## `build-all <services-root>`
 

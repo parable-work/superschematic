@@ -68,6 +68,9 @@ type buildAllTask struct {
 	service    buildplan.Service
 	inputHash  string
 	outputRels []string
+	// apiLanguage is build --with-deps's --api-language, set on the
+	// target's task only. build-all leaves it empty.
+	apiLanguage string
 }
 
 type sharedSchemaCache struct {
@@ -551,11 +554,12 @@ func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTask
 			dep, ok := ctx.serviceByName[name]
 			return dep.Config, ok
 		},
-		Log:        cmd.OutOrStdout(),
-		Profile:    prof,
-		SkipFormat: ctx.skipFormat,
-		Naming:     ctx.naming,
-		Registry:   ctx.registry,
+		Log:         cmd.OutOrStdout(),
+		Profile:     prof,
+		SkipFormat:  ctx.skipFormat,
+		Naming:      ctx.naming,
+		Registry:    ctx.registry,
+		APILanguage: task.apiLanguage,
 	})
 	if err != nil {
 		return fmt.Errorf("%s: %w", service.Name, err)
