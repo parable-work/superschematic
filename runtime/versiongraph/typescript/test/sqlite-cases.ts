@@ -15,6 +15,7 @@ import { sqlRefusal } from "../../../engine/typescript/src/behaviors/sql.ts";
 import {
   CanonicalError,
   canonicalRow,
+  canonicalValue,
   errorCode,
   NameTakenError,
   NotFoundError,
@@ -378,6 +379,93 @@ export const cases: Case[] = [
     },
   },
   {
+    name: "after a kind gains a column, its old rows and images read it as null, as Postgres's ADD COLUMN gives them",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const main = s.engine.createPrimary(cook, bread, "main");
+        const draft = s.engine.branch(cook, main.id, "draft");
+        const saved = s.engine.save(cook, draft.id, draft.version, {
+          step: { upsert: [stepRow("Mix", "Mix")] },
+          utensil: { upsert: ['{"entity_key": "Whisk", "name": "whisk"}'] },
+        });
+        const committed = s.engine.commit(cook, draft.id, saved.ref.version);
+        // The schema's next version: utensil gains color, and step gains
+        // memo, which its history leaves out.
+        type Doc = { kinds: { kind: string; columns: Record<string, string>; excluded: string[]; history: { exclude: string[] } }[] };
+        const d = JSON.parse(descriptor) as Doc;
+        const kind = (name: string) => d.kinds.find((k) => k.kind === name)!;
+        kind("utensil").columns["color"] = "string";
+        kind("step").columns["memo"] = "string";
+        kind("step").excluded.push("memo");
+        kind("step").history.exclude.push("memo");
+        const next = JSON.stringify(d);
+        const storage = new SqliteAdapter(next, { graph }).storage(s.client);
+        const engine = new SyncEngine(core, next, storage, { schemaEpoch: 1, snapshotEvery: 3 });
+        const [whisk] = storage.transact((tx) => tx.rows("utensil", draft.id));
+        const [mix] = storage.transact((tx) => tx.rows("step", draft.id));
+        assert.equal(member(whisk!, "color"), "null");
+        assert.equal(member(mix!, "memo"), "null");
+        assert.equal(canonicalRow(kind("utensil").columns, whisk!), whisk);
+        // An image carries the gained column as null, unless history leaves it out.
+        const id = (row: string) => JSON.parse(member(row, "id")!) as string;
+        const [whiskImage] = storage.transact((tx) => tx.images("utensil", [{ id: id(whisk!), version: 1 }]));
+        const [mixImage] = storage.transact((tx) => tx.images("step", [{ id: id(mix!), version: 1 }]));
+        assert.equal(member(whiskImage!, "color"), "null");
+        assert.equal(canonicalRow(kind("utensil").columns, whiskImage!), whiskImage);
+        assert.equal(member(mixImage!, "memo"), undefined);
+        assert.equal(member(mixImage!, "scratch"), undefined);
+        // The commit's tree carries color as null, and hashes as a tree whose
+        // row holds it null does, which is not how one that lacks it does.
+        const tree = engine.materialize(committed.commit!.id);
+        const [read] = tree.tree["utensil"]!;
+        assert.equal(member(read!, "color"), "null");
+        const hash = (row: Record<string, unknown>) =>
+          core.contentHash({ descriptor: d as never, tree: { step: tree.tree["step"]!.map((r) => JSON.parse(r) as Record<string, unknown>), utensil: [row] } }).contentHash;
+        const withNull = JSON.parse(read!) as Record<string, unknown>;
+        const without = { ...withNull };
+        delete without["color"];
+        assert.equal(tree.contentHash, hash(withNull));
+        assert.notEqual(tree.contentHash, hash(without));
+        // An update of the old row stores the gained column, null, and its image carries it.
+        const updated = engine.save(cook, draft.id, committed.ref.version, { utensil: { upsert: ['{"entity_key": "Whisk", "name": "big whisk"}'] } });
+        assert.equal(member(updated.saved["utensil"]![0]!, "color"), "null");
+        const stored = s.client.get(`SELECT data FROM "graph_member" WHERE id = ?1`, [id(whisk!)]);
+        assert.equal(member(stored?.["data"] as string, "color"), "null");
+        const [updatedImage] = storage.transact((tx) => tx.images("utensil", [{ id: id(whisk!), version: 2 }]));
+        assert.equal(member(updatedImage!, "color"), "null");
+        assert.equal(member(updatedImage!, "name"), '"big whisk"');
+      });
+    },
+  },
+  {
+    name: "a unique index backs each key the adapter's own reads keep unique",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const { ref, commit } = s.storage.transact((tx) => refAndCommit(tx));
+        let n = 0;
+        const fresh = () => `Row${n++}`;
+        const twice: [string, () => string][] = [
+          ["a commit's entity in its patches", () => `INSERT INTO "graph_patch" (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version, operation) VALUES ('${fresh()}', 'recipe', '${commit}', 'step', 'Mix', 'B', 1, 'ADD')`],
+          ["a commit's entity in its snapshot", () => `INSERT INTO "graph_snapshot_entry" (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version) VALUES ('${fresh()}', 'recipe', '${commit}', 'step', 'Mix', 'B', 1)`],
+          ["an entity of a kind on a ref", () => `INSERT INTO "graph_member" (id, graph, kind, entity_key, ref_id, root_id, tombstone, _version, data) VALUES ('${fresh()}', 'recipe', 'step', 'Mix', '${ref.id}', 'Bread', 0, 1, '{}')`],
+          ["a member's image at a version", () => `INSERT INTO "graph_member_history" (history_id, graph, kind, id, _version, operation, data, recorded_at) VALUES ('${fresh()}', 'recipe', 'step', 'Same', 1, 'INSERT', '{}', 0)`],
+          ["a ref's image at a version", () => `INSERT INTO "graph_ref_history" (history_id, graph, id, _version, operation, data, recorded_at) VALUES ('${fresh()}', 'recipe', 'Same', 1, 'INSERT', '{}', 0)`],
+          ["a pointer's image at a version", () => `INSERT INTO "graph_release_history" (history_id, graph, id, _version, operation, data, recorded_at) VALUES ('${fresh()}', 'recipe', 'Same', 1, 'INSERT', '{}', 0)`],
+          ["a root's release pointer", () => `INSERT INTO "graph_release" (id, graph, root_id, commit_id, created_at, created_by, updated_at, updated_by, _version) VALUES ('${fresh()}', 'recipe', 'Soup', '${commit}', 0, 'Cook', 0, 'Cook', 1)`],
+          ["a root's sequence", () => `INSERT INTO "graph_commit" (id, graph, root_id, ref_id, schema_epoch, content_hash, sequence, created_at, created_by) VALUES ('${fresh()}', 'recipe', 'Bread', '${ref.id}', 1, 'h', 7, 0, 'Cook')`],
+        ];
+        for (const [what, insert] of twice) {
+          s.client.run(insert());
+          const err = thrown(() => s.client.run(insert()));
+          assert.ok(err instanceof SqliteError, `${what}: ${String(err)}`);
+          assert.equal(err.code, 2067, what);
+        }
+      });
+    },
+  },
+  {
     name: "every table is STRICT: a value of the wrong type is refused, not stored",
     run(binding) {
       const s = setup(binding);
@@ -399,46 +487,156 @@ export const cases: Case[] = [
     },
   },
   {
-    name: "foreign keys check the layout's edges on a connection the adapter binds",
+    name: "foreign keys check each of the layout's edges on a connection the adapter binds",
     run(binding) {
       const s = setup(binding);
       using([s], () => {
-        const err = thrown(() =>
-          s.client.run(
-            `INSERT INTO "graph_patch" (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version, operation) ` +
-              `VALUES ('A', 'recipe', 'Missing', 'step', 'Mix', 'B', 1, 'ADD')`,
-          ),
-        );
-        assert.ok(err instanceof SqliteError, String(err));
-        // SQLITE_CONSTRAINT_FOREIGNKEY.
-        assert.equal(err.code, 787);
+        const { ref, commit } = s.storage.transact((tx) => refAndCommit(tx));
+        let n = 0;
+        const fresh = () => `Row${n++}`;
+        // Each edge as an insert of a row that names the target, which holds
+        // a valid row of every other column.
+        const edges: [string, string, (target: string) => string][] = [
+          ["a ref's parent", ref.id, (t) => `INSERT INTO "graph_ref" (id, graph, root_id, parent_ref_id, name, created_at, created_by, updated_at, updated_by, _version) VALUES ('${fresh()}', 'recipe', 'Bread', '${t}', '${fresh()}', 0, 'Cook', 0, 'Cook', 1)`],
+          ["a ref's base", commit, (t) => `INSERT INTO "graph_ref" (id, graph, root_id, base_commit_id, name, created_at, created_by, updated_at, updated_by, _version) VALUES ('${fresh()}', 'recipe', 'Bread', '${t}', '${fresh()}', 0, 'Cook', 0, 'Cook', 1)`],
+          ["a ref's head", commit, (t) => `INSERT INTO "graph_ref" (id, graph, root_id, head_commit_id, name, created_at, created_by, updated_at, updated_by, _version) VALUES ('${fresh()}', 'recipe', 'Bread', '${t}', '${fresh()}', 0, 'Cook', 0, 'Cook', 1)`],
+          ["a commit's ref", ref.id, (t) => `INSERT INTO "graph_commit" (id, graph, root_id, ref_id, schema_epoch, content_hash, created_at, created_by) VALUES ('${fresh()}', 'recipe', 'Bread', '${t}', 1, 'h', 0, 'Cook')`],
+          ["a commit's parent", commit, (t) => `INSERT INTO "graph_commit" (id, graph, root_id, ref_id, parent_commit_id, schema_epoch, content_hash, created_at, created_by) VALUES ('${fresh()}', 'recipe', 'Bread', '${ref.id}', '${t}', 1, 'h', 0, 'Cook')`],
+          ["a patch's commit", commit, (t) => `INSERT INTO "graph_patch" (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version, operation) VALUES ('${fresh()}', 'recipe', '${t}', 'step', '${fresh()}', 'B', 1, 'ADD')`],
+          ["a snapshot entry's commit", commit, (t) => `INSERT INTO "graph_snapshot_entry" (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version) VALUES ('${fresh()}', 'recipe', '${t}', 'step', '${fresh()}', 'B', 1)`],
+          ["a release pointer's commit", commit, (t) => `INSERT INTO "graph_release" (id, graph, root_id, commit_id, created_at, created_by, updated_at, updated_by, _version) VALUES ('${fresh()}', 'recipe', '${fresh()}', '${t}', 0, 'Cook', 0, 'Cook', 1)`],
+          ["a member's ref", ref.id, (t) => `INSERT INTO "graph_member" (id, graph, kind, entity_key, ref_id, root_id, tombstone, _version, data) VALUES ('${fresh()}', 'recipe', 'step', '${fresh()}', '${t}', 'Bread', 0, 1, '{}')`],
+        ];
+        for (const [edge, target, insert] of edges) {
+          s.client.run(insert(target));
+          const err = thrown(() => s.client.run(insert("Missing")));
+          assert.ok(err instanceof SqliteError, `${edge}: ${String(err)}`);
+          // SQLITE_CONSTRAINT_FOREIGNKEY.
+          assert.equal(err.code, 787, edge);
+        }
       });
     },
   },
   {
-    name: "two graphs in one file keep apart: each reads, names and sequences only its own",
+    name: "the adapter refuses a write whose ref or commit is another graph's or another root's",
     run(binding) {
-      const a = setup(binding);
+      const s = setup(binding);
+      using([s], () => {
+        const other = new SqliteAdapter(descriptor, { graph: "menu" }).storage(s.client);
+        const mine = s.storage.transact((tx) => refAndCommit(tx));
+        const soup = s.storage.transact((tx) => refAndCommit(tx, "Soup"));
+        const theirs = other.transact((tx) => refAndCommit(tx));
+        const refuses = (what: string, pattern: RegExp, fn: (tx: SyncTx) => unknown) =>
+          assert.match(String(thrown(() => s.storage.transact(fn))), pattern, what);
+        const newCommit = (ref: string, parent: string | null) => ({
+          root: bread,
+          ref,
+          parent,
+          message: "",
+          schemaEpoch: 1,
+          contentHash: "0".repeat(64),
+          sequence: null,
+          actor: cook,
+        });
+        const patch = { commit: "", kind: "step", entityKey: "Mix", entityId: "Row", entityVersion: 1, operation: "ADD" as const };
+        const entry = { kind: "step", entityKey: "Mix", entityId: "Row", entityVersion: 1 };
+        const cases: [string, string, string][] = [
+          ["another graph's", theirs.ref.id, theirs.commit],
+          ["another root's", soup.ref.id, soup.commit],
+        ];
+        for (const [whose, ref, commit] of cases) {
+          refuses(`createRef with ${whose} parent`, /is not a ref of root/, (tx) => tx.createRef({ root: bread, parent: ref, base: null, name: "x", actor: cook }));
+          refuses(`createRef with ${whose} base`, /is not a commit of root/, (tx) => tx.createRef({ root: bread, parent: null, base: commit, name: "x", actor: cook }));
+          refuses(`updateRef to ${whose} head`, /is not a commit of root/, (tx) => tx.updateRef({ id: mine.ref.id, version: 1, head: commit, base: null, seal: false, actor: cook }));
+          refuses(`updateRef to ${whose} base`, /is not a commit of root/, (tx) => tx.updateRef({ id: mine.ref.id, version: 1, head: null, base: commit, seal: false, actor: cook }));
+          refuses(`insertCommit on ${whose} ref`, /is not a ref of root/, (tx) => tx.insertCommit(newCommit(ref, null)));
+          refuses(`insertCommit after ${whose} commit`, /is not a commit of root/, (tx) => tx.insertCommit(newCommit(mine.ref.id, commit)));
+          refuses(`writeRelease of ${whose} commit`, /is not a commit of root/, (tx) => tx.writeRelease({ root: bread, commit, version: 0, actor: cook }));
+          refuses(`upsertRow on ${whose} ref`, /is not a ref of root/, (tx) =>
+            tx.upsertRow("step", { ref, root: bread, row: stepRow("Mix", "Mix"), tombstone: false, actor: cook }),
+          );
+        }
+        refuses("insertPatches of another graph's commit", /is not a commit of graph/, (tx) => tx.insertPatches(theirs.commit, [patch]));
+        refuses("insertSnapshot of another graph's commit", /is not a commit of graph/, (tx) => tx.insertSnapshot(theirs.commit, [entry]));
+        // The graph's own refs and commits of the root are taken.
+        s.storage.transact((tx) => {
+          tx.createRef({ root: bread, parent: mine.ref.id, base: mine.commit, name: "draft", actor: cook });
+          tx.updateRef({ id: mine.ref.id, version: 1, head: mine.commit, base: mine.commit, seal: false, actor: cook });
+          tx.insertCommit(newCommit(mine.ref.id, mine.commit));
+          tx.writeRelease({ root: bread, commit: mine.commit, version: 0, actor: cook });
+          tx.upsertRow("step", { ref: mine.ref.id, root: bread, row: stepRow("Mix", "Mix"), tombstone: false, actor: cook });
+          tx.insertPatches(mine.commit, [patch]);
+          tx.insertSnapshot(mine.commit, [entry]);
+        });
+      });
+    },
+  },
+  {
+    name: "two graphs in one file keep apart: each reads, names, sequences, releases and prunes only its own",
+    run(binding) {
+      let now = 1_800_000_000_000_000;
+      const clock = () => now;
+      const a = setup(binding, { clock });
       using([a], () => {
-        const b = new SqliteAdapter(descriptor, { graph: "menu" }).storage(a.client);
-        const bEngine = new SyncEngine(core, descriptor, b, { schemaEpoch: 1, snapshotEvery: 3 });
+        // Graph menu keeps a day of step history, where recipe keeps 365.
+        const d = JSON.parse(descriptor) as { kinds: { kind: string; history: { retentionDays?: number } }[] };
+        d.kinds.find((k) => k.kind === "step")!.history.retentionDays = 1;
+        const menu = JSON.stringify(d);
+        const b = new SqliteAdapter(menu, { graph: "menu", clock }).storage(a.client);
+        const bEngine = new SyncEngine(core, menu, b, { schemaEpoch: 1, snapshotEvery: 3 });
         const main = a.engine.createPrimary(cook, bread, "main");
         // The same root and name in the other graph is not taken.
         const other = bEngine.createPrimary(cook, bread, "main");
         assert.ok(thrown(() => bEngine.compose(main.id)) instanceof NotFoundError);
-        const draft = a.engine.branch(cook, main.id, "draft");
-        const saved = a.engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Mix", "Mix")] } });
-        a.engine.commit(cook, draft.id, saved.ref.version, { tag: true });
-        assert.deepEqual(b.transact((tx) => tx.rows("step", draft.id)), []);
-        assert.equal(b.transact((tx) => tx.nextSequence(bread)), 1);
-        assert.equal(a.storage.transact((tx) => tx.nextSequence(bread)), 2);
+        // Each graph saves a step three times on a change set, commits it
+        // tagged, and merges it into its primary line, tagged.
+        const work = (engine: SyncEngine, primary: Ref) => {
+          let draft = engine.branch(cook, primary.id, "draft");
+          for (const instruction of ["Mix", "Mix well", "Mix hard"]) {
+            draft = engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Mix", instruction)] } }).ref;
+          }
+          const committed = engine.commit(cook, draft.id, draft.version, { tag: true });
+          const merged = engine.merge(cook, draft.id, primary.id, primary.version, [], { tag: true });
+          return { draft: committed.ref, commit: committed.commit!, merged: merged.commit! };
+        };
+        const aw = work(a.engine, main);
+        assert.deepEqual(b.transact((tx) => tx.rows("step", aw.draft.id)), []);
         assert.equal(b.transact((tx) => tx.commits()).length, 0);
+        assert.ok(thrown(() => bEngine.materialize(aw.commit.id)) instanceof NotFoundError);
+        assert.ok(thrown(() => bEngine.history(aw.draft.id)) instanceof NotFoundError);
+        assert.ok(thrown(() => bEngine.branch(cook, aw.draft.id, "x")) instanceof NotFoundError);
+        assert.equal(b.transact((tx) => tx.nextSequence(bread)), 1);
+        // Both graphs tag the same root, each numbering its own tags from 1.
+        const bw = work(bEngine, other);
+        assert.deepEqual([aw.commit.sequence, aw.merged.sequence, bw.commit.sequence, bw.merged.sequence], [1, 2, 1, 2]);
+        // A first pointer in each graph, then a move of menu's while
+        // recipe's is at the same version, then a move of recipe's.
+        a.engine.release(cook, bread, aw.commit.id, 0);
+        assert.ok(thrown(() => bEngine.released(bread)) instanceof NotFoundError);
+        bEngine.release(cook, bread, bw.commit.id, 0);
+        bEngine.release(cook, bread, bw.merged.id, 1);
+        a.engine.release(cook, bread, aw.merged.id, 1);
+        const released = [a.engine.released(bread).release, bEngine.released(bread).release];
+        assert.deepEqual(
+          released.map((r) => [r.commit, r.version]),
+          [
+            [aw.merged.id, 2],
+            [bw.merged.id, 2],
+          ],
+        );
         // A write through one graph's ref from the other is refused.
         const refused = thrown(() =>
-          b.transact((tx) => tx.upsertRow("step", { ref: draft.id, root: bread, row: stepRow("Mix", "Mix"), tombstone: false, actor: cook })),
+          b.transact((tx) => tx.upsertRow("step", { ref: aw.draft.id, root: bread, row: stepRow("Mix", "Mix"), tombstone: false, actor: cook })),
         );
         assert.match(String(refused), /is not a ref of root/);
-        assert.ok(thrown(() => bEngine.branch(cook, draft.id, "x")) instanceof NotFoundError);
+        // Thirty days on, menu's sweep prunes its own step images past its
+        // day, and none of recipe's, which keeps 365.
+        const images = (graph: string) => a.client.get(`SELECT count(*) AS n FROM "graph_member_history" WHERE graph = ?1`, [graph])?.["n"];
+        const kept = images("recipe");
+        now += 30 * 86_400_000_000;
+        assert.deepEqual(bEngine.sweep({ actor: cook }).pruned, { step: 2 });
+        assert.equal(images("recipe"), kept);
+        assert.deepEqual(a.engine.sweep({ actor: cook }).pruned, {});
         assert.equal(bEngine.compose(other.id).contentHash, a.engine.compose(main.id).contentHash);
       });
     },
@@ -503,6 +701,142 @@ export const cases: Case[] = [
         assert.equal(calls, 5);
         assert.equal(s.client.get(`SELECT created_at FROM "graph_ref" WHERE id = ?1`, [inner.id])?.["created_at"], at(5));
         assert.match(String(thrown(() => new SqliteAdapter(descriptor, { graph, clock: () => 1.5 }).storage(s.client).transact((tx) => tx.readRef(main.id)))), /not a whole number of microseconds/);
+      });
+    },
+  },
+  {
+    name: "a transaction reads the clock once the write lock is held",
+    run(binding, dir) {
+      const path = join(dir, "clock.sqlite");
+      const second = binding.open(path);
+      try {
+        second.client.exec!("PRAGMA busy_timeout = 0");
+        // Whether another connection is kept from the write lock when the clock is read.
+        const held: boolean[] = [];
+        const clock = () => {
+          try {
+            second.client.exec!("BEGIN IMMEDIATE");
+            second.client.exec!("ROLLBACK");
+            held.push(false);
+          } catch (err) {
+            held.push(err instanceof SqliteError && err.code === 5);
+          }
+          return 1_800_000_000_000_000;
+        };
+        const s = setup(binding, { clock }, path);
+        using([s], () => {
+          s.storage.transact((tx) => tx.createRef({ root: bread, parent: null, base: null, name: "main", actor: cook }));
+          s.engine.createPrimary(cook, "Soup", "main");
+          assert.deepEqual(held, [true, true, true]);
+        });
+      } finally {
+        second.close();
+      }
+    },
+  },
+  {
+    name: "in the caller's transaction each transaction reads the clock once, and one whose function returns a promise is refused",
+    run(binding) {
+      const db = binding.open(":memory:");
+      try {
+        let calls = 0;
+        const adapter = new SqliteAdapter(descriptor, { graph, callerTransaction: true, clock: () => 1_800_000_000_000_000 + ++calls });
+        inCallerTransaction(db.client, () => adapter.createTables(db.client));
+        const storage = adapter.storage(db.client);
+        calls = 0;
+        const [first, second] = inCallerTransaction(db.client, () =>
+          storage.transact((tx) => [
+            tx.createRef({ root: bread, parent: null, base: null, name: "main", actor: cook }),
+            tx.createRef({ root: "Soup", parent: null, base: null, name: "main", actor: cook }),
+          ]),
+        );
+        assert.equal(calls, 1);
+        const times = db.client.all(`SELECT DISTINCT created_at FROM "graph_ref" WHERE id IN (?1, ?2)`, [first!.id, second!.id]);
+        assert.deepEqual(times.map((row) => row["created_at"]), [1_800_000_000_000_001]);
+        inCallerTransaction(db.client, () => storage.transact((tx) => tx.readRef(first!.id)));
+        assert.equal(calls, 2);
+        assert.match(String(thrown(() => inCallerTransaction(db.client, () => storage.transact(() => Promise.resolve(1))))), /its function returned a promise/);
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "storage refuses a connection whose foreign keys would not turn on",
+    run(binding) {
+      const db = binding.open(":memory:");
+      try {
+        const adapter = new SqliteAdapter(descriptor, { graph });
+        adapter.createTables(db.client);
+        db.client.exec!("PRAGMA foreign_keys = OFF");
+        // SQLite ignores the pragma inside a transaction.
+        db.client.exec!("BEGIN");
+        assert.match(String(thrown(() => adapter.storage(db.client))), /foreign keys would not turn on/);
+        db.client.exec!("ROLLBACK");
+        adapter.storage(db.client);
+        assert.equal(db.client.get("PRAGMA foreign_keys")?.["foreign_keys"], 1);
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "prune: an image exactly its retention old stays and one a microsecond older goes, and the oldest goes first",
+    run(binding) {
+      const start = 1_800_000_000_000_000;
+      let now = start;
+      const s = setup(binding, { clock: () => now });
+      using([s], () => {
+        const main = s.engine.createPrimary(cook, bread, "main");
+        let draft = s.engine.branch(cook, main.id, "draft");
+        for (const instruction of ["Mix", "Mix well"]) {
+          draft = s.engine.save(cook, draft.id, draft.version, {
+            step: { upsert: [stepRow("Mix", instruction), stepRow("Rest", instruction), stepRow("Bake", instruction)] },
+          }).ref;
+        }
+        const prune = (batch: number) => s.storage.transact((tx) => tx.prune("step", 0, batch));
+        const left = () =>
+          s.client
+            .all(`SELECT id FROM "graph_member_history" WHERE kind = 'step' AND _version = 1`)
+            .map((row) => row["id"] as string)
+            .sort();
+        // Each row's version 1 is prunable once it is past 365 days old, and
+        // not at exactly 365 days.
+        now = start + 365 * 86_400_000_000;
+        assert.equal(prune(0), 0);
+        // Make the row with the greatest id the oldest by a microsecond more
+        // than the next, so oldest first and id order disagree.
+        const ids = left();
+        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 2 WHERE id = ?1 AND _version = 1`, [ids[2]!]);
+        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 1 WHERE id = ?1 AND _version = 1`, [ids[1]!]);
+        assert.equal(prune(1), 1);
+        assert.deepEqual(left(), [ids[0], ids[1]], "the oldest went first");
+        assert.equal(prune(0), 1);
+        assert.deepEqual(left(), [ids[0]], "an image exactly 365 days old stays");
+        now += 1;
+        assert.equal(prune(0), 1);
+        assert.deepEqual(left(), []);
+      });
+    },
+  },
+  {
+    name: "a commit's time is a canonical date-time: no trailing zeros in its fraction, and no fraction when it is zero",
+    run(binding) {
+      let now = 1_800_000_000_120_000;
+      const s = setup(binding, { clock: () => now });
+      using([s], () => {
+        const ref = s.storage.transact((tx) => tx.createRef({ root: bread, parent: null, base: null, name: "main", actor: cook }));
+        const commit = () =>
+          s.storage.transact((tx) =>
+            tx.insertCommit({ root: bread, ref: ref.id, parent: null, message: "", schemaEpoch: 1, contentHash: "0".repeat(64), sequence: null, actor: cook }),
+          );
+        assert.equal(commit().createdAt, "2027-01-15T08:00:00.12Z");
+        now = 1_800_000_000_000_000;
+        const whole = commit();
+        assert.equal(whole.createdAt, "2027-01-15T08:00:00Z");
+        assert.equal(s.storage.transact((tx) => tx.readCommit(whole.id)).createdAt, "2027-01-15T08:00:00Z");
+        now = 1_800_000_000_000_001;
+        assert.equal(commit().createdAt, "2027-01-15T08:00:00.000001Z");
       });
     },
   },
@@ -682,7 +1016,7 @@ export const cases: Case[] = [
     },
   },
   {
-    name: "every canonical vector reads back as the canonical value written, live and from history",
+    name: "every canonical vector reads back as the canonical value written, live and from history, and its Postgres form is stored canonical",
     run(binding) {
       const vectors = new URL("../../testdata/canonical/", import.meta.url);
       type ValueCase = { name: string; class: string; postgres: string; canonical?: string };
@@ -698,9 +1032,37 @@ export const cases: Case[] = [
       // A kind per case, whose role columns are named apart from its own.
       const roles = { key: "vg_key", id: "vg_id", ref: "vg_ref", root: "vg_root", tombstone: "vg_tombstone", version: "vg_version" };
       const roleColumns = { vg_key: "uuid", vg_id: "uuid", vg_ref: "uuid", vg_root: "uuid", vg_tombstone: "boolean", vg_version: "integer" };
+      // Input forms the canonical rules read, for each list class, beside
+      // the vectors' Postgres forms: each is stored canonical, as
+      // canonicalValue gives it, or refused.
+      const inputs: [string, string][] = [
+        ["string[]", '["a", 1]'],
+        ["string[][]", '[["a"], [2]]'],
+        ["integer[]", "[-0, 12]"],
+        ["integer[][]", "[[-0, 7], []]"],
+        ["integer[][]", "[[1.5]]"],
+        ["number[]", "[1e2, -0]"],
+        ["number[][]", "[[1.50e1]]"],
+        ["boolean[]", '["true"]'],
+        ["uuid[][]", '[["5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90"]]'],
+        ["dateTime[]", '["2026-09-01T12:30:00+02:30"]'],
+        ["dateTime[][]", '[["2026-09-01T12:30:00.10+02:30"]]'],
+        ["date[]", '["2026-02-30"]'],
+        ["date[]", '["2026-09-01", "nope"]'],
+        ["date[][]", '[["2026-02-29"]]'],
+        ["time[]", '["2:30 pm"]'],
+        ["duration[]", '["1 day 02:00:00"]'],
+        ["enum[]", "[1]"],
+        ["json[]", '[{"b": 1.50, "a": [2.0]}]'],
+        ["json[][]", '[[{"b": 1, "a": 0}]]'],
+      ];
+      const kindOf = (kind: string, columns: Record<string, string>) => ({ kind, ...roles, history: { exclude: [] }, columns: { ...roleColumns, ...columns } });
       const kinds = [
-        ...values.map((c, i) => ({ kind: `value${i}`, ...roles, history: { exclude: [] }, columns: { ...roleColumns, v: c.class } })),
-        ...rows.map((c, i) => ({ kind: `row${i}`, ...roles, history: { exclude: [] }, columns: { ...roleColumns, ...c.columns } })),
+        ...values.map((c, i) => kindOf(`value${i}`, { v: c.class })),
+        ...values.map((c, i) => kindOf(`postgres${i}`, { v: c.class })),
+        ...rows.map((c, i) => kindOf(`row${i}`, c.columns)),
+        ...rows.map((c, i) => kindOf(`postgresRow${i}`, c.columns)),
+        ...inputs.map(([valueClass], i) => kindOf(`input${i}`, { v: valueClass })),
       ];
       const db = binding.open(":memory:");
       try {
@@ -722,6 +1084,8 @@ export const cases: Case[] = [
           const written = write(kind, `{"v":${c.canonical}}`);
           const row = stored(kind)!;
           assert.equal(row["data"], `{"v":${c.canonical}}`, `${c.class}/${c.name} is stored canonical`);
+          write(`postgres${i}`, `{"v":${c.postgres}}`);
+          assert.equal(stored(`postgres${i}`)?.["data"], `{"v":${c.canonical}}`, `${c.class}/${c.name}'s Postgres form is stored canonical`);
           const [read] = storage.transact((tx) => tx.rows(kind, ref.id));
           const [image] = storage.transact((tx) => tx.images(kind, [{ id: row["id"] as string, version: 1 }]));
           for (const text of [written, read!, image!]) {
@@ -736,6 +1100,7 @@ export const cases: Case[] = [
             return;
           }
           write(kind, c.canonical);
+          write(`postgresRow${i}`, c.postgres);
           // Every declared column, the ones the row lacks as null.
           const canonical = parseJson(c.canonical) as JsonObject;
           const expected = Object.keys(c.columns)
@@ -743,6 +1108,24 @@ export const cases: Case[] = [
             .map((column) => JSON.stringify(column) + ":" + (canonical.has(column) ? stringifyJson(canonical.get(column)!) : "null"))
             .join(",");
           assert.equal(stored(kind)?.["data"], `{${expected}}`, c.name);
+          assert.equal(stored(`postgresRow${i}`)?.["data"], `{${expected}}`, `${c.name}: its Postgres form`);
+        });
+        inputs.forEach(([valueClass, input], i) => {
+          const kind = `input${i}`;
+          let want: string | undefined;
+          try {
+            want = canonicalValue(valueClass, input);
+          } catch {
+            want = undefined;
+          }
+          if (want === undefined) {
+            assert.ok(thrown(() => write(kind, `{"v":${input}}`)) instanceof CanonicalError, `${valueClass} ${input} is refused`);
+            assert.equal(stored(kind), undefined);
+            return;
+          }
+          assert.notEqual(stringifyJson(parseJson(input)), want, `${valueClass} ${input} is not already canonical`);
+          write(kind, `{"v":${input}}`);
+          assert.equal(stored(kind)?.["data"], `{"v":${want}}`, `${valueClass} ${input} is stored canonical`);
         });
       } finally {
         db.close();

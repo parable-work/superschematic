@@ -159,6 +159,8 @@ interface Kind {
   columns: Readonly<Record<string, string>>;
   /** Every declared column but the role ones: what data holds. */
   data: string[];
+  /** Every declared column the kind's history does not exclude: what an image holds. */
+  image: string[];
   exclude: ReadonlySet<string>;
   actor: string | undefined;
   retentionDays: number | undefined;
@@ -304,8 +306,8 @@ export function sqliteLayout(tableName: TableName = defaultTableName): string[] 
       `ref_id TEXT NOT NULL REFERENCES ${t.ref} (id), root_id TEXT NOT NULL, ` +
       `tombstone INTEGER NOT NULL CHECK (tombstone IN (0, 1)), _version INTEGER NOT NULL, data TEXT NOT NULL` +
       `) STRICT`,
-    // Unique on (graph, kind, entity_key, ref_id), led by the ref so it
-    // also serves a read of a ref's rows of a kind.
+    // Unique on the entity key of a kind on a ref, declared as (graph, kind,
+    // ref_id, entity_key) so it also serves a read of a ref's rows of a kind.
     `CREATE UNIQUE INDEX IF NOT EXISTS ${index("member_entity")} ON ${t.member} (graph, kind, ref_id, entity_key)`,
     `CREATE TABLE IF NOT EXISTS ${t.memberHistory} (` +
       `history_id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, ` +
@@ -379,6 +381,7 @@ export class SqliteAdapter {
         throw new Error(`sqlite: kind ${JSON.stringify(k.kind)} has no history`);
       }
       const roleColumns = new Set(roles.map(([, column]) => column!));
+      const exclude = new Set(history.exclude);
       config.kinds.set(k.kind!, {
         name: k.kind!,
         key: k.key!,
@@ -391,7 +394,10 @@ export class SqliteAdapter {
         data: Object.keys(columns)
           .filter((column) => !roleColumns.has(column))
           .sort(compareCodePoints),
-        exclude: new Set(history.exclude),
+        image: Object.keys(columns)
+          .filter((column) => !exclude.has(column))
+          .sort(compareCodePoints),
+        exclude,
         actor: history.actor,
         retentionDays: history.retentionDays,
       });
@@ -749,9 +755,20 @@ function scanMember(row: SqliteRow): Member {
   };
 }
 
-/** A member's canonical row's members: its data and its role columns under the descriptor's names. */
+/**
+ * A member's canonical row's members: its role columns under the
+ * descriptor's names, and every other column the kind declares, null where
+ * the stored row lacks it, as a Postgres row has a column added after it
+ * was written. A stored column the kind no longer declares is kept as
+ * stored.
+ */
 function memberMembers(k: Kind, m: Member): Map<string, string> {
   const members = new Map(m.data);
+  for (const column of k.data) {
+    if (!members.has(column)) {
+      members.set(column, "null");
+    }
+  }
   members.set(k.id, writeJsonString(m.id));
   members.set(k.key, writeJsonString(m.key));
   members.set(k.ref, writeJsonString(m.ref));
@@ -759,6 +776,24 @@ function memberMembers(k: Kind, m: Member): Map<string, string> {
   members.set(k.tombstone, m.tombstone ? "true" : "false");
   members.set(k.version, String(m.version));
   return members;
+}
+
+/**
+ * A member's history image as an image reads: as stored, with every column
+ * the kind declares and its history does not exclude, null where the image
+ * lacks it, as to_jsonb of a Postgres row less the excluded columns has a
+ * column added after the image was taken.
+ */
+function imageOf(k: Kind, stored: string): string {
+  const members = readObject(stored, "data");
+  let filled = false;
+  for (const column of k.image) {
+    if (!members.has(column)) {
+      members.set(column, "null");
+      filled = true;
+    }
+  }
+  return filled ? writeObject(members) : stored;
 }
 
 /** One transaction's view of the graph, over a client, at the transaction's time. */
@@ -950,14 +985,14 @@ class SqliteTx implements SyncTx {
     return undefined;
   }
 
-  #members(k: Kind, sql: string, params: readonly SqliteValue[]): Member[] {
+  #members(sql: string, params: readonly SqliteValue[]): Member[] {
     return this.#all(sql, params).map(scanMember);
   }
 
   rows(kindName: string, ref: string): string[] {
     const k = this.#kind(kindName);
     try {
-      return this.#members(k, `SELECT ${memberColumns} FROM ${this.#a.tables.member} WHERE graph = ?1 AND kind = ?2 AND ref_id = ?3`, [
+      return this.#members(`SELECT ${memberColumns} FROM ${this.#a.tables.member} WHERE graph = ?1 AND kind = ?2 AND ref_id = ?3`, [
         this.#a.graph,
         k.name,
         ref,
@@ -1019,7 +1054,7 @@ class SqliteTx implements SyncTx {
     const existing =
       key === undefined
         ? undefined
-        : this.#members(k, `SELECT ${memberColumns} FROM ${t.member} WHERE graph = ?1 AND kind = ?2 AND ref_id = ?3 AND entity_key = ?4`, [
+        : this.#members(`SELECT ${memberColumns} FROM ${t.member} WHERE graph = ?1 AND kind = ?2 AND ref_id = ?3 AND entity_key = ?4`, [
             this.#a.graph,
             k.name,
             ref,
@@ -1032,11 +1067,19 @@ class SqliteTx implements SyncTx {
       given.delete(createdByColumn);
       audit(updatedAtColumn, time);
       audit(updatedByColumn, write.actor);
+      const data = new Map([...existing.data, ...given]);
+      // A column the kind gained after the row was written is null, as a
+      // Postgres row has it.
+      for (const column of k.data) {
+        if (!data.has(column)) {
+          data.set(column, "null");
+        }
+      }
       const stored: Member = {
         ...existing,
         tombstone: write.tombstone,
         version: existing.version + 1,
-        data: new Map([...existing.data, ...given]),
+        data,
       };
       const changed = this.#run(
         `UPDATE ${t.member} SET tombstone = ?3, _version = ?4, data = ?5 WHERE graph = ?1 AND id = ?2 AND _version = ?6`,
@@ -1103,7 +1146,6 @@ class SqliteTx implements SyncTx {
     try {
       const key = this.#roleValue(k, k.key, entityKey);
       const found = this.#members(
-        k,
         `SELECT ${memberColumns} FROM ${this.#a.tables.member} WHERE graph = ?1 AND kind = ?2 AND ref_id = ?3 AND entity_key = ?4`,
         [this.#a.graph, k.name, ref, key],
       );
@@ -1128,7 +1170,7 @@ class SqliteTx implements SyncTx {
           `ON h.id = json_extract(p.value, '$[0]') AND h._version = json_extract(p.value, '$[1]') ` +
           `WHERE h.graph = ?1 AND h.kind = ?2`,
         [this.#a.graph, k.name, pinList],
-      ).map((row) => text(row["data"], "data"));
+      ).map((row) => imageOf(k, text(row["data"], "data")));
     } catch (err) {
       throw withContext(`read ${k.name} history`, err);
     }
@@ -1454,7 +1496,7 @@ class SqliteTx implements SyncTx {
   removeRefRows(kindName: string, ref: string, actor: string): number {
     const k = this.#kind(kindName);
     try {
-      const found = this.#members(k, `SELECT ${memberColumns} FROM ${this.#a.tables.member} WHERE graph = ?1 AND kind = ?2 AND ref_id = ?3`, [
+      const found = this.#members(`SELECT ${memberColumns} FROM ${this.#a.tables.member} WHERE graph = ?1 AND kind = ?2 AND ref_id = ?3`, [
         this.#a.graph,
         k.name,
         ref,
