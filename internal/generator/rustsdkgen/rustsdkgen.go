@@ -1069,10 +1069,7 @@ func toRustIdentifier(name, fallback string) string {
 	if identifier[0] >= '0' && identifier[0] <= '9' {
 		identifier = "_" + identifier
 	}
-	if rustutil.IsRustKeyword(identifier) {
-		identifier = "r#" + identifier
-	}
-	return identifier
+	return rustutil.EscapeKeyword(identifier)
 }
 
 // FormatSDK runs cargo fmt on the generated Rust SDK crate.
