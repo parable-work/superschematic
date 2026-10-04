@@ -2265,8 +2265,12 @@ table the plan drops; a change between a list, a JSON value and text, all
 refuses a service whose new version does not list `sqlite`, and builds
 the previous version's SQLite model without checking its list; and the
 SQLite convergence test compares a column's collation through an index
-it builds and rolls back, since no pragma reports it. Each change that
-lands a piece updates this paragraph.
+it builds and rolls back, since no pragma reports it. D32 takes the
+version graph to SQLite through its adapter's own tables, which write
+history without triggers, not through this dialect, so `@versioned` stays
+refused here. D30's deploy runs a plan's `expand` steps before the servers
+roll and its `contract` steps after (`docs/stack-model.md`, sections 5.3
+and 11.2). Each change that lands a piece updates this paragraph.
 
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
