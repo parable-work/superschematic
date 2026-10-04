@@ -432,6 +432,52 @@ test("SyncEngine refuses a SyncStorage whose transact returns a promise", () => 
   expect(log).toEqual(["createRef"]);
 });
 
+// A storage whose transact awaits before calling its function would otherwise
+// run the operation after the SyncEngine has refused it.
+test("SyncEngine refuses a SyncStorage that calls its function after transact returned, so the write does not land", async () => {
+  const created = ref("Main", 1);
+  const log: string[] = [];
+  let late: Promise<unknown> | undefined;
+  const storage = {
+    transact: (fn: (tx: SyncTx) => unknown) => {
+      late = (async () => {
+        await Promise.resolve();
+        return fn(fakeTx({ createRef: () => created }, log));
+      })();
+      return late;
+    },
+  } as unknown as SyncStorage;
+  const engine = new SyncEngine(initSync(), descriptor, storage);
+  expect(() => engine.createPrimary(actor, root, "main")).toThrow(
+    new TypeError("engine: SyncStorage.transact returned a promise; a SyncEngine needs synchronous storage"),
+  );
+  await expect(late).rejects.toThrow(
+    new TypeError(
+      "engine: SyncStorage.transact called its function after it returned; a SyncEngine needs synchronous storage",
+    ),
+  );
+  expect(log).toEqual([]);
+});
+
+// Each SyncTx method with no value returns undefined, so tsc refuses an async
+// function for any of them; each @ts-expect-error fails the type check if it
+// ever accepts one.
+test("SyncTx's methods with no value refuse an async function", () => {
+  const handlers: Partial<SyncTx> = {
+    lockRef: () => ref("Draft", 1),
+    // @ts-expect-error An async function does not type-check as SyncTx.discardRef.
+    discardRef: async () => undefined,
+    // @ts-expect-error An async function does not type-check as SyncTx.insertPatches.
+    insertPatches: async () => undefined,
+    // @ts-expect-error An async function does not type-check as SyncTx.insertSnapshot.
+    insertSnapshot: async () => undefined,
+  };
+  const engine = new SyncEngine(initSync(), descriptor, syncStorage(handlers, []));
+  expect(() => engine.discard(actor, "Draft", 1)).toThrow(
+    new TypeError("engine: SyncTx.discardRef returned a promise; a SyncEngine needs synchronous storage"),
+  );
+});
+
 test("SyncEngine's copies keep its storage and options", () => {
   const log: string[] = [];
   const walked: number[] = [];

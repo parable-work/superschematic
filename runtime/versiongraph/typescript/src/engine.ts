@@ -674,11 +674,26 @@ export class SyncEngine {
 
   /**
    * Runs an operation's transaction in one transaction of the storage, and
-   * refuses a storage whose transact returns a promise.
+   * refuses a storage whose transact returns a promise. Such a storage may
+   * still call the function once it has returned; that call throws before
+   * any step runs, so the storage's transaction rolls back and the write the
+   * caller was told failed does not land.
    */
   #transact<T>(body: Body<T>): T {
-    const result: unknown = this.#storage.transact((tx) => driveSync(body(calls), tx));
+    let returned = false;
+    const result: unknown = this.#storage.transact((tx) => {
+      if (returned) {
+        throw new TypeError(
+          "engine: SyncStorage.transact called its function after it returned; a SyncEngine needs synchronous storage",
+        );
+      }
+      return driveSync(body(calls), tx);
+    });
+    returned = true;
     if (isThenable(result)) {
+      // The promise's own outcome no longer matters; keep its rejection from
+      // surfacing as unhandled.
+      (result as PromiseLike<unknown>).then(undefined, () => undefined);
       throw new TypeError("engine: SyncStorage.transact returned a promise; a SyncEngine needs synchronous storage");
     }
     return result as T;
