@@ -1,0 +1,155 @@
+{
+  "dialect": "postgres",
+  "from": "",
+  "hash": "58e142758b8a110ea2faf4625cad176b442916084ef31561e6879f8f5e2d5e00",
+  "service": "shop",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE customer (id BIGINT NOT NULL, name TEXT NOT NULL, CONSTRAINT customer_pkey PRIMARY KEY (id))"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"order\" (id BIGINT NOT NULL, customer_id BIGINT NOT NULL, total BIGINT NOT NULL, CONSTRAINT order_pkey PRIMARY KEY (id), CONSTRAINT order_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (id) ON DELETE CASCADE)"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX order_customer_id_idx ON \"order\" (customer_id)"
+      ],
+      "subject": "table/order/index/order_customer_id_idx",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_total_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.total \u003c 0 THEN RAISE EXCEPTION 'total must not be negative; got %', NEW.total; END IF; RETURN NEW; END; $$"
+      ],
+      "subject": "function/order_total_check",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER order_total_check BEFORE INSERT OR UPDATE ON \"order\" FOR EACH ROW EXECUTE FUNCTION order_total_check()"
+      ],
+      "subject": "trigger/order/order_total_check",
+      "transactional": true
+    }
+  ],
+  "to": "b66c5848826b22c127914d25196b97bd81e0d2eb088a9ed4abb0060ba5c78d5c",
+  "toModel": {
+    "dialect": "postgres",
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION order_total_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.total \u003c 0 THEN RAISE EXCEPTION 'total must not be negative; got %', NEW.total; END IF; RETURN NEW; END; $$",
+        "name": "order_total_check",
+        "origin": "Order"
+      }
+    ],
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "BIGINT"
+          },
+          {
+            "name": "name",
+            "origin": "Customer.name",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "BIGINT"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "BIGINT"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "BIGINT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "method": "BTREE",
+            "name": "order_customer_id_idx"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "definition": "CREATE TRIGGER order_total_check BEFORE INSERT OR UPDATE ON \"order\" FOR EACH ROW EXECUTE FUNCTION order_total_check()",
+        "name": "order_total_check",
+        "origin": "Order",
+        "table": "order"
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}
