@@ -1,0 +1,79 @@
+{
+  "dialect": "sqlite",
+  "from": "e411a1b050fe5f33ff8ccbc935b1cfeb9c83682e6dcd688792885df6011420f0",
+  "hash": "4768fccd34d5f28caad8f81a55cee3f705b858d5b2f8b71db99db825c76fa0ca",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX \"idx_account_email\""
+      ],
+      "subject": "table/account/index/idx_account_email",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/account/column/email",
+          "reason": "Dropping account.email deletes the values of Account.email.",
+          "subject": "table/account/column/email"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/account/column/email",
+          "reason": "SQLite rewrites account to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/account/column/email"
+        }
+      ],
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"account\" DROP COLUMN \"email\""
+      ],
+      "subject": "table/account/column/email",
+      "transactional": true
+    }
+  ],
+  "to": "3582dd7b01770d82e5dd057f98f1e885ffeb634a7b54f0aa84042fccbe17b06e",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "display_name",
+            "origin": "Account.displayName",
+            "type": "TEXT"
+          },
+          {
+            "name": "balance",
+            "origin": "Account.balance",
+            "type": "REAL"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

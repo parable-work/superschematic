@@ -84,12 +84,57 @@ var vectorCases = map[string][]vectorPlan{
 	},
 }
 
-// vectorRun is one vector case planned: its plans by file name, in order,
-// and the schema the last one ends at.
+// sqliteVectorCases are the vectors planned for SQLite.
+var sqliteVectorCases = map[string][]vectorPlan{
+	// Columns in place: ADD COLUMN with an index, RENAME COLUMN, and DROP
+	// COLUMN after its index.
+	"sqlite-columns": {
+		{name: "create", change: func(s *ir.Schema) {
+			s.Types["Account"] = &ir.TypeDef{Name: "Account", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+				{Name: "name", TypeRef: stringRef, Required: true},
+				{Name: "balance", TypeRef: ir.TypeRef{Name: "number"}, Required: true},
+			}}
+		}},
+		{name: "add-column-and-index", change: func(s *ir.Schema) {
+			addField(s, "Account", &ir.FieldDef{Name: "email", TypeRef: stringRef})
+			typeNamed(s, "Account").Indexes = []ir.IndexDef{{Keys: []string{"email"}}}
+		}},
+		{name: "rename-column", change: func(s *ir.Schema) {
+			fieldNamed(s, "Account", "name").Name = "displayName"
+		}, renames: []Rename{{From: "account.name", To: "account.display_name"}}},
+		{name: "drop-column", change: func(s *ir.Schema) {
+			dropField(s, "Account", "email")
+			typeNamed(s, "Account").Indexes = nil
+		}},
+	},
+	// Rebuilds: the parent of an ON DELETE CASCADE child rebuilt in
+	// expand, with a unique index, and the child rebuilt in contract.
+	"sqlite-rebuild": {
+		{name: "create", change: func(s *ir.Schema) {
+			s.Types["Account"] = &ir.TypeDef{Name: "Account", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+				{Name: "name", TypeRef: stringRef, Required: true},
+			}}
+			s.Types["Entry"] = &ir.TypeDef{Name: "Entry", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+				{Name: "account", TypeRef: ir.TypeRef{Name: "Account"}, Required: true},
+				{Name: "memo", TypeRef: stringRef},
+			}}
+		}},
+		{name: "rebuild", change: func(s *ir.Schema) {
+			fieldNamed(s, "Account", "name").Required = false
+			fieldNamed(s, "Account", "name").Unique = true
+			fieldNamed(s, "Entry", "memo").Required = true
+		}},
+	},
+}
+
+// vectorRun is one vector case planned: its dialect, its plans by file
+// name, in order, and the schema and model the last one ends at.
 type vectorRun struct {
-	files  []string
-	plans  []*Plan
-	schema *ir.Schema
+	dialect Dialect
+	files   []string
+	plans   []*Plan
+	schema  *ir.Schema
+	model   *Model
 }
 
 // planVectors plans every vector case.
@@ -97,26 +142,33 @@ func planVectors(t *testing.T) map[string]vectorRun {
 	t.Helper()
 	runs := map[string]vectorRun{}
 	for name, plans := range vectorCases {
-		var run vectorRun
-		run.schema = ir.NewSchema("ledger-db", ir.SchemaKindDB)
-		var from *Model
-		for i, vp := range plans {
-			vp.change(run.schema)
-			to, err := BuildModel(run.schema, sqlgen.Options{SchemaName: "ledger-db"}, Postgres)
-			if err != nil {
-				t.Fatalf("%s/%s: %v", name, vp.name, err)
-			}
-			plan, err := Diff(from, to, Options{Renames: vp.renames})
-			if err != nil {
-				t.Fatalf("%s/%s: %v", name, vp.name, err)
-			}
-			run.files = append(run.files, fmt.Sprintf("%02d-%s.plan.json", i+1, vp.name))
-			run.plans = append(run.plans, plan)
-			from = to
-		}
-		runs[name] = run
+		runs[name] = planVector(t, name, Postgres, plans)
+	}
+	for name, plans := range sqliteVectorCases {
+		runs[name] = planVector(t, name, SQLite, plans)
 	}
 	return runs
+}
+
+// planVector plans one vector case in dialect.
+func planVector(t *testing.T, name string, dialect Dialect, plans []vectorPlan) vectorRun {
+	t.Helper()
+	run := vectorRun{dialect: dialect, schema: ir.NewSchema("ledger-db", ir.SchemaKindDB)}
+	for i, vp := range plans {
+		vp.change(run.schema)
+		to, err := BuildModel(run.schema, sqlgen.Options{SchemaName: "ledger-db"}, dialect)
+		if err != nil {
+			t.Fatalf("%s/%s: %v", name, vp.name, err)
+		}
+		plan, err := Diff(run.model, to, Options{Renames: vp.renames})
+		if err != nil {
+			t.Fatalf("%s/%s: %v", name, vp.name, err)
+		}
+		run.files = append(run.files, fmt.Sprintf("%02d-%s.plan.json", i+1, vp.name))
+		run.plans = append(run.plans, plan)
+		run.model = to
+	}
+	return run
 }
 
 // vectorFiles returns each vector's path under vectorsDir and its

@@ -1,0 +1,55 @@
+{
+  "dialect": "sqlite",
+  "from": "",
+  "hash": "2f946fa0a9b542573e7db70c56ec5663808c528722a83beb6a531a2a457d2427",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"account\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"balance\" REAL NOT NULL,\n  PRIMARY KEY (\"id\")\n)"
+      ],
+      "subject": "table/account",
+      "transactional": true
+    }
+  ],
+  "to": "ef8e36131ddcac34c80add7d455a2100652aa7e8c1ee7da21a702e80f3310d55",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "balance",
+            "origin": "Account.balance",
+            "type": "REAL"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

@@ -1,0 +1,102 @@
+{
+  "dialect": "sqlite",
+  "from": "",
+  "hash": "3e30515d0b82324aa67c09c07a50216679d60bf9b39458dd851e069e5567c714",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"account\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\")\n)"
+      ],
+      "subject": "table/account",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"entry\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"account_id\" TEXT NOT NULL,\n  \"memo\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"account_id\") REFERENCES \"account\" (\"id\") ON DELETE CASCADE\n)"
+      ],
+      "subject": "table/entry",
+      "transactional": true
+    }
+  ],
+  "to": "295de4e412d1254794d91926feb77450972604e2271c35d8bc0b72a1fa2e637a",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "account_id",
+            "origin": "Entry.account",
+            "type": "TEXT"
+          },
+          {
+            "name": "memo",
+            "nullable": true,
+            "origin": "Entry.memo",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "account_id"
+            ],
+            "name": "fk_entry_account_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "account"
+          }
+        ],
+        "kind": "entity",
+        "name": "entry",
+        "origin": "Entry",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "entry_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

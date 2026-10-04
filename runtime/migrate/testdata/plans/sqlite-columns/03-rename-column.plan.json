@@ -1,0 +1,81 @@
+{
+  "dialect": "sqlite",
+  "from": "e5422896e078e98809a0bef4ef71d6c2c53ddaca55df33b82b673a08a231d5d5",
+  "hash": "f994745db731236cf77dc772b4109c9ac03f3627727a491d04455cb8db1a4573",
+  "renames": [
+    "account.name=account.display_name"
+  ],
+  "service": "ledger-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/account/column/display_name",
+          "reason": "account.name is renamed to account.display_name (Account.displayName): servers built from the previous version still use the old name.",
+          "subject": "table/account/column/display_name"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"account\" RENAME COLUMN \"name\" TO \"display_name\""
+      ],
+      "subject": "table/account/column/display_name",
+      "transactional": true
+    }
+  ],
+  "to": "e411a1b050fe5f33ff8ccbc935b1cfeb9c83682e6dcd688792885df6011420f0",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "display_name",
+            "origin": "Account.displayName",
+            "type": "TEXT"
+          },
+          {
+            "name": "balance",
+            "origin": "Account.balance",
+            "type": "REAL"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Account.email",
+            "type": "TEXT"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "method": "BTREE",
+            "name": "idx_account_email"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}
