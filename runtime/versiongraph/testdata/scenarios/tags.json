@@ -1,8 +1,8 @@
 {
   "name": "tags",
   "description": "Tagged commits take a root's sequences in order, across its refs and its merges; each root counts its own, and an untagged commit takes none.",
+  "roots": ["Bread", "Soup"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid), ($3::uuid, 'Soup', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}, {"uuid": "Soup"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "mix", "as": "mix"},
     {"op": "save", "ref": "mix", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},

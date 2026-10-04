@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -41,16 +43,26 @@ const fixtureSnapshotEvery = 3
 // its canonical form.
 const defaultActor = "Cook"
 
+// backend is the backend this runner runs the scenarios on. A step that
+// lists its backends runs here only when it lists this one, and an sql
+// step runs its statement for this backend.
+const backend = "postgres"
+
+// knownBackends are the backends a scenario may name.
+var knownBackends = []string{"postgres", "sqlite"}
+
 var fixtureDir = filepath.Join("..", "..", "testdata", "fixture")
 
 type scenario struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Steps       []step `json:"steps"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Roots       []string `json:"roots"`
+	Steps       []step   `json:"steps"`
 }
 
 type step struct {
 	Op            string                    `json:"op"`
+	Backends      []string                  `json:"backends"`
 	As            string                    `json:"as"`
 	Actor         *string                   `json:"actor"`
 	Root          string                    `json:"root"`
@@ -72,9 +84,37 @@ type step struct {
 	SnapshotEvery int                       `json:"snapshotEvery"`
 	Sweep         *sweepOptions             `json:"sweep"`
 	Kind          string                    `json:"kind"`
-	Statement     string                    `json:"statement"`
+	Statement     statements                `json:"statement"`
 	Args          []sqlArg                  `json:"args"`
 	Expect        expect                    `json:"expect"`
+}
+
+// statements are an sql step's statement, one per backend.
+type statements map[string]string
+
+// UnmarshalJSON reads a statement as an object of one statement per
+// backend, and refuses any other form, a plain string included. A null
+// statement is none.
+func (s *statements) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if string(trimmed) == "null" {
+		return nil
+	}
+	if !bytes.HasPrefix(trimmed, []byte("{")) {
+		return fmt.Errorf("a statement is an object of one statement per backend, not %s", trimmed)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(trimmed, &m); err != nil {
+		return fmt.Errorf("a statement is an object of one statement per backend: %w", err)
+	}
+	*s = m
+	return nil
+}
+
+// runsOn reports whether the step runs on the backend: a step runs on
+// every backend unless it lists the ones it runs on.
+func (st step) runsOn(backend string) bool {
+	return st.Backends == nil || slices.Contains(st.Backends, backend)
 }
 
 type kindEdits struct {
@@ -158,6 +198,20 @@ func TestScenarios(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, file := range scenarioFiles(t) {
+		s := readScenario(t, file)
+		if want := strings.TrimSuffix(filepath.Base(file), ".json"); s.Name != want {
+			t.Fatalf("%s: scenario name %q, want the file's name %q", file, s.Name, want)
+		}
+		t.Run(s.Name, func(t *testing.T) {
+			runScenario(t, newRunner(t, dsn, descriptor, createSQL), s)
+		})
+	}
+}
+
+// scenarioFiles are the files of runtime/versiongraph/testdata/scenarios.
+func scenarioFiles(t *testing.T) []string {
+	t.Helper()
 	files, err := filepath.Glob(filepath.Join("..", "..", "testdata", "scenarios", "*.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -165,19 +219,7 @@ func TestScenarios(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("no scenarios found")
 	}
-	for _, file := range files {
-		s := readScenario(t, file)
-		if want := strings.TrimSuffix(filepath.Base(file), ".json"); s.Name != want {
-			t.Fatalf("%s: scenario name %q, want the file's name %q", file, s.Name, want)
-		}
-		t.Run(s.Name, func(t *testing.T) {
-			r := newRunner(t, dsn, descriptor, createSQL)
-			for i, st := range s.Steps {
-				r.step = fmt.Sprintf("step %d (%s)", i, st.Op)
-				r.run(t, st)
-			}
-		})
-	}
+	return files
 }
 
 func readScenario(t *testing.T, file string) scenario {
@@ -186,16 +228,98 @@ func readScenario(t *testing.T, file string) scenario {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s, err := parseScenario(text, backend)
+	if err != nil {
+		t.Fatalf("%s: %v", file, err)
+	}
+	return s
+}
+
+// parseScenario reads a scenario as the format says
+// (runtime/versiongraph/README.md, "Scenarios") for a runner of backend. It
+// refuses an unknown member, a scenario with no steps or no roots or one
+// that names a root twice, a backends list that is empty, names a backend
+// twice or names one no runner knows, a statement for an unknown backend,
+// and an sql step that runs on backend with no statement for it.
+func parseScenario(text []byte, backend string) (scenario, error) {
 	decoder := json.NewDecoder(bytes.NewReader(text))
 	decoder.DisallowUnknownFields()
 	var s scenario
 	if err := decoder.Decode(&s); err != nil {
-		t.Fatalf("%s: %v", file, err)
+		return scenario{}, err
 	}
 	if len(s.Steps) == 0 {
-		t.Fatalf("%s: a scenario has steps", file)
+		return scenario{}, errors.New("a scenario has steps")
 	}
-	return s
+	if s.Roots == nil {
+		return scenario{}, errors.New("a scenario names its roots")
+	}
+	if len(s.Roots) == 0 {
+		return scenario{}, errors.New("a scenario names at least one root")
+	}
+	if root, ok := repeated(s.Roots); ok {
+		return scenario{}, fmt.Errorf("the scenario names root %q twice", root)
+	}
+	for i, st := range s.Steps {
+		if err := checkStep(st, backend); err != nil {
+			return scenario{}, fmt.Errorf("step %d (%s): %w", i, st.Op, err)
+		}
+	}
+	return s, nil
+}
+
+// checkStep checks a step's backends and statement.
+func checkStep(st step, backend string) error {
+	if st.Backends != nil {
+		if len(st.Backends) == 0 {
+			return errors.New("backends lists no backend")
+		}
+		for _, name := range st.Backends {
+			if !slices.Contains(knownBackends, name) {
+				return fmt.Errorf("backends lists unknown backend %q", name)
+			}
+		}
+		if name, ok := repeated(st.Backends); ok {
+			return fmt.Errorf("backends lists %q twice", name)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(st.Statement)) {
+		if !slices.Contains(knownBackends, name) {
+			return fmt.Errorf("a statement for unknown backend %q", name)
+		}
+	}
+	if st.Op == "sql" && st.runsOn(backend) {
+		if _, ok := st.Statement[backend]; !ok {
+			return fmt.Errorf("the sql step has no %s statement", backend)
+		}
+	}
+	return nil
+}
+
+// repeated returns a name the list holds twice.
+func repeated(names []string) (string, bool) {
+	seen := map[string]bool{}
+	for _, name := range names {
+		if seen[name] {
+			return name, true
+		}
+		seen[name] = true
+	}
+	return "", false
+}
+
+// runScenario seeds the scenario's roots and runs each step that runs on
+// the runner's backend, in order.
+func runScenario(t *testing.T, r *runner, s scenario) {
+	t.Helper()
+	r.seed(t, s.Roots)
+	for i, st := range s.Steps {
+		if !st.runsOn(backend) {
+			continue
+		}
+		r.step = fmt.Sprintf("step %d (%s)", i, st.Op)
+		r.run(t, st)
+	}
 }
 
 // runner holds one scenario's database, engine and named results.
@@ -268,6 +392,23 @@ func newRunner(t *testing.T, dsn string, descriptor, createSQL []byte) *runner {
 		}
 	})
 	return r
+}
+
+// seed gives each root the row a root has on Postgres: a recipe whose id
+// is the root, whose title is the root's name and whose creator is the
+// default actor, all in one statement.
+func (r *runner) seed(t *testing.T, roots []string) {
+	t.Helper()
+	args := []any{hyphenated(t, defaultActor)}
+	values := make([]string, len(roots))
+	for i, root := range roots {
+		args = append(args, hyphenated(t, root), root)
+		values[i] = fmt.Sprintf("($%d::uuid, $%d, $1::uuid)", len(args)-1, len(args))
+	}
+	statement := "INSERT INTO recipe (id, title, created_by) VALUES " + strings.Join(values, ", ")
+	if _, err := r.conn.Exec(r.ctx, statement, args...); err != nil {
+		t.Fatalf("seed the roots %q: %v", roots, err)
+	}
 }
 
 func (r *runner) fatalf(t *testing.T, format string, args ...any) {
@@ -484,10 +625,11 @@ func (r *runner) run(t *testing.T, st step) {
 		for i, arg := range st.Args {
 			args[i] = r.sqlArg(t, arg)
 		}
+		statement := st.Statement[backend]
 		if st.Expect.Rows != nil {
-			rows, err = r.queryRows(ctx, st.Statement, args)
+			rows, err = r.queryRows(ctx, statement, args)
 		} else {
-			_, err = r.conn.Exec(ctx, st.Statement, args...)
+			_, err = r.conn.Exec(ctx, statement, args...)
 		}
 	default:
 		r.fatalf(t, "unknown op %q", st.Op)

@@ -8,7 +8,7 @@ make versiongraph-scenarios-python fails without it."""
 
 from dataclasses import fields, is_dataclass
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import pytest
 from support import DESCRIPTOR, TESTDATA, Scratch, create_scratch, drop_scratch, hyphenated, requires_database
@@ -35,15 +35,24 @@ FIXTURE_SNAPSHOT_EVERY = 3
 # The actor of a step that names none: "Cook", a UUID in its canonical form.
 DEFAULT_ACTOR = "Cook"
 
+# The backend this runner runs the scenarios on. A step that lists its
+# backends runs here only when it lists this one, and an sql step runs its
+# statement for this backend.
+BACKEND = "postgres"
+
+# The backends a scenario may name.
+KNOWN_BACKENDS = ("postgres", "sqlite")
+
 SCENARIOS = TESTDATA / "scenarios"
 FILES = sorted(SCENARIOS.glob("*.json"))
 
 # The members each object of a scenario may have; any other is refused, as
 # the Go runner's decoder refuses it.
 MEMBERS = {
-    "scenario": {"name", "description", "steps"},
+    "scenario": {"name", "description", "roots", "steps"},
     "step": {
         "op",
+        "backends",
         "as",
         "actor",
         "root",
@@ -148,26 +157,289 @@ def to_json(value: Any, json_members: Sequence[str] = ()) -> Any:
     raise TypeError(f"{value!r} is not a plain value")
 
 
+class Scenario:
+    """A scenario as the format says: its name, its roots, and its steps,
+    each checked."""
+
+    def __init__(self, name: str, roots: List[str], steps: List[Dict[str, Any]]) -> None:
+        self.name = name
+        self.roots = roots
+        self.steps = steps
+
+
+def names(value: Any, what: str) -> List[str]:
+    """A list of distinct strings, or the reason it is not one."""
+    if not isinstance(value, list):
+        raise AssertionError(f"{what} is a list")
+    out: List[str] = []
+    for name in value:
+        if not isinstance(name, str):
+            raise AssertionError(f"{what} lists {dumps(name)}, not a name")
+        if name in out:
+            raise AssertionError(f"{what} lists {name!r} twice")
+        out.append(name)
+    return out
+
+
+def read_scenario(source: str, where: str, backend: str) -> Scenario:
+    """Reads a scenario as the format says (runtime/versiongraph/README.md,
+    "Scenarios") for a runner of backend. It refuses an unknown member, a
+    scenario with no steps or no roots or one that names a root twice, a
+    backends list that is empty, names a backend twice or names one no
+    runner knows, a statement that is not an object of one statement per
+    backend or that names an unknown backend, and an sql step that runs on
+    backend with no statement for it."""
+    scenario = obj(loads(source), "scenario", where)
+    steps = scenario.get("steps")
+    if not isinstance(steps, list) or not steps:
+        raise AssertionError(f"{where}: a scenario has steps")
+    if scenario.get("roots") is None:
+        raise AssertionError(f"{where}: a scenario names its roots")
+    try:
+        roots = names(scenario["roots"], "roots")
+    except AssertionError as refused:
+        raise AssertionError(f"{where}: {refused}") from None
+    if not roots:
+        raise AssertionError(f"{where}: a scenario names at least one root")
+    checked = []
+    for i, value in enumerate(steps):
+        step = obj(value, "step", f"{where} step {i}")
+        try:
+            check_step(step, backend)
+        except AssertionError as refused:
+            raise AssertionError(f"{where} step {i} ({text(step.get('op'))}): {refused}") from None
+        checked.append(step)
+    return Scenario(text(scenario.get("name")), roots, checked)
+
+
+def check_step(step: Dict[str, Any], backend: str) -> None:
+    """Checks a step's backends and statement."""
+    if step.get("backends") is not None:
+        listed = names(step["backends"], "backends")
+        if not listed:
+            raise AssertionError("backends lists no backend")
+        for name in listed:
+            if name not in KNOWN_BACKENDS:
+                raise AssertionError(f"backends lists unknown backend {name!r}")
+    statement = step.get("statement")
+    if statement is not None:
+        if not isinstance(statement, dict):
+            raise AssertionError(f"a statement is an object of one statement per backend, not {dumps(statement)}")
+        for name in sorted(statement):
+            if name not in KNOWN_BACKENDS:
+                raise AssertionError(f"a statement for unknown backend {name!r}")
+            if not isinstance(statement[name], str):
+                raise AssertionError(f"a statement is an object of one statement per backend, not {dumps(statement)}")
+    if text(step.get("op")) == "sql" and runs_on(step, backend):
+        if not isinstance(statement, dict) or backend not in statement:
+            raise AssertionError(f"the sql step has no {backend} statement")
+
+
+def runs_on(step: Dict[str, Any], backend: str) -> bool:
+    """Whether a step runs on the backend: a step runs on every backend
+    unless it lists the ones it runs on."""
+    backends = step.get("backends")
+    return backends is None or backend in backends
+
+
+def run_scenario(scenario: Scenario, then: Optional[Callable[["Runner"], None]] = None) -> None:
+    """Opens a runner, seeds the scenario's roots, and runs each step that
+    runs on the runner's backend, in order; then runs on the runner before
+    it closes."""
+    runner = Runner(create_scratch("vg_scenario_py"))
+    try:
+        runner.seed(scenario.roots)
+        for i, step in enumerate(scenario.steps):
+            if not runs_on(step, BACKEND):
+                continue
+            runner.where = f"{scenario.name} step {i} ({text(step.get('op'))})"
+            runner.run(step)
+        if then is not None:
+            then(runner)
+    finally:
+        runner.close()
+
+
 def test_the_scenario_directory_holds_scenarios() -> None:
     assert FILES
+
+
+@pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
+def test_scenario_file_reads(path: Any) -> None:
+    """Every scenario file reads as the format says, whether or not a
+    database is there to run it on."""
+    scenario = read_scenario(path.read_text(encoding="utf-8"), path.name, BACKEND)
+    assert scenario.name == path.stem, f"{path.name}: the scenario's name is not the file's"
+
+
+def format_scenario(roots: str, *steps: str) -> str:
+    """A scenario of the given roots (raw JSON, or "" for none) and steps."""
+    member = f'"roots": {roots}, ' if roots else ""
+    return '{"name": "format", "description": "", ' + member + '"steps": [' + ", ".join(steps) + "]}"
+
+
+CREATE_PRIMARY = '{"op": "createPrimary", "root": "Bread", "name": "main"}'
+
+# Scenarios that each break one rule of the format, with a part of the error
+# each is refused with, and ones that keep them ("" for none).
+FORMAT_CASES = [
+    (
+        "a statement per backend",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}'),
+        "",
+    ),
+    (
+        "a plain string statement",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": "SELECT 1"}'),
+        "a statement is an object of one statement per backend",
+    ),
+    (
+        "a statement that is not text",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": 1}}'),
+        "a statement is an object of one statement per backend",
+    ),
+    (
+        "an sql step without the runner's statement",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": {"sqlite": "SELECT 1"}}'),
+        "the sql step has no postgres statement",
+    ),
+    (
+        "an sql step with no statement",
+        format_scenario('["Bread"]', '{"op": "sql"}'),
+        "the sql step has no postgres statement",
+    ),
+    (
+        "a statement for an unknown backend",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": "SELECT 1", "mysql": "SELECT 1"}}'),
+        "a statement for unknown backend 'mysql'",
+    ),
+    (
+        "an sql step for another backend, without the runner's statement",
+        format_scenario('["Bread"]', '{"op": "sql", "backends": ["sqlite"], "statement": {"sqlite": "SELECT 1"}}'),
+        "",
+    ),
+    (
+        "backends listing the runner's",
+        format_scenario(
+            '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["sqlite", "postgres"]}'
+        ),
+        "",
+    ),
+    (
+        "backends listing an unknown backend",
+        format_scenario(
+            '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "mysql"]}'
+        ),
+        "backends lists unknown backend 'mysql'",
+    ),
+    (
+        "an empty backends",
+        format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": []}'),
+        "backends lists no backend",
+    ),
+    (
+        "backends listing a backend twice",
+        format_scenario(
+            '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "postgres"]}'
+        ),
+        "backends lists 'postgres' twice",
+    ),
+    ("no roots", format_scenario("", CREATE_PRIMARY), "a scenario names its roots"),
+    ("null roots", format_scenario("null", CREATE_PRIMARY), "a scenario names its roots"),
+    ("empty roots", format_scenario("[]", CREATE_PRIMARY), "a scenario names at least one root"),
+    ("a root named twice", format_scenario('["Bread", "Soup", "Bread"]', CREATE_PRIMARY), "roots lists 'Bread' twice"),
+    ("no steps", format_scenario('["Bread"]'), "a scenario has steps"),
+    (
+        "an unknown scenario member",
+        '{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": ['
+        + CREATE_PRIMARY
+        + "]}",
+        "unknown scenario member 'backend'",
+    ),
+    (
+        "an unknown step member",
+        format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}'),
+        "unknown step member 'backend'",
+    ),
+]
+
+
+@pytest.mark.parametrize("source,refused", [c[1:] for c in FORMAT_CASES], ids=[c[0] for c in FORMAT_CASES])
+def test_scenario_format(source: str, refused: str) -> None:
+    """A scenario that breaks a rule of the format is refused, and one that
+    keeps them reads."""
+    if not refused:
+        read_scenario(source, "format", BACKEND)
+        return
+    with pytest.raises(AssertionError) as caught:
+        read_scenario(source, "format", BACKEND)
+    assert refused in str(caught.value)
+
+
+@requires_database
+def test_a_step_whose_backends_leave_out_the_runners_is_skipped() -> None:
+    """A scenario whose steps list their backends: a save listed for SQLite
+    alone is skipped and leaves no row, and a save listed for Postgres too
+    writes its row."""
+    run_scenario(
+        read_scenario(
+            format_scenario(
+                '["Bread"]',
+                '{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}',
+                '{"op": "branch", "from": "main", "name": "mix", "as": "mix"}',
+                '{"op": "save", "ref": "mix", "backends": ["sqlite"], "edits": {"step": {"upsert": '
+                '[{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}}',
+                '{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}}',
+                '{"op": "save", "ref": "mix", "backends": ["sqlite", "postgres"], "edits": {"step": {"upsert": '
+                '[{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}}',
+                '{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": [{"entity_key": "Rest"}]}}',
+            ),
+            "backends",
+            BACKEND,
+        )
+    )
+
+
+@requires_database
+def test_a_scenarios_roots_are_seeded_and_only_they() -> None:
+    """A scenario of two roots: each has the recipe row the seeding sql steps
+    gave it (its id, its name as the title and the default actor as its
+    creator) and no other root has one, so a primary line of a root the
+    scenario does not name fails on the foreign key from
+    recipe_ref.root_id."""
+    import psycopg
+
+    def missing_root(runner: "Runner") -> None:
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            runner.engine.create_primary(DEFAULT_ACTOR, "Bread", "main")
+
+    run_scenario(
+        read_scenario(
+            format_scenario(
+                '["Soup", "Pie"]',
+                '{"op": "sql", "statement": {"postgres": "SELECT title, '
+                "CASE id WHEN $1::uuid THEN 'Soup' WHEN $2::uuid THEN 'Pie' ELSE id::text END AS id, "
+                "CASE created_by WHEN $3::uuid THEN 'Cook' ELSE created_by::text END AS created_by "
+                'FROM recipe ORDER BY title"}, '
+                '"args": [{"uuid": "Soup"}, {"uuid": "Pie"}, {"uuid": "Cook"}], '
+                '"expect": {"rows": [{"title": "Pie", "id": "Pie", "created_by": "Cook"}, '
+                '{"title": "Soup", "id": "Soup", "created_by": "Cook"}]}}',
+                '{"op": "createPrimary", "root": "Soup", "name": "main"}',
+                '{"op": "createPrimary", "root": "Pie", "name": "main"}',
+            ),
+            "roots",
+            BACKEND,
+        ),
+        missing_root,
+    )
 
 
 @requires_database
 @pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
 def test_scenario(path: Any) -> None:
-    scenario = obj(loads(path.read_text(encoding="utf-8")), "scenario", path.name)
-    assert text(scenario.get("name")) == path.stem, f"{path.name}: the scenario's name is not the file's"
-    steps = scenario.get("steps")
-    if not isinstance(steps, list) or not steps:
-        raise AssertionError(f"{path.name}: a scenario has steps")
-    runner = Runner(create_scratch("vg_scenario_py"))
-    try:
-        for i, value in enumerate(steps):
-            step = obj(value, "step", f"{path.name} step {i}")
-            runner.where = f"{path.stem} step {i} ({text(step.get('op'))})"
-            runner.run(step)
-    finally:
-        runner.close()
+    scenario = read_scenario(path.read_text(encoding="utf-8"), path.name, BACKEND)
+    assert scenario.name == path.stem, f"{path.name}: the scenario's name is not the file's"
+    run_scenario(scenario)
 
 
 class Failure(AssertionError):
@@ -201,6 +473,17 @@ class Runner:
             self.holder.execute("ROLLBACK")
             self.holder = None
         drop_scratch(self.scratch)
+
+    def seed(self, roots: List[str]) -> None:
+        """Gives each root the row a root has on Postgres: a recipe whose id
+        is the root, whose title is the root's name and whose creator is the
+        default actor, all in one statement."""
+        args = [hyphenated(DEFAULT_ACTOR)]
+        values = []
+        for root in roots:
+            args += [hyphenated(root), root]
+            values.append(f"(${len(args) - 1}::uuid, ${len(args)}, $1::uuid)")
+        self.query("INSERT INTO recipe (id, title, created_by) VALUES " + ", ".join(values), args)
 
     def fail(self, message: str) -> Failure:
         return Failure(f"{self.where}: {message}")
@@ -357,7 +640,7 @@ class Runner:
                 commit_id = self.commit_id(text(step.get("commit")))
                 patches = self.adapter.storage(self.client).transact(lambda tx: tx.patches([commit_id]))
             elif op == "sql":
-                rows = self.query(text(step.get("statement")), [self.sql_arg(a) for a in step.get("args") or []])
+                rows = self.query(step["statement"][BACKEND], [self.sql_arg(a) for a in step.get("args") or []])
             else:
                 raise self.fail(f"unknown op {op!r}")
         except Failure:

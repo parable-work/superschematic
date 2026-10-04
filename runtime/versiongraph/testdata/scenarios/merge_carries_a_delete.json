@@ -1,8 +1,8 @@
 {
   "name": "merge_carries_a_delete",
   "description": "A change set deletes an entity and merges back: the target writes the delete as its own row, the merge commit's patch is a DELETE, and the commit materializes without the entity. A second change set that deleted the same entity then merges cleanly and writes nothing.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "seed", "as": "seed"},
     {"op": "save", "ref": "seed", "edits": {

@@ -20,12 +20,22 @@ use superschematic_versiongraph_engine::{
     Release, Resolution, SweepOptions, SweepReport, TreeResult,
 };
 
+/// The backend this runner runs the scenarios on. A step that lists its
+/// backends runs here only when it lists this one, and an sql step runs its
+/// statement for this backend.
+const BACKEND: &str = "postgres";
+
+/// The backends a scenario may name.
+const KNOWN_BACKENDS: [&str; 2] = ["postgres", "sqlite"];
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Scenario {
     name: String,
     #[allow(dead_code)]
     description: String,
+    #[serde(default)]
+    roots: Option<Vec<String>>,
     steps: Vec<Step>,
 }
 
@@ -33,6 +43,7 @@ struct Scenario {
 #[serde(deny_unknown_fields, default)]
 struct Step {
     op: String,
+    backends: Option<Vec<String>>,
     #[serde(rename = "as")]
     as_: String,
     actor: Option<String>,
@@ -60,7 +71,8 @@ struct Step {
     snapshot_every: usize,
     sweep: Option<StepSweep>,
     kind: String,
-    statement: String,
+    #[serde(deserialize_with = "statements")]
+    statement: Option<BTreeMap<String, String>>,
     args: Vec<SqlArg>,
     expect: Expect,
 }
@@ -160,6 +172,42 @@ struct CommitExpect {
     content_hash_of: String,
 }
 
+impl Step {
+    /// Whether the step runs on the backend: a step runs on every backend
+    /// unless it lists the ones it runs on.
+    fn runs_on(&self, backend: &str) -> bool {
+        self.backends
+            .as_ref()
+            .is_none_or(|backends| backends.iter().any(|name| name == backend))
+    }
+}
+
+/// Reads an sql step's statement as an object of one statement per
+/// backend, and refuses any other form, a plain string included. A null
+/// statement is none.
+fn statements<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<BTreeMap<String, String>>, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    let refused = || {
+        serde::de::Error::custom(format!(
+            "a statement is an object of one statement per backend, not {value}"
+        ))
+    };
+    match &value {
+        Value::Null => Ok(None),
+        Value::Object(members) => members
+            .iter()
+            .map(|(name, text)| match text {
+                Value::String(text) => Ok((name.clone(), text.clone())),
+                _ => Err(refused()),
+            })
+            .collect::<Result<_, _>>()
+            .map(Some),
+        _ => Err(refused()),
+    }
+}
+
 /// A member given as `null` is `Some(Value::Null)`; only a missing one is
 /// `None`.
 fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
@@ -242,6 +290,41 @@ impl Runner {
 
     /// A ref named by an earlier step's `as`, or a literal id written
     /// `id:<uuid>`.
+    /// Gives each root the row a root has on Postgres: a recipe whose id is
+    /// the root, whose title is the root's name and whose creator is the
+    /// default actor, all in one statement.
+    async fn seed(&self, roots: &[String]) {
+        let mut args = vec![support::hyphenated(support::DEFAULT_ACTOR)];
+        let mut values = Vec::new();
+        for root in roots {
+            args.push(support::hyphenated(root));
+            args.push(root.clone());
+            values.push(format!(
+                "(${}::uuid, ${}, $1::uuid)",
+                args.len() - 1,
+                args.len()
+            ));
+        }
+        let statement = format!(
+            "INSERT INTO recipe (id, title, created_by) VALUES {}",
+            values.join(", ")
+        );
+        let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = args
+            .iter()
+            .map(|arg| arg as &(dyn tokio_postgres::types::ToSql + Sync))
+            .collect();
+        let types = vec![tokio_postgres::types::Type::TEXT; args.len()];
+        let client = self.store.client().client().await;
+        let prepared = client
+            .prepare_typed(&statement, &types)
+            .await
+            .unwrap_or_else(|e| panic!("prepare {statement}: {e}"));
+        client
+            .execute(&prepared, &params)
+            .await
+            .unwrap_or_else(|e| panic!("seed the roots {roots:?}: {e}"));
+    }
+
     fn ref_id(&self, name: &str) -> String {
         if let Some(literal) = name.strip_prefix("id:") {
             return literal.to_owned();
@@ -577,11 +660,16 @@ impl Runner {
                     .map(|arg| arg as &(dyn tokio_postgres::types::ToSql + Sync))
                     .collect();
                 let types = vec![tokio_postgres::types::Type::TEXT; args.len()];
+                let text = st
+                    .statement
+                    .as_ref()
+                    .and_then(|statements| statements.get(BACKEND))
+                    .unwrap_or_else(|| fail!(self, "the sql step has no {BACKEND} statement"));
                 let client = self.store.client().client().await;
                 let statement = client
-                    .prepare_typed(&st.statement, &types)
+                    .prepare_typed(text, &types)
                     .await
-                    .unwrap_or_else(|e| fail!(self, "prepare {}: {e}", st.statement));
+                    .unwrap_or_else(|e| fail!(self, "prepare {text}: {e}"));
                 if st.expect.rows.is_none() {
                     return client
                         .execute(&statement, &params)
@@ -977,8 +1065,8 @@ fn scenario_files() -> Vec<std::path::PathBuf> {
 
 fn read_scenario(path: &std::path::Path) -> Scenario {
     let text = fs::read_to_string(path).expect("read a scenario");
-    let scenario: Scenario =
-        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let scenario =
+        parse_scenario(&text, BACKEND).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -989,12 +1077,92 @@ fn read_scenario(path: &std::path::Path) -> Scenario {
         "{}: the scenario's name is its file's",
         path.display()
     );
-    assert!(
-        !scenario.steps.is_empty(),
-        "{}: a scenario has steps",
-        path.display()
-    );
     scenario
+}
+
+/// Reads a scenario as the format says (runtime/versiongraph/README.md,
+/// "Scenarios") for a runner of `backend`. It refuses an unknown member, a
+/// scenario with no steps or no roots or one that names a root twice, a
+/// backends list that is empty, names a backend twice or names one no
+/// runner knows, a statement for an unknown backend, and an sql step that
+/// runs on `backend` with no statement for it.
+fn parse_scenario(text: &str, backend: &str) -> Result<Scenario, String> {
+    let scenario: Scenario = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    if scenario.steps.is_empty() {
+        return Err("a scenario has steps".to_owned());
+    }
+    let Some(roots) = &scenario.roots else {
+        return Err("a scenario names its roots".to_owned());
+    };
+    if roots.is_empty() {
+        return Err("a scenario names at least one root".to_owned());
+    }
+    if let Some(root) = repeated(roots) {
+        return Err(format!("the scenario names root {root:?} twice"));
+    }
+    for (i, st) in scenario.steps.iter().enumerate() {
+        check_step(st, backend).map_err(|e| format!("step {i} ({}): {e}", st.op))?;
+    }
+    Ok(scenario)
+}
+
+/// Checks a step's backends and statement.
+fn check_step(st: &Step, backend: &str) -> Result<(), String> {
+    if let Some(backends) = &st.backends {
+        if backends.is_empty() {
+            return Err("backends lists no backend".to_owned());
+        }
+        if let Some(name) = backends
+            .iter()
+            .find(|name| !KNOWN_BACKENDS.contains(&name.as_str()))
+        {
+            return Err(format!("backends lists unknown backend {name:?}"));
+        }
+        if let Some(name) = repeated(backends) {
+            return Err(format!("backends lists {name:?} twice"));
+        }
+    }
+    if let Some(name) = st
+        .statement
+        .iter()
+        .flatten()
+        .map(|(name, _)| name)
+        .find(|name| !KNOWN_BACKENDS.contains(&name.as_str()))
+    {
+        return Err(format!("a statement for unknown backend {name:?}"));
+    }
+    let has_statement = st
+        .statement
+        .as_ref()
+        .is_some_and(|statements| statements.contains_key(backend));
+    if st.op == "sql" && st.runs_on(backend) && !has_statement {
+        return Err(format!("the sql step has no {backend} statement"));
+    }
+    Ok(())
+}
+
+/// A name the list holds twice.
+fn repeated(names: &[String]) -> Option<&String> {
+    names
+        .iter()
+        .enumerate()
+        .find(|(i, name)| names[..*i].contains(name))
+        .map(|(_, name)| name)
+}
+
+/// Seeds the scenario's roots and runs each step that runs on the runner's
+/// backend, in order.
+async fn run_scenario(runner: &mut Runner, scenario: &Scenario) {
+    runner
+        .seed(scenario.roots.as_deref().unwrap_or_default())
+        .await;
+    for (i, step) in scenario.steps.iter().enumerate() {
+        if !step.runs_on(BACKEND) {
+            continue;
+        }
+        runner.step = format!("{} step {i} ({})", scenario.name, step.op);
+        runner.run(step).await;
+    }
 }
 
 /// Every scenario file reads as the format says, whether or not a database
@@ -1024,10 +1192,7 @@ async fn scenarios() {
         let name = scenario.name.clone();
         let outcome = tokio::spawn(async move {
             let mut runner = Runner::new(&dsn).await;
-            for (i, step) in scenario.steps.iter().enumerate() {
-                runner.step = format!("{} step {i} ({})", scenario.name, step.op);
-                runner.run(step).await;
-            }
+            run_scenario(&mut runner, &scenario).await;
             if let Some(holder) = runner.take_holder() {
                 let _ = holder.rollback().await;
             }
@@ -1057,4 +1222,239 @@ async fn scenarios() {
         files.len(),
         failures.join("\n")
     );
+}
+
+/// A scenario of the given roots (raw JSON, or "" for none) and steps.
+fn format_scenario(roots: &str, steps: &[&str]) -> String {
+    let member = if roots.is_empty() {
+        String::new()
+    } else {
+        format!(r#""roots": {roots}, "#)
+    };
+    format!(
+        r#"{{"name": "format", "description": "", {member}"steps": [{}]}}"#,
+        steps.join(", ")
+    )
+}
+
+/// Scenarios that each break one rule of the format are refused, with an
+/// error that says which, and ones that keep them read.
+#[test]
+fn scenario_format() {
+    const CREATE_PRIMARY: &str = r#"{"op": "createPrimary", "root": "Bread", "name": "main"}"#;
+    let unknown_member = format!(
+        r#"{{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": [{CREATE_PRIMARY}]}}"#
+    );
+    // Each case's name, its text, and a part of the error it is refused
+    // with ("" when it reads).
+    let cases: Vec<(&str, String, &str)> = vec![
+        (
+            "a statement per backend",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}"#],
+            ),
+            "",
+        ),
+        (
+            "a plain string statement",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "sql", "statement": "SELECT 1"}"#],
+            ),
+            "a statement is an object of one statement per backend",
+        ),
+        (
+            "a statement that is not text",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "sql", "statement": {"postgres": 1}}"#],
+            ),
+            "a statement is an object of one statement per backend",
+        ),
+        (
+            "an sql step without the runner's statement",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "sql", "statement": {"sqlite": "SELECT 1"}}"#],
+            ),
+            "the sql step has no postgres statement",
+        ),
+        (
+            "an sql step with no statement",
+            format_scenario(r#"["Bread"]"#, &[r#"{"op": "sql"}"#]),
+            "the sql step has no postgres statement",
+        ),
+        (
+            "a statement for an unknown backend",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "sql", "statement": {"postgres": "SELECT 1", "mysql": "SELECT 1"}}"#],
+            ),
+            r#"a statement for unknown backend "mysql""#,
+        ),
+        (
+            "an sql step for another backend, without the runner's statement",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "sql", "backends": ["sqlite"], "statement": {"sqlite": "SELECT 1"}}"#],
+            ),
+            "",
+        ),
+        (
+            "backends listing the runner's",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[
+                    r#"{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["sqlite", "postgres"]}"#,
+                ],
+            ),
+            "",
+        ),
+        (
+            "backends listing an unknown backend",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[
+                    r#"{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "mysql"]}"#,
+                ],
+            ),
+            r#"backends lists unknown backend "mysql""#,
+        ),
+        (
+            "an empty backends",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[r#"{"op": "createPrimary", "root": "Bread", "name": "main", "backends": []}"#],
+            ),
+            "backends lists no backend",
+        ),
+        (
+            "backends listing a backend twice",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[
+                    r#"{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "postgres"]}"#,
+                ],
+            ),
+            r#"backends lists "postgres" twice"#,
+        ),
+        (
+            "no roots",
+            format_scenario("", &[CREATE_PRIMARY]),
+            "a scenario names its roots",
+        ),
+        (
+            "null roots",
+            format_scenario("null", &[CREATE_PRIMARY]),
+            "a scenario names its roots",
+        ),
+        (
+            "empty roots",
+            format_scenario("[]", &[CREATE_PRIMARY]),
+            "a scenario names at least one root",
+        ),
+        (
+            "a root named twice",
+            format_scenario(r#"["Bread", "Soup", "Bread"]"#, &[CREATE_PRIMARY]),
+            r#"the scenario names root "Bread" twice"#,
+        ),
+        (
+            "no steps",
+            format_scenario(r#"["Bread"]"#, &[]),
+            "a scenario has steps",
+        ),
+        (
+            "an unknown scenario member",
+            unknown_member,
+            "unknown field `backend`",
+        ),
+        (
+            "an unknown step member",
+            format_scenario(
+                r#"["Bread"]"#,
+                &[
+                    r#"{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}"#,
+                ],
+            ),
+            "unknown field `backend`",
+        ),
+    ];
+    for (name, text, refused) in cases {
+        match parse_scenario(&text, BACKEND) {
+            Ok(_) if refused.is_empty() => {}
+            Ok(_) => panic!("{name}: read, want it refused with {refused:?}"),
+            Err(error) if refused.is_empty() => panic!("{name}: refused: {error}"),
+            Err(error) => assert!(
+                error.contains(refused),
+                "{name}: refused with {error:?}, want {refused:?}"
+            ),
+        }
+    }
+}
+
+/// A scenario whose steps list their backends: a save listed for SQLite
+/// alone is skipped and leaves no row, and a save listed for Postgres too
+/// writes its row.
+#[tokio::test(flavor = "multi_thread")]
+async fn scenario_backends() {
+    let Some(dsn) = support::database("scenario_backends") else {
+        return;
+    };
+    let scenario = parse_scenario(
+        &format_scenario(
+            r#"["Bread"]"#,
+            &[
+                r#"{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}"#,
+                r#"{"op": "branch", "from": "main", "name": "mix", "as": "mix"}"#,
+                r#"{"op": "save", "ref": "mix", "backends": ["sqlite"], "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}}"#,
+                r#"{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}}"#,
+                r#"{"op": "save", "ref": "mix", "backends": ["sqlite", "postgres"], "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}}"#,
+                r#"{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": [{"entity_key": "Rest"}]}}"#,
+            ],
+        ),
+        BACKEND,
+    )
+    .expect("the scenario reads");
+    let mut runner = Runner::new(&dsn).await;
+    run_scenario(&mut runner, &scenario).await;
+}
+
+/// A scenario of two roots: each has the recipe row the seeding sql steps
+/// gave it (its id, its name as the title and the default actor as its
+/// creator) and no other root has one, so a primary line of a root the
+/// scenario does not name fails on the foreign key from
+/// recipe_ref.root_id.
+#[tokio::test(flavor = "multi_thread")]
+async fn scenario_roots() {
+    let Some(dsn) = support::database("scenario_roots") else {
+        return;
+    };
+    let scenario = parse_scenario(
+        &format_scenario(
+            r#"["Soup", "Pie"]"#,
+            &[
+                r#"{"op": "sql", "statement": {"postgres": "SELECT title, CASE id WHEN $1::uuid THEN 'Soup' WHEN $2::uuid THEN 'Pie' ELSE id::text END AS id, CASE created_by WHEN $3::uuid THEN 'Cook' ELSE created_by::text END AS created_by FROM recipe ORDER BY title"},
+                  "args": [{"uuid": "Soup"}, {"uuid": "Pie"}, {"uuid": "Cook"}],
+                  "expect": {"rows": [{"title": "Pie", "id": "Pie", "created_by": "Cook"}, {"title": "Soup", "id": "Soup", "created_by": "Cook"}]}}"#,
+                r#"{"op": "createPrimary", "root": "Soup", "name": "main"}"#,
+                r#"{"op": "createPrimary", "root": "Pie", "name": "main"}"#,
+            ],
+        ),
+        BACKEND,
+    )
+    .expect("the scenario reads");
+    let mut runner = Runner::new(&dsn).await;
+    run_scenario(&mut runner, &scenario).await;
+    match runner
+        .engine
+        .create_primary(support::DEFAULT_ACTOR, "Bread", "main")
+        .await
+    {
+        Err(error) if error.to_string().contains("SQLSTATE 23503") => {}
+        other => panic!(
+            "a primary line of a root the scenario does not name: {:?}, want a foreign key violation",
+            other.map(|r| r.id)
+        ),
+    }
 }

@@ -1,8 +1,8 @@
 {
   "name": "lifecycle",
   "description": "A primary line written only through merges: a first draft merged as a tagged commit, two change sets merged back (one cleanly, one with a conflict a resolution settles), a parent deleted with its children, a revert to the first published version made on a change set and merged, and the line's history.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main",
       "expect": {"ref": {"version": 1, "name": "main", "sealed": false, "parent": null, "base": null, "head": null}}},
     {"op": "branch", "from": "main", "name": "first draft", "as": "draft",
