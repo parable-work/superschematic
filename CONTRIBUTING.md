@@ -116,7 +116,7 @@ of them; run them locally before pushing.
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
 | `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript` and `runtime/engine-workqueue/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, the engine's and the work-queue package's tests run under Node.js and Bun, and so does `examples/engine-notes`'s end-to-end test (`scripts/check.sh` there) |
 | `make python`         | `runtime/schema/python` pytest; `runtime/versiongraph/python` fmt, clippy `-D warnings`, the PyO3 extension built by uv with maturin, and every core vector and the engine's tests that need no database through the package under the default Python and 3.9 |
-| `make rust`           | `runtime/http/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test |
+| `make rust`           | `runtime/http/rust`, `runtime/schema/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test; the schema runtime's and the version-graph crates' tests again with the serde_json features superscalar turns on |
 | `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
 | `make docs`           | Starlight site in `docs/` (`npm ci && npm run build`)                |
 | `make scrub`          | No leftover mentions, identifiers or planning ids from the source tree this repository was extracted from, dot-paths such as `.github/` included |

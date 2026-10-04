@@ -47,6 +47,8 @@ Version sites (relative to the repository root):
                                       core it builds on
   runtime/http/rust/Cargo.toml        [package] version
   runtime/http/rust/Cargo.lock        the superschematic-http-runtime package
+  runtime/schema/rust/Cargo.toml      [package] version
+  runtime/schema/rust/Cargo.lock      the superschematic-schema-runtime package
   runtime/versiongraph/rust/Cargo.toml
                                       [package] version
   runtime/versiongraph/rust/Cargo.lock
@@ -267,6 +269,20 @@ def sites():
         (
             ROOT / "runtime" / "http" / "rust" / "Cargo.lock",
             [(r'(\[\[package\]\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "schema" / "rust" / "Cargo.toml",
+            [(r'(\[package\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "schema" / "rust" / "Cargo.lock",
+            [(r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
             "semver",
         )
     )

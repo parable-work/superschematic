@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; schema-level operations; the runner that runs reactions and schedules; and the core's Dependencies, Links, Rollups, Search and Reactions behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; schema-level operations; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search and Reactions behaviors.
 sidebar:
   order: 7
 ---
@@ -27,7 +27,7 @@ schema that composes one until a deployment registers that package.
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
-| `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission | | [The engine](/superschematic/guides/engine/#workflow) |
+| `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
 | `Comments` | comments on the instance | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
@@ -182,6 +182,37 @@ engine.runner.stop();      // engine.close() stops it too
 HTTP or MCP, since it spans every namespace; expose it on a health route
 of your own.
 
+## Outcomes
+
+A `Workflow` state that no transition leaves is terminal, and a terminal
+state has an outcome: `success`, `failure` or `neutral`. Name the ones
+that are not successes in `outcomes`:
+
+```json
+{ "name": "Workflow", "config": {
+    "states": ["todo", "doing", "passed", "failed", "cancelled"],
+    "transitions": [
+      { "from": "todo", "to": "doing" },
+      { "from": "doing", "to": "passed" },
+      { "from": "doing", "to": "failed" },
+      { "from": "todo", "to": "cancelled" } ],
+    "outcomes": { "failed": "failure", "cancelled": "neutral" } } }
+```
+
+- A terminal state `outcomes` does not name is a `success`, so a config
+  without `outcomes` behaves as it always did.
+- A key that is not a state, or names a state a transition leaves, is
+  refused when the schema is defined.
+- `Workflow` itself ignores outcomes. The behaviors that look at other
+  instances read them: a blocker that failed does not release its
+  dependents, and a rollup or a reaction can tell children that
+  succeeded from children that failed.
+- `stateOutcome(config, state)` from `@superschematic/engine` gives a
+  state's outcome for a config as `engine.schemas.behaviors` returns it,
+  and `undefined` for a state that is not terminal.
+- A new version may change outcomes. Blockers and rollups read the new
+  outcome at their next read; nothing that already moved is moved back.
+
 ## Dependencies
 
 Blockers between instances, which hold up the type's Workflow. A task
@@ -189,8 +220,8 @@ cannot be done while a task it waits on is open.
 
 | | |
 | --- | --- |
-| Config | `schemas`: the schemas a blocker may belong to, each composing Workflow (the type's own when absent); `gatedStates`: the terminal states a transition into waits on (every terminal state when absent) |
-| Field | `blocked`: whether any blocker is not yet in a terminal state of its own Workflow |
+| Config | `schemas`: the schemas a blocker may belong to, each composing Workflow (the type's own when absent); `gatedStates`: the states a transition into waits on, terminal or not (every terminal state when absent); `satisfiedBy`: the outcomes that finish a blocker (`["success"]` when absent) |
+| Field | `blocked`: whether any blocker is not yet finished: in a terminal state of its own Workflow whose outcome `satisfiedBy` lists |
 | Operations | `addBlocker({ schema?, id })`, `removeBlocker({ schema?, id })`, and the read-only `listBlockers` and `listDependents`, which page with `limit` and `cursor` |
 | Guard | a transition into a gated state while `blocked` is `vetoed` (409), naming the open blockers |
 
@@ -201,6 +232,15 @@ engine.instances.get(alice, 'Task', 't1')?.data;
 // { title: 't1', status: 'todo', blocked: true }
 ```
 
+- A blocker that ends in a `failure` or `neutral` state stays open, so a
+  failed check holds up the step after it. Remove it with `removeBlocker`
+  to go on without it, or list `neutral` in `satisfiedBy` to go on past
+  cancelled work.
+- Gate a state that is not terminal to hold the start of work:
+  `gatedStates: ["doing", "done"]` refuses `todo` to `doing` while a
+  blocker is open. An instance already in `doing` can still take a
+  blocker, which then holds up its move to `done`; one in a terminal
+  gated state takes no open blocker.
 - A cycle and an instance blocking itself are refused.
 - `blocked` is computed at each read, so a blocker finishing shows at the
   dependent's next read, with no event on the dependent.
@@ -245,7 +285,7 @@ count of tasks, its tasks by status, whether they have all finished.
 
 | | |
 | --- | --- |
-| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates? }`. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`; `countBy`, `sum`, `min` and `max` take a `field`; only `all` and `any` take `gatedStates` |
+| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`; `countBy`, `sum`, `min` and `max` take a `field`; only `all` and `any` take `gatedStates` and `outcomes` |
 | Field | `rollups`: `{ <name>: value }`, computed at each read |
 | Guard | a transition into a state an `all` or `any` rollup gates is `vetoed` unless the rollup holds |
 
@@ -269,8 +309,13 @@ and cannot move to `done` until every task is done or dropped.
 | `countBy` | `{ <value>: count }` over a string, enum or boolean field | `{}` |
 | `sum` | the sum of a number field | `0` |
 | `min`, `max` | the least or greatest value | absent |
-| `all` | whether every one is in a terminal state of its Workflow | `true` |
+| `all` | whether every one is in a terminal state of its Workflow, with an outcome `outcomes` lists when given | `true` |
 | `any` | whether some one is | `false` |
+
+`"tasksSucceeded": { "schema": "tasks", "link": "project", "function": "all", "outcomes": ["success"], "gatedStates": ["done"] }`
+keeps a project from `done` while any of its tasks failed, where
+`tasksFinished` above lets it through once they have all ended, however
+they ended.
 
 - Nothing is stored and no event is written: a linked instance's change
   shows at this instance's next read.
@@ -333,14 +378,18 @@ Rules that move Workflow statuses after a change commits. They need
 
 | | |
 | --- | --- |
-| Config | `rules`: 1 to 64, each `{ when, then }`. `when` is `{ enters: <state> }` or `{ allTerminal: { schema, link } }`; `then` is `{ transition: <state>, link? }` |
+| Config | `rules`: 1 to 64, each `{ when, then }`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }` or `{ anyTerminal: { schema, link, outcomes } }`; `then` is `{ transition: <state>, link? }` |
 | Fields, operations | none |
 
 - `enters` fires when this instance's status becomes the state, by a
   create or a transition.
 - `allTerminal` fires when an instance of `schema` that links here
   through `link` changes or goes, and every such instance is in a
-  terminal state of its Workflow.
+  terminal state of its Workflow, with an outcome `outcomes` lists when
+  it is given.
+- `anyTerminal` fires when an instance of `schema` that links here
+  through `link` enters a terminal state whose outcome `outcomes` lists,
+  or is linked here while in one.
 - `then` moves this instance, or the one its `link` points to, to the
   state, through Workflow's `transition`, so every guard still runs.
 
@@ -362,6 +411,22 @@ also composes `Links` with a `project` link. When a task moves to
 `doing`, the runner's next pass moves its project to `active`, and the
 project's event records `actor: "runner"` and
 `cause: { behavior: "Reactions", event: <the task's cursor>, depth: 1 }`.
+
+A run that completes when all its steps pass and fails when one fails
+puts both rules on the run's own schema:
+
+```json
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "allTerminal": { "schema": "steps", "link": "run", "outcomes": ["success"] } }, "then": { "transition": "completed" } },
+    { "when": { "anyTerminal": { "schema": "steps", "link": "run", "outcomes": ["failure"] } }, "then": { "transition": "failed" } } ] } }
+```
+
+The first rule completes the run only when every step has succeeded, so
+a run never completes with a failed step, whichever step finishes last
+and whenever the runner gets to it; the second fails it. Prefer this to
+a rule on the step that fails its run beside an `allTerminal` without
+`outcomes`: the two run in different subscriptions, and the last step
+failing could then complete the run or fail it, by which ran first.
 
 - A rule acts only where it can. A target already in the state, with no
   transition to it, or whose guards veto the move (an open blocker, say)

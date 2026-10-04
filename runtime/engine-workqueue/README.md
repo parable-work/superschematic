@@ -410,8 +410,10 @@ made the change, who therefore needs `write` on the child schema and
 parent, every child, link and edge roll back together. Children come in
 an order where each follows its blockers, ties in the map's order. A
 child schema that composes `Queue` makes the children claimable work:
-`claimNext` claims each once its blockers are in a terminal state, so the
-steps are claimed in the order their edges give.
+`claimNext` claims each once its blockers have finished, in a terminal
+state whose outcome the child's `Dependencies` `satisfiedBy` lists (a
+success by default), so the steps are claimed in the order their edges
+give, and the steps after one that failed are not claimed.
 
 Inline `steps` are stamped in the instance's create. A create sets no
 link, since a link is set by `Links.link` on an instance that exists, so
