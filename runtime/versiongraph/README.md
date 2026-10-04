@@ -141,7 +141,7 @@ prune functions hold the same facts.
 
 | Member | Meaning |
 |---|---|
-| `retentionDays` | Optional. How many days of history pruning keeps, `@versioned({ retentionDays })`: a positive integer. Absent for no retention, and then nothing is pruned. |
+| `retentionDays` | Optional. How many days of history pruning keeps, `@versioned({ retentionDays })`: an integer from 1 to 2147483647, the largest Postgres `INTEGER`, which the prune function's `retention_days` is. Absent for no retention, and then nothing is pruned. |
 | `exclude` | The columns every history image leaves out, `@versioned({ exclude })`, in the order it names them; `[]` for none. Each is a column of the kind that is not content (it is `excluded` or the `author`) and is not one of the role columns a history image is found and read by (`key`, `id`, `ref`, `root`, `tombstone`, `version`), and none is named twice. |
 | `actor` | Optional. The column a delete's image names its actor in: `deleted_by` when the kind has it, else `updated_by`. Absent when the kind has neither, or when that column is in `exclude`, since a delete's image leaves it out too. It is a column of the kind, not in `exclude`, and not one of those role columns; it may be the `author`. |
 

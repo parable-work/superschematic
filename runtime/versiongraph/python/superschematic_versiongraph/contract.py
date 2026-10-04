@@ -129,8 +129,8 @@ class KindHistory(_KindHistoryRequired, total=False):
     core checks it against the kind's columns and does not read it otherwise."""
 
     retentionDays: int
-    """How many days of history pruning keeps, a positive integer; absent for
-    no retention."""
+    """How many days of history pruning keeps, an integer from 1 to
+    2147483647; absent for no retention."""
     actor: str
     """The column a delete's image names its actor in, which history keeps;
     absent for none."""

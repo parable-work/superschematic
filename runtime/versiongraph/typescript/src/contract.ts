@@ -49,7 +49,7 @@ export interface ParentEdge {
  * otherwise.
  */
 export interface KindHistory {
-  /** How many days of history pruning keeps, a positive integer; absent for no retention. */
+  /** How many days of history pruning keeps, an integer from 1 to 2147483647; absent for no retention. */
   retentionDays?: number;
   /** The columns every history image leaves out: none is content, nor a role column other than the author. */
   exclude: string[];

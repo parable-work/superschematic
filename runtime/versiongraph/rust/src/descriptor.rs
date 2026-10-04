@@ -13,6 +13,11 @@ use crate::error::Error;
 /// The descriptor format this core reads.
 pub const VERSION: u64 = 3;
 
+/// The longest retention a kind's history may keep, in days: the largest
+/// Postgres `INTEGER`, which the prune function's `retention_days` is, so
+/// every adapter can honour any retention the core accepts.
+pub const MAX_RETENTION_DAYS: u64 = 2_147_483_647;
+
 /// The descriptor as it crosses the boundary.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -524,17 +529,21 @@ fn history_roles(kind: &Kind) -> impl Iterator<Item = (&'static str, &str)> {
     .chain(kind.root.as_deref().map(|c| ("root", c)))
 }
 
-/// A retention is a positive whole number of days. An excluded column is
-/// one of the kind's columns, once, and is not content, since a commit is
-/// read back from history images; nor is it a role column a history image
-/// is found and read by. The actor is a column of the kind that history
-/// keeps, and is not one of those role columns either.
+/// A retention is a whole number of days from 1 to [`MAX_RETENTION_DAYS`].
+/// An excluded column is one of the kind's columns, once, and is not
+/// content, since a commit is read back from history images; nor is it a
+/// role column a history image is found and read by. The actor is a column
+/// of the kind that history keeps, and is not one of those role columns
+/// either.
 fn check_history(kind: &Kind, history: &HistoryDescriptor) -> Result<(), Error> {
     let name = &kind.name;
     if let Some(days) = &history.retention_days {
-        if days.as_u64().is_none_or(|days| days == 0) {
+        if days
+            .as_u64()
+            .is_none_or(|days| days == 0 || days > MAX_RETENTION_DAYS)
+        {
             return Err(Error::descriptor(format!(
-                "descriptor: kind {name:?} history retentionDays is {days}, not a positive integer"
+                "descriptor: kind {name:?} history retentionDays is {days}, not an integer from 1 to {MAX_RETENTION_DAYS}"
             )));
         }
     }

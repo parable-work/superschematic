@@ -147,7 +147,7 @@
   "expect": {
     "error": {
       "code": "invalid_descriptor",
-      "message": "descriptor: kind \"step\" history retentionDays is -30, not a positive integer"
+      "message": "descriptor: kind \"step\" history retentionDays is -30, not an integer from 1 to 2147483647"
     }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "descriptor_rejects_retention_that_is_not_a_number",
+  "name": "descriptor_rejects_retention_beyond_a_postgres_integer",
   "op": "validate",
   "input": {
     "descriptor": {
@@ -34,7 +34,7 @@
           "history": {
             "actor": "updated_by",
             "exclude": [],
-            "retentionDays": "30"
+            "retentionDays": 2147483648
           },
           "historyTable": "step_history",
           "id": "id",
@@ -147,7 +147,7 @@
   "expect": {
     "error": {
       "code": "invalid_descriptor",
-      "message": "descriptor: kind \"step\" history retentionDays is \"30\", not an integer from 1 to 2147483647"
+      "message": "descriptor: kind \"step\" history retentionDays is 2147483648, not an integer from 1 to 2147483647"
     }
   }
 }
