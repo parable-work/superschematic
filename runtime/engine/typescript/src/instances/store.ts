@@ -8,10 +8,15 @@ validated after the merge. Each write appends its event in the same
 transaction (events/log.ts).
 
 The behaviors of the live version run with every call (behaviors/): a
-create checks the parameters it gives them, asks their guards, then runs
-their initialize, each with its own parameters, then their afterChange;
-an update and a delete ask their guards first, each with its entry of
-the caller's preconditions, and run afterChange after; a read adds the
+create and an update ask their validate about the fields the write would
+store once the live version accepts them, whose issues refuse it as the
+live version's do; a create checks the parameters it gives them, asks
+their guards, then runs their initialize, each with its own parameters,
+then their afterChange; an update and a delete ask their guards first,
+each with its entry of the caller's preconditions, and run afterChange
+after. The preconditions are checked against their schemas with the
+call's other arguments, before the instance is read, so before any
+validate, and only a guard judges what one asserts. A read adds the
 fields they declare beside the instance's own, which are theirs to
 change: a create or an update that sets one is refused (readOnly).
 invoke calls one of their operations: it checks the parameters, asks the
@@ -42,7 +47,7 @@ import type { PermissionMatcher } from '@superschematic/http-runtime';
 
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
 import type { BoundBehavior } from '../behaviors/composition.js';
-import type { FrozenJSON, GuardRequest, InstanceChange, Reference } from '../behaviors/behavior.js';
+import type { FrozenJSON, GuardRequest, InstanceChange, Reference, ValidationRequest } from '../behaviors/behavior.js';
 import {
   Chain,
   Execution,
@@ -50,6 +55,7 @@ import {
   checkCreateParams,
   checkParams,
   checkPreconditions,
+  validationIssues,
   vetoOf,
   type Preconditions,
   type Reach,
@@ -232,10 +238,11 @@ export class InstanceStore {
   }
 
   // insert creates an instance in the chain's namespace inside the
-  // chain's transaction: validate the data and the behaviors' parameters,
-  // insert, every guard, every initialize with its parameters, every
-  // afterChange, then the create event, which records the chain's cause.
-  // The policy has been asked.
+  // chain's transaction: validate the data, against the live version and
+  // then the behaviors' validate, and the behaviors' parameters, insert,
+  // every guard, every initialize with its parameters, every afterChange,
+  // then the create event, which records the chain's cause. The policy has
+  // been asked.
   private insert(chain: Chain, schema: string, id: string, data: unknown, behaviors: unknown): InstanceRecord {
     const namespace = chain.namespace;
     const subject = chain.principal.subject;
@@ -243,6 +250,7 @@ export class InstanceStore {
       const record = this.live(namespace, schema);
       const runtime = this.catalog.runtimeOf(record);
       this.validate(namespace, record, runtime, data);
+      this.validateBehaviors(chain, record, runtime, id, { kind: 'create', data: JSON.parse(JSON.stringify(data)) as FrozenJSON });
       const params = checkCreateParams(runtime.composition, schema, behaviors);
       const json = JSON.stringify(data);
       const seq = nextSeq(this.storage, namespace, schema, id);
@@ -339,6 +347,11 @@ export class InstanceStore {
         const current = JSON.parse(String(row.data)) as Record<string, unknown>;
         const merged = mergePatch(current, patch) as Record<string, unknown>;
         this.validate(namespace, record, runtime, merged);
+        this.validateBehaviors(chain, record, runtime, id, {
+          kind: 'update',
+          before: JSON.parse(String(row.data)) as FrozenJSON,
+          after: JSON.parse(JSON.stringify(merged)) as FrozenJSON,
+        });
         if (jsonEqual(merged, current)) {
           return this.read(chain, runtime, record, row);
         }
@@ -872,6 +885,16 @@ export class InstanceStore {
     const issues = runtime.validator.validate(data);
     if (issues.length > 0) {
       throw new InstanceValidationError(namespace, record.name, record.version as number, issues);
+    }
+  }
+
+  // validateBehaviors asks each behavior's validate about the own fields a
+  // write would store, which the live version accepts; their issues refuse
+  // the write as the live version's do.
+  private validateBehaviors(chain: Chain, record: SchemaRecord, runtime: VersionRuntime, id: string, request: ValidationRequest): void {
+    const issues = validationIssues(runtime, chain, { schema: record.name, version: record.version as number, id }, request);
+    if (issues.length > 0) {
+      throw new InstanceValidationError(chain.namespace, record.name, record.version as number, issues);
     }
   }
 

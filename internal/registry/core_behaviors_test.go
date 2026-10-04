@@ -10,7 +10,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
@@ -98,6 +98,17 @@ func TestCoreBehaviors(t *testing.T) {
 		t.Errorf("Budget: config required %v, requires %v; Retries: config required %v, requires %v; want true, none, true, [Workflow]",
 			budget.ConfigRequired(), budget.Requires, retries.ConfigRequired(), retries.Requires)
 	}
+	// Constants and Variants judge the fields a write stores: no field, no
+	// operation, no requirement, and no veto code or precondition, since
+	// what they refuse is an issue at a field (invalid_instance).
+	constants, _ := reg.Behavior("Constants")
+	variants, _ := reg.Behavior("Variants")
+	for _, b := range []Behavior{constants, variants} {
+		if b.Package != EnginePackage || !b.ConfigRequired() || len(b.Requires) != 0 || len(b.Fields) != 0 || len(b.Operations) != 0 ||
+			len(b.Vetoes) != 0 || len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
+			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
+		}
+	}
 	// Every work-queue operation writes but countClaimable and checkReserve,
 	// which read; claimNext, countClaimable and expireHolder are schema-level.
 	reads := []string{"countClaimable", "checkReserve"}
@@ -137,7 +148,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{queue, []string{"not_claimable", "blocked", "claim_required"}},
 		{presence, []string{"no_principal", "not_principal", "principal_fixed"}},
 		{budget, []string{"over_limit", "not_leased", "scope_moved", "scope_reserved", "below_committed", "exceeds_reservation", "not_configured"}},
-		{blueprint, []string{"stamped", "no_dependencies", "no_revision", "unreadable", "invalid_steps"}},
+		{blueprint, []string{"stamped", "no_dependencies", "not_constant", "no_revision", "unreadable", "invalid_steps"}},
 	} {
 		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
 			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
@@ -246,6 +257,23 @@ func TestCoreBehaviors(t *testing.T) {
 		{reactions, `{"rules": [{"when": {"anyTerminal": {"schema": "steps", "link": "run", "outcomes": []}}, "then": {"transition": "failed"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "steps", "link": "run", "outcomes": ["passed"]}}, "then": {"transition": "completed"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "steps", "link": "run"}, "anyTerminal": {"schema": "steps", "link": "run", "outcomes": ["failure"]}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{constants, `{"fields": ["kind", "key"]}`, ""},
+		{constants, `{"fields": ["kind"], "permission": "steps.rename"}`, ""},
+		{constants, ``, "behavior Constants config: "},
+		{constants, `{"fields": []}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind", "kind"]}`, "behavior Constants config: "},
+		{constants, `{"fields": [""]}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind"], "permission": ""}`, "behavior Constants config: "},
+		{constants, `{"fields": ["kind"], "roles": ["admin"]}`, "behavior Constants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult", "review": "ReviewResult"}}`, ""},
+		{variants, ``, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind"}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"": "VerifyResult"}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": ""}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": ["VerifyResult"]}}`, "behavior Variants config: "},
+		{variants, `{"field": "", "by": "kind", "types": {"verify": "VerifyResult"}}`, "behavior Variants config: "},
+		{variants, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult"}, "otherwise": "AnyResult"}`, "behavior Variants config: "},
 		{lease, ``, ""},
 		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "sweepMs": 2000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
 			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},

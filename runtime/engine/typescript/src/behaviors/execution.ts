@@ -32,6 +32,15 @@ each behavior's preconditionSchema (checkPreconditions) and handed to
 that behavior's guard as its request's precondition; a request a
 behavior's own code makes carries none.
 
+Every write of an instance's own fields, a create's, an update's and an
+operation's update() alike, asks each behavior's validate about the
+fields it would store once the live version accepts them
+(validationIssues), before any guard; their issues refuse it as the live
+version's do, and validateUpdate() reports them. A call's preconditions
+are its arguments, checked with them before the instance is read, so
+before any validate; what one asserts is its guard's to judge, after
+every validate, and validate never sees it.
+
 What a behavior reaches beyond its instance goes through the Reach, which
 the instance store implements: reads, invokes, creates and references
 there ask the access policy as the chain's principal (D16, amended), and
@@ -88,6 +97,8 @@ import type {
   SchemaContext,
   SchemaOperationHandler,
   Schemas,
+  ValidationContext,
+  ValidationRequest,
   WorkContext,
   WritableColumns,
 } from './behavior.js';
@@ -111,6 +122,8 @@ export type Preconditions = ReadonlyMap<string, FrozenJSON>;
 /** Checks an instance's own fields against the live version (registry/validator.ts). */
 export interface InstanceValidator {
   validate(value: unknown): ValidationIssue[];
+  /** Checks a value against one of the document's types besides the instance type, with issues under path. */
+  validateType(type: string, value: unknown, path: string): ValidationIssue[];
 }
 
 /** What running a version needs: its behaviors, their storage and its validator. */
@@ -467,7 +480,8 @@ export class Execution {
 
   // merge applies a behavior's merge patch to a copy of the instance's own
   // fields and lists what update() would refuse: a behavior's field, then
-  // whatever the live version refuses in the result.
+  // whatever the live version refuses in the result, then whatever the
+  // behaviors' validate refuses in it.
   private merge(from: BoundBehavior, patch: unknown): { patch: Record<string, unknown>; merged: Record<string, unknown>; issues: ValidationIssue[] } {
     const copied = jsonCopy(patch);
     if (!('value' in copied) || !isPlainObject(copied.value)) {
@@ -482,7 +496,15 @@ export class Execution {
       }
     }
     const merged = mergePatch(this.data, value) as Record<string, unknown>;
-    return { patch: value, merged, issues: issues.length > 0 ? issues : this.runtime.validator.validate(merged) };
+    if (issues.length > 0) {
+      return { patch: value, merged, issues };
+    }
+    const own = this.runtime.validator.validate(merged);
+    if (own.length > 0) {
+      return { patch: value, merged, issues: own };
+    }
+    const request: ValidationRequest = { kind: 'update', before: this.data, after: freezeCopy(merged), caller: from.behavior.name };
+    return { patch: value, merged, issues: validationIssues(this.runtime, this.chain, this.target, request) };
   }
 
   // frozen freezes a view or a context whose data reads the instance's own
@@ -942,6 +964,72 @@ function checkResult(operation: OperationSpec, result: unknown): unknown {
     throw new BehaviorError(operation.behavior.name, `operation ${operation.name} returned a result its resultSchema refuses: ${detail}`);
   }
   return value;
+}
+
+/**
+ * validationIssues asks every behavior's validate, in list order, about
+ * the instance's own fields a write would store, which the live version
+ * accepts, and returns their issues together. Each validate gets a
+ * context with the config, the call, can() and checkType(), which checks
+ * a value against a type its checkedTypes names.
+ */
+export function validationIssues(runtime: Runtime, chain: Chain, target: ExecutionTarget, request: ValidationRequest): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const frozen = deepFreeze(request);
+  for (const bound of runtime.composition.behaviors) {
+    const validate = bound.behavior.implementation.validate;
+    if (!validate) {
+      continue;
+    }
+    const name = bound.behavior.name;
+    const context: ValidationContext<unknown> = Object.freeze({
+      behavior: name,
+      config: bound.config,
+      namespace: chain.namespace,
+      schema: target.schema,
+      version: target.version,
+      id: target.id,
+      principal: chain.principal,
+      now: chain.now,
+      can: (permission: string) => can(chain, name, permission),
+      checkType: (type: string, value: unknown, path: string) => {
+        if (typeof type !== 'string' || !bound.checked.includes(type)) {
+          throw new BehaviorError(
+            name,
+            `checkType: ${String(type)} is not a type its checkedTypes names (${bound.checked.length > 0 ? bound.checked.join(', ') : 'none'})`
+          );
+        }
+        if (typeof path !== 'string') {
+          throw new BehaviorError(name, 'checkType takes the path of the value: a string');
+        }
+        return runtime.validator.validateType(type, value, path);
+      },
+    });
+    const answer: unknown = declaredVetoes(runtime.composition, () => validate.call(bound.behavior.implementation, context, frozen));
+    synchronous(name, 'validate', answer);
+    issues.push(...returnedIssues(name, answer));
+  }
+  return issues;
+}
+
+// returnedIssues reads what a validate returned: a list of issues, or
+// nothing.
+function returnedIssues(behavior: string, answer: unknown): ValidationIssue[] {
+  if (answer === undefined || answer === null) {
+    return [];
+  }
+  const shaped = (issue: unknown): issue is ValidationIssue =>
+    typeof issue === 'object' &&
+    issue !== null &&
+    typeof (issue as ValidationIssue).path === 'string' &&
+    typeof (issue as ValidationIssue).rule === 'string' &&
+    (issue as ValidationIssue).rule !== '' &&
+    typeof (issue as ValidationIssue).message === 'string' &&
+    (issue as ValidationIssue).message !== '';
+  if (!Array.isArray(answer) || !answer.every(shaped)) {
+    throw new BehaviorError(behavior, 'validate returns a list of issues, each { path, rule, message } with a rule and a message, or nothing to accept');
+  }
+  return answer.map(({ path, rule, message }) => ({ path, rule, message }));
 }
 
 /** What initialize gets from a create that gives its behavior no parameters. */

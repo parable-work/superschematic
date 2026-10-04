@@ -32,6 +32,13 @@ and gets a context that reaches only what the behavior may touch:
 - in a writing operation, update(), which changes the instance's own
   fields with the checks and guards of an update.
 
+validate judges the instance's own fields a create or an update would
+store, once the live version accepts them, and its issues refuse the
+write as the live version's do (invalid_instance). Its context reaches
+no storage and no other instance: only the config, the call, can() and
+checkType(), which holds a value to a type of the schema document that
+the behavior's checkedTypes names, as the live version holds a field's.
+
 Two more run after the commit, on the engine's runner, as the principal
 the deployment names for it (D16, amended): reactions, which hear the
 events of the instances of a schema that composes the behavior, one at a
@@ -490,10 +497,70 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
   /**
    * What update(patch) would refuse the patch for, without writing or
    * asking a guard: a behavior's field, then what the live version refuses
-   * in the merged instance. Empty when it would validate.
+   * in the merged instance, then what the behaviors' validate refuses in
+   * it. Empty when it would validate.
    */
   validateUpdate(patch: FrozenJSON): readonly ValidationIssue[];
 }
+
+/**
+ * What a behavior's validate is asked to judge: the instance's own fields
+ * a write would store, which the live version accepts.
+ */
+export type ValidationRequest =
+  | {
+      readonly kind: 'create';
+      /** The new instance's own fields. */
+      readonly data: FrozenJSON;
+    }
+  | {
+      readonly kind: 'update';
+      /** The instance's own fields before the update. */
+      readonly before: FrozenJSON;
+      /** Its own fields after the merge: what the update would store. */
+      readonly after: FrozenJSON;
+      /** The behavior whose operation applies it with update(); absent for a caller's update. */
+      readonly caller?: string;
+    };
+
+/**
+ * validate's context: the behavior, its config and the call. It reaches no
+ * storage and no other instance, since what it judges is the fields a
+ * write would store, and validateUpdate() asks it with nothing written.
+ */
+export interface ValidationContext<Config> {
+  readonly behavior: string;
+  /** The type's config of the behavior: what parseConfig returned, or the JSON config; deep-frozen. */
+  readonly config: Config;
+  readonly namespace: string;
+  readonly schema: string;
+  /** The live schema version the call runs with. */
+  readonly version: number;
+  readonly id: string;
+  readonly principal: Principal;
+  readonly now: number;
+  /** Whether the principal holds a permission, as BehaviorScope.can answers. */
+  can(permission: string): boolean;
+  /**
+   * The issues of a value as a value of a type of the schema document, by
+   * the rules the live version holds a field of that type to: a JSON
+   * object, each field's value, and no key the type does not declare, at
+   * any depth. Each issue's path is under path (`result`, then
+   * `result.checks[0].name`). The type is one checkedTypes(config) names;
+   * any other is a BehaviorError.
+   */
+  checkType(type: string, value: unknown, path: string): ValidationIssue[];
+}
+
+/** Which instance schema instanceSchema describes: an instance's or a create's data, or an update's merge patch. */
+export type InstanceSchemaForm = 'instance' | 'patch';
+
+/**
+ * Renders a type checkedTypes names as the describe document renders a
+ * nested type: a closed object of its fields, and in a patch, with none
+ * required. nullable also takes null, as an optional field does.
+ */
+export type TypeSchema = (type: string, options?: { readonly nullable?: boolean }) => unknown;
 
 /**
  * What a guard is asked to allow. The instance before the change is the
@@ -616,6 +683,8 @@ export interface ConfigTarget {
    * the type "string", or ["string", "null"] when it is not required.
    */
   readonly fieldSchemas: Readonly<Record<string, unknown>>;
+  /** The schema document's types besides the instance type, by name, sorted: the ones checkedTypes may name. */
+  readonly types: readonly string[];
   /** Every behavior the type lists, in order. */
   readonly behaviors: readonly string[];
   /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
@@ -730,6 +799,39 @@ export interface BehaviorImplementation<Config = unknown> {
    * and its columns hold their defaults; a veto leaves nothing of it.
    */
   guard?(context: InstanceView<Config>, request: GuardRequest): GuardAnswer;
+
+  /**
+   * Judges the instance's own fields a create or an update would store:
+   * returns the issues it finds ({ path, rule, message }, a path as the
+   * live version writes one, such as `result.checks[0]`), none to accept.
+   * It runs on every write of the fields, a caller's or a behavior's
+   * (instances.create, an operation's update()), once the live version
+   * accepts them and before any guard, every behavior's in list order, and
+   * their issues together refuse the write with InstanceValidationError
+   * (invalid_instance), as the live version's do; validateUpdate()
+   * reports them without writing.
+   */
+  validate?(context: ValidationContext<Config>, request: ValidationRequest): readonly ValidationIssue[] | undefined | void;
+
+  /**
+   * The types of the schema document, besides the instance type, whose
+   * values validate checks with checkType under the config. The
+   * compatibility rule holds a new version to each one both versions'
+   * configs name as it holds a type a field reaches, so a new version
+   * cannot refuse a value a stored instance holds; instanceSchema renders
+   * them.
+   */
+  checkedTypes?(config: Config): readonly string[];
+
+  /**
+   * What validate holds the instance's own fields to, as JSON Schemas,
+   * which the describe document's instance and the create and update
+   * tools' arguments carry under allOf, so a client sees the shape a write
+   * takes: form 'instance' for an instance and a create's data, 'patch'
+   * for an update's merge patch. typeSchema renders a type checkedTypes
+   * names in the form.
+   */
+  instanceSchema?(config: Config, form: InstanceSchemaForm, typeSchema: TypeSchema): readonly unknown[];
 
   /**
    * A handler per declared operation of scope instance (the default). A

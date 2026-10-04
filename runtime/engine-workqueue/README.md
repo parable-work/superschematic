@@ -494,12 +494,12 @@ which.
 
 | | |
 | --- | --- |
-| Config | `schema` (the child schema), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
+| Config | `schema` (the child schema, which composes `Constants` over `keyField` and every copied field), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
 | Steps | by key (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`, at most 500): `{ after?, when?, data? }`; `after`, the keys of the steps whose children block this one's; `when`, `{ field, equals }` or `{ field, includes }`; `data`, more fields of the child |
 | Fields | `blueprint`: `{ children: [{ key, id }] }`, in the order they were created; absent until the instance is stamped |
 | Operations | none |
 | Guards | with `from`, once stamped, Links' `link` of the `from` link: `vetoed` (`stamped`) |
-| Refusals | with `from`, a link that records no revision (`no_revision`), a revision the principal cannot read (`unreadable`), a map the pinned revision holds that breaks a rule (`invalid_steps`); steps with `after` when the child schema does not compose Dependencies (`no_dependencies`); each `vetoed`, on the create that stamps (action `create`) or on the link; whatever a child's create, with its links and edges, is refused for (its own error, a Links or Dependencies veto with its code), which refuses the change that stamps. Each code is a veto's (`vetoed`) |
+| Refusals | with `from`, a link that records no revision (`no_revision`), a revision the principal cannot read (`unreadable`), a map the pinned revision holds that breaks a rule (`invalid_steps`); steps with `after` when the child schema does not compose Dependencies (`no_dependencies`); a child schema whose live version's `Constants` no longer keeps `keyField` and every copied field (`not_constant`, with the fields it does not keep in `details.fields`); each `vetoed`, on the create that stamps (action `create`) or on the link; whatever a child's create, with its links and edges, is refused for (its own error, a Links or Dependencies veto with its code), which refuses the change that stamps. Each code is a veto's (`vetoed`) |
 | `configChange` | any config may change; it applies to the stamps that come after. Added to a schema with instances; not removed from one, since the record of what was stamped would stay behind |
 
 ```json
@@ -512,6 +512,12 @@ which.
       "check": { "after": ["fetch"], "when": { "field": "topic", "equals": "search" } },
       "index": { "after": ["check"], "data": { "title": "Index what was fetched" } } },
     "copyFields": ["topic"] } }
+```
+
+The child schema, `steps`, keeps what a stamp sets:
+
+```json
+{ "name": "Constants", "config": { "fields": ["step", "topic"] } }
 ```
 
 ### Stamping
@@ -568,7 +574,8 @@ When the schema is defined or published, `parseConfig` checks the child
 schema's live version as the definer may read it: it composes Links with
 `parentLink` pointing at this schema (and this type lists Revisions
 before Blueprint when that link is pinned, so the parent has a revision
-to pin), Dependencies with its own schema among its
+to pin), `Constants` over `keyField` and every copied field,
+Dependencies with its own schema among its
 blockers' schemas when a step has `after`, and not Blueprint; `keyField`
 is a string field of its type, `copyFields` are fields of both types of
 one JSON type, and `data` sets fields of its type. `when` names a field
@@ -579,6 +586,19 @@ link of this type's Links to a schema that composes Revisions and has
 the field, an object or JSON; `copyLinks` are links of both Links
 configs to one schema. A map read through `from` is held to the same
 rules against this type when it is stamped.
+
+A child is routed by what its stamp set: the step it is, in `keyField`,
+and the fields it copied. Any writer of the child, the holder of its
+lease included, could change them after and turn it into another step,
+so the child schema's `Constants` (`runtime/engine/README.md`) keeps
+them: an update that changes one is `invalid_instance`, with the rule
+`constant` at the field. A later version of the child schema can drop
+them from `Constants`; this schema's published version is not refused
+for that, as a published version is not refused for another schema's
+change, but a stamp checks the child schema's live version again, as it
+checks Dependencies for `after`, and is `vetoed` (`not_constant`) when
+its `Constants` no longer keeps them, so no child is stamped whose route
+a writer could change.
 
 ### What was stamped
 
@@ -765,7 +785,12 @@ stay; and the holder of the instance's active lease, read through
 Lease's `lease` field, does not change it, with the permission or
 without (`limits_fixed`). Other principals are kept out by Lease's own
 guard while the lease is active, unless they hold its
-`overridePermission`.
+`overridePermission`. The engine's `Constants` is the general rule for
+a field nothing changes after the create but a caller with its
+permission; Retries guards `limitsField` itself because its rule reads
+who holds the lease, which a `validate` cannot, and the holder must
+never raise its own caps, even with the permission. A type may list
+`limitsField` in `Constants` as well, which then needs both permissions.
 
 ### Steering the next attempt
 

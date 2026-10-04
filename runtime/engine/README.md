@@ -12,8 +12,9 @@ behavior plug-in interface, the runner of reactions and schedules, the
 describe and tools documents, the MCP endpoint
 (`@superschematic/engine/mcp`), and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
-reach other instances, `Search`, full-text search, and `Reactions`, which
-the runner runs. Not built yet: the vectors D16 lists beside search. The
+reach other instances, `Search`, full-text search, `Reactions`, which
+the runner runs, and `Constants` and `Variants`, which judge the fields a
+write stores. Not built yet: the vectors D16 lists beside search. The
 work-queue behaviors are a package of their own,
 `@superschematic/engine-workqueue` (`runtime/engine-workqueue/README.md`),
 which a deployment registers with the engine.
@@ -267,13 +268,18 @@ types, enums and scalars its fields reach.
 | a required field made optional | an optional field made required, or a new required field |
 | a dropped pattern | a new or changed pattern |
 | descriptions, comments, defaults, UI metadata | another type, or another list depth (`T`, `T[]`, `T[][]`) |
-| any change to a type, enum or scalar no field reaches | a scalar that accepts less: a primitive or JSON type change, a narrower bound, a new or changed pattern, new reserved words, a new custom validator |
+| any change to a type, enum or scalar no field and no behavior's `checkedTypes` reaches | a scalar that accepts less: a primitive or JSON type change, a narrower bound, a new or changed pattern, new reserved words, a new custom validator |
 | | another instance type |
 | a behavior's config changed as its implementation allows | any other config change |
 | a behavior added or removed while the schema has no instances, or with its implementation's consent | a behavior added or removed while it has instances, otherwise |
 
-A refused version throws `IncompatibleChangeError`, whose `changes` name
-each change and whose message says to use a new schema name.
+The walk starts at the instance type and at each type a behavior's
+`validate` checks values against under both versions' configs
+(`checkedTypes`, "Validating fields" under "Behaviors"): a stored
+instance holds values the live version checked against it, a `Variants`
+result say, so such a type is held as a type a field reaches. A refused
+version throws `IncompatibleChangeError`, whose `changes` name each
+change and whose message says to use a new schema name.
 
 ### Validation
 
@@ -286,9 +292,15 @@ compatibility rule relies on: the value is JSON (plain objects and
 arrays, strings, finite numbers, booleans, null; a member whose value is
 `undefined` is absent), and an object holds no key its type does not
 declare, at any depth. A field a behavior adds is the behavior's: an
-instance that sets one is refused with the rule `readOnly`. `validate`
-returns `{ path, rule, message }` issues, with paths such as
-`lines[2].sku`, and `validator` the cached validator itself.
+instance that sets one is refused with the rule `readOnly`. A scalar
+the builtin catalog holds validates by the catalog's row, whatever the
+document declares for it, as the Go loader reads it: the form `format
+--to=json` writes declares each catalog scalar a field uses, by its name
+and language primitive. `validate` returns `{ path, rule, message }`
+issues, with paths such as `lines[2].sku`, and `validator` the cached
+validator itself. Both are the version's own rules: a behavior's
+`validate`, which judges a write ("Validating fields" under
+"Behaviors"), is not asked.
 
 ## Instances
 
@@ -300,8 +312,9 @@ followed by letters, digits, `.`, `_`, `:` and `-`, at most 256
 characters. A schema a namespace reaches through the shared namespace
 holds instances in the namespace that creates them.
 
-- `create` validates the instance against the schema's live version and
-  refuses an id the namespace already has for the schema (`conflict`).
+- `create` validates the instance against the schema's live version,
+  then asks its behaviors' `validate`, and refuses an id the namespace
+  already has for the schema (`conflict`).
   `behaviors` gives the type's behaviors their parameters, by behavior
   name, such as the links and blockers the instance holds from its
   create ("Create parameters" under "Behaviors"). Every behavior's guard
@@ -315,8 +328,9 @@ holds instances in the namespace that creates them.
 - `update` takes a JSON merge patch (RFC 7386), the engine's update rule: a
   member replaces the instance's member, a nested object merges, `null`
   removes the member, and a list or any other value replaces what was
-  there. The result is validated against the live version; a patch that
-  changes nothing writes nothing. The behaviors' guards may veto it.
+  there. The result is validated against the live version, then by the
+  behaviors' `validate`; a patch that changes nothing writes nothing. The
+  behaviors' guards may veto it.
 - `delete` removes the instance and returns whether there was one. The
   behaviors' guards may veto it.
 - `update`, `delete` and `invoke` take `expectedSeq`, the sequence the
@@ -556,7 +570,8 @@ runtime, which brings Hono; the `./http` entry point does.
 Every refusal is an `EngineError` with a `code` a server maps to a
 status: `invalid_schema` (`SchemaDocumentError`, with its issues),
 `incompatible_change` (`IncompatibleChangeError`, with its changes),
-`invalid_instance` (`InstanceValidationError`, with its issues),
+`invalid_instance` (`InstanceValidationError`, with its issues, the live
+version's or a behavior's `validate`'s),
 `name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`,
 `invalid_argument` (`OperationParamsError` for an operation's parameters,
 `CreateParamsError` for a create's and `PreconditionsError` for a call's
@@ -617,9 +632,9 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
 (`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
-`Rollups`, `Search` and `Reactions`, and the work-queue package's
-`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and
-`Retries`), so its loader refuses any other.
+`Rollups`, `Search`, `Reactions`, `Constants` and `Variants`, and the
+work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`,
+`Blueprint`, `Budget` and `Retries`), so its loader refuses any other.
 
 ### The implementation
 
@@ -630,12 +645,15 @@ function is synchronous (D16): one that returns a promise is a
 | Member | What it is |
 | --- | --- |
 | `declaration` | the declaration the compiler registers, as its JSON file holds it |
-| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
+| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), the document's other `types`, every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
 | `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
 | `initialize(context, params)` | sets up its state for a new instance; `params` is its own entry of the create's parameters, `{}` when the create gives none ("Create parameters"); it refuses with a `BehaviorVetoError`, whose code its declaration lists |
-| `guard(view, request)` | may veto a `create`, an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason, or `{ reason, code?, details? }`, vetoes ("Vetoes and preconditions"). A create's request carries the new instance's `data` and the create's parameters by behavior (`behaviors`), and no precondition. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does. `precondition` is the behavior's own entry of the caller's preconditions |
+| `validate(context, request)` | judges the instance's own fields a create or an update would store, once the live version accepts them: returned issues refuse the write (`invalid_instance`), as the live version's do ("Validating fields"). It gets no precondition: what one asserts is a guard's to judge |
+| `checkedTypes(config)` | the types of the document its `validate` checks values against with `checkType`, which the compatibility rule then holds ("Validating fields") |
+| `instanceSchema(config, form, typeSchema)` | what its `validate` holds the fields to, as JSON Schemas the describe document and the create and update tools carry under `allOf` ("Validating fields") |
+| `guard(view, request)` | may veto a `create`, an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason, or `{ reason, code?, details? }`, vetoes ("Vetoes and preconditions"). It is asked once every `validate` has accepted the fields. A create's request carries the new instance's `data` and the create's parameters by behavior (`behaviors`), and no precondition. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does. `precondition` is the behavior's own entry of the caller's preconditions |
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext` ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
@@ -722,6 +740,69 @@ its children this way. The create route's body, the create tool's
 arguments and the describe document carry the parameters under
 `behaviors` ("HTTP", "Tools").
 
+### Validating fields
+
+A behavior may judge the instance's own fields a write would store, as
+the live version's validation does: which fields keep the value their
+create gave them (`Constants`), what shape a field holds for each value
+of another (`Variants`). A guard can refuse such a write too, but its
+veto is a 409 with a reason and no field, and `validateUpdate()` does not
+see it. `validate(context, request)` returns issues instead:
+
+```ts
+validate(context, request) {
+  if (request.kind === 'update' && request.before.sku !== request.after.sku) {
+    return [{ path: 'sku', rule: 'constant', message: 'sku does not change' }];
+  }
+},
+```
+
+- **When.** On every write of the fields: a caller's create and update,
+  a behavior's `instances.create`, an operation's `update()`, and
+  `validateUpdate()`, which reports the issues without writing. It runs
+  once the live version accepts the fields, so each holds its declared
+  type: before a create's parameters, its insert and every guard; before
+  an update's "nothing changed" check and every guard. An update's
+  arguments are checked before it, with the instance unread: a patch
+  that sets a behavior's field (`readOnly`), and the preconditions'
+  shapes ("Vetoes and preconditions").
+- **What it gets.** `request` is `{ kind: 'create', data }` or `{ kind:
+  'update', before, after, caller? }`, deep-frozen: the own fields, before
+  and after the merge for an update, and the behavior whose operation
+  applies it as `caller`. The context has `behavior`, `config`,
+  `namespace`, `schema`, `version`, `id`, `principal`, `now`, `can()` and
+  `checkType()`: no storage and no other instance, which are a guard's to
+  read.
+- **What it returns.** A list of `{ path, rule, message }`, a path as the
+  live version writes one (`result.checks[0].ok`, `''` for the instance),
+  or nothing. Every behavior's runs, in list order, and their issues
+  together are one `InstanceValidationError` (`invalid_instance`), as the
+  live version's are: 422 over HTTP, and that problem as an MCP tool
+  error. Anything else, a promise included, is a `BehaviorError`.
+- **Other types.** `checkType(type, value, path)` holds a value to a type
+  of the schema document as the live version holds a field of that type:
+  a JSON object, each field's value, and no key the type does not
+  declare, at any depth, with each issue's path under `path`. The type is
+  one the implementation's `checkedTypes(config)` names. `define` refuses
+  a name that is not a type of the document besides the instance type,
+  and a type it reaches whose field the schema runtime cannot check (a
+  union, a map); `checkType` of any other type is a `BehaviorError`.
+- **Versions.** The compatibility rule holds each type that both
+  versions' configs name in `checkedTypes` as a type a field reaches,
+  since stored instances hold values checked against it ("The
+  compatibility rule"). Whether a config may name another type, or stop
+  naming one, is the behavior's `configChange`.
+- **What a client sees.** `instanceSchema(config, form, typeSchema)`
+  returns JSON Schemas for the fields, which the describe document's
+  `instance`, the create tool's `data` and the update tool's `patch` carry
+  under `allOf`: `form` is `instance` for the first two and `patch` for the
+  last. `typeSchema(type, { nullable? })` renders a type `checkedTypes`
+  names as a nested type is rendered ("The describe document"), with
+  nothing required in a patch.
+
+`schemas.validate` checks a value against the version's own rules and
+asks no `validate`: it has no instance before an update.
+
 ### Vetoes and preconditions
 
 A refusal a client branches on carries a code (D16, amended). A guard
@@ -742,7 +823,9 @@ that are not a JSON object, or an answer of another shape is a
 'create'` and an `initialize` that throws are held to the list, and a
 create parameter a behavior vetoes carries the code its operation's
 check would (`Dependencies`' `already_blocking`, `Links`' `no_revision`).
-The describe document lists each behavior's codes.
+A `validate` refuses with issues, not a veto; one that throws a
+`BehaviorVetoError` anyway is held to the list too. The describe
+document lists each behavior's codes.
 
 A caller asserts what a behavior keeps with preconditions, entries by
 behavior name, on `update`, `delete`, `invoke` and `operate` (and a
@@ -758,15 +841,22 @@ a closed object schema:
 engine.instances.update(me, 'Item', id, { title: 'Desk' }, { preconditions: { 'acme.Hold': { generation: 3 } } });
 ```
 
-- The engine checks them before any guard runs: an entry for a behavior
-  the type does not compose, for one that declares no schema, or that
-  its schema refuses is a `PreconditionsError` (`invalid_argument`) with
-  issues at `/<Behavior>/<member>`.
+- The engine checks them with the call's other arguments, before it
+  reads the instance, so before an update's `validate` and any guard: an
+  entry for a behavior the type does not compose, for one that declares
+  no schema, or that its schema refuses is a `PreconditionsError`
+  (`invalid_argument`) with issues at `/<Behavior>/<member>`.
 - Each guard gets its own behavior's entry as `request.precondition`, and
   decides what it asserts; a failed one is its veto, with its code. A
   request a behavior's own code makes (`call()`, `update()`) and a
   `guardReference` request carry none, and so does a create, which has
   no instance to fence: `create` takes no preconditions.
+- Guards run once every `validate` has accepted the fields, so an
+  update whose precondition its guard would fail and whose fields a
+  `validate` refuses is `invalid_instance`, not `vetoed`; `validate`
+  never sees a precondition. An operation's guards judge the caller's
+  preconditions before its handler runs, so before the `validate` of an
+  `update()` it makes, whose own guard request carries none.
 - A read-only operation's guards get them too; a patch that changes
   nothing asks no guard. A precondition fences a write.
 
@@ -815,15 +905,21 @@ proposed change say, runs the checks an update runs:
 - `update(patch)` applies a JSON merge patch to the instance's own fields
   and returns them after it. A behavior's field in the patch is refused
   (`InstanceValidationError`, rule `readOnly`), so is a result the live
-  version refuses, and then every guard is asked with `{ kind: 'update',
-  patch, after, caller }`. A patch that changes nothing writes nothing.
+  version refuses, and then one the behaviors' `validate` refuses, asked
+  with `{ kind: 'update', before, after, caller }`; then every guard is
+  asked with `{ kind: 'update', patch, after, caller }`. A patch that changes nothing writes nothing.
   The access policy is not asked again, and no event is appended: the
   operation's event carries the change in its `patch`, and `afterChange`
   gets `before`. A read-only operation's `update` refuses, and a called
   operation's update rolls back with its savepoint. `data` reads the
   fields as the operation's updates leave them.
 - `validateUpdate(patch)` returns the issues `update(patch)` would refuse
-  the patch for, without writing or asking a guard.
+  the patch for, the behaviors' `validate`'s included, without writing or
+  asking a guard.
+
+`validate` gets a narrower context of its own ("Validating fields"):
+`behavior`, `config`, `namespace`, `schema`, `version`, `id`,
+`principal`, `now`, `can()` and `checkType()`.
 
 ### Other instances
 
@@ -1171,8 +1267,10 @@ behavior listed twice, a config its `configSchema` (checked with ajv) or
 it does, a field that collides with another behavior's or with one of
 the type's own, by its name or its JSON key, and two behaviors that add
 an operation of the same name. They also refuse a behavior with no
-implementation registered, and one on a type other than the instance
-type (only it has instances). A live version whose behavior has no
+implementation registered, one on a type other than the instance type
+(only it has instances), a type its `checkedTypes` names that is not one
+of the document's besides the instance type, and a field the schema
+runtime cannot check in a type it names or one that type reaches. A live version whose behavior has no
 implementation in this engine, as after a restart without it, makes
 every call on the schema `unavailable` until one registers.
 
@@ -1180,11 +1278,12 @@ every call on the schema `unavailable` until one registers.
 
 | Call | Order, in one transaction for a write |
 | --- | --- |
-| `create` | validate (a behavior field is `readOnly`) -> check `behaviors` against each `createParamsSchema` -> insert -> every guard (`kind: 'create'`) -> each `initialize`, with its parameters -> each `afterChange` -> event |
+| `create` | validate (a behavior field is `readOnly`) -> each `validate` (`kind: 'create'`) -> check `behaviors` against each `createParamsSchema` -> insert -> every guard (`kind: 'create'`) -> each `initialize`, with its parameters -> each `afterChange` -> event |
 | `get`, `list` | each field reader |
-| `update` | refuse a behavior field (`readOnly`) -> check `expectedSeq` -> merge and validate -> nothing more if nothing changed -> every guard -> write -> each `afterChange` -> event |
-| `delete` | check `expectedSeq` -> every guard, then each referencing behavior's `guardReference` -> the row goes -> each `afterChange` -> its references go -> event -> each `afterReferenceChange` -> no reference to it may remain |
-| `invoke` | policy -> parameters against `paramsSchema` -> check `expectedSeq` -> every guard (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
+| `update` | refuse a behavior field (`readOnly`) -> check `preconditions` against each `preconditionSchema` -> check `expectedSeq` -> merge and validate -> each `validate` (`kind: 'update'`) -> nothing more if nothing changed -> every guard, each with its precondition -> write -> each `afterChange` -> event |
+| an operation's `update()` | refuse a behavior field (`readOnly`) -> merge and validate -> each `validate`, with `caller` -> nothing more if nothing changed -> every guard, with no precondition -> write; `validateUpdate()` stops before the guards and writes nothing |
+| `delete` | check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition, then each referencing behavior's `guardReference` -> the row goes -> each `afterChange` -> its references go -> event -> each `afterReferenceChange` -> no reference to it may remain |
+| `invoke` | policy -> parameters against `paramsSchema` -> check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
 | `invokeSchema` | policy -> parameters against `paramsSchema` -> the handler -> its result against `resultSchema`; no guard, no event |
 | a behavior's `instances.create` | policy (`write`) -> as `create`, in a savepoint of the calling call's transaction |
 | `publish` (`schemas`) | policy -> the compatibility rule, with each `configChange` -> each `parseConfig` with `target.schemas` (`read` on each schema it reaches) -> each composed behavior's migrations -> the version -> each `afterConfigChange` of a behavior it adds, removes or changes, per namespace -> event |
@@ -1230,7 +1329,7 @@ operation that expects the sequence from before the operation is refused
 
 ### Core behaviors
 
-The core declares eight behaviors the engine implements
+The core declares ten behaviors the engine implements
 (`internal/registry/behaviors`, section 3.16 of
 `docs/extension-model.md`), so every binary's meta-schema admits them,
 and the engine implements them in `src/behaviors/core` and registers
@@ -1285,6 +1384,17 @@ their project:
 ```json
 { "name": "Reactions", "config": { "rules": [
     { "when": { "allTerminal": { "schema": "tasks", "link": "project" } }, "then": { "transition": "done" } } ] } }
+```
+
+`Constants` and `Variants` add no field, operation or storage either:
+their `validate` judges the fields a write stores ("Validating fields").
+On a schema of steps whose kind the create sets for good, and whose
+result has the kind's shape:
+
+```json
+{ "name": "Constants", "config": { "fields": ["kind"] } },
+{ "name": "Variants", "config": { "field": "result", "by": "kind",
+    "types": { "verify": "VerifyResult", "review": "ReviewResult" } } }
 ```
 
 Their records number from 1 per instance (a comment's id, a revision, a
@@ -1763,6 +1873,109 @@ event the next rule can enter on, and their cycles are refused at
 define. Rules across instances can chain without bound in data, a task
 whose parent's parent is a task, say; the runner's depth limit stops them.
 
+#### Constants
+
+Fields of the type that its create sets and nothing changes after.
+
+| | |
+| --- | --- |
+| Config | `fields`: 1 to 64 of the type's own top-level fields, by JSON key; `permission`: the permission a caller needs to change them after the create, optional |
+| Fields, operations | none |
+| Validates | an update, a caller's or an operation's `update()`, that changes a listed field: the rule `constant` at the field, unless the caller holds `permission` (`invalid_instance`). A create is never refused |
+| Refusals at define | a field that is not one of the type's own, a behavior's field such as `status` included (`invalid_schema`) |
+| `configChange` | any; added to and removed from a schema with instances, since it keeps no state |
+
+Work is routed by what an instance is: a step's kind, the key a
+blueprint stamped it with, the fields it copied from its parent. When
+any writer can change them, the holder of a lease included, a worker can
+turn the step it holds into another one. A listed field keeps the value
+its create gave it:
+
+- A value is compared as JSON, so a change inside an object or a list is
+  a change, and the same value again is none.
+- A field the create leaves absent stays absent: setting it later is a
+  change. Absent and null are one value, as a merge patch has it.
+- An operation's `update()` is held to it as a caller's update is, so a
+  `Revisions` approval cannot rename a step, and `validateUpdate()`
+  reports it, so neither can a proposal.
+- A caller with `permission` may change, set or remove the fields; the
+  permission is asked of the caller, an operation's included.
+
+`Constants` is the general rule: a field nothing changes after the
+create, but a caller with its permission. `Lease`'s `maxHoldField`,
+`Budget`'s `limitField`, `Presence`'s `principalField` and `Retries`'
+`limitsField` keep rules of their own, in their guards, because each
+rule reads state a `validate` cannot (who holds the lease, what is used
+and reserved). `Retries` guards its caps itself because the holder
+of the instance's active lease must never raise them, with
+`limitsPermission` or without (`limits_fixed`), where `Constants`'
+permission would let any caller who holds it; others need
+`limitsPermission`, so an operator can still give a stuck job room. A
+type may list such a field in `Constants` too: then a change needs
+`Constants`' permission as well as passing the behavior's own rule.
+
+#### Variants
+
+A field typed by another field's value.
+
+| | |
+| --- | --- |
+| Config | `field`: an own field whose values are open JSON objects (`Generic.JSON`, or a scalar whose values are objects); `by`: an own string or enum field; `types`: by a value of `by`, 1 to 256, a type of the document besides the instance type |
+| Fields, operations | none |
+| Validates | while `by` holds a value `types` lists, `field`, when it holds one, against that value's type, strictly (`checkType`); while `by` holds another value or none, `field` holds none (rule `variant`). Both on a create and an update (`invalid_instance`) |
+| Refusals at define | a `field` or `by` that is not one of the type's own, the two the same, a `field` whose values are not open objects (a string, a list, a type of the document), a `by` that is not a string or an enum, a type that is not one of the document's besides the instance type, a value that is not a member of `by`'s enum, and a type whose fields the schema runtime cannot check (`invalid_schema`) |
+| Describe | an `if`/`then` per listed value and one for every other value, under the instance's `allOf`, in create's `data` and, in patch form, in update's `patch` |
+| `configChange` | `field` and `by` stay; each listed value keeps its type, and another value may gain one; removed from a schema with instances, not added to one |
+
+A step's result has a different shape for each kind of step. The engine
+refuses a union field, which the schema runtime does not check, so
+without this `result` is `Generic.JSON` and a result in the wrong shape
+is stored without a word. Paired with `Constants`, the kind and the
+result's shape stay what the create gave them:
+
+```json
+"types": {
+  "Step": { "name": "Step", "role": "EmbeddedStruct",
+    "behaviors": [
+      { "name": "Constants", "config": { "fields": ["kind"] } },
+      { "name": "Variants", "config": { "field": "result", "by": "kind",
+          "types": { "verify": "VerifyResult", "review": "ReviewResult" } } } ],
+    "fields": [
+      { "name": "title", "typeRef": { "name": "string" }, "required": true },
+      { "name": "kind", "typeRef": { "name": "StepKind" }, "required": true },
+      { "name": "result", "typeRef": { "name": "Generic.JSON" } } ] },
+  "VerifyResult": { "name": "VerifyResult", "role": "EmbeddedStruct",
+    "fields": [{ "name": "passed", "typeRef": { "name": "boolean" }, "required": true }] },
+  "ReviewResult": { "name": "ReviewResult", "role": "EmbeddedStruct",
+    "fields": [{ "name": "approved", "typeRef": { "name": "boolean" }, "required": true }] }
+}
+```
+
+A schema with more than one type names its instance type, so this one is
+named `Step` ("Schemas"). A verify step's result `{ "passed": "yes" }`
+is refused with `type` at `result.passed`, and `{ "passed": true,
+"by": "ci" }` with `unknown` at `result.by`; a note's result, `note`
+being a kind `types` does not list, with `variant` at `result`. An
+update is held to it as merged, so a patch that gives a review step's
+result changes only the members it names.
+
+- **A value without a type.** While `by` holds a value `types` does not
+  list, or none, `field` holds none. A later version can give that value
+  a type, since no stored instance holds a value for it; a required
+  `field` admits only the listed values.
+- **Versions.** The types `types` names are held to the compatibility
+  rule as types a field reaches: a new version cannot add a required
+  field to `VerifyResult` or change one's type, while it may add an
+  optional field, and change a type nothing reaches freely. A version
+  without `Variants` checks them no more, so it may change them.
+- **What a client sees.** The describe document's `instance` carries,
+  under `allOf`, `{ if: { properties: { kind: { const: "verify" } },
+  required: ["kind"] }, then: { properties: { result: <VerifyResult> } } }`
+  for each value, and `{ if: { not: <kind is a listed value> }, then: {
+  properties: { result: { type: "null" } } } }`. The create tool's `data`
+  carries the same, and the update tool's `patch` a patch form, whose
+  types require nothing and whose `if` needs `kind` in the patch.
+
 ## Namespaces
 
 Schemas and instances live in namespaces. There is one, `default`, unless the
@@ -1863,7 +2076,7 @@ operation of the other scope.
 | 413 | `payload_too_large` | the body exceeds `bodyLimitBytes` |
 | 415 | `unsupported_media_type` | the body is not of the route's media type |
 | 422 | `invalid_schema` | the document is refused; `details.issues` |
-| 422 | `invalid_instance` | the instance, or an update's result, is refused; `details.issues` |
+| 422 | `invalid_instance` | the instance, or an update's result, is refused by the live version or a behavior's `validate`; `details.issues` |
 | 429 | `too_many_requests` | the rate limit; `Retry-After` |
 | 500 | `internal_error` | anything else the deployment's `onError` does not map, a `BehaviorError` included; the failure stays off the wire |
 | 503 | `unavailable` | the schema's live version composes a behavior this engine has no implementation for, or whose implementation refuses its config |
@@ -1989,7 +2202,11 @@ a schema's live version:
 
 - `instance` is the JSON Schema of an instance's `data`: closed, its own
   fields, then its behaviors' fields, `readOnly` and without a type, since
-  a declaration gives a field only a name and a description.
+  a declaration gives a field only a name and a description. Under
+  `allOf` it carries what its behaviors' `validate` holds the own fields
+  to, as their `instanceSchema` writes it: `Variants`' `if`/`then` per
+  value. Create's `data` carries the same, update's `patch` the patch
+  form, and the instance in each result.
 - `behaviors` lists each behavior's config, fields, operations and the
   codes its vetoes carry (`vetoes`).
 - `operations` lists `create`, `get`, `list`, `update`, `delete`, then each
@@ -2000,8 +2217,9 @@ a schema's live version:
   `delete`'s and each instance operation's have `preconditions` when one
   declares a `preconditionSchema`, the same way; `create`'s never does,
   and the others never have `behaviors`. So a schema that composes
-  `Links` and `Lease` shows, side by side, the links its create takes,
-  the token its writes present and each behavior's veto codes. `params`
+  `Links`, `Lease` and `Variants` shows, side by side, the links its
+  create takes, the token its writes present, each behavior's veto codes
+  and, under `allOf`, the shape each variant's field takes. `params`
   is the operation's tool arguments (below), `result` the JSON Schema of
   what it returns (an instance, a page, `null` for a delete, a behavior
   operation's `resultSchema`), and the invocation policy sits under the
@@ -2034,10 +2252,10 @@ reaches that the principal may read, by name, after three schema tools.
 
 | Tool | Name | MCP handle | Arguments |
 | --- | --- | --- | --- |
-| create | `<schema>.create` | `<schema>_create` | `id` (optional), `data`, and `behaviors` (optional) when a behavior takes create parameters |
+| create | `<schema>.create` | `<schema>_create` | `id` (optional), `data` (with its behaviors' `allOf`), and `behaviors` (optional) when a behavior takes create parameters |
 | get | `<schema>.get` | `<schema>_get` | `id` |
 | list | `<schema>.list` | `<schema>_list` | `limit`, `cursor` |
-| update | `<schema>.update` | `<schema>_update` | `id`, `patch` (a merge patch; nothing required), `expectedSeq`, `preconditions` |
+| update | `<schema>.update` | `<schema>_update` | `id`, `patch` (a merge patch; nothing required; its behaviors' `allOf` in patch form), `expectedSeq`, `preconditions` |
 | delete | `<schema>.delete` | `<schema>_delete` | `id`, `expectedSeq`, `preconditions` |
 | a behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `id`, `params` (its `paramsSchema`), `expectedSeq`, `preconditions` |
 | a schema-level behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `params` (its `paramsSchema`) |

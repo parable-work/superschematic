@@ -53,8 +53,11 @@ const stepFields: Field[] = [
   { name: 'topic', typeRef: { name: 'string' } },
 ];
 
+/** What a stamp sets in a step and nothing may change after: its key and the copied topic. */
+const stepConstants: BehaviorRef = { name: 'Constants', config: { fields: ['step', 'topic'] } };
+
 function stepBehaviors(links: Record<string, unknown> = { run: { schema: 'Run', required: true } }, extra: BehaviorRef[] = [{ name: 'Dependencies' }]): BehaviorRef[] {
-  return [{ name: 'Workflow', config: stepFlow }, ...extra, { name: 'Links', config: { links } }];
+  return [{ name: 'Workflow', config: stepFlow }, stepConstants, ...extra, { name: 'Links', config: { links } }];
 }
 
 const runFields: Field[] = [
@@ -228,6 +231,61 @@ for (const driver of drivers) {
       // Without after, Dependencies is not needed.
       second.schemas.define(alice, documentOf('Run', runFields, [{ name: 'Blueprint', config: { ...inline, steps: { only: {} } } }]));
       assert.match(refusal(second, { ...inline, schema: 'Run', parentLink: 'run' }), /schema Run composes Blueprint: a child cannot stamp children of its own/);
+    });
+
+    test("the child schema's Constants keeps keyField and every copied field, so a stamped child stays the step it was stamped as", () => {
+      const engine = openTestEngine({ driver });
+      const links = { run: { schema: 'Run', required: true } };
+      publish(engine, documentOf('Step', stepFields, stepBehaviors(links, [{ name: 'Dependencies' }]).filter((ref) => ref.name !== 'Constants')));
+      assert.match(
+        refusal(engine, inline),
+        /schema Step does not compose Constants, so the fields each stamp sets in a child could change after it: compose Constants with fields step, topic/
+      );
+      publish(engine, documentOf('Step', stepFields, [{ name: 'Workflow', config: stepFlow }, { name: 'Constants', config: { fields: ['topic'] } }, { name: 'Dependencies' }, { name: 'Links', config: { links } }]));
+      assert.match(refusal(engine, inline), /schema Step's Constants does not list step, which each stamp sets and nothing may change after/);
+      publish(engine, documentOf('Step', stepFields, [{ name: 'Workflow', config: stepFlow }, { name: 'Constants', config: { fields: ['step', 'title'] } }, { name: 'Dependencies' }, { name: 'Links', config: { links } }]));
+      assert.match(refusal(engine, inline), /schema Step's Constants does not list topic, which each stamp sets/);
+      // Without copyFields, keyField alone is enough.
+      publish(engine, documentOf('Run', runFields, [{ name: 'Blueprint', config: { ...inline, copyFields: [] } }]));
+
+      // A stamped child cannot be turned into another step, by its creator or anyone else.
+      publish(engine, documentOf('Step', stepFields, stepBehaviors()));
+      publish(engine, documentOf('Run', runFields, [{ name: 'Blueprint', config: inline }]));
+      engine.instances.create(nora, 'Run', { title: 'First', topic: 'public' }, { id: 'r1' });
+      const build = (childrenOf(engine, 'r1') as Child[])[1];
+      const refused = thrown(() => engine.instances.update(nora, 'Step', build.id, { step: 'release', topic: 'private' }), InstanceValidationError);
+      assert.deepEqual(
+        refused.issues.map((issue) => [issue.path, issue.rule]),
+        [
+          ['step', 'constant'],
+          ['topic', 'constant'],
+        ]
+      );
+      // Its other fields stay open.
+      assert.equal(engine.instances.update(wren, 'Step', build.id, { title: 'Build it well' }).data.title, 'Build it well');
+    });
+
+    test("a stamp checks the child schema's live Constants again: one a later version dropped is vetoed not_constant, and nothing is stamped", () => {
+      const engine = world();
+      const links = { run: { schema: 'Run', required: true } };
+      // A later version of Step drops topic from Constants, then Constants
+      // altogether: Run's published version is not refused for it.
+      publish(engine, documentOf('Step', stepFields, [{ name: 'Workflow', config: stepFlow }, { name: 'Constants', config: { fields: ['step'] } }, { name: 'Dependencies' }, { name: 'Links', config: { links } }]));
+      const loose = thrown(() => engine.instances.create(nora, 'Run', { title: 'Loose', topic: 'public' }, { id: 'r1' }), BehaviorVetoError);
+      assert.deepEqual(
+        [loose.behavior, loose.action, loose.vetoCode, loose.vetoDetails, loose.reason],
+        ['Blueprint', 'create', 'not_constant', { fields: ['topic'] }, "Step's Constants does not list topic, which each stamp sets and nothing may change after"]
+      );
+      publish(engine, documentOf('Step', stepFields, stepBehaviors(links).filter((ref) => ref.name !== 'Constants')));
+      const none = thrown(() => engine.instances.create(nora, 'Run', { title: 'None' }, { id: 'r2' }), BehaviorVetoError);
+      assert.deepEqual([none.vetoCode, none.vetoDetails], ['not_constant', { fields: ['step', 'topic'] }]);
+      assert.equal(engine.instances.get(alice, 'Run', 'r1'), undefined);
+      assert.equal(engine.instances.get(alice, 'Run', 'r2'), undefined);
+      assert.equal(allSteps(engine).length, 0);
+      // Constants back over both, the stamp goes ahead.
+      publish(engine, documentOf('Step', stepFields, stepBehaviors(links)));
+      engine.instances.create(nora, 'Run', { title: 'Kept' }, { id: 'r3' });
+      assert.equal((childrenOf(engine, 'r3') as Child[]).length, 4);
     });
 
     test('a pinned parentLink needs Revisions listed before Blueprint, and pins the parent revision its create records', () => {
@@ -425,6 +483,7 @@ for (const driver of drivers) {
         engine,
         documentOf('Step', stepFields, [
           { name: 'Workflow', config: stepFlow },
+          { name: 'Constants', config: { fields: ['step'] } },
           { name: 'Dependencies' },
           { name: 'Lease' },
           { name: 'Queue', config: { claim: { from: ['todo'], to: 'doing' } } },

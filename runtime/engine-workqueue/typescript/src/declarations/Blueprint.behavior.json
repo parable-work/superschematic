@@ -66,7 +66,7 @@
         "type": "string"
       },
       "schema": {
-        "description": "The child schema. It composes Links with parentLink, Dependencies when a step comes after another, and not Blueprint.",
+        "description": "The child schema. It composes Links with parentLink, Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint.",
         "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
         "type": "string"
       },
@@ -153,6 +153,10 @@
     {
       "code": "no_dependencies",
       "description": "A stamp whose steps come after others, while the child schema does not compose Dependencies."
+    },
+    {
+      "code": "not_constant",
+      "description": "A stamp while the child schema's Constants does not keep keyField and every copied field, which a later version of it dropped; details.fields lists the ones it does not keep."
     },
     {
       "code": "no_revision",

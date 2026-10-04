@@ -11,7 +11,7 @@ import { Hono } from 'hono';
 import { BehaviorError, OperationParamsError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
 import { ENGINE_ERROR_STATUS, MERGE_PATCH_MEDIA_TYPE, engineApp, engineProblem, type EngineHttpOptions } from '../dist/http/index.js';
 import { counter, flag, hold, itemDocument, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, freshPath, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, clone, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -523,6 +523,31 @@ describe('behaviors', () => {
         [['count', 'readOnly']]
       );
     }
+  });
+
+  test("a behavior's validate refuses POST and PATCH as the live version does: 422 invalid_instance with its issues", async () => {
+    const { app } = serve();
+    await data(call(app, 'POST', '/namespaces/default/schemas', { body: stepsDocument() }));
+    await data(call(app, 'POST', '/namespaces/default/schemas/Step/publish'));
+    const STEPS = '/namespaces/default/schemas/Step/instances';
+    const wrong = await problem(call(app, 'POST', STEPS, { body: { data: { title: 'Check', kind: 'verify', result: { passed: 'yes', by: 'ci' } } } }), 422);
+    assert.equal(wrong.code, 'invalid_instance');
+    assert.deepEqual(
+      wrong.details.issues.map((issue: { path: string; rule: string }) => [issue.path, issue.rule]),
+      [
+        ['result.by', 'unknown'],
+        ['result.passed', 'type'],
+      ]
+    );
+    await data(call(app, 'POST', STEPS, { body: { id: 's1', data: { title: 'Check', kind: 'verify', result: { passed: true } } } }), 201);
+    // Each behavior's issues, in list order: Constants keeps the kind, and Variants holds the result to the kind's type.
+    const renamed = await problem(call(app, 'PATCH', `${STEPS}/s1`, { body: { kind: 'review' }, headers: { 'if-match': '"1"' } }), 422);
+    assert.deepEqual(renamed.details.issues, [
+      { path: 'kind', rule: 'constant', message: 'kind is a constant of Step: its create sets it and nothing changes it after' },
+      { path: 'result.passed', rule: 'unknown', message: 'ReviewResult has no field passed' },
+      { path: 'result.approved', rule: 'required', message: 'approved is required.' },
+    ]);
+    assert.equal((await call(app, 'GET', `${STEPS}/s1`)).headers.get('etag'), '"1"');
   });
 
   test('a writing operation moves the entity tag, even when no field changes; a read-only one does not', async () => {

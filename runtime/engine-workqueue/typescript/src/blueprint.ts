@@ -28,8 +28,8 @@ principal, so a later revision of the definition changes only what is
 stamped from then on. Once stamped, the guard refuses moving the from
 link: the children came from the revision it pins. Each refusal is a
 veto with a code the declaration lists: stamped for the guard's, and
-no_revision, unreadable, invalid_steps and no_dependencies for a stamp
-that cannot go ahead, on the create or the link that stamps.
+no_revision, unreadable, invalid_steps, no_dependencies and not_constant
+for a stamp that cannot go ahead, on the create or the link that stamps.
 
 A step's when holds when this instance's field equals a JSON value, or
 is a list that includes one, compared as JSON, without coercion. A step
@@ -43,10 +43,11 @@ then the step's data.
 parseConfig checks the config when the schema is defined or published:
 the child schema composes Links with parentLink pointing at this schema
 (and this type lists Revisions before Blueprint when that link is
-pinned), Dependencies (with its own schema among its blockers' schemas)
-when a step comes after another, and not Blueprint; keyField is a string
-field of the child's type; copyFields are fields of both types, of one
-JSON type; when's fields are fields of this type, a list for includes;
+pinned), Constants over keyField and every copied field, Dependencies
+(with its own schema among its blockers' schemas) when a step comes after
+another, and not Blueprint; keyField is a string field of the child's
+type; copyFields are fields of both types, of one JSON type; when's
+fields are fields of this type, a list for includes;
 inline steps name only steps the map has in after, form no cycle, and
 set no keyField in data. A map read through from is held to the same
 rules (against this type) when it is stamped, and an invalid one refuses
@@ -54,6 +55,18 @@ the change that stamps. copyLinks are links of both Links configs to one
 schema, copied with the revision a pinned one records: the ones the
 instance holds when it is stamped, which for inline steps are the ones
 its create gives.
+
+A child is routed by what the stamp set: the step it is, in keyField, and
+the fields it copied. Any writer of the child, the holder of its lease
+included, could change them after, and turn the child into another
+step, so the child schema's Constants keeps them as the stamp set them.
+A later version of the child schema can drop them from Constants, and
+this schema's published version is not refused for that (D16, amended:
+a published version is not refused for another schema's change). A
+stamp checks again, against the child schema's live version, as it
+checks Dependencies for a step's after: one whose Constants no longer
+keeps them refuses the change that stamps (not_constant), so no child is
+stamped whose route a writer could change.
 
 What was stamped is kept in Blueprint's own table: the blueprint field
 lists each step's key and its child's id, in the order they were
@@ -363,6 +376,17 @@ function checkChild(config: BlueprintConfig, target: ConfigTarget, child: Config
       throw new BehaviorConfigError(`copyFields: ${target.type}'s ${field} holds ${own.join(' or ')}, and ${child.type}'s holds ${type}`);
     }
   }
+  const constant = [config.keyField, ...config.copyFields];
+  if (!child.behaviors.includes('Constants')) {
+    throw new BehaviorConfigError(
+      `${at} does not compose Constants, so the fields each stamp sets in a child could change after it: compose Constants with fields ${constant.join(', ')}`
+    );
+  }
+  const kept = (child.configs.Constants as { fields?: readonly string[] } | undefined)?.fields ?? [];
+  const loose = constant.filter((field) => !kept.includes(field));
+  if (loose.length > 0) {
+    throw new BehaviorConfigError(`${at}'s Constants does not list ${loose.join(', ')}, which each stamp sets and nothing may change after`);
+  }
   for (const step of config.steps ?? []) {
     for (const field of Object.keys(step.data)) {
       if (!hasOwn(child.fields, field)) {
@@ -401,10 +425,10 @@ function checkSource(from: { link: string; field: string }, schema: string, sour
 }
 
 /** The codes of Blueprint's vetoes, as its declaration lists them. */
-type BlueprintVeto = 'stamped' | 'no_dependencies' | 'no_revision' | 'unreadable' | 'invalid_steps';
+type BlueprintVeto = 'stamped' | 'no_dependencies' | 'not_constant' | 'no_revision' | 'unreadable' | 'invalid_steps';
 
-function vetoed(view: InstanceView<unknown>, operation: string, reason: string, code: BlueprintVeto): BehaviorVetoError {
-  return new BehaviorVetoError(NAME, operation, view.schema, view.id, { reason, code });
+function vetoed(view: InstanceView<unknown>, operation: string, reason: string, code: BlueprintVeto, details?: Record<string, unknown>): BehaviorVetoError {
+  return new BehaviorVetoError(NAME, operation, view.schema, view.id, details === undefined ? { reason, code } : { reason, code, details });
 }
 
 function key(view: InstanceView<unknown>): [string, string, string] {
@@ -442,6 +466,22 @@ function stamp(context: InstanceContext<BlueprintConfig>, steps: readonly Bluepr
   const plan = effectiveSteps(steps, context.data);
   if (plan.some((step) => step.after.length > 0) && context.schemas.config(config.schema, 'Dependencies') === undefined) {
     throw vetoed(context, operation, `${config.schema} does not compose Dependencies, so a step's after cannot block its child`, 'no_dependencies');
+  }
+  // The child schema's live version may have dropped what parseConfig
+  // required of its Constants since this schema was published.
+  const constant = [config.keyField, ...config.copyFields];
+  const kept = (context.schemas.config(config.schema, 'Constants') as { fields?: readonly string[] } | undefined)?.fields;
+  const loose = constant.filter((field) => !(kept ?? []).includes(field));
+  if (loose.length > 0) {
+    throw vetoed(
+      context,
+      operation,
+      kept === undefined
+        ? `${config.schema} does not compose Constants, so the fields each stamp sets in a child could change after it`
+        : `${config.schema}'s Constants does not list ${loose.join(', ')}, which each stamp sets and nothing may change after`,
+      'not_constant',
+      { fields: loose }
+    );
   }
   const copied: Record<string, unknown> = {};
   for (const field of config.copyFields) {

@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search and Reactions behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants and Variants behaviors.
 sidebar:
   order: 7
 ---
@@ -20,8 +20,8 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares fifteen behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements eight itself
+The core declares seventeen behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements ten itself
 and registers them when it opens. The other seven are claimable work,
 implemented by `@superschematic/engine-workqueue`; the engine refuses a
 schema that composes one until a deployment registers that package.
@@ -36,6 +36,8 @@ schema that composes one until a deployment registers that package.
 | `Rollups` | values computed from the instances that link here | `Workflow` | [Rollups](#rollups) |
 | `Search` | full-text search over the type's text fields | | [Search](#search) |
 | `Reactions` | rules that move statuses after a change commits | `Workflow` | [Reactions](#reactions) |
+| `Constants` | fields the create sets and nothing changes after | | [Constants and Variants](#constants-and-variants) |
+| `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
 ## Compose a behavior
@@ -206,8 +208,11 @@ engine.instances.invoke(worker, 'jobs', id, 'transition', { to: 'done' }, { prec
 
 An entry for a behavior the type does not compose, or that declares no
 precondition, or that its schema refuses, is 400 `invalid_argument` with
-`details.issues`; a precondition the guard finds false is that
-behavior's 409 veto.
+`details.issues`, checked before the instance is read; a precondition
+the guard finds false is that behavior's 409 veto. Guards run once the
+fields are validated, `Constants` and `Variants` included, so a write
+whose fields are refused is 422 `invalid_instance` whatever its
+preconditions say.
 
 ## The runner
 
@@ -521,6 +526,101 @@ failing could then complete the run or fail it, by which ran first.
 - States and links that do not exist, and `enters` rules that cycle, are
   refused when the schema is defined.
 - Rules across instances can chain; the runner's `maxDepth` stops a loop.
+
+## Constants and Variants
+
+Two behaviors judge the fields a write stores, as the schema's own
+validation does: a refusal is `invalid_instance` (422), with each issue
+at its field and a rule, and the describe document shows what they
+hold the fields to. Neither adds a field or an operation.
+
+| Behavior | Config |
+| --- | --- |
+| `Constants` | `fields`: the type's own top-level fields that keep the value their create gives them; `permission`: what a caller needs to change them after, optional |
+| `Variants` | `field`: a `Generic.JSON` field (or one of a scalar whose values are objects); `by`: a string or enum field; `types`: by a value of `by`, a type of the schema |
+
+A step's kind routes it, and its result has a different shape for each
+kind. `Constants` keeps the kind as the create set it, so a worker cannot
+turn the step it holds into another one, and `Variants` holds the result
+to the kind's type:
+
+```ts
+import { Generic } from "superscalar";
+import { behavior } from "@superschematic/schema";
+
+export enum StepKind {
+  Verify = "verify",
+  Review = "review",
+  Note = "note"
+}
+
+export abstract class Check {
+  name: string;
+  ok: boolean;
+}
+
+export abstract class VerifyResult {
+  passed: boolean;
+  checks?: Check[];
+}
+
+export abstract class ReviewResult {
+  approved: boolean;
+  notes?: string;
+}
+
+@behavior("Constants", { fields: ["kind"] })
+@behavior("Variants", { field: "result", by: "kind", types: { verify: "VerifyResult", review: "ReviewResult" } })
+export abstract class Step {
+  title: string;
+  kind: StepKind;
+  result?: Generic.JSON;
+}
+```
+
+A schema with more than one type is named like its instance type, so
+this one is `Step`.
+
+```ts
+engine.instances.create(me, 'Step', { title: 'Lint', kind: 'verify', result: { passed: 'yes', by: 'ci' } });
+// InstanceValidationError: result.by (unknown), result.passed (type)
+
+const lint = engine.instances.create(me, 'Step', { title: 'Lint', kind: 'verify', result: { passed: true } });
+engine.instances.update(me, 'Step', lint.id, { kind: 'review' });
+// InstanceValidationError: kind (constant), result.passed (unknown), result.approved (required)
+```
+
+- **Every write.** A caller's create and update, a behavior's create, and
+  an operation that changes the instance's fields on a caller's behalf
+  (a `Revisions` approval) are held to them alike, and a proposal they
+  would refuse is refused when it is made.
+- **Absent stays absent.** A field `Constants` lists that the create
+  leaves out cannot be set later, except by a caller with `permission`,
+  who may also change or remove it.
+- **Kinds without a type.** While `kind` holds a value `types` does not
+  list (`note` above) or none, `result` holds nothing. A later version can
+  give that kind a type, since no stored note holds a result.
+- **Strict at every depth.** A result is held to its type as a field of
+  that type would be: its fields' types and bounds, and no key the type
+  does not declare, down through nested objects and lists.
+- **New versions.** A new version keeps `field`, `by` and each kind's
+  type, and the types themselves are held to the compatibility rule as a
+  field's type is: `VerifyResult` can gain an optional field, not a
+  required one. `Constants` can change freely.
+- **What a client sees.** The describe document's instance and the
+  create and update tools carry an `if`/`then` per kind under `allOf`, so
+  an MCP client or an agent sees which shape each kind takes before it
+  writes, beside the create parameters, the preconditions and each
+  behavior's veto codes.
+- **Fields a work-queue behavior guards.** `Constants` is the general
+  rule. `Retries` guards its `limitsField` itself, since its rule reads
+  who holds the lease: the holder must never raise its own caps, even
+  with `limitsPermission`. `Lease`'s `maxHoldField`, `Budget`'s
+  `limitField` and `Presence`'s `principalField` keep rules of their own
+  too; listing such a field in `Constants` as well adds its permission.
+
+The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#validating-fields)
+shows how a behavior of your own judges the fields a write stores.
 
 ## Where to go next
 

@@ -39,6 +39,10 @@ export interface BehaviorConfigs {
   Search: SearchConfig;
   /** Rules that move Workflow statuses after a change commits; it requires Workflow. */
   Reactions: ReactionsConfig;
+  /** Fields of the type that its create sets and nothing changes after. */
+  Constants: ConstantsConfig;
+  /** Types an open JSON field of the type by the value of another of its fields. */
+  Variants: VariantsConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -216,6 +220,32 @@ export interface ReactionThen {
   readonly link?: string;
 }
 
+/** Constants' config. */
+export interface ConstantsConfig {
+  /**
+   * The type's own top-level fields, by JSON key, that keep the value their
+   * create gives them: an update that changes one is refused. A field the
+   * create leaves absent stays absent.
+   */
+  readonly fields: readonly string[];
+  /** The permission a caller needs to change them after the create; nobody may when absent. */
+  readonly permission?: string;
+}
+
+/** Variants' config. */
+export interface VariantsConfig {
+  /** The type's own field the variants type: a Generic.JSON field, or one of a scalar whose values are JSON objects. */
+  readonly field: string;
+  /** The type's own string or enum field whose value picks the type. */
+  readonly by: string;
+  /**
+   * By a value of by, the type of the schema document, besides the instance
+   * type, that field holds while by holds the value. While by holds another
+   * value or none, field holds none.
+   */
+  readonly types: Readonly<Record<string, string>>;
+}
+
 /** Lease's config. */
 export interface LeaseConfig {
   /** How long a lease lasts after its acquire or its last heartbeat, in milliseconds, at least 1000; 60000 when absent. */
@@ -305,7 +335,7 @@ export type BlueprintConfig = BlueprintBase & ({ readonly steps: BlueprintSteps;
 
 /** What every Blueprint config gives. */
 export interface BlueprintBase {
-  /** The child schema: it composes Links with parentLink, Dependencies when a step comes after another, and not Blueprint. */
+  /** The child schema: it composes Links with parentLink, Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint. */
   readonly schema: string;
   /** The link of the child schema's Links config that points at this schema. */
   readonly parentLink: string;
@@ -372,7 +402,11 @@ export interface RetriesConfig {
   readonly totalAttempts: number;
   /** An object field of the type with the instance's own caps, by class name and totalAttempts. */
   readonly limitsField?: string;
-  /** The permission that changes limitsField once the instance exists; absent, the caps it was created with stay. */
+  /**
+   * The permission that changes limitsField once the instance exists; absent, the caps it was created with stay.
+   * Never the holder of the instance's active lease, with it or without: Retries guards its own field, where
+   * Constants, the general rule for a field nothing changes, would let any caller with its permission.
+   */
   readonly limitsPermission?: string;
   /** Keeps the best scoring result: by at least minDelta, and never losing a neverRegress predicate. */
   readonly keepBest?: { readonly minDelta?: number; readonly neverRegress?: readonly string[] };
