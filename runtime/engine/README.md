@@ -636,7 +636,7 @@ function is synchronous (D16): one that returns a promise is a
 | `fields` | a reader per declared field: `(view) => value` |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
 | `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"), as a guard does; the view is the referencing instance's, and the request carries no precondition |
-| `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference |
+| `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference. Its context's `writing` says the referencing instance's own write made the change |
 | `reactions` | `{ react(context, event), watches?(config, schema) }`: reactions to committed events, which the runner runs after the commit ("Reactions and schedules") |
 | `schedules` | named timed work, `{ <name>: { everyMs, run(context) } }`, which the runner runs on each schema that composes the behavior; `everyMs` is a number or a function of the schema's config ("Schedules" under "The runner") |
 
@@ -923,7 +923,12 @@ and its event, it runs each `afterReferenceChange(context, reference,
 change)`, in the same transaction. That context is a view of the
 referencing instance whose `instances.invoke` also runs writing
 operations: the referencing instance changes only through an operation
-invoked on it, so its guards run and it gets its own event.
+invoked on it, so its guards run and it gets its own event. Its
+`writing` is true when the referencing instance's own write is running
+up the call, as when a claim's reservation changes an enclosing budget
+the claimed instance refers to: invoking one of its writing operations
+then is a cycle (`BehaviorError`), and what its write leaves is that
+write's to settle.
 
 After a delete no guard vetoes, no reference to the deleted instance may
 remain: each hook removes its reference through such an operation. A

@@ -101,13 +101,14 @@ shows how.
 
 Most operations run on one instance. An operation a behavior declares
 with `scope: "schema"` runs on the schema as a whole and names no
-instance. Four do so far:
+instance. Five do so far:
 
 | Operation | Behavior | What it does |
 | --- | --- | --- |
 | `listLinked` | `Links` | the instances whose link points at a target |
 | `search` | `Search` | a full-text search over the schema's instances |
 | `claimNext` | `Queue` | claims the first instance the caller can claim |
+| `countClaimable` | `Queue` | counts the instances `claimNext` would try, read-only |
 | `expireHolder` | `Lease` | expires every lease one principal holds |
 
 Each is served at its own route, with its parameters as the body:

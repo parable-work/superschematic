@@ -12,6 +12,11 @@ Queue's claim by every principal but the assignee, whoever made the call
 (a claim calls acquire for its caller), so an assigned instance is
 claimed only by its assignee.
 
+Every refusal is a veto with a code the declaration lists
+(assigned_to_another, already_assigned, not_assigned, not_configured),
+but a move the config's permission allows and the caller lacks, which is
+forbidden.
+
 configChange: the permission may change. Assignment can be added to a
 schema that has instances, which start unassigned, and cannot be removed
 from one: the assignments they hold would stay behind and come back if it
@@ -29,6 +34,13 @@ export interface AssignmentConfig {
 }
 
 const NAME = 'Assignment';
+
+/** The codes Assignment's vetoes carry, as its declaration lists them. */
+type AssignmentVeto = 'assigned_to_another' | 'already_assigned' | 'not_assigned' | 'not_configured';
+
+function vetoed(view: InstanceView<unknown>, operation: string, reason: string, code: AssignmentVeto): BehaviorVetoError {
+  return new BehaviorVetoError(NAME, operation, view.schema, view.id, { reason, code });
+}
 
 /** The operations an assignment keeps to its assignee: taking the lease, and claiming the instance. */
 const GATED = new Set(['Lease.acquire', 'Queue.claim']);
@@ -48,7 +60,7 @@ function privileged(scope: BehaviorScope<AssignmentConfig>): boolean {
 function refused(view: InstanceView<AssignmentConfig>, operation: string, what: string): Error {
   const permission = view.config.permission;
   if (permission === undefined) {
-    return new BehaviorVetoError(NAME, operation, view.schema, view.id, `${what} needs a permission, and its config names none`);
+    return vetoed(view, operation, `${what} needs a permission, and its config names none`, 'not_configured');
   }
   return new EngineError('forbidden', `${view.principal.subject} may not ${operation} ${view.schema} ${view.id}: ${what} needs permission ${permission}`);
 }
@@ -83,7 +95,7 @@ export const assignment = defineBehavior<AssignmentConfig>({
     if (assignee === null || assignee === view.principal.subject) {
       return undefined;
     }
-    return 'it is assigned to another principal, who alone may take it';
+    return { reason: 'it is assigned to another principal, who alone may take it', code: 'assigned_to_another' };
   },
 
   operations: {
@@ -92,7 +104,7 @@ export const assignment = defineBehavior<AssignmentConfig>({
       const subject = context.principal.subject;
       const current = assigneeOf(context);
       if (current === to) {
-        throw new BehaviorVetoError(NAME, 'assign', context.schema, context.id, to === subject ? 'it is already assigned to the caller' : 'it is already assigned to that principal');
+        throw vetoed(context, 'assign', to === subject ? 'it is already assigned to the caller' : 'it is already assigned to that principal', 'already_assigned');
       }
       if (!privileged(context)) {
         if (to !== subject) {
@@ -109,7 +121,7 @@ export const assignment = defineBehavior<AssignmentConfig>({
     unassign(context) {
       const current = assigneeOf(context);
       if (current === null) {
-        throw new BehaviorVetoError(NAME, 'unassign', context.schema, context.id, 'it is not assigned');
+        throw vetoed(context, 'unassign', 'it is not assigned', 'not_assigned');
       }
       if (current !== context.principal.subject && !privileged(context)) {
         throw refused(context, 'unassign', 'unassigning another principal');

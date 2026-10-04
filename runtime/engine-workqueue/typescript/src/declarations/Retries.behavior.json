@@ -14,6 +14,12 @@
                   "description": "How many failures of the class an instance may have.",
                   "minimum": 1,
                   "type": "integer"
+                },
+                "hint": {
+                  "description": "What recordAttempt returns for a failure of the class, to steer the worker's next attempt.",
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
                 }
               },
               "required": [
@@ -26,7 +32,7 @@
             }
           ]
         },
-        "description": "The failure classes, by name: each its own cap of attempts, or terminal, which exhausts the instance at its first failure.",
+        "description": "The failure classes, by name: each its own cap of attempts, with an optional hint for the next attempt, or terminal, which exhausts the instance at its first failure.",
         "minProperties": 1,
         "propertyNames": {
           "not": {
@@ -73,7 +79,12 @@
         "type": "object"
       },
       "limitsField": {
-        "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored.",
+        "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored. Once the instance exists, only a principal with limitsPermission changes it, and the holder of its active lease does not.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "limitsPermission": {
+        "description": "The permission a principal needs to change limitsField once the instance exists. Absent, the caps an instance is created with do not change.",
         "minLength": 1,
         "type": "string"
       },
@@ -117,10 +128,14 @@
   "operations": [
     {
       "name": "recordAttempt",
-      "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+      "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
+          "detail": {
+            "description": "Anything about the attempt worth keeping, such as validation errors: recorded in the operation's event and nowhere else.",
+            "type": "object"
+          },
           "failure": {
             "description": "The failure class; a success when absent.",
             "minLength": 1,
@@ -169,6 +184,13 @@
               "null"
             ]
           },
+          "hint": {
+            "description": "The failure class's hint; null for a success and a class without one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "kept": {
             "description": "Whether the attempt's result was kept.",
             "type": "boolean"
@@ -195,7 +217,8 @@
           "total",
           "classAttempts",
           "exhausted",
-          "stuck"
+          "stuck",
+          "hint"
         ],
         "type": "object"
       },
@@ -206,6 +229,14 @@
     {
       "code": "exhausted",
       "description": "The instance's retries are exhausted: it takes no more attempts, its status moves only to exhaustedState, and it is not acquired or claimed again."
+    },
+    {
+      "code": "limits_fixed",
+      "description": "The holder of the instance's active lease does not change limitsField: a worker never raises its own caps."
+    },
+    {
+      "code": "not_configured",
+      "description": "The config names no limitsPermission, so limitsField does not change once the instance exists."
     }
   ]
 }

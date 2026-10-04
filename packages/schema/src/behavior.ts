@@ -239,7 +239,7 @@ export interface QueueConfig {
   readonly claim: { readonly from: readonly string[]; readonly to: string };
   /** An integer field of the type that orders claimNext: higher first, an instance without a value last. */
   readonly priorityField?: string;
-  /** The type's own top-level scalar fields claimNext may filter on, by equality. */
+  /** The type's own top-level scalar fields claimNext and countClaimable may filter on, by a value or a list of values. */
   readonly match?: readonly string[];
   /** The most instances one claimNext tries; 100 when absent. */
   readonly maxCandidates?: number;
@@ -311,6 +311,8 @@ export interface BudgetConfig {
   readonly limitPermission?: string;
   /** A directive sent to the holder of the active lease when usage takes the instance or an enclosing scope over its limit; needs Lease. */
   readonly onExceeded?: { readonly direct: string };
+  /** Moves the instance's Workflow status, through transition, when usage leaves it over a limit while the status is one of from; needs Workflow. */
+  readonly escalate?: { readonly transition: string; readonly from: readonly string[] };
 }
 
 /** One meter of a Budget config. */
@@ -319,9 +321,9 @@ export interface BudgetMeter {
   readonly limit?: number;
   /** An integer field of the type that holds the instance's limit; not with limit. */
   readonly limitField?: string;
-  /** The amount reserve takes for the meter when it is given no meter. */
+  /** The amount reserve takes for the meter when it is given no meter; with reserveField, when the field holds no positive integer. */
   readonly reserve?: number;
-  /** An integer field of the type whose positive value is that amount; not with reserve. */
+  /** An integer field of the type whose positive value is that amount, in place of reserve. */
   readonly reserveField?: string;
   /** A link of the type's Links config whose target, which composes Budget with the meter, is the enclosing scope. */
   readonly scope?: string;
@@ -331,12 +333,14 @@ export interface BudgetMeter {
 
 /** Retries' config. */
 export interface RetriesConfig {
-  /** The failure classes, by name: a cap of attempts each, or terminal. */
-  readonly classes: { readonly [failure: string]: { readonly attempts: number } | "terminal" };
+  /** The failure classes, by name: a cap of attempts each, with a hint recordAttempt returns for a failure of the class, or terminal. */
+  readonly classes: { readonly [failure: string]: { readonly attempts: number; readonly hint?: string } | "terminal" };
   /** How many failures of every class together an instance may have. */
   readonly totalAttempts: number;
   /** An object field of the type with the instance's own caps, by class name and totalAttempts. */
   readonly limitsField?: string;
+  /** The permission that changes limitsField once the instance exists; absent, the caps it was created with stay. */
+  readonly limitsPermission?: string;
   /** Keeps the best scoring result: by at least minDelta, and never losing a neverRegress predicate. */
   readonly keepBest?: { readonly minDelta?: number; readonly neverRegress?: readonly string[] };
   /** How many failures in a row, none kept, with the same signature exhaust the instance as stuck. */

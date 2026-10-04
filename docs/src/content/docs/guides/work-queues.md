@@ -127,13 +127,16 @@ const { claimed } = engine.instances.invokeSchema(worker, 'jobs', 'claimNext', {
 // so a process that lost the lease cannot write once another holds it.
 const fenced = { preconditions: { Lease: { token: claimed.token } } };
 
-// Renew the lease every heartbeatMs. The result carries any directives
-// sent to the holder.
-engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', {}, fenced);
+// Renew the lease every heartbeatMs. The result carries the directives
+// sent to the holder and not acknowledged; the next heartbeat
+// acknowledges the ones handled, in the same write.
+const { directives } = engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { acknowledge: [] }, fenced);
+engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { acknowledge: directives.map((d) => d.id) }, fenced);
 
-// Report what the work used, and failures by class.
+// Report what the work used, and failures by class. A failure's class
+// hint, when the config gives one, steers the next attempt.
 engine.instances.invoke(worker, 'jobs', claimed.id, 'recordUsage', { meter: 'cpuSeconds', amount: 100 }, fenced);
-engine.instances.invoke(worker, 'jobs', claimed.id, 'recordAttempt', { failure: 'timeout' }, fenced);
+const { hint } = engine.instances.invoke(worker, 'jobs', claimed.id, 'recordAttempt', { failure: 'timeout', detail: { after: '30s' } }, fenced);
 
 // Finish, and give the lease back.
 engine.instances.invoke(worker, 'jobs', claimed.id, 'transition', { to: 'done' }, fenced);
@@ -169,7 +172,7 @@ After the test's run, a job that timed out reads:
 {
   "title": "index", "topic": "search", "priority": 5, "timeLimitMs": 45000,
   "status": "queued",
-  "lease": { "holder": null, "token": 2, "acquiredAt": null, "expiresAt": null, "active": false, "expiries": 1,
+  "lease": { "holder": null, "token": 2, "acquiredAt": null, "renewedAt": null, "expiresAt": null, "active": false, "expiries": 1,
              "ended": { "reason": "maxHold", "at": 1045000 } },
   "budget": { "cpuSeconds": { "used": 100, "reserved": 0, "limit": 3600, "remaining": 3500 } },
   "retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "bestScore": null, "exhausted": false, "stuck": false }
@@ -184,8 +187,8 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 | --- | --- |
 | Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission` |
 | Precondition | `{ token }`: `preconditions: { Lease: { token } }`, or the `Preconditions` header over HTTP |
-| Field | `lease`: `{ holder, token, acquiredAt, expiresAt, active, expiries, ended }` |
-| Operations | `acquire({ ttlMs? })`, `heartbeat()`, `release({ abandon? })`, `expire({ holder? })`, `direct({ name, data? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder })` |
+| Field | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }` |
+| Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder, notRenewedAfter? })` |
 | Schedule | `expire`, every `sweepMs`, on the runner |
 | Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, and principals with `overridePermission` |
 
@@ -217,8 +220,13 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   `lease.ended` keeps how the last lease ended, and the event of each end
   carries it.
 - **Directives** are messages to the holder: `direct` sends one, every
-  heartbeat returns those not yet acknowledged, and `acknowledge` stops
-  them. They end with the lease.
+  heartbeat returns those not yet acknowledged, and `acknowledge`, or a
+  heartbeat's own `acknowledge`, stops them in the same write. A
+  `dedupeKey` sends a directive once per lease, so a sender that fires
+  on every change does not queue it twice. They end with the lease.
+- **A gone holder.** `expireHolder` expires every lease one principal
+  holds and returns the ids; `notRenewedAfter` spares a lease renewed
+  after a time, whose own heartbeats show it alive.
 - **The sweep** needs the runner's principal to hold `write` on the
   schema and any permission an `onExpiry` transition names.
 
@@ -231,7 +239,7 @@ One principal the instance is assigned to, or none.
 | Config | `permission`, optional |
 | Field | `assignee`, the principal's subject |
 | Operations | `assign({ to })`, `unassign()` |
-| Guard | while assigned, a `Lease.acquire` or `Queue.claim` by anyone but the assignee is `vetoed` |
+| Guard | while assigned, a `Lease.acquire` or `Queue.claim` by anyone but the assignee is `vetoed` (`assigned_to_another`) |
 
 A principal may assign an unassigned instance to itself and unassign
 itself; every other move needs `permission`. `claimNext` skips work
@@ -246,8 +254,8 @@ takes its lease and moves its status.
 | | |
 | --- | --- |
 | Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100) |
-| Operations | `claim({ ttlMs? })`, `refresh()`, and the schema-level `claimNext({ match? })`, which returns `{ claimed }`, a claim or null |
-| Guard | `Lease.acquire` other than through a claim is `vetoed`, so a claimable instance's lease is taken only by claiming it |
+| Operations | `claim({ ttlMs? })`, `refresh()`, the schema-level `claimNext({ match?, assignedOnly?, ttlMs? })`, which returns `{ claimed }`, a claim or null, and the schema-level, read-only `countClaimable({ match?, assignedOnly? })`, which returns `{ count }` |
+| Guard | `Lease.acquire` other than through a claim is `vetoed` (`claim_required`), so a claimable instance's lease is taken only by claiming it |
 
 `claim` expires a lapsed lease first, then checks the status is one of
 `claim.from` and that no `Dependencies` blocker holds the instance up,
@@ -256,9 +264,24 @@ transitions to `claim.to`. A refusal at any step leaves nothing behind.
 
 `claimNext` tries candidates highest priority first (an instance with no
 priority last), then oldest, then by id, skipping work that is blocked,
-assigned to another principal or at `maxExpiries`, and claims the first
-that succeeds. Calls are synchronous and the engine writes from one
-process, so two claims never interleave.
+assigned to another principal, at `maxExpiries`, exhausted by `Retries`
+or over its `Budget`, and claims the first that succeeds; a claim
+refused to this caller (`vetoed`, `conflict` or `forbidden`) passes to
+the next. Calls are synchronous and the engine writes from one process,
+so two claims never interleave.
+
+- **Pools in one order.** A `match` value may be a list: `{ topic:
+  ["search", "mail"] }` takes either topic, highest priority first across
+  both.
+- **Over budget is not tried.** Queue copies Budget's `checkReserve`, and
+  hears the enclosing scopes it read, so a pool that runs out takes its
+  queued work out of the candidates, and a pool that frees up, or a new
+  UTC day for a daily meter, puts it back. Work over its budget at the
+  head of the queue never hides claimable work behind it.
+- **Your own work.** `assignedOnly: true` takes only work assigned to
+  the caller.
+- **How much is waiting.** `countClaimable` counts the candidates with
+  the same rules and claims nothing: a signal to scale workers on.
 
 Queue cannot be added to a schema that already has instances.
 
@@ -271,7 +294,7 @@ it.
 | | |
 | --- | --- |
 | Config | `ttlMs` and `principalField`, required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (schema names), `sweepMs` (5000) |
-| Field | `presence`: `{ deadline, lastBeatAt, missed }` |
+| Field | `presence`: `{ deadline, lastBeatAt, missed, released }` |
 | Operations | `beat()`, `miss()` |
 | Schedule | `miss`, every `sweepMs`, on the runner |
 
@@ -290,11 +313,15 @@ export abstract class Worker {
 ```
 
 A worker that misses its deadline is marked `missed`, moved to
-`missing`, and every lease its principal holds on the `releaseLeases`
-schemas is expired through `Lease.expireHolder`, so its jobs go back in
-the queue even if their own leases had time left. The runner's principal
-needs Lease's `overridePermission` on those schemas. A later `beat`
-clears the miss.
+`missing`, and the leases its principal holds on the `releaseLeases`
+schemas are expired through `Lease.expireHolder`, so its jobs go back in
+the queue even if their own leases had time left. A lease renewed after
+the worker's last beat is spared: its heartbeats show the process
+holding it is alive, and it expires on its own if they stop. Keep lease
+heartbeats at most the presence `ttlMs` apart. The miss records the ids
+it expired in `presence.released`, which its event carries. The
+runner's principal needs Lease's `overridePermission` on those schemas.
+A later `beat` clears the miss.
 
 ## Blueprint
 
@@ -341,15 +368,19 @@ the enclosing scopes its `scope` link points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, by name): each `limit` or `limitField`, `reserve` or `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }` |
+| Config | `meters` (required, by name): each `limit` or `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
 | Field | `budget`: by meter, `{ used, reserved, limit, remaining }` |
-| Operations | `reserve`, `recordUsage`, `settle`, `setLimit`, and the scope side, `reserveFor`, `settleFor` and `recordUsageFor` |
+| Operations | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, and the scope side, `reserveFor`, `settleFor` and `recordUsageFor` |
 
-- A claim reserves each meter's `reserve` amount and is refused when it
-  does not fit, so `claimNext` moves on to the next candidate.
+- A claim reserves each meter's amount, the instance's `reserveField`
+  or else `reserve`, and is refused when it does not fit (`over_limit`).
+  `checkReserve` says whether it would fit, without reserving; Queue
+  copies it, so `claimNext` does not try work over its budget.
 - `recordUsage` is never refused, since the usage has happened. It
   releases the part the reservation covered and reports any overrun;
-  with `onExceeded`, the lease holder also gets a directive.
+  with `onExceeded`, the lease holder also gets a directive, and with
+  `escalate`, each instance it leaves over its limit, a scope included,
+  moves its status by its own config, a pool to `paused` say.
 - On a type with `Lease`, a reservation lasts as long as the lease: a
   release or an expiry settles it.
 - A `scope` link to a pool or a project applies that scope's own limit
@@ -364,10 +395,10 @@ once.
 
 | | |
 | --- | --- |
-| Config | `classes` (required: `{ attempts }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `keepBest`, `stuckAfter`, `resultField`, `from`, `permission` |
+| Config | `classes` (required: `{ attempts, hint? }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `limitsPermission`, `keepBest`, `stuckAfter`, `resultField`, `from`, `permission` |
 | Field | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
-| Operation | `recordAttempt({ failure?, score?, result?, signature?, predicates? })` |
-| Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` (`exhausted`) |
+| Operation | `recordAttempt({ failure?, score?, result?, signature?, predicates?, detail? })`, which returns the class's `hint` |
+| Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` (`exhausted`); `limitsField` changes only with `limitsPermission`, and never by the lease holder (`limits_fixed`) |
 
 - An attempt without `failure` is a success.
 - A terminal class, a class out of room, or the total reaching its cap
@@ -376,6 +407,11 @@ once.
   `score` improves on the best by `minDelta`.
 - `stuckAfter` exhausts an instance that fails with the same `signature`
   that many times in a row.
+- A class's `hint` comes back from `recordAttempt` to steer the next
+  attempt; an attempt's `detail`, validation errors say, is kept in its
+  event.
+- A worker cannot raise its own caps: `limitsField` needs
+  `limitsPermission`, and the lease holder may not change it.
 - Nothing resets exhaustion.
 
 ## Where to go next

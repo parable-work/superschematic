@@ -255,6 +255,32 @@
               "config": {
                 "additionalProperties": false,
                 "properties": {
+                  "escalate": {
+                    "additionalProperties": false,
+                    "description": "Moves the instance's Workflow status when usage leaves it over the limit of a meter, while the status is one of from, in the transaction of that usage: an instance's own usage, or one an instance inside it passes up, so a scope's config moves the scope. A move a guard vetoes or the caller may not make leaves the status, and the usage counts all the same. Needs Workflow on the type.",
+                    "properties": {
+                      "from": {
+                        "description": "The states the status moves from; in any other state it stays.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "transition": {
+                        "description": "The state to move to, through Workflow's transition.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "transition",
+                      "from"
+                    ],
+                    "type": "object"
+                  },
                   "limitPermission": {
                     "description": "The permission a principal needs to change a meter's limit, with setLimit or through limitField. Absent, no limit changes once the instance exists.",
                     "minLength": 1,
@@ -264,19 +290,9 @@
                     "additionalProperties": {
                       "additionalProperties": false,
                       "not": {
-                        "anyOf": [
-                          {
-                            "required": [
-                              "limit",
-                              "limitField"
-                            ]
-                          },
-                          {
-                            "required": [
-                              "reserve",
-                              "reserveField"
-                            ]
-                          }
+                        "required": [
+                          "limit",
+                          "limitField"
                         ]
                       },
                       "properties": {
@@ -291,12 +307,12 @@
                           "type": "string"
                         },
                         "reserve": {
-                          "description": "The amount reserve takes for the meter when it is given no meter: what a claim reserves.",
+                          "description": "The amount reserve takes for the meter when it is given no meter: what a claim reserves. With reserveField, the amount when the field holds no positive integer.",
                           "minimum": 1,
                           "type": "integer"
                         },
                         "reserveField": {
-                          "description": "An integer field of the type whose positive value is the amount reserve takes for the meter when it is given no meter.",
+                          "description": "An integer field of the type whose positive value is the amount reserve takes for the meter when it is given no meter, in place of reserve.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -659,7 +675,7 @@
                     "type": "string"
                   },
                   "releaseLeases": {
-                    "description": "Schemas that compose Lease, whose leases the principal holds are expired when the instance is missed, through Lease's schema-level expireHolder. The principal that applies the miss, the runner's in the sweep, needs Lease's overridePermission on each.",
+                    "description": "Schemas that compose Lease, whose leases the principal holds are expired when the instance is missed, through Lease's schema-level expireHolder, but for a lease renewed after the principal's last beat, whose own heartbeats show it alive. The principal that applies the miss, the runner's in the sweep, needs Lease's overridePermission on each.",
                     "items": {
                       "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
                       "type": "string"
@@ -730,7 +746,7 @@
                     "type": "object"
                   },
                   "match": {
-                    "description": "The type's own top-level scalar fields claimNext may filter on, by equality.",
+                    "description": "The type's own top-level scalar fields claimNext and countClaimable may filter on, by equality with a value or membership in a list of values.",
                     "items": {
                       "minLength": 1,
                       "type": "string"
@@ -881,6 +897,12 @@
                               "description": "How many failures of the class an instance may have.",
                               "minimum": 1,
                               "type": "integer"
+                            },
+                            "hint": {
+                              "description": "What recordAttempt returns for a failure of the class, to steer the worker's next attempt.",
+                              "maxLength": 2000,
+                              "minLength": 1,
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -893,7 +915,7 @@
                         }
                       ]
                     },
-                    "description": "The failure classes, by name: each its own cap of attempts, or terminal, which exhausts the instance at its first failure.",
+                    "description": "The failure classes, by name: each its own cap of attempts, with an optional hint for the next attempt, or terminal, which exhausts the instance at its first failure.",
                     "minProperties": 1,
                     "propertyNames": {
                       "not": {
@@ -940,7 +962,12 @@
                     "type": "object"
                   },
                   "limitsField": {
-                    "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored.",
+                    "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored. Once the instance exists, only a principal with limitsPermission changes it, and the holder of its active lease does not.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "limitsPermission": {
+                    "description": "The permission a principal needs to change limitsField once the instance exists. Absent, the caps an instance is created with do not change.",
                     "minLength": 1,
                     "type": "string"
                   },

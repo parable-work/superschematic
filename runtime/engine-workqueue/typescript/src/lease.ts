@@ -24,7 +24,10 @@ sweepMs as its principal, calls it on every lapsed lease of the schema,
 found through the lease columns across the schema (sql.instances()) and
 their index. A principal with overridePermission expires a given holder's
 lease at once, active or not (expire with holder), and every lease that
-holder has on the schema (expireHolder), for a holder that is gone. An
+holder has on the schema (expireHolder), for a holder that is gone;
+notRenewedAfter spares an active lease acquired or renewed after a time,
+whose own heartbeats show the process holding it alive, and expireHolder
+returns the ids it expired. An
 expiry clears the holder, advances the token, counts the expiry unless
 the instance is in a terminal state of its Workflow (a holder that
 finished and died before releasing has not failed), and moves the status
@@ -61,8 +64,9 @@ blocker goes, runs as its caller and is refused like any other: a
 deployment exempts the ones it wants through.
 
 Directives are a holder's control channel. direct attaches one to the
-current token; heartbeat returns the ones not acknowledged, and
-acknowledge marks them handled. A principal's direct needs
+current token, once per dedupeKey when it gives one; heartbeat returns
+the ones not acknowledged, and acknowledge, or heartbeat's own
+acknowledge, marks them handled. A principal's direct needs
 directPermission (overridePermission when that is absent), which the
 guard asks; another behavior of the type sends one through call(), as
 the principal it runs for, with none, as a budget does when its usage
@@ -149,6 +153,8 @@ export interface LeaseRecord {
   readonly holder: string | null;
   readonly token: number;
   readonly acquiredAt: number | null;
+  /** When its holder last acquired or renewed it; null when free. */
+  readonly renewedAt: number | null;
   /** When the lease stops being active: its expiry time, or its longest hold if that comes first; null when free. */
   readonly expiresAt: number | null;
   /** Whether it is held and neither expired nor past its longest hold. */
@@ -165,6 +171,8 @@ export interface DirectiveRecord {
   readonly id: number;
   readonly name: string;
   readonly data?: Record<string, unknown>;
+  /** The key it was sent with, which sends it once per lease. */
+  readonly dedupeKey?: string;
   readonly createdAt: number;
   readonly createdBy: string;
 }
@@ -176,6 +184,8 @@ interface Held {
   readonly holder: string | null;
   readonly token: number;
   readonly acquiredAt: number | null;
+  /** Its acquire or its last heartbeat; null for a lease held before the column was added, which reads acquiredAt. */
+  readonly renewedAt: number | null;
   readonly expiresAt: number | null;
   /** The length the lease was acquired with, which each heartbeat renews it by. */
   readonly ttlMs: number | null;
@@ -195,6 +205,7 @@ function held(view: InstanceView<LeaseConfig>): Held {
     holder: columns.holder === null || columns.holder === undefined ? null : String(columns.holder),
     token: Number(columns.token),
     acquiredAt: number(columns.acquired_at),
+    renewedAt: number(columns.renewed_at),
     expiresAt: number(columns.expires_at),
     ttlMs: number(columns.ttl_ms),
     expiries: Number(columns.expiries),
@@ -322,6 +333,7 @@ function end(context: OperationContext<LeaseConfig>, lease: Held, expiries: numb
     holder: null,
     token: lease.token + 1,
     acquired_at: null,
+    renewed_at: null,
     expires_at: null,
     ttl_ms: null,
     expiries,
@@ -432,6 +444,7 @@ function directiveOf(row: Row): DirectiveRecord {
     id: Number(row.directive),
     name: String(row.name),
     ...(row.data === null ? {} : { data: JSON.parse(String(row.data)) as Record<string, unknown> }),
+    ...(row.dedupe_key === null ? {} : { dedupeKey: String(row.dedupe_key) }),
     createdAt: Number(row.created_at),
     createdBy: String(row.created_by),
   };
@@ -524,7 +537,7 @@ function holdSql(config: LeaseConfig): { sql?: string; params: SqlValue[] } {
 // instance for the next sweep and the others go on; any other failure, a
 // principal the policy refuses say, fails the run, so the deployment
 // sees it.
-function expireOne(context: BehaviorScope<LeaseConfig>, id: string, params: { holder?: string }): ExpiryReason | undefined {
+function expireOne(context: BehaviorScope<LeaseConfig>, id: string, params: { holder?: string; notRenewedAfter?: number }): ExpiryReason | undefined {
   try {
     return (context.instances.invoke(context.schema, id, 'expire', params as FrozenJSON) as { reason?: ExpiryReason }).reason;
   } catch (error) {
@@ -533,6 +546,31 @@ function expireOne(context: BehaviorScope<LeaseConfig>, id: string, params: { ho
     }
     throw error;
   }
+}
+
+// acknowledgeDirectives marks directives of the lease handled, for
+// acknowledge and heartbeat's acknowledge; an id not sent under its token
+// refuses the call.
+function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation: string, path: string, lease: Held, ids: readonly number[]): void {
+  const table = context.sql.table('directives');
+  const marks = ids.map(() => '?').join(', ');
+  const found = new Set(
+    context.sql
+      .all(`SELECT directive FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND directive IN (${marks})`, [
+        ...key(context),
+        lease.token,
+        ...ids,
+      ])
+      .map((row) => Number(row.directive))
+  );
+  const missing = ids.filter((id) => !found.has(id));
+  if (missing.length > 0) {
+    throw new OperationParamsError(NAME, operation, [{ path, message: `no directive ${missing.join(', ')} was sent under token ${lease.token}` }]);
+  }
+  context.sql.run(
+    `UPDATE ${table} SET acknowledged_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND directive IN (${marks}) AND acknowledged_at IS NULL`,
+    [context.now, ...key(context), lease.token, ...ids]
+  );
 }
 
 export const lease = defineBehavior<LeaseConfig>({
@@ -648,6 +686,16 @@ export const lease = defineBehavior<LeaseConfig>({
     },
     // How the last lease ended, which its event carries.
     { version: 2, name: 'ended', columns: { ended_reason: { type: 'text' }, ended_at: { type: 'integer' } } },
+    // When the holder last renewed it, which notRenewedAfter reads, and the
+    // key that sends a directive once per lease.
+    {
+      version: 3,
+      name: 'renewed',
+      columns: { renewed_at: { type: 'integer' } },
+      up(sql) {
+        sql.run(`ALTER TABLE ${sql.table('directives')} ADD COLUMN dedupe_key TEXT`);
+      },
+    },
   ],
 
   // The lease's exclusion and its fence: see the header.
@@ -731,6 +779,7 @@ export const lease = defineBehavior<LeaseConfig>({
         holder: context.principal.subject,
         token,
         acquired_at: context.now,
+        renewed_at: context.now,
         expires_at: expiresAt,
         ttl_ms: ttl,
         ended_reason: null,
@@ -740,16 +789,21 @@ export const lease = defineBehavior<LeaseConfig>({
     },
 
     // The guard holds it to the holder of an active lease, with its token.
-    heartbeat(context) {
+    // Its acknowledge marks directives handled in the same write.
+    heartbeat(context, params) {
       const lease = held(context);
       checkGuarded(context, 'heartbeat', lease);
+      const ids = params.acknowledge as number[] | undefined;
+      if (ids !== undefined && ids.length > 0) {
+        acknowledgeDirectives(context, 'heartbeat', '/acknowledge', lease, ids);
+      }
       const ttl = lease.ttlMs ?? context.config.ttlMs;
       const limit = holdLimit(context);
       const expiresAt = limit === undefined ? context.now + ttl : Math.min(context.now + ttl, (lease.acquiredAt as number) + limit);
-      context.columns.set({ expires_at: expiresAt });
+      context.columns.set({ expires_at: expiresAt, renewed_at: context.now });
       const directives = context.sql
         .all(
-          `SELECT directive, name, data, created_by, created_at FROM ${context.sql.table('directives')}
+          `SELECT directive, name, data, dedupe_key, created_by, created_at FROM ${context.sql.table('directives')}
            WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND acknowledged_at IS NULL ORDER BY directive`,
           [...key(context), lease.token]
         )
@@ -777,6 +831,12 @@ export const lease = defineBehavior<LeaseConfig>({
 
     expire(context, params) {
       const holder = params.holder as string | undefined;
+      const notRenewedAfter = params.notRenewedAfter as number | undefined;
+      if (holder === undefined && notRenewedAfter !== undefined) {
+        throw new OperationParamsError(NAME, 'expire', [
+          { path: '/notRenewedAfter', message: "notRenewedAfter spares a holder's active leases, so it needs holder" },
+        ]);
+      }
       if (holder !== undefined) {
         requireOverride(context, 'expire the lease of another holder of');
       }
@@ -784,7 +844,12 @@ export const lease = defineBehavior<LeaseConfig>({
       if (lease.holder === null || (holder === undefined ? isActive(context, lease) : lease.holder !== holder)) {
         return { expired: false };
       }
-      const reason: ExpiryReason = isActive(context, lease) ? 'holder' : lapseReason(context, lease);
+      const active = isActive(context, lease);
+      // Its holder renewed it after the time: the process holding it is alive.
+      if (active && notRenewedAfter !== undefined && (lease.renewedAt ?? lease.acquiredAt ?? 0) > notRenewedAfter) {
+        return { expired: false };
+      }
+      const reason: ExpiryReason = active ? 'holder' : lapseReason(context, lease);
       applyExpiry(context, lease, reason);
       return { expired: true, reason };
     },
@@ -799,6 +864,17 @@ export const lease = defineBehavior<LeaseConfig>({
         throw vetoed(context, 'direct', 'no lease is active, so there is no holder to direct', 'lapsed', { expiredAt: deadline(context, lease) });
       }
       const table = context.sql.table('directives');
+      const dedupeKey = params.dedupeKey as string | undefined;
+      if (dedupeKey !== undefined) {
+        const sent = context.sql.get(`SELECT directive FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND dedupe_key = ?`, [
+          ...key(context),
+          lease.token,
+          dedupeKey,
+        ]);
+        if (sent !== undefined) {
+          return { id: Number(sent.directive), created: false };
+        }
+      }
       const last = context.sql.get(`SELECT MAX(directive) AS last FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND token = ?`, [
         ...key(context),
         lease.token,
@@ -806,38 +882,26 @@ export const lease = defineBehavior<LeaseConfig>({
       const id = Number(last?.last ?? 0) + 1;
       const data = params.data as FrozenJSON | undefined;
       context.sql.run(
-        `INSERT INTO ${table} (namespace, schema, id, token, directive, name, data, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [...key(context), lease.token, id, params.name as string, data === undefined ? null : JSON.stringify(data), context.principal.subject, context.now]
+        `INSERT INTO ${table} (namespace, schema, id, token, directive, name, data, dedupe_key, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          ...key(context),
+          lease.token,
+          id,
+          params.name as string,
+          data === undefined ? null : JSON.stringify(data),
+          dedupeKey ?? null,
+          context.principal.subject,
+          context.now,
+        ]
       );
-      return { id };
+      return { id, created: true };
     },
 
     // The guard holds it to the holder of an active lease, with its token.
     acknowledge(context, params) {
       const lease = held(context);
       checkGuarded(context, 'acknowledge', lease);
-      const ids = params.ids as number[];
-      const table = context.sql.table('directives');
-      const marks = ids.map(() => '?').join(', ');
-      const found = new Set(
-        context.sql
-          .all(`SELECT directive FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND directive IN (${marks})`, [
-            ...key(context),
-            lease.token,
-            ...ids,
-          ])
-          .map((row) => Number(row.directive))
-      );
-      const missing = ids.filter((id) => !found.has(id));
-      if (missing.length > 0) {
-        throw new OperationParamsError(NAME, 'acknowledge', [
-          { path: '/ids', message: `no directive ${missing.join(', ')} was sent under token ${lease.token}` },
-        ]);
-      }
-      context.sql.run(
-        `UPDATE ${table} SET acknowledged_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND directive IN (${marks}) AND acknowledged_at IS NULL`,
-        [context.now, ...key(context), lease.token, ...ids]
-      );
+      acknowledgeDirectives(context, 'acknowledge', '/ids', lease, params.ids as number[]);
       return {};
     },
 
@@ -862,8 +926,9 @@ export const lease = defineBehavior<LeaseConfig>({
     expireHolder(context, params) {
       requireOverride(context, 'expire the leases of a holder on');
       const holder = params.holder as string;
+      const notRenewedAfter = params.notRenewedAfter as number | undefined;
       const relation = context.sql.instances();
-      let expired = 0;
+      const expired: string[] = [];
       const reasons: Partial<Record<ExpiryReason, number>> = {};
       let after = '';
       for (;;) {
@@ -871,14 +936,14 @@ export const lease = defineBehavior<LeaseConfig>({
           .all(`SELECT id FROM ${relation} WHERE holder = ? AND id > ? ORDER BY id LIMIT ?`, [holder, after, BATCH])
           .map((row) => String(row.id));
         for (const id of ids) {
-          const reason = expireOne(context, id, { holder });
+          const reason = expireOne(context, id, notRenewedAfter === undefined ? { holder } : { holder, notRenewedAfter });
           if (reason !== undefined) {
-            expired += 1;
+            expired.push(id);
             reasons[reason] = (reasons[reason] ?? 0) + 1;
           }
         }
         if (ids.length < BATCH) {
-          return { expired, reasons };
+          return { expired: expired.length, reasons, ids: expired };
         }
         after = ids[ids.length - 1];
       }
@@ -924,6 +989,7 @@ export const lease = defineBehavior<LeaseConfig>({
         holder: lease.holder,
         token: lease.token,
         acquiredAt: lease.acquiredAt,
+        renewedAt: lease.holder === null ? null : (lease.renewedAt ?? lease.acquiredAt),
         expiresAt: lease.holder === null ? null : deadline(view, lease),
         active: isActive(view, lease),
         expiries: lease.expiries,

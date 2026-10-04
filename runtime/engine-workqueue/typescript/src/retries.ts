@@ -3,10 +3,17 @@ Retries, logical retries per failure class (D16), apart from a lease's
 expiries: a worker that ran and failed records the attempt, and the
 instance's caps decide whether it may run again. Each attempt is a call of
 recordAttempt: a success, with no failure, or a failure of one of the
-config's classes. A class has its own cap of failures or is terminal, and
-every class counts against totalAttempts. The instance's limitsField may
-narrow or widen the caps for it; an unknown or terminal class, and a value
-that is not a valid cap, is ignored.
+config's classes. A class has its own cap of failures and an optional
+hint, which recordAttempt returns for a failure of the class to steer the
+worker's next attempt, or is terminal, and every class counts against
+totalAttempts. The instance's limitsField may narrow or widen the caps for
+it; an unknown or terminal class, and a value that is not a valid cap, is
+ignored. Once the instance exists, limitsField changes only with
+limitsPermission, and never by the holder of its active lease, read
+through Lease's field: a worker does not raise its own caps. Without
+limitsPermission in the config, the caps an instance is created with
+stay. An attempt's detail, any JSON object, is kept in its operation's
+event, the one place it is recorded.
 
 The rules for a failure, in order:
 
@@ -54,6 +61,10 @@ recordAttempt needs the config's permission when it names one, and a
 Lease on the type refuses it to every principal but the holder while a
 lease is active, as any writing operation.
 
+Every refusal is a veto with a code the declaration lists (exhausted,
+limits_fixed, not_configured), but a permission the caller lacks, which
+is forbidden.
+
 configChange: any config may change. Retries can be added to a schema
 that has instances, which start with no attempts, and cannot be removed
 from one: the attempts its instances recorded would stay behind.
@@ -67,14 +78,15 @@ import {
   defineBehavior,
   isTerminalState,
   type ConfigTarget,
+  type GuardAnswer,
   type InstanceView,
   type OperationContext,
 } from '@superschematic/engine';
 
 import declaration from './declarations/Retries.behavior.json' with { type: 'json' };
 
-/** A failure class: a cap of failures, or terminal. */
-export type RetryClass = { readonly attempts: number } | 'terminal';
+/** A failure class: a cap of failures with an optional hint for the next attempt, or terminal. */
+export type RetryClass = { readonly attempts: number; readonly hint?: string } | 'terminal';
 
 /** Retries' config, parsed: the defaults filled in. */
 export interface RetriesConfig {
@@ -88,6 +100,10 @@ export interface RetriesConfig {
   /** The states exhaustion moves the status from. */
   readonly from: readonly string[];
   readonly permission?: string;
+  /** The permission that changes limitsField once the instance exists. */
+  readonly limitsPermission?: string;
+  /** Whether the type composes Lease, whose holder does not change limitsField. */
+  readonly leased: boolean;
 }
 
 /** The retries field. */
@@ -112,6 +128,8 @@ export interface AttemptRecord {
   readonly classAttempts: Readonly<Record<string, number>>;
   readonly exhausted: boolean;
   readonly stuck: boolean;
+  /** The failure class's hint; null for a success and a class without one. */
+  readonly hint: string | null;
 }
 
 const NAME = 'Retries';
@@ -258,6 +276,31 @@ function fieldOf(target: ConfigTarget, at: string, field: string): unknown[] {
   return Array.isArray(type) ? type : [type];
 }
 
+// limitsGuard holds a change of limitsField to limitsPermission, and keeps
+// it from the holder of the instance's active lease, read through Lease's
+// field: the caps a worker's attempts count against are not the worker's
+// to raise. An update that leaves the field as it was passes.
+function limitsGuard(view: InstanceView<RetriesConfig>, after: Readonly<Record<string, unknown>>): GuardAnswer {
+  const field = view.config.limitsField;
+  if (field === undefined || JSON.stringify(view.data[field] ?? null) === JSON.stringify(after[field] ?? null)) {
+    return undefined;
+  }
+  const permission = view.config.limitsPermission;
+  if (permission === undefined) {
+    return { reason: `${field} holds the instance's caps, which change only with limitsPermission, and the config names none`, code: 'not_configured' };
+  }
+  if (!view.can(permission)) {
+    throw new EngineError('forbidden', `${view.principal.subject} may not change ${field}, the caps of ${view.schema} ${view.id}: it needs permission ${permission}`);
+  }
+  if (view.config.leased) {
+    const lease = view.instances.get(view.schema, view.id, { fields: ['lease'] })?.data.lease as { holder?: unknown; active?: unknown } | undefined;
+    if (lease?.active === true && lease.holder === view.principal.subject) {
+      return { reason: `${field} holds the caps its holder's attempts count against, so the holder of its lease does not change it`, code: 'limits_fixed' };
+    }
+  }
+  return undefined;
+}
+
 export const retries = defineBehavior<RetriesConfig>({
   declaration,
 
@@ -274,6 +317,7 @@ export const retries = defineBehavior<RetriesConfig>({
       exhaustedState: string;
       from?: string[];
       permission?: string;
+      limitsPermission?: string;
     };
     if (raw.limitsField !== undefined && !fieldOf(target, 'limitsField', raw.limitsField).includes('object')) {
       throw new BehaviorConfigError(`limitsField "${raw.limitsField}" is not an object field of ${target.type}`);
@@ -310,7 +354,7 @@ export const retries = defineBehavior<RetriesConfig>({
     const classes: Record<string, RetryClass> = {};
     for (const [name, spec] of Object.entries(raw.classes)) {
       // A class's name starts with a letter (configSchema), so it is never __proto__.
-      classes[name] = spec === 'terminal' ? 'terminal' : { attempts: spec.attempts };
+      classes[name] = spec === 'terminal' ? 'terminal' : { attempts: spec.attempts, ...(spec.hint === undefined ? {} : { hint: spec.hint }) };
     }
     return {
       classes,
@@ -322,6 +366,8 @@ export const retries = defineBehavior<RetriesConfig>({
       exhaustedState: raw.exhaustedState,
       from,
       ...(raw.permission === undefined ? {} : { permission: raw.permission }),
+      ...(raw.limitsPermission === undefined ? {} : { limitsPermission: raw.limitsPermission }),
+      leased: target.behaviors.includes('Lease'),
     };
   },
 
@@ -373,8 +419,11 @@ export const retries = defineBehavior<RetriesConfig>({
   ],
 
   // Once exhausted, the instance moves only to exhaustedState and is not
-  // taken again.
+  // taken again; limitsField changes only as a limit does.
   guard(view, request) {
+    if (request.kind === 'update') {
+      return limitsGuard(view, request.after);
+    }
     if (request.kind !== 'operation') {
       return undefined;
     }
@@ -491,7 +540,9 @@ export const retries = defineBehavior<RetriesConfig>({
       if (exhausted) {
         exhaust(context);
       }
-      return { failure: failure ?? null, score: score ?? null, kept, total, classAttempts: counted, exhausted, stuck } satisfies AttemptRecord;
+      const spec = failure === undefined ? undefined : config.classes[failure];
+      const hint = spec === undefined || spec === 'terminal' ? null : (spec.hint ?? null);
+      return { failure: failure ?? null, score: score ?? null, kept, total, classAttempts: counted, exhausted, stuck, hint } satisfies AttemptRecord;
     },
   },
 

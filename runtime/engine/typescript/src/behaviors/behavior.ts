@@ -421,7 +421,16 @@ export interface BehaviorSchedule<Config> {
  * referencing instance only through an operation it invokes on it, so
  * that instance's guards run and its change gets an event.
  */
-export interface ReferenceContext<Config> extends InstanceView<Config> {}
+export interface ReferenceContext<Config> extends InstanceView<Config> {
+  /**
+   * Whether a write of the referencing instance is running up this call:
+   * its own write changed the instance it refers to, as a claim's
+   * reservation changes an enclosing budget. Invoking one of its writing
+   * operations now is a cycle (BehaviorError); what its own write leaves
+   * is that write's to settle, in its operation or its afterChange.
+   */
+  readonly writing: boolean;
+}
 
 /**
  * A write to one instance: initialize, afterChange and an operation. In a

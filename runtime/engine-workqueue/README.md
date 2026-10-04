@@ -76,11 +76,11 @@ and numbered by a fencing token.
 | --- | --- |
 | Config | `ttlMs` (at least 1000; 60000 when absent), `heartbeatMs` (at most half of `ttlMs`; a third of it when absent), `sweepMs` (at least 1000; 5000 when absent), `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`; all optional |
 | Precondition | `{ token }`, the lease's current token: `preconditions: { Lease: { token } }` on any write |
-| Fields | `lease`: `{ holder, token, acquiredAt, expiresAt, active, expiries, ended }`, `holder`, `acquiredAt` and `expiresAt` null when it is free; `ended`, `{ reason, at }`, how the last lease ended, null while one is held |
-| Operations | `acquire({ ttlMs? })` -> `{ token, expiresAt, heartbeatMs }`; `heartbeat()` -> `{ expiresAt, directives }`; `release({ abandon? })` -> `{}`; `expire({ holder? })` -> `{ expired, reason? }`; `direct({ name, data? })` -> `{ id }`; `acknowledge({ ids })` -> `{}`; `resetExpiries()` -> `{ expiries }`; schema-level `expireHolder({ holder })` -> `{ expired, reasons }`. All write; `heartbeat`, `acknowledge` and the holder's `release` present the token |
+| Fields | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }`, `holder`, `acquiredAt`, `renewedAt` (its acquire or last heartbeat) and `expiresAt` null when it is free; `ended`, `{ reason, at }`, how the last lease ended, null while one is held |
+| Operations | `acquire({ ttlMs? })` -> `{ token, expiresAt, heartbeatMs }`; `heartbeat({ acknowledge? })` -> `{ expiresAt, directives }`; `release({ abandon? })` -> `{}`; `expire({ holder?, notRenewedAfter? })` -> `{ expired, reason? }`; `direct({ name, data?, dedupeKey? })` -> `{ id, created }`; `acknowledge({ ids })` -> `{}`; `resetExpiries()` -> `{ expiries }`; schema-level `expireHolder({ holder, notRenewedAfter? })` -> `{ expired, reasons, ids }`. All write; `heartbeat`, `acknowledge` and the holder's `release` present the token |
 | Schedules | `expire`, every `sweepMs`, on the engine's runner |
 | Guards | a write that presents a token other than the current one, whoever calls (`token_stale`); while a lease is active, an update, a delete or a writing operation of another behavior by any principal but the holder (`held_by_another`), except an `exempt` operation, a read-only one, Queue's `refresh` and a principal with `overridePermission`; with `requireToken`, such a write by the holder that presents no token (`token_required`); once the lease has lapsed, the holder's writes (`lapsed`); while a lease is held, a change to `maxHoldField` without `overridePermission` (`hold_limit_fixed`); a principal's `direct` needs its permission (below). All `vetoed` |
-| Refusals | `acquire` while a lease is active (`held_by_caller`, `held_by_another`) and at `maxExpiries` (`max_expiries`, details `{ expiries, maxExpiries }`), without `acquirePermission` (`forbidden`), with a `ttlMs` past the config's (`invalid_argument`); `heartbeat` and `acknowledge` with no lease (`not_leased`), by another principal (`not_holder`), with no token (`token_required`) or once the lease has lapsed (`lapsed`); `release` with no lease (`not_leased`), by another principal (`forbidden` without `overridePermission` when the config names one, `not_holder` when it names none), by the holder with no token (`token_required`), once the lease has lapsed (`lapsed`); `direct` by a principal without its permission (`forbidden`) or with no permission in the config (`not_configured`), and with no active lease (`not_leased`, `lapsed`); `expire` with a `holder`, and `expireHolder`, without `overridePermission` (`forbidden`, the config naming none included); `acknowledge` of an id not sent under the token (`invalid_argument`); `resetExpiries` without `overridePermission` (`forbidden`, or `not_configured` when the config names none). Each code is a veto's (`vetoed`) |
+| Refusals | `acquire` while a lease is active (`held_by_caller`, `held_by_another`) and at `maxExpiries` (`max_expiries`, details `{ expiries, maxExpiries }`), without `acquirePermission` (`forbidden`), with a `ttlMs` past the config's (`invalid_argument`); `heartbeat` and `acknowledge` with no lease (`not_leased`), by another principal (`not_holder`), with no token (`token_required`) or once the lease has lapsed (`lapsed`); `release` with no lease (`not_leased`), by another principal (`forbidden` without `overridePermission` when the config names one, `not_holder` when it names none), by the holder with no token (`token_required`), once the lease has lapsed (`lapsed`); `direct` by a principal without its permission (`forbidden`) or with no permission in the config (`not_configured`), and with no active lease (`not_leased`, `lapsed`); `expire` with a `holder`, and `expireHolder`, without `overridePermission` (`forbidden`, the config naming none included), and `expire` with `notRenewedAfter` and no `holder` (`invalid_argument`); `acknowledge`, and `heartbeat`'s `acknowledge`, of an id not sent under the token (`invalid_argument`, and nothing is acknowledged); `resetExpiries` without `overridePermission` (`forbidden`, or `not_configured` when the config names none). Each code is a veto's (`vetoed`) |
 | Events | each operation's event; a heartbeat is a write, with its event; the event of a release, an abandon and an expiry carries `lease.ended` in its patch |
 | `configChange` | any config may change. Added to a schema with instances, which start free at token 0; not removed from one, since their leases and directives would stay behind |
 
@@ -216,8 +216,13 @@ transition names.
 For a holder that is gone, `expire({ holder })` expires that principal's
 lease at once, active or not, and the schema-level `expireHolder({ holder
 })` does so on every instance whose lease it holds and returns how many
-expired; a presence check calls it as the runner's principal. Both need
-`overridePermission`, and are refused when the config names none.
+expired, by reason, and the ids of the instances; a presence check calls
+it as the runner's principal. Both need `overridePermission`, and are
+refused when the config names none. `notRenewedAfter`, a time, spares an
+active lease its holder acquired or renewed after it (`renewedAt`): a
+process whose own heartbeats go on is alive whatever else says its
+principal is gone, and its lease expires on its own if they stop. A
+lapsed lease expires all the same.
 
 ### The guard
 
@@ -252,7 +257,7 @@ the field `maxHoldField` names while a lease is held, unless with
 ### Directives
 
 A directive is a message to the holder of the active lease: `direct({
-name, data? })`. A principal's `direct` needs `directPermission`, or
+name, data?, dedupeKey? })`. A principal's `direct` needs `directPermission`, or
 `overridePermission` when that is absent, and is refused when the config
 names neither; the guard asks it before any other check. Another behavior
 of the type sends one with `call('Lease', 'direct', ...)`, as the
@@ -260,8 +265,15 @@ principal it runs for and without either permission: a budget whose
 usage runs over tells the holder so as the principal that recorded the
 usage. It attaches to the current token and is numbered within it, 1, 2, 3, ....
 Every heartbeat returns the directives of its lease that are not
-acknowledged, oldest first, as `{ id, name, data?, createdAt, createdBy }`;
-delivery is at least once, and `acknowledge({ ids })`, with the token, stops it.
+acknowledged, oldest first, as `{ id, name, data?, dedupeKey?, createdAt,
+createdBy }`; delivery is at least once, and `acknowledge({ ids })`, with
+the token, stops it. `heartbeat({ acknowledge: ids })` acknowledges them
+in the heartbeat's own write, before it lists the rest, so a worker pays
+no write and no event of its own per acknowledgement. With `dedupeKey`, a
+directive already sent under the lease with the key, acknowledged or not,
+stands: `direct` returns its id with `created: false` and sends nothing,
+so a sender that runs on every change (an alert, a watchdog) does not
+queue the same message twice for one lease.
 When the token advances, by a release, an expiry or a new acquire, the
 directives of the lease it ends are deleted, so none reaches the next
 holder. Deleting the instance deletes its directives.
@@ -275,8 +287,8 @@ Who the instance is assigned to: one principal at a time, or none.
 | Config | `permission`, optional |
 | Fields | `assignee`: the principal's subject; absent when unassigned |
 | Operations | `assign({ to })` -> `{ assignee, assignedAt, assignedBy }`, writes; `unassign()` -> `{ assignee }`, writes |
-| Guards | while the instance is assigned, Lease's `acquire` and Queue's `claim` by any principal but the assignee: `vetoed`, whoever made the call |
-| Refusals | assigning another principal, reassigning, and unassigning another principal without the permission (`forbidden`; `vetoed` when the config names none); assigning the principal it is assigned to, and unassigning an unassigned instance (`vetoed`) |
+| Guards | while the instance is assigned, Lease's `acquire` and Queue's `claim` by any principal but the assignee: `vetoed` (`assigned_to_another`), whoever made the call |
+| Refusals | assigning another principal, reassigning, and unassigning another principal without the permission (`forbidden`; `not_configured` when the config names none); assigning the principal it is assigned to (`already_assigned`), and unassigning an unassigned instance (`not_assigned`). Each code is a veto's (`vetoed`) |
 | `configChange` | the permission may change. Added to a schema with instances, which start unassigned; not removed from one, since their assignments would stay behind |
 
 A principal may assign an unassigned instance to itself, and an assignee
@@ -287,17 +299,18 @@ exists: only a principal trusted with the permission names one.
 ## Queue
 
 Claimable work: a claim that checks an instance can be claimed, takes its
-lease and moves its status in one transaction, and `claimNext`, which
-claims the first instance the caller can claim.
+lease and moves its status in one transaction, `claimNext`, which claims
+the first instance the caller can claim, and `countClaimable`, which
+counts them.
 
 | | |
 | --- | --- |
 | Config | `claim`: `{ from, to }`, the Workflow states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field of the type; `match`, the type's own top-level scalar fields `claimNext` may filter on; `maxCandidates` (1 to 1000; 100 when absent). Requires `Workflow` and `Lease` |
 | Fields | none |
-| Operations | `claim({ ttlMs? })` -> `{ id, token, expiresAt, heartbeatMs }`, writes; `refresh()` -> `{}`, writes; schema-level `claimNext({ match? })` -> `{ claimed }`, the claim or null, writes |
-| Guards | Lease's `acquire` by anything but Queue's own claim: `vetoed`, so the lease of a claimable instance is taken only by claiming it |
-| Refusals | `claim` of an instance whose status is not one of `claim.from`, or that a blocker holds up (`vetoed`), and whatever Lease's `acquire`, Budget's `reserve`, Workflow's `transition` and the instance's guards refuse; `claimNext` with a `match` field the config does not name (`invalid_argument`) |
-| Events | `claim`'s operation event carries the lease and the status; a blocker's change appends a `refresh` event on each instance it holds up |
+| Operations | `claim({ ttlMs? })` -> `{ id, token, expiresAt, heartbeatMs }`, writes; `refresh()` -> `{}`, writes; schema-level `claimNext({ match?, assignedOnly?, ttlMs? })` -> `{ claimed }`, the claim or null, writes; schema-level `countClaimable({ match?, assignedOnly? })` -> `{ count }`, read-only. A `match` value is a value or a list of values |
+| Guards | Lease's `acquire` by anything but Queue's own claim: `vetoed` (`claim_required`), so the lease of a claimable instance is taken only by claiming it |
+| Refusals | `claim` of an instance whose status is not one of `claim.from` (`not_claimable`, details `{ status, from }`), or that a blocker holds up (`blocked`), and whatever Lease's `acquire`, Budget's `reserve`, Workflow's `transition` and the instance's guards refuse; `claimNext` and `countClaimable` with a `match` field the config does not name, or `assignedOnly` on a type without Assignment (`invalid_argument`); `claimNext` whose every candidate's claim was `forbidden` to the caller (that `forbidden`). Each code is a veto's (`vetoed`) |
+| Events | `claim`'s operation event carries the lease and the status; a blocker's change appends a `refresh` event on each instance it holds up, and an enclosing budget scope's change one on each instance whose exclusion it moves |
 | `configChange` | `claim`, `priorityField`, `match` and `maxCandidates` may change. Not added to a schema with instances, which would have no copies for `claimNext` to find them by, and not removed from one |
 
 ```json
@@ -319,31 +332,69 @@ instance whose lease is active.
 
 `claimNext` reads candidates from Queue's own columns across the schema
 (`sql.instances()`), through their index: copies of what a claim checks,
-the status, `blocked`, the assignee, Lease's expiries and the priority
-field's value, which Queue keeps current in the transaction of every
-change of the instance (`afterChange`) and of every change of a blocker
+the status, `blocked`, the assignee, Lease's expiries, the priority
+field's value and until when the instance is excluded, which Queue keeps
+current in the transaction of every change of the instance
+(`afterChange`) and of every change of what it waits on
 (`afterReferenceChange`, which invokes `refresh`). It copies facts, not
 booleans of the config, so a new version's `claim.from` or `maxExpiries`
 applies to every instance at once; a new `priorityField` orders an
 instance from its next change. A candidate is in a `claim.from` state,
-not blocked, below Lease's `maxExpiries`, unassigned or assigned to the
-caller, and holds each `match` value (by JSON equality on the instance's
-own field). Candidates go highest priority first, an instance without one
-last, then oldest, then by id. `claimNext` invokes `claim` on each in
-turn, as the caller, until one succeeds, and takes a veto or a conflict
-to mean that one cannot be claimed now, up to `maxCandidates`; any other
-error ends it. A stale copy costs a skipped candidate, never a wrong
-claim.
+not blocked, below Lease's `maxExpiries`, not excluded now, unassigned or
+assigned to the caller (only assigned to it with `assignedOnly`), and
+holds each `match` value, or one of a list, by JSON equality on the
+instance's own field. Candidates go highest priority first, an instance
+without one last, then oldest, then by id. `claimNext` invokes `claim` on
+each in turn, as the caller, with its `ttlMs`, until one succeeds, and
+takes a veto, a conflict or a `forbidden` to mean that one cannot be
+claimed by this caller now, up to `maxCandidates`; any other error ends
+it. When every candidate it tried was `forbidden`, it throws the first, so
+a caller that may claim none of them learns why rather than that there
+is no work. A stale copy costs a skipped candidate, never a wrong claim.
 
-Queue records a reference to each blocker it reads through
-`Dependencies`' `listBlockers`, so a blocker's change in any schema runs
-its `afterReferenceChange`, which invokes `refresh` on the dependent as
-the principal that changed the blocker, who needs `write` on the
-dependent's schema.
+`countClaimable` counts the same candidates for the caller, with no
+`maxCandidates`, and claims nothing: a read-only signal of the work
+waiting, for an autoscaler say.
 
 The engine writes a file from one process (D16), and its calls are
 synchronous, so two claims never interleave: `claimNext`'s scan and the
 claim it makes are one transaction under the file's write lock.
+
+### Exclusion
+
+A claim is refused for more than its status and blockers. An instance
+over its budget, or exhausted, would be tried by every `claimNext` and
+refused, and enough of them at the head of the order (more than
+`maxCandidates`) would make `claimNext` return null while claimable work
+waits behind them. So for an instance that its status and blockers make a
+candidate, Queue copies until when it is excluded (`excluded_until`),
+which the candidate query compares with the time:
+
+- with Retries on the type, while its `retries` field shows it exhausted:
+  until a change;
+- with Budget on the type, while its `checkReserve` (Budget, below)
+  says the reservation a claim makes does not fit, here or in an
+  enclosing scope: until the start of the next UTC day when that day
+  alone makes it fit, so an instance over a daily meter comes back with
+  no write; else until a change.
+
+Queue records a reference to each enclosing scope `checkReserve` read,
+while the instance is a candidate but for its budget, so a scope's change
+in any schema (a reservation, a usage, a settlement, a new limit) runs
+its `afterReferenceChange`. That checks the instance's exclusion through
+`checkReserve`, as the principal who changed the scope, and invokes
+`refresh` only when the copy no longer matches. A scope's change costs a
+check of each instance waiting under it, and an event on each whose fit
+it moves. A change the instance's own write makes in a scope, its claim's
+reservation say, is left to that write (the context's `writing`): its own
+`afterChange` refreshes it.
+
+Queue records a reference to each blocker it reads through
+`Dependencies`' `listBlockers` too, so a blocker's change in any schema
+runs its `afterReferenceChange`, which invokes `refresh` on the dependent.
+Either change runs as the principal that made it, who needs `write` on
+the dependent's schema, and a change of a candidate needs `read` on the
+schemas of its blockers and scopes.
 
 ## Presence
 
@@ -354,12 +405,12 @@ only that principal may beat it.
 | | |
 | --- | --- |
 | Config | `ttlMs` (at least 1000) and `principalField` (a string field of the type), required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (schema names), `sweepMs` (at least 1000; 5000 when absent) |
-| Fields | `presence`: `{ deadline, lastBeatAt, missed }`, the times in epoch milliseconds or null |
-| Operations | `beat()` -> `{ deadline }`; `miss()` -> `{ missed }`. Both write |
+| Fields | `presence`: `{ deadline, lastBeatAt, missed, released }`, the times in epoch milliseconds or null; `released`, the instances whose lease the last miss expired, by schema, null before a miss |
+| Operations | `beat()` -> `{ deadline }`; `miss()` -> `{ missed, released? }`. Both write |
 | Schedule | `miss`, every `sweepMs`: `miss` on every instance past its deadline and not missed, at most 1000 a run, as the runner's principal |
-| Guards | an update that changes `principalField` once it holds a value: `vetoed`, whoever asks |
-| Refusals | `beat` by any principal but the one `principalField` names, or on an instance whose `principalField` holds none (`vetoed`) |
-| Events | each operation's event; a beat is a write, with its event |
+| Guards | an update that changes `principalField` once it holds a value: `vetoed` (`principal_fixed`), whoever asks |
+| Refusals | `beat` by any principal but the one `principalField` names (`not_principal`), or on an instance whose `principalField` holds none (`no_principal`). Each code is a veto's (`vetoed`) |
+| Events | each operation's event; a beat is a write, with its event; a miss's carries `presence.released` in its patch |
 | `configChange` | any config may change but `principalField`. Added to a schema with instances, which have no deadline until their first beat; not removed from one, since their deadlines and misses would stay behind |
 
 ```json
@@ -386,10 +437,19 @@ one of its `from` states, so a worker in a terminal state stays there,
 and expires the principal's leases on each `releaseLeases` schema
 through that schema's `expireHolder`, Lease's schema-level operation, so
 each expiry runs Lease's rules (the token, `onExpiry`, the count) and
-appends its own event. The leases are the principal's, not the
+appends its own event. It passes `notRenewedAfter`, the principal's last
+beat on any instance of the schema that stands for it (its create when it
+never beat), so a lease renewed since is spared: a worker whose presence
+beat starved while its lease heartbeats went on keeps its live work, and
+a lease that stops being renewed expires on its own. A lease whose
+heartbeat interval is longer than the presence `ttlMs` can go a whole
+presence interval unrenewed while its holder is alive; keep lease
+heartbeats at most the presence `ttlMs` apart. The miss records the ids
+it expired, by schema, in `presence.released`, so its event shows an
+operator what it released. The leases are the principal's, not the
 instance's: while another instance of the schema stands for the same
 principal and is present (not missed, before its deadline), a miss
-leaves them. A status move a guard vetoes leaves the status as
+leaves them, and records `released: {}`. A status move a guard vetoes leaves the status as
 it is and the instance missed all the same; any other refusal fails the
 miss and leaves the instance as it was. Any principal who may write the
 instance may call `miss`; on any other instance it returns `{ missed:
@@ -526,19 +586,20 @@ points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) or `limitField` (an integer field of the type), `reserve` (at least 1) or `reserveField` (an integer field of the type), `scope` (a link of the type's `Links` config) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`) |
+| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) or `limitField` (an integer field of the type), `reserve` (at least 1) and `reserveField` (an integer field of the type, whose positive value replaces `reserve`), `scope` (a link of the type's `Links` config) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`); `escalate` (`{ transition, from }`, needs `Workflow`) |
 | Fields | `budget`: by meter, `{ used, reserved, limit, remaining }`, `limit` and `remaining` null without a limit; `reserved` counts what the instance holds for the instances inside it |
-| Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All write |
-| Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed`; a change of a meter's `limitField` without `limitPermission` is `forbidden` (`vetoed` when the config names none), and below what is used and reserved `vetoed` |
-| Refusals | `reserve` that does not fit here or in a scope, and on a type with `Lease` without an active lease (`vetoed`); an unknown meter, an amount without a meter, a meter without a configured reservation and no amount (`invalid_argument`); `setLimit` without `limitPermission` (`forbidden`, or `vetoed` when the config names none) and below what is used and reserved (`vetoed`); a scope operation from an instance that does not draw the meter from the scope (`invalid_argument`) or for more than it reserved (`vetoed`). `recordUsage` is never refused for its amount |
-| Events | each operation's event, on the instance and on every scope it reaches |
+| Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `checkReserve({ meter?, amount? })` -> `{ fits, until, scopes }`, read-only; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`, each overrun `{ schema, id, used, limit, escalated }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All but `checkReserve` write |
+| Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed` (`scope_reserved`); a change of a meter's `limitField` without `limitPermission` is `forbidden` (`not_configured` when the config names none), and below what is used and reserved `vetoed` (`below_committed`) |
+| Refusals | `reserve` that does not fit here or in a scope (`over_limit`, details `{ meter, amount, remaining, limit, scope }`, `scope` the instance whose limit refused it), through a scope its link has moved from while the old one holds a reservation (`scope_moved`), and on a type with `Lease` without an active lease (`not_leased`); an unknown meter, an amount without a meter, a meter without a configured reservation and no amount (`invalid_argument`); `setLimit` without `limitPermission` (`forbidden`, or `not_configured` when the config names none) and below what is used and reserved (`below_committed`); a scope operation from an instance that does not draw the meter from the scope (`invalid_argument`) or for more than it reserved (`exceeds_reservation`). `recordUsage` is never refused for its amount. Each code is a veto's (`vetoed`) |
+| Events | each operation's event, on the instance and on every scope it reaches; an escalation's status in the event of the usage that caused it |
 | `configChange` | a meter cannot be removed; anything else may change. Added to a schema with instances, whose meters start empty; not removed from one |
 
 ```json
 { "name": "Budget", "config": {
-    "meters": { "cpuSeconds": { "limit": 3600, "reserve": 600, "scope": "pool", "reset": "daily" } },
+    "meters": { "cpuSeconds": { "limit": 3600, "reserve": 600, "reserveField": "cpuEstimate", "scope": "pool", "reset": "daily" } },
     "limitPermission": "jobs.budget",
-    "onExceeded": { "direct": "budgetExceeded" } } }
+    "onExceeded": { "direct": "budgetExceeded" },
+    "escalate": { "transition": "paused", "from": ["running"] } } }
 ```
 
 ### Reservations and usage
@@ -546,10 +607,22 @@ points at.
 A reservation fits while the meter's used plus reserved plus the amount
 is within its limit: the config's `limit`, the instance's `limitField`,
 or the one `setLimit` set. `reserve` with no meter takes every meter
-whose `reserve` or `reserveField` gives an amount; that is the call
-Queue's claim makes once the lease is taken, so a claim that does not fit
-is refused with no lease, no reservation and its status as it was, and
-`claimNext` moves on to the next candidate. The instance keeps its own
+whose `reserveField` or `reserve` gives an amount: the instance's
+`reserveField` when it holds a positive integer, else the config's
+`reserve`, as Lease's `maxHoldField` falls back to `maxHoldMs`. That is
+the call Queue's claim makes once the lease is taken, so a claim that
+does not fit is refused with no lease, no reservation and its status as
+it was, and `claimNext` moves on to the next candidate.
+
+`checkReserve`, which takes `reserve`'s parameters, says whether it
+would fit now, here and at every scope up the chain, read through their
+`budget` and `links` fields, and changes nothing. It counts the own
+reservation of a lease that is no longer active as settled, as `reserve`
+settles it first, and asks for no lease. When it does not fit, `until`
+is the start of the next UTC day if the daily meters starting again make
+it fit with nothing else changing, else null; `scopes` lists the scopes
+it read, innermost first. Queue copies the answer, so work over its
+budget is not tried (Queue, "Exclusion"). The instance keeps its own
 reservation apart from what it holds for others, so `settle` releases
 exactly what its claims reserved.
 
@@ -593,7 +666,7 @@ over a lapsed lease. Deleting the instance
 settles everything it reserved and holds, up the chain. On a type
 without `Lease`, a reservation lasts until `settle` or the delete.
 
-### Overruns and directives
+### Overruns, directives and escalation
 
 With `onExceeded`, usage that takes the instance or a scope over its
 limit sends `onExceeded.direct` to the holder of the instance's active
@@ -603,6 +676,17 @@ the overrun from `recordUsage`'s result. Lease's guard lets a call() of
 `direct` by another behavior of the type through without a permission,
 so the principal that records the usage needs none; a refusal sends
 nothing and does not refuse the usage.
+
+With `escalate`, usage that leaves an instance over a limit moves its
+status to `escalate.transition` when it is one of `from`, through
+Workflow's `transition`, as the caller, in the usage's transaction. Each
+level applies its own config: the instance's own usage moves it, and the
+usage an instance inside a scope passes up moves the scope, a pool
+paused say, in `recordUsageFor`. A move a guard vetoes or the caller may
+not make leaves the status, since usage is never refused; each overrun
+says whether its instance moved (`escalated`). `parseConfig` checks that
+the type lists Workflow, that the states are its states, and that a
+transition leads from each `from` state.
 
 ### Limits and daily meters
 
@@ -626,12 +710,12 @@ in time: an instance that may run again may be taken again at once.
 
 | | |
 | --- | --- |
-| Config | `classes` (required, by name: `{ attempts }` of at least 1, or `"terminal"`), `totalAttempts` (required, at least 1), `exhaustedState` (required, a Workflow state), `limitsField` (an object field of the type), `keepBest` (`{ minDelta?, neverRegress? }`), `stuckAfter` (at least 1), `resultField` (a field of the type), `from` (Workflow states, each with a transition to `exhaustedState`), `permission` |
+| Config | `classes` (required, by name: `{ attempts, hint? }`, `attempts` at least 1, or `"terminal"`), `totalAttempts` (required, at least 1), `exhaustedState` (required, a Workflow state), `limitsField` (an object field of the type), `limitsPermission`, `keepBest` (`{ minDelta?, neverRegress? }`), `stuckAfter` (at least 1), `resultField` (a field of the type), `from` (Workflow states, each with a transition to `exhaustedState`), `permission` |
 | Fields | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
-| Operations | `recordAttempt({ failure?, score?, result?, signature?, predicates? })` -> `{ failure, score, kept, total, classAttempts, exhausted, stuck }`, writes |
-| Guards | once exhausted, a `Workflow` transition into any state but `exhaustedState`, Lease's `acquire` and Queue's `claim`: `vetoed` (`exhausted`) |
-| Refusals | an unknown class, and a result without `resultField` (`invalid_argument`); a result the field's type refuses (`invalid_instance`); an attempt once exhausted (`vetoed`, `exhausted`); without `permission` (`forbidden`) |
-| Events | each attempt's operation event, by its caller |
+| Operations | `recordAttempt({ failure?, score?, result?, signature?, predicates?, detail? })` -> `{ failure, score, kept, total, classAttempts, exhausted, stuck, hint }`, writes |
+| Guards | once exhausted, a `Workflow` transition into any state but `exhaustedState`, Lease's `acquire` and Queue's `claim`: `vetoed` (`exhausted`); an update that changes `limitsField` without `limitsPermission` (`forbidden`; `not_configured` when the config names none), and by the holder of the instance's active lease (`limits_fixed`) |
+| Refusals | an unknown class, and a result without `resultField` (`invalid_argument`); a result the field's type refuses (`invalid_instance`); an attempt once exhausted (`exhausted`); without `permission` (`forbidden`). Each code is a veto's (`vetoed`) |
+| Events | each attempt's operation event, by its caller, with its parameters, `detail` among them |
 | `configChange` | any config may change. Added to a schema with instances, which start with no attempts; not removed from one |
 
 ```json
@@ -656,6 +740,23 @@ to a cap of at least 0 and `totalAttempts` to one of at least 1; an
 unknown or terminal class, and a value that is not such a cap, is
 ignored. Exhaustion is set only by an attempt, so a config whose classes
 are all terminal, or caps of 0, exhaust nothing before the first failure.
+
+The caps are not the worker's to raise. Once the instance exists, an
+update that changes `limitsField` needs `limitsPermission`, and is
+refused when the config names none, so the caps it was created with
+stay; and the holder of the instance's active lease, read through
+Lease's `lease` field, does not change it, with the permission or
+without (`limits_fixed`). Other principals are kept out by Lease's own
+guard while the lease is active, unless they hold its
+`overridePermission`.
+
+### Steering the next attempt
+
+A class's `hint` is what `recordAttempt` returns for a failure of the
+class (`hint`, null otherwise): an instruction a worker can carry into
+its next attempt, such as what a validator wants. An attempt's `detail`,
+any JSON object, is a parameter, so its operation event keeps it, and
+nothing else does: validation errors, a stack, what was tried.
 
 ### Kept results
 
@@ -683,9 +784,9 @@ that finished stays finished. A transition a guard vetoes leaves the
 status and the instance exhausted all the same. Once exhausted, the
 instance takes no more attempts, its status moves only to
 `exhaustedState`, and its lease cannot be acquired nor the instance
-claimed: an exhausted instance that `from` left in a claimable state is a
-candidate Queue's `claimNext` tries, is refused, and passes over. Nothing
-resets it.
+claimed: an exhausted instance that `from` left in a claimable state is
+no candidate of Queue's `claimNext`, which copies the exhaustion
+(Queue, "Exclusion"), and its claim is refused. Nothing resets it.
 
 `recordAttempt` needs `permission` when the config names one, and while
 a lease is active, `Lease`'s guard keeps it to the holder, as any writing

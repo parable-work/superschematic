@@ -383,7 +383,7 @@ export class Execution {
 
   /** referenceContext is a view whose instances.invoke also runs writing operations: afterReferenceChange's. */
   referenceContext(bound: BoundBehavior): ReferenceContext<unknown> {
-    return this.frozen(this.viewMembers(bound, true));
+    return this.frozen({ ...this.viewMembers(bound, true), writing: this.chain.writing(this.target.schema, this.target.id) });
   }
 
   private call(from: BoundBehavior, writable: boolean, behavior: string, name: string, params: unknown): unknown {

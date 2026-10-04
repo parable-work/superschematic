@@ -3,10 +3,12 @@
 // refused, draws the instance's own reservation down and releases exactly
 // that part at every scope; settlement when the lease a reservation was
 // made under ends (release, expiry, an acquire over a lapsed lease) and
-// when the instance is deleted; overruns reported and directed once per
-// lease; limits only limitPermission changes; daily meters that a read
-// never writes; scope operations that cannot free what an instance still
-// holds; and the config rules. Real SQLite, a real engine, a clock the
+// when the instance is deleted; overruns reported, directed once per
+// lease and escalated through Workflow by each level's own config; limits
+// only limitPermission changes; daily meters that a read never writes;
+// scope operations that cannot free what an instance still holds;
+// checkReserve, the read-only answer Queue copies; the codes refusals
+// carry; and the config rules. Real SQLite, a real engine, a clock the
 // tests move.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -159,6 +161,7 @@ for (const driver of drivers) {
       const seq = seqOf(engine, 'Step', 's1');
       const refused = veto(() => invoke(engine, worker, 'Step', 's1', 'reserve', { meter: 'cpu', amount: 30 }));
       assert.deepEqual([refused.behavior, refused.action, refused.reason], ['Budget', 'reserve', 'meter cpu has 20 of its limit 80 left, not 30']);
+      assert.deepEqual([refused.vetoCode, refused.vetoDetails], ['over_limit', { meter: 'cpu', amount: 30, remaining: 20, limit: 80, scope: { schema: 'Step', id: 's1' } }]);
       assert.deepEqual(meterOf(engine, 'Step', 's1'), meter(0, 60, 80));
       assert.equal(seqOf(engine, 'Step', 's1'), seq);
       // A meter with no limit takes any amount; reserve with no meter takes only the configured reservations.
@@ -179,7 +182,8 @@ for (const driver of drivers) {
     test('on a type that composes Lease, reserve needs an active lease, and only its holder reserves', () => {
       const { engine, clock } = single({ meters: { cpu: { limit: 80, reserve: 60 } } });
       const reason = 'no lease is active, and on a type that composes Lease a reservation is made under the active lease';
-      assert.equal(veto(() => invoke(engine, worker, 'Step', 's1', 'reserve')).reason, reason);
+      const unleased = veto(() => invoke(engine, worker, 'Step', 's1', 'reserve'));
+      assert.deepEqual([unleased.reason, unleased.vetoCode], [reason, 'not_leased']);
       invoke(engine, worker, 'Step', 's1', 'acquire');
       assert.equal(veto(() => invoke(engine, other, 'Step', 's1', 'reserve')).behavior, 'Lease');
       clock.advance(60000);
@@ -194,7 +198,7 @@ for (const driver of drivers) {
     test('usage is never refused: past the limit it is recorded and reported, and the holder gets one directive per lease', () => {
       const { engine } = single({ meters: { cpu: { limit: 80, reserve: 60 } }, onExceeded: { direct: 'meterExceeded' } });
       claim(engine);
-      const over = { schema: 'Step', id: 's1', used: 100, limit: 80 };
+      const over = { schema: 'Step', id: 's1', used: 100, limit: 80, escalated: false };
       assert.deepEqual(invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 100 }), {
         meter: 'cpu',
         used: 100,
@@ -372,6 +376,15 @@ for (const driver of drivers) {
       assert.deepEqual(invoke(engine, worker, 'Step', 's3', 'reserve'), { reserved: {} });
     });
 
+    test('with reserve beside reserveField, an instance whose field holds no positive integer reserves the config amount', () => {
+      const { engine } = chain({ pool: { limit: 200 }, step: { reserve: 20, reserveField: 'estimate' } });
+      engine.instances.update(alice, 'Step', 's1', { estimate: 30 });
+      engine.instances.update(alice, 'Step', 's2', { estimate: 0 });
+      claim(engine, 's1');
+      claim(engine, 's2', other);
+      assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Step', 's2'), meterOf(engine, 'Pool', 'p1')], [meter(0, 30, null), meter(0, 20, null), meter(0, 50, 200)]);
+    });
+
     test("usage that takes a scope over its limit is reported, and directs the holder of the instance's lease", () => {
       const { engine } = chain({ stepConfig: { onExceeded: { direct: 'meterExceeded' } } });
       claim(engine);
@@ -379,7 +392,7 @@ for (const driver of drivers) {
         meter: 'cpu',
         used: 120,
         released: 60,
-        overruns: [{ schema: 'Pool', id: 'p1', used: 120, limit: 100 }],
+        overruns: [{ schema: 'Pool', id: 'p1', used: 120, limit: 100, escalated: false }],
         directed: true,
       });
       const directives = (engine.instances.invoke(worker, 'Step', 's1', 'heartbeat', {}, fenced(1)) as { directives: Array<{ name: string; data: unknown }> }).directives;
@@ -400,9 +413,10 @@ for (const driver of drivers) {
         { released: 0, overruns: [] }
       );
       assert.deepEqual([meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Pool', 'p1')], [meter(0, 60, null), meter(1, 60, 100)]);
-      assert.equal(
-        veto(() => invoke(engine, other, 'Pool', 'p1', 'reserveFor', { meter: 'cpu', schema: 'Run', id: 'r1', amount: 10 })).reason,
-        'Run r1 has 60 of meter cpu reserved and 60 of it is held here, so 10 more is not its to hold'
+      const beyond = veto(() => invoke(engine, other, 'Pool', 'p1', 'reserveFor', { meter: 'cpu', schema: 'Run', id: 'r1', amount: 10 }));
+      assert.deepEqual(
+        [beyond.reason, beyond.vetoCode],
+        ['Run r1 has 60 of meter cpu reserved and 60 of it is held here, so 10 more is not its to hold', 'exceeds_reservation']
       );
       // An instance that does not draw the meter from the scope is no one the scope holds for.
       assert.deepEqual(
@@ -417,7 +431,8 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Run', { title: 'Other' }, { id: 'r2' });
       claim(engine);
       const reason = 'meter cpu has 60 reserved through link run; settle it before the link changes';
-      assert.equal(veto(() => invoke(engine, worker, 'Step', 's1', 'link', { name: 'run', id: 'r2' })).reason, reason);
+      const moved = veto(() => invoke(engine, worker, 'Step', 's1', 'link', { name: 'run', id: 'r2' }));
+      assert.deepEqual([moved.reason, moved.vetoCode, moved.vetoDetails], [reason, 'scope_reserved', { meter: 'cpu', reserved: 60 }]);
       assert.equal(veto(() => invoke(engine, worker, 'Step', 's1', 'unlink', { name: 'run' })).reason, reason);
       // A scope holding for an instance is held to it too.
       assert.equal(veto(() => invoke(engine, alice, 'Run', 'r1', 'unlink', { name: 'pool' })).reason, 'meter cpu has 60 reserved through link pool; settle it before the link changes');
@@ -569,10 +584,10 @@ for (const driver of drivers) {
       invoke(engine, alice, 'Step', 's1', 'link', { name: 'alt', id: 'r2' });
       claim(engine);
       publish(engine, step('alt'));
-      assert.equal(
-        veto(() => invoke(engine, worker, 'Step', 's1', 'reserve', { meter: 'cpu', amount: 1 })).reason,
-        'meter cpu has 60 reserved through Run r1; settle it before reserving through Run r2'
-      );
+      const moved = veto(() => invoke(engine, worker, 'Step', 's1', 'reserve', { meter: 'cpu', amount: 1 }));
+      assert.deepEqual([moved.reason, moved.vetoCode], ['meter cpu has 60 reserved through Run r1; settle it before reserving through Run r2', 'scope_moved']);
+      // checkReserve says so too: no reservation fits until the old one is settled.
+      assert.deepEqual(invoke(engine, worker, 'Step', 's1', 'checkReserve'), { fits: false, until: null, scopes: [{ schema: 'Run', id: 'r2' }] });
       // The usage counts at the new scope; the part it draws is released at the old one, which holds it.
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 10 });
       assert.deepEqual([meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Run', 'r2'), meterOf(engine, 'Pool', 'p1')], [meter(0, 50, null), meter(10, 0, null), meter(0, 50, 100)]);
@@ -580,6 +595,126 @@ for (const driver of drivers) {
       assert.deepEqual([meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Pool', 'p1')], [meter(0, 0, null), meter(0, 0, 100)]);
       invoke(engine, worker, 'Step', 's1', 'reserve');
       assert.deepEqual(meterOf(engine, 'Run', 'r2'), meter(10, 60, null));
+    });
+  });
+
+  describe(`Budget: checkReserve (${driver})`, () => {
+    test('it says whether reserve would fit, here and up the chain, lists the scopes it read, and changes nothing', () => {
+      const { engine } = chain({ pool: { limit: 100 } });
+      const check = (id = 's1', params: Record<string, unknown> = {}) => invoke(engine, worker, 'Step', id, 'checkReserve', params);
+      const scopes = [{ schema: 'Run', id: 'r1' }, { schema: 'Pool', id: 'p1' }];
+      assert.deepEqual(check(), { fits: true, until: null, scopes });
+      claim(engine);
+      const seq = seqOf(engine, 'Step', 's2');
+      // The pool has 40 of 100 left: s2's 60 does not fit, and only a change makes it.
+      assert.deepEqual(check('s2'), { fits: false, until: null, scopes });
+      assert.deepEqual(check('s2', { meter: 'cpu', amount: 40 }), { fits: true, until: null, scopes });
+      assert.equal(seqOf(engine, 'Step', 's2'), seq);
+      assert.deepEqual(thrown(() => check('s2', { amount: 5 }), OperationParamsError).issues, [
+        { path: '/amount', message: 'an amount is reserved of one meter, which meter names' },
+      ]);
+      // An instance with no scope link reads none.
+      engine.instances.create(alice, 'Step', { title: 'Loose' }, { id: 's3' });
+      assert.deepEqual(check('s3'), { fits: true, until: null, scopes: [] });
+    });
+
+    test("it counts a lease's reservation as settled once the lease is no longer active, as reserve settles it first", () => {
+      const { engine, clock } = chain({ pool: { limit: 100 } });
+      claim(engine);
+      assert.deepEqual(invoke(engine, other, 'Step', 's1', 'checkReserve'), { fits: false, until: null, scopes: [{ schema: 'Run', id: 'r1' }, { schema: 'Pool', id: 'p1' }] });
+      // Lapsed, not yet expired: the 60 still shows, and is counted as gone.
+      clock.advance(60000);
+      assert.deepEqual(meterOf(engine, 'Pool', 'p1'), meter(0, 60, 100));
+      assert.equal((invoke(engine, other, 'Step', 's1', 'checkReserve') as { fits: boolean }).fits, true);
+      assert.equal((invoke(engine, other, 'Step', 's2', 'checkReserve') as { fits: boolean }).fits, false);
+    });
+
+    test('a reservation daily meters keep out fits at the start of the next UTC day, which until gives', () => {
+      const { engine, clock } = chain({ pool: { limit: 100, reset: 'daily' }, step: { reserve: 60, limit: 70 } });
+      claim(engine);
+      invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 60 });
+      engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
+      // The pool, daily, has 40 left until the day turns; s2's own meter is not daily but empty.
+      assert.deepEqual(invoke(engine, other, 'Step', 's2', 'checkReserve'), {
+        fits: false,
+        until: DAY,
+        scopes: [{ schema: 'Run', id: 'r1' }, { schema: 'Pool', id: 'p1' }],
+      });
+      // s1's own meter, not daily, has 10 of 70 left: no day makes 60 fit.
+      assert.deepEqual((invoke(engine, other, 'Step', 's1', 'checkReserve') as { until: unknown }).until, null);
+      clock.ms = DAY;
+      assert.equal((invoke(engine, other, 'Step', 's2', 'checkReserve') as { fits: boolean }).fits, true);
+    });
+  });
+
+  describe(`Budget: escalate (${driver})`, () => {
+    // A pool can be paused, by its own escalate.
+    const poolFlow = { states: ['open', 'paused'], transitions: [{ from: 'open', to: 'paused' }] };
+
+    test('usage that leaves the instance over its limit moves its status, in the same operation, and is counted all the same', () => {
+      const { engine } = single({ meters: { cpu: { limit: 80, reserve: 60 } }, escalate: { transition: 'failed', from: ['running'] } });
+      claim(engine);
+      invoke(engine, worker, 'Step', 's1', 'transition', { to: 'running' });
+      assert.deepEqual((invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 50 }) as { overruns: unknown }).overruns, []);
+      assert.deepEqual(engine.instances.get(alice, 'Step', 's1')?.data.status, 'running');
+      assert.deepEqual(invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 40 }), {
+        meter: 'cpu',
+        used: 90,
+        released: 10,
+        overruns: [{ schema: 'Step', id: 's1', used: 90, limit: 80, escalated: true }],
+        directed: false,
+      });
+      const last = engine.events.read(alice, { schema: 'Step', instanceId: 's1' }).events.at(-1);
+      assert.deepEqual([(last?.change as { operation: string }).operation, (last?.change as { patch: { status?: string } }).patch.status], ['recordUsage', 'failed']);
+      // Out of its from states, a later overrun leaves the status.
+      assert.equal((invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 1 }) as { overruns: Array<{ escalated: boolean }> }).overruns[0].escalated, false);
+    });
+
+    test("a scope over its limit moves by its own config, as the caller; a move the caller may not make leaves it, and the usage counts", () => {
+      const clock = new Clock(T0);
+      const engine = openTestEngine({ driver, clock: clock.now });
+      const poolOf = (permission?: string) =>
+        budgetDocument('Pool', [
+          { name: 'Workflow', config: { ...poolFlow, transitions: [{ from: 'open', to: 'paused', ...(permission === undefined ? {} : { permission }) }] } },
+          { name: 'Budget', config: { meters: { cpu: { limit: 100 } }, escalate: { transition: 'paused', from: ['open'] } } },
+        ]);
+      publish(engine, poolOf('pools.pause'));
+      publish(
+        engine,
+        budgetDocument('Step', [
+          { name: 'Workflow', config: jobFlow },
+          lease,
+          { name: 'Links', config: { links: { pool: { schema: 'Pool' } } } },
+          { name: 'Budget', config: { meters: { cpu: { scope: 'pool', reserve: 60 } } } },
+        ])
+      );
+      engine.instances.create(alice, 'Pool', { title: 'Shared' }, { id: 'p1' });
+      engine.instances.create(alice, 'Step', { title: 's1' }, { id: 's1' });
+      invoke(engine, alice, 'Step', 's1', 'link', { name: 'pool', id: 'p1' });
+      claim(engine);
+      const over = invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 110 }) as { overruns: unknown };
+      assert.deepEqual(over.overruns, [{ schema: 'Pool', id: 'p1', used: 110, limit: 100, escalated: false }]);
+      assert.deepEqual([engine.instances.get(alice, 'Pool', 'p1')?.data.status, meterOf(engine, 'Pool', 'p1').used], ['open', 110]);
+      // Without the permission on the transition, the caller moves it.
+      publish(engine, poolOf());
+      const moved = invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 1 }) as { overruns: unknown };
+      assert.deepEqual(moved.overruns, [{ schema: 'Pool', id: 'p1', used: 111, limit: 100, escalated: true }]);
+      const last = engine.events.read(alice, { schema: 'Pool', instanceId: 'p1' }).events.at(-1);
+      assert.deepEqual(
+        [last?.actor, (last?.change as { operation: string }).operation, (last?.change as { patch: { status?: string } }).patch.status],
+        ['wren', 'recordUsageFor', 'paused']
+      );
+    });
+
+    test('escalate needs Workflow, its states and a transition from each from state', () => {
+      const engine = openTestEngine({ driver });
+      const refusal = (behaviors: BehaviorRef[]) => thrown(() => engine.schemas.define(alice, budgetDocument('Run', behaviors)), SchemaDocumentError).message;
+      const budgetWith = (escalate: object): BehaviorRef => ({ name: 'Budget', config: { meters: { cpu: { limit: 10 } }, escalate } });
+      assert.match(refusal([budgetWith({ transition: 'paused', from: ['open'] })]), /escalate moves the status through Workflow, which the type does not list/);
+      const flow: BehaviorRef = { name: 'Workflow', config: poolFlow };
+      assert.match(refusal([flow, budgetWith({ transition: 'stopped', from: ['open'] })]), /escalate.transition "stopped" is not a state of the type's Workflow \(open, paused\)/);
+      assert.match(refusal([flow, budgetWith({ transition: 'open', from: ['paused'] })]), /escalate: no transition of the type's Workflow leads from "paused" to "open"/);
+      engine.schemas.define(alice, budgetDocument('Run', [flow, budgetWith({ transition: 'paused', from: ['open'] })]));
     });
   });
 
@@ -591,7 +726,8 @@ for (const driver of drivers) {
       engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       const refused = thrown(() => invoke(engine, other, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 200 }), EngineError);
       assert.deepEqual([refused.code, refused.message], ['forbidden', 'otto may not change a limit of Step s1: it needs permission budget.limit']);
-      assert.equal(veto(() => invoke(engine, operator, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 9 })).reason, 'meter cpu has 10 used and reserved, more than the limit 9');
+      const below = veto(() => invoke(engine, operator, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 9 }));
+      assert.deepEqual([below.reason, below.vetoCode, below.vetoDetails], ['meter cpu has 10 used and reserved, more than the limit 9', 'below_committed', { meter: 'cpu', committed: 10 }]);
       // It lowers a limit too, down to what is committed.
       assert.deepEqual(invoke(engine, operator, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 10 }), { meter: 'cpu', limit: 10, previous: 80 });
       assert.deepEqual(invoke(engine, operator, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 200 }), { meter: 'cpu', limit: 200, previous: 10 });
@@ -613,10 +749,8 @@ for (const driver of drivers) {
       assert.equal(veto(() => invoke(exempt, worker, 'Step', 's1', 'reserve', { meter: 'cpu', amount: 1 })).reason, 'meter cpu has 0 of its limit 60 left, not 1');
 
       const unset = single({ meters: { cpu: { limit: 80 } } }).engine;
-      assert.equal(
-        veto(() => invoke(unset, operator, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 100 })).reason,
-        'its config names no limitPermission, which changing a limit needs'
-      );
+      const unnamed = veto(() => invoke(unset, operator, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 100 }));
+      assert.deepEqual([unnamed.reason, unnamed.vetoCode], ['its config names no limitPermission, which changing a limit needs', 'not_configured']);
     });
 
     test("limitField holds the instance's limit, which only limitPermission changes, setLimit through update() with its checks", () => {
@@ -632,15 +766,14 @@ for (const driver of drivers) {
       assert.equal(engine.instances.get(alice, 'Step', 's2')?.data.cap, 120);
       claim(engine, 's2', lead);
       invoke(engine, lead, 'Step', 's2', 'recordUsage', { meter: 'cpu', amount: 10 });
-      assert.equal(
-        veto(() => engine.instances.update(lead, 'Step', 's2', { cap: 50 })).reason,
-        'meter cpu has 60 used and reserved, more than the limit 50'
-      );
+      const below = veto(() => engine.instances.update(lead, 'Step', 's2', { cap: 50 }));
+      assert.deepEqual([below.reason, below.vetoCode], ['meter cpu has 60 used and reserved, more than the limit 50', 'below_committed']);
 
       const unset = single({ meters: { cpu: { limitField: 'cap' } } }).engine;
-      assert.equal(
-        veto(() => unset.instances.update(alice, 'Step', 's1', { cap: 10 })).reason,
-        'cap holds the limit of meter cpu, which changes only with limitPermission, and the config names none'
+      const unnamed = veto(() => unset.instances.update(alice, 'Step', 's1', { cap: 10 }));
+      assert.deepEqual(
+        [unnamed.reason, unnamed.vetoCode],
+        ['cap holds the limit of meter cpu, which changes only with limitPermission, and the config names none', 'not_configured']
       );
       unset.instances.update(alice, 'Step', 's1', { title: 'Renamed' });
     });

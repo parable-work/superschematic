@@ -1,7 +1,8 @@
 // Assignment: a principal takes an unassigned instance for itself or
 // gives it up; assigning, reassigning and unassigning anyone else need the
-// config's permission; and while an instance is assigned, only its
-// assignee takes its lease. Real SQLite, a real engine.
+// config's permission; while an instance is assigned, only its assignee
+// takes its lease; and each refusal carries its code. Real SQLite, a real
+// engine.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -42,10 +43,12 @@ for (const driver of drivers) {
       assert.equal(assigneeOf(engine), undefined);
       assert.deepEqual(invoke(engine, worker, 'assign', { to: 'wren' }), { assignee: 'wren', assignedAt: T0, assignedBy: 'wren' });
       assert.equal(assigneeOf(engine), 'wren');
-      assert.equal(veto(() => invoke(engine, worker, 'assign', { to: 'wren' })).reason, 'it is already assigned to the caller');
+      const again = veto(() => invoke(engine, worker, 'assign', { to: 'wren' }));
+      assert.deepEqual([again.reason, again.vetoCode], ['it is already assigned to the caller', 'already_assigned']);
       assert.deepEqual(invoke(engine, worker, 'unassign'), { assignee: 'wren' });
       assert.equal(assigneeOf(engine), undefined);
-      assert.equal(veto(() => invoke(engine, worker, 'unassign')).reason, 'it is not assigned');
+      const unassigned = veto(() => invoke(engine, worker, 'unassign'));
+      assert.deepEqual([unassigned.reason, unassigned.vetoCode], ['it is not assigned', 'not_assigned']);
       const events = engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.slice(1);
       assert.deepEqual(
         events.map((event) => [event.actor, (event.change as { operation: string; patch: unknown }).operation, (event.change as { patch: unknown }).patch]),
@@ -58,7 +61,8 @@ for (const driver of drivers) {
 
     test('without a permission in the config, no one assigns another principal, takes an assigned instance or unassigns another', () => {
       const { engine } = world();
-      assert.equal(veto(() => invoke(engine, worker, 'assign', { to: 'otto' })).reason, 'assigning another principal needs a permission, and its config names none');
+      const unnamed = veto(() => invoke(engine, worker, 'assign', { to: 'otto' }));
+      assert.deepEqual([unnamed.reason, unnamed.vetoCode], ['assigning another principal needs a permission, and its config names none', 'not_configured']);
       invoke(engine, worker, 'assign', { to: 'wren' });
       assert.equal(
         veto(() => invoke(engine, other, 'assign', { to: 'otto' })).reason,
@@ -86,7 +90,10 @@ for (const driver of drivers) {
       const { engine } = world({ permission: 'jobs.assign' });
       invoke(engine, lead, 'assign', { to: 'wren' });
       const refused = veto(() => invoke(engine, other, 'acquire'));
-      assert.deepEqual([refused.behavior, refused.action, refused.reason], ['Assignment', 'acquire', 'it is assigned to another principal, who alone may take it']);
+      assert.deepEqual(
+        [refused.behavior, refused.action, refused.reason, refused.vetoCode],
+        ['Assignment', 'acquire', 'it is assigned to another principal, who alone may take it', 'assigned_to_another']
+      );
       assert.equal((invoke(engine, worker, 'acquire') as { token: number }).token, 1);
       engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(1));
       invoke(engine, worker, 'unassign');

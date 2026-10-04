@@ -82,5 +82,23 @@
       },
       "writes": true
     }
+  ],
+  "vetoes": [
+    {
+      "code": "assigned_to_another",
+      "description": "The instance is assigned to another principal, who alone may acquire its lease or claim it."
+    },
+    {
+      "code": "already_assigned",
+      "description": "The instance is already assigned to that principal."
+    },
+    {
+      "code": "not_assigned",
+      "description": "The instance is not assigned."
+    },
+    {
+      "code": "not_configured",
+      "description": "The config names no permission, which assigning another principal, reassigning and unassigning another principal need."
+    }
   ]
 }
