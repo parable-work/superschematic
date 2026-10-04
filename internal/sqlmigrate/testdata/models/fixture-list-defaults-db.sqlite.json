@@ -1,0 +1,83 @@
+{
+  "dialect": "sqlite",
+  "service": "fixture-list-defaults-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Tasting.id",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "tasted_at",
+          "origin": "Tasting.tastedAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%d', 'now'))",
+          "name": "tasted_on",
+          "origin": "Tasting.tastedOn",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%H:%M:%f', 'now'))",
+          "name": "poured_at",
+          "origin": "Tasting.pouredAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "'[]'",
+          "name": "retasted_at",
+          "origin": "Tasting.retastedAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "'[]'",
+          "name": "retasted_on",
+          "origin": "Tasting.retastedOn",
+          "type": "TEXT"
+        },
+        {
+          "default": "'[]'",
+          "name": "repoured_at",
+          "origin": "Tasting.repouredAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "'[]'",
+          "name": "restocked_at",
+          "origin": "Tasting.restockedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "flights",
+          "origin": "Tasting.flights",
+          "type": "TEXT"
+        },
+        {
+          "name": "opened_at",
+          "origin": "Tasting.openedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "bottled_at",
+          "origin": "Tasting.bottledAt",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "tasting",
+      "origin": "Tasting",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "tasting_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

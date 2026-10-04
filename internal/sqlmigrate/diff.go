@@ -463,8 +463,8 @@ func (d *differ) diffDefault(tt *Table, fc, tc *Column) {
 	}
 }
 
-func (d *differ) renameConstraint(table, prev, name string) {
-	d.add(&change{
+func (d *differ) renameConstraint(table, prev, name string) *change {
+	return d.add(&change{
 		op: opRenameConstraint, phase: Expand, subject: constraintSubject(table, name),
 		table: table, name: name, oldName: prev,
 	})
@@ -481,7 +481,9 @@ func (d *differ) diffUniques(ft, tt *Table, mapColumns func([]string) []string) 
 		if fu := from[key]; fu != nil {
 			delete(from, key)
 			if fu.Name != u.Name {
-				d.renameConstraint(tt.Name, fu.Name, u.Name)
+				// A dialect whose unique constraint is an index it cannot
+				// rename builds it again from its definition.
+				d.renameConstraint(tt.Name, fu.Name, u.Name).constraint = u
 			}
 			continue
 		}
@@ -625,7 +627,7 @@ func (d *differ) diffIndexes(ft, tt *Table, mapColumns func([]string) []string) 
 		if fromIdx.Name != idx.Name {
 			d.add(&change{
 				op: opRenameIndex, phase: Expand, subject: indexSubject(tt.Name, idx.Name),
-				table: tt.Name, name: idx.Name, oldName: fromIdx.Name,
+				table: tt.Name, name: idx.Name, oldName: fromIdx.Name, index: idx,
 			})
 		}
 	}

@@ -1,0 +1,88 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "19e815a973d620ad645d3f14e0bd06247c9554914ba247be1fb6dbfcc8eb16f1",
+  "service": "shop-db",
+  "steps": [
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order",
+          "reason": "Copying order holds the database's write lock for time that grows with the table.",
+          "subject": "table/order"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/buyer_id",
+          "reason": "Order.buyer is required and has no default: servers built from the previous version insert rows without it.",
+          "subject": "table/order/column/buyer_id"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/column/buyer_id",
+          "reason": "Order.buyer is required and has no default: adding it fails when order has rows.",
+          "subject": "table/order/column/buyer_id"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order",
+          "reason": "SQLite's ALTER TABLE cannot add buyer_id with a foreign key unless it is nullable with no default and drop NOT NULL from customer_id, so the step rebuilds order: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "subject": "table/order"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"buyer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"customer_id\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"buyer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT,\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"total\", \"reference\", \"note\", \"placed_at\", \"customer_id\")\nSELECT \"id\", \"code\", \"total\", \"reference\", \"note\", \"placed_at\", \"customer_id\"\nFROM \"order\"",
+        "DROP TABLE \"order\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "CREATE INDEX \"idx_order_buyer_placed_at\" ON \"order\" (\"buyer_id\", \"placed_at\")",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    },
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/customer_id",
+          "reason": "Dropping order.customer_id deletes the values of Order.customer. It may be a rename: order.buyer_id is added with the same type, nullability and default. If it is, plan with --rename order.customer_id=order.buyer_id.",
+          "subject": "table/order/column/customer_id"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/order",
+          "reason": "Copying order holds the database's write lock for time that grows with the table.",
+          "subject": "table/order"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order",
+          "reason": "SQLite's ALTER TABLE cannot drop foreign key fk_order_customer_id, so the step rebuilds order: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "subject": "table/order"
+        }
+      ],
+      "index": 2,
+      "op": "copyTable",
+      "phase": "contract",
+      "statements": [
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"buyer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"buyer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"buyer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"buyer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "DROP TABLE \"order\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "CREATE INDEX \"idx_order_buyer_placed_at\" ON \"order\" (\"buyer_id\", \"placed_at\")"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    }
+  ],
+  "to": "02cd2dd0ea7443b73266b0877dc1ef7921e453ee49160eef053b3abf5cd6e659",
+  "toModel": null,
+  "version": 1
+}

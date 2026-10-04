@@ -88,13 +88,6 @@ func TestDiffRefuses(t *testing.T) {
 	}
 }
 
-func TestBuildModelSQLite(t *testing.T) {
-	_, err := BuildModel(ir.NewSchema("x", ir.SchemaKindDB), sqlgen.Options{SchemaName: "x"}, SQLite)
-	if err == nil || !strings.Contains(err.Error(), "sqlite is not supported yet") {
-		t.Fatalf("BuildModel(sqlite) = %v, want sqlite is not supported yet", err)
-	}
-}
-
 func TestBuildModelWithoutTables(t *testing.T) {
 	model, err := BuildModel(ir.NewSchema("x", ir.SchemaKindDB), sqlgen.Options{SchemaName: "x"}, Postgres)
 	if err != nil {

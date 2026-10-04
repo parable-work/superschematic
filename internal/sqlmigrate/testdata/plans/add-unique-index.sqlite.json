@@ -1,0 +1,41 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "6f5334359217616b44df5781697959121d49cab6e169269420cd9b7a6c3d4b48",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_line/index/uq_order_line_sku",
+          "reason": "Building the index holds the database's write lock for time that grows with order_line.",
+          "subject": "table/order_line/index/uq_order_line_sku"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/index/uq_order_line_sku",
+          "reason": "OrderLine.sku becomes unique: servers built from the previous version may write duplicates.",
+          "subject": "table/order_line/index/uq_order_line_sku"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order_line/index/uq_order_line_sku",
+          "reason": "Building the unique index fails when order_line holds duplicate values of OrderLine.sku.",
+          "subject": "table/order_line/index/uq_order_line_sku"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX \"uq_order_line_sku\" ON \"order_line\" (\"sku\")"
+      ],
+      "subject": "table/order_line/index/uq_order_line_sku",
+      "transactional": true
+    }
+  ],
+  "to": "a64a6be4270663793c13b79c3f8c96eb55f72774be0bc41c64355264a32123f7",
+  "toModel": null,
+  "version": 1
+}

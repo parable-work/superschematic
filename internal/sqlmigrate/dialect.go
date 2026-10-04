@@ -2,6 +2,7 @@ package sqlmigrate
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	ir "github.com/parable-work/superschematic/ir"
@@ -93,19 +94,16 @@ type conversion struct {
 	lossy bool
 }
 
-// dialects are the dialects the planner knows, by name. SQLite is planned
-// through the same seam and is not here yet.
+// dialects are the dialects the planner knows, by name.
 var dialects = map[Dialect]dialect{
 	Postgres: postgresDialect{},
+	SQLite:   sqliteDialect{},
 }
 
 // dialectFor returns the dialect named d.
 func dialectFor(d Dialect) (dialect, error) {
 	if impl, ok := dialects[d]; ok {
 		return impl, nil
-	}
-	if d == SQLite {
-		return nil, fmt.Errorf("sqlmigrate: %s is not supported yet", d)
 	}
 	return nil, fmt.Errorf("sqlmigrate: unknown dialect %q", d)
 }
@@ -114,11 +112,38 @@ func dialectFor(d Dialect) (dialect, error) {
 // are the sqlgen options a build passes (service name, dependencies, view
 // owner, naming); the model holds exactly what sqlgen.Generate and
 // create.sql produce for them. A schema with no tables gives a model with
-// no objects.
+// no objects. A schema that uses a feature the dialect does not support
+// fails, with the feature and the dialect named.
 func BuildModel(schema *ir.Schema, opts sqlgen.Options, dialect Dialect) (*Model, error) {
 	impl, err := dialectFor(dialect)
 	if err != nil {
 		return nil, err
 	}
 	return impl.model(schema, opts)
+}
+
+// dialectTitles name each dialect in the header of CreateSQL's script.
+var dialectTitles = map[Dialect]string{Postgres: "PostgreSQL", SQLite: "SQLite"}
+
+// CreateSQL renders the plan from an empty database to model as one SQL
+// script: SQLite's create.sql (D27). A header comment names the service and
+// the model's hash; then come the statements of each step in order, each
+// ending with a semicolon, with a blank line between steps.
+func CreateSQL(model *Model) (string, error) {
+	plan, err := Diff(nil, model, Options{})
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "-- Generated %s DDL for schema: %s\n", dialectTitles[model.Dialect], model.Service)
+	b.WriteString("-- This file is auto-generated. Do not edit manually.\n")
+	fmt.Fprintf(&b, "-- It is the migration plan from an empty database to model %s.\n", plan.To)
+	for _, step := range plan.Steps {
+		b.WriteString("\n")
+		for _, statement := range step.Statements {
+			b.WriteString(statement)
+			b.WriteString(";\n")
+		}
+	}
+	return b.String(), nil
 }

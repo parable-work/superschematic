@@ -35,30 +35,38 @@ func (d *differ) steps() ([]*Step, error) {
 				changes = append(changes, c)
 			}
 		}
-		// The changes a dialect cannot make in place on a table that
-		// exists are rebuilt together, at the first one's place.
+		// A table that exists and that the dialect cannot change in place
+		// by one of the phase's changes is rebuilt once, at the place of
+		// the first such change. The rebuild makes every change the phase
+		// makes to the table but the renames of the table and its columns,
+		// which run first and in place.
+		first := map[string]*change{}
+		for _, c := range changes {
+			if d.existing(c) && first[c.table] == nil && !d.dialect.canAlter(c) {
+				first[c.table] = c
+			}
+		}
 		rebuilds := map[string][]*change{}
 		for _, c := range changes {
-			if d.existing(c) && !d.dialect.canAlter(c) {
+			if d.rebuilt(c, first) {
 				rebuilds[c.table] = append(rebuilds[c.table], c)
 			}
 		}
-		done := map[string]bool{}
 		for _, c := range changes {
 			var r rendered
 			var hazards []*Hazard
 			var err error
-			if batch := rebuilds[c.table]; d.existing(c) && len(batch) > 0 && !d.dialect.canAlter(c) {
-				if done[c.table] {
-					continue
-				}
-				done[c.table] = true
+			switch {
+			case d.rebuilt(c, first) && first[c.table] != c:
+				continue
+			case d.rebuilt(c, first):
+				batch := rebuilds[c.table]
 				before, after := d.phaseTables(c.table, phase)
 				r, err = d.dialect.rebuild(before, after, batch)
 				for _, bc := range batch {
 					hazards = append(hazards, bc.hazards...)
 				}
-			} else {
+			default:
 				r, err = d.dialect.render(c)
 				hazards = c.hazards
 			}
@@ -86,6 +94,14 @@ func (d *differ) steps() ([]*Step, error) {
 	return steps, nil
 }
 
+// rebuilt reports whether c is made by the rebuild of its table: the table
+// is in first, which holds the first change of the phase the dialect cannot
+// make in place to each table it rebuilds, and c is not a rename of the
+// table or of a column.
+func (d *differ) rebuilt(c *change, first map[string]*change) bool {
+	return first[c.table] != nil && d.existing(c) && c.op != opRenameTable && c.op != opRenameColumn
+}
+
 // existing reports whether c changes a table the previous model has, as
 // opposed to one the plan creates or an object outside any table.
 func (d *differ) existing(c *change) bool {
@@ -94,20 +110,79 @@ func (d *differ) existing(c *change) bool {
 
 // phaseTables returns a table as the given phase finds it and as it leaves
 // it, for a dialect that rebuilds the table. Expand finds the previous
-// model's table under its new name and leaves the new table with what
-// contract still removes or tightens: the columns it drops (nullable), the
-// constraints and indexes it drops, the nullability and defaults it
-// tightens. Contract finds that and leaves the new model's table.
+// model's table as its renames leave it, since they run first, and leaves
+// the new table with what contract still removes or tightens: the columns
+// it drops (nullable), the constraints and indexes it drops, the
+// nullability and defaults it tightens. Contract finds that and leaves the
+// new model's table.
 func (d *differ) phaseTables(table string, phase Phase) (before, after *Table) {
 	tt := d.toTables[table]
 	ft := d.fromTables[d.renames.prevTable(table)]
 	middle := d.betweenPhases(ft, tt)
 	if phase == Expand {
-		renamed := *ft
-		renamed.Name = table
-		return &renamed, middle
+		return d.renamedTable(ft), middle
 	}
 	return middle, tt
+}
+
+// renamedTable is a table of the previous model with the renames applied:
+// its name, its columns, the columns its key, constraints and indexes
+// cover, and the tables and columns its foreign keys reference.
+func (d *differ) renamedTable(ft *Table) *Table {
+	t := *ft
+	t.Name = d.renames.table(ft.Name)
+	t.Columns = nil
+	for _, col := range ft.Columns {
+		c := *col
+		c.Name = d.renames.column(ft.Name, col.Name)
+		t.Columns = append(t.Columns, &c)
+	}
+	if ft.PrimaryKey != nil {
+		t.PrimaryKey = d.renamedConstraint(ft.Name, ft.PrimaryKey)
+	}
+	t.Uniques = nil
+	for _, u := range ft.Uniques {
+		t.Uniques = append(t.Uniques, d.renamedConstraint(ft.Name, u))
+	}
+	t.ForeignKeys = nil
+	for _, fk := range ft.ForeignKeys {
+		t.ForeignKeys = append(t.ForeignKeys, d.renamedFK(ft.Name, fk))
+	}
+	t.Indexes = nil
+	for _, idx := range ft.Indexes {
+		t.Indexes = append(t.Indexes, d.renamedIndex(ft.Name, idx))
+	}
+	return &t
+}
+
+// renamedColumns maps columns of the previous model's table prevTable to
+// their new names.
+func (d *differ) renamedColumns(prevTable string, columns []string) []string {
+	out := make([]string, len(columns))
+	for i, col := range columns {
+		out[i] = d.renames.column(prevTable, col)
+	}
+	return out
+}
+
+func (d *differ) renamedConstraint(prevTable string, c *Constraint) *Constraint {
+	out := *c
+	out.Columns = d.renamedColumns(prevTable, c.Columns)
+	return &out
+}
+
+func (d *differ) renamedIndex(prevTable string, idx *Index) *Index {
+	out := *idx
+	out.Columns = d.renamedColumns(prevTable, idx.Columns)
+	return &out
+}
+
+func (d *differ) renamedFK(prevTable string, fk *ForeignKey) *ForeignKey {
+	out := *fk
+	out.Columns = d.renamedColumns(prevTable, fk.Columns)
+	out.RefTable = d.renames.table(fk.RefTable)
+	out.RefColumns = d.renamedColumns(fk.RefTable, fk.RefColumns)
+	return &out
 }
 
 // betweenPhases is the table between expand and contract: the new table
@@ -146,15 +221,15 @@ func (d *differ) betweenPhases(ft, tt *Table) *Table {
 			c.Nullable = true
 			t.Columns = append(t.Columns, &c)
 		case opDropUnique:
-			t.Uniques = append(t.Uniques, ch.constraint)
+			t.Uniques = append(t.Uniques, d.renamedConstraint(ft.Name, ch.constraint))
 		case opDropIndex:
-			t.Indexes = append(t.Indexes, ch.index)
+			t.Indexes = append(t.Indexes, d.renamedIndex(ft.Name, ch.index))
 		case opAddForeignKey:
 			contractFKs[ch.foreignKey.Name] = nil
 		case opReplaceFK:
-			contractFKs[ch.foreignKey.Name] = ch.oldFK
+			contractFKs[ch.foreignKey.Name] = d.renamedFK(ft.Name, ch.oldFK)
 		case opDropForeignKey:
-			contractFKs[ch.foreignKey.Name] = ch.foreignKey
+			contractFKs[ch.foreignKey.Name] = d.renamedFK(ft.Name, ch.foreignKey)
 		}
 	}
 	for _, fk := range tt.ForeignKeys {

@@ -20,15 +20,7 @@ const (
 // these classes. A wrong class reads as an expected change in a golden;
 // here it fails.
 func TestHazardClasses(t *testing.T) {
-	tests := []struct {
-		plan    string
-		op      string
-		subject string
-		want    []HazardClass
-		phase   Phase
-		// reason is text a hazard's reason must contain.
-		reason string
-	}{
+	checkHazardClasses(t, planCases, []hazardTest{
 		{plan: "from-empty", op: "createTable", phase: Expand},
 		{plan: "from-empty", op: "createIndex", phase: Expand},
 		{plan: "from-empty", op: "addForeignKey", phase: Expand},
@@ -111,19 +103,37 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "graph-content-retype", op: "alterColumnType", phase: Expand,
 			want: []HazardClass{blockingClass, compat, dataDependent, history}, reason: "rose from 1 to 2"},
 		{plan: "graph-content-add", op: "addColumn", phase: Expand, want: []HazardClass{history}, reason: "stays 1"},
-	}
+	})
+}
 
+// hazardTest gives the hazard classes of every step of a plan case with an
+// op (and a subject, when given) in a phase.
+type hazardTest struct {
+	plan    string
+	op      string
+	subject string
+	want    []HazardClass
+	phase   Phase
+	// reason is text a hazard's reason must contain.
+	reason string
+}
+
+// checkHazardClasses plans the cases the tests name and checks each test:
+// a step matches, and every matching step has exactly the classes it
+// lists.
+func checkHazardClasses(t *testing.T, cases []planCase, tests []hazardTest) {
+	t.Helper()
 	plans := map[string]*Plan{}
-	for _, pc := range planCases {
+	for _, pc := range cases {
 		plans[pc.name] = nil
 	}
 	for _, tc := range tests {
-		t.Run(tc.plan+"/"+tc.op, func(t *testing.T) {
+		t.Run(tc.plan+"/"+string(tc.phase)+"/"+tc.op, func(t *testing.T) {
 			if _, ok := plans[tc.plan]; !ok {
 				t.Fatalf("no plan case %s", tc.plan)
 			}
 			if plans[tc.plan] == nil {
-				for _, pc := range planCases {
+				for _, pc := range cases {
 					if pc.name == tc.plan {
 						plans[tc.plan] = pc.plan(t)
 					}
@@ -131,13 +141,10 @@ func TestHazardClasses(t *testing.T) {
 			}
 			matched := 0
 			for _, step := range plans[tc.plan].Steps {
-				if step.Op != tc.op || (tc.subject != "" && step.Subject != tc.subject) {
+				if step.Op != tc.op || step.Phase != tc.phase || (tc.subject != "" && step.Subject != tc.subject) {
 					continue
 				}
 				matched++
-				if step.Phase != tc.phase {
-					t.Errorf("step %d %s is in %s, want %s", step.Index, step.Subject, step.Phase, tc.phase)
-				}
 				var got []HazardClass
 				reasons := ""
 				for _, h := range step.Hazards {
@@ -157,7 +164,7 @@ func TestHazardClasses(t *testing.T) {
 				}
 			}
 			if matched == 0 {
-				t.Errorf("no %s step", tc.op)
+				t.Errorf("no %s step in %s", tc.op, tc.phase)
 			}
 		})
 	}
