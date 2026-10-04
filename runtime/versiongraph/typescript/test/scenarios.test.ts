@@ -1,15 +1,26 @@
 // Runs every scenario in runtime/versiongraph/testdata/scenarios through the
-// TypeScript engine and its Postgres adapter, each in a schema of its own
-// that holds the fixture's DDL (runtime/versiongraph/README.md,
-// "Scenarios"). The TypeScript counterpart of the Go engine's
+// TypeScript engine (runtime/versiongraph/README.md, "Scenarios"), on each
+// backend a scenario may name. The TypeScript counterpart of the Go engine's
 // scenario_test.go: the same files, the same rules for reading them, the
-// same checks. It needs the Postgres SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL
-// names, and skips without it; make versiongraph-scenarios-ts fails
-// without it. Each engine operation is also replayed through SyncEngine
-// (test/replay.ts), which must make the same storage calls and return the
-// same result.
+// same checks.
+//
+// On Postgres each scenario runs through Engine and the Postgres adapter, in
+// a schema of its own that holds the fixture's DDL. It needs the Postgres
+// SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names, and skips without it;
+// make versiongraph-scenarios-ts fails without it. Each engine operation is
+// also replayed through SyncEngine (test/replay.ts), which must make the
+// same storage calls and return the same result.
+//
+// On SQLite each scenario runs through SyncEngine and the SQLite adapter
+// (D32), over the fixed layout in an in-memory database, and needs no
+// server: once through bun:sqlite on transactions of the adapter's own, and
+// once through node:sqlite in a transaction the runner holds, as D16's
+// engine holds a behavior's, with every statement the adapter runs held to
+// D16's rules for a behavior's SQL.
 import { beforeAll, expect, test } from "bun:test";
+import { Database as BunDatabase } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import type pg from "pg";
 import {
   compareCodePoints,
@@ -20,22 +31,29 @@ import {
   JsonNumber,
   parseJson,
   stringifyJson,
+  SyncEngine,
   uuidHyphenated,
   type Commit,
+  type EngineOptions,
   type Edits,
   type JsonObject,
   type JsonValue,
+  type Patch,
   type Ref,
   type Release,
   type Resolution,
+  type SnapshotEntry,
   type SweepOptions,
   type SweepReport,
+  type SyncStorage,
   type TreeResult,
 } from "../dist/engine.js";
-import { init, type VersionGraph } from "../dist/index.js";
+import { init, initSync, type VersionGraph } from "../dist/index.js";
 import { PostgresAdapter, pgClient, pgPool } from "../dist/postgres.js";
+import { SqliteAdapter, type SqliteClient } from "../dist/sqlite.js";
 import { dsn, descriptor, rawTypes, scratchSchema, type Scratch } from "./postgres.js";
 import { replayed } from "./replay.js";
+import { bunBinding, checkedClient, inCallerTransaction, nodeBinding, type Binding, type Database } from "./sqlite.js";
 
 // The schema epoch and snapshot interval the fixture's Recipe graph declares,
 // which the engine of every step runs at unless the step names another.
@@ -45,13 +63,13 @@ const fixtureSnapshotEvery = 3;
 // The actor of a step that names none: "Cook", a UUID in its canonical form.
 const defaultActor = "Cook";
 
-// The backend this runner runs the scenarios on. A step that lists its
-// backends runs here only when it lists this one, and an sql step runs its
-// statement for this backend.
-const backend = "postgres";
-
-// The backends a scenario may name.
+// The backends a scenario may name. A runner runs on one of them: a step
+// that lists its backends runs only on the ones it lists, and an sql step
+// runs its statement for the runner's backend.
 const knownBackends: readonly string[] = ["postgres", "sqlite"];
+
+// The graph the SQLite runner keeps the fixture's Recipe graph under.
+const sqliteGraph = "recipe";
 
 const scenarioDir = new URL("../../testdata/scenarios/", import.meta.url);
 const files = readdirSync(scenarioDir)
@@ -280,16 +298,21 @@ function runsOn(step: JsonObject, runnerBackend: string): boolean {
   return backends === undefined || backends === null || (backends as JsonValue[]).includes(runnerBackend);
 }
 
+/** Opens a backend of a scenario: a database of its own, with its engine and its adapter. */
+type Open = () => Promise<Backend>;
+
 /**
- * Opens a runner, seeds the scenario's roots, and runs each step that runs on
- * the runner's backend, in order; `then` runs on the runner before it closes.
+ * Opens a backend, seeds the scenario's roots as the backend needs, and runs
+ * each step that runs on the backend, in order; `then` runs on the runner
+ * before the backend closes.
  */
-async function runScenario(scenario: Scenario, then?: (runner: Runner) => Promise<void>): Promise<void> {
-  const runner = await Runner.open();
+async function runScenario(scenario: Scenario, open: Open, then?: (runner: Runner) => Promise<void>): Promise<void> {
+  const backend = await open();
+  const runner = new Runner(backend);
   try {
-    await runner.seed(scenario.roots);
+    await backend.seed(scenario.roots);
     for (const [i, step] of scenario.steps.entries()) {
-      if (!runsOn(step, backend)) {
+      if (!runsOn(step, backend.name)) {
         continue;
       }
       runner.where = `${scenario.name} step ${i} (${str(step.get("op"))})`;
@@ -297,26 +320,53 @@ async function runScenario(scenario: Scenario, then?: (runner: Runner) => Promis
     }
     await then?.(runner);
   } finally {
-    await runner.close();
+    await backend.close();
   }
 }
 
 let core: VersionGraph;
 
+/** The core SyncEngine runs on, instantiated without awaiting. */
+const syncCore = initSync();
+
 beforeAll(async () => {
   core = await init();
 });
+
+/** One way a scenario runs: its backend's name, how a test names it, how to open it, and whether it runs here. */
+interface Pass {
+  backend: string;
+  label: string;
+  open: Open;
+  skip: boolean;
+}
+
+const bun = bunBinding(BunDatabase);
+const node = nodeBinding(DatabaseSync);
+
+const passes: Pass[] = [
+  { backend: "postgres", label: "", open: () => PostgresBackend.open(), skip: dsn === "" },
+  { backend: "sqlite", label: " on SQLite (bun:sqlite)", open: async () => SqliteBackend.open(bun, false), skip: false },
+  {
+    backend: "sqlite",
+    label: " on SQLite (node:sqlite, in the caller's transaction, D16's rules)",
+    open: async () => SqliteBackend.open(node, true),
+    skip: false,
+  },
+];
 
 test("the scenario directory holds scenarios", () => {
   expect(files.length).toBeGreaterThan(0);
 });
 
-test("every scenario file reads as the format says", () => {
-  for (const file of files) {
-    const scenario = readScenario(readFileSync(new URL(file, scenarioDir), "utf8"), file, backend);
-    expect(scenario.name).toBe(file.replace(/\.json$/, ""));
-  }
-});
+for (const runnerBackend of knownBackends) {
+  test(`every scenario file reads as the format says, for a ${runnerBackend} runner`, () => {
+    for (const file of files) {
+      const scenario = readScenario(readFileSync(new URL(file, scenarioDir), "utf8"), file, runnerBackend);
+      expect(scenario.name).toBe(file.replace(/\.json$/, ""));
+    }
+  });
+}
 
 /** A scenario of the given roots (raw JSON, or "" for none) and steps. */
 function formatScenario(roots: string, ...steps: string[]): string {
@@ -327,69 +377,93 @@ function formatScenario(roots: string, ...steps: string[]): string {
 const createPrimaryStep = `{"op": "createPrimary", "root": "Bread", "name": "main"}`;
 
 // Scenarios that each break one rule of the format, with a part of the error
-// each is refused with, and ones that keep them ("" for none).
-const formatCases: [string, string, string][] = [
-  ["a statement per backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}`), ""],
-  ["a plain string statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": "SELECT 1"}`), "a statement is an object of one statement per backend"],
-  ["a statement that is not text", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": 1}}`), "a statement is an object of one statement per backend"],
-  ["an sql step without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"sqlite": "SELECT 1"}}`), "the sql step has no postgres statement"],
-  ["an sql step with no statement", formatScenario(`["Bread"]`, `{"op": "sql"}`), "the sql step has no postgres statement"],
-  ["a null statement for the runner's backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": null}}`), "a statement is an object of one statement per backend"],
-  ["a null statement on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": null}`), ""],
-  ["a statement for an unknown backend on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": {"mysql": "x"}}`), `a statement for unknown backend "mysql"`],
-  ["a plain string statement on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": "x"}`), "a statement is an object of one statement per backend"],
-  ["a statement for an unknown backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "mysql": "SELECT 1"}}`), `a statement for unknown backend "mysql"`],
-  ["an sql step for another backend, without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "backends": ["sqlite"], "statement": {"sqlite": "SELECT 1"}}`), ""],
-  ["backends listing the runner's", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["sqlite", "postgres"]}`), ""],
-  ["backends listing an unknown backend", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "mysql"]}`), `backends lists unknown backend "mysql"`],
-  ["an empty backends", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": []}`), "backends lists no backend"],
-  ["null backends", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": null}`), ""],
-  ["backends listing a backend twice", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "postgres"]}`), `backends lists "postgres" twice`],
-  ["no roots", formatScenario("", createPrimaryStep), "a scenario names its roots"],
-  ["null roots", formatScenario("null", createPrimaryStep), "a scenario names its roots"],
-  ["empty roots", formatScenario("[]", createPrimaryStep), "a scenario names at least one root"],
-  ["a root named twice", formatScenario(`["Bread", "Soup", "Bread"]`, createPrimaryStep), `roots lists "Bread" twice`],
-  ["a null root", formatScenario("[null]", createPrimaryStep), "roots lists null, not a name"],
-  ["no steps", formatScenario(`["Bread"]`), "a scenario has steps"],
-  ["an unknown scenario member", `{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": [${createPrimaryStep}]}`, `unknown scenario member "backend"`],
-  ["an unknown step member", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}`), `unknown step member "backend"`],
+// each is refused with, and ones that keep them ("" for none), for a runner of
+// the backend named first.
+const formatCases: [string, string, string, string][] = [
+  ["postgres", "a statement per backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}`), ""],
+  ["sqlite", "a statement per backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}`), ""],
+  ["postgres", "a plain string statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": "SELECT 1"}`), "a statement is an object of one statement per backend"],
+  ["postgres", "a statement that is not text", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": 1}}`), "a statement is an object of one statement per backend"],
+  ["postgres", "an sql step without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"sqlite": "SELECT 1"}}`), "the sql step has no postgres statement"],
+  ["sqlite", "an sql step without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1"}}`), "the sql step has no sqlite statement"],
+  ["postgres", "an sql step with no statement", formatScenario(`["Bread"]`, `{"op": "sql"}`), "the sql step has no postgres statement"],
+  ["sqlite", "an sql step with no statement", formatScenario(`["Bread"]`, `{"op": "sql"}`), "the sql step has no sqlite statement"],
+  ["postgres", "a null statement for the runner's backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": null}}`), "a statement is an object of one statement per backend"],
+  ["sqlite", "a null statement for the runner's backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": null}}`), "a statement is an object of one statement per backend"],
+  ["postgres", "a null statement on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": null}`), ""],
+  ["postgres", "a statement for an unknown backend on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": {"mysql": "x"}}`), `a statement for unknown backend "mysql"`],
+  ["postgres", "a plain string statement on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": "x"}`), "a statement is an object of one statement per backend"],
+  ["postgres", "a statement for an unknown backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "mysql": "SELECT 1"}}`), `a statement for unknown backend "mysql"`],
+  ["postgres", "an sql step for another backend, without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "backends": ["sqlite"], "statement": {"sqlite": "SELECT 1"}}`), ""],
+  ["sqlite", "an sql step for another backend, without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "backends": ["postgres"], "statement": {"postgres": "SELECT 1"}}`), ""],
+  ["postgres", "backends listing the runner's", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["sqlite", "postgres"]}`), ""],
+  ["postgres", "backends listing an unknown backend", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "mysql"]}`), `backends lists unknown backend "mysql"`],
+  ["postgres", "an empty backends", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": []}`), "backends lists no backend"],
+  ["postgres", "null backends", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": null}`), ""],
+  ["postgres", "backends listing a backend twice", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "postgres"]}`), `backends lists "postgres" twice`],
+  ["postgres", "no roots", formatScenario("", createPrimaryStep), "a scenario names its roots"],
+  ["postgres", "null roots", formatScenario("null", createPrimaryStep), "a scenario names its roots"],
+  ["postgres", "empty roots", formatScenario("[]", createPrimaryStep), "a scenario names at least one root"],
+  ["postgres", "a root named twice", formatScenario(`["Bread", "Soup", "Bread"]`, createPrimaryStep), `roots lists "Bread" twice`],
+  ["postgres", "a null root", formatScenario("[null]", createPrimaryStep), "roots lists null, not a name"],
+  ["postgres", "no steps", formatScenario(`["Bread"]`), "a scenario has steps"],
+  ["postgres", "an unknown scenario member", `{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": [${createPrimaryStep}]}`, `unknown scenario member "backend"`],
+  ["postgres", "an unknown step member", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}`), `unknown step member "backend"`],
 ];
 
-for (const [name, text, refused] of formatCases) {
-  test(`the scenario format: ${name}`, () => {
+for (const [runnerBackend, name, text, refused] of formatCases) {
+  test(`the scenario format, for a ${runnerBackend} runner: ${name}`, () => {
     if (refused === "") {
-      readScenario(text, "format", backend);
+      readScenario(text, "format", runnerBackend);
     } else {
-      expect(() => readScenario(text, "format", backend)).toThrow(refused);
+      expect(() => readScenario(text, "format", runnerBackend)).toThrow(refused);
     }
   });
 }
 
-// A scenario whose steps list their backends: a save listed for SQLite alone
-// is skipped and leaves no row, and a save listed for Postgres too writes its
-// row.
-test.skipIf(dsn === "")("a step whose backends leave out the runner's is skipped", async () => {
-  await runScenario(
-    readScenario(
-      formatScenario(
-        `["Bread"]`,
-        `{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}`,
-        `{"op": "branch", "from": "main", "name": "mix", "as": "mix"}`,
-        `{"op": "save", "ref": "mix", "backends": ["sqlite"], "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}}`,
-        `{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}}`,
-        `{"op": "save", "ref": "mix", "backends": ["sqlite", "postgres"], "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}}`,
-        `{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": [{"entity_key": "Rest"}]}}`,
-      ),
-      "backends",
-      backend,
-    ),
-  );
-});
+for (const pass of passes) {
+  const other = pass.backend === "postgres" ? "sqlite" : "postgres";
 
-// A scenario of two roots: each has the recipe row the seeding sql steps gave
-// it (its id, its name as the title and the default actor as its creator) and
-// no other root has one, so a primary line of a root the scenario does not
-// name fails on the foreign key from recipe_ref.root_id.
+  // A scenario whose steps list their backends: a save listed for the other
+  // backend alone is skipped and leaves no row, and a save listed for both
+  // writes its row.
+  test.skipIf(pass.skip)(`a step whose backends leave out the runner's is skipped${pass.label}`, async () => {
+    await runScenario(
+      readScenario(
+        formatScenario(
+          `["Bread"]`,
+          `{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}`,
+          `{"op": "branch", "from": "main", "name": "mix", "as": "mix"}`,
+          `{"op": "save", "ref": "mix", "backends": ["${other}"], "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}}`,
+          `{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}}`,
+          `{"op": "save", "ref": "mix", "backends": ["sqlite", "postgres"], "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}}`,
+          `{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": [{"entity_key": "Rest"}]}}`,
+        ),
+        "backends",
+        pass.backend,
+      ),
+      pass.open,
+    );
+  });
+
+  for (const file of files) {
+    const name = file.replace(/\.json$/, "");
+    test.skipIf(pass.skip)(
+      `scenario ${name}${pass.label}`,
+      async () => {
+        const scenario = readScenario(readFileSync(new URL(file, scenarioDir), "utf8"), file, pass.backend);
+        expect(scenario.name).toBe(name);
+        await runScenario(scenario, pass.open);
+      },
+      120_000,
+    );
+  }
+}
+
+// A scenario of two roots on Postgres: each has the recipe row the runner
+// seeded for it (its id, its name as the title and the default actor as its
+// creator) and no other root has one, so a primary line of a root the
+// scenario does not name fails on the foreign key from recipe_ref.root_id.
 test.skipIf(dsn === "")("a scenario's roots are seeded, and only they", async () => {
   await runScenario(
     readScenario(
@@ -402,37 +476,66 @@ test.skipIf(dsn === "")("a scenario's roots are seeded, and only they", async ()
         `{"op": "createPrimary", "root": "Pie", "name": "main"}`,
       ),
       "roots",
-      backend,
+      "postgres",
     ),
+    passes[0]!.open,
     async (runner) => {
-      const error = await runner.engine.createPrimary(defaultActor, "Bread", "main").then(
-        () => undefined,
-        (err: unknown) => err,
-      );
+      const error = await Promise.resolve()
+        .then(() => runner.backend.engine.createPrimary(defaultActor, "Bread", "main"))
+        .then(
+          () => undefined,
+          (err: unknown) => err,
+        );
       expect((error as { code?: string } | undefined)?.code).toBe("23503");
     },
   );
 });
 
-for (const file of files) {
-  const name = file.replace(/\.json$/, "");
-  test.skipIf(dsn === "")(
-    `scenario ${name}`,
-    async () => {
-      const scenario = readScenario(readFileSync(new URL(file, scenarioDir), "utf8"), file, backend);
-      expect(scenario.name).toBe(name);
-      await runScenario(scenario);
+// On SQLite the runner seeds nothing, since the layout has no root table: a
+// root the scenario does not name takes a primary line as a named one does.
+test("a scenario's roots are not seeded on SQLite", async () => {
+  await runScenario(
+    readScenario(formatScenario(`["Soup"]`, `{"op": "createPrimary", "root": "Soup", "name": "main"}`), "roots", "sqlite"),
+    passes[1]!.open,
+    async (runner) => {
+      const ref = await runner.backend.engine.createPrimary(defaultActor, "Bread", "main");
+      expect(ref.root).toBe("Bread");
     },
-    120_000,
   );
+});
+
+/** An engine either backend runs a scenario's operations on. */
+type AnyEngine = Engine | SyncEngine;
+
+/** What a runner needs of the backend a scenario runs on. */
+interface Backend {
+  /** The backend's name, as a scenario's backends and statements name it. */
+  readonly name: string;
+  /** The scenario's engine, at the fixture's schema epoch and snapshot interval. */
+  readonly engine: AnyEngine;
+  /** An engine of the scenario's storage at other options. */
+  engineAt(options: EngineOptions): AnyEngine;
+  /** Gives each of the scenario's roots what a root has on the backend. */
+  seed(roots: string[]): Promise<void>;
+  /** The adapter's rows of a ref, its patches of a commit and its snapshot of one. */
+  rows(kind: string, ref: string): Promise<string[]>;
+  patches(commit: string): Promise<Patch[]>;
+  snapshot(commit: string): Promise<SnapshotEntry[]>;
+  /**
+   * Runs an sql step's statement with its arguments, each an id in its
+   * canonical form, and returns its rows, in the order it returns them, each
+   * as a JSON object of its columns read as text.
+   */
+  sql(statement: string, args: string[]): Promise<string[]>;
+  /** Takes the graph's sweep lock in a transaction of another connection, and ends it. */
+  holdSweepLock(): Promise<void>;
+  releaseSweepLock(): Promise<void>;
+  close(): Promise<void>;
 }
 
-/** One scenario's database, engine and named results. */
-class Runner {
-  where = "";
-  readonly refs = new Map<string, Ref>();
-  readonly commits = new Map<string, Commit>();
-  readonly releases = new Map<string, Release>();
+/** A scenario on Postgres: a schema of its own holding the fixture's DDL, and Engine, replayed through SyncEngine. */
+class PostgresBackend implements Backend {
+  readonly name = "postgres";
   // The connection whose transaction holds the graph's sweep lock, between
   // holdSweepLock and releaseSweepLock.
   holder: pg.PoolClient | undefined;
@@ -443,23 +546,18 @@ class Runner {
     readonly engine: Engine,
   ) {}
 
-  static async open(): Promise<Runner> {
+  static async open(): Promise<PostgresBackend> {
     const scratch = await scratchSchema("vg_scenario_ts");
     const adapter = new PostgresAdapter(descriptor);
     const engine = replayed(core, descriptor, adapter.storage(pgPool(scratch.pool)), {
       schemaEpoch: fixtureSchemaEpoch,
       snapshotEvery: fixtureSnapshotEvery,
     });
-    return new Runner(scratch, adapter, engine);
+    return new PostgresBackend(scratch, adapter, engine);
   }
 
-  async close(): Promise<void> {
-    if (this.holder !== undefined) {
-      await this.holder.query("ROLLBACK");
-      this.holder.release();
-      this.holder = undefined;
-    }
-    await this.scratch.close();
+  engineAt(options: EngineOptions): Engine {
+    return replayed(core, descriptor, this.adapter.storage(pgPool(this.scratch.pool)), options);
   }
 
   /**
@@ -475,6 +573,157 @@ class Runner {
     });
     await this.scratch.pool.query(`INSERT INTO recipe (id, title, created_by) VALUES ${values.join(", ")}`, args);
   }
+
+  rows(kind: string, ref: string): Promise<string[]> {
+    return this.adapter.storage(pgPool(this.scratch.pool)).transact((tx) => tx.rows(kind, ref));
+  }
+
+  patches(commit: string): Promise<Patch[]> {
+    return this.adapter.storage(pgPool(this.scratch.pool)).transact((tx) => tx.patches([commit]));
+  }
+
+  snapshot(commit: string): Promise<SnapshotEntry[]> {
+    return this.adapter.storage(pgPool(this.scratch.pool)).transact((tx) => tx.snapshot(commit));
+  }
+
+  /** A UUID argument is hyphenated text on Postgres, and every column comes back as the text Postgres writes. */
+  async sql(statement: string, args: string[]): Promise<string[]> {
+    const result = await this.scratch.pool.query({ text: statement, values: args.map(uuidHyphenated), types: rawTypes });
+    return result.rows.map((row: Record<string, string | null>) => JSON.stringify(row));
+  }
+
+  /**
+   * Takes the graph's sweep lock through the adapter in a transaction of
+   * another connection, and keeps it open until releaseSweepLock.
+   */
+  async holdSweepLock(): Promise<void> {
+    if (this.holder !== undefined) {
+      throw new Error("the sweep lock is already held");
+    }
+    const holder = await this.scratch.pool.connect();
+    this.holder = holder;
+    await holder.query("BEGIN");
+    const locked = await this.adapter.storage(pgClient(holder, { savepoint: true })).transact((tx) => tx.sweepLock());
+    if (!locked) {
+      throw new Error("take the sweep lock: another transaction holds it");
+    }
+  }
+
+  async releaseSweepLock(): Promise<void> {
+    if (this.holder === undefined) {
+      throw new Error("no sweep lock is held");
+    }
+    const holder = this.holder;
+    this.holder = undefined;
+    await holder.query("ROLLBACK");
+    holder.release();
+  }
+
+  async close(): Promise<void> {
+    if (this.holder !== undefined) {
+      await this.holder.query("ROLLBACK");
+      this.holder.release();
+      this.holder = undefined;
+    }
+    await this.scratch.close();
+  }
+}
+
+/**
+ * A scenario on SQLite: the fixed layout in an in-memory database of its own,
+ * and SyncEngine over the SQLite adapter. In the caller's transaction the
+ * runner holds each transaction, as D16's engine holds a behavior's, and
+ * every statement the adapter runs is held to D16's rules for a behavior's
+ * SQL; an sql step's statement runs on the connection itself.
+ */
+class SqliteBackend implements Backend {
+  readonly name = "sqlite";
+
+  constructor(
+    readonly database: Database,
+    readonly storage: SyncStorage,
+    readonly engine: SyncEngine,
+  ) {}
+
+  static open(binding: Binding, callerTransaction: boolean): SqliteBackend {
+    const database = binding.open(":memory:");
+    const raw = database.client;
+    raw.exec!("PRAGMA foreign_keys = ON");
+    let storage: SyncStorage;
+    if (callerTransaction) {
+      const adapter = new SqliteAdapter(descriptor, { graph: sqliteGraph, callerTransaction: true });
+      const checked: SqliteClient = checkedClient(raw, "write");
+      inCallerTransaction(raw, () => adapter.createTables(checkedClient(raw, "migrate")));
+      const inner = adapter.storage(checked);
+      storage = { transact: (fn) => inCallerTransaction(raw, () => inner.transact(fn)) };
+    } else {
+      const adapter = new SqliteAdapter(descriptor, { graph: sqliteGraph });
+      adapter.createTables(raw);
+      storage = adapter.storage(raw);
+    }
+    const engine = new SyncEngine(syncCore, descriptor, storage, {
+      schemaEpoch: fixtureSchemaEpoch,
+      snapshotEvery: fixtureSnapshotEvery,
+    });
+    return new SqliteBackend(database, storage, engine);
+  }
+
+  engineAt(options: EngineOptions): SyncEngine {
+    return new SyncEngine(syncCore, descriptor, this.storage, options);
+  }
+
+  /** The layout has no root table, so a root needs nothing. */
+  async seed(): Promise<void> {}
+
+  async rows(kind: string, ref: string): Promise<string[]> {
+    return this.storage.transact((tx) => tx.rows(kind, ref));
+  }
+
+  async patches(commit: string): Promise<Patch[]> {
+    return this.storage.transact((tx) => tx.patches([commit]));
+  }
+
+  async snapshot(commit: string): Promise<SnapshotEntry[]> {
+    return this.storage.transact((tx) => tx.snapshot(commit));
+  }
+
+  /**
+   * A UUID argument is its canonical form on SQLite, as the layout stores
+   * it, and a column that is not text or NULL is refused: the statement
+   * casts what it selects, as on Postgres every column reads as text.
+   */
+  async sql(statement: string, args: string[]): Promise<string[]> {
+    return this.database.client.all(statement, args).map((row) => {
+      for (const [column, value] of Object.entries(row)) {
+        if (value !== null && typeof value !== "string") {
+          throw new Error(`column ${column} is ${typeof value}, not text: cast it in the statement`);
+        }
+      }
+      return JSON.stringify(row);
+    });
+  }
+
+  async holdSweepLock(): Promise<void> {
+    throw new Error("the sweep lock steps run on postgres only: under SQLite's one writer no transaction holds the lock while a sweep runs");
+  }
+
+  async releaseSweepLock(): Promise<void> {
+    await this.holdSweepLock();
+  }
+
+  async close(): Promise<void> {
+    this.database.close();
+  }
+}
+
+/** One scenario's database, engine and named results. */
+class Runner {
+  where = "";
+  readonly refs = new Map<string, Ref>();
+  readonly commits = new Map<string, Commit>();
+  readonly releases = new Map<string, Release>();
+
+  constructor(readonly backend: Backend) {}
 
   fail(message: string): never {
     throw new Error(`${this.where}: ${message}`);
@@ -527,12 +776,12 @@ class Runner {
   }
 
   /** The scenario's engine, at the step's walk ceiling, schema epoch and snapshot interval when it names them. */
-  engineFor(step: JsonObject): Engine {
-    let engine = this.engine;
+  engineFor(step: JsonObject): AnyEngine {
+    let engine = this.backend.engine;
     const schemaEpoch = num(step.get("schemaEpoch"));
     const snapshotEvery = num(step.get("snapshotEvery")) ?? 0;
     if (schemaEpoch !== undefined || snapshotEvery !== 0) {
-      engine = replayed(core, descriptor, this.adapter.storage(pgPool(this.scratch.pool)), {
+      engine = this.backend.engineAt({
         schemaEpoch: schemaEpoch ?? fixtureSchemaEpoch,
         snapshotEvery: snapshotEvery !== 0 ? snapshotEvery : fixtureSnapshotEvery,
       });
@@ -650,22 +899,13 @@ class Runner {
           break;
         }
         case "holdSweepLock":
-          await this.holdSweepLock();
+          await this.backend.holdSweepLock();
           break;
-        case "releaseSweepLock": {
-          if (this.holder === undefined) {
-            this.fail("no sweep lock is held");
-          }
-          const holder = this.holder;
-          this.holder = undefined;
-          await holder.query("ROLLBACK");
-          holder.release();
+        case "releaseSweepLock":
+          await this.backend.releaseSweepLock();
           break;
-        }
         case "snapshot":
-          entries = await this.adapter
-            .storage(pgPool(this.scratch.pool))
-            .transact((tx) => tx.snapshot(this.commitID(str(step.get("commit")))));
+          entries = await this.backend.snapshot(this.commitID(str(step.get("commit"))));
           break;
         case "materialize":
           tree = await engine.materialize(this.commitID(str(step.get("commit"))));
@@ -683,22 +923,15 @@ class Runner {
           await engine.discard(actor, this.refID(str(step.get("ref"))), this.version(step, str(step.get("ref"))));
           break;
         case "rows":
-          rows = await this.adapter
-            .storage(pgPool(this.scratch.pool))
-            .transact((tx) => tx.rows(str(step.get("kind")), this.refID(str(step.get("ref")))));
+          rows = await this.backend.rows(str(step.get("kind")), this.refID(str(step.get("ref"))));
           break;
         case "patches":
-          patches = await this.adapter
-            .storage(pgPool(this.scratch.pool))
-            .transact((tx) => tx.patches([this.commitID(str(step.get("commit")))]));
+          patches = await this.backend.patches(this.commitID(str(step.get("commit"))));
           break;
         case "sql": {
           const args = ((step.get("args") as JsonValue[] | undefined) ?? []).map((arg) => this.sqlArg(arg));
-          const statement = str((step.get("statement") as JsonObject).get(backend));
-          const result = await this.scratch.pool.query({ text: statement, values: args, types: rawTypes });
-          // A query's rows, in the order it returns them, every column as
-          // the text Postgres writes.
-          rows = result.rows.map((row: Record<string, string | null>) => JSON.stringify(row));
+          const statement = str((step.get("statement") as JsonObject).get(this.backend.name));
+          rows = await this.backend.sql(statement, args);
           break;
         }
         default:
@@ -884,23 +1117,6 @@ class Runner {
     });
   }
 
-  /**
-   * Takes the graph's sweep lock through the adapter in a transaction of
-   * another connection, and keeps it open until releaseSweepLock.
-   */
-  async holdSweepLock(): Promise<void> {
-    if (this.holder !== undefined) {
-      this.fail("the sweep lock is already held");
-    }
-    const holder = await this.scratch.pool.connect();
-    this.holder = holder;
-    await holder.query("BEGIN");
-    const locked = await this.adapter.storage(pgClient(holder, { savepoint: true })).transact((tx) => tx.sweepLock());
-    if (!locked) {
-      this.fail("take the sweep lock: another transaction holds it");
-    }
-  }
-
   sqlArg(value: JsonValue): string {
     const arg = object(value, "sqlArg", this.where);
     let id: string;
@@ -913,7 +1129,7 @@ class Runner {
     } else {
       this.fail("an sql argument names a uuid, a ref or a commit");
     }
-    return uuidHyphenated(id);
+    return id;
   }
 
   /** The name an earlier step bound a commit to, or its id. */

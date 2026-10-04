@@ -1,0 +1,735 @@
+// The SQLite adapter's own rules, which the scenarios do not reach or reach
+// only in passing: the version fences of refs and release pointers, a taken
+// name and a discarded ref's name free again, the history it writes, STRICT
+// tables and foreign keys, two graphs in one file, the name function, the
+// clock, its ids, the write lock a second connection waits on, the caller's
+// transaction, D16's rules for a behavior's SQL, the canonical vectors as a
+// round trip, and the bindings. Each case takes the binding it opens
+// databases with and a directory for the files it needs; test/sqlite.test.ts
+// runs every case through bun:sqlite and node:sqlite under bun, and
+// test/node.mjs through node:sqlite under Node.
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { sqlRefusal } from "../../../engine/typescript/src/behaviors/sql.ts";
+import {
+  CanonicalError,
+  errorCode,
+  NameTakenError,
+  NotFoundError,
+  parseJson,
+  stringifyJson,
+  SyncEngine,
+  uuidCanonical,
+  uuidHyphenated,
+  VersionConflictError,
+  type JsonObject,
+  type Ref,
+  type SyncStorage,
+  type SyncTx,
+} from "../dist/engine.js";
+import { initSync } from "../dist/index.js";
+import {
+  defaultTableName,
+  SqliteAdapter,
+  SqliteError,
+  sqliteLayout,
+  sqliteTables,
+  type SqliteClient,
+  type SqliteOptions,
+  type SqliteRow,
+} from "../dist/sqlite.js";
+import { behaviorPrefix, behaviorTable, checkedClient, inCallerTransaction, type Binding, type Database, type Ran } from "./sqlite.ts";
+
+/** One rule of the adapter, run through a binding with a directory for its files. */
+export interface Case {
+  name: string;
+  run(binding: Binding, dir: string): void;
+}
+
+const fixture = new URL("../../testdata/fixture/recipe.json", import.meta.url);
+
+/** The scenarios' graph descriptor, fixture-version-graph-db's Recipe graph, as JSON text. */
+const descriptor = readFileSync(fixture, "utf8");
+
+const core = initSync();
+
+const graph = "recipe";
+const cook = "Cook";
+const bread = "Bread";
+
+/** A database with the layout, and the adapter's storage over it. */
+interface Setup {
+  db: Database;
+  client: SqliteClient;
+  adapter: SqliteAdapter;
+  storage: SyncStorage;
+  engine: SyncEngine;
+}
+
+function setup(binding: Binding, options: Partial<SqliteOptions> = {}, path = ":memory:"): Setup {
+  const db = binding.open(path);
+  const adapter = new SqliteAdapter(descriptor, { graph, ...options });
+  adapter.createTables(db.client);
+  const storage = adapter.storage(db.client);
+  const engine = new SyncEngine(core, descriptor, storage, { schemaEpoch: 1, snapshotEvery: 3 });
+  return { db, client: db.client, adapter, storage, engine };
+}
+
+/** Runs fn over each setup, closing their databases however it ends. */
+function using(setups: Setup[], fn: () => void): void {
+  try {
+    fn();
+  } finally {
+    for (const s of setups) {
+      s.db.close();
+    }
+  }
+}
+
+/** A JSON object's member, as its JSON text. */
+function member(row: string, name: string): string | undefined {
+  const value = (parseJson(row) as JsonObject).get(name);
+  return value === undefined ? undefined : stringifyJson(value);
+}
+
+/** The error fn throws; it fails when fn does not throw. */
+function thrown(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (err) {
+    return err;
+  }
+  assert.fail("expected an error");
+}
+
+/** A step row of the fixture, as an upsert's JSON text. */
+function stepRow(key: string | null, instruction: string, extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({ entity_key: key, position: 1, instruction, timings: {}, ...extra });
+}
+
+function history(client: SqliteClient, table: string, id: string): SqliteRow[] {
+  return client.all(`SELECT _version, operation, data, recorded_at FROM ${table} WHERE id = ?1 ORDER BY _version`, [id]);
+}
+
+/** A canonical id: base62 of a version-4 UUID. */
+function assertCanonicalID(id: unknown, what: string): void {
+  assert.equal(typeof id, "string", `${what} is text`);
+  assert.equal(uuidCanonical(id as string), id, `${what} ${String(id)} is in its canonical form`);
+  const hex = uuidHyphenated(id as string);
+  assert.match(hex, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, `${what} ${String(id)} is a version-4 UUID`);
+}
+
+/** A ref and a tagged commit on it, written through the adapter, for the cases that need a commit. */
+function refAndCommit(tx: SyncTx, root = bread, name = "main"): { ref: Ref; commit: string } {
+  const ref = tx.createRef({ root, parent: null, base: null, name, actor: cook });
+  const commit = tx.insertCommit({
+    root,
+    ref: ref.id,
+    parent: null,
+    message: "",
+    schemaEpoch: 1,
+    contentHash: "0".repeat(64),
+    sequence: tx.nextSequence(root),
+    actor: cook,
+  }).id;
+  return { ref, commit };
+}
+
+export const cases: Case[] = [
+  {
+    name: "a ref's version fences its update and its discard, and a refused discard leaves the transaction usable",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const ref = s.storage.transact((tx) => tx.createRef({ root: bread, parent: null, base: null, name: "main", actor: cook }));
+        assert.equal(ref.version, 1);
+        const moved = s.storage.transact((tx) => tx.updateRef({ id: ref.id, version: 1, head: null, base: null, seal: false, actor: cook }));
+        assert.equal(moved.version, 2);
+        assert.ok(thrown(() => s.storage.transact((tx) => tx.updateRef({ id: ref.id, version: 1, head: null, base: null, seal: true, actor: cook }))) instanceof VersionConflictError);
+        assert.equal(s.storage.transact((tx) => tx.readRef(ref.id)).sealed, false);
+        const draft = s.storage.transact((tx) => {
+          assert.ok(thrown(() => tx.discardRef(ref.id, 1, cook)) instanceof VersionConflictError);
+          // The transaction goes on after the refused discard, and commits.
+          return tx.createRef({ root: bread, parent: ref.id, base: null, name: "draft", actor: cook });
+        });
+        assert.equal(s.storage.transact((tx) => tx.readRef(draft.id)).name, "draft");
+        s.storage.transact((tx) => tx.discardRef(ref.id, 2, cook));
+        const discarded = s.storage.transact((tx) => tx.readRef(ref.id));
+        assert.deepEqual([discarded.discarded, discarded.version], [true, 3]);
+        assert.ok(thrown(() => s.storage.transact((tx) => tx.discardRef(ref.id, 3, cook))) instanceof VersionConflictError);
+        assert.ok(thrown(() => s.storage.transact((tx) => tx.readRef("Missing"))) instanceof NotFoundError);
+      });
+    },
+  },
+  {
+    name: "a release pointer's version fences its first write and every move",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const { commit } = s.storage.transact((tx) => refAndCommit(tx));
+        const first = s.storage.transact((tx) => tx.writeRelease({ root: bread, commit, version: 0, actor: cook }));
+        assert.equal(first.version, 1);
+        assert.ok(thrown(() => s.storage.transact((tx) => tx.writeRelease({ root: bread, commit, version: 0, actor: cook }))) instanceof VersionConflictError);
+        assert.ok(thrown(() => s.storage.transact((tx) => tx.writeRelease({ root: bread, commit, version: 2, actor: cook }))) instanceof VersionConflictError);
+        const moved = s.storage.transact((tx) => tx.writeRelease({ root: bread, commit, version: 1, actor: "Baker" }));
+        assert.deepEqual([moved.id, moved.version], [first.id, 2]);
+        assert.equal(s.storage.transact((tx) => tx.readRelease(bread)).version, 2);
+        assert.ok(thrown(() => s.storage.transact((tx) => tx.readRelease("Soup"))) instanceof NotFoundError);
+        // The pointer's history is the release log: each write's image at its version.
+        const log = history(s.client, '"graph_release_history"', first.id);
+        assert.deepEqual(
+          log.map((row) => [row["_version"], row["operation"], member(row["data"] as string, "updated_by")]),
+          [
+            [1, "INSERT", '"Cook"'],
+            [2, "UPDATE", '"Baker"'],
+          ],
+        );
+      });
+    },
+  },
+  {
+    name: "a root's live ref names are distinct, and a discarded ref's name is free again",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const main = s.engine.createPrimary(cook, bread, "main");
+        const taken = thrown(() => s.engine.createPrimary(cook, bread, "main"));
+        assert.ok(taken instanceof NameTakenError);
+        assert.equal(errorCode(taken), "name_taken");
+        const draft = s.engine.branch(cook, main.id, "draft");
+        assert.equal(errorCode(thrown(() => s.engine.branch(cook, main.id, "draft"))), "name_taken");
+        // Another root takes the name.
+        s.engine.createPrimary(cook, "Soup", "main");
+        s.engine.discard(cook, draft.id, draft.version);
+        assert.equal(s.engine.branch(cook, main.id, "draft").version, 1);
+      });
+    },
+  },
+  {
+    name: "history: a member's versions and images, a delete's actor, and the columns history leaves out",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const main = s.engine.createPrimary(cook, bread, "main");
+        const draft = s.engine.branch(cook, main.id, "draft");
+        const first = s.engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Mix", "Mix", { scratch: "note to self" })] } });
+        const second = s.engine.save("Baker", draft.id, first.ref.version, { step: { upsert: [stepRow("Mix", "Mix well")] } });
+        const row = second.saved["step"]![0]!;
+        assert.equal(member(row, "_version"), "2");
+        // A column the update leaves out keeps its value on the live row.
+        assert.equal(member(row, "scratch"), '"note to self"');
+        const id = JSON.parse(member(row, "id")!) as string;
+        s.engine.save("Janitor", draft.id, second.ref.version, { step: { unset: ["Mix"] } });
+        const images = history(s.client, '"graph_member_history"', id);
+        assert.deepEqual(
+          images.map((image) => [image["_version"], image["operation"]]),
+          [
+            [1, "INSERT"],
+            [2, "UPDATE"],
+            [3, "DELETE"],
+          ],
+        );
+        for (const image of images) {
+          assert.equal(member(image["data"] as string, "scratch"), undefined, "an image leaves scratch out");
+          assert.equal(member(image["data"] as string, "_version"), String(image["_version"]));
+        }
+        // An update's image is the row as stored, less scratch.
+        const updated = parseJson(row) as JsonObject;
+        updated.delete("scratch");
+        assert.equal(images[1]!["data"], stringifyJson(updated));
+        // The delete's image is the row at its version plus 1, naming the
+        // delete's actor in the kind's actor column, updated_by.
+        const deleted = parseJson(row) as JsonObject;
+        deleted.delete("scratch");
+        deleted.set("_version", parseJson("3"));
+        deleted.set("updated_by", "Janitor");
+        assert.equal(images[2]!["data"], stringifyJson(deleted));
+        assert.equal(s.storage.transact((tx) => tx.rows("step", draft.id)).length, 0);
+        // A kind with no actor column keeps the row's values in its delete's image.
+        const whisk = s.engine.save(cook, draft.id, s.storage.transact((tx) => tx.readRef(draft.id)).version, {
+          utensil: { upsert: ['{"entity_key": "Whisk", "name": "whisk"}'] },
+        });
+        const utensil = whisk.saved["utensil"]![0]!;
+        s.engine.save("Janitor", draft.id, whisk.ref.version, { utensil: { unset: ["Whisk"] } });
+        const gone = history(s.client, '"graph_member_history"', JSON.parse(member(utensil, "id")!) as string);
+        const kept = parseJson(utensil) as JsonObject;
+        kept.set("_version", parseJson("2"));
+        assert.equal(gone[1]!["data"], stringifyJson(kept));
+        // A ref's history: its insert and each update at its version, the discard's naming its actor.
+        s.engine.discard("Janitor", draft.id, s.storage.transact((tx) => tx.readRef(draft.id)).version);
+        const refImages = history(s.client, '"graph_ref_history"', draft.id);
+        assert.deepEqual(
+          refImages.map((image) => [image["_version"], image["operation"]]),
+          [1, 2, 3, 4, 5, 6, 7].map((version) => [version, version === 1 ? "INSERT" : "UPDATE"]),
+        );
+        const last = refImages.at(-1)!["data"] as string;
+        assert.equal(member(last, "deleted_by"), '"Janitor"');
+        assert.equal(member(last, "_version"), "7");
+        assert.match(member(last, "deleted_at")!, /^"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z"$/);
+      });
+    },
+  },
+  {
+    name: "the adapter writes a row's ref, root, tombstone, actor and time, never its id or version, and keeps or defaults what it lacks",
+    run(binding) {
+      const s = setup(binding, { clock: () => 1_800_000_000_000_000 });
+      using([s], () => {
+        const { ref } = s.storage.transact((tx) => refAndCommit(tx));
+        const write = (row: string, tombstone = false, actor = cook) =>
+          s.storage.transact((tx) => tx.upsertRow("step", { ref: ref.id, root: bread, row, tombstone, actor }));
+        const inserted = write(
+          JSON.stringify({
+            entity_key: "Mix",
+            id: "Elsewhere",
+            _version: 7,
+            ref_id: "Other",
+            recipe_id: "Soup",
+            deleted_on_ref: true,
+            created_at: "2000-01-01T00:00:00Z",
+            created_by: "Somebody",
+            position: 1,
+            instruction: "Mix",
+            timings: {},
+          }),
+        );
+        assert.notEqual(member(inserted, "id"), '"Elsewhere"');
+        assert.equal(member(inserted, "_version"), "1");
+        assert.equal(member(inserted, "ref_id"), JSON.stringify(ref.id));
+        assert.equal(member(inserted, "recipe_id"), '"Bread"');
+        assert.equal(member(inserted, "deleted_on_ref"), "false");
+        assert.equal(member(inserted, "created_at"), '"2027-01-15T08:00:00Z"');
+        assert.equal(member(inserted, "created_by"), '"Cook"');
+        assert.equal(member(inserted, "updated_by"), '"Cook"');
+        // A column the insert lacks holds null.
+        assert.equal(member(inserted, "scratch"), "null");
+        const updated = write(JSON.stringify({ entity_key: "Mix", instruction: "Stir", created_by: "Somebody" }), true, "Baker");
+        assert.equal(member(updated, "id"), member(inserted, "id"));
+        assert.equal(member(updated, "_version"), "2");
+        assert.equal(member(updated, "deleted_on_ref"), "true");
+        // A column the update lacks keeps its value, and the creation audit stays.
+        assert.equal(member(updated, "position"), "1");
+        assert.equal(member(updated, "created_by"), '"Cook"');
+        assert.equal(member(updated, "updated_by"), '"Baker"');
+        // A row without an entity key is a new entity.
+        const fresh = write(stepRow(null, "Rest"));
+        assert.notEqual(member(fresh, "entity_key"), member(inserted, "entity_key"));
+        assertCanonicalID(JSON.parse(member(fresh, "entity_key")!), "a generated entity key");
+        // A column the descriptor does not declare is refused.
+        assert.match(String(thrown(() => write(JSON.stringify({ entity_key: "Mix", flavour: "salt" })))), /does not declare/);
+      });
+    },
+  },
+  {
+    name: "every table is STRICT: a value of the wrong type is refused, not stored",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const err = thrown(() =>
+          s.client.run(
+            `INSERT INTO "graph_ref" (id, graph, root_id, name, created_at, created_by, updated_at, updated_by, _version) ` +
+              `VALUES ('A', 'recipe', 'Bread', 'main', 'today', 'Cook', 0, 'Cook', 1)`,
+          ),
+        );
+        assert.ok(err instanceof SqliteError, String(err));
+        // SQLITE_CONSTRAINT_DATATYPE.
+        assert.equal(err.code, 3091);
+        for (const table of sqliteTables) {
+          const sql = s.client.get(`SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?1`, [defaultTableName(table)]);
+          assert.match(String(sql?.["sql"]), /\) STRICT$/, `${table} is STRICT`);
+        }
+      });
+    },
+  },
+  {
+    name: "foreign keys check the layout's edges on a connection the adapter binds",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const err = thrown(() =>
+          s.client.run(
+            `INSERT INTO "graph_patch" (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version, operation) ` +
+              `VALUES ('A', 'recipe', 'Missing', 'step', 'Mix', 'B', 1, 'ADD')`,
+          ),
+        );
+        assert.ok(err instanceof SqliteError, String(err));
+        // SQLITE_CONSTRAINT_FOREIGNKEY.
+        assert.equal(err.code, 787);
+      });
+    },
+  },
+  {
+    name: "two graphs in one file keep apart: each reads, names and sequences only its own",
+    run(binding) {
+      const a = setup(binding);
+      using([a], () => {
+        const b = new SqliteAdapter(descriptor, { graph: "menu" }).storage(a.client);
+        const bEngine = new SyncEngine(core, descriptor, b, { schemaEpoch: 1, snapshotEvery: 3 });
+        const main = a.engine.createPrimary(cook, bread, "main");
+        // The same root and name in the other graph is not taken.
+        const other = bEngine.createPrimary(cook, bread, "main");
+        assert.ok(thrown(() => bEngine.compose(main.id)) instanceof NotFoundError);
+        const draft = a.engine.branch(cook, main.id, "draft");
+        const saved = a.engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Mix", "Mix")] } });
+        a.engine.commit(cook, draft.id, saved.ref.version, { tag: true });
+        assert.deepEqual(b.transact((tx) => tx.rows("step", draft.id)), []);
+        assert.equal(b.transact((tx) => tx.nextSequence(bread)), 1);
+        assert.equal(a.storage.transact((tx) => tx.nextSequence(bread)), 2);
+        assert.equal(b.transact((tx) => tx.commits()).length, 0);
+        // A write through one graph's ref from the other is refused.
+        const refused = thrown(() =>
+          b.transact((tx) => tx.upsertRow("step", { ref: draft.id, root: bread, row: stepRow("Mix", "Mix"), tombstone: false, actor: cook })),
+        );
+        assert.match(String(refused), /is not a ref of root/);
+        assert.ok(thrown(() => bEngine.branch(cook, draft.id, "x")) instanceof NotFoundError);
+        assert.equal(bEngine.compose(other.id).contentHash, a.engine.compose(main.id).contentHash);
+      });
+    },
+  },
+  {
+    name: "the name function names every table and index",
+    run(binding) {
+      const tableName = (name: string) => `vg_${name}`;
+      const s = setup(binding, { tableName });
+      using([s], () => {
+        const objects = s.client.all(`SELECT type, name, tbl_name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_autoindex_%' ORDER BY name`);
+        const tables = objects.filter((o) => o["type"] === "table").map((o) => o["name"]);
+        assert.deepEqual(tables, sqliteTables.map(tableName).sort());
+        for (const o of objects) {
+          assert.match(String(o["name"]), /^vg_[a-z_]+$/, `${String(o["type"])} ${String(o["name"])} is named by the function`);
+          assert.match(String(o["tbl_name"]), /^vg_/);
+        }
+        assert.ok(objects.some((o) => o["type"] === "index"));
+        const main = s.engine.createPrimary(cook, bread, "main");
+        const draft = s.engine.branch(cook, main.id, "draft");
+        s.engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Mix", "Mix")] } });
+        assert.equal(s.client.get(`SELECT count(*) AS n FROM "vg_member"`)?.["n"], 1);
+        // The layout's statements name each object with the function, and the default's start with graph_.
+        for (const statement of sqliteLayout()) {
+          assert.match(statement, /^CREATE (UNIQUE )?(TABLE|INDEX) IF NOT EXISTS "graph_[a-z_]+" /);
+        }
+      });
+    },
+  },
+  {
+    name: "the clock: a transaction reads it once, and every write in it has its time",
+    run(binding) {
+      let calls = 0;
+      const start = 1_800_000_000_000_000;
+      const clock = () => start + ++calls * 1_000_001;
+      const s = setup(binding, { clock });
+      using([s], () => {
+        calls = 0;
+        const main = s.engine.createPrimary(cook, bread, "main");
+        const draft = s.engine.branch(cook, main.id, "draft");
+        const saved = s.engine.save(cook, draft.id, draft.version, {
+          step: { upsert: [stepRow("Mix", "Mix"), stepRow("Rest", "Rest")] },
+        });
+        assert.equal(calls, 3, "one read of the clock per transaction");
+        const at = (n: number) => start + n * 1_000_001;
+        for (const row of saved.saved["step"]!) {
+          assert.equal(member(row, "created_at"), '"2027-01-15T08:00:03.000003Z"');
+          assert.equal(member(row, "updated_at"), '"2027-01-15T08:00:03.000003Z"');
+        }
+        const recorded = s.client.all(`SELECT DISTINCT recorded_at FROM "graph_member_history"`);
+        assert.deepEqual(recorded.map((r) => r["recorded_at"]), [at(3)]);
+        const refRow = s.client.get(`SELECT created_at, updated_at FROM "graph_ref" WHERE id = ?1`, [draft.id]);
+        assert.deepEqual([refRow?.["created_at"], refRow?.["updated_at"]], [at(2), at(3)]);
+        const committed = s.engine.commit(cook, draft.id, saved.ref.version);
+        assert.equal(calls, 4);
+        assert.equal(committed.commit!.createdAt, "2027-01-15T08:00:04.000004Z");
+        // A transaction inside another is a savepoint at the outer one's time.
+        const inner = s.storage.transact((tx) => {
+          tx.createRef({ root: "Soup", parent: null, base: null, name: "outer", actor: cook });
+          return s.storage.transact((nested) => nested.createRef({ root: "Soup", parent: null, base: null, name: "inner", actor: cook }));
+        });
+        assert.equal(calls, 5);
+        assert.equal(s.client.get(`SELECT created_at FROM "graph_ref" WHERE id = ?1`, [inner.id])?.["created_at"], at(5));
+        assert.match(String(thrown(() => new SqliteAdapter(descriptor, { graph, clock: () => 1.5 }).storage(s.client).transact((tx) => tx.readRef(main.id)))), /not a whole number of microseconds/);
+      });
+    },
+  },
+  {
+    name: "every id the adapter writes is a version-4 UUID in its canonical form",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const main = s.engine.createPrimary(cook, bread, "main");
+        const draft = s.engine.branch(cook, main.id, "draft");
+        const saved = s.engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow(null, "Mix")] } });
+        const committed = s.engine.commit(cook, draft.id, saved.ref.version);
+        const merged = s.engine.merge(cook, draft.id, main.id, main.version, [], { tag: true });
+        s.engine.release(cook, bread, merged.commit!.id, 0);
+        const ids: string[] = [];
+        const columns: [string, string[]][] = [
+          ["ref", ["id"]],
+          ["ref_history", ["history_id"]],
+          ["commit", ["id"]],
+          ["patch", ["id"]],
+          ["snapshot_entry", ["id"]],
+          ["release", ["id"]],
+          ["release_history", ["history_id"]],
+          ["member", ["id", "entity_key"]],
+          ["member_history", ["history_id"]],
+        ];
+        for (const [table, names] of columns) {
+          const rows = s.client.all(`SELECT ${names.join(", ")} FROM "graph_${table}"`);
+          assert.ok(rows.length > 0, `${table} has rows`);
+          for (const row of rows) {
+            for (const name of names) {
+              assertCanonicalID(row[name], `${table}.${name}`);
+              ids.push(row[name] as string);
+            }
+          }
+        }
+        assert.equal(new Set(ids).size, ids.length - 1, "every id is new but the entity key two rows share");
+        assertCanonicalID(committed.commit!.id, "a commit's id");
+      });
+    },
+  },
+  {
+    name: "a second connection's BEGIN IMMEDIATE waits for the write lock, and then fails busy",
+    run(binding, dir) {
+      const path = join(dir, "lock.sqlite");
+      const a = setup(binding, {}, path);
+      const second = binding.open(path);
+      using([a], () => {
+        try {
+          second.client.exec!("PRAGMA busy_timeout = 300");
+          const b = new SqliteAdapter(descriptor, { graph }).storage(second.client);
+          let waited = 0;
+          let busy: unknown;
+          a.storage.transact((tx) => {
+            tx.createRef({ root: bread, parent: null, base: null, name: "main", actor: cook });
+            const started = Date.now();
+            busy = thrown(() => b.transact((other) => other.createRef({ root: "Soup", parent: null, base: null, name: "main", actor: cook })));
+            waited = Date.now() - started;
+          });
+          assert.ok(busy instanceof SqliteError, String(busy));
+          assert.equal(busy.code, 5, "SQLITE_BUSY");
+          assert.ok(waited >= 250, `waited ${waited}ms for the lock`);
+          // Once the first transaction commits, the second connection writes, and reads what the first wrote.
+          b.transact((other) => other.createRef({ root: "Soup", parent: null, base: null, name: "main", actor: cook }));
+          assert.equal(second.client.get(`SELECT count(*) AS n FROM "graph_ref"`)?.["n"], 2);
+        } finally {
+          second.close();
+        }
+      });
+    },
+  },
+  {
+    name: "a transaction that throws rolls back, and one inside another is a savepoint that rolls back alone",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const create = (tx: SyncTx, name: string) => tx.createRef({ root: bread, parent: null, base: null, name, actor: cook });
+        assert.match(
+          String(
+            thrown(() =>
+              s.storage.transact((tx) => {
+                create(tx, "gone");
+                throw new Error("rolled back");
+              }),
+            ),
+          ),
+          /rolled back/,
+        );
+        s.storage.transact((tx) => {
+          create(tx, "kept");
+          assert.ok(thrown(() => s.storage.transact((nested) => (create(nested, "inner"), create(nested, "kept")))) instanceof NameTakenError);
+          create(tx, "after");
+        });
+        const names = s.client.all(`SELECT name FROM "graph_ref" ORDER BY name`).map((row) => row["name"]);
+        assert.deepEqual(names, ["after", "kept"]);
+        assert.match(String(thrown(() => s.storage.transact(() => Promise.resolve(1)))), /its function returned a promise/);
+        assert.deepEqual(s.client.all(`SELECT name FROM "graph_ref" ORDER BY name`).map((row) => row["name"]), ["after", "kept"]);
+      });
+    },
+  },
+  {
+    name: "in the caller's transaction the adapter issues no transaction control, and the caller's rollback undoes its writes",
+    run(binding) {
+      const db = binding.open(":memory:");
+      try {
+        db.client.exec!("PRAGMA foreign_keys = ON");
+        const ran: Ran[] = [];
+        const adapter = new SqliteAdapter(descriptor, { graph, callerTransaction: true, tableName: behaviorTable });
+        // A client with no exec, as a behavior's sql has none.
+        inCallerTransaction(db.client, () => adapter.createTables(checkedClient(db.client, "migrate", ran)));
+        const storage = adapter.storage(checkedClient(db.client, "write", ran));
+        const engine = new SyncEngine(core, descriptor, storage, { schemaEpoch: 1, snapshotEvery: 3 });
+        const main = inCallerTransaction(db.client, () => engine.createPrimary(cook, bread, "main"));
+        const draft = inCallerTransaction(db.client, () => engine.branch(cook, main.id, "draft"));
+        const saved = inCallerTransaction(db.client, () =>
+          engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Mix", "Mix")] }, utensil: { upsert: ['{"entity_key": "Whisk", "name": "whisk"}'] } }),
+        );
+        const committed = inCallerTransaction(db.client, () => engine.commit(cook, draft.id, saved.ref.version));
+        const merged = inCallerTransaction(db.client, () => engine.merge(cook, draft.id, main.id, main.version, [], { tag: true }));
+        inCallerTransaction(db.client, () => engine.release(cook, bread, merged.commit!.id, 0));
+        inCallerTransaction(db.client, () => engine.sweep({ actor: cook }));
+        // Reads run as a behavior's read: only SELECT.
+        const reader = new SyncEngine(core, descriptor, adapter.storage(checkedClient(db.client, "read", ran)), { schemaEpoch: 1, snapshotEvery: 3 });
+        inCallerTransaction(db.client, () => {
+          reader.compose(draft.id);
+          reader.materialize(committed.commit!.id);
+          reader.released(bread);
+          reader.history(draft.id);
+          reader.diff(committed.commit!.id, merged.commit!.id);
+        });
+        assert.ok(ran.length > 0);
+        for (const { sql } of ran) {
+          assert.doesNotMatch(sql, /^\s*(BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE|PRAGMA)\b/i);
+        }
+        // The caller rolls back, and the graph's writes go with it.
+        db.client.exec!("BEGIN IMMEDIATE");
+        const dropped = engine.branch(cook, main.id, "dropped");
+        db.client.exec!("ROLLBACK");
+        assert.ok(thrown(() => inCallerTransaction(db.client, () => engine.compose(dropped.id))) instanceof NotFoundError);
+        assert.equal(db.client.get(`SELECT count(*) AS n FROM "${behaviorTable("ref")}"`)?.["n"], 2);
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "the layout's statements pass D16's checks for a behavior's migration, and create only the behavior's own tables and indexes",
+    run(binding) {
+      const statements = sqliteLayout(behaviorTable);
+      assert.equal(statements.length, new Set(statements).size);
+      for (const statement of statements) {
+        assert.equal(sqlRefusal(statement, behaviorPrefix, "migrate"), undefined, statement);
+      }
+      const db = binding.open(":memory:");
+      try {
+        for (const statement of statements) {
+          db.client.run(statement);
+        }
+        const own = (name: string) => name.startsWith(behaviorPrefix) && !name.startsWith(behaviorPrefix + "_");
+        for (const object of db.client.all(`SELECT type, name, tbl_name FROM sqlite_schema`)) {
+          const name = String(object["name"]);
+          const named = object["type"] === "index" && name.startsWith("sqlite_autoindex_") ? own(String(object["tbl_name"])) : own(name);
+          assert.ok((object["type"] === "table" || object["type"] === "index") && named && own(String(object["tbl_name"])), name);
+        }
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "every canonical vector reads back as the canonical value written, live and from history",
+    run(binding) {
+      const vectors = new URL("../../testdata/canonical/", import.meta.url);
+      type ValueCase = { name: string; class: string; postgres: string; canonical?: string };
+      type RowCase = { name: string; columns: Record<string, string>; postgres: string; canonical?: string };
+      const values: ValueCase[] = [];
+      const rows: RowCase[] = [];
+      for (const file of readdirSync(vectors).filter((name) => name.endsWith(".json")).sort()) {
+        const doc = JSON.parse(readFileSync(new URL(file, vectors), "utf8")) as { cases?: ValueCase[]; rows?: RowCase[] };
+        values.push(...(doc.cases ?? []));
+        rows.push(...(doc.rows ?? []));
+      }
+      assert.ok(values.length > 0 && rows.length > 0);
+      // A kind per case, whose role columns are named apart from its own.
+      const roles = { key: "vg_key", id: "vg_id", ref: "vg_ref", root: "vg_root", tombstone: "vg_tombstone", version: "vg_version" };
+      const roleColumns = { vg_key: "uuid", vg_id: "uuid", vg_ref: "uuid", vg_root: "uuid", vg_tombstone: "boolean", vg_version: "integer" };
+      const kinds = [
+        ...values.map((c, i) => ({ kind: `value${i}`, ...roles, history: { exclude: [] }, columns: { ...roleColumns, v: c.class } })),
+        ...rows.map((c, i) => ({ kind: `row${i}`, ...roles, history: { exclude: [] }, columns: { ...roleColumns, ...c.columns } })),
+      ];
+      const db = binding.open(":memory:");
+      try {
+        const adapter = new SqliteAdapter(JSON.stringify({ version: 3, kinds }), { graph: "vectors" });
+        adapter.createTables(db.client);
+        const storage = adapter.storage(db.client);
+        const ref = storage.transact((tx) => tx.createRef({ root: bread, parent: null, base: null, name: "main", actor: cook }));
+        const write = (kind: string, row: string) =>
+          storage.transact((tx) => tx.upsertRow(kind, { ref: ref.id, root: bread, row, tombstone: false, actor: cook }));
+        const stored = (kind: string) => db.client.get(`SELECT id, data FROM "graph_member" WHERE kind = ?1`, [kind]);
+        values.forEach((c, i) => {
+          const kind = `value${i}`;
+          if (c.canonical === undefined) {
+            // A value its class refuses is not stored.
+            assert.ok(thrown(() => write(kind, `{"v":${c.postgres}}`)) instanceof CanonicalError, `${c.class}/${c.name}`);
+            assert.equal(stored(kind), undefined);
+            return;
+          }
+          const written = write(kind, `{"v":${c.canonical}}`);
+          const row = stored(kind)!;
+          assert.equal(row["data"], `{"v":${c.canonical}}`, `${c.class}/${c.name} is stored canonical`);
+          const [read] = storage.transact((tx) => tx.rows(kind, ref.id));
+          const [image] = storage.transact((tx) => tx.images(kind, [{ id: row["id"] as string, version: 1 }]));
+          for (const text of [written, read!, image!]) {
+            assert.ok(text.startsWith(`{"v":${c.canonical},"vg_id":`), `${c.class}/${c.name}: ${text}`);
+          }
+        });
+        rows.forEach((c, i) => {
+          const kind = `row${i}`;
+          if (c.canonical === undefined) {
+            assert.ok(thrown(() => write(kind, c.postgres)) !== undefined);
+            assert.equal(stored(kind), undefined);
+            return;
+          }
+          write(kind, c.canonical);
+          // Every declared column, the ones the row lacks as null.
+          const canonical = parseJson(c.canonical) as JsonObject;
+          const expected = Object.keys(c.columns)
+            .sort()
+            .map((column) => JSON.stringify(column) + ":" + (canonical.has(column) ? stringifyJson(canonical.get(column)!) : "null"))
+            .join(",");
+          assert.equal(stored(kind)?.["data"], `{${expected}}`, c.name);
+        });
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "the binding returns plain rows and undefined for no row, and throws SQLite's extended result code",
+    run(binding) {
+      const db = binding.open(":memory:");
+      try {
+        db.client.run("CREATE TABLE t (a TEXT NOT NULL UNIQUE, b INTEGER) STRICT");
+        assert.equal(Number(db.client.run("INSERT INTO t (a, b) VALUES (?1, ?2)", ["x", 1]).changes), 1);
+        const row = db.client.get("SELECT a, b, NULL AS c FROM t WHERE a = ?1", ["x"]);
+        assert.equal(Object.getPrototypeOf(row), Object.prototype);
+        assert.deepEqual(row, { a: "x", b: 1, c: null });
+        assert.equal(db.client.get("SELECT a FROM t WHERE a = ?1", ["y"]), undefined);
+        assert.ok(db.client.all("SELECT a FROM t").every((r) => Object.getPrototypeOf(r) === Object.prototype));
+        const unique = thrown(() => db.client.run("INSERT INTO t (a, b) VALUES (?1, ?2)", ["x", 2]));
+        assert.ok(unique instanceof SqliteError, String(unique));
+        assert.equal(unique.code, 2067);
+        assert.match(unique.message, /UNIQUE constraint failed/);
+        const syntax = thrown(() => db.client.all("SELEC 1"));
+        assert.ok(syntax instanceof SqliteError, String(syntax));
+        assert.equal(syntax.code, 1);
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "new SqliteAdapter refuses what it cannot run",
+    run() {
+      type Doc = { [key: string]: unknown; kinds: { [key: string]: unknown; columns: Record<string, string> }[] };
+      const refusals: [string, (d: Doc) => void, Partial<SqliteOptions>, string][] = [
+        ["the fixture's descriptor", () => {}, {}, ""],
+        ["a descriptor of version 2", (d) => (d.version = 2), {}, "reads version 3"],
+        ["no graph", () => {}, { graph: "" }, "needs its graph's name"],
+        ["a kind without a root column", (d) => delete d.kinds[0]!["root"], {}, "has no root"],
+        ["a role column missing from the kind's columns", (d) => delete d.kinds[0]!.columns["_version"], {}, 'version column "_version" is not in its columns'],
+        ["a tombstone that is not boolean", (d) => (d.kinds[0]!.columns["deleted_on_ref"] = "integer"), {}, "a tombstone is a boolean column"],
+        ["a kind without history", (d) => delete d.kinds[0]!["history"], {}, "has no history"],
+      ];
+      for (const [name, edit, options, refuse] of refusals) {
+        const d = JSON.parse(descriptor) as Doc;
+        edit(d);
+        const build = () => new SqliteAdapter(JSON.stringify(d), { graph, ...options });
+        if (refuse === "") {
+          build();
+        } else {
+          assert.throws(build, new RegExp(refuse.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), name);
+        }
+      }
+    },
+  },
+];
