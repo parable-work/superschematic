@@ -1766,6 +1766,20 @@ overlapping route.
 
 The rule is reversible until the first release.
 
+### D20, amended: an encrypted operation cannot upload files
+
+An encrypted operation whose input type has a file-upload field built.
+Every SDK sends a file upload as multipart before the step that would
+encrypt the body, so the files and the other arguments travelled in clear,
+and the Go server's payload decryptor, which reads a JSON envelope,
+answered 400. No server could serve it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| apigen refuses an operation that is encrypted (an `Encrypted` set, `@encrypted`, or an `EncryptedField<T>` result or argument) and uploads files, naming the operation and its first file field. Every server and SDK generator builds from apigen's endpoints, so none of them sees such an operation. | Encrypting a multipart body, which needs a second envelope format in every SDK and a multipart decryption step in the Go server |
+
+The rule is reversible until the first release.
+
 ## D22. A TypeScript env loader in the TypeScript types package
 
 An `@envVars` class got a loader in Go or Rust and none in TypeScript, so a
