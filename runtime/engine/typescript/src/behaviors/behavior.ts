@@ -15,6 +15,11 @@ and gets a context that reaches only what the behavior may touch:
 - the principal, the schema version and the clock's time for the call;
 - can(permission), which asks the deployment's PermissionMatcher whether
   the principal holds a permission the behavior's config names (D16);
+- validate(type, value), which checks a value against another type of the
+  schema with the version's validator, as a nested value of the type is
+  checked: a type the version's checks cover, one its instance type's
+  fields reach, a behavior's checkedTypes names or a behavior's
+  parseConfig read through ConfigTarget.types (D32);
 - instances and schemas: other instances of the namespace and the configs
   of other schemas' behaviors, read as the principal, with the access
   policy asked at each read, and another instance's operation or a
@@ -43,10 +48,12 @@ Two more run after the commit, on the engine's runner, as the principal
 the deployment names for it (D16, amended): reactions, which hear the
 events of the instances of a schema that composes the behavior, one at a
 time in log order, and schedules, which run on an interval, a fixed one
-or one the schema's config gives. Each runs in its own transaction with
-what the runner records for it, so its writes and that record commit
-together, and it changes state only through the operations it invokes
-and the instances it creates.
+or one the schema's config gives, or not at all on a schema whose config
+turns them off. Each runs in its own transaction with what the runner
+records for it, so its writes and that record commit together, and it
+changes state only through the operations it invokes and the instances
+it creates. A schedule may also write the behavior's own tables, where
+the write changes nothing an operation returns (BehaviorSchedule, D32).
 
 A migration and afterConfigChange act for no principal: their SQL
 reaches the behavior's own tables only (TableWriter), without the
@@ -341,7 +348,29 @@ export interface BehaviorScope<Config> {
   readonly instances: Instances;
   /** The configs of the behaviors other schemas compose. */
   readonly schemas: Schemas;
+  /**
+   * Checks a value against another type of the schema, as validateUpdate
+   * checks the instance's own fields (TypeCheck).
+   */
+  validate: TypeCheck;
 }
+
+/**
+ * Checks a value against a type of the schema besides its instance type,
+ * with the version's validator: a JSON object, each field's value (its
+ * presence, JSON type, scalar rules, enum members and list rules), and no
+ * key the type does not declare, at any depth, as the version checks a
+ * nested value of the type in an instance. It returns every issue, as
+ * validateUpdate does ({ path, rule, message }, a path into the value such
+ * as `steps[0].name`, '' for the value itself), and none when the value
+ * holds. The type is one the version's checks cover: a type the instance
+ * type's fields reach, one a behavior's checkedTypes names, or one a
+ * behavior's parseConfig read through ConfigTarget.types, and the types
+ * those reach. The compatibility rule holds a new version to each of
+ * them, so a value it accepts today is accepted by every later version.
+ * Any other name, the instance type's included, is a BehaviorError.
+ */
+export type TypeCheck = (type: string, value: unknown) => readonly ValidationIssue[];
 
 /** A read of one instance: a guard's view and a field reader's. */
 export interface InstanceView<Config> extends BehaviorScope<Config> {
@@ -373,10 +402,11 @@ export interface SchemaContext<Config> extends BehaviorScope<Config> {
  * The context of the runner's work: a reaction or a schedule run, on one
  * schema that composes the behavior, in one namespace, as the runner's
  * principal. Like a schema-level operation's, its SQL reads the
- * behavior's tables and its columns across the schema's instances and
- * writes nothing, and it changes state only through the operations it
- * invokes, which run writing operations here, and the instances it
- * creates; their events record the cause.
+ * behavior's tables and its columns across the schema's instances, and it
+ * changes state only through the operations it invokes, which run writing
+ * operations here, and the instances it creates; their events record the
+ * cause. A reaction's SQL writes nothing; a schedule's writes the
+ * behavior's own tables (ScheduleContext).
  */
 export interface WorkContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlReader;
@@ -394,8 +424,15 @@ export interface ReactionContext<Config> extends WorkContext<Config> {
   before(event: EngineEvent): FrozenJSON | undefined;
 }
 
-/** A schedule run's context. */
+/**
+ * A schedule run's context. Its SQL writes the behavior's own tables
+ * (sql.table(name)), in the run's transaction, as the runner's principal,
+ * so the run's writes roll back with it when it throws; the relation over
+ * the instances (sql.instances()) stays read-only, as in every context.
+ * Such a write must change nothing an operation returns (BehaviorSchedule).
+ */
 export interface ScheduleContext<Config> extends WorkContext<Config> {
+  readonly sql: SqlWriter;
   /** The schedule's name. */
   readonly schedule: string;
   /** When its previous run committed, in epoch milliseconds; undefined before its first. */
@@ -419,20 +456,39 @@ export interface BehaviorReactions<Config> {
   react(context: ReactionContext<Config>, event: EngineEvent): void;
 }
 
-/** A behavior's schedule: work the runner runs on each schema that composes it, once an interval. */
+/**
+ * A behavior's schedule: work the runner runs on each schema that composes
+ * it, once an interval.
+ *
+ * A run changes what an operation shows only through the operations it
+ * invokes and the instances it creates, so each change runs its guards and
+ * appends its event. It may also write the behavior's own tables directly
+ * (ScheduleContext.sql), and such a write must change nothing an operation
+ * returns: history that no commit or snapshot pins, rows that no operation
+ * can read any more, and data that only makes a read cheaper, such as a
+ * snapshot. Discarding an idle draft, which a read shows, is a change an
+ * operation makes, so a run invokes that operation on each instance. The
+ * engine cannot tell one write from the other: keeping to the rule is the
+ * behavior's part.
+ */
 export interface BehaviorSchedule<Config> {
   /**
    * How often it runs, in milliseconds: an integer of at least 1000, or a
    * function of the config of a schema that composes the behavior that
-   * returns one, so each schema runs it at its own interval. The runner
-   * calls the function for each schema it schedules the behavior on, when
-   * it finds the schedule there: when it first looks and after each
-   * publish. A function that throws or returns anything else fails the
-   * schedule on that schema as a failing run does: engine.runner.status()
-   * shows the error and the runner tries again with its backoff; the
-   * runner and the schedule on other schemas go on.
+   * returns one, so each schema runs it at its own interval, or null, which
+   * turns the schedule off on that schema. The runner calls the function
+   * for each schema it schedules the behavior on, when it finds the
+   * schedule there: when it first looks and after each publish. An off
+   * schedule runs nothing on the schema and the runner keeps nothing for
+   * it there; engine.runner.status() shows it as off. Once a publish gives
+   * the schema a config the function returns an interval for, the runner
+   * finds it again, as for the first time: it runs an interval later. A
+   * function that throws or returns anything else (undefined among them)
+   * fails the schedule on that schema as a failing run does:
+   * engine.runner.status() shows the error and the runner tries again with
+   * its backoff; the runner and the schedule on other schemas go on.
    */
-  readonly everyMs: number | ((config: Config) => number);
+  readonly everyMs: number | ((config: Config) => number | null);
   /** One run. It is synchronous; it returns nothing. */
   run(context: ScheduleContext<Config>): void;
 }
@@ -668,6 +724,8 @@ export interface PublishContext<Config> {
   readonly sql: TableWriter;
   /** Visits every instance of the schema in the namespace, in creation order, reading 500 at a time. */
   eachInstance(visit: (instance: StoredInstance) => void): void;
+  /** Checks a value against another type of the schema with the version being published (TypeCheck). */
+  validate: TypeCheck;
 }
 
 /** The type a config is given on, for parseConfig. */
@@ -683,8 +741,17 @@ export interface ConfigTarget {
    * the type "string", or ["string", "null"] when it is not required.
    */
   readonly fieldSchemas: Readonly<Record<string, unknown>>;
-  /** The schema document's types besides the instance type, by name, sorted: the ones checkedTypes may name. */
-  readonly types: readonly string[];
+  /**
+   * The schema document's types besides the instance type: their names,
+   * the ones checkedTypes may name, and each one's fields. A type
+   * parseConfig reads through it counts as reachable from the instance type
+   * for the version, as a type its fields reach is (ConfigTypes.get). It is
+   * there whenever parseConfig runs: when the schema is defined or
+   * published, and when a published version is composed again to run it
+   * or to check a new version against it, since what it reads is the
+   * version's own document, which never changes.
+   */
+  readonly types: ConfigTypes;
   /** Every behavior the type lists, in order. */
   readonly behaviors: readonly string[];
   /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
@@ -697,6 +764,54 @@ export interface ConfigTarget {
    * not refused later because another schema changed.
    */
   readonly schemas?: ConfigSchemas;
+}
+
+/**
+ * The types of a schema's document besides its instance type, as
+ * parseConfig reads them (ConfigTarget.types).
+ */
+export interface ConfigTypes {
+  /** Their names, sorted. Listing them reads none. */
+  readonly names: readonly string[];
+  /**
+   * A type by name, with its fields, deep-frozen; undefined for a name
+   * that is not a type of the document besides the instance type. Each
+   * type it returns counts as reachable from the instance type for the
+   * version, as a type a field reaches does, and so do the types its own
+   * fields reach. The engine's document checks then cover their fields: a
+   * union, a map and a type the document does not have are refused. And a
+   * new version must keep their fields as the compatibility rule keeps the
+   * instance type's, since a value stored under the live version was
+   * checked against them, whether or not the new version's configs read
+   * them too. Reading is recorded only while parseConfig runs: get after
+   * it returns is a BehaviorError.
+   */
+  get(name: string): ConfigType | undefined;
+}
+
+/** A type of the schema as parseConfig reads it (ConfigTypes.get). */
+export interface ConfigType {
+  readonly name: string;
+  /**
+   * Its fields, in the order the document lists them. A field the
+   * document checks refuse (a map, a union, a type the document does not
+   * have) is not here: the define or publish is refused at that field.
+   */
+  readonly fields: readonly ConfigTypeField[];
+}
+
+/** A field of a type as parseConfig reads it. */
+export interface ConfigTypeField {
+  /** The key of its value in an object of the type: its jsonTag, else its name. */
+  readonly key: string;
+  /** The name of its type, as the document writes it: string, Int, Email, Generic.JSON, an enum's or a type's. */
+  readonly type: string;
+  /** What that name is: a builtin primitive, a scalar, an enum or a type of the document. */
+  readonly kind: 'primitive' | 'scalar' | 'enum' | 'type';
+  /** 0 for a single value, 1 for a list, 2 for a list of lists. */
+  readonly depth: 0 | 1 | 2;
+  /** Whether an object of the type may leave it out: the document does not mark it required. */
+  readonly optional: boolean;
 }
 
 /** The schemas parseConfig reaches when a schema is defined or published (ConfigTarget.schemas). */
@@ -750,7 +865,11 @@ export interface BehaviorImplementation<Config = unknown> {
    * says, and returns the value the other functions get as config. Throw
    * BehaviorConfigError to refuse it; the schema is refused at that
    * config. Absent, the config is the JSON value ({} when the type gives
-   * none).
+   * none). The engine calls it whenever it composes a version: at define
+   * and publish, when it runs a published version and when it checks a new
+   * version against the live one, so it returns the same value for the
+   * same config and document. The types it reads through target.types are
+   * held by the version's checks and the compatibility rule.
    */
   parseConfig?(config: unknown, target: ConfigTarget): Config;
 
@@ -819,7 +938,8 @@ export interface BehaviorImplementation<Config = unknown> {
    * compatibility rule holds a new version to each one both versions'
    * configs name as it holds a type a field reaches, so a new version
    * cannot refuse a value a stored instance holds; instanceSchema renders
-   * them.
+   * them. A type whose values the behavior keeps elsewhere, in its own
+   * tables, is one parseConfig reads through ConfigTarget.types instead.
    */
   checkedTypes?(config: Config): readonly string[];
 

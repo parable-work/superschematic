@@ -105,9 +105,9 @@ export const variants = defineBehavior<VariantsConfig>({
     }
     const values = Array.isArray(bySchema?.enum) ? bySchema.enum.filter((value): value is string => typeof value === 'string') : undefined;
     for (const [value, type] of Object.entries(raw.types)) {
-      if (!target.types.includes(type)) {
+      if (!target.types.names.includes(type)) {
         throw new BehaviorConfigError(
-          `types: ${JSON.stringify(value)} names ${type}, which is not a type of the schema document besides ${target.type} (its types: ${target.types.join(', ') || 'none'})`
+          `types: ${JSON.stringify(value)} names ${type}, which is not a type of the schema document besides ${target.type} (its types: ${target.types.names.join(', ') || 'none'})`
         );
       }
       if (values !== undefined && !values.includes(value)) {
