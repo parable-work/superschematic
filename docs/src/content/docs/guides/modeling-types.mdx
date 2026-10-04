@@ -1,6 +1,6 @@
 ---
 title: Modeling types
-description: Declare object types, scalars, enums, lists, maps, defaults and constraints once, and get the same checks in Go, TypeScript, Python and Rust.
+description: Declare object types, scalars, enums, lists, maps, defaults and constraints once, and get the same checks in Go, TypeScript, Python and Rust; and declare a service's environment variables and secrets.
 sidebar:
   order: 1
 ---
@@ -203,3 +203,62 @@ payload with an extra `colour` key, in each language:
 
 `@denyUnknownFields` is the Rust half alone: it adds
 `#[serde(deny_unknown_fields)]` and changes no other language.
+
+## Environment variables
+
+A General schema can declare a service's configuration. Put `@envVars`,
+from `@superschematic/schema-config`, on one class; each field is one
+environment variable, named as the field is:
+
+```ts
+import { Network } from "superscalar";
+import { Default, Secret } from "@superschematic/schema";
+import { envVars } from "@superschematic/schema-config";
+
+export enum Environment {
+  Development = "development",
+  Production = "production"
+}
+
+@envVars
+export abstract class ServiceConfig {
+  DATABASE_URL: Network.Url;
+  JWT_SECRET: Secret<string>;
+  PORT: Default<number, 8080>;
+  ENVIRONMENT: Default<Environment, Environment.Development>;
+}
+```
+
+A field is a `string`, a `number` (read as an integer), a `boolean`
+(`true` or `false`), an enum, or a scalar, which runs its validators.
+`Default<T, V>` makes a variable optional; any other field is required.
+
+The build writes a loader that reads and checks every variable and
+reports every one that is missing or invalid at once, never a value:
+
+| Language | Loader | Where |
+| --- | --- | --- |
+| Go | `LoadConfig() (*ServiceConfig, error)`; it also reads a `.env` file when one is present | `api/<service>`, when `outputs.types` lists Go |
+| Rust | `load_config()` | `api/<service>`, when `outputs.types` lists Rust but not Go |
+| TypeScript | `loadServiceConfig()`, from the types package's `./config` export; it reads no `.env` file | the TypeScript types package ([TypeScript](/superschematic/install/typescript/#load-environment-variables)) |
+
+Beside the loader, `api/<service>/values-schema.json` is a JSON Schema of
+the variables (types, defaults and which are required), with an
+`x-superschematic.envVars` list that also says which are enums, scalars
+and secrets. Deployment tooling can check a values file against it; the
+[deploy extension](/superschematic/extending/deploy/) is one that maps
+the same fields to Helm values.
+
+## Secrets
+
+`Secret<T>` marks a field whose value must not leak into logs. It is a
+`T` everywhere it is decoded and validated, and:
+
+- every generated type gets a mask helper that returns a copy with its
+  secret fields cleared: `MaskSecrets()` in Go, `mask_secrets()` in
+  Python, and `maskSecrets<Type>()` in TypeScript;
+- an `@envVars` field marked secret is `"secret": true` in
+  `values-schema.json`, and the TypeScript loader holds it as a
+  `SecretValue` that prints as `[secret]` until you call `reveal()`.
+
+Rust types have no mask helper.

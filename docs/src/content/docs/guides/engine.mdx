@@ -85,8 +85,8 @@ from a TypeScript or YAML schema file. The notes schema:
 - The instance type, the one whose instances the engine stores, is the
   type named like the schema or, as here, the only type.
 - A field's type is a builtin primitive, a scalar, or an enum or type of
-  the document, alone or as a list. The engine refuses a union or a map,
-  which the schema runtime does not check.
+  the document, alone, as a list or as a list of lists. The engine
+  refuses a union or a map, which the schema runtime does not check.
 - `behaviors` lists what `Note` composes, with each one's config.
   `Workflow` keeps a `status` and moves it only along the listed
   transitions; moving a note from review to published, or from published
@@ -98,8 +98,16 @@ from a TypeScript or YAML schema file. The notes schema:
 The engine checks a document with the strict loader of
 `@superschematic/schema-runtime`, against the core binary's
 [`json-schema`](/superschematic/reference/cli/) output by default, which
-admits the core's behaviors. A deployment whose binary registers
-more behaviors passes that binary's output as the `metaSchema` option.
+admits the core's behaviors, the
+[work-queue behaviors](/superschematic/guides/work-queues/) included
+(those run once the server registers `@superschematic/engine-workqueue`).
+A deployment whose binary registers more behaviors passes that binary's
+output as the `metaSchema` option.
+
+You can also write the schema in TypeScript, composing each behavior with
+`@behavior(name, config)`, and convert it with `format --to=json`;
+[Engine behaviors](/superschematic/guides/engine-behaviors/#compose-a-behavior)
+shows both forms.
 
 ## Open the engine and publish the schema
 
@@ -298,15 +306,24 @@ reads it, and `DELETE` removes it.
 
 ## Behaviors
 
-Each behavior operation is a route:
+Each behavior operation on an instance is a route:
 `POST .../instances/{id}/operations/{operation}`, with the operation's
-parameters as the body and an optional `If-Match`. The README's
+parameters as the body and an optional `If-Match`. A few operations run
+on the whole schema instead, such as `Search`'s `search` and `Queue`'s
+`claimNext`, at `POST .../schemas/{name}/operations/{operation}`
+([schema-level operations](/superschematic/guides/engine-behaviors/#schema-level-operations)).
+The README's
 [core behaviors](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#core-behaviors)
-section lists every operation, guard and config change of each. The core
-also declares `Dependencies`, `Links` and `Rollups`, which reach other
-instances, `Search`, full-text search over a type's text fields, and
-`Reactions`, whose rules the engine's runner applies after a change
-commits; the example does not use them.
+section lists every operation, guard and config change of each.
+
+This example uses three behaviors. The core also declares
+`Dependencies`, `Links` and `Rollups`, which reach other instances,
+`Search`, full-text search over a type's text fields, and `Reactions`,
+whose rules the engine's [runner](/superschematic/guides/engine-behaviors/#the-runner)
+applies after a change commits; [Engine behaviors](/superschematic/guides/engine-behaviors/)
+covers them. [Work queues](/superschematic/guides/work-queues/) covers
+`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and
+`Retries`, which make instances claimable work.
 
 ### Workflow
 
@@ -461,7 +478,9 @@ declaration its Go package registers; the binary's
 the npm package that implements it. The engine half is a
 `BehaviorImplementation`, built with `defineBehavior`: a handler per
 operation, a reader per field, guards, and migrations for its own
-storage. A server registers it with `openEngine({ behaviors, metaSchema })`,
+storage, and optionally schema-level operations, reactions and schedules
+for the runner, and hooks that run when an instance it references
+changes. A server registers it with `openEngine({ behaviors, metaSchema })`,
 where `metaSchema` is the extension binary's `json-schema` output, which
 declares it. `acme.Rating` in `examples/acme-schematic` is the worked
 example, and
@@ -508,6 +527,13 @@ not read are left out. An event's `change` is the instance for a create,
 the merge patch for an update, and `{behavior, operation, params, patch}`
 for an operation, so applying the changes in order gives the note as a
 read returns it.
+
+A write that reaches other instances, such as a delete that clears the
+links pointing at it or a create that stamps children, appends an event
+on each instance it changes, all in the same transaction. An event the
+[runner](/superschematic/guides/engine-behaviors/#the-runner) writes
+also carries `cause`, the behavior and the event or schedule that set it
+off.
 
 With `Accept: text/event-stream` the same route streams. It replays from
 `after` (or `Last-Event-ID`, which a reconnecting `EventSource` sends),
@@ -613,6 +639,11 @@ field the file lacks goes live over HTTP, the next start refuses the file.
 
 ## Where to go next
 
+- [Engine behaviors](/superschematic/guides/engine-behaviors/): the
+  runner, schema-level operations, and the Dependencies, Links, Rollups,
+  Search and Reactions behaviors.
+- [Work queues](/superschematic/guides/work-queues/): claimable work with
+  `@superschematic/engine-workqueue`.
 - The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md):
   the storage, the routes and statuses, the event stream, the describe and
   tools documents, and the behavior interface.

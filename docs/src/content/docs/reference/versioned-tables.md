@@ -45,7 +45,7 @@ export abstract class RecipeCard {
 
 | Option | Meaning |
 | --- | --- |
-| `retentionDays` | Greater than 0. Generates `<table>_prune_history`, which deletes history rows older than this many days, and the ORM's `PruneHistory`. Nothing schedules it. |
+| `retentionDays` | Greater than 0. Generates `<table>_prune_history`, which deletes history rows older than this many days, and the ORM's `PruneHistory`. Nothing schedules it for a table on its own; a [version graph](/superschematic/reference/version-graphs/#sweep)'s sweep prunes its members' history. |
 | `partitionBy` | `"month"` is the only value. The history table is partitioned by range on `recorded_at`. The generator writes only its default partition. |
 | `pruneKeepReferencedBy` | One `{ table, keyColumn, versionColumn }` or a list of them. The prune function keeps every history row whose `(key, _version)` a row of `table` names in `(keyColumn, versionColumn)`. Requires `retentionDays`. |
 | `exclude` | Fields left out of every history image. |
@@ -111,8 +111,25 @@ another version and `ErrNotFound` when it does not exist.
 `ErrVersionConflict` wraps `ErrNotFound`, so `errors.Is(err, ErrNotFound)`
 holds for both.
 
-The Go, TypeScript, Rust and Python types give the table's type a
-`_version` field (`Version` in Go and Rust) and declare `HistoryRecord`.
+The Go, TypeScript, Rust and Python types give the table's type a field
+that holds `_version` in JSON (`Version` in Go, `_version` in TypeScript,
+`version` in Rust and `version_` in Python) and declare `HistoryRecord`.
+Only Go has an ORM, so the history readers and fenced writes above are
+Go's; the other languages read and send `_version` as a field.
+
+```go
+ctx := WithUserID(context.Background(), userID)
+
+// Update only if nobody has written since version 2.
+updated, err := db.Recipe.UpdateOneIfVersion(ctx, breadID, 2, &RecipeUpdate{Title: &rye})
+if errors.Is(err, ErrVersionConflict) {
+	// The row moved on: reload it and try again, or tell the caller.
+}
+
+past, err := db.Recipe.GetVersion(ctx, breadID, 2)          // the row as version 2 left it
+then, err := db.Recipe.GetAsOf(ctx, breadID, lastWeek)      // the row as it was at a time
+steps, err := db.Step.ListAsOfByRecipeID(ctx, breadID, lastWeek, nil)
+```
 
 ## `@optimistic`
 

@@ -38,7 +38,7 @@ docs/
     index.md              overview
     start/                prerequisites, getting started, how it works
     first-project/        the tutorial over examples/acme-shop
-    guides/               one guide per area: types, tables, routes, auth, SDKs, the engine
+    guides/               one guide per area: types, tables, routes, auth, SDKs, the engine, its behaviors and work queues
     install/              per-language pages (the "Languages" group)
     extending/            write an extension, deploy, platform
     reference/            naming file, CLI, one page per feature

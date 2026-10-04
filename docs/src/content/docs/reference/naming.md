@@ -246,10 +246,10 @@ scalar-typed field, followed by the scalar's canonical name. With
 ```ts
 export interface User {
   /** @scalar Identity.UUID */
-  id?: string | null;
+  id?: IdentityUUID | null;
   /** Display name shown across the product. */
   /** @scalar Identity.Name */
-  name: string;
+  name: IdentityName;
   isActive: boolean;
 }
 ```
