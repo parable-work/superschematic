@@ -504,6 +504,20 @@ test("a scenario's roots are not seeded on SQLite", async () => {
   );
 });
 
+// An sql step's rows are its columns read as text: on SQLite, where a
+// column keeps its type, a column that is not text is refused rather than
+// turned into text, and a statement casts what it selects.
+test("an sql step's column that is not text is refused on SQLite", async () => {
+  const step = (select: string) =>
+    readScenario(
+      formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "${select}"}, "expect": {"rows": [{"n": "1"}]}}`),
+      "sql",
+      "sqlite",
+    );
+  await runScenario(step("SELECT CAST(1 AS TEXT) AS n"), passes[1]!.open);
+  await expect(runScenario(step("SELECT 1 AS n"), passes[1]!.open)).rejects.toThrow("column n is number, not text: cast it in the statement");
+});
+
 /** An engine either backend runs a scenario's operations on. */
 type AnyEngine = Engine | SyncEngine;
 
