@@ -263,6 +263,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [JSON-valued scalars](docs/src/content/docs/reference/json-scalars.md): `Generic.JSON`, `Generic.StringMap` and `Embedding.Vector`.
 - [Versioned tables](docs/src/content/docs/reference/versioned-tables.md): `@versioned` and `@optimistic`, history tables and fenced writes.
 - [Version graphs](docs/src/content/docs/reference/version-graphs.md): branch, commit and merge a tree of tables, with engines in Go, TypeScript, Rust and Python.
+- [Schema migrations](docs/src/content/docs/reference/migrations.md): plan a database's change between two versions of a schema with `migrate plan`, its hazards, and the runner that applies it.
 
 **Extending**
 
@@ -326,7 +327,7 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | Path | What it is |
 | --- | --- |
 | [`cmd/superschematic/`](cmd/superschematic/) | The binary, with no extension linked |
-| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `format`, `json-schema`, `behaviors` |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `migrate`, `format`, `json-schema`, `behaviors` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |

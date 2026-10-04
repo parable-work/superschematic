@@ -18,8 +18,8 @@ set. Extensions that implement `cli.CommandProvider` add subcommands at
 resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
-The core binary has five commands: `build`, `build-all`, `json-schema`,
-`format` and `behaviors`.
+The core binary has six commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format` and `behaviors`.
 
 ## `build <service-dir>`
 
@@ -167,6 +167,57 @@ files elsewhere under the schemas root that its documents import. The
 input hash covers those files' contents. `build`, `build --with-deps` and
 `build-all` all write it under the schemas root they resolved, whatever the
 schemas root is named and wherever `--out` points.
+
+## `migrate plan <service-dir>`
+
+Plan the migration of a DB service's database from a previous version of
+its schema to the one in `<service-dir>`, with no database at hand. The
+plan is ordered steps in two phases, `expand` before the new servers roll
+out and `contract` after, each with its SQL and its hazards.
+`superschematic-migrate` applies it.
+[Schema migrations](/superschematic/reference/migrations/) covers the plan,
+the hazard classes, readers, renames and the runner.
+
+The previous version is another checkout of the service (`--from
+<service-dir>`), the model a database recorded (`--from <model.json>`), or
+the schemas root at a git ref (`--from-ref`); with none, the plan starts
+from an empty database. Each version loads with its dependencies resolved
+from its own schemas root, as `build --with-deps` resolves them, and with
+its own naming file when it has one. Both resolve to models with the
+options a build passes the `sql` generator.
+
+The API and General services in each version's schemas root are that
+version's readers: the columns their `@source` views read. A step that
+drops, renames or retypes a column a reader live at its phase reads is
+`api-breaking` for that reader. `--reader` adds a service that lives
+elsewhere; it counts on both sides.
+
+`--format` prints the plan to stdout; notes, such as planning from an empty
+database, go to stderr. With `--fail-on`, the command prints the plan,
+then lists on stderr each hazard of a listed class that no `--allow` names,
+with the `--allow` that lets it pass, and exits 1.
+
+```
+superschematic migrate plan ./schemas/services/shop-db
+superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --format markdown --fail-on destructive,compat
+superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --rename order.total=order.amount --out plan.json
+superschematic migrate plan ./schemas/services/shop-db --from applied-model.json --out plan.json
+superschematic migrate plan ./schemas/services/shop-db --print-model > model.json
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--from` | none | the previous version: another checkout of the service directory, or a model JSON file as `superschematic-migrate status --model` prints it |
+| `--from-ref` | none | the previous version: the schemas root at this git ref, read with `git archive`; cannot be combined with `--from` |
+| `--rename` | none | a rename: `old=new` for a table, `oldTable.oldColumn=newTable.newColumn` for a column; repeatable |
+| `--reader` | none | an API or General service directory outside the schemas root whose `@source` views read the database; repeatable |
+| `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` once that dialect lands |
+| `--out` | none | write the plan JSON, in canonical form, to this file |
+| `--format` | `sql` | print the plan to stdout as `json`, `sql` or `markdown` |
+| `--fail-on` | none | hazard classes, comma-separated, or `all`; exit 1 when the plan has a hazard of one that no `--allow` names |
+| `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
+| `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags |
+| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 
 ## `json-schema`
 
