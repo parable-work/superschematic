@@ -151,3 +151,103 @@ func TestDerivedVariableSegment(t *testing.T) {
 		}
 	}
 }
+
+// TestDerivedFieldNames: the core's rule, a naming file's templates, and
+// the templates Validate refuses.
+func TestDerivedFieldNames(t *testing.T) {
+	var core DerivedFieldNames
+	if got := core.Field(EdgeSQL, "shop-db"); got != "SHOP_DB_DATABASE" {
+		t.Errorf("core sql field = %s", got)
+	}
+	if got := core.Field(EdgeHTTP, "shop.api"); got != "SHOP_API_SERVICE" {
+		t.Errorf("core http field = %s", got)
+	}
+	named := DerivedFieldNames{Database: "DB_{SERVICE}", Service: "{SERVICE}_API"}
+	if err := named.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := named.Field(EdgeSQL, "shop-db"); got != "DB_SHOP_DB" {
+		t.Errorf("named sql field = %s", got)
+	}
+	if got := named.Field(EdgeHTTP, "shop-api"); got != "SHOP_API_API" {
+		t.Errorf("named http field = %s", got)
+	}
+	for _, bad := range []DerivedFieldNames{
+		{Database: "DATABASE"},
+		{Service: "{SERVICE}_{SERVICE}"},
+		{Service: "{SERVICE}-url"},
+		{Database: "9{SERVICE}"},
+	} {
+		if err := bad.Validate(); err == nil {
+			t.Errorf("Validate(%+v) passed", bad)
+		}
+	}
+}
+
+func TestDerivedFieldClaims(t *testing.T) {
+	for name, want := range map[string]bool{
+		"SHOP_DB_DATABASE":         true,
+		"SHOP_DB_DATABASE_URL":     true,
+		"SHOP_DB_DATABASE_TIMEOUT": true,
+		"SHOP_DB_DATABASES":        false,
+		"SHOP_DB":                  false,
+	} {
+		if got := DerivedFieldClaims("SHOP_DB_DATABASE", name); got != want {
+			t.Errorf("DerivedFieldClaims(SHOP_DB_DATABASE, %s) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// TestDerivedConfigFields: an API's database comes from its authDb, or its
+// one DB-kind dependency, and each calls entry adds a service field.
+func TestDerivedConfigFields(t *testing.T) {
+	api := &Schema{Name: "shop-orders", Kind: SchemaKindAPI, AuthDB: "shop-db",
+		Calls: []ServiceRef{{Name: "shop-api", Kind: SchemaKindAPI}, {Name: "payments", Kind: SchemaKindAPI}}}
+	want := []DerivedConfigField{
+		{Name: "SHOP_DB_DATABASE", Kind: EdgeSQL, Service: "shop-db", From: "authDb"},
+		{Name: "SHOP_API_SERVICE", Kind: EdgeHTTP, Service: "shop-api", From: "calls"},
+		{Name: "PAYMENTS_SERVICE", Kind: EdgeHTTP, Service: "payments", From: "calls"},
+	}
+	if got := api.DerivedConfigFields(DerivedFieldNames{}); !reflect.DeepEqual(got, want) {
+		t.Errorf("fields:\n got %+v\nwant %+v", got, want)
+	}
+
+	oneDB := &Schema{Name: "a", Kind: SchemaKindAPI, Dependencies: []ServiceRef{{Name: "common", Kind: SchemaKindGeneral}, {Name: "a-db", Kind: SchemaKindDB}}}
+	if db, from, ok := oneDB.Database(); !ok || db != "a-db" || from != "dependencies" {
+		t.Errorf("Database() = %s, %s, %v; want a-db from dependencies", db, from, ok)
+	}
+	twoDBs := &Schema{Name: "a", Kind: SchemaKindAPI, Dependencies: []ServiceRef{{Name: "x", Kind: SchemaKindDB}, {Name: "y", Kind: SchemaKindDB}}}
+	if _, _, ok := twoDBs.Database(); ok {
+		t.Error("an API with two DB dependencies and no authDb has a database")
+	}
+	db := &Schema{Name: "shop-db", Kind: SchemaKindDB, Dependencies: []ServiceRef{{Name: "x", Kind: SchemaKindDB}}}
+	if fields := db.DerivedConfigFields(DerivedFieldNames{}); fields != nil {
+		t.Errorf("a DB schema derives %+v", fields)
+	}
+}
+
+// TestDerivedMembersNameTheVariables: DerivedVariables names a value's
+// variables as DerivedVariableName names its members.
+func TestDerivedMembersNameTheVariables(t *testing.T) {
+	values := map[EdgeKind]any{
+		EdgeSQL: DatabaseConnection{CloudSQL: &CloudSQLConnection{Instance: "i", Database: "d", User: "u"}},
+		EdgeHTTP: ServiceEndpoint{URL: "u", Credential: &ServiceCredential{
+			Source: CredentialSignedToken, Audience: "a", Issuer: "i", Key: "k", Headers: []string{ServiceAuthorizationHeader},
+		}},
+	}
+	for kind, value := range values {
+		names := map[string]bool{}
+		for _, path := range DerivedMembers(kind) {
+			names[DerivedVariableName("F", path)] = true
+		}
+		vars, err := DerivedVariables("F", value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range vars {
+			if !names[v.Name] {
+				t.Errorf("%s: variable %s is no member DerivedMembers lists", kind, v.Name)
+			}
+		}
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/parable-work/superschematic/internal/buildcache"
 	"github.com/parable-work/superschematic/internal/buildplan"
 	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
@@ -39,6 +40,7 @@ type buildAllFlags struct {
 	skipFormat bool
 	namingPath string
 	depsCopy   string
+	scaffold   bool
 }
 
 func newBuildAllCmd(a *app) *cobra.Command {
@@ -58,6 +60,7 @@ func newBuildAllCmd(a *app) *cobra.Command {
 	cmd.Flags().BoolVar(&flags.parallel, "parallel", false, "build independent schemas concurrently within each dependency phase")
 	cmd.Flags().BoolVar(&flags.isolatedTS, "isolated-ts-programs", false, "use one TypeScript compiler program per schema service instead of the build-all shared program")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
+	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go API whose package is missing, at the [implementation_paths] go template")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <services-root>/../superschematic.toml)")
 	cmd.Flags().StringVar(&flags.depsCopy, "deps-copy", "", "also write the dependency graph to this path (default: [deps] copy in the naming file, relative to the repository root)")
 	return cmd
@@ -184,10 +187,20 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		return err
 	}
 
+	scaffoldRoot := ""
+	if flags.scaffold {
+		scaffoldRoot = repoRoot
+	}
 	resolved := make(map[string]bool)
 	if cacheRoot != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Cache: %s\n", cacheRoot)
 		for _, task := range tasks {
+			// The cache stores the generated outputs, not the scaffold,
+			// so a service whose implementation --scaffold must write
+			// builds.
+			if scaffoldRoot != "" && needsImplementationScaffold(task.service, scaffoldRoot, activeNaming, reg) {
+				continue
+			}
 			ok, action := resolveBuildAllTask(task, cacheRoot, repoRoot, cmd.ErrOrStderr())
 			if ok {
 				resolved[task.service.Name] = true
@@ -266,56 +279,46 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		}
 	}
 
+	ctx := buildAllTaskContext{
+		outputRoot:     outputRoot,
+		schemasRoot:    schemasRoot,
+		repoRoot:       repoRoot,
+		cacheRoot:      cacheRoot,
+		loadOpts:       loadOpts,
+		schemaCache:    schemaCache,
+		tsProgramCache: tsProgramCache,
+		serviceByName:  serviceByName,
+		profileWriter:  errWriter,
+		profileEnabled: flags.profile,
+		skipFormat:     flags.skipFormat,
+		naming:         activeNaming,
+		registry:       reg,
+		hasher:         hasher,
+		hashes:         hashes,
+		scaffoldRoot:   scaffoldRoot,
+		loaded:         newLoadedServices(),
+	}
+	// The build orders outputs: each API's server builds after the SDKs
+	// of the APIs it calls (docs/stack-model.md, section 3.3).
+	steps := buildplan.Steps(remainingServices)
 	if !flags.parallel {
-		for _, task := range remaining {
-			if err := executeBuildAllTask(cmd, task, buildAllTaskContext{
-				outputRoot:     outputRoot,
-				schemasRoot:    schemasRoot,
-				repoRoot:       repoRoot,
-				cacheRoot:      cacheRoot,
-				loadOpts:       loadOpts,
-				schemaCache:    schemaCache,
-				tsProgramCache: tsProgramCache,
-				serviceByName:  serviceByName,
-				profileWriter:  errWriter,
-				profileEnabled: flags.profile,
-				skipFormat:     flags.skipFormat,
-				naming:         activeNaming,
-				registry:       reg,
-				hasher:         hasher,
-				hashes:         hashes,
-			}); err != nil {
+		for _, step := range steps {
+			if err := executeBuildAllStep(cmd, taskByName[step.Service.Name], step.Stage, ctx); err != nil {
 				return err
 			}
 		}
 	} else {
-		phases, err := buildplan.GroupIntoPhases(remainingServices, resolved)
+		phases, err := buildplan.GroupIntoPhases(steps, resolved)
 		if err != nil {
 			return err
 		}
 		for i, phase := range phases {
 			phaseNames := make([]string, 0, len(phase))
-			for _, service := range phase {
-				phaseNames = append(phaseNames, service.Name)
+			for _, step := range phase {
+				phaseNames = append(phaseNames, stepLabel(step))
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Phase %d/%d: %s\n", i+1, len(phases), strings.Join(phaseNames, ", "))
-			if err := executeBuildAllPhase(cmd, phase, taskByName, buildAllTaskContext{
-				outputRoot:     outputRoot,
-				schemasRoot:    schemasRoot,
-				repoRoot:       repoRoot,
-				cacheRoot:      cacheRoot,
-				loadOpts:       loadOpts,
-				schemaCache:    schemaCache,
-				tsProgramCache: tsProgramCache,
-				serviceByName:  serviceByName,
-				profileWriter:  errWriter,
-				profileEnabled: flags.profile,
-				skipFormat:     flags.skipFormat,
-				naming:         activeNaming,
-				registry:       reg,
-				hasher:         hasher,
-				hashes:         hashes,
-			}); err != nil {
+			if err := executeBuildAllPhase(cmd, phase, taskByName, ctx); err != nil {
 				return err
 			}
 		}
@@ -504,17 +507,73 @@ type buildAllTaskContext struct {
 	// after construction, so concurrent phase tasks may share it.
 	hasher *buildcache.InputHasher
 	hashes map[string]string
+
+	// scaffoldRoot is the repository root under --scaffold, else empty.
+	scaffoldRoot string
+
+	// loaded hands each split service's base stage result to its server
+	// stage.
+	loaded *loadedServices
 }
 
-func executeBuildAllPhase(cmd *cobra.Command, phase []buildplan.Service, taskByName map[string]buildAllTask, ctx buildAllTaskContext) error {
+// loadedServices holds what each split service's base stage loaded until
+// its server stage takes it. Steps of one phase run concurrently.
+type loadedServices struct {
+	mu      sync.Mutex
+	results map[string]*buildServiceResult
+}
+
+func newLoadedServices() *loadedServices {
+	return &loadedServices{results: map[string]*buildServiceResult{}}
+}
+
+func (l *loadedServices) put(name string, result *buildServiceResult) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.results[name] = result
+}
+
+func (l *loadedServices) take(name string) *buildServiceResult {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	result := l.results[name]
+	delete(l.results, name)
+	return result
+}
+
+// needsImplementationScaffold reports whether service is a Go API whose
+// implementation package, at the [implementation_paths] go template under
+// repoRoot, is missing, so --scaffold must build it to write one.
+func needsImplementationScaffold(service buildplan.Service, repoRoot string, names naming.Naming, reg *registry.Registry) bool {
+	if service.Config.Kind != ir.SchemaKindAPI {
+		return false
+	}
+	outputs, err := registry.ParseOutputs(service.Config.Outputs, reg)
+	if err != nil || !outputs.APIEnabled() || outputs.API.Language != registry.APILanguageGo {
+		return false
+	}
+	exists, err := apigen.ImplementationExists(names.GoImplementationDir(repoRoot, service.Name))
+	return err == nil && !exists
+}
+
+// stepLabel names a step in build-all's log: the service, and the stage
+// when the step builds part of it.
+func stepLabel(step buildplan.Step) string {
+	if step.Stage == buildplan.StageAll {
+		return step.Service.Name
+	}
+	return fmt.Sprintf("%s (%s)", step.Service.Name, step.Stage)
+}
+
+func executeBuildAllPhase(cmd *cobra.Command, phase []buildplan.Step, taskByName map[string]buildAllTask, ctx buildAllTaskContext) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(phase))
-	for _, service := range phase {
-		task := taskByName[service.Name]
+	for _, step := range phase {
+		task := taskByName[step.Service.Name]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := executeBuildAllTask(cmd, task, ctx); err != nil {
+			if err := executeBuildAllStep(cmd, task, step.Stage, ctx); err != nil {
 				errCh <- err
 			}
 		}()
@@ -529,11 +588,26 @@ func executeBuildAllPhase(cmd *cobra.Command, phase []buildplan.Service, taskByN
 	return nil
 }
 
-func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTaskContext) error {
+// executeBuildAllStep runs one stage of a service's build. A base stage
+// keeps what it loaded for the service's server stage; a whole or server
+// stage finishes the service: it stores the cache entry and writes the
+// stamp over every output.
+func executeBuildAllStep(cmd *cobra.Command, task buildAllTask, stage buildplan.Stage, ctx buildAllTaskContext) error {
 	service := task.service
 	var prof *profile.Profiler
 	if ctx.profileEnabled {
 		prof = profile.New(service.Name, ctx.profileWriter)
+	}
+	var loaded *buildServiceResult
+	generatorStage := registry.StageAll
+	switch stage {
+	case buildplan.StageBase:
+		generatorStage = registry.StageBase
+	case buildplan.StageServer:
+		generatorStage = registry.StageServer
+		if loaded = ctx.loaded.take(service.Name); loaded == nil {
+			return fmt.Errorf("%s: the server stage ran before the base stage", service.Name)
+		}
 	}
 	result, err := buildService(buildServiceOptions{
 		ServicePath: service.Dir,
@@ -561,11 +635,19 @@ func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTask
 		Naming:      ctx.naming,
 		Registry:    ctx.registry,
 		APILanguage: task.apiLanguage,
+
+		Stage:              generatorStage,
+		Loaded:             loaded,
+		ImplementationRoot: ctx.scaffoldRoot,
 	})
 	if err != nil {
 		return fmt.Errorf("%s: %w", service.Name, err)
 	}
 	ctx.schemaCache.set(service.Name, result.Schema)
+	if stage == buildplan.StageBase {
+		ctx.loaded.put(service.Name, result)
+		return nil
+	}
 	// The build wrote the authoring-import depfile; the stored key and the
 	// stamp must include it (see buildcache/authoring.go). Storing under the
 	// pre-build hash would let a worktree with different import contents
@@ -574,7 +656,7 @@ func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTask
 	// the generated output is current.
 	inputHash := task.inputHash
 	if ctx.hasher != nil {
-		inputHash = ctx.hasher.Recompute(service, ctx.hashes)
+		inputHash = ctx.hasher.Recompute(service)
 	}
 	if ctx.cacheRoot != "" {
 		if err := buildcache.StoreEntry(ctx.cacheRoot, "schemas", service.Name, inputHash, ctx.repoRoot, task.outputRels); err != nil {

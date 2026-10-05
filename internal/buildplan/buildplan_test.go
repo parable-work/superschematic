@@ -106,10 +106,10 @@ func TestGroupIntoPhasesHonorsAlreadyBuilt(t *testing.T) {
 		},
 	}
 
-	phases, err := GroupIntoPhases(services[1:], map[string]bool{"base": true})
+	phases, err := GroupIntoPhases(Steps(services[1:]), map[string]bool{"base": true})
 	require.NoError(t, err)
 	require.Len(t, phases, 1)
-	assert.Equal(t, "leaf", phases[0][0].Name)
+	assert.Equal(t, "leaf", phases[0][0].Service.Name)
 }
 
 func TestValidateDependencyKindsRejectsPackagelessDependency(t *testing.T) {
@@ -146,11 +146,11 @@ func TestTopologicalSortOrdersAuthDBBeforeDependent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"db", "api"}, serviceNames(sorted))
 
-	phases, err := GroupIntoPhases(sorted, nil)
+	phases, err := GroupIntoPhases(Steps(sorted), nil)
 	require.NoError(t, err)
 	require.Len(t, phases, 2)
-	assert.Equal(t, []string{"db"}, serviceNames(phases[0]))
-	assert.Equal(t, []string{"api"}, serviceNames(phases[1]))
+	assert.Equal(t, []string{"db all"}, stepNames(phases[0]))
+	assert.Equal(t, []string{"api all"}, stepNames(phases[1]))
 }
 
 func apiCalling(name string, callees ...string) Service {
@@ -173,16 +173,44 @@ func TestTopologicalSortOrdersCalleeBeforeCaller(t *testing.T) {
 	assert.Equal(t, []string{"shop", "orders"}, serviceNames(closure))
 }
 
-func TestTopologicalSortNamesACycleOfCalls(t *testing.T) {
-	// "lead" reaches the cycle without being in it, so the message must
-	// start at the service the cycle returns to.
-	services := []Service{apiCalling("lead", "orders"), apiCalling("orders", "shop"), apiCalling("shop", "orders")}
+// TestAPIsThatCallEachOtherBuildByOutput: a cycle of calls is no error.
+// The tree is ordered by its build dependencies, and each service whose
+// callee comes after it builds its base outputs first and its API server
+// once its callees' base outputs, their SDKs among them, are built.
+func TestAPIsThatCallEachOtherBuildByOutput(t *testing.T) {
+	db := Service{Name: "db", Dir: "/services/db", Config: &schemaconfig.SchemaConfig{Name: "db", Kind: ir.SchemaKindDB}}
+	lead := apiCalling("lead", "orders")
+	orders := apiCalling("orders", "shop")
+	orders.Config.AuthDB = "db"
+	shop := apiCalling("shop", "orders")
 
-	_, err := TopologicalSort(services)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "circular dependency involving orders: orders calls shop, shop calls orders;")
-	assert.Contains(t, err.Error(), "section 3.3")
-	assert.NotContains(t, err.Error(), "lead")
+	sorted, err := TopologicalSort([]Service{lead, orders, shop, db})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"lead", "db", "orders", "shop"}, serviceNames(sorted))
+
+	steps := Steps(sorted)
+	assert.Equal(t, []string{"lead base", "db all", "orders base", "lead server", "shop all", "orders server"}, stepNames(steps))
+
+	phases, err := GroupIntoPhases(steps, nil)
+	require.NoError(t, err)
+	var got [][]string
+	for _, phase := range phases {
+		got = append(got, stepNames(phase))
+	}
+	assert.Equal(t, [][]string{{"lead base", "db all"}, {"orders base"}, {"lead server", "shop all"}, {"orders server"}}, got)
+
+	// With every callee built, nothing waits.
+	phases, err = GroupIntoPhases(Steps([]Service{orders}), map[string]bool{"db": true, "shop": true})
+	require.NoError(t, err)
+	assert.Equal(t, [][]Step{{{Service: orders, Stage: StageAll}}}, phases)
+}
+
+// TestAWholeCallerWaitsForItsCallees: a caller whose callees come first
+// builds whole, after them, as before outputs were ordered.
+func TestAWholeCallerWaitsForItsCallees(t *testing.T) {
+	sorted, err := TopologicalSort([]Service{apiCalling("orders", "shop"), apiCalling("shop")})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"shop all", "orders all"}, stepNames(Steps(sorted)))
 }
 
 func TestTopologicalSortNamesEachEdgeOfAMixedCycle(t *testing.T) {
@@ -197,7 +225,20 @@ func TestTopologicalSortNamesEachEdgeOfAMixedCycle(t *testing.T) {
 	_, err := TopologicalSort([]Service{db, api})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "circular dependency involving db: db depends on api, api depends on and authenticates against db")
-	assert.NotContains(t, err.Error(), "section 3.3", "only a cycle of calls alone points at output ordering")
+}
+
+// TestACycleThroughCallsAndDependenciesNamesOnlyItsBuildEdges: a call that
+// closes a cycle of dependencies does not make it buildable, and the error
+// names the edges that order whole outputs.
+func TestACycleThroughCallsAndDependenciesNamesOnlyItsBuildEdges(t *testing.T) {
+	a := apiCalling("a", "b")
+	a.Config.Dependencies = []schemaconfig.ServiceDependency{{Name: "b", Kind: ir.SchemaKindAPI}}
+	b := apiCalling("b")
+	b.Config.Dependencies = []schemaconfig.ServiceDependency{{Name: "a", Kind: ir.SchemaKindAPI}}
+
+	_, err := TopologicalSort([]Service{a, b})
+	require.Error(t, err)
+	assert.Equal(t, "circular dependency involving a: a depends on b, b depends on a", err.Error())
 }
 
 func TestValidateHandleKindsChecksEachHandleAgainstItsService(t *testing.T) {
@@ -307,6 +348,14 @@ func TestClosureRejectsUnknownRootAndUndiscoveredDependency(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing")
 }
 
+func stepNames(steps []Step) []string {
+	names := make([]string, 0, len(steps))
+	for _, step := range steps {
+		names = append(names, step.Service.Name+" "+string(step.Stage))
+	}
+	return names
+}
+
 func serviceNames(services []Service) []string {
 	names := make([]string, 0, len(services))
 	for _, service := range services {
@@ -402,7 +451,7 @@ import { ShopDb } from "@acme/shop-db";`, "authDb: ShopDb, calls: [ShopApi],"), 
 // TestDiscoverReachesTheCycleOfAPIsThatImportEachOther: two configs that
 // import each other's sentinels are no module cycle, since nothing imports a
 // config. The sweep and the static reads succeed, and the build plan
-// reports the cycle of calls.
+// orders the two APIs' outputs.
 func TestDiscoverReachesTheCycleOfAPIsThatImportEachOther(t *testing.T) {
 	root := t.TempDir()
 	servicesRoot := filepath.Join(root, "services")
@@ -411,9 +460,9 @@ func TestDiscoverReachesTheCycleOfAPIsThatImportEachOther(t *testing.T) {
 	reg := generator.CoreRegistry(naming.Default())
 
 	require.NoError(t, EnsureSentinels(servicesRoot, reg, nil))
-	_, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), reg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "circular dependency involving shop-api: shop-api calls shop-orders, shop-orders calls shop-api")
+	services, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), reg)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"shop-api base", "shop-orders all", "shop-api server"}, stepNames(Steps(services)))
 }
 
 // TestDiscoverRefusesAConfigImportThatIsNotASentinel: a config imports the

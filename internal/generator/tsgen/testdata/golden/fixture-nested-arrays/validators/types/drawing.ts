@@ -9,6 +9,7 @@ import {
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectList, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { Drawing, Point } from '../../types';
 
 import { validateShadeRequired, validateShade } from '../enums';
@@ -239,12 +240,15 @@ function parseDrawingInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseDrawing ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseDrawing ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseDrawing ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseDrawing ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -256,8 +260,14 @@ function parseDrawingInput(
       (fieldName) => !DrawingKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseDrawing ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseDrawing ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -265,8 +275,10 @@ function parseDrawingInput(
   const typedCandidate = candidate as unknown as Drawing;
   const validationResult = validateDrawing(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseDrawing ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseDrawing ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

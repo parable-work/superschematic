@@ -120,7 +120,7 @@ async fn a_body_that_is_not_json_is_a_bad_request_problem() {
     let (status, headers, body) = send("POST", "/api/grids", Some("req-2"), "{nope").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_problem(&headers, &body, 400, "Bad Request", "bad_request");
-    assert!(body["detail"].as_str().unwrap().starts_with("The request body is not valid JSON"), "{body}");
+    assert_eq!(body["detail"], "Request body is not valid JSON", "{body}");
     assert_eq!(body["requestId"], "req-2");
 }
 

@@ -14,6 +14,7 @@ import (
 	orm "example.com/acme/orm/shop-db"
 	types "example.com/acme/types/go/shop-api"
 	"github.com/go-chi/chi/v5"
+	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
@@ -204,25 +205,23 @@ func createProductListProductsHandler(impl ProductImplementation) gohttp.Handler
 // createProductCreateProductHandler creates a handler for POST /api/products
 func createProductCreateProductHandler(impl ProductImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Parse and validate input
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
 		var input types.CreateProductInput
-		var rawInput json.RawMessage
-		if err := json.NewDecoder(r.Body).Decode(&rawInput); err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
-			return
-		}
-		if string(rawInput) == "null" {
-			RespondError(w, r, gohttp.StatusBadRequest, "input is required")
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
 			return
 		}
 		if err := json.Unmarshal(rawInput, &input); err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			RespondInputRefusal(w, r, bodyargs.Mismatch("does not match the declared type", nil))
 			return
 		}
 
 		// Validate input
 		if validationErrors := input.Validate(); validationErrors.HasErrors() {
-			RespondValidationErrors(w, r, validationErrors)
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
 			return
 		}
 

@@ -76,8 +76,9 @@ func RegisterCore(reg *registry.Registry) error {
 			},
 		},
 		{
-			Name:      "api",
-			OutputKey: "api",
+			Name:       "api",
+			OutputKey:  "api",
+			ReadsCalls: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{APIDir(c.Options.OutputRoot, c.Config.Name)}
 			},

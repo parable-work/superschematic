@@ -1,0 +1,7 @@
+# The database of deps-orders and deps-catalog, which call each other: the
+# Deps tests in internal/generator build the three.
+name: deps-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }

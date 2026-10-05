@@ -399,6 +399,12 @@ type GeneratorSpec struct {
 	// it on a schema one of whose types composes a behavior, rather than
 	// generate the type without them (D16).
 	RendersBehaviors bool
+	// ReadsCalls marks a generator whose output imports the SDK of each
+	// API the service calls: the core API server's Deps
+	// (docs/stack-model.md, section 8.5). The build plan runs it in the
+	// server stage, after those SDKs (Options.Stage); every other
+	// generator runs in the base stage.
+	ReadsCalls bool
 
 	compiledOutput *validator.Schema
 }

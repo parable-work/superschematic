@@ -2472,6 +2472,22 @@ authoring package, the targets and the provisioners are not.
 | `RegisterDNSPlatform` registers a DNS platform: the schema of its values and a `Lower` from records to resources. A target names its default one, and `manual` is reserved for a domain that no DNS platform holds. | DNS as one more `PlatformSpec` kind, whose spec would carry a lowering that only DNS platforms set and a kind that no target places a deployable on |
 | A target also names its provisioner and registers the schema of each resource type its platforms emit. Resolution checks every node against the schema of its type, with references read as strings. | A provisioner chosen per environment; schemas registered per platform, which repeats a type that a platform and a connector share |
 
+### D30, amended: the derived fields, `Deps`, the scaffold and a build ordered by output
+
+Building the derived config fields, the Go `Deps` and the implementation
+scaffold settled what D30 left to the build (`docs/stack-model.md`,
+sections 3.3, 3.4 and 8.5). The server entrypoint, the Dockerfile, and
+`Deps` in TypeScript and Rust are not built.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| What a connector derives has a contract per edge kind, in `ir`. A database connection is a connection string or a Cloud SQL connector configuration (instance connection name, database, IAM user). A service endpoint is a base URL and an optional service credential: one of D37's sources, the settings it reads and the headers that carry it. Resolution refuses a value that breaks the contract. | A free-form value that connectors and loaders agree on in prose |
+| A derived field is one environment variable per member of its value: the field's name, an underscore and the member's path in upper snake case, with a list joined by commas. A platform sets each from an output reference, or from its secret store. | One JSON document per field, which every provisioner would have to render with references inside it, and none of whose members could come from a secret store |
+| The naming file's `[derived_fields]` templates name the fields after the service, `{SERVICE}_DATABASE` and `{SERVICE}_SERVICE` by default, and envgen and the resolver share them. A setting is refused when its name is a derived field's, or begins with it and an underscore. | Refusing only the exact name, which lets a setting take a variable that a member added later would need |
+| Go's `Deps` holds `Config` (the `@envVars` type embedded, and the derived fields), the ORM of the API's database, a Go SDK client per `calls` entry and a zap logger. `Constructor` types `New`. | A `*slog.Logger` beside the zap logger the generated `Config` takes, which gives an implementation two logger types |
+| `build --scaffold` and `build-all --scaffold` write the scaffold until the entrypoint lands. The entrypoint will scaffold each API a stack's servers serve. | Scaffolding on every build, which writes stub packages beside any Go code a tree already has, such as the examples' and the test fixtures', before anything imports them |
+| The build plan orders outputs. A caller's API server builds after each callee's SDK, so two APIs may call each other. The cache keeps one entry per service, and a caller's key adds each callee's key without the callee's own calls. | Ordering whole services and refusing a cycle of calls |
+
 ## D28. No SDK has a method for a `@webhook` operation
 
 `@webhook` marks an operation a third party calls. The Go and TypeScript
@@ -3107,3 +3123,34 @@ fixture in every language. It checks that the Rust and TypeScript
 validators of shop-orders' `OrderView` report a wrong `amount` and an
 unknown `currency` under `total`, a shop-common `Money`, and pass a valid
 one. Both checks fail without the change.
+
+## D42. A refused input is one problem on every server
+
+The three servers refused an input body three ways:
+
+- **Go:** "Validation Failed", code `WA-VL-001`, with the field errors. A
+  body that failed to decode, such as a number for a string, was "Invalid
+  request body" with no field errors, and null was "input is required".
+  An undeclared key passed silently.
+- **TypeScript:** "Request body does not match the declared input",
+  without the reason or the field errors.
+- **Rust (D39):** the TypeScript detail with `details` and `errors`.
+
+An SDK that read one server's refusal misread another's, and a Go caller
+learned only from a TypeScript or Rust server that a key was undeclared.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every server refuses an input body with code `bad_request`, titled as its status ("Bad Request"). A missing body is "Request body is required" and one that is not JSON "Request body is not valid JSON". A body the input type refuses is "Request body does not match the declared input", with `details: {location: "body", reason}`. The reason is `expected an object`, `unknown fields: a, b`, `validation failed` or `does not match the declared type`. An undeclared key and a broken rule also put their field errors in the top-level `errors`, keyed by path. | Go's `WA-VL-001` and "Validation Failed", an application code no other server or SDK knew |
+| The Go server refuses a top-level key the input type does not declare, as the TypeScript and Rust servers do: `unknown` at the key, in the order the body holds them. Each generated Go type lists its keys (`JSONFieldNames`), and the runtime's `bodyargs.ReadInput` reads the body and makes the checks before the type decodes it. A nested object's undeclared keys still pass, unless its type is `@strictJSON`. | Accepting them, where a misspelt optional field is lost without a word |
+| The TypeScript parsers throw a `ParseError` with the reason and the field errors, exported from each types package's `validators`. The router copies both into the 400; its message stays as it was. | Parsing the parser's message, which carries the errors only as text |
+| The Go route's other validation refusals, of a parameter or a body argument, keep their field errors and detail. Their title becomes "Bad Request" and their code `bad_request` too. | |
+
+`bodyargs.ReadInput`, `response.LoggedInputRefusal`, the TypeScript
+runtime's input refusal and the generated TypeScript router have tests of
+the shape. The generated Go route test (`raw_body_check_routes_test.go`)
+checks a body that fails to decode, null, an empty body and two
+undeclared keys. A Go caller sending an undeclared key now gets a 400
+where it was ignored.
+
+The rule is reversible until the first release.

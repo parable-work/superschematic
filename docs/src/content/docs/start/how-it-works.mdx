@@ -109,8 +109,9 @@ A service may use another's types:
   depend on each other's packages.
 - On an API marked `public: true`, `authDb` names the DB schema whose
   `User` and `Session` tables the Go server's auth provider reads.
-- On an API, `calls` names the other APIs its implementation calls. Each
-  callee builds before its caller, so two APIs cannot call each other yet.
+- On an API, `calls` names the other APIs its implementation calls. The
+  generated `Deps` holds a client of each, so each callee's SDK builds
+  before the caller's server, and two APIs may call each other.
 
 In a TypeScript config each is a handle: the sentinel the named service's
 build writes, imported from its package (`import { ShopDb } from

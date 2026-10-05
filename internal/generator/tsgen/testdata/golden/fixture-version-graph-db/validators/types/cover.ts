@@ -9,6 +9,7 @@ import {
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectBoolean, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { Cover, Recipe, RecipeRef } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
@@ -148,12 +149,15 @@ function parseCoverInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseCover ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseCover ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseCover ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseCover ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -169,8 +173,14 @@ function parseCoverInput(
       (fieldName) => !CoverKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseCover ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseCover ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -178,8 +188,10 @@ function parseCoverInput(
   const typedCandidate = candidate as unknown as Cover;
   const validationResult = validateCover(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseCover ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseCover ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 
