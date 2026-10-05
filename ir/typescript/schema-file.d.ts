@@ -77,6 +77,7 @@ export interface Document {
   kind?: SchemaKind;
   name?: string;
   operationSets?: OperationSet[];
+  references?: ServiceRef[];
   scalars?: { [key: string]: ScalarDef };
   types?: { [key: string]: TypeDef };
   unions?: { [key: string]: UnionDef };
@@ -413,6 +414,11 @@ export interface ScalarFile {
   reservedWordsCaseInsensitive?: boolean;
   reservedWordsMatchPartial?: boolean;
   typeMappings?: { [key: string]: string };
+}
+
+export interface ServiceRef {
+  kind: 'API' | 'DB' | 'General';
+  name: string;
 }
 
 export interface SourceRef {

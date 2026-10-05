@@ -1707,6 +1707,13 @@
           },
           "type": "array"
         },
+        "references": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        },
         "scalars": {
           "additionalProperties": {
             "$ref": "#/$defs/ScalarDef"
@@ -3000,6 +3007,27 @@
       "required": [
         "name",
         "languagePrimitive",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ServiceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "API",
+            "DB",
+            "General"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
         "kind"
       ],
       "type": "object"

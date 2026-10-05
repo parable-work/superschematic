@@ -196,11 +196,12 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 	// Schema-level description, comment, extensions and documents go on the
 	// first document only; Merge rejects documents restating them with
 	// different content, and restating identical content on every file is
-	// noise.
+	// noise. References go there too: Merge unions each document's.
 	keys := sortedKeys(docs)
 	if len(keys) > 0 {
 		docs[keys[0]].Description = schema.Description
 		docs[keys[0]].Comment = schema.Comment
+		docs[keys[0]].References = schema.References
 		docs[keys[0]].Extensions = schema.Extensions
 		docs[keys[0]].Documents = schema.Documents
 	}
