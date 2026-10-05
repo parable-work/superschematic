@@ -25,7 +25,8 @@ name: release
 # `workflow_dispatch` with dry_run runs preflight, verify, both builds and
 # assemble on any branch and uploads the assembled assets as a workflow
 # artifact (release-assets). It creates no release, publishes nothing and
-# deploys nothing.
+# deploys nothing. release-candidate.yml dispatches it on main twice a day
+# (D40): it is main's full CI run, since merges run none.
 #
 # Every action is pinned to a commit SHA; tool versions come from tools.env
 # only.

@@ -70,6 +70,15 @@
           "field": "SHOP_API_SERVICE",
           "source": "derived",
           "value": {
+            "credential": {
+              "audience": {
+                "$output": {
+                  "resource": "shop-api.service",
+                  "name": "url"
+                }
+              },
+              "source": "google-id-token"
+            },
             "url": {
               "$output": {
                 "resource": "shop-api.service",
@@ -83,16 +92,24 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "database": {
-              "$output": {
-                "resource": "shop-db.database.shop-db",
-                "name": "name"
-              }
-            },
-            "instance": {
-              "$output": {
-                "resource": "shop-db.instance",
-                "name": "connectionName"
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": {
+                "$output": {
+                  "resource": "Orders.account",
+                  "name": "email"
+                }
               }
             }
           },
@@ -135,16 +152,24 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "database": {
-              "$output": {
-                "resource": "shop-db.database.shop-db",
-                "name": "name"
-              }
-            },
-            "instance": {
-              "$output": {
-                "resource": "shop-db.instance",
-                "name": "connectionName"
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": {
+                "$output": {
+                  "resource": "shop-api.account",
+                  "name": "email"
+                }
               }
             }
           },
@@ -313,30 +338,51 @@
               "value": "50"
             },
             {
-              "name": "SHOP_API_SERVICE",
+              "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
               "value": {
-                "url": {
-                  "$output": {
-                    "resource": "shop-api.service",
-                    "name": "url"
-                  }
+                "$output": {
+                  "resource": "shop-api.service",
+                  "name": "url"
                 }
               }
             },
             {
-              "name": "SHOP_DB_DATABASE",
+              "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+              "value": "google-id-token"
+            },
+            {
+              "name": "SHOP_API_SERVICE_URL",
               "value": {
-                "database": {
-                  "$output": {
-                    "resource": "shop-db.database.shop-db",
-                    "name": "name"
-                  }
-                },
-                "instance": {
-                  "$output": {
-                    "resource": "shop-db.instance",
-                    "name": "connectionName"
-                  }
+                "$output": {
+                  "resource": "shop-api.service",
+                  "name": "url"
+                }
+              }
+            },
+            {
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
+              "value": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              }
+            },
+            {
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE",
+              "value": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              }
+            },
+            {
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_USER",
+              "value": {
+                "$output": {
+                  "resource": "Orders.account",
+                  "name": "email"
                 }
               }
             },
@@ -502,19 +548,29 @@
               "value": "info"
             },
             {
-              "name": "SHOP_DB_DATABASE",
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
               "value": {
-                "database": {
-                  "$output": {
-                    "resource": "shop-db.database.shop-db",
-                    "name": "name"
-                  }
-                },
-                "instance": {
-                  "$output": {
-                    "resource": "shop-db.instance",
-                    "name": "connectionName"
-                  }
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              }
+            },
+            {
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE",
+              "value": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              }
+            },
+            {
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_USER",
+              "value": {
+                "$output": {
+                  "resource": "shop-api.account",
+                  "name": "email"
                 }
               }
             },
