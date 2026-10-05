@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,35 @@ func TestUsage(t *testing.T) {
 	}
 	if _, err := os.Stat(db); !os.IsNotExist(err) {
 		t.Fatalf("a usage error opened the database: %v", err)
+	}
+}
+
+// TestVersion: version prints the version a release stamps, else the module
+// version go install recorded, else (devel).
+func TestVersion(t *testing.T) {
+	stamped := version
+	t.Cleanup(func() { version = stamped })
+	version = "0.1.0-alpha.1"
+	for _, arg := range []string{"version", "-version", "--version"} {
+		got := invoke(t, nil, arg).expect(t, exitOK)
+		if got.stdout != "superschematic-migrate 0.1.0-alpha.1\n" || got.stderr != "" {
+			t.Fatalf("%s printed %q and %q", arg, got.stdout, got.stderr)
+		}
+	}
+	installed := &debug.BuildInfo{Main: debug.Module{Version: "v0.1.0-alpha.1"}}
+	for _, c := range []struct {
+		stamped string
+		info    *debug.BuildInfo
+		want    string
+	}{
+		{"0.1.0", installed, "0.1.0"},
+		{"", installed, "0.1.0-alpha.1"},
+		{"", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, "(devel)"},
+		{"", nil, "(devel)"},
+	} {
+		if got := binaryVersion(c.stamped, c.info); got != c.want {
+			t.Errorf("binaryVersion(%q, %v) = %q, want %q", c.stamped, c.info, got, c.want)
+		}
 	}
 }
 

@@ -257,7 +257,31 @@ Nothing in the module needs cgo, so the binary builds with
 
 ## Use
 
-Build the binary from a checkout:
+Each release attaches the binary for linux and darwin on x64 and arm64:
+`superschematic-migrate_<version>_<platform>.tar.gz`, where `<platform>`
+is `linux-x64`, `linux-arm64`, `darwin-x64` or `darwin-arm64`. The archive
+holds the binary, this file, the license and `BUILD_COMMIT`, the commit it
+was built from. The release's `SHA256SUMS` lists every archive, and each
+archive has a build provenance attestation. Download one, check both, and
+install it:
+
+```sh
+version=0.1.0-alpha.1
+asset="superschematic-migrate_${version}_linux-x64.tar.gz"
+gh release download "v$version" --repo parable-work/superschematic \
+  --pattern "$asset" --pattern SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+gh attestation verify "$asset" --repo parable-work/superschematic
+tar -xzf "$asset"
+install "superschematic-migrate_${version}_linux-x64/superschematic-migrate" /usr/local/bin/
+superschematic-migrate version
+```
+
+`superschematic-migrate version` prints the version the release stamped.
+A binary built without that stamp prints the version Go recorded for the
+module, or `(devel)`.
+
+Or build the binary from a checkout:
 
 ```sh
 cd runtime/migrate/go
@@ -302,7 +326,10 @@ SQLite takes a path, a `sqlite:` URL (`sqlite:///var/lib/shop/shop.db` is
 superschematic-migrate apply --plan shop.plan.json --database-url /var/lib/shop/shop.db
 ```
 
-As a Cloud Run job, an image that holds the binary and the plan:
+A release publishes no image of the runner: Cloud Run cannot pull from
+GitHub's registry directly, and the stack model (D30) builds the migration
+job's image itself. As a Cloud Run job, an image that holds the binary and
+the plan:
 
 ```dockerfile
 FROM golang:1.26.4 AS build

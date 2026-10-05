@@ -469,18 +469,35 @@ the feature and the dialect:
 `github.com/parable-work/superschematic/runtime/migrate/go`, which holds the
 database drivers, so a migration job needs the plan and that binary, not the
 compiler. It never computes a plan. It needs no cgo, so one static binary
-serves a container job:
+serves a container job.
+
+Each release attaches it for linux and darwin on x64 and arm64, as
+`superschematic-migrate_<version>_<platform>.tar.gz` (`linux-x64`,
+`linux-arm64`, `darwin-x64`, `darwin-arm64`). The release's `SHA256SUMS`
+lists each archive, and each has a build provenance attestation:
+
+```
+gh release download v0.1.0-alpha.1 --repo parable-work/superschematic \
+  --pattern 'superschematic-migrate_0.1.0-alpha.1_linux-x64.tar.gz' --pattern SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify superschematic-migrate_0.1.0-alpha.1_linux-x64.tar.gz --repo parable-work/superschematic
+```
+
+Or install it with Go:
 
 ```
 CGO_ENABLED=0 go install github.com/parable-work/superschematic/runtime/migrate/go/cmd/superschematic-migrate@latest
 ```
 
-`runtime/migrate/README.md` has a Dockerfile for a Cloud Run job.
+`superschematic-migrate version` prints its version. A release publishes no
+container image of the runner. `runtime/migrate/README.md` has a Dockerfile
+for a Cloud Run job.
 
 ```
 superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
 superschematic-migrate status --service NAME [--model] [--database-url URL]
 superschematic-migrate adopt --model model.json [--database-url URL]
+superschematic-migrate version
 ```
 
 `--database-url` defaults to `$DATABASE_URL`. A `postgres://` or
