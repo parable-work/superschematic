@@ -849,10 +849,14 @@ operations: {
 - **Reading.** `target.types.names` lists the document's types besides
   the instance type, sorted; listing them reads none. `target.types.get(name)`
   returns one, deep-frozen, as `{ name, fields }`, each field `{ key,
-  type, kind, depth, optional }`: its JSON key (`jsonTag`, else its name),
-  its type's name as the document writes it, whether that is a
-  `primitive`, a `scalar`, an `enum` or a `type`, its list depth (0, 1 or
-  2) and whether an object may leave it out. It returns `undefined` for
+  type, kind, jsonType?, depth, optional }`: its JSON key (`jsonTag`, else
+  its name), its type's name as the document writes it, whether that is a
+  `primitive`, a `scalar`, an `enum` or a `type`, for a scalar the JSON
+  type of its values as the describe document writes a field of it
+  (`string`, `number`, `integer`, `boolean`, `object`, `array`, or `any`
+  for `Generic.JSON`; a catalog scalar's is the catalog's, whatever the
+  document declares for it), its list depth (0, 1 or 2) and whether an
+  object may leave it out. It returns `undefined` for
   the instance type and for a name that is no type of the document. A
   field the document checks refuse (a map, a union, a type the document
   lacks) is left out, since the version is refused at it. `types` is

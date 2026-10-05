@@ -808,6 +808,14 @@ export interface ConfigTypeField {
   readonly type: string;
   /** What that name is: a builtin primitive, a scalar, an enum or a type of the document. */
   readonly kind: 'primitive' | 'scalar' | 'enum' | 'type';
+  /**
+   * For a scalar, the JSON type of one of its values, as the describe
+   * document writes a field of it: string, number, integer, boolean,
+   * object, array, or any for every JSON type (Generic.JSON's). A scalar the
+   * catalog holds is the catalog's, whatever the document declares for it.
+   * Absent for a primitive, an enum or a type, whose kind and name say it.
+   */
+  readonly jsonType?: string;
   /** 0 for a single value, 1 for a list, 2 for a list of lists. */
   readonly depth: 0 | 1 | 2;
   /** Whether an object of the type may leave it out: the document does not mark it required. */

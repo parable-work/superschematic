@@ -188,7 +188,7 @@ for (const driver of drivers) {
           fields: [
             { key: 'title', type: 'string', kind: 'primitive', depth: 0, optional: false },
             { key: 'serves', type: 'Int', kind: 'primitive', depth: 0, optional: true },
-            { key: 'contact', type: 'Contact.Email', kind: 'scalar', depth: 0, optional: true },
+            { key: 'contact', type: 'Contact.Email', kind: 'scalar', jsonType: 'string', depth: 0, optional: true },
             { key: 'unit', type: 'Unit', kind: 'enum', depth: 0, optional: true },
             { key: 'steps', type: 'Step', kind: 'type', depth: 1, optional: true },
             { key: 'grid', type: 'number', kind: 'primitive', depth: 2, optional: true },
@@ -200,6 +200,46 @@ for (const driver of drivers) {
       // with no other schema in reach and the types there all the same.
       assert.deepEqual(targets.at(-1), { schemas: false, names: ['Loose', 'Meta', 'Odd', 'Recipe', 'Spare', 'Step', 'Wrapper'] });
       assert.ok(targets.some((target) => target.schemas));
+    });
+
+    test("a scalar field carries the JSON type of the scalar's values, as the describe document writes it; a catalog scalar's is the catalog's", () => {
+      const engine = open();
+      const document = kitchen({ types: ['Measure'] }) as Doc & { scalars?: Record<string, unknown> };
+      document.scalars = {
+        Grams: { name: 'Grams', languagePrimitive: 'number', typeMappings: { json_schema: 'integer' } },
+        Ratio: { name: 'Ratio', languagePrimitive: 'number' },
+        Flag: { name: 'Flag', languagePrimitive: 'boolean' },
+        Code: { name: 'Code', languagePrimitive: 'string', pattern: '^[A-Z]+$' },
+        // The form format --to=json writes declares a catalog scalar by its
+        // name and primitive; the catalog's row decides it.
+        'Identity.UUID': { name: 'Identity.UUID', languagePrimitive: 'object' },
+      };
+      document.types.Measure = {
+        name: 'Measure',
+        role: 'EmbeddedStruct',
+        fields: [
+          { name: 'grams', typeRef: { name: 'Grams' } },
+          { name: 'ratio', typeRef: { name: 'Ratio', isArray: true } },
+          { name: 'flag', typeRef: { name: 'Flag' } },
+          { name: 'code', typeRef: { name: 'Code' } },
+          { name: 'id', typeRef: { name: 'Identity.UUID' } },
+          { name: 'extra', typeRef: { name: 'Generic.JSON' } },
+        ],
+      } as Doc['types'][string];
+      publish(engine, document);
+      engine.instances.create(alice, 'Kitchen', { title: 'Home' }, { id: 'k1' });
+      const read = engine.instances.invoke(alice, 'Kitchen', 'k1', 'kinds', {}) as Record<string, ConfigType>;
+      assert.deepEqual(
+        read.Measure.fields.map(({ key, jsonType }) => [key, jsonType]),
+        [
+          ['grams', 'integer'],
+          ['ratio', 'number'],
+          ['flag', 'boolean'],
+          ['code', 'string'],
+          ['id', 'string'],
+          ['extra', 'any'],
+        ]
+      );
     });
 
     test('the instance type, an enum and a name the document lacks are no type to read', () => {
