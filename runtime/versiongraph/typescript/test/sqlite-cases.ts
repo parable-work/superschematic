@@ -379,7 +379,7 @@ export const cases: Case[] = [
     },
   },
   {
-    name: "after a kind gains a column, its old rows and images read it as null, as Postgres's ADD COLUMN gives them",
+    name: "after a kind gains a column, its old rows read it as null, as Postgres's ADD COLUMN gives them, and its old images read as stored",
     run(binding) {
       const s = setup(binding);
       using([s], () => {
@@ -407,26 +407,27 @@ export const cases: Case[] = [
         assert.equal(member(whisk!, "color"), "null");
         assert.equal(member(mix!, "memo"), "null");
         assert.equal(canonicalRow(kind("utensil").columns, whisk!), whisk);
-        // An image carries the gained column as null, unless history leaves it out.
+        // An image reads as it was stored, without the gained column, as a
+        // Postgres history image does.
         const id = (row: string) => JSON.parse(member(row, "id")!) as string;
         const [whiskImage] = storage.transact((tx) => tx.images("utensil", [{ id: id(whisk!), version: 1 }]));
         const [mixImage] = storage.transact((tx) => tx.images("step", [{ id: id(mix!), version: 1 }]));
-        assert.equal(member(whiskImage!, "color"), "null");
+        const storedImage = s.client.get(`SELECT data FROM "graph_member_history" WHERE id = ?1 AND _version = 1`, [id(whisk!)]);
+        assert.equal(whiskImage, storedImage?.["data"]);
+        assert.equal(member(whiskImage!, "color"), undefined);
         assert.equal(canonicalRow(kind("utensil").columns, whiskImage!), whiskImage);
         assert.equal(member(mixImage!, "memo"), undefined);
         assert.equal(member(mixImage!, "scratch"), undefined);
-        // The commit's tree carries color as null, and hashes as a tree whose
-        // row holds it null does, which is not how one that lacks it does.
+        // The commit's tree lacks color, and the core reads it as null: it
+        // hashes as the draft's live rows, which hold it null, and as a tree
+        // whose row holds it null.
         const tree = engine.materialize(committed.commit!.id);
         const [read] = tree.tree["utensil"]!;
-        assert.equal(member(read!, "color"), "null");
+        assert.equal(member(read!, "color"), undefined);
+        assert.equal(tree.contentHash, engine.compose(draft.id).contentHash);
         const hash = (row: Record<string, unknown>) =>
           core.contentHash({ descriptor: d as never, tree: { step: tree.tree["step"]!.map((r) => JSON.parse(r) as Record<string, unknown>), utensil: [row] } }).contentHash;
-        const withNull = JSON.parse(read!) as Record<string, unknown>;
-        const without = { ...withNull };
-        delete without["color"];
-        assert.equal(tree.contentHash, hash(withNull));
-        assert.notEqual(tree.contentHash, hash(without));
+        assert.equal(tree.contentHash, hash({ ...(JSON.parse(read!) as Record<string, unknown>), color: null }));
         // An update of the old row stores the gained column, null, and its image carries it.
         const updated = engine.save(cook, draft.id, committed.ref.version, { utensil: { upsert: ['{"entity_key": "Whisk", "name": "big whisk"}'] } });
         assert.equal(member(updated.saved["utensil"]![0]!, "color"), "null");
@@ -572,7 +573,7 @@ export const cases: Case[] = [
     },
   },
   {
-    name: "two graphs in one file keep apart: each reads, names, sequences, releases and prunes only its own",
+    name: "two graphs in one file keep apart: each reads, names, sequences, releases, prunes and sweeps only its own",
     run(binding) {
       let now = 1_800_000_000_000_000;
       const clock = () => now;
@@ -639,6 +640,21 @@ export const cases: Case[] = [
         assert.equal(images("recipe"), kept);
         assert.deepEqual(a.engine.sweep({ actor: cook }).pruned, {});
         assert.equal(bEngine.compose(other.id).contentHash, a.engine.compose(main.id).contentHash);
+        // Each graph discards its draft, and a week and a day on, past the
+        // grace, menu's sweep collects its own draft's rows and leaves
+        // recipe's, which recipe's own sweep collects.
+        const rowsOf = (graph: string, ref: string) =>
+          a.client.get(`SELECT count(*) AS n FROM "graph_member" WHERE graph = ?1 AND ref_id = ?2`, [graph, ref])?.["n"];
+        a.engine.discard(cook, aw.draft.id, aw.draft.version);
+        bEngine.discard(cook, bw.draft.id, bw.draft.version);
+        assert.deepEqual([rowsOf("recipe", aw.draft.id), rowsOf("menu", bw.draft.id)], [1, 1]);
+        now += 8 * 86_400_000_000;
+        const swept = bEngine.sweep({ actor: cook });
+        assert.deepEqual([swept.collectedRefs, swept.collectedRows], [1, { step: 1 }]);
+        assert.deepEqual([rowsOf("recipe", aw.draft.id), rowsOf("menu", bw.draft.id)], [1, 0]);
+        const own = a.engine.sweep({ actor: cook });
+        assert.deepEqual([own.collectedRefs, own.collectedRows], [1, { step: 1 }]);
+        assert.equal(rowsOf("recipe", aw.draft.id), 0);
       });
     },
   },

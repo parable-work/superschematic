@@ -24,10 +24,11 @@
 // old version plus 1 on an update), writes the row's image at its new
 // version on an insert or an update, and on a delete writes the row's image
 // at the old version plus 1 with the kind's history actor column set to the
-// delete's actor. An image leaves out the kind's history-excluded columns.
-// Refs and release pointers keep history too. Every value it writes is
-// canonicalized by its class first (canonical.ts), so a read returns what is
-// stored and needs no rules of its own.
+// delete's actor. An image leaves out the kind's history-excluded columns,
+// and reads back as it was stored, while a live row reads with every column
+// its kind declares. Refs and release pointers keep history too. Every value
+// it writes is canonicalized by its class first (canonical.ts), so a read
+// returns what is stored and needs no rules of its own.
 //
 // The adapter reaches SQLite through SqliteClient, a small synchronous
 // interface of the shape of D16's SqlDriver: run, get and all with
@@ -159,8 +160,6 @@ interface Kind {
   columns: Readonly<Record<string, string>>;
   /** Every declared column but the role ones: what data holds. */
   data: string[];
-  /** Every declared column the kind's history does not exclude: what an image holds. */
-  image: string[];
   exclude: ReadonlySet<string>;
   actor: string | undefined;
   retentionDays: number | undefined;
@@ -393,9 +392,6 @@ export class SqliteAdapter {
         columns,
         data: Object.keys(columns)
           .filter((column) => !roleColumns.has(column))
-          .sort(compareCodePoints),
-        image: Object.keys(columns)
-          .filter((column) => !exclude.has(column))
           .sort(compareCodePoints),
         exclude,
         actor: history.actor,
@@ -778,24 +774,6 @@ function memberMembers(k: Kind, m: Member): Map<string, string> {
   return members;
 }
 
-/**
- * A member's history image as an image reads: as stored, with every column
- * the kind declares and its history does not exclude, null where the image
- * lacks it, as to_jsonb of a Postgres row less the excluded columns has a
- * column added after the image was taken.
- */
-function imageOf(k: Kind, stored: string): string {
-  const members = readObject(stored, "data");
-  let filled = false;
-  for (const column of k.image) {
-    if (!members.has(column)) {
-      members.set(column, "null");
-      filled = true;
-    }
-  }
-  return filled ? writeObject(members) : stored;
-}
-
 /** One transaction's view of the graph, over a client, at the transaction's time. */
 class SqliteTx implements SyncTx {
   readonly #a: AdapterConfig;
@@ -1158,6 +1136,11 @@ class SqliteTx implements SyncTx {
     }
   }
 
+  /**
+   * Each pinned image as it was stored, as a Postgres history image reads:
+   * one taken before its kind gained a column lacks it, and the core reads
+   * a content column a row lacks as null.
+   */
   images(kindName: string, pins: readonly Pin[]): string[] {
     const k = this.#kind(kindName);
     if (pins.length === 0) {
@@ -1170,7 +1153,7 @@ class SqliteTx implements SyncTx {
           `ON h.id = json_extract(p.value, '$[0]') AND h._version = json_extract(p.value, '$[1]') ` +
           `WHERE h.graph = ?1 AND h.kind = ?2`,
         [this.#a.graph, k.name, pinList],
-      ).map((row) => imageOf(k, text(row["data"], "data")));
+      ).map((row) => text(row["data"], "data"));
     } catch (err) {
       throw withContext(`read ${k.name} history`, err);
     }

@@ -135,19 +135,22 @@ const main = engine.createPrimary(actor, root, "main");
 ```
 
 `SqliteAdapter` is `SyncStorage` and `SyncTx` over one fixed layout of nine
-`STRICT` tables (`ref`, `ref_history`, `commit`, `patch`,
-`snapshot_entry`, `release`, `release_history`, `member` and
-`member_history`), the same for every graph (D32). Every row carries the
-graph's name, `options.graph`, so one file holds several graphs, and
-`options.tableName` names each table and index from its local name
-(`graph_` before it by default), so a D16 behavior can pass its
-`sql.table`. It reads from the descriptor only its kinds' role columns,
-value classes and `history`, and returns each row with every column its
-kind declares, `null` where the stored row lacks one. `createTables` creates the layout where it is
-missing, and `sqliteLayout(tableName)` returns its statements, one each,
-with no trigger and no transaction control, for a caller that runs its own
-migrations. `runtime/versiongraph/README.md` ("SQLite") holds the layout
-and its rules.
+`STRICT` tables (`ref`, `ref_history`, `commit`, `patch`, `snapshot_entry`,
+`release`, `release_history`, `member` and `member_history`), the same for
+every graph (D32). Every row carries the graph's name, `options.graph`, so
+one file holds several graphs, and `options.tableName` names each table and
+index from its local name (`graph_` before it by default), so a D16 behavior
+can pass its `sql.table`. It reads from the descriptor only its kinds' role
+columns, value classes and `history`. It returns each live row with every
+column its kind declares, `null` where the stored row lacks one, as
+Postgres's `ADD COLUMN` without a `DEFAULT` gives an existing row, and each
+history image as it was stored, as a Postgres image reads, so one taken
+before its kind gained a column lacks it; the core reads a content column a
+row lacks as `null`, so the two compare, merge and hash the same.
+`createTables` creates the layout where it is missing, and
+`sqliteLayout(tableName)` returns its statements, one each, with no trigger
+and no transaction control, for a caller that runs its own migrations.
+`runtime/versiongraph/README.md` ("SQLite") holds the layout and its rules.
 
 The adapter does what Postgres's history triggers do, in the statements of
 the transaction that changes a row: it sets `_version`, writes each
@@ -185,10 +188,10 @@ SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... bun test test   # w
 make versiongraph-scenarios-ts   # from the repository root: the SQLite pass, then the Postgres tests, failing without the variable
 ```
 
-The build needs cargo with the `wasm32-unknown-unknown` target
-(`rustup target add wasm32-unknown-unknown`). `bun run test` builds the
-package, type-checks the tests against the built `dist/`, runs every vector
-in `runtime/versiongraph/testdata/vectors` through the package API
+The build needs cargo with the `wasm32-unknown-unknown` target (`rustup
+target add wasm32-unknown-unknown`). `bun run test` builds the package,
+type-checks the tests against the built `dist/`, runs every vector in
+`runtime/versiongraph/testdata/vectors` through the package API
 (`test/vectors.test.ts`), checks each way of loading the module
 (`test/load.test.ts`), runs every canonical vector
 (`test/canonical.test.ts`), reads every scenario file and checks the
@@ -196,20 +199,24 @@ scenario format's rules (`test/scenarios.test.ts`), runs every scenario on
 SQLite through `SyncEngine` and the SQLite adapter, in memory, once through
 `bun:sqlite` and once through `node:sqlite` in a transaction the runner
 holds with every statement held to D16's rules for a behavior's SQL
-(`test/scenarios.test.ts`), runs the SQLite adapter's own tests through
-both bindings (`test/sqlite.test.ts`, over the cases in
-`test/sqlite-cases.ts`), checks `initSync`'s sources and `SyncEngine`'s
-driver (`test/sync.test.ts`), and loads every entry under Node with the
-`pg` driver and the SQLite modules refused, then runs the SQLite adapter's
-tests through `node:sqlite` (`test/node.mjs`). With the variable set it
-also runs every scenario in
-`runtime/versiongraph/testdata/scenarios` through the engine and the
-adapter (`test/scenarios.test.ts`), replaying each operation through a
-`SyncEngine` that must make the recorded storage calls, in the recorded
-order, and return the `Engine`'s result or error (`test/replay.ts`);
-checks each canonical vector's rendering against Postgres; and runs the
-adapter's (`test/adapter.test.ts`), the sweeper's (`test/sweeper.test.ts`)
-and the facade's (`test/facade.test.ts`) own tests. Without it they skip.
+(`test/scenarios.test.ts`), runs the SQLite adapter's own tests through both
+bindings (`test/sqlite.test.ts`, over the cases in `test/sqlite-cases.ts`),
+runs a kind that gains a column end to end on SQLite
+(`test/gained-column.test.ts`), checks `initSync`'s sources and
+`SyncEngine`'s driver (`test/sync.test.ts`), and loads every entry under
+Node with the `pg` driver and the SQLite modules refused, then runs the
+SQLite adapter's tests through `node:sqlite` (`test/node.mjs`). With the
+variable set it also runs every scenario in
+`runtime/versiongraph/testdata/scenarios` through the engine and the adapter
+(`test/scenarios.test.ts`), replaying each operation through a `SyncEngine`
+that must make the recorded storage calls, in the recorded order, and return
+the `Engine`'s result or error (`test/replay.ts`); checks each canonical
+vector's rendering against Postgres; and runs the adapter's
+(`test/adapter.test.ts`), the sweeper's (`test/sweeper.test.ts`) and the
+facade's (`test/facade.test.ts`) own tests; and runs the gained column on
+Postgres too, with `ALTER TABLE ... ADD COLUMN`, and checks that both
+backends give the same trees and hashes (`test/gained-column.test.ts`).
+Without it they skip.
 
 The reference page is "Version graphs" in the docs site
 (`docs/src/content/docs/reference/version-graphs.md`).
