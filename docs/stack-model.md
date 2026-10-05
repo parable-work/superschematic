@@ -123,18 +123,33 @@ all follow from it. A call between two APIs that one server serves stays an
 HTTP call to the server's own address.
 
 `calls` is also a build dependency, since the caller's generated `Deps`
-imports the callee's SDK. The build plan builds each callee before its
-caller, and `build --with-deps` builds the callees with the caller. Two
-APIs that call each other form a cycle between services. The build plan
-orders whole services, so it refuses that cycle, with an error that names
-each edge (`shop-api calls shop-orders, shop-orders calls shop-api`).
+imports the callee's SDK (section 8.5), and `build --with-deps` builds the
+callees with the caller. The build plan orders outputs, not whole
+services: only a caller's API server reads its callees, so each callee's
+SDK builds before the servers that call it, and the caller's other outputs
+need nothing of the callee.
 
-Follow-up: order outputs instead, each SDK before the APIs that call it, so
-two APIs may call each other. It waits for the `Deps` generator (section
-8.5), the first output that imports a callee's SDK, and it splits a
-service's build, which the build cache stores as one entry. That generator
-also adds each callee's key to the caller's cache key, which leaves `calls`
-out while no output reads it.
+- Where the calls form no cycle, each callee builds whole before its
+  caller, as `dependencies` and `authDb` order a tree.
+- Two APIs that call each other form a cycle between services, which is
+  not an error. The tree is then ordered by `dependencies` and `authDb`
+  alone. A caller whose callee comes after it builds in two steps: its
+  base outputs (the types, SQL, ORM and SDKs) in its place, and its API
+  server once its callees' base outputs are built (`buildplan.Steps`).
+  `build-all --parallel` names the steps `shop-api (base)` and `shop-api
+  (server)`.
+- A cycle of `dependencies` and `authDb` still cannot build, and its error
+  names each edge (`a depends on b, b authenticates against a`).
+
+Building is not deploying: two servers that call each other still have no
+callee-first rollout (section 5.3), and resolution refuses them
+(`call-cycle`, section 6.10) unless one server serves both APIs.
+
+The build cache still stores a service as one entry, written after its
+last step. A caller's key adds each callee's key, taken without the
+callee's own calls, so two APIs that call each other hash without a cycle.
+What a caller reads of a callee is its SDK and its types, which that key
+covers.
 
 ### 3.4 Bindings in the generated config
 
@@ -152,6 +167,19 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
   what the server's `ServiceAuthenticator` checks: each inbound edge's
   issuer, keys and audience, and the deployable each caller identity is
   (section 9.2).
+
+An API's database field comes from its `authDb`, or its one DB-kind
+dependency, as its sql edge does (section 3.3).
+
+The Go loader has the first two. The API package's `EnvConfig` embeds the
+`@envVars` type and adds a field per edge, a `stackconfig.Database` or a
+`stackconfig.Service` from the Go HTTP runtime, which `LoadEnvConfig`
+reads. `values-schema.json` lists each derived field in
+`x-superschematic.envVars` with `derived` (the edge kind), `service` and
+`variables`, and each of its variables as an optional string property
+that the platform sets, not a deployment's values. The TypeScript and Rust
+loaders read no derived field yet (section 12), and the service-auth field
+waits for the connectors that write it.
 
 What a connector derives for each edge kind has a contract, in
 `ir/derived_value.go`. Resolution checks every connector's value against
@@ -182,9 +210,18 @@ provisioner would have to render references inside a JSON string, and no
 member of it could come from a secret store.
 
 Field and variable names follow a naming-file rule over the callee's
-service name, with the core's rule as the default (D7, D8). A server's own
-`@envVars` type holds only the application's settings. The loader refuses
-an `@envVars` field whose name collides with a derived one.
+service name, with the core's rule as the default (D7, D8). The
+`[derived_fields]` table holds a template per edge kind, `database` and
+`service`, in which `{SERVICE}` is the DB or called API service's name in
+upper snake case. They default to `{SERVICE}_DATABASE` and
+`{SERVICE}_SERVICE`. envgen and the resolver (`stack.Input.FieldNames`)
+name the fields by the same templates.
+
+A server's own `@envVars` type holds only the application's settings. The
+loader refuses an `@envVars` field whose name collides with a derived one:
+the derived field's name, or that name followed by an underscore. The
+second form covers each of its variables, and any member a later contract
+adds. The resolver applies the same rule (`field-collision`).
 
 The generated entrypoint (section 8.1) reads these fields, so application
 code never names an environment variable. `examples/acme-shop/go/example_test.go`
@@ -896,26 +933,47 @@ The unit of implementation is the API service, not the server. Each API
 service has one implementation per language, at a conventional location,
 found with no declaration:
 
-- **Location.** The naming file holds a path template per language (for
-  example `go/{service}`, from the repository root), with a core default.
-  The service name fills it. A distribution changes the template, not each
-  service.
-- **Scaffold.** When the package is missing, superschematic writes it once,
-  with each method returning a not-implemented error. From then on the
-  package is the engineer's and is never regenerated.
+- **Location.** The naming file's `[implementation_paths]` table holds a
+  path template per language, from the repository root (the parent of the
+  schemas root), in which the service name fills `{service}`. `go`
+  defaults to `go/{service}`. A distribution changes the template, not
+  each service.
+- **Scaffold.** When the package is missing, superschematic writes it
+  once: an `implementation.go` whose `New` builds `Implementations` with a
+  struct per namespace, each method returning the API package's
+  not-implemented error, which answers 501. It never writes into a
+  directory that holds a Go file, so the package is the engineer's from
+  then on. `build --scaffold` and `build-all --scaffold` write it. A
+  service the cache would restore builds again when its implementation is
+  missing, since the cache stores outputs, not the scaffold.
 - **Signature.** The API generator writes `Deps` and the constructor's
-  signature: `func New(deps Deps) (Implementations, error)` in Go, and the
-  equivalent in TypeScript and Rust. `Deps` is typed and filled by the
-  entrypoint:
+  signature in `deps.go`: `type Constructor func(deps Deps)
+  (Implementations, error)`, which the scaffold asserts with `var _
+  api.Constructor = New`. TypeScript and Rust get the equivalent later
+  (section 12). `Deps` is typed and filled by the entrypoint:
 
   ```go
   type Deps struct {
-      Config  Config                 // the API's @envVars, derived fields included
-      DB      orm.DatabaseInterface  // from authDb
-      ShopApi *shopapisdk.Client     // from calls, with service credentials
-      Logger  *slog.Logger
+      Config  EnvConfig              // the API's @envVars settings and derived fields (section 3.4)
+      DB      orm.DatabaseInterface  // the ORM of its authDb, or of its one DB-kind dependency
+      ShopApi *shopapisdk.ShopApiSDK // a Go SDK client per calls entry, with service credentials
+      Logger  *zap.Logger
   }
   ```
+
+  A field is left out when the API has nothing for it: `Config` without
+  settings or edges, `DB` without a database. The logger is zap's, as the
+  generated `Config`'s is, so the entrypoint passes one logger to both. A
+  dependency must generate what `Deps` imports, its Go types (and so its
+  ORM) for the database and its Go SDK for a callee, and the build refuses
+  one whose config does not. The generated `Config` and `RegisterRoutes`
+  do not change.
+
+The scaffold is opt-in until the entrypoint lands. Nothing imports the
+package before the generated `main` does (section 8.1), and a build of a
+tree whose Go code lives elsewhere, such as `examples/acme-shop`, would
+gain a stub package beside it. The entrypoint scaffolds each API a stack's
+servers serve.
 
 A server that serves several APIs calls each one's constructor with that
 API's `Deps`, built from the server's shared connections and clients.
@@ -1432,18 +1490,34 @@ registrations.
 3. **envgen.** The derived binding fields of section 3.4. Landed: the
    contract of the values connectors derive, with its environment
    variable encoding (`ir/derived_value.go`), and the resolver's check of
-   every connector's value against it.
+   every connector's value against it. The Go loader's `EnvConfig`, with
+   a field per database and per `calls` entry named by `[derived_fields]`
+   and read through the Go HTTP runtime's `stackconfig`;
+   `values-schema.json` marking those fields derived; and the loader's
+   refusal of an `@envVars` field that collides with one. Next: the
+   TypeScript and Rust loaders read the derived fields, in the PR that
+   gives them `Deps`, and the service-auth field arrives with the
+   connectors that write it.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
-   (section 8.5).
+   (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`, and
+   the scaffold under `build --scaffold` and `build-all --scaffold`. Next:
+   the entrypoint and the Dockerfile, then `Deps`, the constructor
+   signature and the scaffold in TypeScript and Rust, in a later PR.
+   `examples/acme-shop/go` keeps its hand wiring until the entrypoint
+   lands. Moving it to the scaffold layout now would move the code its
+   docs pages quote (`go/products.go`, `go/orders.go`, `NewHandler`) for
+   no running server.
 5. **Config and build plan.** `calls` is in the schema config, beside
    `authDb`, in the TypeScript type and the data-form schema, valid on an
-   API config and naming API services. It is a build-order edge, and the
-   build plan refuses a cycle of `calls`; ordering outputs instead is the
-   follow-up in section 3.3. A config imports its handles as siblings'
-   sentinels (D34): the import rule is in the static config read, and the
-   sentinel sweep runs before discovery. A naming-file key holds the
-   implementation path templates.
+   API config and naming API services. It is a build-order edge for the
+   caller's API server only: the build plan orders outputs, so two APIs
+   may call each other, and each callee's key joins the caller's cache key
+   (section 3.3). A config imports its handles as siblings' sentinels
+   (D34): the import rule is in the static config read, and the sentinel
+   sweep runs before discovery. The naming file's `[implementation_paths]`
+   holds the implementation path templates, and `[derived_fields]` the
+   derived field names.
 6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
    and TypeScript HTTP runtimes (section 9.5), and a service credential
    source in the SDKs (section 9.6).

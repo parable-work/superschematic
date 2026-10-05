@@ -99,6 +99,15 @@ as a committed language must. Pair it with `--out`, so the two servers do
 not share an output root; a build's cache stamps come from `build-all`,
 which has no such flag.
 
+`--scaffold` writes the implementation of each Go API the command builds
+whose package is missing: an `implementation.go` at the naming file's
+`[implementation_paths]` `go` template (`go/{service}` from the parent of
+the schemas root by default). Its `New` has the signature of the generated
+`Constructor`, `func(deps Deps) (Implementations, error)`, and each
+method answers 501 until it is implemented. It never writes into a
+directory that holds a Go file. Without the flag a build writes nothing
+outside the output root.
+
 ```
 superschematic build ./schemas/services/shop-db
 superschematic build ./schemas/services/shop-db --emit-ir | jq .types
@@ -115,20 +124,24 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 | `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
+| `--scaffold` | false | write the implementation scaffold of each Go API built whose package is missing, at the `[implementation_paths]` `go` template |
 
 ## `build-all <services-root>`
 
 Write every service's sentinel that is missing or stale, then discover
 every schema service under `<services-root>` and build them in one
 process, in dependency order. The sentinels come first because a config
-may import a sibling's. A service's `authDb`, and each API it
-`calls`, count as dependencies for ordering. Discovery fails, before any
+may import a sibling's. A service's `authDb` counts as a dependency for
+ordering. The build orders outputs for `calls`: each API's server builds
+after the SDK of every API it calls, so two APIs may call each other. A
+service whose callee comes after it builds its other outputs in its place
+and its server later, and `--parallel` names the two steps
+`shop-api (base)` and `shop-api (server)`. Discovery fails, before any
 service is built, on a handle whose kind is not the kind of the service it
 names (`shop-orders: calls names shop-db with kind API, but shop-db is kind DB`),
-and on a cycle, which it names edge by edge
-(`circular dependency involving shop-api: shop-api calls shop-orders, shop-orders calls shop-api`).
-Two APIs cannot call each other yet. `build --with-deps` runs the same
-discovery. A service whose API server, SDK or DB kind needs
+and on a cycle of `dependencies` and `authDb`, which it names edge by edge
+(`circular dependency involving shop-db: shop-db depends on shop-api, shop-api authenticates against shop-db`).
+`build --with-deps` runs the same discovery and ordering. A service whose API server, SDK or DB kind needs
 a types language its config does not enable fails discovery, before any
 service is built. A service whose type library imports a
 dependency that does not generate types in that language fails, as with
@@ -162,6 +175,7 @@ superschematic build-all ./schemas/services --parallel --cache
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 | `--deps-copy` | `[deps] copy`, else none | also write the dependency graph to this path |
+| `--scaffold` | false | write the implementation scaffold of each Go API whose package is missing, as `build --scaffold` does; a cached service whose implementation is missing builds again |
 
 Every service `build-all` builds gets a stamp,
 `<schemas-root>/dist/.build-stamps/<service>`, holding the hash of the

@@ -484,6 +484,45 @@ outside it can be committed, so CI or a pin tool reads the graph without
 building. `--deps-copy` overrides it and may be absolute. The key is not
 part of the build cache key: moving the copy rebuilds nothing.
 
+## `[derived_fields]`
+
+How the config fields an API's edges derive in a stack are named: the
+API's database connection and the endpoint of each API it `calls`
+(see the stack model, section 3.4). In each template `{SERVICE}` is the
+DB or called API service's name in upper snake case, and the rest of the
+template holds upper-case letters, digits and underscores. A platform sets
+each field as one environment variable per member of its value
+(`SHOP_DB_DATABASE_URL`, `SHOP_API_SERVICE_CREDENTIAL_SOURCE`), and the
+loader refuses an `@envVars` field named after one.
+
+### `derived_fields.database`
+
+Default: `{SERVICE}_DATABASE`
+
+The field of an API's database: its `authDb`, or its one DB-kind
+dependency.
+
+### `derived_fields.service`
+
+Default: `{SERVICE}_SERVICE`
+
+The field of each API an API `calls`.
+
+## `[implementation_paths]`
+
+Where each API service's implementation lives, per language, as a path
+from the repository root (the parent of the schemas root) in which
+`{service}` is the service's name. `build --scaffold` and
+`build-all --scaffold` write a missing implementation there. An absolute
+path, or one without `{service}`, is an error.
+
+### `implementation_paths.go`
+
+Default: `go/{service}`
+
+The Go package of the implementation, whose `New(deps Deps)
+(Implementations, error)` the generated API's `Constructor` types.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches
