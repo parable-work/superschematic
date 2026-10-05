@@ -1,7 +1,8 @@
 {
   "dialect": "sqlite",
+  "expanded": "c5d431815dbd68914829fb3860eaf3545f02a7f64a2ff8db4f62794e236202dc",
   "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
-  "hash": "1c65b2a9184b9170cd427de27b80feab33e917f850c874b8a7db1bf1925eb1e2",
+  "hash": "0cdec5d770c793401491fb71336a401cf6f3a1010fddbab7350ce063cf77396d",
   "renames": [
     "customer=buyer"
   ],

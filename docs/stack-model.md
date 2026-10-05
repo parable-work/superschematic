@@ -881,10 +881,10 @@ plug into it; they add no commands of their own.
    applied model.
 
 A rollout that fails runs no `contract` step, so the previous version's
-servers keep working on the expanded schema. The runner then holds that
-plan's `contract` as pending and refuses a new plan for the database until
-it runs; setting it aside for a rollback that keeps the previous servers is
-open.
+servers keep working on the expanded schema. The runner records that
+schema as the database's model, and the manifest records it too. The next
+deploy plans from it: its plan supersedes the pending `contract`, and any
+drop still wanted is in its own `contract` (D27, amended).
 
 The manifest is the migration baseline, the record of what is running, and
 the starting point for a rollback.
@@ -915,9 +915,13 @@ registrations.
    (`ir/stack_environment.go`) and the resource graph
    (`ir/resource_graph.go`).
 2. **Loader:**
-   - Class values in the arguments of any registered decorator. Today the
-     walker special-cases the decorators that take classes
-     (`internal/registry/core_decorators.go:58`).
+   - Landed: class values in the arguments of any registered decorator.
+     The argument evaluator reads a class, local or imported from another
+     service's package, as the class reference `{"class": name}`, and the
+     data forms write the same object (extension-model.md section 3.4), so
+     `settings: [{ of: Backend }]` needs no walker code of its own.
+     `@source`, `@versionGraph` and `@graphMember` stay walker-read;
+     `internal/registry/core_decorators.go` says why.
    - `ServiceHandle` typed by kind and config type
      (`ServiceHandle<"API", ShopApiConfig>`,
      `packages/schema-config/src/index.ts:31`), written by the sentinel

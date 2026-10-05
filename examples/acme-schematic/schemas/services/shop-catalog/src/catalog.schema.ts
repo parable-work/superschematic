@@ -1,6 +1,6 @@
 import { Identity } from "superscalar";
 import { Validate } from "@superschematic/schema";
-import { Acme, feedKey, shelf } from "@acme/schema";
+import { Acme, crossSell, feedKey, shelf } from "@acme/schema";
 
 // A Catalog schema's classes are embedded structs (KindSpec.StructRole).
 // @shelf and @feedKey come from @acme/schema and are only allowed in Catalog
@@ -21,6 +21,9 @@ export abstract class Product {
   photo: Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>;
 }
 
+// A bundle is offered beside Product's listing. @crossSell names the class
+// itself; the IR and the data forms write it {"class": "Product"}.
+@crossSell({ with: Product })
 export abstract class Bundle {
   @shelf({ aisle: 12 })
   @feedKey

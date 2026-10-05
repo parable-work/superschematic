@@ -9,7 +9,7 @@
     {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead well", "timings": {}}]}}},
     {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead hard", "timings": {}}]}}},
     {"op": "commit", "ref": "p", "as": "pCommit"},
-    {"op": "sql", "statement": {"postgres": "UPDATE step_history SET recorded_at = now() - interval '400 days' WHERE id IN (SELECT id FROM step WHERE ref_id = $1::uuid)"}, "args": [{"ref": "p"}]},
+    {"op": "sql", "statement": {"postgres": "UPDATE step_history SET recorded_at = now() - interval '400 days' WHERE id IN (SELECT id FROM step WHERE ref_id = $1::uuid)", "sqlite": "UPDATE graph_member_history SET recorded_at = recorded_at - 400 * 86400000000 WHERE kind = 'step' AND id IN (SELECT id FROM graph_member WHERE kind = 'step' AND ref_id = ?1)"}, "args": [{"ref": "p"}]},
     {"op": "sweep", "sweep": {"pruneBatch": 1}, "expect": {"report": {"pruned": {"step": 1}}}},
     {"op": "sweep", "sweep": {"pruneBatch": 1}, "expect": {"report": {"pruned": {"step": 1}}}},
     {"op": "sweep", "expect": {"report": {"pruned": {}}}},

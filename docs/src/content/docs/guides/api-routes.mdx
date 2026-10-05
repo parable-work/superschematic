@@ -153,7 +153,8 @@ The envelope is the body of a `POST`, `PUT` or `PATCH` request. The build
 refuses an encrypted operation whose method is `GET` or `DELETE`, declared
 or its set's default, since that request has no body to encrypt. It also
 refuses an `EncryptedField<T>` argument that would travel outside the
-envelope: a path or query parameter. On a field of an object type,
+envelope, a path or query parameter, and an encrypted operation that
+uploads files: the envelope carries a JSON body, not a multipart one. On a field of an object type,
 `EncryptedField<T>` is recorded in the IR and changes no generated code: an
 input type with such a field does not make its operation encrypted. The
 TypeScript and Rust servers have no decryption step, so they refuse an
@@ -189,9 +190,10 @@ decryptor, which in a deployment calls a key service. On such a route
 
 <Snippet file="go/orders_test.go" symbol="TestTrafficControls" />
 
-The TypeScript server applies the same three. The Rust server does not
-apply them yet, nor the permission check
-([Rust](/superschematic/install/rust/#serve-a-generated-api)).
+The TypeScript and Rust servers apply the same three and the permission
+check, the Rust server in the order above
+([TypeScript](/superschematic/install/typescript/#serve-a-generated-api),
+[Rust](/superschematic/install/rust/#serve-a-generated-api)).
 
 ## Webhooks
 

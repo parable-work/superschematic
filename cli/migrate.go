@@ -84,7 +84,10 @@ version's readers: the columns their @source views read. --reader adds a
 service that lives elsewhere; it counts on both sides.
 
 --dialect sqlite plans the service's SQLite database; its
-outputs.sql.dialects must list sqlite.
+outputs.sql.dialects must list sqlite, and so must the previous
+version's when it is a service directory or a git ref. A database whose
+previous version was not built for SQLite plans from the model it
+recorded (--from <model.json>).
 
 --out writes the plan JSON the runner applies. --format prints the plan
 as json, sql or markdown. --fail-on exits non-zero, after printing, when

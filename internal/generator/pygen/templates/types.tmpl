@@ -227,15 +227,15 @@ class HistoryRecord(BaseModel, Generic[_HistoryValue]):
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item)) is None:
+                        if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item), re.ASCII) is None:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "pattern", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item)) is None:
+                    if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item), re.ASCII) is None:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "pattern", "{{pythonString .Message}}")
 {{- else}}
-            if re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(self.{{$fieldAttr}})) is None:
+            if re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(self.{{$fieldAttr}}), re.ASCII) is None:
                 errors.add_field_error("{{$fieldName}}", "pattern", "{{pythonString .Message}}")
 {{- end}}
 {{- else if eq .Validator "min"}}
