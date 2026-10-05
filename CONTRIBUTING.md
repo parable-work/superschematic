@@ -73,7 +73,7 @@ By making a contribution to this project, I certify that:
 | Bun           | 1.4.0   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
-| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
+| Rust          | 1.99.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
 | Postgres      | 16      | `tools.env` (`POSTGRES_VERSION`); CI's database tests run against it |
 | superscalar   | commit  | `superscalar.pin`; `go.mod` carries the same commit as a pseudo-version |
 
@@ -81,7 +81,7 @@ Setup on a fresh machine:
 
 ```
 export GOTOOLCHAIN=go1.26.4
-rustup toolchain install 1.95.0 --target wasm32-unknown-unknown
+rustup toolchain install 1.99.0 --target wasm32-unknown-unknown
 make setup
 ```
 

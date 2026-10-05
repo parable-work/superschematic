@@ -12,7 +12,7 @@ from `rust_crate_prefix` in
 
 ## Requirements
 
-- Rust 1.95.0 (`tools.env`, `RUST_VERSION`). Needed to build the
+- Rust 1.99.0 (`tools.env`, `RUST_VERSION`). Needed to build the
   superscalar archive the CLI links, and to compile generated crates.
 - The [CLI](/superschematic/install/go/).
 
