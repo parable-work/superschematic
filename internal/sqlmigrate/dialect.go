@@ -71,6 +71,13 @@ func one(step *Step) rendered {
 	return rendered{steps: []*Step{step}}
 }
 
+// noSQL is a change that changes nothing in the database, rendered as a
+// step with no statements, in every dialect: the step carries the change's
+// hazards, and the runner logs it like any other.
+func noSQL(c *change) rendered {
+	return one(&Step{Op: string(c.op), Subject: c.subject, Statements: []string{}, Transactional: true})
+}
+
 // conversionKind classifies a column type change (D27).
 type conversionKind int
 

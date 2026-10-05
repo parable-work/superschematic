@@ -40,7 +40,7 @@ A step:
 | `phase` | string | `expand` or `contract`. |
 | `op` | string | The operation, for people. The runner does not read it. |
 | `subject` | string | The object the step changes, as a path (`table/order/column/total`). |
-| `statements` | array of strings | Complete SQL statements without trailing semicolons. The runner runs each with one call, in order. A statement may contain semicolons inside a dollar-quoted body. |
+| `statements` | array of strings | Complete SQL statements without trailing semicolons. The runner runs each with one call, in order. A statement may contain semicolons inside a dollar-quoted body. The array may be empty: the step changes nothing and carries its hazards, and the runner logs it like any other. |
 | `transactional` | boolean | Whether the step runs in one transaction. |
 | `recovery` | array of strings | Absent unless `transactional` is false. Statements to run before a step that started and did not finish is run again. |
 | `foreignKeysOff` | boolean | SQLite only, absent when false. Run the step with foreign key enforcement off and check every foreign key before the commit. |

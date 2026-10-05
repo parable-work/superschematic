@@ -2204,7 +2204,7 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 55 pairs for Postgres and 39 for SQLite, 9 of them
+Plan goldens cover 56 pairs for Postgres and 39 for SQLite, 9 of them
 rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
@@ -2223,8 +2223,11 @@ foreign key whose `onDelete` alone changes is replaced in `contract` with
 no hazard; an index is dropped with a plain `DROP INDEX` in a transaction;
 `Diff` refuses a `partitionBy` change on an existing table, an impossible
 cast, a primary key change and a change between a generated and a stored
-column; a change to a graph member's content set with no DDL change has no
-step, so no hazard; `--reader` services are read against both models;
+column; a column that joins or leaves a graph member's content while the
+column stays, as `@conflictUnit('excluded')` makes it, gets a step with no
+statements in `expand`, `changeGraphContent`, which carries the `history`
+hazard, and the runner logs a step with no statements like any other;
+`--reader` services are read against both models;
 `--from-ref` extracts the previous schemas root beside the checkout's, so
 the paths its `tsconfig` reaches resolve, and each version uses its own
 naming file; a service is a reader when its kind allows `@source`; a

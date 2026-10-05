@@ -216,6 +216,38 @@ func TestSQLHashOfManyStatements(t *testing.T) {
 	}
 }
 
+// TestApplyAStepWithNoStatements: a step with an empty statements list,
+// such as the one a version graph's content change gets, runs nothing, and
+// the runner logs it with the SHA-256 of no SQL.
+func TestApplyAStepWithNoStatements(t *testing.T) {
+	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
+		url := testdb.New(t, dialect)
+		r := newRunner(t, url)
+		p := edited(t, dialect, "01-create", func(p map[string]any) {
+			p["steps"] = append(steps(p), map[string]any{
+				"index": len(steps(p)) + 1, "phase": "expand", "op": "changeGraphContent", "subject": "table/order",
+				"statements": []any{}, "transactional": true,
+			})
+		})
+		last := len(p.Steps)
+		result := apply(t, r, p, migrate.All)
+		if !result.Finished || !equalInts(result.Ran, ints(1, last)) {
+			t.Fatalf("apply: %+v", result)
+		}
+		if st := status(t, r, "shop"); st.ModelHash != p.To || st.PlanHash != "" {
+			t.Fatalf("status after the plan: %+v", st)
+		}
+		if log := r.Log.(*testLog); !log.contains(fmt.Sprintf("step %d/%d expand table/order: done", last, last)) {
+			t.Error("the runner did not log the step")
+		}
+		empty := sha256.Sum256(nil)
+		got := testdb.Strings(t, url, `SELECT sql_hash FROM superschematic_migrations WHERE plan_hash = $1 AND step = $2`, p.Hash, last)
+		if len(got) != 1 || got[0] != hex.EncodeToString(empty[:]) {
+			t.Fatalf("sql_hash %v", got)
+		}
+	})
+}
+
 // TestTwoRunnersSerialize: two runners applying one plan at once never run
 // a step twice. On Postgres the second waits for the advisory lock until
 // the first is done and finds the plan applied, also across a CREATE INDEX

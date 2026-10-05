@@ -16,8 +16,9 @@ var phaseNotes = map[Phase]string{
 // statements, each ending with a semicolon, under a comment naming its
 // index, phase, operation, subject and hazard ids. A step that runs
 // outside a transaction says so, with its recovery statements commented
-// out. The script is for review: the runner applies the plan JSON, which
-// carries what the script cannot, such as each step's transaction.
+// out, and a step with no statements says it has none. The script is for
+// review: the runner applies the plan JSON, which carries what the script
+// cannot, such as each step's transaction.
 func (p *Plan) SQL() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "-- Migration plan for %s (%s)\n", p.Service, p.Dialect)
@@ -50,6 +51,9 @@ func (p *Plan) SQL() string {
 				b.WriteString(commentLines("recovery: "+statement+";", "--   "))
 			}
 		}
+		if len(step.Statements) == 0 {
+			b.WriteString("-- no SQL: the database does not change, and the runner logs the step\n")
+		}
 		for _, statement := range step.Statements {
 			b.WriteString(statement)
 			b.WriteString(";\n")
@@ -61,7 +65,7 @@ func (p *Plan) SQL() string {
 // Markdown renders the plan for a pull request: a summary line, a table of
 // the hazards (class, subject, reader, reason, id), then the expand and
 // contract steps, each with its SQL in a fenced block. A plan with no
-// steps says so.
+// steps says so, and so does a step with no SQL.
 func (p *Plan) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Migration plan for `%s` (%s)\n\n", p.Service, p.Dialect)
@@ -129,6 +133,10 @@ func (p *Plan) Markdown() string {
 			}
 			if step.ForeignKeysOff {
 				b.WriteString(" Runs with foreign keys off, checked before its commit.")
+			}
+			if len(step.Statements) == 0 {
+				b.WriteString(" No SQL: the database does not change.\n")
+				continue
 			}
 			b.WriteString("\n\n```sql\n")
 			for _, statement := range step.Statements {

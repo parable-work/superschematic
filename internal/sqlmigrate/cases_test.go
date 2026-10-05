@@ -383,6 +383,11 @@ var planCases = []planCase{
 	{name: "graph-content-add", noSQLite: "the version graph fixture is @versioned", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
 		addField(s, "Cover", &ir.FieldDef{Name: "caption", TypeRef: stringRef})
 	}},
+	// A field leaves the content and no column changes: a step with no SQL.
+	{name: "graph-content-exclude", noSQLite: "the version graph fixture is @versioned", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
+		fieldNamed(s, "Note", "body").ConflictUnit = ir.ConflictUnitExcluded
+		typeNamed(s, "Recipe").VersionGraph.SchemaEpoch = 2
+	}},
 }
 
 // renameCustomerToBuyer renames Order.customer, which a foreign key, an

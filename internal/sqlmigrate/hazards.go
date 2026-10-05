@@ -110,16 +110,24 @@ func (d *differ) graphContent(c *change, ft *Table, before *Column, tt *Table, a
 	if graph == nil {
 		graph = fromGraph
 	}
-	epoch := fmt.Sprintf("The graph's schemaEpoch stays %d.", graph.SchemaEpoch)
-	if fromGraph != nil && toGraph != nil && toGraph.SchemaEpoch != fromGraph.SchemaEpoch {
-		epoch = fmt.Sprintf("The graph's schemaEpoch rose from %d to %d.", fromGraph.SchemaEpoch, toGraph.SchemaEpoch)
-		if toGraph.SchemaEpoch < fromGraph.SchemaEpoch {
-			epoch = fmt.Sprintf("The graph's schemaEpoch fell from %d to %d.", fromGraph.SchemaEpoch, toGraph.SchemaEpoch)
-		}
-	}
 	c.addHazard(HazardHistory, "", fmt.Sprintf(
 		"%s is content of version graph %s: commits made before this change hash and merge rows of the old shape. %s",
-		field, graph.Name, epoch))
+		field, graph.Name, epochNote(fromGraph, toGraph)))
+}
+
+// epochNote says whether a version graph's schemaEpoch rose between the
+// two models. One of the graphs is nil when the table is a member in one
+// model only.
+func epochNote(from, to *Graph) string {
+	switch {
+	case from == nil:
+		return fmt.Sprintf("The graph's schemaEpoch stays %d.", to.SchemaEpoch)
+	case to == nil || to.SchemaEpoch == from.SchemaEpoch:
+		return fmt.Sprintf("The graph's schemaEpoch stays %d.", from.SchemaEpoch)
+	case to.SchemaEpoch > from.SchemaEpoch:
+		return fmt.Sprintf("The graph's schemaEpoch rose from %d to %d.", from.SchemaEpoch, to.SchemaEpoch)
+	}
+	return fmt.Sprintf("The graph's schemaEpoch fell from %d to %d.", from.SchemaEpoch, to.SchemaEpoch)
 }
 
 // graphOf returns the version graph t is a member of in m, with t's

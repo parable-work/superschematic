@@ -132,6 +132,7 @@ func (d *differ) diff() error {
 	if err := d.diffTables(); err != nil {
 		return err
 	}
+	d.diffGraphs()
 	d.diffFunctions()
 	d.diffTriggers()
 	d.diffViews(d.groupAlterations())

@@ -287,7 +287,11 @@ A [version graph](/superschematic/reference/version-graphs/)'s tables are
 ordinary tables after the loader adds them, and migrate as any other. A
 change to a member's content columns is `history`: commits made before it
 hash and merge rows of the old shape. The hazard says whether the graph's
-`schemaEpoch` rose.
+`schemaEpoch` rose. A column can join or leave the content while the
+column stays, as `@conflictUnit('excluded')` added or taken off it does.
+That changes no table, so it gets a step of its own in `expand`,
+`changeGraphContent`, with no statements: the step carries the hazard,
+which names the columns, and the runner logs it like any other.
 
 ## SQLite
 

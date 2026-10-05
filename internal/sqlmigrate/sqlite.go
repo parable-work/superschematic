@@ -143,6 +143,8 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		step := sqliteStep(c, "ALTER TABLE "+qs(c.table)+" DROP COLUMN "+qs(c.column.Name))
 		blocking(step, fmt.Sprintf("SQLite rewrites %s to drop the column, holding the database's write lock for time that grows with the table.", c.table))
 		return one(step), nil
+	case opGraphContent:
+		return noSQL(c), nil
 	case opDropTable:
 		// With foreign keys on, DROP TABLE deletes every row first and
 		// runs the ON DELETE actions of the tables that reference them,
