@@ -110,7 +110,10 @@ const routeControlsRouterTest = `use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use API_CRATE::{build_router, Implementations, SessionImplementation, TenantImplementation};
+use API_CRATE::{
+    build_router, types, Implementations, SessionImplementation, TenantCreateTenantArgs, TenantGetTenantArgs,
+    TenantImplementation, TenantListTenantsArgs, TenantUpdateSecretArgs,
+};
 use RUNTIME_CRATE::{
     bearer_token, has_any_permission, ApiError, Authenticator, ClientIp, Principal, RequestContext, RouteControls,
 };
@@ -159,43 +162,51 @@ struct Tenants {
     log: Log,
 }
 
-fn caller(ctx: &RequestContext) -> Option<String> {
-    ctx.principal.as_ref().map(|principal| principal.subject.clone())
+fn caller(ctx: &RequestContext) -> String {
+    ctx.principal.as_ref().map(|principal| principal.subject.clone()).unwrap_or_default()
+}
+
+fn uuid(text: &str) -> types::IdentityUUID {
+    serde_json::from_value(json!(text)).unwrap()
+}
+
+// A tenant view that names the caller in its internalDebugLabel.
+fn view(id: types::IdentityUUID, name: &str, ctx: &RequestContext) -> types::TenantView {
+    types::TenantView { id, name: name.to_string(), user_count: 0.0, internal_debug_label: caller(ctx) }
 }
 
 #[async_trait]
 impl SessionImplementation for Tenants {
-    async fn current_tenant(&self, ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
-        Ok(json!({"caller": caller(&ctx)}))
+    async fn current_tenant(&self, ctx: RequestContext) -> Result<types::TenantView, ApiError> {
+        Ok(view(uuid("0"), "me", &ctx))
     }
 }
 
 #[async_trait]
 impl TenantImplementation for Tenants {
-    async fn list_tenants(&self, ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
+    async fn list_tenants(&self, ctx: RequestContext, args: TenantListTenantsArgs) -> Result<Vec<types::TenantView>, ApiError> {
         self.log.lock().unwrap().push("list_tenants".to_string());
-        Ok(json!({"caller": caller(&ctx)}))
+        Ok(args.ids.into_iter().map(|id| view(id, "listed", &ctx)).collect())
     }
-    async fn create_tenant(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
+    async fn create_tenant(&self, ctx: RequestContext, args: TenantCreateTenantArgs) -> Result<types::TenantView, ApiError> {
         self.log.lock().unwrap().push("create_tenant".to_string());
-        Ok(json!({"name": payload["name"], "caller": caller(&ctx)}))
+        Ok(view(uuid("1"), &args.input.name, &ctx))
     }
-    async fn get_tenant(&self, ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
-        let id = ctx.path_params.get("id").cloned().unwrap_or_default();
+    async fn get_tenant(&self, ctx: RequestContext, args: TenantGetTenantArgs) -> Result<types::TenantView, ApiError> {
+        let id = args.id.to_string();
         self.log.lock().unwrap().push(format!("get_tenant {id}"));
         if id == "slow" {
             tokio::time::sleep(Duration::from_secs(10)).await;
         }
-        Ok(json!({"id": id, "caller": caller(&ctx)}))
+        Ok(view(args.id, "got", &ctx))
     }
     // @requireOwnership: the router has established the caller; owning the
     // tenant is this implementation's check.
-    async fn update_secret(&self, ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
-        let id = ctx.path_params.get("id").cloned().unwrap_or_default();
-        if caller(&ctx).as_deref() != Some(id.as_str()) {
+    async fn update_secret(&self, ctx: RequestContext, args: TenantUpdateSecretArgs) -> Result<types::TenantView, ApiError> {
+        if caller(&ctx) != args.id.to_string() {
             return Err(ApiError::forbidden("The caller does not own this tenant"));
         }
-        Ok(json!({"id": id}))
+        Ok(view(args.id, &args.secret, &ctx))
     }
 }
 
@@ -262,29 +273,30 @@ async fn an_auth_route_answers_401_without_a_caller() {
 
     let sent = get(&router, "/api/auth/me", Some("ana")).await;
     assert_eq!(sent.status, StatusCode::OK);
-    assert_eq!(sent.body["data"], json!({"caller": "ana"}));
+    assert_eq!(sent.body["data"]["internalDebugLabel"], "ana");
 }
 
 #[tokio::test]
 async fn a_permission_route_answers_403_to_a_caller_without_one_of_its_permissions() {
     let log = Log::default();
     let router = router(&log);
-    assert_eq!(get(&router, "/api/tenants/t1", None).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(get(&router, "/api/tenants/t1?includeArchived=false", None).await.status, StatusCode::UNAUTHORIZED);
 
-    let sent = get(&router, "/api/tenants/t1", Some("ana:tenants.write")).await;
+    let sent = get(&router, "/api/tenants/t1?includeArchived=false", Some("ana:tenants.write")).await;
     assert_eq!(sent.status, StatusCode::FORBIDDEN);
     assert_problem(&sent.body, "forbidden", "Insufficient permissions");
 
     // tenants covers tenants.read.
-    let sent = get(&router, "/api/tenants/t1", Some("ana:tenants")).await;
+    let sent = get(&router, "/api/tenants/t1?includeArchived=false", Some("ana:tenants")).await;
     assert_eq!(sent.status, StatusCode::OK);
-    assert_eq!(sent.body["data"], json!({"id": "t1", "caller": "ana"}));
+    assert_eq!(sent.body["data"], json!({"id": "t1", "name": "got", "userCount": 0.0, "internalDebugLabel": "ana"}));
 
     let create = |token| send(&router, "POST", "/api/tenants", token, Body::from(r#"{"name":"Acme","slug":"acme"}"#), None);
     assert_eq!(create(Some("ana:tenants.read")).await.status, StatusCode::FORBIDDEN);
     let sent = create(Some("ana:tenants.write")).await;
     assert_eq!(sent.status, StatusCode::OK);
-    assert_eq!(sent.body["data"], json!({"name": "Acme", "caller": "ana"}));
+    assert_eq!(sent.body["data"]["name"], "Acme");
+    assert_eq!(sent.body["data"]["internalDebugLabel"], "ana");
     assert_eq!(count(&log, "create_tenant"), 1);
 }
 
@@ -294,8 +306,8 @@ async fn the_authenticator_can_replace_the_permission_rule() {
     let mut implementations = implementations(&log);
     implementations.authenticator = Arc::new(RootTokens(Tokens { log: log.clone() }));
     let router = build_router(implementations);
-    assert_eq!(get(&router, "/api/tenants/t1", Some("ops:root")).await.status, StatusCode::OK);
-    assert_eq!(get(&router, "/api/tenants/t1", Some("ops:billing")).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(get(&router, "/api/tenants/t1?includeArchived=false", Some("ops:root")).await.status, StatusCode::OK);
+    assert_eq!(get(&router, "/api/tenants/t1?includeArchived=false", Some("ops:billing")).await.status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -329,7 +341,7 @@ async fn past_the_rate_limit_a_client_gets_429_with_retry_after() {
     assert_eq!(count(&log, "authenticate"), 60);
 
     assert_eq!(list([198, 51, 100, 2]).await.status, StatusCode::OK);
-    let other_route = send(&router, "GET", "/api/tenants/t1", Some("ana:tenants.read"), Body::empty(), Some([198, 51, 100, 1])).await;
+    let other_route = send(&router, "GET", "/api/tenants/t1?includeArchived=false", Some("ana:tenants.read"), Body::empty(), Some([198, 51, 100, 1])).await;
     assert_eq!(other_route.status, StatusCode::OK);
 }
 
@@ -345,9 +357,12 @@ async fn a_body_over_the_limit_answers_413_before_the_permission_check() {
     assert_eq!(sent.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(count(&log, "authenticate"), 0);
 
+    // A body under the limit reaches the input's validation, where a name
+    // that long breaks Identity.Name's maxLength.
     let under = format!(r#"{{"name":"{}","slug":"big"}}"#, "x".repeat(1024 * 1024 - 64));
     let sent = send(&router, "POST", "/api/tenants", Some("ana:tenants.write"), Body::from(under), None).await;
-    assert_eq!(sent.status, StatusCode::OK);
+    assert_eq!(sent.status, StatusCode::BAD_REQUEST);
+    assert_eq!(sent.body["errors"]["name"][0]["validator"], "maxLength", "{}", sent.body["errors"]);
 }
 
 // getTenant has the set's rate limit and body limit, a permission and a
@@ -361,7 +376,7 @@ async fn the_rate_limit_comes_before_the_body_limit_and_both_before_the_permissi
     let sent = send(&router, "GET", "/api/tenants/t1", None, over(), None).await;
     assert_eq!(sent.status, StatusCode::PAYLOAD_TOO_LARGE);
     for _ in 0..59 {
-        assert_eq!(get(&router, "/api/tenants/t1", None).await.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(get(&router, "/api/tenants/t1?includeArchived=false", None).await.status, StatusCode::UNAUTHORIZED);
     }
     let sent = send(&router, "GET", "/api/tenants/t1", None, over(), None).await;
     assert_eq!(sent.status, StatusCode::TOO_MANY_REQUESTS);
@@ -372,11 +387,11 @@ async fn the_rate_limit_comes_before_the_body_limit_and_both_before_the_permissi
 async fn a_route_past_its_timeout_answers_504() {
     let log = Log::default();
     let router = router(&log);
-    let sent = get(&router, "/api/tenants/slow", Some("ana:tenants.read")).await;
+    let sent = get(&router, "/api/tenants/slow?includeArchived=false", Some("ana:tenants.read")).await;
     assert_eq!(sent.status, StatusCode::GATEWAY_TIMEOUT);
     assert_problem(&sent.body, "gateway_timeout", "Gateway Timeout");
     assert_eq!(count(&log, "get_tenant slow"), 1);
-    assert_eq!(get(&router, "/api/tenants/t1", Some("ana:tenants.read")).await.status, StatusCode::OK);
+    assert_eq!(get(&router, "/api/tenants/t1?includeArchived=false", Some("ana:tenants.read")).await.status, StatusCode::OK);
 }
 
 // tenant.customHandler is @manualRouteRegistration and (in this test)

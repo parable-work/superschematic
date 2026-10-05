@@ -476,6 +476,7 @@ for (const driver of drivers) {
       for (let attempt = 0; attempt < 4; attempt += 1) {
         assert.equal(engine.runner.runDue().failed, 1);
         const [status] = engine.runner.status().schedules;
+        assert.ok(status.next !== null, 'a retrying schedule runs next at a time');
         failures.push([status.state, status.failures, status.next - clock.now]);
         clock.now = status.next;
       }

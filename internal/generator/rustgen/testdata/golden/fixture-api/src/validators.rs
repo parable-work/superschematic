@@ -5,8 +5,8 @@
 //! A validator checks a JSON value as the generated Go, TypeScript and
 //! Python validators do (D14): presence, then the JSON type, then the
 //! rules, with one error per failing value at its wire path (`field`,
-//! `field[i]`, `field.key`). `parse_<type>` fills the type's defaults,
-//! validates the value and decodes it.
+//! `field[i]`, `field.key`). `prepare_<type>` fills the type's defaults and
+//! validates the value; `parse_<type>` also decodes it.
 
 #![allow(clippy::too_many_lines, clippy::needless_borrow)]
 
@@ -239,9 +239,10 @@ pub fn validate_tenant_view_required(value: Option<&Value>) -> rt::ScalarResult 
     rt::require_object(value, validate_tenant_view)
 }
 
-/// Parses a JSON value as `TenantView`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_tenant_view(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::TenantView, rt::ParseError> {
+/// Prepares a JSON value as `TenantView`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_tenant_view` decodes.
+pub fn prepare_tenant_view(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -251,6 +252,12 @@ pub fn parse_tenant_view(value: Value, unknown_fields: rt::UnknownFields) -> Res
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `TenantView`: `prepare_tenant_view`, then decodes it.
+pub fn parse_tenant_view(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::TenantView, rt::ParseError> {
+    let value = prepare_tenant_view(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -281,9 +288,10 @@ pub fn validate_create_tenant_input_required(value: Option<&Value>) -> rt::Scala
     rt::require_object(value, validate_create_tenant_input)
 }
 
-/// Parses a JSON value as `CreateTenantInput`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_create_tenant_input(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::CreateTenantInput, rt::ParseError> {
+/// Prepares a JSON value as `CreateTenantInput`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_create_tenant_input` decodes.
+pub fn prepare_create_tenant_input(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -293,5 +301,11 @@ pub fn parse_create_tenant_input(value: Value, unknown_fields: rt::UnknownFields
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `CreateTenantInput`: `prepare_create_tenant_input`, then decodes it.
+pub fn parse_create_tenant_input(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::CreateTenantInput, rt::ParseError> {
+    let value = prepare_create_tenant_input(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }

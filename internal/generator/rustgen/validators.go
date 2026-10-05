@@ -127,18 +127,19 @@ type EnumValidator struct {
 	RustPath string
 }
 
-// TypeValidator is validate_<type>, validate_<type>_required and
-// parse_<type>.
+// TypeValidator is validate_<type>, validate_<type>_required,
+// prepare_<type> and parse_<type>.
 type TypeValidator struct {
-	Name     string
-	Fn       string
-	ParseFn  string
-	FieldsID string
-	RustPath string
-	Strict   bool
-	Fields   []FieldValidator
-	Defaults []FieldDefault
-	Patterns []PatternStatic
+	Name      string
+	Fn        string
+	PrepareFn string
+	ParseFn   string
+	FieldsID  string
+	RustPath  string
+	Strict    bool
+	Fields    []FieldValidator
+	Defaults  []FieldDefault
+	Patterns  []PatternStatic
 }
 
 // FieldValidator is one field's checks in validate_<type>.
@@ -242,12 +243,13 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 
 	for _, t := range in.types {
 		tv := TypeValidator{
-			Name:     t.Name,
-			Fn:       validatorFnName(t.Name),
-			ParseFn:  "parse_" + codegen.ToSnakeCase(t.Name),
-			FieldsID: constName(t.Name) + "_FIELDS",
-			RustPath: "crate::types::" + t.Name,
-			Strict:   t.StrictJSON,
+			Name:      t.Name,
+			Fn:        validatorFnName(t.Name),
+			PrepareFn: "prepare_" + codegen.ToSnakeCase(t.Name),
+			ParseFn:   "parse_" + codegen.ToSnakeCase(t.Name),
+			FieldsID:  constName(t.Name) + "_FIELDS",
+			RustPath:  "crate::types::" + t.Name,
+			Strict:    t.StrictJSON,
 		}
 		rulesIDs := map[string]bool{}
 		for _, f := range t.Fields {

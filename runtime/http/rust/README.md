@@ -12,8 +12,19 @@ This crate provides:
   route, which settles the request's id (`X-Request-ID` or a fresh UUID),
   echoes it in `x-request-id`, adds it to a problem body and marks every
   response `no-store`
-- `json_body` and `query_map`: a request's body as JSON whatever its
-  `Content-Type`, and its query, with a failure as an `ApiError`
+- `json_body` and `query_values`: a request's body as JSON whatever its
+  `Content-Type` (none when empty), and its query's keys and values, with a
+  failure as an `ApiError`
+- `ParamSpec`: how the generated router decodes one path, query or body
+  argument, as the TypeScript runtime's `params.ts` does, refusing a value
+  with a 400 whose `details` name it
+- `input`, `required_input` and `input_refusal`: an operation's input
+  parsed by its type's generated `parse_<type>`, with undeclared keys
+  refused and field errors in the problem's `errors`; `body_fields` and
+  `operation_response`, the body object scalar arguments come from and the
+  result in the success envelope
+- `schema`: the schema runtime crate the generated types crates validate
+  with, re-exported so a parameter spec and an input parse share its types
 - `RouterOptions`, `openapi_router`: the OpenAPI document and its RapiDoc
   page a generated router serves
 - `Authenticator` and `Principal`: how a service tells the router who the

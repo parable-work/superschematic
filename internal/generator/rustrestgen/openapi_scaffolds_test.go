@@ -17,7 +17,8 @@ import (
 // trait, Implementations is built from them, and build_router answers a
 // scaffolded route 501 and serves the OpenAPI document and its page,
 // which build_router_with's options restate or turn off. tenant has four
-// operations, so its implementation.rs must hold one impl for all of them.
+// operations, so its implementation.rs must hold one impl for all of them,
+// each taking its operation's Args and returning its result type.
 func TestScaffoldsPlugIntoTheRouterThatServesOpenAPI(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
 	if err != nil {
@@ -69,12 +70,26 @@ func TestScaffoldLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"use schemas_fixture_multiword_api_api::PoolSearchImplementation;",
-		"super::get_index::get_index(self, ctx, payload).await",
-		"super::rebuild_index::rebuild_index(self, ctx, payload).await",
+		"use schemas_fixture_multiword_api_api::types;",
+		"use schemas_fixture_multiword_api_api::{PoolSearchImplementation, PoolSearchRebuildIndexArgs, PoolSearchGetIndexArgs};",
+		"async fn get_index(&self, ctx: RequestContext, args: PoolSearchGetIndexArgs) -> Result<types::PoolSearchIndex, ApiError> {",
+		"super::get_index::get_index(self, ctx, args).await",
+		"super::rebuild_index::rebuild_index(self, ctx, args).await",
 	} {
 		if !strings.Contains(string(impl), want) {
 			t.Errorf("implementation.rs missing %q", want)
+		}
+	}
+	operation, err := os.ReadFile(filepath.Join(dir, "pool_search", "get_index.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"use schemas_fixture_multiword_api_api::PoolSearchGetIndexArgs;",
+		"    _args: PoolSearchGetIndexArgs,\n) -> Result<types::PoolSearchIndex, ApiError> {",
+	} {
+		if !strings.Contains(string(operation), want) {
+			t.Errorf("get_index.rs missing %q", want)
 		}
 	}
 	second, err := WriteScaffolds(output, dir)
@@ -138,7 +153,7 @@ async fn get(router: Router, path: &str) -> (StatusCode, String, String) {
 
 #[tokio::test]
 async fn a_scaffolded_route_is_not_implemented() {
-    let (status, _, body) = get(build_router(implementations()), "/api/tenants/abc").await;
+    let (status, _, body) = get(build_router(implementations()), "/api/tenants/abc?includeArchived=true").await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
     assert!(body.contains("get_tenant is not implemented"), "{body}");
 }

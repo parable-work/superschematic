@@ -5,8 +5,8 @@
 //! A validator checks a JSON value as the generated Go, TypeScript and
 //! Python validators do (D14): presence, then the JSON type, then the
 //! rules, with one error per failing value at its wire path (`field`,
-//! `field[i]`, `field.key`). `parse_<type>` fills the type's defaults,
-//! validates the value and decodes it.
+//! `field[i]`, `field.key`). `prepare_<type>` fills the type's defaults and
+//! validates the value; `parse_<type>` also decodes it.
 
 #![allow(clippy::too_many_lines, clippy::needless_borrow)]
 
@@ -182,9 +182,10 @@ pub fn validate_grid_view_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_grid_view)
 }
 
-/// Parses a JSON value as `GridView`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_grid_view(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::GridView, rt::ParseError> {
+/// Prepares a JSON value as `GridView`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_grid_view` decodes.
+pub fn prepare_grid_view(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -194,6 +195,12 @@ pub fn parse_grid_view(value: Value, unknown_fields: rt::UnknownFields) -> Resul
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `GridView`: `prepare_grid_view`, then decodes it.
+pub fn parse_grid_view(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::GridView, rt::ParseError> {
+    let value = prepare_grid_view(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -230,9 +237,10 @@ pub fn validate_point_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_point)
 }
 
-/// Parses a JSON value as `Point`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_point(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Point, rt::ParseError> {
+/// Prepares a JSON value as `Point`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_point` decodes.
+pub fn prepare_point(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -242,6 +250,12 @@ pub fn parse_point(value: Value, unknown_fields: rt::UnknownFields) -> Result<cr
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Point`: `prepare_point`, then decodes it.
+pub fn parse_point(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Point, rt::ParseError> {
+    let value = prepare_point(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -346,9 +360,10 @@ pub fn validate_save_grid_input_required(value: Option<&Value>) -> rt::ScalarRes
     rt::require_object(value, validate_save_grid_input)
 }
 
-/// Parses a JSON value as `SaveGridInput`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_save_grid_input(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::SaveGridInput, rt::ParseError> {
+/// Prepares a JSON value as `SaveGridInput`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_save_grid_input` decodes.
+pub fn prepare_save_grid_input(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -358,5 +373,11 @@ pub fn parse_save_grid_input(value: Value, unknown_fields: rt::UnknownFields) ->
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `SaveGridInput`: `prepare_save_grid_input`, then decodes it.
+pub fn parse_save_grid_input(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::SaveGridInput, rt::ParseError> {
+    let value = prepare_save_grid_input(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }

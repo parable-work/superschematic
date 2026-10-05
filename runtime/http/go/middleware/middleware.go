@@ -15,6 +15,7 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
 	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
+	"github.com/parable-work/superschematic/runtime/http/go/response"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -111,7 +112,8 @@ func RateLimit(requestLimit int, windowLength time.Duration, getLogger LoggerGet
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			logger := loggerFromContext(r.Context(), getLogger)
 			logger.Warn("rate limit exceeded", zap.String("path", r.URL.Path))
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			// httprate has set Retry-After and the X-RateLimit headers.
+			response.RequestError(w, r, http.StatusTooManyRequests, "Too Many Requests", "too_many_requests")
 		}),
 	)
 }
@@ -184,7 +186,7 @@ func Timeout(timeout time.Duration, getLogger LoggerGetter) func(http.Handler) h
 					zap.Duration("timeout", timeout),
 					zap.String("path", r.URL.Path),
 				)
-				http.Error(w, "Gateway Timeout", http.StatusGatewayTimeout)
+				response.RequestError(w, r, http.StatusGatewayTimeout, "Gateway Timeout", "gateway_timeout")
 			}
 		})
 	}

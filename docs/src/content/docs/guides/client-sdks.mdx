@@ -85,7 +85,7 @@ A response outside 2xx is an error that carries the status, the problem's
 | --- | --- | --- | --- | --- |
 | Go | `*APIError` | `*AuthenticationError` | `*AuthorizationError` | `*RateLimitError` (`RetryAfter`) |
 | TypeScript | `ApiError` (`statusCode`) | `AuthenticationError` | `AuthorizationError` | `RateLimitError` (`retryAfter`) |
-| Python | `APIError` (`status_code`) | `AuthenticationError` | `AuthorizationError` | `RateLimitError` (`retry_after`) |
+| Python | `APIError` (`status_code`, `code`, `request_id`) | `AuthenticationError` | `AuthorizationError` | `RateLimitError` (`retry_after`) |
 | Rust | `SDKError::Api { status_code, .. }` | `is_auth_denied()` | `is_auth_denied()` | `is_transient()`, `retry_after()` |
 
 A Rust `SDKError::Api` reads the request id from `X-Request-ID` (else the

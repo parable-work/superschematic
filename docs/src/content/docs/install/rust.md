@@ -149,6 +149,8 @@ fn read(value: serde_json::Value) -> Result<Money, ParseError> {
 
 A `ParseError` says which step refused the value: `NotAnObject`,
 `UnknownFields`, `Invalid` with the errors, or `Decode` with serde's.
+`prepare_<type>` runs the same steps and returns the checked JSON value
+instead of decoding it.
 Each scalar the schema uses has `validators::scalars::validate_<scalar>`
 and `validate_<scalar>_required`, and each enum `validate_<enum>`; they
 take an `Option<&serde_json::Value>`. The scalar core's own checks come
@@ -214,8 +216,57 @@ let router = build_router(implementations)
     .route("/api/grid-imports", post(import_grid));
 ```
 
-The router hands each implementation the request body as a
-`serde_json::Value` and has no step that decrypts one. The build refuses
+Each mounted operation is a method of its namespace's trait. It takes the
+operation's arguments, decoded and checked, as one struct,
+`<Namespace><Operation>Args`: a field per path, query and body argument,
+typed as the schema declares it, and `input` for an input type. The method
+returns the operation's result type. An operation without arguments has
+no `args`, and one without a result returns `()`:
+
+```rust
+use schemas_catalog_api::{types, ProductGetProductArgs, ProductImplementation};
+use superschematic_http_runtime::{ApiError, RequestContext};
+
+#[async_trait]
+impl ProductImplementation for Products {
+    async fn get_product(&self, ctx: RequestContext, args: ProductGetProductArgs) -> Result<types::Product, ApiError> {
+        self.store.find(args.id, args.include_archived).await.ok_or_else(|| ApiError::not_found("No such product"))
+    }
+}
+```
+
+An optional argument is an `Option`, a list a `Vec`, a list of lists a
+`Vec<Vec<T>>` and a map a `HashMap<String, T>`. An optional
+`Generic.JSON` body argument is an `Option<serde_json::Value>` that keeps
+null apart from absent: `Some(Value::Null)` for a null. The crate
+re-exports the types crate as `types`.
+
+The router decodes each argument as the TypeScript server does. A path or
+query value is read as its kind, a query list from repeated keys and comma
+lists, and a body argument from its JSON value, each element checked at
+its path (`labels[2]`, `grid[1][0]`, `shades[en]`). A UUID or timestamp is
+checked by its scalar's validator, an enum against its values, and a
+value against its scalar's and its own `Validate<>` rules. A value that
+fails is a 400 problem whose `details` name it: `location` (`path`,
+`query` or `body`), `parameter`, `path` inside a list or map, `reason`, and
+`errors` with the rule it broke. An integer is an `i64`, as in the Go
+server.
+
+An input is parsed by its type's `parse_<type>` with undeclared top-level
+keys refused, as the TypeScript server refuses them. A body the type
+refuses is a 400 problem, "Request body does not match the declared
+input", whose `details.reason` says why and whose top-level `errors`
+holds each field's errors by path, the member the Go server writes and
+every SDK reads:
+
+```json
+{"type": "about:blank", "title": "Bad Request", "status": 400, "code": "bad_request",
+ "detail": "Request body does not match the declared input",
+ "details": {"location": "body", "reason": "validation failed"},
+ "errors": {"lines[0]": {"quantity": [{"validator": "min", "message": "must be at least 1"}]}}}
+```
+
+The router has no step that decrypts a body. The build refuses
 an encrypted operation
 ([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads))
 unless it is `@manualRouteRegistration`. The service's own handler for
@@ -322,8 +373,8 @@ Every response carries the request's id in `x-request-id`: the caller's
 characters, else a fresh UUID. A success's `meta.requestId` and a
 problem's `requestId` are the same id, and no response is cached
 (`cache-control: no-store`). The router reads a body as JSON whatever its
-`Content-Type`, an empty body as `null`, and a body that is not JSON as a
-400 problem.
+`Content-Type`, an empty body as none (a 400 when the input or an argument
+is required), and a body that is not JSON as a 400 problem.
 
 `build_router` applies none of this to a `@manualRouteRegistration`
 operation, since it does not mount one. Its doc lists each such
@@ -368,7 +419,8 @@ With `scaffoldsOutputDir` set, the build writes starter implementations
 once, never overwriting them: a `mod.rs` with one module per namespace,
 and in each namespace's directory a `mod.rs`, `implementation.rs` with the
 `Implementation` struct and its one impl of the namespace trait, and a
-file per operation with the function that impl calls. Mount the directory
+file per operation with the function that impl calls, typed as the trait
+method is. Mount the directory
 as a module of the service's crate and build `Implementations` from it:
 
 ```rust

@@ -137,8 +137,8 @@ export interface ScheduleStatus {
   everyMs: number | null;
   /** When its last run committed; null before its first, and for an off one. */
   previous: number | null;
-  /** When it runs next; Infinity for an off one, which runs nothing (JSON writes it as null). */
-  next: number;
+  /** When it runs next; null for an off one, which runs nothing. */
+  next: number | null;
   /** Failed runs since its last success. */
   failures: number;
   error: string | null;
@@ -979,7 +979,7 @@ function offStatus(unit: ScheduleUnit): ScheduleStatus {
     state: 'off',
     everyMs: null,
     previous: null,
-    next: Number.POSITIVE_INFINITY,
+    next: null,
     failures: 0,
     error: null,
   };
