@@ -295,6 +295,12 @@ var planCases = []planCase{
 	{name: "change-on-delete", after: func(s *ir.Schema) {
 		fieldNamed(s, "Order", "customer").Relation.OnDelete = "CASCADE"
 	}},
+	// Expand renames the foreign key with its column, so contract replaces
+	// it under its new name.
+	{name: "rename-column-and-change-on-delete", after: func(s *ir.Schema) {
+		renameCustomerToBuyer(s)
+		fieldNamed(s, "Order", "buyer").Relation.OnDelete = "CASCADE"
+	}, renames: []Rename{{From: "order.customer_id", To: "order.buyer_id"}}},
 	{name: "drop-relation", after: func(s *ir.Schema) {
 		dropField(s, "Order", "customer")
 		typeNamed(s, "Order").Indexes = nil
