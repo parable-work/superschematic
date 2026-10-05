@@ -16,12 +16,27 @@ repository = "https://github.com/parable-work/superschematic"
 [dependencies]
 async-trait = "0.1.89"
 axum = { version = "0.8.9", features = ["json"] }
+base64 = "0.22.1"
 http = "1"
 http-body-util = "0.1.3"
+# Service credentials (D37): RS256, ES256 and Ed25519 signature checks, the
+# Ed25519 signing of the key-pair token source, and its random jti.
+ring = "0.17.14"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1.52.2", features = ["time"] }
+tokio = { version = "1.52.2", features = ["sync", "time"] }
+# Already in axum's tree: why a service credential was refused, for the log.
+tracing = { version = "0.1.41", default-features = false, features = ["std"] }
 uuid = { version = "1", features = ["serde", "v4"] }
+# The http-client feature's HTTP client, with the TLS the generated Rust
+# SDKs use, so a service that also calls other APIs builds one stack.
+reqwest = { version = "0.13.2", default-features = false, features = ["native-tls"], optional = true }
+
+[features]
+# HttpFetcher: the default JWKS fetcher of JwtServiceAuthenticator and the
+# default metadata client of GoogleIdTokenSource. Without it, a service
+# passes its own KeyFetcher or HttpGetter.
+http-client = ["dep:reqwest"]
 
 [dev-dependencies]
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time", "test-util"] }

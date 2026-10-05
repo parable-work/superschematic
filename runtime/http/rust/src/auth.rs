@@ -97,7 +97,11 @@ pub fn has_any_permission(held: &[String], required: &[String]) -> bool {
 /// The token of an `Authorization: Bearer <token>` header, for an
 /// authenticator that reads one; `None` without the header or another scheme.
 pub fn bearer_token(headers: &HeaderMap) -> Option<&str> {
-    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    parse_bearer(headers.get(AUTHORIZATION)?.to_str().ok()?)
+}
+
+/// The token of a `Bearer <token>` header value.
+pub(crate) fn parse_bearer(value: &str) -> Option<&str> {
     let (scheme, token) = value.split_once(' ')?;
     let token = token.trim();
     (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some(token)

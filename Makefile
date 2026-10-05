@@ -132,9 +132,11 @@ python:
 # build that uses it: a content hash and a canonical row must not depend on
 # the order a serde_json map keeps. The schema runtime's run again with
 # arbitrary_precision too, which superscalar's default lossless-json feature
-# turns on: an error map and a number check must not depend on either.
+# turns on: an error map and a number check must not depend on either. The
+# http runtime's run again with its optional http-client feature.
 rust:
-	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
+		&& cargo clippy --all-targets --features http-client -- -D warnings && cargo test --features http-client
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
