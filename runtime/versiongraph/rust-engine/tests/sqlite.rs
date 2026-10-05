@@ -756,7 +756,7 @@ async fn prune_keeps_an_image_exactly_its_retention_old_and_takes_the_oldest_fir
         .await
         .expect("draft");
     for instruction in ["Mix", "Mix well"] {
-        let rows = ["Mix", "Rest", "Bake"]
+        let rows = ["Mix", "Rest", "Bake", "Cool"]
             .iter()
             .map(|key| step_row(Some(key), instruction, json!({})))
             .collect();
@@ -771,25 +771,33 @@ async fn prune_keeps_an_image_exactly_its_retention_old_and_takes_the_oldest_fir
     // at exactly 365 days.
     now.store(START + 365 * DAY, Ordering::SeqCst);
     assert_eq!(prune(&s, "step", 0, 0).await.expect("prune"), 0);
-    // Make the row with the greatest id the oldest by a microsecond more than
-    // the next, so oldest first and id order disagree.
+    // Age three of the four images by a microsecond or more, so the second
+    // id is the oldest and the fourth the next: oldest first and either id
+    // order disagree. The third stays exactly 365 days old.
     let ids = version_ones(&s).await;
-    for (id, by) in [(&ids[2], 2), (&ids[1], 1)] {
+    for (id, by) in [(&ids[1], 3), (&ids[3], 2), (&ids[0], 1)] {
         let sql = format!(
             "UPDATE \"graph_member_history\" SET recorded_at = recorded_at - {by} WHERE id = '{id}' AND _version = 1"
         );
         run_sql(&s.client, &sql).await.expect("age an image");
     }
+    let left = |kept: &[usize]| kept.iter().map(|&i| ids[i].clone()).collect::<Vec<_>>();
     assert_eq!(prune(&s, "step", 0, 1).await.expect("prune"), 1);
     assert_eq!(
         version_ones(&s).await,
-        vec![ids[0].clone(), ids[1].clone()],
+        left(&[0, 2, 3]),
         "the oldest went first"
+    );
+    assert_eq!(prune(&s, "step", 0, 1).await.expect("prune"), 1);
+    assert_eq!(
+        version_ones(&s).await,
+        left(&[0, 2]),
+        "then the next oldest"
     );
     assert_eq!(prune(&s, "step", 0, 0).await.expect("prune"), 1);
     assert_eq!(
         version_ones(&s).await,
-        vec![ids[0].clone()],
+        left(&[2]),
         "an image exactly 365 days old stays"
     );
     now.fetch_add(1, Ordering::SeqCst);
