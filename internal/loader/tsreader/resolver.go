@@ -532,7 +532,7 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 			// A length or item count is a whole number: the JSON and YAML
 			// forms type these bounds as integers, so a fraction is refused
 			// here rather than truncated.
-			bound, valid := uploadMaxBytesLiteral(v)
+			bound, valid := safeIntegerLiteral(v)
 			if !valid {
 				return nil, errorAtNode(node, "Validate %s must be a finite JavaScript-safe integer literal, got %s", prop.Name, formatLiteral(v))
 			}
