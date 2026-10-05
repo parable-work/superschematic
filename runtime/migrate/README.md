@@ -26,6 +26,8 @@ A plan is one JSON object. The compiler writes it in canonical form
 | `from` | string | The hash of the model the plan starts from; `""` means an empty database. |
 | `to` | string | The hash of the model the plan ends at. |
 | `toModel` | object | The model the plan ends at. Its hash is `to`. |
+| `expanded` | string | Present only when the plan has contract steps: the hash of the model the database holds between the phases, the previous model with every expand step applied. |
+| `expandedModel` | object | With `expanded`: that model. Its hash is `expanded`. |
 | `renames` | array of strings | The renames the plan was given, as written. Informational. |
 | `steps` | array of steps | Every `expand` step, then every `contract` step. |
 | `hash` | string | The plan's hash. |
@@ -112,7 +114,8 @@ superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--d
 path selects SQLite. It must match the plan's dialect. `--phase` defaults
 to `all`.
 
-1. Read the plan and check its version, its `hash` and its `to`.
+1. Read the plan and check its version, its `hash`, its `to` and, when
+   it has one, its `expanded`.
 2. Take the lock. On Postgres, one connection holds
    `pg_advisory_lock(key)` for the whole run, where `key` is the first
    eight bytes, big-endian, of the SHA-256 of
@@ -129,6 +132,13 @@ to `all`.
    - the row's `plan_hash` is this plan: resume it;
    - no plan is in progress and the row's `model_hash` is the plan's `to`
      (and not its `from`): the plan has been applied; say so and exit 0;
+   - another plan is in progress with only its contract left
+     (`plan_phase` is `expand`), and the row's `model_hash` is this plan's
+     `from`: this plan supersedes that contract. Say so, naming the old
+     plan, clear `plan_hash` and `plan_phase`, and go on as for a plan with
+     none in progress. The old plan's contract never runs; the new plan was
+     planned from the schema the database holds, so whatever of it is
+     still wanted is in the new plan;
    - another plan is in progress: refuse, naming it and its phase;
    - the row's `model_hash` is not the plan's `from`: refuse, naming both,
      and say to plan again from the applied model
@@ -163,9 +173,13 @@ to `all`.
      `apply` of the same plan resumes at that step. The error names the
      step's index, subject and the statement that failed.
 8. When the last expand step finishes and the plan has contract steps,
-   set `plan_phase` to `expand`. When the plan's last step finishes, set
-   `model_hash` to `to`, `model` to `toModel` and `dialect`, and clear
-   `plan_hash` and `plan_phase`.
+   set `plan_phase` to `expand`, and, when the plan has `expanded`, set
+   `model_hash` to `expanded` and `model` to `expandedModel`: the database
+   holds that schema until the contract runs. A plan without `expanded`
+   (written before it existed) leaves `model_hash` and `model` as they
+   were. When the plan's last step finishes, set `model_hash` to `to`,
+   `model` to `toModel` and `dialect`, and clear `plan_hash` and
+   `plan_phase`.
 
 ## `status`
 

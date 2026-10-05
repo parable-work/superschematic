@@ -755,10 +755,10 @@ plug into it; they add no commands of their own.
    applied model.
 
 A rollout that fails runs no `contract` step, so the previous version's
-servers keep working on the expanded schema. The runner then holds that
-plan's `contract` as pending and refuses a new plan for the database until
-it runs; setting it aside for a rollback that keeps the previous servers is
-open.
+servers keep working on the expanded schema. The runner records that
+schema as the database's model, and the manifest records it too. The next
+deploy plans from it: its plan supersedes the pending `contract`, and any
+drop still wanted is in its own `contract` (D27, amended).
 
 The manifest is the migration baseline, the record of what is running, and
 the starting point for a rollback.

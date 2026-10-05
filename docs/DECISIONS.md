@@ -2272,6 +2272,26 @@ refused here. D30's deploy runs a plan's `expand` steps before the servers
 roll and its `contract` steps after (`docs/stack-model.md`, sections 5.3
 and 11.2). Each change that lands a piece updates this paragraph.
 
+### D27, amended: a plan between its phases
+
+D30 runs a plan's `expand` steps before the new servers roll out and its
+`contract` steps after. A rollout can fail between them, leaving the
+previous version's servers running on the expanded schema. The runner kept
+that plan in progress and refused every other plan until its contract ran,
+and it still recorded the previous model as applied, a schema the database
+no longer held. A deploy that kept the previous servers had no way forward
+but the drops those servers cannot survive.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A plan with contract steps carries the model the database holds between its phases: `expandedModel`, and its hash, `expanded`. It is the previous model with every expand step applied: the new version's tables, columns, indexes and objects, with what `contract` removes or tightens still there, and loose. The planner builds it from the tables it already hands a dialect's rebuild between the phases. A plan without contract steps carries neither, since its expand steps end at `to`. | Computing it in the runner, which cannot read a schema; leaving the applied model at `from` until the plan ends |
+| When a plan's last expand step commits, the runner records `expandedModel` as the applied model, with the plan's contract pending, so `status --model` prints the schema the database holds. | |
+| A new plan whose `from` is that model supersedes the pending contract: the runner says so, forgets the old plan and runs the new one. A deploy whose rollout failed plans again from the database's model, so the drops still wanted are in the new plan's contract, planned from what the database holds, and nothing of the old contract runs unless the new plan needs it. Taking the schema back to the previous version is a plan from that model too. The old plan's contract is refused afterwards: it is no longer in progress. | An `abandon` command, which a deploy would have to decide on its own to run; refusing every other plan until the contract runs, the rule before this amendment |
+| `expanded` and `expandedModel` are optional members of plan version 1. A runner that predates them ignores them and keeps the old rule, and this runner keeps the old rule for a plan without them. | Plan version 2, which every runner already built would refuse |
+| The tests check, on Postgres and on SQLite, that a plan's expand steps leave the same schema as the plan from an empty database to its `expandedModel`, and that a plan from `expandedModel` to the plan's `to` has no expand steps and the plan's contract steps. | Trusting the model the planner builds between the phases, which no apply would check |
+
+The rule is reversible until the first release.
+
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
 superschematic generates the code of a tree of services but nothing that
