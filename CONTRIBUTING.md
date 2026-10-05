@@ -238,8 +238,8 @@ builds on the checkout.
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
 (Settings -> Actions -> General) must permit; it is off by default on a new
-repository, and the parable-work organization must allow it first (it does
-not yet).
+repository, and the organization that owns the repository must allow it
+first (it does not yet).
 
 A release is three steps, each started by a person. For the first release,
 `v0.1.0-alpha.1`:
