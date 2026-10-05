@@ -1995,7 +1995,8 @@ never changes under it.
 that carry the namespace and the schema name as path parameters and
 resolve them per request, so publishing a version mounts nothing. Every
 route goes through `@superschematic/http-runtime` (D15): the request id,
-the rate limit, the timeout, the body limit, the authentication gate, the
+the rate limit (keyed by the connection's peer address), the body limit,
+the authentication gate, the timeout around the engine call, the
 `{data, meta: {requestId}}` envelope and RFC 9457 problem documents.
 
 ```ts
