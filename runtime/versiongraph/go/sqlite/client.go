@@ -46,6 +46,15 @@ const savepoint = "superschematic_versiongraph"
 // connection from the pool for its whole length, turns its foreign keys on
 // and begins with BEGIN IMMEDIATE; a transaction begun inside it is a
 // savepoint on that connection.
+//
+// Give the pool's connections a busy timeout (modernc.org/sqlite:
+// _pragma=busy_timeout(5000) in the DSN, which sets none by default), or a
+// transaction that finds another connection holding the write lock fails
+// SQLITE_BUSY at once instead of waiting for it. Open a file: over a pool,
+// :memory: gives each connection a database of its own. And begin a nested
+// transaction with the context the outer one's function was given: one
+// begun with a fresh context takes another connection, so with
+// SetMaxOpenConns(1) it waits for one until its context ends.
 func DB(db *sql.DB) Client {
 	return &dbClient{db: db}
 }

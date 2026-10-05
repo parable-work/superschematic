@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/sqlite"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/storage"
 )
 
 // edgeClients are the bindings that begin transactions of their own, each
@@ -214,5 +217,37 @@ func TestPoolDropsAnUnendedConnection(t *testing.T) {
 				t.Fatalf("t holds %d rows after the transaction the pool dropped, want none", n)
 			}
 		})
+	}
+}
+
+// TestPoolWritersWait: over a pool whose connections have a busy timeout,
+// as the docs' DSN gives them, transactions of many goroutines each wait
+// for the write lock in turn, and every one commits.
+func TestPoolWritersWait(t *testing.T) {
+	s := newSetup(t, sqlite.Options{}, "")
+	var wg sync.WaitGroup
+	errs := make(chan error, 40)
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < 5; i++ {
+				errs <- s.storage.Transact(context.Background(), func(ctx context.Context, tx storage.Tx) error {
+					_, err := tx.CreateRef(ctx, storage.NewRef{Root: fmt.Sprintf("Root%d", g), Name: fmt.Sprintf("line%d", i), Actor: cook})
+					time.Sleep(2 * time.Millisecond)
+					return err
+				})
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("a writer's transaction = %v, want it to wait for the lock and commit", err)
+		}
+	}
+	if n := count(t, s.db, `SELECT count(*) FROM "graph_ref"`); n != 40 {
+		t.Fatalf("%d refs, want every writer's 40", n)
 	}
 }

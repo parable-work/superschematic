@@ -375,8 +375,17 @@ given is a savepoint inside it; inside an open transaction each is a
 savepoint. `Storage` refuses a connection whose foreign keys are off, a
 SQLite older than 3.37.0, and one built without the JSON functions.
 
+Give a pool's connections a busy timeout, as the DSN below does for
+`modernc.org/sqlite`, which sets none: without one, a transaction that
+finds another connection holding the write lock fails `SQLITE_BUSY` at
+once rather than waiting. Open a file, since over a pool `:memory:` gives
+each connection a database of its own. Begin a nested transaction with the
+context the outer one's function was given: one begun with a fresh context
+takes another connection, and under `SetMaxOpenConns(1)` waits for one
+until its context ends.
+
 ```go
-db, err := sql.Open("sqlite", "recipes.sqlite") // modernc.org/sqlite
+db, err := sql.Open("sqlite", "recipes.sqlite?_pragma=busy_timeout(5000)") // modernc.org/sqlite
 client := sqlite.DB(db)
 adapter, err := sqlite.New(descriptor, sqlite.Options{Graph: "recipe"})
 err = adapter.CreateTables(ctx, client)

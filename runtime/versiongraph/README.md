@@ -604,7 +604,14 @@ SQLite through `Client` and `Conn`, the shape of package `postgres`'s seam
 with `?1` placeholders. `DB`, `DBConn` and `DBTx` bind a `database/sql`
 pool, connection and transaction; the package imports no driver, so the
 caller picks one (its tests use `modernc.org/sqlite`). Over a pool, each
-transaction holds one connection for its whole length. Over a pool or a
+transaction holds one connection for its whole length, so give the pool's
+connections a busy timeout (`modernc.org/sqlite`, which sets none, takes
+`?_pragma=busy_timeout(5000)` in the DSN), or a transaction that finds
+the write lock held fails `SQLITE_BUSY` at once; open a file, since over a
+pool `:memory:` gives each connection a database of its own; and nest a
+transaction with the outer one's context, since one begun with a fresh
+context takes another connection and, under `SetMaxOpenConns(1)`, waits
+for one until its context ends. Over a pool or a
 connection, each transaction turns the connection's foreign keys on and
 begins with `BEGIN IMMEDIATE`, and one begun with the context another's
 function was given is a savepoint on the same connection, at the outer
