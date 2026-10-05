@@ -32,10 +32,9 @@ adapter owns the request pipeline:
   decoding -> JSON parse -> strict input parser -> implementation]
   -> envelope
 
-hono/body-limit answers 413 to a declared Content-Length over the cap, and
-reads a body without one up front, answering 413 once it passes the cap.
-
-and turns every failure into the problem envelope. Operations marked
+and turns every failure into the problem envelope. hono/body-limit answers
+413 to a declared Content-Length over the cap, and reads a body without one
+up front, answering 413 once it passes the cap. Operations marked
 @manualRouteRegistration are mounted through mountManualOperation: the
 webhook verifier, rate limit, timeout and gate still run, then the service's
 own handler receives the Hono context (a streaming response cannot be
