@@ -230,8 +230,9 @@ func serverName(ctx registry.PlatformContext) any {
 }
 
 // lowerServer lowers a server to an account, a service whose environment
-// carries every binding, a secret and an accessor grant per secret
-// binding, and for an exposed server a route and a CNAME record under the
+// carries every binding (a derived one as the variables
+// ir.DerivedVariables encodes it in), a secret and an accessor grant per
+// secret binding, and for an exposed server a route and a CNAME record under the
 // environment's domain. Under a parameter the secrets are the parent
 // environment's.
 func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
@@ -249,7 +250,16 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	for _, b := range d.Bindings {
 		entry := map[string]any{"name": b.Field}
 		switch b.Source {
-		case ir.BindingLiteral, ir.BindingDerived:
+		case ir.BindingDerived:
+			vars, err := ir.DerivedVariables(b.Field, b.Value)
+			if err != nil {
+				return registry.Lowered{}, fmt.Errorf("binding %s: %w", b.Field, err)
+			}
+			for _, v := range vars {
+				env = append(env, map[string]any{"name": v.Name, "value": v.Value})
+			}
+			continue
+		case ir.BindingLiteral:
 			entry["value"] = b.Value
 		case ir.BindingParameter:
 			entry["value"] = ir.Parameter(b.Parameter)
@@ -333,8 +343,8 @@ func lowerDatabase(ctx registry.PlatformContext) (registry.Lowered, error) {
 }
 
 // connectSQL grants the server's account the client role on the instance
-// and derives the connection: the instance's address and the schema's
-// database.
+// and derives a Cloud SQL connection: the instance's address, the
+// schema's database, and the server's account as its database user.
 func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 	return registry.Connected{
 		Resources: []*ir.Resource{{
@@ -346,19 +356,21 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 				"resource": ir.Output{Resource: ctx.To.Name + ".instance", Name: "id"},
 			},
 		}},
-		Value: map[string]any{
-			"instance": ctx.To.Address,
-			"database": ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "name"},
-		},
+		Value: ir.DatabaseConnection{CloudSQL: &ir.CloudSQLConnection{
+			Instance: ctx.To.Address,
+			Database: ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "name"},
+			User:     ir.Output{Resource: ctx.From.Name + ".account", Name: "email"},
+		}},
 	}, nil
 }
 
 // connectHTTP grants the caller's account the invoker role on the callee
-// and derives the callee's address. A server that calls an API it serves
-// itself reaches it over loopback and needs no grant.
+// and derives the callee's address, with an ID token for it as the
+// service credential. A server that calls an API it serves itself reaches
+// it over loopback, needs no grant and sends no credential.
 func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 	if ctx.From.Name == ctx.To.Name {
-		return registry.Connected{Value: map[string]any{"url": "http://127.0.0.1:8080"}}, nil
+		return registry.Connected{Value: ir.ServiceEndpoint{URL: "http://127.0.0.1:8080"}}, nil
 	}
 	return registry.Connected{
 		Resources: []*ir.Resource{{
@@ -370,7 +382,10 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 				"resource": ir.Output{Resource: ctx.To.Name + ".service", Name: "id"},
 			},
 		}},
-		Value: map[string]any{"url": ctx.To.Address},
+		Value: ir.ServiceEndpoint{
+			URL:        ctx.To.Address,
+			Credential: &ir.ServiceCredential{Source: ir.CredentialGoogleIDToken, Audience: ctx.To.Address},
+		},
 	}, nil
 }
 
