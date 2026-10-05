@@ -63,6 +63,18 @@ export const descriptor = readFileSync(new URL("../../testdata/fixture/recipe.js
 /** The engine options the script writes with, as the scenarios run; a reader needs the schema epoch. */
 export const engineOptions = { schemaEpoch: 1, snapshotEvery: 3 };
 
+/** The content column a kind gains partway through the script: menu's first writes are made without it. */
+export const gained = { kind: "utensil", column: "name" };
+
+/** The fixture's descriptor before its kind gained the column, as JSON text. */
+const beforeGain = (() => {
+  const d = JSON.parse(descriptor) as { kinds: { kind: string; columns: Record<string, string> }[] };
+  const k = d.kinds.find((kind) => kind.kind === gained.kind)!;
+  assert.ok(gained.column in k.columns, `the fixture's ${gained.kind} declares ${gained.column}`);
+  delete k.columns[gained.column];
+  return JSON.stringify(d);
+})();
+
 const kinds = (JSON.parse(descriptor) as { kinds: { kind: string; key: string }[] }).kinds
   .map((k) => ({ name: k.kind, key: k.key }))
   .sort((a, b) => compareCodePoints(a.name, b.name));
@@ -163,8 +175,11 @@ const row = (columns: Record<string, unknown>): string => JSON.stringify(columns
  * that updates a step with a partial row, tombstones an ingredient, adds a
  * step and unsets it as another actor, commits twice and merges as a second
  * tagged commit, which the release moves to, then saves work it does not
- * commit; and a draft that saves and is discarded. In menu: a primary line,
- * a change set, a tagged merge and a release.
+ * commit; and a draft that saves and is discarded. In menu, first with a
+ * descriptor whose utensil lacks its name: a primary line, a change set with
+ * a utensil, a tagged merge and a release. Then with the fixture's, after
+ * the utensil gained its name: a second change set that names it and adds
+ * another, and a second tagged merge, which the release does not move to.
  */
 export function writeDatabase(client: SqliteClient): void {
   withSeededIDs(() => {
@@ -184,7 +199,7 @@ export function writeDatabase(client: SqliteClient): void {
         ],
       },
       note: {
-        upsert: [row({ entity_key: "Note", body: "Proof overnight\tif you can" }), row({ entity_key: "Reply", body: "Agreed", reply_to: "Note" })],
+        upsert: [row({ entity_key: "Note", body: "Proof overnight\tif there's time" }), row({ entity_key: "Reply", body: "Agreed", reply_to: "Note" })],
       },
       step: {
         upsert: [
@@ -233,17 +248,29 @@ export function writeDatabase(client: SqliteClient): void {
     }).ref;
     g.discard(cook, scrap.id, scrap.version);
 
-    const menu = new SqliteAdapter(descriptor, { graph: "menu", clock });
-    const h = new SyncEngine(core, descriptor, menu.storage(client), engineOptions);
-    const lunch = h.createPrimary(cook, bread, "main");
+    // Before the gain: rows, images and commits without the utensil's name.
+    const menu = new SqliteAdapter(beforeGain, { graph: "menu", clock });
+    const h = new SyncEngine(core, beforeGain, menu.storage(client), engineOptions);
+    let lunch = h.createPrimary(cook, bread, "main");
     let today = h.branch(cook, lunch.id, "today");
     today = h.save(cook, today.id, today.version, {
       step: { upsert: [row({ entity_key: "Knead", position: 1, instruction: "Slice", timings: {} })] },
-      utensil: { upsert: [row({ entity_key: "Knife", name: "Bread knife" })] },
+      utensil: { upsert: [row({ entity_key: "Knife" })] },
     }).ref;
     today = h.commit(cook, today.id, today.version, { message: "today" }).ref;
     const served = merged(h.merge(cook, today.id, lunch.id, lunch.version, [], { message: "lunch", tag: true }));
+    lunch = served.ref;
     h.release(cook, bread, served.commit.id, 0);
+
+    // After it: the fixture's descriptor, which declares the name.
+    const gainedMenu = new SqliteAdapter(descriptor, { graph: "menu", clock });
+    const i = new SyncEngine(core, descriptor, gainedMenu.storage(client), engineOptions);
+    let dinner = i.branch(ann, lunch.id, "dinner");
+    dinner = i.save(ann, dinner.id, dinner.version, {
+      utensil: { upsert: [row({ entity_key: "Knife", name: "Bread knife" }), row({ entity_key: "Board", name: "Bread board" })] },
+    }).ref;
+    dinner = i.commit(ann, dinner.id, dinner.version, { message: "dinner" }).ref;
+    merged(i.merge(ann, dinner.id, lunch.id, lunch.version, [], { message: "supper", tag: true }));
   });
 }
 
