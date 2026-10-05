@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine, its SQLite adapter and the generated facade from TypeScript, the Rust engine and facade, and the core, the engine and the generated facade from Python.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres and SQLite adapters with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine, its SQLite adapter and the generated facade from TypeScript, the Rust engine and facade, and the core, the engine and the generated facade from Python.
 sidebar:
   order: 8
 ---
@@ -334,10 +334,10 @@ history images by `(id, _version)`, read and write commits, patches,
 snapshots and the release pointer, take the next sequence under a root
 lock, walk commits, read discarded refs and idle change sets, prune and
 take the sweep lock. It asks the adapter for one transaction per
-operation. Every language's engine has a Postgres adapter, and the
-TypeScript engine has a SQLite adapter too
-([below](#the-sqlite-adapter)); another database needs its own
-implementation of that interface.
+operation. Every language's engine has a Postgres adapter, and the Go
+and TypeScript engines have a SQLite adapter too
+([Go](#the-go-sqlite-adapter), [TypeScript](#the-sqlite-adapter));
+another database needs its own implementation of that interface.
 
 Package `postgres` is the Postgres adapter. It builds its statements at run
 time from the descriptor, reads live rows with `to_jsonb` and history
@@ -355,6 +355,33 @@ history actor setting, the schema's
 adapter, err := postgres.New(descriptor, postgres.Options{})
 eng, err := engine.New(descriptor, adapter.Storage(postgres.Pgx(pool)), engine.Options{SchemaEpoch: 1, SnapshotEvery: 32})
 ref, err := eng.CreatePrimary(ctx, actor, root, "main")
+```
+
+### The Go SQLite adapter
+
+Package `sqlite` keeps a graph in a SQLite file. It is the TypeScript
+[SQLite adapter](#the-sqlite-adapter) ported statement for statement, with
+the same fixed layout, stored forms and rules, so a file one writes reads
+the same through the other. It reaches SQLite through a `Client` and
+`Conn` of the shape of package `postgres`'s, and `sqlite.DB`,
+`sqlite.DBConn` and `sqlite.DBTx` bind a `database/sql` pool, connection or
+open transaction. The package imports no driver: the caller opens the
+database with one, such as `modernc.org/sqlite`, whose errors carry
+SQLite's extended result code as `Code() int`; `sqlite.Options.ResultCode`
+reads it from another driver's. Over a pool or a connection each
+transaction turns the connection's foreign keys on and begins with
+`BEGIN IMMEDIATE`, and one begun with the context another's function was
+given is a savepoint inside it; inside an open transaction each is a
+savepoint. `Storage` refuses a connection whose foreign keys are off and a
+SQLite older than 3.38.0.
+
+```go
+db, err := sql.Open("sqlite", "recipes.sqlite") // modernc.org/sqlite
+client := sqlite.DB(db)
+adapter, err := sqlite.New(descriptor, sqlite.Options{Graph: "recipe"})
+err = adapter.CreateTables(ctx, client)
+store, err := adapter.Storage(ctx, client)
+eng, err := engine.New(descriptor, store, engine.Options{SchemaEpoch: 1, SnapshotEvery: 32})
 ```
 
 ### The primary line and the release pointer
@@ -439,7 +466,9 @@ scenarios in `runtime/versiongraph/testdata/scenarios` run sequences of
 operations over canonical rows, with the expected trees, content hashes,
 conflicts and errors, against the fixture in
 `runtime/versiongraph/testdata/fixture`; the Go, TypeScript, Rust and
-Python engines run every one against Postgres. Their format is in
+Python engines run every one against Postgres, and the Go and TypeScript
+engines against SQLite too (`make versiongraph-scenarios` runs the Go
+engine's SQLite pass with or without a Postgres URL). Their format is in
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#scenarios).
 
 ## The generated facade
@@ -748,7 +777,9 @@ statement each, for a caller that runs its own migrations.
 `DatabaseSync` and an open `bun:sqlite` `Database`; another driver
 implements `SqliteClient` (`run`, `get` and `all` with numbered `?1`
 parameters, and `exec`), whose errors carry SQLite's extended result code
-in `code`. The SQLite adapters for Go, Python and Rust are still to come.
+in `code`. The Go adapter is package `sqlite`
+([above](#the-go-sqlite-adapter)); the SQLite adapters for Python and Rust
+are still to come.
 
 When a schema declares a graph, tsgen writes a typed facade per graph into
 the TypeScript types package, `versiongraph/<name>.ts`, exported as

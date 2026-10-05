@@ -13,6 +13,7 @@ go/canonical/       package canonical: Postgres renderings to canonical rows, pl
 go/storage/         package storage: the storage adapter interface the engine runs over, plain Go
 go/engine/          package engine: the Go engine, every graph operation over a storage adapter and the binding
 go/postgres/        package postgres: the Postgres storage adapter, with a pgx binding
+go/sqlite/          package sqlite: the SQLite storage adapter, with database/sql bindings
 rust-engine/        superschematic-versiongraph-engine: the Rust engine, storage traits and Postgres adapter
 typescript/         @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations, and the
                     TypeScript engine (./engine), its Postgres adapter (./postgres), its SQLite adapter (./sqlite)
@@ -446,8 +447,9 @@ member rows of refs discarded longer ago than the grace, prunes history
 past retention, and writes missing snapshots. The Go engine is package `engine`,
 over the interface in package `storage`; package `postgres` is its Postgres
 adapter, which builds its statements from the descriptor and needs each
-kind's `root`. The TypeScript engine, storage interface and Postgres
-adapter are `typescript/src/engine.ts`, `storage.ts` and `postgres.ts`.
+kind's `root`, and package `sqlite` its SQLite adapter (below). The
+TypeScript engine, storage interface and Postgres adapter are
+`typescript/src/engine.ts`, `storage.ts` and `postgres.ts`.
 The TypeScript engine's operations are written once, as generators that
 yield each storage call, and two drivers run them (D32): `Engine` awaits
 each call over `Storage` and `Tx`, whose methods return promises, and
@@ -592,18 +594,43 @@ settings. `nodeSqlite` and `bunSqlite` bind an open `node:sqlite`
 `DatabaseSync` and an open `bun:sqlite` `Database`, using only the methods
 they call, so no entry imports either module.
 
+The Go adapter, package `sqlite`, ports the TypeScript one statement for
+statement: the same layout under the same name function, the same stored
+forms and the same rules, so a file one writes reads the same through the
+other. It is a `storage.Storage` the Go engine runs over, and reaches
+SQLite through `Client` and `Conn`, the shape of package `postgres`'s seam
+with `?1` placeholders. `DB`, `DBConn` and `DBTx` bind a `database/sql`
+pool, connection and transaction; the package imports no driver, so the
+caller picks one (its tests use `modernc.org/sqlite`). Over a pool, each
+transaction holds one connection for its whole length. Over a pool or a
+connection, each transaction turns the connection's foreign keys on and
+begins with `BEGIN IMMEDIATE`, and one begun with the context another's
+function was given is a savepoint on the same connection, at the outer
+one's time. Inside a `database/sql` transaction the caller holds, each is
+a savepoint, as `postgres.Pgx` runs inside a pgx transaction. `Storage`
+refuses a connection whose foreign keys are off and a SQLite older than
+3.38.0 (`MinVersion`): `STRICT` needs 3.37.0, `RETURNING` 3.35.0, and the
+statements' `json_each` and `json_extract` are built in from 3.38.0. A
+name already taken is SQLite's extended result code 2067, which the
+adapter reads from the driver's error through its `Code() int`, as
+`modernc.org/sqlite`'s has, or through `Options.ResultCode` for a driver
+that carries it otherwise.
+
 ## Scenarios
 
 `testdata/scenarios` holds one scenario per file, named by its `name`:
 `{"name", "description", "roots", "steps": [step, ...]}`. A runner runs on
 one backend. The backends a scenario may name are `postgres` and `sqlite`;
-every runner runs on `postgres`, and the TypeScript runner on `sqlite` too.
-On Postgres a runner applies `testdata/fixture/create.sql` to an empty
-schema and builds its engine and Postgres adapter from
+every runner runs on `postgres`, and the TypeScript and Go runners on
+`sqlite` too. On Postgres a runner applies `testdata/fixture/create.sql` to
+an empty schema and builds its engine and Postgres adapter from
 `testdata/fixture/recipe.json`; on SQLite the TypeScript runner creates the
 SQLite adapter's layout, under its default names, in an in-memory database
 and builds a `SyncEngine` and the SQLite adapter, graph `recipe`, from the
-same descriptor. Either way the engine runs at schema epoch 1 and snapshot
+same descriptor; the Go runner creates it in a file of its own and runs
+each scenario twice, once on the adapter's own transactions over a
+`database/sql` pool and once inside transactions it holds, under another
+name function. Either way the engine runs at schema epoch 1 and snapshot
 interval 3, the fixture graph's; the runner seeds the scenario's roots and
 runs each step in order. It reads the whole scenario before the first
 step, and refuses one with an unknown member or one that breaks a rule
@@ -725,7 +752,7 @@ make python                  # among the Python packages: the binding's unit tes
 cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
-make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
+make versiongraph-scenarios  # every scenario through the Go engine and the SQLite adapter, with the adapter's tests, then through the Postgres adapter
 make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
 make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
@@ -738,8 +765,8 @@ check run against the Postgres that
 `make versiongraph-scenarios-rust` and `make versiongraph-scenarios-python`
 fail without it. The scenarios on SQLite and the SQLite adapter's tests
 need no server and run with or without it, and
-`make versiongraph-scenarios-ts` runs them before it checks for the
-variable. The fixture is the
+`make versiongraph-scenarios` and `make versiongraph-scenarios-ts` run
+them before they check for the variable. The fixture is the
 compiler's output for `fixture-version-graph-db`, and a compiler test
 (`go test ./internal/generator -run TestVersionGraphScenarioFixtureIsCurrent`)
 fails when the checked-in copy is stale; `-update` rewrites it.
