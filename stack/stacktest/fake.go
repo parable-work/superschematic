@@ -354,8 +354,12 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 }
 
 // connectHTTP grants the caller's account the invoker role on the callee
-// and derives the callee's address.
+// and derives the callee's address. A server that calls an API it serves
+// itself reaches it over loopback and needs no grant.
 func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Name == ctx.To.Name {
+		return registry.Connected{Value: map[string]any{"url": "http://127.0.0.1:8080"}}, nil
+	}
 	return registry.Connected{
 		Resources: []*ir.Resource{{
 			ID:   ctx.From.Name + ".invokes." + ctx.Edge.Service.Name,

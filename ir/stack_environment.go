@@ -89,7 +89,8 @@ type ResolvedDeployable struct {
 	// server serves, sorted by name.
 	Services []ServiceRef `json:"services"`
 
-	// Calls are the API services a server calls, sorted by name.
+	// Calls are the API services a server calls: the union of the `calls`
+	// of the APIs it serves, sorted by name.
 	Calls []ServiceRef `json:"calls,omitempty"`
 
 	// Language is a server's language; Dialect is the SQL dialect a

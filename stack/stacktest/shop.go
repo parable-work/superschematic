@@ -69,8 +69,10 @@ func Of(ref ir.ServiceRef) ir.DeployableRef { return ir.DeployableRef{Service: &
 
 // Shop returns the stack of docs/stack-model.md, section 4.1, on the fake
 // target: shop-api and shop-orders are deployed and shop-api is exposed;
-// the declared server Orders serves shop-orders; Staging and Production
-// are environments, and Preview extends Staging with a parameter.
+// the declared server Orders serves shop-orders in place of its default
+// server, and takes its edges from shop-orders' authDb and calls; Staging
+// and Production are environments, and Preview extends Staging with a
+// parameter.
 func Shop() *ir.Stack {
 	return &ir.Stack{
 		Name:   "Shop",
@@ -80,7 +82,6 @@ func Shop() *ir.Stack {
 			Name:   "Orders",
 			Kind:   ir.DeployableServer,
 			Serves: []ir.ServiceRef{ShopOrders},
-			Calls:  []ir.ServiceRef{ShopAPI},
 		}},
 		Environments: []*ir.Environment{
 			{

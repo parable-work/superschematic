@@ -53,16 +53,9 @@ func (k EdgeKind) Valid() bool {
 	return k == EdgeSQL || k == EdgeHTTP
 }
 
-// ServiceRef is a service handle: the `service({name, kind})` sentinel a
-// schema imports, written `{name, kind}` in the data forms.
-type ServiceRef struct {
-	// Name is the service's name.
-	Name string `json:"name" yaml:"name"`
-
-	// Kind is the kind the handle claims for the service. Resolution checks
-	// it against the service it names.
-	Kind SchemaKind `json:"kind" yaml:"kind"`
-}
+// A service handle is a ServiceRef (ir/schema.go), written `{name, kind}`
+// in the data forms. Resolution checks its kind against the service it
+// names.
 
 // DeployableRef names a deployable: by a service handle, which means the
 // deployable that hosts or serves that service, or by the name of a
@@ -117,7 +110,9 @@ func (s *Stack) Environment(name string) *Environment {
 
 // DeployableDecl is a declared deployable, such as an `@server` class. It
 // is declared only to change a default: to run several APIs in one
-// process, to host several DB schemas on one database, or to add `calls`.
+// process, or to host several DB schemas on one database. It only groups:
+// a server's edges are the union of its APIs' edges, from their `authDb`
+// and `calls` (section 3.3).
 type DeployableDecl struct {
 	// Name is the declaring class's name.
 	Name string `json:"name" yaml:"name"`
@@ -130,10 +125,6 @@ type DeployableDecl struct {
 
 	// Hosts lists the DB services a database hosts.
 	Hosts []ServiceRef `json:"hosts,omitempty" yaml:"hosts,omitempty"`
-
-	// Calls lists the API services a server calls, beyond the `calls` its
-	// served services declare.
-	Calls []ServiceRef `json:"calls,omitempty" yaml:"calls,omitempty"`
 }
 
 // Environment places the stack's deployables on a target and sets the

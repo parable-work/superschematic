@@ -124,11 +124,13 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 
 // orderServers numbers each server's rollout wave from 1: a server rolls
 // out one wave after the latest of its callees, so a new caller never
-// meets an old callee. A cycle of calls has no such order and fails.
+// meets an old callee. A server's calls to the APIs it serves itself do
+// not order it. A cycle of calls between servers has no such order and
+// fails.
 func (r *resolver) orderServers() {
 	callees := map[string][]string{}
 	for _, id := range sortedKeys(r.edges) {
-		if e := r.edges[id].res; e.Kind == ir.EdgeHTTP {
+		if e := r.edges[id].res; e.Kind == ir.EdgeHTTP && e.From != e.To {
 			callees[e.From] = append(callees[e.From], e.To)
 		}
 	}

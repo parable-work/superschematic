@@ -349,11 +349,6 @@ func (r *resolver) collectMembers() {
 				add(ref.Name)
 			}
 		}
-		for _, ref := range decl.Calls {
-			if r.checkRef(fmt.Sprintf("server %s calls", decl.Name), ref, ir.SchemaKindAPI) {
-				add(ref.Name)
-			}
-		}
 	}
 	for len(queue) > 0 {
 		svc := r.services[queue[0]]
@@ -415,8 +410,8 @@ func (r *resolver) declareDeployables() {
 			if len(decl.Hosts) == 0 {
 				r.fail(CodeInvalidStack, "database %s hosts no DB schema", decl.Name)
 			}
-			if len(decl.Serves) > 0 || len(decl.Calls) > 0 {
-				r.fail(CodeInvalidStack, "database %s serves or calls APIs; a server does", decl.Name)
+			if len(decl.Serves) > 0 {
+				r.fail(CodeInvalidStack, "database %s serves APIs; a server does", decl.Name)
 			}
 			claims = decl.Hosts
 		default:
@@ -658,33 +653,25 @@ func (r *resolver) expose() {
 	}
 }
 
-// resolveCalls gives each server the APIs it calls: its declaration's
-// `calls` and the `calls` of every API it serves.
+// resolveCalls gives each server the APIs it calls: the union of the
+// `calls` of the APIs it serves. A call to an API the same server serves
+// stays a call, to the server's own address.
 func (r *resolver) resolveCalls() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableServer {
 			continue
 		}
-		var refs []ir.ServiceRef
-		if d.decl != nil {
-			refs = append(refs, d.decl.Calls...)
-		}
-		for _, served := range d.res.Services {
-			refs = append(refs, r.services[served.Name].Calls...)
-		}
 		seen := map[string]bool{}
-		for _, ref := range refs {
-			svc, ok := r.services[ref.Name]
-			if !ok || svc.Kind != ir.SchemaKindAPI || ref.Kind != svc.Kind || seen[ref.Name] {
-				continue // collectMembers reported a bad handle
+		for _, served := range d.res.Services {
+			for _, ref := range r.services[served.Name].Calls {
+				svc, ok := r.services[ref.Name]
+				if !ok || svc.Kind != ir.SchemaKindAPI || ref.Kind != svc.Kind || seen[ref.Name] {
+					continue // collectMembers reported a bad handle
+				}
+				seen[ref.Name] = true
+				d.res.Calls = append(d.res.Calls, ir.ServiceRef{Name: svc.Name, Kind: svc.Kind})
 			}
-			seen[ref.Name] = true
-			if r.byService[ref.Name] == name {
-				r.fail(CodeInvalidStack, "server %s calls %s, which it serves", name, ref.Name)
-				continue
-			}
-			d.res.Calls = append(d.res.Calls, ir.ServiceRef{Name: svc.Name, Kind: svc.Kind})
 		}
 		slices.SortFunc(d.res.Calls, func(a, b ir.ServiceRef) int { return strings.Compare(a.Name, b.Name) })
 	}

@@ -167,6 +167,30 @@ func TestDeclaredDeployables(t *testing.T) {
 	}
 }
 
+// TestCallWithinOneServer: when one server serves both the caller and the
+// callee, the call stays an http edge, to the server itself, and does not
+// order the server after itself (section 3.3).
+func TestCallWithinOneServer(t *testing.T) {
+	reg := assemble(t)
+	s, services := shop()
+	s.Deployables = []*ir.DeployableDecl{{Name: "Backend", Kind: ir.DeployableServer, Serves: []ir.ServiceRef{stacktest.ShopAPI, stacktest.ShopOrders}}}
+	s.Expose = []ir.DeployableRef{{Deployable: "Backend"}}
+	s.Environments[0].Settings = []*ir.DeployableSettings{{Of: ir.DeployableRef{Deployable: "Backend"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}}}
+	env := mustResolve(t, reg, s, services, "Staging")
+	if got, want := edgeIDs(env), "http:Backend->shop-api=>Backend; sql:Backend->shop-db=>shop-db"; got != want {
+		t.Errorf("edges = %s, want %s", got, want)
+	}
+	var rollouts []string
+	for _, step := range env.DeployOrder {
+		if step.Step == ir.StepRollout {
+			rollouts = append(rollouts, fmt.Sprintf("%d:%s", step.Wave, strings.Join(step.Deployables, ",")))
+		}
+	}
+	if got := strings.Join(rollouts, " "); got != "1:Backend" {
+		t.Errorf("rollout waves = %s, want Backend alone in wave 1", got)
+	}
+}
+
 // TestSQLEdgeFromTheOneDBDependency: an API with no authDb connects to its
 // one DB-kind dependency, and one with only a General dependency connects
 // to nothing (section 3.3).
@@ -239,9 +263,9 @@ func TestCheckKindMismatch(t *testing.T) {
 	})
 	t.Run("a kind the place does not take", func(t *testing.T) {
 		s, services := shop()
-		s.Deployables[0].Calls = []ir.ServiceRef{stacktest.ShopDB}
+		service(services, "shop-orders").Calls = []ir.ServiceRef{stacktest.ShopDB}
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeKindMismatch, "server Orders calls names shop-db, a DB service; it takes API services")
+		mustFail(t, errs, stack.CodeKindMismatch, "service shop-orders calls names shop-db, a DB service; it takes API services")
 	})
 }
 
@@ -413,8 +437,6 @@ func TestFieldCollision(t *testing.T) {
 	t.Run("two types declare one field for one server", func(t *testing.T) {
 		s, services := shop()
 		s.Deployables[0].Serves = append(s.Deployables[0].Serves, stacktest.ShopAPI)
-		s.Deployables[0].Calls = nil
-		service(services, "shop-orders").Calls = nil
 		service(services, "shop-orders").Config.Fields = append(service(services, "shop-orders").Config.Fields, stack.ConfigField{Name: "LOG_LEVEL"})
 		s.Expose = []ir.DeployableRef{{Deployable: "Orders"}}
 		_, errs := resolve(t, reg, s, services, "Staging")
@@ -471,10 +493,6 @@ func TestInvalidStack(t *testing.T) {
 			s.Deployables = append(s.Deployables, &ir.DeployableDecl{Name: "Orders2", Kind: ir.DeployableServer, Serves: []ir.ServiceRef{stacktest.ShopOrders}})
 			return sv
 		}, "shop-orders is claimed by both Orders and Orders2"},
-		{"server calls what it serves", func(s *ir.Stack, sv []stack.Service) []stack.Service {
-			s.Deployables[0].Calls = append(s.Deployables[0].Calls, stacktest.ShopOrders)
-			return sv
-		}, "server Orders calls shop-orders, which it serves"},
 		{"declared deployable named like a default", func(s *ir.Stack, sv []stack.Service) []stack.Service {
 			s.Deployables = append(s.Deployables, &ir.DeployableDecl{Name: "shop-api", Kind: ir.DeployableDatabase, Hosts: []ir.ServiceRef{stacktest.ShopDB}})
 			return sv
