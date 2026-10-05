@@ -227,7 +227,7 @@ Each step lists the hazard classes it falls in.
 | `blocking` | holds a lock that blocks writes, or reads, for time that grows with the table | a type change that rewrites the table, a column added with a volatile default or as a stored generated column, an index built without `CONCURRENTLY`, seeding a history table |
 | `compat` | breaks a server built from the previous version, which may still be running | a rename, a retype, a required column without a default, a new unique constraint over columns it writes |
 | `data-dependent` | fails at apply when existing rows violate it | `SET NOT NULL`, a unique constraint, validating a foreign key, a narrowing cast, a required column without a default on a table with rows |
-| `copy-table` | rebuilds the table by copying it | SQLite only: a change its `ALTER TABLE` cannot make |
+| `copy-table` | rebuilds the table by copying it, with the tables that reference it | SQLite only: a change its `ALTER TABLE` cannot make |
 | `api-breaking` | drops, renames or retypes a column a deployed reader reads, or changes the columns a projection view publishes | [Readers](#readers) |
 | `history` | changes the shape of rows a history table keeps | retyping a column of a versioned table; changing a version graph member's content columns |
 
@@ -386,8 +386,9 @@ nor a foreign key, so renaming one is no step. SQLite keeps no comments.
 ### Steps
 
 Every SQLite step runs in a transaction, which the runner opens with
-`BEGIN IMMEDIATE`. SQLite changes a table in place only where its
-`ALTER TABLE` can:
+`BEGIN IMMEDIATE`, and with foreign keys on ([Foreign keys stay
+on](#foreign-keys-stay-on)). SQLite changes a table in place only where
+its `ALTER TABLE` can:
 
 | Change | Step |
 | --- | --- |
@@ -396,45 +397,70 @@ Every SQLite step runs in a transaction, which the runner opens with
 | a column dropped | `DROP COLUMN` (`blocking`: SQLite rewrites the table). Its indexes are dropped before it, and a foreign key over it makes its table's rebuild drop it instead |
 | an index or a unique field added or dropped | `CREATE INDEX`, `CREATE UNIQUE INDEX`, `DROP INDEX`; building an index on a table the previous version has is `blocking` |
 | an index or a unique field renamed | the index dropped and built again under its new name (`blocking`): SQLite cannot rename an index |
-| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops |
+| a table dropped | `DROP TABLE`, after every table that references it. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops. That step, and one that drops a table that references itself, starts with `PRAGMA defer_foreign_keys = ON` |
 
 Every other change to a table rebuilds it: a type, a list's element, a
 nullability, a default, a foreign key added over a column the table has,
 changed or dropped, and a column `ADD COLUMN` cannot add. The rebuild is
-SQLite's copy-table procedure, in one step:
+SQLite's copy-table procedure, run for the table and every table that
+references it, directly or through another table, in one step:
 
-1. create the table as the phase leaves it under a temporary name
-   (`_new_order`), with its primary key and foreign keys;
-2. copy the rows, mapping each column to its name after the renames, filling
-   the columns the table gains from their defaults, casting a column
-   whose type changes, and converting each element of a list whose
-   element changes ([A list's element](#a-lists-element));
-3. drop the old table;
-4. rename the new one;
-5. create its unique indexes and indexes again.
+1. `PRAGMA defer_foreign_keys = ON`, which defers the foreign key checks
+   to the step's commit;
+2. create each table as the phase leaves it under a temporary name
+   (`_new_order`), with its primary key and foreign keys, which name the
+   other new tables;
+3. copy the rows, referenced tables first, mapping each column to its
+   name after the renames, filling the columns a table gains from their
+   defaults, casting a column whose type changes, and converting each
+   element of a list whose element changes ([A list's
+   element](#a-lists-element));
+4. drop the old tables, referencing tables first;
+5. rename each new table, which rewrites the foreign keys that name it;
+6. create the unique indexes and indexes again.
 
-Every change the phase makes to a table shares one rebuild: a table is
-rebuilt at most once in `expand` and once in `contract`, and the rebuild
-also adds the columns and indexes the phase adds to it. Renames of the
-table and its columns run before it, in place. The rebuild is `copy-table`
-and `blocking`, and carries the hazards of every change it makes.
-
-The step runs with foreign keys off (`foreignKeysOff` in the plan). With
-them on, dropping the old table would delete its rows first and run the
-`ON DELETE` actions of the tables that reference it: a `CASCADE` would
-delete their rows and a `RESTRICT` would fail. SQLite turns them off only
-outside a transaction, so the runner does that around the step, runs
-`PRAGMA foreign_key_check` before the commit, and fails the step on any
-violation. The tables that reference the rebuilt one name it, and the name
-resolves again once the new table takes it. A table renamed with `RENAME
-TO` keeps the references to it too: SQLite rewrites the foreign keys of
-the tables that reference it.
+A table that references the rebuilt one and does not change is copied as
+it is. Every change the phase makes to the tables of a rebuild shares it:
+a table is copied at most once in `expand` and once in `contract`, the
+rebuild also adds the columns and indexes the phase adds, and it drops a
+table that `contract` drops instead of copying it. Rebuilt tables that
+reference one another share one step. Renames of the tables and their
+columns run before it, in place. The rebuild is `copy-table` and
+`blocking`, whose reasons name every table it copies, and carries the
+hazards of every change it makes.
 
 SQLite's `CAST` never fails: text that is not a number becomes `0`, and a
 fraction is cut toward zero as an `INTEGER`. So a type change that cannot
 keep every value is `destructive`, not `data-dependent`. A `NOT NULL` a
 rebuild adds, a required column without a default, and a unique index
 fail on the rows that break them, as on Postgres (`data-dependent`).
+
+### Foreign keys stay on
+
+Every SQLite step runs with foreign key enforcement on, so one plan serves
+a SQLite file and Cloudflare D1. D1 keeps enforcement on: no query can
+turn it off. A step never turns it off, and the plan carries no
+`foreignKeysOff`; a plan from an earlier compiler may, and the runner
+still applies it to a SQLite file. A table renamed with `RENAME TO` keeps
+the references to it: SQLite rewrites the foreign keys of the tables that
+reference it.
+
+With enforcement on, `DROP TABLE` deletes the table's rows first, which
+runs the `ON DELETE` actions of the tables that reference them: a
+`CASCADE` would delete their rows and a `SET NULL` would clear their keys.
+So a rebuild copies those tables too, and drops the old ones before the
+table they reference: no action reaches a row the plan keeps. Renaming the
+old table out of the way first does not work: SQLite rewrites the foreign
+keys that reference it to follow it, even under `legacy_alter_table`, and
+its drop then runs their actions.
+
+The other checks wait for the commit. SQLite checks a `NO ACTION` key
+there, and, while the checks are deferred, a `RESTRICT` key too: it runs
+no `RESTRICT` action until then. By the commit the step has dropped every
+old row a key protects. So a table that references itself, and tables that
+reference one another, rebuild and drop with their rows, whatever their
+keys' actions and whether or not their keys are `NOT NULL`. Without the
+deferral, dropping a row a `RESTRICT` key protects would fail at once.
 
 ### A list's element
 
@@ -655,5 +681,9 @@ adopt.
 - SQLite refuses `@versioned`, `@optimistic`, `@searchField`, projections,
   `GIN` and `GIST` indexes, and `LTREE` and the PostGIS types
   ([Refusals](#refusals)).
+- A SQLite rebuild copies every table that references the rebuilt one,
+  directly or through another table, so rebuilding a table many others
+  reference holds the database's write lock while it copies them all
+  ([Steps](#steps)).
 - The engine's own storage is the engine's: it creates its tables and runs
   its behaviors' migrations, and no plan covers them.

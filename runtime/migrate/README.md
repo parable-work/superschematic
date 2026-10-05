@@ -43,7 +43,7 @@ A step:
 | `statements` | array of strings | Complete SQL statements without trailing semicolons. The runner runs each with one call, in order. A statement may contain semicolons inside a dollar-quoted body. The array may be empty: the step changes nothing and carries its hazards, and the runner logs it like any other. |
 | `transactional` | boolean | Whether the step runs in one transaction. |
 | `recovery` | array of strings | Absent unless `transactional` is false. Statements to run before a step that started and did not finish is run again. |
-| `foreignKeysOff` | boolean | SQLite only, absent when false. Run the step with foreign key enforcement off and check every foreign key before the commit. |
+| `foreignKeysOff` | boolean | SQLite only, absent when false. Run the step with foreign key enforcement off and check every foreign key before the commit. Only plans written before D27's amendment on foreign keys set it: the compiler now writes every SQLite step to run with enforcement on, a rebuild deferring the checks to its commit with `PRAGMA defer_foreign_keys = ON` as its first statement. |
 | `hazards` | array | The step's hazards: `id`, `class`, `subject`, `reader`, `reason`. Informational to the runner. |
 
 ### Canonical JSON and hashes
@@ -184,12 +184,14 @@ on D1):
 7. Run each step of the requested phases in order, skipping a step whose
    log row has `finished_at`:
    - A transactional step: begin (on SQLite, `PRAGMA foreign_keys = OFF`
-     first when `foreignKeysOff`); on Postgres `SET LOCAL lock_timeout =
-     '5s'`; run the statements; on SQLite with `foreignKeysOff`, run
-     `PRAGMA foreign_key_check` and fail the step if it returns a row;
-     write the log row with `started_at` and `finished_at`; commit; then
-     `PRAGMA foreign_keys = ON`. The step and its log row commit together,
-     so it runs once.
+     first when `foreignKeysOff`, which only an older plan sets); on
+     Postgres `SET LOCAL lock_timeout = '5s'`; run the statements; on
+     SQLite with `foreignKeysOff`, run `PRAGMA foreign_key_check` and fail
+     the step if it returns a row; write the log row with `started_at` and
+     `finished_at`; commit; then `PRAGMA foreign_keys = ON`. The step and
+     its log row commit together, so it runs once. A SQLite step otherwise
+     runs with foreign keys on, as the connection has them, and the commit
+     checks what the step's `PRAGMA defer_foreign_keys = ON` deferred.
    - A step that is not transactional (Postgres only): `SET lock_timeout =
      '5s'`; if its log row exists without `finished_at`, run `recovery`
      first; otherwise write the log row with `started_at`. Then run each
