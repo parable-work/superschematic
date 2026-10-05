@@ -112,7 +112,7 @@ class Board(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only

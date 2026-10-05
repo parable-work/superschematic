@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine and the generated facade from TypeScript, the Rust engine and facade, and the core, the engine and the generated facade from Python.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine, its SQLite adapter and the generated facade from TypeScript, the Rust engine and facade, and the core, the engine and the generated facade from Python.
 sidebar:
   order: 8
 ---
@@ -17,7 +17,7 @@ validates trees. The Go, TypeScript, Rust and Python engines run every
 graph operation on the core over a storage adapter, and a generated facade in
 each language gives each graph typed methods over its engine.
 
-The design and the alternatives not taken are D17 and D19 in
+The design and the alternatives not taken are D17, D19 and D32 in
 [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md).
 
 ## Declare a graph
@@ -321,9 +321,10 @@ history images by `(id, _version)`, read and write commits, patches,
 snapshots and the release pointer, take the next sequence under a root
 lock, walk commits, read discarded refs and idle change sets, prune and
 take the sweep lock. It asks the adapter for one transaction per
-operation. Postgres is the only adapter, in Go and in every other
-language's engine; another database needs its own implementation of that
-interface.
+operation. Every language's engine has a Postgres adapter, and the
+TypeScript engine has a SQLite adapter too
+([below](#the-sqlite-adapter)); another database needs its own
+implementation of that interface.
 
 Package `postgres` is the Postgres adapter. It builds its statements at run
 time from the descriptor, reads live rows with `to_jsonb` and history
@@ -612,6 +613,7 @@ point of its own, so the core's entry loads in a browser without them:
 | --- | --- |
 | `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, and the canonical rules (`canonicalRow`, `canonicalValue`) with the exact JSON codec they read with. |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
+| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
 `pg` is an optional peer dependency. The bindings use only the methods they
@@ -676,6 +678,60 @@ const engine = new SyncEngine(initSync(), descriptor, storage, { schemaEpoch: 1,
 const main = engine.createPrimary(actor, root, "main");
 ```
 
+### The SQLite adapter
+
+`SqliteAdapter` is a `SyncStorage` over SQLite, so a `SyncEngine` keeps a
+graph in a SQLite file under bun or Node. Where the Postgres adapters use
+the tables sqlgen generates for each graph, it owns one fixed layout of
+nine `STRICT` tables, the same for every graph: `ref`, `ref_history`,
+`commit`, `patch`, `snapshot_entry`, `release`, `release_history`, `member`
+and `member_history`. Every row carries its graph's name, so one file
+holds several graphs; a function the caller gives names each table and
+index (`graph_ref` and so on by default). A member row keeps its kind's
+role columns as columns and its other columns as one canonical JSON
+object, so a kind needs no table of its own. Foreign keys check every edge
+inside the layout; there is no root table, so the adapter itself refuses a
+write through another graph's or another root's ref or commit.
+
+```ts
+import { DatabaseSync } from "node:sqlite";
+import { initSync } from "@superschematic/versiongraph";
+import { SyncEngine } from "@superschematic/versiongraph/engine";
+import { SqliteAdapter, nodeSqlite } from "@superschematic/versiongraph/sqlite";
+
+const client = nodeSqlite(new DatabaseSync("recipes.sqlite"));
+const adapter = new SqliteAdapter(descriptor, { graph: "recipe" });
+adapter.createTables(client);
+const engine = new SyncEngine(initSync(), descriptor, adapter.storage(client), { schemaEpoch: 1, snapshotEvery: 32 });
+```
+
+SQLite has no trigger that can set `NEW`, so the adapter does in its own
+statements what the generated triggers do on Postgres: it sets `_version`
+(1, then the old version plus 1), writes each insert's and update's image
+at the new version and a delete's at the old version plus 1 with the
+kind's actor column set to the delete's actor, and leaves the kind's
+`@versioned({ exclude })` columns out of every image. It reads those facts
+from the descriptor's `history` (version 3), and prunes a kind's images
+past its `retentionDays`, keeping every pinned one, as the prune function
+does. Refs and release pointers keep history too. A transaction reads its
+time once, from a clock option, and every write in it takes that time; ids
+are version-4 UUIDs the adapter generates; and every value is stored in its
+canonical form, so a row reads back as the canonical row it was written as.
+
+On a connection of its own the adapter begins each transaction with
+`BEGIN IMMEDIATE`, which takes the file's write lock, and runs one begun
+inside another as a savepoint. With `callerTransaction: true` it runs
+inside the transaction its caller holds and issues no transaction control,
+for a host such as D16's engine that holds the transaction. With one
+writer per file, a ref needs no lock of its own and the sweep lock is
+always free. `sqliteLayout(tableName)` returns the layout's statements, one
+statement each, for a caller that runs its own migrations.
+`nodeSqlite(db)` and `bunSqlite(db)` bind an open `node:sqlite`
+`DatabaseSync` and an open `bun:sqlite` `Database`; another driver
+implements `SqliteClient` (`run`, `get` and `all` with numbered `?1`
+parameters, and `exec`), whose errors carry SQLite's extended result code
+in `code`. The SQLite adapters for Go, Python and Rust are still to come.
+
 When a schema declares a graph, tsgen writes a typed facade per graph into
 the TypeScript types package, `versiongraph/<name>.ts`, exported as
 `./versiongraph`, and the package depends on the runtime package the
@@ -712,11 +768,13 @@ no TypeScript ORM, so refs, commits and release pointers come back as the
 engine's `Ref`, `Commit` and `Release`.
 
 ```
-make versiongraph-scenarios-ts   # every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
+make versiongraph-scenarios-ts   # every scenario on SQLite and the SQLite adapter's tests; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
 ```
 
-The target needs `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and fails
-without it; CI runs it in the versiongraph job.
+The SQLite pass needs no database server. The Postgres pass needs
+`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL`, and the target fails
+without it once the SQLite pass has run; CI runs it in the versiongraph
+job.
 
 ## Use the engine from Rust
 

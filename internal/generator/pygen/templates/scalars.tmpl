@@ -124,7 +124,7 @@ def _custom_validate_{{pythonScalarModule .}}(v: Any) -> Any:
 {{range .Scalars}}
 # {{.Name}}{{if scalarDoc .}} - {{pythonComment (scalarDoc .)}}{{end}}
 {{if and .Pattern (not .HasCustomValidate) -}}
-_{{pythonScalarSymbol .}}_pattern = re.compile(r"{{pythonRawString .Pattern}}")
+_{{pythonScalarSymbol .}}_pattern = re.compile(r"{{pythonRawString .Pattern}}", re.ASCII)
 
 
 def _validate_{{pythonScalarModule .}}_pattern(v: Any) -> Any:
@@ -312,7 +312,7 @@ def _validate_location(v: Any) -> Dict[str, float]:
         min_length={{.MinLength}},
         {{- end}}
         {{- if .Pattern}}
-        pattern=r"{{pythonRawString .Pattern}}",
+        pattern=re.compile(r"{{pythonRawString .Pattern}}", re.ASCII),
         {{- end}}
         {{- if .Minimum}}
         ge={{.Minimum}},

@@ -13,12 +13,15 @@ schema's instances in the namespace, read 500 at a time in creation
 order, each with its own fields only. It has no principal and asks no
 policy: the publish was allowed, and what the behavior reads goes into
 its own storage, never back to the publisher. A search index is rebuilt
-this way when the fields it indexes change.
+this way when the fields it indexes change. Its validate(type, value)
+checks a value with the version being published, as a call's does with
+the live version.
 */
 
 import type { Storage } from '../storage/storage.js';
 import type { FrozenJSON, PublishContext, StoredInstance } from './behavior.js';
 import type { ConfigTransition } from './composition.js';
+import { typeCheck, type Runtime } from './execution.js';
 import { deepFreeze } from './json.js';
 import { BehaviorSql, prefixOf, storedKey, synchronous } from './storage.js';
 
@@ -34,6 +37,8 @@ export interface PublishTarget {
   readonly now: number;
   /** The namespaces whose instances the schema serves: the holder, or every namespace for the shared one. */
   readonly namespaces: readonly string[];
+  /** The version's behaviors and validator, which the context's validate checks values with. */
+  readonly runtime: Pick<Runtime, 'composition' | 'validator'>;
 }
 
 /**
@@ -61,6 +66,7 @@ export function afterConfigChanges(storage: Storage, transitions: readonly Confi
         sql: new BehaviorSql(storage, behavior.name, prefix, 'write'),
         eachInstance: (visit: (instance: StoredInstance) => void) =>
           eachInstance(storage, namespace, target, (instance) => synchronous(behavior.name, 'eachInstance', visit(instance))),
+        validate: typeCheck(target.runtime, behavior.name),
       });
       synchronous(behavior.name, 'afterConfigChange', hook.call(behavior.implementation, context));
     }

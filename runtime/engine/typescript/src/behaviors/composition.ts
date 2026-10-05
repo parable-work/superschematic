@@ -18,27 +18,40 @@ operation of the same name. It refuses two things more:
 A config passes parseConfig after its configSchema. When the schema is
 defined or published, parseConfig also reaches the namespace's other
 schemas (ConfigTarget.schemas), so a config that names one is checked
-against it; a published version composed again to run it is not. An
-operation named like a built-in never gets here: registration refuses
-its declaration.
+against it; a published version composed again to run it is not. Every
+time, it reaches the document's other types (ConfigTarget.types), and
+each type it reads there counts as reachable from the instance type for
+the version: the field-type checks of document.ts cover it and the types
+it reaches, as they cover the types a behavior checks values against
+(checkedTypes). An operation named like a built-in never gets here:
+registration refuses its declaration.
 
 configChanges is the behaviors' half of the compatibility rule: a new
 version keeps a behavior's config unless the implementation allows the
 change, and adds or removes a behavior on a schema with instances only
 when the implementation opts in. checkedTypes names the types a
-behavior's validate holds values to under both versions, which the rule
-(registry/compat.ts) then diffs as it diffs a type a field reaches; a
-behavior's checkedTypes must name types of the document besides the
-instance type.
+behavior's validate holds values to under both versions, and readTypes
+the types the live version's behaviors read through ConfigTarget.types,
+which the rule (registry/compat.ts) then diffs as it diffs a type a field
+reaches; a behavior's checkedTypes must name types of the document
+besides the instance type.
 */
 
 import type { Document, TypeDef } from '@superschematic/schema-ir/schema-file';
 
 import { BehaviorError, type SchemaChange, type SchemaIssue } from '../errors.js';
 import { isPlainObject, jsonEqual } from '../instances/patch.js';
-import { fieldTypeIssue, jsonKey, pointer, reachableTypes } from '../registry/document.js';
+import { arrayDepth, fieldTypeIssue, jsonKey, pointer, reachableTypes, refKind } from '../registry/document.js';
 import { FieldSchemas, renderProperty } from '../tools/schema.js';
-import { BehaviorConfigError, type ConfigSchema, type ConfigSchemas, type ConfigTarget } from './behavior.js';
+import {
+  BehaviorConfigError,
+  type ConfigSchema,
+  type ConfigSchemas,
+  type ConfigTarget,
+  type ConfigType,
+  type ConfigTypeField,
+  type ConfigTypes,
+} from './behavior.js';
 import { deepFreeze } from './json.js';
 import { BehaviorRegistry, type OperationSpec, type RegisteredBehavior } from './registry.js';
 import { synchronous } from './storage.js';
@@ -54,6 +67,8 @@ export interface BoundBehavior {
   readonly config: unknown;
   /** The types of the document its validate checks values against: what checkedTypes returned for the config. */
   readonly checked: readonly string[];
+  /** The types of the document its parseConfig read through ConfigTarget.types, sorted. */
+  readonly read: readonly string[];
 }
 
 /** The behaviors of a schema's instance type, in list order. */
@@ -65,7 +80,14 @@ export class Composition {
 
   constructor(
     readonly type: string,
-    readonly behaviors: readonly BoundBehavior[]
+    readonly behaviors: readonly BoundBehavior[],
+    /**
+     * Every type the version's checks cover: the instance type, the types
+     * its fields reach, and the types each behavior checks values against
+     * or read through ConfigTarget.types, with the types those reach. The
+     * compatibility rule holds a new version to each of them.
+     */
+    readonly covered: ReadonlySet<string> = new Set([type])
   ) {
     const fields = new Map<string, BoundBehavior>();
     const operations = new Map<string, OperationSpec>();
@@ -128,7 +150,7 @@ export function compose(
     own.add(field.name);
     own.add(jsonKey(field));
   }
-  const configTarget = targetOf(target, schemas);
+  const typeNames = otherTypes(target);
 
   const bound: BoundBehavior[] = [];
   const seen = new Set<string>();
@@ -144,13 +166,13 @@ export function compose(
       issues.push({ path, message: `behavior ${ref.name} on type ${target.instanceType}: no implementation registered` });
       return;
     }
-    const parsed = parseConfig(behavior, ref.config, configTarget);
+    const parsed = parseConfig(behavior, ref.config, target, schemas);
     if ('problem' in parsed) {
       issues.push({ path: `${path}/config`, message: `type ${target.instanceType}: ${parsed.problem}` });
       return;
     }
     const checked = checkedTypesOf(behavior, parsed.config);
-    const unknown = checked.filter((name) => !configTarget.types.includes(name));
+    const unknown = checked.filter((name) => !typeNames.includes(name));
     if (unknown.length > 0) {
       issues.push({
         path: `${path}/config`,
@@ -158,25 +180,26 @@ export function compose(
       });
       return;
     }
-    bound.push({ behavior, index, json: parsed.json, config: parsed.config, checked });
+    bound.push({ behavior, index, json: parsed.json, config: parsed.config, checked, read: parsed.read });
   });
 
-  // A value checked against a type is held to its fields as an instance's
-  // field is, so the types a behavior checks, and the ones they reach,
-  // hold only field types the schema runtime validates, as the ones the
+  // A value checked against a type, or kept as a value of a type a
+  // behavior read through ConfigTarget.types, is held to its fields as an
+  // instance's field is, so those types, and the ones they reach, hold
+  // only field types the schema runtime validates, as the ones the
   // instance type reaches do (registry/document.ts checks those).
   const fromInstance = new Set(reachableTypes(target.document, target.instanceType));
-  const checkedOnly = new Set<string>();
-  for (const { checked } of bound) {
-    for (const root of checked) {
+  const behaviorsOnly = new Set<string>();
+  for (const { checked, read } of bound) {
+    for (const root of [...checked, ...read]) {
       for (const typeName of reachableTypes(target.document, root)) {
         if (!fromInstance.has(typeName)) {
-          checkedOnly.add(typeName);
+          behaviorsOnly.add(typeName);
         }
       }
     }
   }
-  for (const typeName of [...checkedOnly].sort()) {
+  for (const typeName of [...behaviorsOnly].sort()) {
     (types[typeName].fields ?? []).forEach((field, index) => {
       const issue = fieldTypeIssue(target.document, typeName, field);
       if (issue) {
@@ -225,7 +248,9 @@ export function compose(
       }
     }
   }
-  return issues.length > 0 ? { issues } : { composition: new Composition(target.instanceType, bound), issues };
+  return issues.length > 0
+    ? { issues }
+    : { composition: new Composition(target.instanceType, bound, new Set([...fromInstance, ...behaviorsOnly])), issues };
 }
 
 /**
@@ -253,7 +278,7 @@ export function configChanges(
       if (jsonEqual(earlier.config ?? {}, ref.config ?? {})) {
         continue;
       }
-      const reason = decide(behavior, earlier.config, targetOf(before), ref.config, targetOf(after), 'it allows no config change');
+      const reason = decide(behavior, earlier.config, before, ref.config, after, 'it allows no config change');
       if (reason !== undefined) {
         changes.push({
           path,
@@ -261,14 +286,7 @@ export function configChanges(
         });
       }
     } else if (populated()) {
-      const reason = decide(
-        behavior,
-        undefined,
-        undefined,
-        ref.config,
-        targetOf(after),
-        'it cannot be added to a schema that has instances'
-      );
+      const reason = decide(behavior, undefined, undefined, ref.config, after, 'it cannot be added to a schema that has instances');
       if (reason !== undefined) {
         changes.push({ path, message: `behavior ${ref.name} cannot be added to type ${type}, which has instances: ${reason}` });
       }
@@ -278,14 +296,7 @@ export function configChanges(
     if (afterRefs.some((candidate) => candidate.name === ref.name) || !populated()) {
       continue;
     }
-    const reason = decide(
-      registry.lookup(ref.name),
-      ref.config,
-      targetOf(before),
-      undefined,
-      undefined,
-      'it cannot be removed from a schema that has instances'
-    );
+    const reason = decide(registry.lookup(ref.name), ref.config, before, undefined, undefined, 'it cannot be removed from a schema that has instances');
     if (reason !== undefined) {
       changes.push({
         path: `${type}.behaviors.${ref.name}`,
@@ -311,7 +322,7 @@ export function checkedTypes(before: ComposeTarget, after: ComposeTarget, regist
   const beforeRefs = (before.document.types ?? {})[before.instanceType]?.behaviors ?? [];
   const afterRefs = (after.document.types ?? {})[after.instanceType]?.behaviors ?? [];
   const named = (behavior: RegisteredBehavior, json: unknown, target: ComposeTarget): readonly string[] => {
-    const parsed = parseConfig(behavior, json, targetOf(target));
+    const parsed = parseConfig(behavior, json, target);
     return 'problem' in parsed ? [] : checkedTypesOf(behavior, parsed.config);
   };
   const carried = new Set<string>();
@@ -329,6 +340,35 @@ export function checkedTypes(before: ComposeTarget, after: ComposeTarget, regist
     }
   }
   return [...carried].sort();
+}
+
+/**
+ * readTypes lists, sorted, the types of the document the behaviors of a
+ * version read through ConfigTarget.types when their parseConfig runs on
+ * it, as when the version runs, with no other schema in reach: the
+ * compatibility rule holds a new version to each, as to a type a field of
+ * the version reaches, since a value stored under the version was checked
+ * against it. A behavior with no implementation registered, and a config
+ * its implementation refuses, read none.
+ */
+export function readTypes(version: ComposeTarget, registry: BehaviorRegistry): string[] {
+  const refs = (version.document.types ?? {})[version.instanceType]?.behaviors ?? [];
+  const read = new Set<string>();
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const behavior = registry.lookup(ref.name);
+    if (seen.has(ref.name) || !behavior) {
+      continue;
+    }
+    seen.add(ref.name);
+    const parsed = parseConfig(behavior, ref.config, version);
+    if (!('problem' in parsed)) {
+      for (const name of parsed.read) {
+        read.add(name);
+      }
+    }
+  }
+  return [...read].sort();
 }
 
 // checkedTypesOf asks an implementation which types its validate checks
@@ -368,7 +408,7 @@ export function configTransitions(before: ComposeTarget | undefined, after: Comp
   const beforeRefs = before === undefined ? [] : ((before.document.types ?? {})[before.instanceType]?.behaviors ?? []);
   const afterRefs = (after.document.types ?? {})[after.instanceType]?.behaviors ?? [];
   const parsed = (behavior: RegisteredBehavior, json: unknown, target: ComposeTarget): unknown => {
-    const result = parseConfig(behavior, json, targetOf(target));
+    const result = parseConfig(behavior, json, target);
     return 'problem' in result ? undefined : result.config;
   };
   const transitions: ConfigTransition[] = [];
@@ -395,11 +435,11 @@ export function configTransitions(before: ComposeTarget | undefined, after: Comp
 }
 
 // targetOf is what parseConfig is told about the type a config is given
-// on: its schema, its fields with their JSON Schemas, every behavior it
-// lists with its config as the schema holds it, and, when given, the other
-// schemas it reaches. A behavior listed twice keeps its first config;
-// compose refuses the list.
-function targetOf(target: ComposeTarget, schemas?: ConfigSchemas): ConfigTarget {
+// on: its schema, its fields with their JSON Schemas, the document's other
+// types through the call's reader, every behavior it lists with its config
+// as the schema holds it, and, when given, the other schemas it reaches. A
+// behavior listed twice keeps its first config; compose refuses the list.
+function targetOf(target: ComposeTarget, types: ConfigTypes, schemas?: ConfigSchemas): ConfigTarget {
   const typeDef = (target.document.types ?? {})[target.instanceType] as TypeDef;
   const refs = typeDef.behaviors ?? [];
   const fieldSchemas: Record<string, unknown> = {};
@@ -411,13 +451,74 @@ function targetOf(target: ComposeTarget, schemas?: ConfigSchemas): ConfigTarget 
     type: target.instanceType,
     fields: (typeDef.fields ?? []).map(jsonKey),
     fieldSchemas,
-    types: Object.keys(target.document.types ?? {})
-      .filter((name) => name !== target.instanceType)
-      .sort(),
+    types,
     behaviors: refs.map((ref) => ref.name),
     configs: configsOf(refs),
     ...(schemas === undefined ? {} : { schemas }),
   });
+}
+
+// otherTypes lists the document's types besides the instance type, sorted.
+function otherTypes(target: ComposeTarget): string[] {
+  return Object.keys(target.document.types ?? {})
+    .filter((name) => name !== target.instanceType)
+    .sort();
+}
+
+/**
+ * TypeReader is ConfigTarget.types for one parseConfig call: it records
+ * each type the call reads, and refuses to read once the call returns, so
+ * every type a config depends on is one the version's checks and the
+ * compatibility rule know of.
+ */
+class TypeReader {
+  private open = true;
+  private readonly seen = new Map<string, ConfigType>();
+  readonly types: ConfigTypes;
+
+  constructor(
+    private readonly target: ComposeTarget,
+    private readonly behavior: string
+  ) {
+    const names = deepFreeze(otherTypes(target));
+    this.types = Object.freeze({ names, get: (name: string) => this.get(name) });
+  }
+
+  /** close ends the call and returns the names it read, sorted. */
+  close(): string[] {
+    this.open = false;
+    return [...this.seen.keys()].sort();
+  }
+
+  private get(name: string): ConfigType | undefined {
+    if (!this.open) {
+      throw new BehaviorError(this.behavior, 'ConfigTarget.types.get reads a type only while parseConfig runs');
+    }
+    if (typeof name !== 'string' || name === this.target.instanceType || refKind(this.target.document, name) !== 'type') {
+      return undefined;
+    }
+    let type = this.seen.get(name);
+    if (type === undefined) {
+      type = configTypeOf(this.target.document, name);
+      this.seen.set(name, type);
+    }
+    return type;
+  }
+}
+
+// configTypeOf is a type as parseConfig reads it: its fields' JSON keys,
+// type names, kinds, list depths and whether each is optional, leaving out
+// a field the document checks refuse (fieldTypeIssue).
+function configTypeOf(document: Document, name: string): ConfigType {
+  const fields: ConfigTypeField[] = [];
+  for (const field of ((document.types ?? {})[name] as TypeDef).fields ?? []) {
+    const kind = refKind(document, field.typeRef.name);
+    if (field.typeRef.isMap || kind === 'union' || kind === 'unknown') {
+      continue;
+    }
+    fields.push({ key: jsonKey(field), type: field.typeRef.name, kind, depth: arrayDepth(field.typeRef) as 0 | 1 | 2, optional: !field.required });
+  }
+  return deepFreeze({ name, fields });
 }
 
 /**
@@ -455,9 +556,9 @@ function configsOf(refs: ReadonlyArray<{ readonly name: string; readonly config?
 function decide(
   behavior: RegisteredBehavior | undefined,
   beforeJSON: unknown,
-  beforeTarget: ConfigTarget | undefined,
+  beforeTarget: ComposeTarget | undefined,
   afterJSON: unknown,
-  afterTarget: ConfigTarget | undefined,
+  afterTarget: ComposeTarget | undefined,
   refusal: string
 ): string | undefined {
   if (!behavior) {
@@ -467,7 +568,7 @@ function decide(
   if (!configChange) {
     return refusal;
   }
-  const parse = (json: unknown, target: ConfigTarget | undefined): { config: unknown } | { problem: string } | undefined =>
+  const parse = (json: unknown, target: ComposeTarget | undefined): { config: unknown } | { problem: string } | undefined =>
     target === undefined ? undefined : parseConfig(behavior, json, target);
   const before = parse(beforeJSON, beforeTarget);
   const after = parse(afterJSON, afterTarget);
@@ -492,12 +593,15 @@ function decide(
 }
 
 // parseConfig checks a config against the behavior's configSchema, then
-// its parseConfig. An absent config is checked as {}.
+// its parseConfig, on the type target composes, with schemas in reach when
+// given. An absent config is checked as {}. read is what it read through
+// ConfigTarget.types.
 function parseConfig(
   behavior: RegisteredBehavior,
   raw: unknown,
-  target: ConfigTarget
-): { json: unknown; config: unknown } | { problem: string } {
+  target: ComposeTarget,
+  schemas?: ConfigSchemas
+): { json: unknown; config: unknown; read: readonly string[] } | { problem: string } {
   const json = deepFreeze(raw === undefined ? {} : (JSON.parse(JSON.stringify(raw)) as unknown));
   if (behavior.config === undefined) {
     if (!isPlainObject(json) || Object.keys(json).length > 0) {
@@ -511,17 +615,20 @@ function parseConfig(
   }
   const parse = behavior.implementation.parseConfig;
   if (!parse) {
-    return { json, config: json };
+    return { json, config: json, read: [] };
   }
+  const reader = new TypeReader(target, behavior.name);
   let config: unknown;
   try {
-    config = parse.call(behavior.implementation, json, target);
+    config = parse.call(behavior.implementation, json, targetOf(target, reader.types, schemas));
   } catch (error) {
     if (error instanceof BehaviorConfigError) {
       return { problem: `behavior ${behavior.name} config: ${error.message}` };
     }
     throw error;
+  } finally {
+    reader.close();
   }
   synchronous(behavior.name, 'parseConfig', config);
-  return { json, config: deepFreeze(config) };
+  return { json, config: deepFreeze(config), read: deepFreeze(reader.close()) };
 }

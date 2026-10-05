@@ -159,7 +159,9 @@ func isByteSequence(node *yaml.Node) bool {
 func replaceWithJSON(seq *yaml.Node, key, name string) error {
 	raw := make([]byte, 0, len(seq.Content))
 	for _, item := range seq.Content {
-		b, err := strconv.Atoi(item.Value)
+		// A byte is 0 to 255; ParseUint refuses anything else rather than
+		// wrapping it.
+		b, err := strconv.ParseUint(item.Value, 10, 8)
 		if err != nil {
 			return fmt.Errorf("%s %q: %w", key, name, err)
 		}

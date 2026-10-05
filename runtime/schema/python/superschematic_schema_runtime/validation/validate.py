@@ -138,7 +138,7 @@ def _validate_string_constraints(
         )
     if scalar.pattern:
         try:
-            if not re.search(scalar.pattern, value):
+            if not re.search(scalar.pattern, value, re.ASCII):
                 errors.append(
                     ValidationError(
                         validator="pattern",
@@ -361,7 +361,7 @@ def _validate_field_level_string_constraints(
         )
     if field.validate_pattern:
         try:
-            if not re.search(field.validate_pattern, value):
+            if not re.search(field.validate_pattern, value, re.ASCII):
                 out.append(
                     ValidationError(
                         validator="pattern",

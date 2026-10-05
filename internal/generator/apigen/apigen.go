@@ -840,6 +840,9 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		if err != nil {
 			return nil, fmt.Errorf("apigen: operation %s.%s: %w", namespace, op.Name, err)
 		}
+		if err := checkEncryptedUpload(namespace, set, op, fileUploadFields); err != nil {
+			return nil, err
+		}
 	}
 
 	requiresAuth := op.Auth || op.RequireOwnership || len(op.Permissions) > 0

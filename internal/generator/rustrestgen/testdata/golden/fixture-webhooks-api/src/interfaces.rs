@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
-use superschematic_http_runtime::{ApiError, RequestContext};
+use superschematic_http_runtime::{ApiError, Authenticator, RequestContext};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -39,6 +39,10 @@ pub trait WebhookVerifier: Send + Sync + 'static {
 pub struct Implementations {
     pub event: Arc<dyn EventImplementation>,
     pub webhook: Arc<dyn WebhookImplementation>,
+    /// Establishes the caller of each route that needs one (@auth,
+    /// @requirePermission, @requireOwnership, an Authenticated set), and
+    /// decides whether its permissions satisfy a @requirePermission list.
+    pub authenticator: Arc<dyn Authenticator>,
     /// The verifier of each @hmacVerified provider, keyed by provider.
     /// `build_router` panics without one for every provider.
     pub webhook_verifiers: HashMap<String, Arc<dyn WebhookVerifier>>,

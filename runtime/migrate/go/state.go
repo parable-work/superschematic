@@ -80,6 +80,17 @@ var stateSQL = map[Dialect]dialectSQL{
 	},
 }
 
+// The values of plan_phase, and of Status.PlanPhase, once the plan in
+// progress has finished its expand steps. PlanPhaseExpanded also says the
+// applied model is the plan's expandedModel, which a plan from it
+// supersedes; PlanPhaseExpand says the plan has none, or a runner that
+// predates it recorded the phase, so the applied model is still the plan's
+// from. NULL, an empty PlanPhase, means expand has not finished.
+const (
+	PlanPhaseExpand   = "expand"
+	PlanPhaseExpanded = "expanded"
+)
+
 // now is the time a row records, as RFC 3339 UTC text with microseconds:
 // Postgres reads it into TIMESTAMPTZ and SQLite stores it as written.
 func now() string {
@@ -147,13 +158,35 @@ ON CONFLICT (service) DO UPDATE SET dialect = excluded.dialect, model_hash = exc
 }
 
 // setExpandDone records that the plan in progress has finished its expand
-// steps.
+// steps and, when it has an expandedModel, that model as the applied model:
+// the database holds it until the contract runs.
 func setExpandDone(ctx context.Context, conn Conn, plan *Plan) error {
-	if err := conn.Exec(ctx, `UPDATE `+stateTable+` SET plan_phase = 'expand', updated_at = $1 WHERE service = $2 AND plan_hash = $3`,
-		now(), plan.Service, plan.Hash); err != nil {
+	var err error
+	if between := plan.BetweenPhases(); between != nil {
+		err = conn.Exec(ctx, `UPDATE `+stateTable+` SET plan_phase = '`+PlanPhaseExpanded+`', model_hash = $1, model = $2, updated_at = $3
+WHERE service = $4 AND plan_hash = $5`,
+			between.Hash, string(between.Canonical), now(), plan.Service, plan.Hash)
+	} else {
+		err = conn.Exec(ctx, `UPDATE `+stateTable+` SET plan_phase = '`+PlanPhaseExpand+`', updated_at = $1 WHERE service = $2 AND plan_hash = $3`,
+			now(), plan.Service, plan.Hash)
+	}
+	if err != nil {
 		return fmt.Errorf("record the end of plan %s's expand phase: %w", plan.Hash, err)
 	}
 	return nil
+}
+
+// contractStarted reports whether any contract step of a plan has a log
+// row: once one has started, the database no longer holds the plan's
+// expanded model.
+func contractStarted(ctx context.Context, conn Conn, planHash string) (bool, error) {
+	var rows int64
+	err := conn.Query(ctx, `SELECT count(*) FROM `+logTable+` WHERE plan_hash = $1 AND phase = 'contract'`, []any{planHash},
+		func(scan func(dest ...any) error) error { return scan(&rows) })
+	if err != nil {
+		return false, fmt.Errorf("read the log of plan %s: %w", planHash, err)
+	}
+	return rows > 0, nil
 }
 
 // finishedSteps returns the indexes of the plan's steps whose log row has

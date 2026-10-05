@@ -986,6 +986,28 @@ Not changed: the Python types' `to_dict` and `to_json` write every field,
 one; the SDK does not send through them. The engine's `update` tool and
 `PATCH` route (D16) follow JSON merge patch, where null removes a member.
 
+### D14, amended: a pattern's `\d`, `\w` and `\b` are ASCII classes
+
+The engines the validators run read a pattern's class escapes
+differently. Go's RE2 reads `\d`, `\w`, `\s` and `\b` as ASCII. JavaScript
+with the `u` flag reads `\d`, `\w` and `\b` as ASCII and `\s` as Unicode
+whitespace. Python's `re` and the `regex` crate, which pydantic runs for a
+`Field(pattern=...)`, read all four as Unicode. So `^\w+$` refused `café` in
+the Go and TypeScript validators and took it in the Python ones, and
+`Network.Url`, whose host is `[\w\-\{\}]+`, took a host with `é` in Python
+only.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `\d`, `\w` and `\b` are ASCII classes, as RE2 reads them. Python matches every pattern with `re.ASCII`: the generated validator's field rules and scalar patterns, a scalar's pydantic `Field`, which takes the compiled pattern and runs it with Python's `re`, the Python SDK's input check and the Python runtime. The Rust validators translate the classes to ASCII ones (D31). | Unicode classes everywhere, which neither RE2 nor JavaScript offers for `\d` and `\w`; leaving Python apart |
+| `\s` is ASCII whitespace in Go, Rust and Python (where `re.ASCII` also counts `\v`), and Unicode whitespace in JavaScript. superscalar's catalog uses `\s` in `[\s\S]`, which every engine reads as any character, and between the fields of a PEM key, a cron expression and a time, and in a URI's `[^\s]+`, where the engines differ only on a non-ASCII space. TypeScript stays apart on it. | Translating `\s` in every TypeScript pattern now, in the generated validator, the runtime, the SDK and the API server |
+| `re.ASCII` also makes Python's `(?i)` fold ASCII letters only, where RE2 folds Unicode case. No pattern in the catalog, the fixtures or the examples uses `(?i)`. | |
+
+The parity matrix gains `pattern_word_class_is_ascii` (`^\w\W\w$` takes
+`aéb`) and `url_non_ascii_host` (`Network.Url` refuses a host with `é`).
+The four languages' generated validators and the three runtimes agree on
+both; the Python ones refused the first and took the second before.
+
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 
 A distribution built a server on the source tree that takes a schema while
@@ -1934,6 +1956,20 @@ overlapping route.
 
 The rule is reversible until the first release.
 
+### D20, amended: an encrypted operation cannot upload files
+
+An encrypted operation whose input type has a file-upload field built.
+Every SDK sends a file upload as multipart before the step that would
+encrypt the body, so the files and the other arguments travelled in clear,
+and the Go server's payload decryptor, which reads a JSON envelope,
+answered 400. No server could serve it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| apigen refuses an operation that is encrypted (an `Encrypted` set, `@encrypted`, or an `EncryptedField<T>` result or argument) and uploads files, naming the operation and its first file field. Every server and SDK generator builds from apigen's endpoints, so none of them sees such an operation. | Encrypting a multipart body, which needs a second envelope format in every SDK and a multipart decryption step in the Go server |
+
+The rule is reversible until the first release.
+
 ## D22. A TypeScript env loader in the TypeScript types package
 
 An `@envVars` class got a loader in Go or Rust and none in TypeScript, so a
@@ -2204,7 +2240,7 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 55 pairs for Postgres and 39 for SQLite, 9 of them
+Plan goldens cover 58 pairs for Postgres and 42 for SQLite, 10 of them
 rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
@@ -2223,8 +2259,11 @@ foreign key whose `onDelete` alone changes is replaced in `contract` with
 no hazard; an index is dropped with a plain `DROP INDEX` in a transaction;
 `Diff` refuses a `partitionBy` change on an existing table, an impossible
 cast, a primary key change and a change between a generated and a stored
-column; a change to a graph member's content set with no DDL change has no
-step, so no hazard; `--reader` services are read against both models;
+column; a column that joins or leaves a graph member's content while the
+column stays, as `@conflictUnit('excluded')` makes it, gets a step with no
+statements in `expand`, `changeGraphContent`, which carries the `history`
+hazard, and the runner logs a step with no statements like any other;
+`--reader` services are read against both models;
 `--from-ref` extracts the previous schemas root beside the checkout's, so
 the paths its `tsconfig` reaches resolve, and each version uses its own
 naming file; a service is a reader when its kind allows `@source`; a
@@ -2258,19 +2297,74 @@ a table that exists and `DROP COLUMN`, which rewrites the table, are
 dropped before it and a foreign key over it rebuilds the table; a dropped
 table is dropped with foreign keys off, since with them on `DROP TABLE`
 deletes its rows first, which a `RESTRICT` on the table itself refuses;
-a plan that drops two tables that reference each other fails on SQLite,
-since dropping the foreign key that closes the cycle needs a rebuild of a
-table the plan drops; a change between a list, a JSON value and text, all
-`TEXT`, is no step and converts no value; `migrate plan --dialect sqlite`
-refuses a service whose new version does not list `sqlite`, and builds
-the previous version's SQLite model without checking its list; and the
-SQLite convergence test compares a column's collation through an index
-it builds and rolls back, since no pragma reports it. D32 takes the
+tables a plan drops that reference each other are dropped in one step on
+SQLite, after the tables that reference them and before those they
+reference, since dropping the foreign key that closes the cycle needs a
+rebuild of a table the plan drops, and a `foreign_key_check` between two
+drops finds the rows of one referencing the other, while Postgres drops
+that foreign key first; a list, a JSON value and text are all `TEXT`, so
+the SQLite model records what a column holds as JSON (`holds`: `list` or
+`json`; Postgres models never set it); a JSON value that becomes text
+keeps its JSON text through a rebuild, as Postgres's cast keeps it, and
+one that becomes another scalar casts as text does, while every other
+change between a scalar, a list and a JSON value fails the plan, since no
+conversion keeps every value as Postgres would: text is not a JSON array,
+Postgres parses text as JSON where `json_quote` would wrap it, and
+Postgres converts no list; a list whose element type changes is still no
+step on SQLite; `migrate plan --dialect sqlite` refuses a service whose
+new version does not list `sqlite`, and a previous version, a service
+directory or a git ref, whose list lacks it, pointing to the model the
+database recorded or an empty database, while a `--from` model is
+checked by its own `dialect`; and the SQLite convergence test compares
+a column's collation through an index it builds and rolls back, since no
+pragma reports it. D32 takes the
 version graph to SQLite through its adapter's own tables, which write
 history without triggers, not through this dialect, so `@versioned` stays
 refused here. D30's deploy runs a plan's `expand` steps before the servers
 roll and its `contract` steps after (`docs/stack-model.md`, sections 5.3
 and 11.2). Each change that lands a piece updates this paragraph.
+
+### D27, amended: a plan between its phases
+
+D30 runs a plan's `expand` steps before the new servers roll out and its
+`contract` steps after. A rollout can fail between them, leaving the
+previous version's servers running on the expanded schema. The runner kept
+that plan in progress and refused every other plan until its contract ran,
+and it still recorded the previous model as applied, a schema the database
+no longer held. A deploy that kept the previous servers had no way forward
+but the drops those servers cannot survive.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A plan with contract steps carries the model the database holds between its phases: `expandedModel`, and its hash, `expanded`. It is the previous model with every expand step applied: the new version's tables, columns, indexes and objects, with what `contract` removes still there and what it tightens still loose. The planner builds it from the tables it already hands a dialect's rebuild between the phases. A plan without contract steps carries neither, since its expand steps end at `to`. | Computing it in the runner, which cannot read a schema; leaving the applied model at `from` until the plan ends |
+| When a plan's last expand step commits, the runner records `expandedModel` as the applied model, with the plan's contract pending (`plan_phase` `expanded`), so `status --model` prints the schema the database holds. | |
+| A new plan whose `from` is that model supersedes the pending contract while none of it has started: the runner says so, forgets the old plan and runs the new one. Once a contract step has started, the database no longer holds that model, and the old plan must finish. A deploy whose rollout failed plans again from the database's model, so the drops still wanted are in the new plan's contract, planned from what the database holds, and nothing of the old contract runs unless the new plan needs it. Taking the schema back to the previous version is a plan from that model too. The old plan's contract is refused afterwards: `--phase contract` runs only the plan in progress, so a stale contract job is refused even when the database is at the old plan's `from` again, as it is after a plan back from an expanded model that equals that `from`. | An `abandon` command, which a deploy would have to decide on its own to run; refusing every other plan until the contract runs, the rule before this amendment |
+| `expanded` and `expandedModel` are optional members of plan version 1. A runner that predates them ignores them and keeps the old rule, and this runner keeps the old rule for a plan without them. Such a plan's expand phase records `plan_phase` `expand`, which no plan supersedes, as every runner before this amendment did, so a plan from a model the database does not hold never runs. | Plan version 2, which every runner already built would refuse |
+| The tests check, on Postgres and on SQLite, that a plan's expand steps leave the same schema as the plan from an empty database to its `expandedModel`, and that a plan from `expandedModel` to the plan's `to` has no expand steps and the plan's contract steps. | Trusting the model the planner builds between the phases, which no apply would check |
+
+The rule is reversible until the first release.
+
+Status: built. `Diff` sets `expanded` and `expandedModel` on every plan with
+contract steps, for both dialects (`expandedModel` in
+`internal/sqlmigrate`); the runner records the model between the phases,
+supersedes a pending contract and refuses the superseded one. Rules settled
+as they were built: a column `contract` drops keeps its `NOT NULL` between
+the phases when it has a default or is generated, as `expand` leaves it,
+which a SQLite rebuild in `expand` now keeps too; a foreign key `contract`
+replaces is, between the phases, the previous one under the name `expand`
+gave it; extensions and pool schemas of both models are there; a view,
+trigger or function `contract` drops or replaces is the previous one with
+`expand`'s renames applied; a version graph keeps the previous model's
+schema epoch, and a member's content is the new model's for the columns
+the new table has and the previous model's for the columns `contract`
+drops, so the plan from the model between the phases has no content change
+left for `expand` and its drops keep their history hazards; that plan's
+hazards differ from the contract's only by a destructive hazard's rename
+hint, which names an add the plan from the model between the phases does
+not see; and the plan goldens record `expanded` and leave `expandedModel`
+out. Every Postgres and SQLite plan case with contract steps converges to
+its `expandedModel` after its expand steps, and the runner's vectors
+include a plan superseded after its expand phase.
 
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
@@ -2297,6 +2391,21 @@ from the distribution and what did not.
 | End-user auth and service auth are separate concepts. Platforms admit callers along edges, and an application-level service principal travels in its own header beside the end user's `Authorization`. | Service calls through the end-user auth provider with a minted token, which merges the two principals |
 
 Nothing here is built. The design is reversible until the first release.
+
+### D30, amended: a DNS platform is a registration of its own
+
+Building the stack model's core turned the four registrations into five.
+A DNS platform (`docs/stack-model.md`, section 6.9) lowers an
+environment's domain records, not a deployable, so it registers on its own.
+The Stack IR, the resource graph, the five specs and the resolver are
+built (sections 6.7, 6.10 and 12 of that document). The Stack kind's
+authoring package, the targets and the provisioners are not.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `RegisterDNSPlatform` registers a DNS platform: the schema of its values and a `Lower` from records to resources. A target names its default one, and `manual` is reserved for a domain that no DNS platform holds. | DNS as one more `PlatformSpec` kind, whose spec would carry a lowering that only DNS platforms set and a kind that no target places a deployable on |
+| A target also names its provisioner and registers the schema of each resource type its platforms emit. Resolution checks every node against the schema of its type, with references read as strings. | A provisioner chosen per environment; schemas registered per platform, which repeats a type that a platform and a connector share |
+
 ## D28. No SDK has a method for a `@webhook` operation
 
 `@webhook` marks an operation a third party calls. The Go and TypeScript
@@ -2536,6 +2645,49 @@ without `deletedAt` the store now passes `nil` find options and is
 otherwise unchanged.
 
 The rule is reversible until the first release.
+
+## D29. The Rust server enforces a route's auth and traffic controls
+
+The Rust server's generator read none of `@auth`, `@requirePermission`,
+`@requireOwnership`, an `Authenticated` set, `@rateLimit`, `@bodyLimit` or
+`@timeout`, and its runtime crate had no code for any of them.
+`build_router` mounted each operation as a handler that forwarded the body
+to the implementation, so a route that the Go and TypeScript servers guard
+answered any caller, with no rate, size or time limit, and nothing said
+so. After D26 the webhook verifier was the only step before the handler.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The caller comes from `Implementations.authenticator`, an `Arc<dyn Authenticator>`. The crate has the field when an operation, a manual one included, needs a caller, as D26 made `webhook_verifiers` a field. A service that leaves it out does not compile. `build_router` keeps its signature, and a schema without such an operation generates the same crate. | A `RouterOptions` passed to a new `build_router_with`, the shape of D15's `buildRouter` options, where a forgotten authenticator answers 401 at runtime instead of failing to compile. `build_router(implementations, options)`, which changes every crate's callers, as D26 declined to do for a `Result`. A `Principal` that the service's own tower layer puts in the request's extensions, which needs no API but runs before the verifier, the rate limit and the body limit, on every route. |
+| `Authenticator` and `Principal` live in the runtime crate. `authenticate(&Parts)` returns `Result<Option<Principal>, ApiError>`: `None` is 401, and an `Err` answers with that error, for a failure that is not the caller's. The provided method `permits(held, required)` is D15's `PermissionMatcher`. It defaults to `has_any_permission` (dotted-path coverage, no root permission), and the router calls it only for a route that lists permissions. `Principal` has TypeScript's `subject`, `permissions` and `claims`, and its `Debug` leaves out the claims' values. The handler puts the caller on `RequestContext.principal`. | A separate matcher field, which every service would fill in. An authenticator that returns a bool, which cannot pass the implementation a caller or report a failing identity service. |
+| `@requireOwnership` requires a caller, as in Go and TypeScript. Whether the caller owns the resource is the implementation's check, made with `ctx.principal`, and its scaffold says so. | A router hook that decides ownership, which neither other server has. |
+| The runtime crate's `RouteControls` applies a route's controls with `route_layer`, in the Go router's order: the rate limit, the body limit, the permission check, then the timeout around the handler and its extractors. `webhook_verified` wraps the result, so the verifier still runs first. | The TypeScript runtime's order, in which the body limit runs before the rate limit and the timeout also covers authentication. |
+| `@rateLimit` is a token bucket per route, kept in process memory, that refills continuously, as the TypeScript store does. It answers 429 with the seconds until the next token in `Retry-After`. It keys a client by the `ClientIp` the service's layer puts on the request, or else by the peer address axum records when the router is served with connect info, as the Go runtime keys by chi's client IP or `RemoteAddr`. Without either, a route's clients share one bucket. | Reading `X-Forwarded-For`, as the TypeScript runtime does, which lets a client choose its bucket. A pluggable store and per-route overrides like TypeScript's `RouterOptions`; nothing needs them yet, and they can arrive with an options struct. |
+| `@bodyLimit` counts mebibytes, as Go and TypeScript do. It answers 413 before reading a body whose `Content-Length` is over the limit, and stops reading any other body once it passes the limit. On its route it replaces axum's default 2 MB limit on the body extractor, which still applies to a route without `@bodyLimit`. | TypeScript's 1 MiB default for every route with a body, which Go does not have and which would change every crate. |
+| `@timeout` runs the handler under `tokio::time::timeout`, answers 504, and drops the handler's future. | |
+| A refusal is the Rust router's error envelope, `{"error": {"code", "message"}}`, with the codes the TypeScript runtime uses: `unauthorized`, `forbidden`, `payload_too_large`, `too_many_requests` and `gateway_timeout`. | The RFC 9457 problem body of Go and TypeScript. The SDKs read it, and none of them reads the Rust envelope. But switching changes every refusal of the Rust router, not just these, so it is its own change. |
+| `build_router` does not mount a `@manualRouteRegistration` operation (D20 amended), so it applies no control to one. Its doc lists each such operation's `RouteControls` call. The service applies it to the route it adds, with its own clone of the authenticator. | Requiring an authenticator only when a mounted operation needs a caller, which would give manual operations a different rule from D26's verifiers. |
+| A `@rateLimit`, `@bodyLimit` or `@timeout` below 1 adds no control, as in the TypeScript server. | Go's reading of zero, which answers 429 or 504 to every request. |
+
+`@publicRoute` adds nothing in the Rust server: a route that needs no
+caller is already open. The router follows apigen's `RequiresAuth`, as the
+Go router, the OpenAPI document and the SDKs do. A route that also
+declares `@auth` or a permission, or sits in an `Authenticated` set, still
+needs a caller. The TypeScript server opens such a route, a difference
+that predates this entry.
+
+`runtime/http/rust/src/controls.rs` tests each refusal, the order and the
+lifted body limit. `internal/generator/rustrestgen/route_controls_test.go`
+runs cargo test on fixture-api's crate and checks the 401, 403, 413, 429
+and 504 envelopes, `Retry-After`, a service's own `permits`, ownership left
+to the implementation, the order of the refusals, and a manual route's
+controls. The D26 test also checks that the verifier runs before the rate
+limit and the permission check. Output for a schema without these
+decorators (fixture-multiword-api, fixture-nested-arrays-api) is unchanged
+byte for byte.
+
+The rule is reversible until the first release.
+
 ## D34. A schema config imports a sibling's sentinel
 
 A `schema.config.ts` names other services in `authDb` and `dependencies`,

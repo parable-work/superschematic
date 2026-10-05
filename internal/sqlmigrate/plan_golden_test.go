@@ -2,6 +2,8 @@ package sqlmigrate
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // indentedJSON is canonical JSON indented for review: object keys sorted,
@@ -49,7 +52,10 @@ func checkGolden(t *testing.T, path string, got []byte) {
 // testdata/plans/<case>.json, and every case of sqlitePlanCases with
 // testdata/plans/<case>.sqlite.json. The golden leaves out toModel, the
 // new model's canonical JSON, which the test checks against the model
-// instead; its hash is the plan's to. Regenerate with:
+// instead; its hash is the plan's to. It leaves out expandedModel too, which
+// the test checks is canonical and hashes to the plan's expanded, present
+// exactly when the plan has contract steps (TestExpandedModel checks what it
+// holds). Regenerate with:
 // go test ./internal/sqlmigrate -run TestPlanGoldens -update
 func TestPlanGoldens(t *testing.T) {
 	cases := append(append([]planCase(nil), planCases...), sqlitePlanCases()...)
@@ -72,19 +78,50 @@ func TestPlanGoldens(t *testing.T) {
 			if err := sealed.Seal(); err != nil || sealed.Hash != plan.Hash {
 				t.Errorf("the plan is not sealed")
 			}
+			contract := false
 			for i, step := range plan.Steps {
 				if step.Index != i+1 {
 					t.Errorf("step %d has index %d", i+1, step.Index)
 				}
+				contract = contract || step.Phase == Contract
 			}
+			checkExpandedHash(t, plan, contract)
 
 			plan.ToModel = nil
+			plan.ExpandedModel = nil
 			canonical, err := plan.CanonicalJSON()
 			if err != nil {
 				t.Fatal(err)
 			}
 			checkGolden(t, filepath.Join("testdata", "plans", pc.golden()+".json"), indentedJSON(t, canonical))
 		})
+	}
+}
+
+// checkExpandedHash checks that a plan carries expanded and expandedModel
+// exactly when it has contract steps, that expandedModel is canonical JSON,
+// and that it hashes to expanded.
+func checkExpandedHash(t *testing.T, plan *Plan, contract bool) {
+	t.Helper()
+	if !contract {
+		if plan.Expanded != "" || plan.ExpandedModel != nil {
+			t.Errorf("a plan with no contract steps has expanded %q", plan.Expanded)
+		}
+		return
+	}
+	if plan.Expanded == "" || len(plan.ExpandedModel) == 0 {
+		t.Fatalf("a plan with contract steps has no expanded model")
+	}
+	canonical, err := ir.CanonicalJSON(plan.ExpandedModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(canonical, plan.ExpandedModel) {
+		t.Errorf("expandedModel is not canonical JSON")
+	}
+	sum := sha256.Sum256(plan.ExpandedModel)
+	if hash := hex.EncodeToString(sum[:]); hash != plan.Expanded {
+		t.Errorf("expandedModel hashes to %s, not to expanded %s", hash, plan.Expanded)
 	}
 }
 
