@@ -10,6 +10,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
@@ -53,6 +54,8 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if err := WriteTypes(output, outDir); err != nil {
 		t.Fatalf("write types: %v", err)
 	}
+	ddl := filepath.Join(root, "create.sql")
+	pgtest.WriteCreateSQL(t, filepath.Join(testpaths.RepoRoot(t), "runtime", "versiongraph", "testdata", "fixture", "create.sql"), ddl)
 	test := filepath.Join(root, "test_graph_facade.py")
 	source := strings.ReplaceAll(versionGraphFacadeTest, "MODULE", output.PythonModuleName)
 	if err := os.WriteFile(test, []byte(source), 0o644); err != nil {
@@ -62,7 +65,7 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),
 		"PYTHONPATH="+outDir,
-		"FACADE_DDL="+filepath.Join(testpaths.RepoRoot(t), "runtime", "versiongraph", "testdata", "fixture", "create.sql"),
+		"FACADE_DDL="+ddl,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -111,10 +114,6 @@ def graph():
     Recipe graph over a connection to it, and a connection for SQL."""
     schema = f"vg_py_facade_{os.getpid()}_{time.time_ns()}"
     with psycopg.connect(DSN, autocommit=True) as admin:
-        try:
-            admin.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public")
-        except psycopg.errors.UniqueViolation:
-            pass
         admin.execute(f"CREATE SCHEMA {schema}")
     options = f"-c search_path={schema},public"
     sql = psycopg.connect(DSN, autocommit=True, options=options)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 )
 
 // runPGCheck copies testdata/pgcheck to a temporary module and runs its
@@ -81,6 +82,37 @@ func TestPruneHistoryDropSQLOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	runPGCheck(t, "TestPruneHistoryDropOnPostgres",
+		"PGCHECK_DATABASE_URL="+dsn,
+		"PGCHECK_SQL_DIR="+sqlDir,
+	)
+}
+
+// TestConcurrentCreateSQLOnPostgres applies fixture-db's create.sql, whose
+// extensions are pgcrypto, citext and pg_trgm, from several connections at
+// once on one database, as pgtest.CreateSQL prepares it for the tests that
+// share a database and as it ships; testdata/pgcheck's
+// TestConcurrentCreateOnPostgres holds the checks. Set
+// SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as for
+// TestProjectionMigrationsOnPostgres.
+func TestConcurrentCreateSQLOnPostgres(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL to apply fixture-db's create.sql concurrently against Postgres")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
+	if err != nil {
+		t.Fatalf("load fixture-db: %v", err)
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDir := t.TempDir()
+	if err := WriteDDL(output, sqlDir); err != nil {
+		t.Fatal(err)
+	}
+	pgtest.WriteCreateSQL(t, filepath.Join(sqlDir, "create.sql"), filepath.Join(sqlDir, "shared_create.sql"))
+	runPGCheck(t, "TestConcurrentCreateOnPostgres",
 		"PGCHECK_DATABASE_URL="+dsn,
 		"PGCHECK_SQL_DIR="+sqlDir,
 	)

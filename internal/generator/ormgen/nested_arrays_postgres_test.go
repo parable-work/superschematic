@@ -12,6 +12,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -108,6 +109,7 @@ func TestArraysOfArraysOnPostgres(t *testing.T) {
 		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the array-of-arrays columns against Postgres")
 	}
 	createSQL := nestedArraysCreateSQL(t, loadNestedArraysFixture(t), t.TempDir())
+	pgtest.WriteCreateSQL(t, createSQL, createSQL)
 
 	ormDir := t.TempDir()
 	if err := WriteORM(generateFixture(t, nestedArraysFixture), ormDir); err != nil {
@@ -201,21 +203,15 @@ func TestGeneratedArraysOfArraysORM(t *testing.T) {
 	runGeneratedORMModule(t, ormDir, nestedArraysCreateSQL(t, schema, t.TempDir()), "arrays_of_arrays_test.go", arraysOfArraysORMTest)
 }
 
-// runGeneratedORMModule adds a test file and its DDL (testdata/create.sql)
-// to a generated ORM module, builds, vets and tests it, and returns the
-// verbose test output.
+// runGeneratedORMModule adds a test file and its DDL (testdata/create.sql,
+// as pgtest.CreateSQL prepares it) to a generated ORM module, builds, vets
+// and tests it, and returns the verbose test output.
 func runGeneratedORMModule(t *testing.T, ormDir, createSQL, testFile, testSource string) string {
 	t.Helper()
-	ddl, err := os.ReadFile(createSQL)
-	if err != nil {
-		t.Fatalf("read create.sql: %v", err)
-	}
 	if err := os.MkdirAll(filepath.Join(ormDir, "testdata"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(ormDir, "testdata", "create.sql"), ddl, 0o644); err != nil {
-		t.Fatalf("write create.sql: %v", err)
-	}
+	pgtest.WriteCreateSQL(t, createSQL, filepath.Join(ormDir, "testdata", "create.sql"))
 	if err := os.WriteFile(filepath.Join(ormDir, testFile), []byte(testSource), 0o644); err != nil {
 		t.Fatalf("write %s: %v", testFile, err)
 	}

@@ -133,6 +133,10 @@ The database tests (the generated ORM and history triggers, the
 version-graph shell, the projection migrations) skip unless `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` and
 `SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` name a Postgres whose role may
 create schemas, databases and roles; each test creates and drops its own.
+The test packages share that database in parallel, and an extension belongs
+to the whole database, so a test that applies a generated `create.sql` in a
+schema of its own applies the copy `internal/pgtest` prepares, which creates
+the extensions in `public` under an advisory lock first.
 The canonical-row vectors' check against Postgres
 (`runtime/versiongraph/go/canonical`) skips unless
 `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names one; it only reads.
