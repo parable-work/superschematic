@@ -191,10 +191,10 @@ writes back, carries every declared content column, `null` where its input
 lacked one, so a revert to a commit written before the gain clears a value
 the column holds. Nulls are hashed, so under the descriptor that declares a
 gained column a tree hashes differently from how it hashed before the gain.
-A refused input returns `{"error": {"code", "message"}}` with a stable
-code. The
-contract, with the descriptor's members, every rule, the error codes and the
-C ABI, is
+A column added with a `DEFAULT` is outside the rule, since Postgres gives its
+existing rows the default while the old images lack it. A refused input
+returns `{"error": {"code", "message"}}` with a stable code. The contract,
+with the descriptor's members, every rule, the error codes and the C ABI, is
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md).
 Its vectors in `runtime/versiongraph/testdata/vectors` are the executable
 form: the Rust tests, the Go binding, the TypeScript package's tests and the
@@ -731,7 +731,8 @@ time once, from a clock option, and every write in it takes that time; ids
 are version-4 UUIDs the adapter generates; and every value is stored in its
 canonical form, so a row reads back as the canonical row it was written as.
 A live row reads with every column its kind declares, `null` where the
-stored row lacks one, as Postgres's `ADD COLUMN` gives an existing row, and
+stored row lacks one, as Postgres's `ADD COLUMN` without a `DEFAULT` gives
+an existing row, and
 a history image reads as it was stored, as a Postgres image does: one taken
 before its kind gained a column lacks it, which the core reads as `null`.
 

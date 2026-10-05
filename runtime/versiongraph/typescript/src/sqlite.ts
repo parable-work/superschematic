@@ -26,9 +26,9 @@
 // at the old version plus 1 with the kind's history actor column set to the
 // delete's actor. An image leaves out the kind's history-excluded columns,
 // and reads back as it was stored, while a live row reads with every column
-// its kind declares. Refs and release pointers keep history too. Every value it writes is
-// canonicalized by its class first (canonical.ts), so a read returns what is
-// stored and needs no rules of its own.
+// its kind declares. Refs and release pointers keep history too. Every value
+// it writes is canonicalized by its class first (canonical.ts), so a read
+// returns what is stored and needs no rules of its own.
 //
 // The adapter reaches SQLite through SqliteClient, a small synchronous
 // interface of the shape of D16's SqlDriver: run, get and all with

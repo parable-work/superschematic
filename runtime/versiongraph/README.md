@@ -199,9 +199,14 @@ A kind's content columns are the descriptor's `columns` less the role
 columns and `excluded`. A row that lacks one holds it as `null` wherever the
 core compares, merges, diffs or hashes content. After a kind gains a
 column, the history images written before the change lack it while the live
-rows read it as `null` (Postgres's `ADD COLUMN` gives an existing row
-`null`), and both are the same content, so adding a column moves no
-comparison, patch or merge on any backend. A role or excluded column a row
+rows read it as `null` (Postgres's `ADD COLUMN` without a `DEFAULT` gives an
+existing row `null`), and both are the same content, so adding a column
+moves no comparison, patch or merge on any backend. A column added with a
+`DEFAULT` is outside this rule: on Postgres the existing rows read the
+default while the images written before lack the column, which the core
+reads as `null`, so a ref and its head commit hash differently and a save of
+a row as its base holds it is a change. Add the column without a default,
+and write its values through the graph. A role or excluded column a row
 lacks is nothing, as it is when the row has it. A column a row carries that
 `columns` lacks is content unless it is a role or excluded column, but it is
 not read as `null` where another row lacks it.

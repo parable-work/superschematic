@@ -135,23 +135,22 @@ const main = engine.createPrimary(actor, root, "main");
 ```
 
 `SqliteAdapter` is `SyncStorage` and `SyncTx` over one fixed layout of nine
-`STRICT` tables (`ref`, `ref_history`, `commit`, `patch`,
-`snapshot_entry`, `release`, `release_history`, `member` and
-`member_history`), the same for every graph (D32). Every row carries the
-graph's name, `options.graph`, so one file holds several graphs, and
-`options.tableName` names each table and index from its local name
-(`graph_` before it by default), so a D16 behavior can pass its
-`sql.table`. It reads from the descriptor only its kinds' role columns,
-value classes and `history`. It returns each live row with every column its
-kind declares, `null` where the stored row lacks one, as Postgres's `ADD
-COLUMN` gives an existing row, and each history image as it was stored, as
-a Postgres image reads, so one taken before its kind gained a column lacks
-it; the core reads a content column a row lacks as `null`, so the two
-compare, merge and hash the same. `createTables` creates the layout where it is
-missing, and `sqliteLayout(tableName)` returns its statements, one each,
-with no trigger and no transaction control, for a caller that runs its own
-migrations. `runtime/versiongraph/README.md` ("SQLite") holds the layout
-and its rules.
+`STRICT` tables (`ref`, `ref_history`, `commit`, `patch`, `snapshot_entry`,
+`release`, `release_history`, `member` and `member_history`), the same for
+every graph (D32). Every row carries the graph's name, `options.graph`, so
+one file holds several graphs, and `options.tableName` names each table and
+index from its local name (`graph_` before it by default), so a D16 behavior
+can pass its `sql.table`. It reads from the descriptor only its kinds' role
+columns, value classes and `history`. It returns each live row with every
+column its kind declares, `null` where the stored row lacks one, as
+Postgres's `ADD COLUMN` without a `DEFAULT` gives an existing row, and each
+history image as it was stored, as a Postgres image reads, so one taken
+before its kind gained a column lacks it; the core reads a content column a
+row lacks as `null`, so the two compare, merge and hash the same.
+`createTables` creates the layout where it is missing, and
+`sqliteLayout(tableName)` returns its statements, one each, with no trigger
+and no transaction control, for a caller that runs its own migrations.
+`runtime/versiongraph/README.md` ("SQLite") holds the layout and its rules.
 
 The adapter does what Postgres's history triggers do, in the statements of
 the transaction that changes a row: it sets `_version`, writes each
