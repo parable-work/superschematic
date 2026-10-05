@@ -259,6 +259,15 @@ func (r *resolver) bindField(d *deployable, f *field) *ir.Binding {
 	return nil
 }
 
+// contractOf names the derived value an edge of kind fills its field
+// with, for an error message.
+func contractOf(kind ir.EdgeKind) string {
+	if kind == ir.EdgeSQL {
+		return "database connection (ir.DatabaseConnection)"
+	}
+	return "service endpoint (ir.ServiceEndpoint)"
+}
+
 func isScalar(v any) bool {
 	switch v.(type) {
 	case string, bool, float64, float32, int, int32, int64, json.Number:
@@ -305,8 +314,9 @@ func (r *resolver) secrets() []*ir.StackSecret {
 }
 
 // connectEdges asks each edge's connector for its resources and its
-// derived binding's value. Every connector sees the bindings as they stood
-// before any connector ran: the derived bindings without values.
+// derived binding's value, which must meet the contract of the edge's
+// kind (ir.CheckDerivedValue). Every connector sees the bindings as they
+// stood before any connector ran: the derived bindings without values.
 func (r *resolver) connectEdges() {
 	values := map[string]any{}
 	for _, id := range sortedKeys(r.edges) {
@@ -322,11 +332,16 @@ func (r *resolver) connectEdges() {
 			r.fail(CodeLowering, "connector %s on edge %s: %v", e.connector.Name, id, err)
 			continue
 		}
-		if connected.Value == nil {
-			r.fail(CodeLowering, "connector %s on edge %s derives no value for %s", e.connector.Name, id, e.res.Field)
-		}
 		where := fmt.Sprintf("connector %s derives %s with", e.connector.Name, e.res.Field)
 		values[id] = r.normalize(where, connected.Value)
+		switch {
+		case connected.Value == nil:
+			r.fail(CodeLowering, "connector %s on edge %s derives no value for %s", e.connector.Name, id, e.res.Field)
+		case values[id] != nil:
+			if err := ir.CheckDerivedValue(e.res.Kind, values[id]); err != nil {
+				r.fail(CodeLowering, "connector %s on edge %s derives a value for %s that is no %s: %v", e.connector.Name, id, e.res.Field, contractOf(e.res.Kind), err)
+			}
+		}
 		r.checkParameters(where, values[id])
 		r.produce(id, ir.PhaseInfrastructure, connected.Resources)
 	}
