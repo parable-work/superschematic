@@ -5,8 +5,8 @@
 //! A validator checks a JSON value as the generated Go, TypeScript and
 //! Python validators do (D14): presence, then the JSON type, then the
 //! rules, with one error per failing value at its wire path (`field`,
-//! `field[i]`, `field.key`). `parse_<type>` fills the type's defaults,
-//! validates the value and decodes it.
+//! `field[i]`, `field.key`). `prepare_<type>` fills the type's defaults and
+//! validates the value; `parse_<type>` also decodes it.
 
 #![allow(clippy::too_many_lines, clippy::needless_borrow)]
 
@@ -169,9 +169,10 @@ pub fn validate_shelf_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_shelf)
 }
 
-/// Parses a JSON value as `Shelf`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_shelf(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Shelf, rt::ParseError> {
+/// Prepares a JSON value as `Shelf`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_shelf` decodes.
+pub fn prepare_shelf(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -181,6 +182,12 @@ pub fn parse_shelf(value: Value, unknown_fields: rt::UnknownFields) -> Result<cr
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Shelf`: `prepare_shelf`, then decodes it.
+pub fn parse_shelf(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Shelf, rt::ParseError> {
+    let value = prepare_shelf(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -233,9 +240,10 @@ pub fn validate_stock_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_stock)
 }
 
-/// Parses a JSON value as `Stock`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_stock(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Stock, rt::ParseError> {
+/// Prepares a JSON value as `Stock`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_stock` decodes.
+pub fn prepare_stock(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -245,5 +253,11 @@ pub fn parse_stock(value: Value, unknown_fields: rt::UnknownFields) -> Result<cr
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Stock`: `prepare_stock`, then decodes it.
+pub fn parse_stock(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Stock, rt::ParseError> {
+    let value = prepare_stock(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }

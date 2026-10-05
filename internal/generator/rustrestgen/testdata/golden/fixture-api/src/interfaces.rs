@@ -3,25 +3,66 @@
 //! Operations declared @manualRouteRegistration have no method here: the
 //! service mounts them itself (see `build_router`).
 
+#![allow(unused_imports)]
+
+use crate::types;
 use async_trait::async_trait;
 use superschematic_http_runtime::{ApiError, Authenticator, RequestContext};
-use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+/// The arguments of tenant.listTenants (`GET /api/tenants`),
+/// decoded and checked by the router.
+#[derive(Debug, Clone)]
+pub struct TenantListTenantsArgs {
+    /// The `ids` query parameter.
+    pub ids: Vec<types::IdentityUUID>,
+    /// The `statuses` query parameter.
+    pub statuses: Option<Vec<types::TenantListStatus>>,
+}
+
+/// The arguments of tenant.createTenant (`POST /api/tenants`),
+/// decoded and checked by the router.
+#[derive(Debug, Clone)]
+pub struct TenantCreateTenantArgs {
+    /// The request body.
+    pub input: types::CreateTenantInput,
+}
+
+/// The arguments of tenant.getTenant (`GET /api/tenants/{id}`),
+/// decoded and checked by the router.
+#[derive(Debug, Clone)]
+pub struct TenantGetTenantArgs {
+    /// The `id` path parameter.
+    pub id: types::IdentityUUID,
+    /// The `includeArchived` query parameter.
+    pub include_archived: bool,
+}
+
+/// The arguments of tenant.updateSecret (`PATCH /api/tenants/{id}`),
+/// decoded and checked by the router.
+#[derive(Debug, Clone)]
+pub struct TenantUpdateSecretArgs {
+    /// The `id` path parameter.
+    pub id: types::IdentityUUID,
+    /// The `secret` field of the request body.
+    pub secret: String,
+}
+
 #[async_trait]
 pub trait SessionImplementation: Send + Sync + 'static {
-    async fn current_tenant(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
+    async fn current_tenant(&self, ctx: RequestContext) -> Result<types::TenantView, ApiError>;
 }
 
 #[async_trait]
 pub trait TenantImplementation: Send + Sync + 'static {
     /// Array query parameters: ?ids=a,b&statuses=active,suspended.
-    async fn list_tenants(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
-    async fn create_tenant(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
+    async fn list_tenants(&self, ctx: RequestContext, args: TenantListTenantsArgs) -> Result<Vec<types::TenantView>, ApiError>;
+    async fn create_tenant(&self, ctx: RequestContext, args: TenantCreateTenantArgs) -> Result<types::TenantView, ApiError>;
     /// Fetch one tenant by id.
-    async fn get_tenant(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
-    async fn update_secret(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
+    async fn get_tenant(&self, ctx: RequestContext, args: TenantGetTenantArgs) -> Result<types::TenantView, ApiError>;
+    async fn update_secret(&self, ctx: RequestContext, args: TenantUpdateSecretArgs) -> Result<types::TenantView, ApiError>;
 }
-
 
 #[derive(Clone)]
 pub struct Implementations {

@@ -80,7 +80,8 @@ go-goldens: schema-file-types
 		go test -count=1 $$p -update || exit 1; done
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
-# Go package. CI fails when a committed catalog differs.
+# Go package, the TypeScript one with each scalar's value class from the
+# graph descriptor's rule. CI fails when a committed catalog differs.
 catalog-check:
 	go run ./internal/tools/scalarcatalog -check
 
@@ -134,7 +135,9 @@ python:
 # arbitrary_precision too, which superscalar's default lossless-json feature
 # turns on: an error map and a number check must not depend on either.
 rust:
-	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
+		&& cargo test && cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
@@ -157,15 +160,21 @@ versiongraph-scenarios: versiongraph
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
 	cd runtime/versiongraph/go && go test -count=1 -v -run '^TestScenarios$$' ./engine/
 
-# Every version-graph scenario through the TypeScript engine and its Postgres
-# adapter, each operation replayed through SyncEngine, with the canonical
-# vectors checked against Postgres and the adapter's, the sweeper's and the
-# facade's own tests, against the Postgres that
-# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+# Every version-graph scenario through the TypeScript engine. First on SQLite
+# (D32): SyncEngine over the SQLite adapter, with the adapter's own tests,
+# which need no database server and run with or without a Postgres URL (the
+# URL is unset for them, so the Postgres tests skip here and run once below).
+# Then on Postgres: the Postgres adapter, each operation replayed through
+# SyncEngine, with the canonical vectors checked against Postgres and the
+# adapter's, the sweeper's and the facade's own tests, against the Postgres
+# that SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names; that pass fails
+# without it.
 versiongraph-scenarios-ts:
-	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
-		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && \
+		env -u SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL bun test test/scenarios.test.ts test/sqlite.test.ts
+	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against (the SQLite pass above needs none)" >&2; exit 1; }
+	cd runtime/versiongraph/typescript && \
 		bun test test/scenarios.test.ts test/canonical.test.ts test/adapter.test.ts test/sweeper.test.ts \
 		test/facade.test.ts
 

@@ -86,6 +86,7 @@
           "type": "NUMERIC"
         },
         {
+          "holds": "json",
           "name": "doc",
           "nullable": true,
           "origin": "Sample.doc",
@@ -93,6 +94,7 @@
         },
         {
           "default": "'[]'",
+          "holds": "list",
           "name": "tags",
           "origin": "Sample.tags",
           "type": "TEXT"

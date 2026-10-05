@@ -213,7 +213,7 @@ func TestConvert(t *testing.T) {
 		{"JSONB", "UUID", convertImpossible, false},
 	}
 	for _, tc := range tests {
-		got := postgresDialect{}.convert(tc.from, tc.to)
+		got := pgConvert(tc.from, tc.to)
 		if got.kind != tc.kind || got.lossy != tc.lossy {
 			t.Errorf("convert(%s, %s) = %+v, want kind %d lossy %t", tc.from, tc.to, got, tc.kind, tc.lossy)
 		}
@@ -374,5 +374,49 @@ func TestDropOrder(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("statements:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestGraphContentWithoutDDL: columns that join or leave a graph member's
+// content while they stay get one step with no SQL and a history hazard
+// that names them. A column the plan adds or renames carries its own
+// hazard, and a renamed column that stays in the content is no content
+// change.
+func TestGraphContentWithoutDDL(t *testing.T) {
+	model := func(epoch int, content ...string) *Model {
+		var columns []*Column
+		for _, name := range []string{"id", "a", "b", "c", "old"} {
+			columns = append(columns, &Column{Name: name, Origin: "Step." + name, Type: "TEXT"})
+		}
+		return &Model{
+			Version: ModelVersion, Dialect: Postgres, Service: "s",
+			Tables: []*Table{{Name: "step", Kind: TableEntity, Columns: columns,
+				PrimaryKey: &Constraint{Name: "step_pkey", Columns: []string{"id"}}}},
+			Graphs: []*Graph{{Name: "Recipe", SchemaEpoch: epoch, Members: []*GraphMember{{Table: "step", Content: content}}}},
+		}
+	}
+	from := model(1, "a", "old")
+	to := model(1, "b", "c", "d", "new")
+	to.Tables[0].Columns[4].Name, to.Tables[0].Columns[4].Origin = "new", "Step.new"
+	to.Tables[0].Columns = append(to.Tables[0].Columns, &Column{Name: "d", Origin: "Step.d", Type: "TEXT", Nullable: true})
+	plan, err := Diff(from, to, Options{Renames: []Rename{{From: "step.old", To: "step.new"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, step := range plan.Steps {
+		for _, h := range step.Hazards {
+			if h.Class == HazardHistory {
+				got = append(got, fmt.Sprintf("%s %s %d: %s", step.Op, step.Subject, len(step.Statements), h.Reason))
+			}
+		}
+	}
+	want := []string{
+		"renameColumn table/step/column/new 1: Step.old is content of version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch stays 1.",
+		"addColumn table/step/column/d 1: Step.d is content of version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch stays 1.",
+		"changeGraphContent table/step 0: Step.b and Step.c join and Step.a leaves the content of step in version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch stays 1.",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("history hazards:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

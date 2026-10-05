@@ -57,7 +57,7 @@ as their support lands in every generator.
 | `@auth` | method | the route needs a caller | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@requirePermission([...])` | method | the route needs a caller holding one of the permissions | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@requireOwnership` | method | the route needs a caller; your implementation checks ownership | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
-| `@publicRoute` | method | marks a route anyone may call | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
+| `@publicRoute` | method | marks a route anyone may call, in an `Authenticated` set too; refused with `@auth`, `@requirePermission` or `@requireOwnership` | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@webhook` | method | an operation a third party calls; the Go and TypeScript SDKs leave it out | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | `@hmacVerified({ provider })` | method | the Go server checks the request's signature with the provider's verifier | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | `@requireService({ from? })` | class, method | only a listed service may call: the server of an API whose handle `from` lists, or without `from` any server with an edge to this API; with a user clause, it must forward an end user who meets it. A method's own replaces its class's, and an `@publicRoute` method takes none | [Service auth](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#93-schema-surface) |
@@ -71,6 +71,6 @@ as their support lands in every generator.
 
 | Name | What it does | Covered in |
 | --- | --- | --- |
-| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
-| `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and the `from` of `@requireService` and `@allowService` | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
+| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
+| `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies`, `calls` and the `from` of `@requireService` and `@allowService`; its type carries the kind (`ServiceHandle<"API">`), and an API's generated handle also carries its `@envVars` class | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
 | `@envVars` | on a class of a General schema: its fields are the service's environment variables, with a generated loader and `values-schema.json` | [Modeling types](/superschematic/guides/modeling-types/#environment-variables) |

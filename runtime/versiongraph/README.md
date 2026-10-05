@@ -15,14 +15,15 @@ go/engine/          package engine: the Go engine, every graph operation over a 
 go/postgres/        package postgres: the Postgres storage adapter, with a pgx binding
 rust-engine/        superschematic-versiongraph-engine: the Rust engine, storage traits and Postgres adapter
 typescript/         @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations, and the
-                    TypeScript engine (./engine), its Postgres adapter (./postgres) and the facade base (./facade)
+                    TypeScript engine (./engine), its Postgres adapter (./postgres), its SQLite adapter (./sqlite)
+                    and the facade base (./facade)
 python/             superschematic-versiongraph (module superschematic_versiongraph): the Python binding, a PyO3
                     extension over the core built with maturin, with typed operations, and the Python engine
                     (engine), its Postgres adapter (postgres) and the facade base (facade)
 testdata/vectors/   the core's contract as vectors: {name, op, input, expect}
 testdata/canonical/ the canonical row contract as vectors: {cases} per class, {rows}
 testdata/fixture/   the scenarios' graph: fixture-version-graph-db's descriptor and Postgres DDL
-testdata/scenarios/ the engines' contract as scenarios: {name, description, steps}
+testdata/scenarios/ the engines' contract as scenarios: {name, description, roots, steps}
 ```
 
 This page is the contract. The vectors are its executable form: the Rust
@@ -31,7 +32,8 @@ package's tests run every core vector, and package `canonical`, the Rust
 engine's module `canonical` and the Python package's module `canonical`
 run every canonical vector. The scenarios are the engines' contract: the
 Go, TypeScript, Rust and Python engines run every one through their
-Postgres adapters. The package's
+Postgres adapters, and the TypeScript engine runs every one through its
+SQLite adapter too. The package's
 types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
@@ -414,8 +416,10 @@ Rust engine is the crate in `rust-engine/`, over its `Storage` and `Tx`
 traits, with its Postgres adapter in module `postgres` and the canonical
 rules in module `canonical`. The Python engine, storage protocol and
 Postgres adapter are the modules `engine`, `storage` and `postgres` of
-`python/superschematic_versiongraph`. Every adapter takes the sweep lock
-under the same key, so sweepers in different languages exclude each other.
+`python/superschematic_versiongraph`. Every Postgres adapter takes the
+sweep lock under the same key, so sweepers in different languages exclude
+each other. The TypeScript package also has a SQLite adapter,
+`typescript/src/sqlite.ts`, which `SyncEngine` runs over (below).
 
 Every id an engine takes or returns is a UUID in its canonical form. Each
 write takes an actor, and each write through a ref the ref's expected
@@ -442,25 +446,129 @@ version. An engine's errors have stable codes, shared by every language:
 
 An input the core refuses keeps the core's code (`unmatched_resolution`).
 
+### SQLite
+
+The SQLite adapter (D32, `@superschematic/versiongraph/sqlite`) holds every
+graph in one fixed layout of tables, the same for every graph, rather than
+in tables generated per graph, so a caller with fixed migrations, such as a
+D16 behavior, can hold one. It implements `SyncStorage` and `SyncTx`, since
+SQLite's drivers in bun and Node block, and only `SyncEngine` runs over it.
+It reads from the descriptor only the kinds, their role columns (the root
+among them), their columns' value classes and their `history`; the tables
+the descriptor names are the Postgres adapter's.
+
+The layout is nine `STRICT` tables, so a value of the wrong type is refused
+rather than stored. A function the caller gives names each table and each
+index from its local name below, and the default puts `graph_` before it.
+Every row carries its graph's name (`graph`), an option of the adapter, so
+one file holds several graphs, and every statement is scoped to it. An id
+is `TEXT` holding a UUID in its canonical form; a version, a sequence and a
+tombstone are `INTEGER`; the times of refs, commits, release pointers and
+history images are `INTEGER` microseconds since the Unix epoch, which the
+adapter returns as canonical date-times.
+
+| Table | Columns | Keys and indexes |
+|---|---|---|
+| `ref` | `id`, `graph`, `root_id`, `parent_ref_id`, `base_commit_id`, `head_commit_id`, `name`, `sealed_at`, `created_at`, `created_by`, `updated_at`, `updated_by`, `deleted_at`, `deleted_by`, `_version` | `parent_ref_id` references a ref, `base_commit_id` and `head_commit_id` a commit; `ref_live_name`: unique `(graph, root_id, name)` among refs not deleted |
+| `ref_history` | `history_id`, `graph`, `id`, `_version`, `operation`, `data`, `recorded_at` | `ref_history_version`: unique `(id, _version)` |
+| `commit` | `id`, `graph`, `root_id`, `ref_id`, `parent_commit_id`, `message`, `schema_epoch`, `content_hash`, `sequence`, `created_at`, `created_by` | `ref_id` references a ref, `parent_commit_id` a commit; `commit_sequence`: unique `(graph, root_id, sequence)` |
+| `patch` | `id`, `graph`, `commit_id`, `entity_kind`, `entity_key`, `entity_id`, `entity_version`, `operation` | `commit_id` references a commit; `patch_entity`: unique `(commit_id, entity_kind, entity_key)`; `patch_pin`: `(entity_id, entity_version)` |
+| `snapshot_entry` | `id`, `graph`, `commit_id`, `entity_kind`, `entity_key`, `entity_id`, `entity_version` | `commit_id` references a commit; `snapshot_entry_entity`: unique `(commit_id, entity_kind, entity_key)`; `snapshot_entry_pin`: `(entity_id, entity_version)` |
+| `release` | `id`, `graph`, `root_id`, `commit_id`, `created_at`, `created_by`, `updated_at`, `updated_by`, `_version` | `commit_id` references a commit; `release_root`: unique `(graph, root_id)` |
+| `release_history` | as `ref_history` | `release_history_version`: unique `(id, _version)` |
+| `member` | `id`, `graph`, `kind`, `entity_key`, `ref_id`, `root_id`, `tombstone`, `_version`, `data` | `ref_id` references a ref; `member_entity`: unique `(graph, kind, ref_id, entity_key)` |
+| `member_history` | `history_id`, `graph`, `kind`, `id`, `_version`, `operation`, `data`, `recorded_at` | `member_history_version`: unique `(id, _version)`; `member_history_recorded`: `(graph, kind, recorded_at)` |
+
+A member row holds its kind's role columns (id, entity key, ref, root,
+tombstone, version) as columns and every other column the descriptor
+declares as one canonical JSON object, `data`; read back, it is the
+kind's canonical row, keyed by the descriptor's column names, with every
+column the kind declares: one the stored row lacks, because the kind
+gained it after the row was written, reads as `null`, as a Postgres row
+reads a column added after it. An image likewise reads with every column
+the kind declares and its history does not exclude. Foreign keys
+check every edge inside the layout, immediately: a ref is written before a
+commit of it, and its head moves to a commit only once the commit is
+written. There is no root table, so no key checks a root; the adapter
+refuses a write whose ref or commit is another graph's, or another root's.
+`sqliteLayout(name)` returns the statements that create the layout, one
+statement each (`CREATE TABLE IF NOT EXISTS` or `CREATE [UNIQUE] INDEX IF
+NOT EXISTS`) with no trigger and no transaction control, for a caller that
+runs its own migrations, and `createTables` runs them.
+
+The adapter writes history in the statements of the transaction that
+changes a row, as the sql generator's triggers do on Postgres. `_version`
+starts at 1 and every update sets it to the old version plus 1. An insert
+or an update writes the row's image at its new version, with operation
+`INSERT` or `UPDATE`; a delete writes the row's image at the old version
+plus 1, with operation `DELETE` and the kind's `history.actor` column, when
+it has one, set to the delete's actor. A member's image is its canonical
+row less the kind's `history.exclude` columns, so it hashes as the live row
+does. A ref's image and a release pointer's are JSON objects of their
+columns, each id in its canonical form and each time a canonical
+date-time; the release pointer's history is the release log.
+
+A transaction reads its time once from a clock (the system clock, in
+milliseconds, unless the caller gives one), and every write in it, history
+images included, takes that time, as Postgres's `now()` does. The adapter
+generates every id Postgres takes from `gen_random_uuid()`: a version-4
+UUID, in its canonical form, for each new ref, commit, release pointer,
+patch, snapshot entry, row, history image and entity key a row lacks. It
+canonicalizes each value it writes by its class with the canonical rules,
+so what it stores reads back with no rules of its own. It writes a row's
+ref, root, tombstone, actor and time itself and never its id or version;
+a column the row lacks keeps its stored value on an update, and is `null`
+on an insert, since the layout knows no column's default.
+
+On a connection of its own, the adapter turns the connection's foreign
+keys on when it is bound, begins each transaction with `BEGIN IMMEDIATE`,
+which takes the file's write lock at once, and runs a transaction begun
+inside another as a savepoint, at the outer one's time. With
+`callerTransaction` it runs inside the transaction its caller holds and
+issues no transaction control at all, as a D16 behavior's `sql` requires:
+every statement it runs passes D16's checks for a behavior's SQL. Either
+way one writer holds the file, so `lockRef` reads a ref as `readRef` does,
+`nextSequence` reads the root's highest sequence plus 1, and `sweepLock`
+reports true. A name already taken is `ref_live_name`'s
+`SQLITE_CONSTRAINT_UNIQUE`. `prune` deletes a kind's images older than its
+`history.retentionDays`, or the argument when it is not 0, keeping each
+row's newest image and every image a patch or a snapshot pins, at most a
+batch of them, oldest first; a kind without `retentionDays` prunes
+nothing.
+
+The adapter reaches SQLite through `SqliteClient`: `run`, `get` and `all`
+with positional parameters for numbered placeholders (`?1`), returning
+plain rows and `undefined` for no row, and an error carrying SQLite's
+extended result code as a number in `code`, as D16's driver's do, plus
+`exec`, which it calls only for transaction control and connection
+settings. `nodeSqlite` and `bunSqlite` bind an open `node:sqlite`
+`DatabaseSync` and an open `bun:sqlite` `Database`, using only the methods
+they call, so no entry imports either module.
+
 ## Scenarios
 
 `testdata/scenarios` holds one scenario per file, named by its `name`:
 `{"name", "description", "roots", "steps": [step, ...]}`. A runner runs on
 one backend. The backends a scenario may name are `postgres` and `sqlite`;
-every runner runs on `postgres` today. It applies
-`testdata/fixture/create.sql` to an empty Postgres schema, builds its
-engine and Postgres adapter from `testdata/fixture/recipe.json` at schema
-epoch 1 and snapshot interval 3, the fixture graph's, seeds the scenario's
-roots, and runs each step in order. It reads the whole scenario before the
-first step, and refuses one with an unknown member or one that breaks a
-rule below.
+every runner runs on `postgres`, and the TypeScript runner on `sqlite` too.
+On Postgres a runner applies `testdata/fixture/create.sql` to an empty
+schema and builds its engine and Postgres adapter from
+`testdata/fixture/recipe.json`; on SQLite the TypeScript runner creates the
+SQLite adapter's layout, under its default names, in an in-memory database
+and builds a `SyncEngine` and the SQLite adapter, graph `recipe`, from the
+same descriptor. Either way the engine runs at schema epoch 1 and snapshot
+interval 3, the fixture graph's; the runner seeds the scenario's roots and
+runs each step in order. It reads the whole scenario before the first
+step, and refuses one with an unknown member or one that breaks a rule
+below.
 
 `roots` lists the roots the scenario uses, in order: at least one, each a
 name and named once (`["Bread", "Soup"]`). Before the first step a runner
 seeds them as its backend needs. On Postgres it inserts, in one statement,
 a `recipe` row per root whose `id` is the root, whose `title` is the root's
 name and whose `created_by` is `Cook`, so `recipe_ref.root_id`'s foreign
-key finds it. A root the scenario does not list has no row.
+key finds it; a root the scenario does not list has no row. On SQLite it
+seeds nothing, since the layout has no root table.
 
 A step is `{"op", ...arguments, "expect"?}`. `as` names the ref or commit a
 step returns, and later steps name it: `ref`, `from`, `source` and `target`
@@ -505,15 +613,19 @@ sweep runs.
 | `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
 | `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
 | `snapshot` | `commit` | The adapter's snapshot entries of the commit, by kind and entity key |
-| `sql` | `statement`: `{"<backend>": "<statement>"}`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text on Postgres | The runner's backend's statement on the scenario's schema; with `rows` expected, a query whose rows the step returns |
+| `sql` | `statement`: `{"<backend>": "<statement>"}`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text on Postgres and in its canonical form on SQLite | The runner's backend's statement on the scenario's database; with `rows` expected, a query whose rows the step returns |
 
 An `sql` step's `statement` is an object of one statement per backend,
 `{"postgres": "...", "sqlite": "..."}`; a `null` statement is none. On any
 step that has one, a runner refuses a plain string, a statement for a
 backend it does not know, and a statement that is not text (`null`
 included). It refuses an `sql` step it runs that has no statement for its
-backend, so no step is skipped silently; a step it skips needs none. The
-scenarios give `postgres` statements only until a runner runs on SQLite.
+backend, so no step is skipped silently; a step it skips needs none. Every
+`sql` step gives both. A `postgres` statement numbers its placeholders `$1`
+and takes UUIDs hyphenated; a `sqlite` statement is written against the
+SQLite adapter's layout under its default names (`graph_ref`,
+`graph_member_history`), numbers its placeholders `?1` and takes UUIDs in
+their canonical form, as the layout stores them.
 
 `expect` holds what the step must return; a step without `error` must
 succeed.
@@ -527,7 +639,7 @@ succeed.
 | `contentHash`, `contentHashOf` | A read's content hash. |
 | `findings`, `conflicts`, `changes` | Compose's findings, a merge's conflicts, a diff's changes: in order, each with its listed members. A merge left conflicts only when the step lists them. |
 | `commits` | History's commits, by name, newest first. |
-| `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. An `sql` step's rows are the statement's, in the order it returns them, each an object of its columns read as text, so the statement casts what it selects (a history image's actor, say, mapped to a name with `CASE`). |
+| `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. An `sql` step's rows are the statement's, in the order it returns them, each an object of its columns read as text, so the statement casts what it selects (a history image's actor, say, mapped to a name with `CASE`); on SQLite, where a column keeps its type, a column that is not text or `NULL` is refused. |
 | `release` | The release pointer a release or released step returns: `commit` by name and `version`. |
 | `report` | A sweep's report, with its listed members: `skipped`, `abandoned`, `collectedRefs`, `collectedRows` and `pruned` (by kind, nonzero counts only) and `snapshots`. |
 
@@ -567,7 +679,7 @@ cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
-make versiongraph-scenarios-ts  # every scenario through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine
+make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
 make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
 ```
@@ -577,7 +689,10 @@ check run against the Postgres that
 `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names, and skip without it;
 `make versiongraph-scenarios`, `make versiongraph-scenarios-ts`,
 `make versiongraph-scenarios-rust` and `make versiongraph-scenarios-python`
-fail without it. The fixture is the
+fail without it. The scenarios on SQLite and the SQLite adapter's tests
+need no server and run with or without it, and
+`make versiongraph-scenarios-ts` runs them before it checks for the
+variable. The fixture is the
 compiler's output for `fixture-version-graph-db`, and a compiler test
 (`go test ./internal/generator -run TestVersionGraphScenarioFixtureIsCurrent`)
 fails when the checked-in copy is stale; `-update` rewrites it.

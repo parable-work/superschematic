@@ -68,18 +68,27 @@ func CatalogDir(outputRoot, service string) string {
 }
 
 // Catalog is the generator's output: every shelved field of the service,
-// and each type's feed key.
+// each type's feed key, and the class each @crossSell type is offered beside.
 type Catalog struct {
-	Service  string              `json:"service"`
-	Shelves  map[string]Shelf    `json:"shelves"`
-	FeedKeys map[string][]string `json:"feedKeys"`
+	Service    string              `json:"service"`
+	Shelves    map[string]Shelf    `json:"shelves"`
+	FeedKeys   map[string][]string `json:"feedKeys"`
+	CrossSells map[string]string   `json:"crossSells"`
 }
 
 // generateCatalog writes catalog.json: one entry per @shelf field, keyed
-// Type.field, and per type the @feedKey fields in declaration order.
+// Type.field, per type the @feedKey fields in declaration order, and per
+// @crossSell type the name of the class it names.
 func generateCatalog(c registry.GenerateContext) error {
-	out := Catalog{Service: c.Config.Name, Shelves: map[string]Shelf{}, FeedKeys: map[string][]string{}}
+	out := Catalog{Service: c.Config.Name, Shelves: map[string]Shelf{}, FeedKeys: map[string][]string{}, CrossSells: map[string]string{}}
 	for _, tname := range sortedTypeNames(c.Schema) {
+		with, ok, err := CrossSellOf(c.Schema.Types[tname])
+		if err != nil {
+			return fmt.Errorf("type %s: %w", tname, err)
+		}
+		if ok {
+			out.CrossSells[tname] = with
+		}
 		for _, fd := range c.Schema.Types[tname].Fields {
 			shelf, ok, err := ShelfOf(fd)
 			if err != nil {

@@ -225,6 +225,24 @@ export class Queries {
 			},
 		},
 		{
+			name: "traffic control values below 1",
+			kind: "API",
+			source: `import { HttpMethod, bodyLimit, rest, timeout } from "@superschematic/api";
+@bodyLimit({ megabytes: 0 })
+export class Queries {
+  @rest(HttpMethod.GET, "things")
+  @timeout({ seconds: 0.5 })
+  list(): string {
+    throw new Error("schema declaration only");
+  }
+}
+`,
+			want: []string{
+				"a.schema.ts:2:1: @bodyLimit megabytes must be a whole number of at least 1, not 0",
+				"a.schema.ts:5:3: @timeout seconds must be a whole number of at least 1, not 0.5",
+			},
+		},
+		{
 			name: "versioned config errors survive a failed field",
 			kind: "DB",
 			source: `import { key, versioned } from "@superschematic/db";

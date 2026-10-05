@@ -47,6 +47,8 @@ func TestHazardClasses(t *testing.T) {
 
 		{plan: "add-table", op: "createTable", phase: Expand},
 		{plan: "drop-table", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
+		{plan: "drop-tables-in-cycle", op: "dropForeignKey", phase: Contract},
+		{plan: "drop-tables-in-cycle", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
 		{plan: "rename-table-as-drop-add", op: "dropTable", subject: "table/label", phase: Contract, want: []HazardClass{destructive},
 			reason: "--rename label=tag"},
 		{plan: "rename-table", op: "renameTable", phase: Expand, want: []HazardClass{compat}},
@@ -103,6 +105,8 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "graph-content-retype", op: "alterColumnType", phase: Expand,
 			want: []HazardClass{blockingClass, compat, dataDependent, history}, reason: "rose from 1 to 2"},
 		{plan: "graph-content-add", op: "addColumn", phase: Expand, want: []HazardClass{history}, reason: "stays 1"},
+		{plan: "graph-content-exclude", op: "changeGraphContent", phase: Expand, want: []HazardClass{history},
+			reason: "Note.body leaves the content of note in version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch rose from 1 to 2."},
 	})
 }
 

@@ -253,6 +253,17 @@ engine.runner.stop();      // engine.close() stops it too
   `engine.runner.resume({ behavior, namespace, schema })`, or
   `resume(key, { skip: true })` to pass over it. A schedule never halts:
   its next run redoes the work.
+- **A schema can turn a schedule off.** A schedule's interval may follow
+  the config of each schema, and a config that gives it none (its
+  `everyMs` function returns `null`) runs nothing on that schema:
+  `status()` shows the schedule `off` there. A publish whose config gives
+  an interval starts it again, an interval later.
+- **A schedule writes its own storage, a reaction none.** A schedule's run
+  may write its behavior's own tables, in the run's transaction, so a run
+  that fails leaves none of it. It does so only for what no operation
+  returns, such as history nothing pins; any change a read shows goes
+  through an operation the run invokes, which appends its event. A
+  reaction changes state only through the operations it invokes.
 - **Events record their cause.** An event the runner's work writes
   carries `cause`: `{ behavior, event, depth }` for a reaction, or
   `{ behavior, schedule, depth }` for a schedule.
@@ -261,7 +272,8 @@ engine.runner.stop();      // engine.close() stops it too
   with a clock they move.
 
 `status()` lists each subscription (`active`, `retrying`, `halted` or
-`inactive`) and schedule, with its last failure. It is not served over
+`inactive`) and schedule (`active`, `retrying`, `off` or `inactive`), with
+its last failure. It is not served over
 HTTP or MCP, since it spans every namespace; expose it on a health route
 of your own.
 

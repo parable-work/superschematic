@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -46,6 +47,16 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 
 	// Type declarations.
 	marker(TargetType, "trait", []string{pkgSchema})
+	// The argument evaluator reads a class named as a value, local or
+	// imported, as a class reference ({"class": name}, ClassRef) for every
+	// decorator with an Apply, and records an import for a class from another
+	// service's package. @source, @versionGraph and @graphMember stay markers
+	// the walker reads, because each would lose a diagnostic or change the IR
+	// as an Apply; the reasons follow each registration.
+	//
+	// @source(Product) is projected from the class's declaration, whose
+	// flattened fields Apply cannot reach, and a cross-service target is
+	// compile-time lineage that must not be recorded as an import.
 	specs = append(specs, DecoratorSpec{
 		Name: "source", Packages: []string{pkgAPI, pkgSchema}, Target: TargetType,
 		Kinds: []string{string(ir.SchemaKindAPI), string(ir.SchemaKindGeneral)},
@@ -56,9 +67,11 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// move them after field resolution and lose that diagnostic.
 	marker(TargetType, "envVars", []string{pkgSchemaConfig})
 	marker(TargetType, "versioned", []string{pkgDB})
-	// @versionGraph and @graphMember name schema classes as values (graph,
-	// parent.of), which the argument evaluator does not read, so the walker
-	// reads them itself beside @versioned.
+	// @versionGraph names no class; it is read beside @versioned, for the same
+	// reason. @graphMember is too, and also reports each bad property at its
+	// value (an ArgError points only at a whole argument), counts its repeats
+	// on one type, and resolves graph and parent.of without recording an
+	// import, since both must name classes of this schema.
 	marker(TargetType, "versionGraph", []string{pkgDB})
 	marker(TargetType, "graphMember", []string{pkgDB})
 	flag(TargetType, "optimistic", []string{pkgDB}, func(n Node) { n.Type.Optimistic = true })
@@ -307,7 +320,9 @@ func indexDef(args []any) (ir.IndexDef, error) {
 }
 
 // applyMiddleware folds one of @rateLimit/@bodyLimit/@timeout into a
-// MiddlewareConfig, allocating it on first use.
+// MiddlewareConfig, allocating it on first use. Its value is a whole number
+// of at least 1: a server cannot apply a limit of 0 (the Go runtime would
+// refuse every request) or a fraction of a request, megabyte or second.
 func applyMiddleware(name string, args []any, target **ir.MiddlewareConfig) error {
 	if len(args) != 1 {
 		return fmt.Errorf("@%s takes exactly one config object", name)
@@ -319,30 +334,27 @@ func applyMiddleware(name string, args []any, target **ir.MiddlewareConfig) erro
 	if *target == nil {
 		*target = &ir.MiddlewareConfig{}
 	}
-	readInt := func(key string) (int, bool) {
-		f, ok := cfg[key].(float64)
-		return int(f), ok
-	}
+	var key string
+	var slot **int
 	switch name {
 	case "rateLimit":
-		n, ok := readInt("requestsPerMinute")
-		if !ok {
-			return fmt.Errorf("@rateLimit requires a literal requestsPerMinute")
-		}
-		(*target).RateLimit = &n
+		key, slot = "requestsPerMinute", &(*target).RateLimit
 	case "bodyLimit":
-		n, ok := readInt("megabytes")
-		if !ok {
-			return fmt.Errorf("@bodyLimit requires a literal megabytes")
-		}
-		(*target).BodyLimit = &n
+		key, slot = "megabytes", &(*target).BodyLimit
 	case "timeout":
-		n, ok := readInt("seconds")
-		if !ok {
-			return fmt.Errorf("@timeout requires a literal seconds")
-		}
-		(*target).Timeout = &n
+		key, slot = "seconds", &(*target).Timeout
+	default:
+		return nil
 	}
+	f, ok := cfg[key].(float64)
+	if !ok {
+		return fmt.Errorf("@%s requires a literal %s", name, key)
+	}
+	if f < 1 || f != math.Trunc(f) || f > math.MaxInt32 {
+		return fmt.Errorf("@%s %s must be a whole number of at least 1, not %v", name, key, f)
+	}
+	n := int(f)
+	*slot = &n
 	return nil
 }
 

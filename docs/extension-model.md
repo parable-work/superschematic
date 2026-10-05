@@ -8,8 +8,8 @@ the registry, and which tests prove that an extension needs no core edit.
 Two pages walk the same surfaces with code, and this document does not
 repeat them:
 
-- The [write an extension](https://parable-work.github.io/superschematic/guides/write-an-extension/)
-  guide (source: `docs/src/content/docs/guides/write-an-extension.md`).
+- The [write an extension](https://parable-work.github.io/superschematic/extending/write-an-extension/)
+  guide (source: `docs/src/content/docs/extending/write-an-extension.md`).
 - `examples/acme-schematic/README.md`, which walks every file of the
   example extension.
 
@@ -135,10 +135,11 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
+| `stack` | The stack model's resolver (`docs/stack-model.md`, section 6.10): `Resolve` over a stack, the facts of its services (`Service`, `Config`, `ConfigField`) and one environment, its failures (`Errors`, with a `Code` per check), and `Marshal`, `Unmarshal`, `Write` and `EnvironmentPath` for `environment.json`. An extension's tests resolve a stack over its platforms with it |
 | `schemadeps` | The dependency graph of the generated packages, which `build-all` writes to `<dist>/.deps.json` and, with `[deps] copy`, to a path a repository commits. Every package names the service that produced it. `Read`, `Closure`, `WriteFileAtomic` and `SyncCopy` (check or refresh the committed copy) are what an extension's command over the graph needs (section 3.8) |
 
 `registry` and `loader` are alias packages rather than the implementation;
@@ -183,6 +184,7 @@ Each `Register*` method checks its own spec:
 | `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog |
 | `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
+| `RegisterPlatform`, `RegisterConnector`, `RegisterTarget`, `RegisterDNSPlatform`, `RegisterProvisioner` | the stack model's specs; `docs/stack-model.md`, section 6.7, lists what each refuses |
 | `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params or precondition schema that is not an object schema or does not set `"additionalProperties": false`, a create params schema that is not an object schema or whose `additionalProperties` is neither `false` nor a schema, an operation or field name that is malformed or repeats, an operation named like one every schema has, a veto code that is not lowercase snake case or repeats (section 3.16) |
 
 Every one of them fails after `Finalize`.
@@ -201,6 +203,10 @@ Every one of them fails after `Finalize`.
   other than itself and not the same one in both, and each of its
   operations' `invocationPolicy` is a value of the policy in force
   (section 3.15), whichever extension registered it.
+- Every connector joins registered platforms of the kinds its edge joins.
+  Every platform a target names is registered and of the right kind, and
+  so is any DNS platform or provisioner it names (`docs/stack-model.md`,
+  section 6.7).
 
 `Registry.Extensions()` is the set of names passed to `Use` or set on a
 spec. It closes the data-form `extensions` objects (section 5).
@@ -265,6 +271,34 @@ reaches `Args` and the IR as `[]`, not `null`. `registry.DecodeArgs` decodes
 the argument into a Go struct. An `ArgError` (`registry.ArgErrorf`) points
 the TypeScript diagnostic at one argument instead of the decorator.
 
+An argument can name a class as a value, in any decorator, core or
+extension: `@pairsWith(Accessory)`, `{ of: Backend }`. The TypeScript
+frontend resolves the identifier, through any import alias, to the class it
+declares and evaluates it to the class reference `{"class": "Accessory"}`
+(`ir.ClassRef`), which holds the declared name, unqualified. The data forms
+write the same object, so `Apply` sees the same value from every form and
+the slot stores it as written. A class declared in another service's
+package is recorded in the schema's `Imports` under that package, as a
+field type from it is, so the kind's import rules apply and `schema.config`
+must declare the dependency. Three registry names serve an extension:
+
+| Name | Use |
+| --- | --- |
+| `registry.ClassRefSchema` | the JSON Schema of a class reference, for the place in `Args` that takes a class; a name in a string there fails in both forms |
+| `registry.ClassRef` | the Go type, a member of the struct `DecodeArgs` fills or of a codec struct |
+| `registry.DecodeClassRef(v)` | reads one class reference, such as a whole argument, into the class's name |
+
+The shape is reserved. In a decorator's value under an `extensions` slot,
+an object whose only key is `class`, holding a string, is a class reference
+wherever it sits. After the schema is assembled, verify fails the load,
+in every form, when the schema neither declares nor imports a type of that
+name: `type "Product": @pairsWith names class "Missing", which this schema
+neither declares nor imports`. That check is what holds the data forms to a
+real class. The TypeScript form has the compiler too, and it refuses an
+object literal of that shape: a schema names the class itself. A core
+decorator that keeps a class in a typed IR field checks it with a rule of
+its own, as `@graphMember`'s `graph` is checked.
+
 A core spec can also take class type arguments. `DecoratorSpec.TypeArgs()`
 is their number; `@projection<Source>` and `@join<Table>` take one each.
 The TypeScript frontend resolves each type argument to the name of the
@@ -288,8 +322,16 @@ does, and the data forms write its value as `true`. A spec with a nil
 `Apply` is a marker the frontend interprets itself; only the core registers
 those (`trait`, `source`, `envVars`, `versioned`, `versionGraph`,
 `graphMember`), and `RegisterDecorator` refuses an extension decorator
-without `Apply`. `versionGraph` and `graphMember` name schema classes as
-values (`graph: Recipe`), which the argument evaluator does not read.
+without `Apply`. `source` and `graphMember` name classes (`@source(Product)`,
+`graph: Recipe`), but each would lose a diagnostic or change the IR as an
+`Apply`, so they stay markers. `@source` projects the class's flattened
+fields, which `Apply` cannot reach, and records no import for a
+cross-service target. `versionGraph`, which names no class, and
+`graphMember` are read before the type's fields resolve, as `versioned` is,
+so their errors are reported when a field fails; `graphMember` also reports
+each bad property at that property's value.
+`internal/registry/core_decorators.go` gives the reasons beside each
+registration.
 
 A decorator has a TypeScript half: a function the extension's npm package
 exports that does nothing at run time, so the author gets completion and
@@ -949,9 +991,15 @@ carries the same declaration. Some of its members have no part in the
 declaration, since a client never calls them: `reactions`, which the
 engine's runner hands committed events after the commit, as the
 principal the deployment names for it, and `schedules`, named timed work
-with an interval (`runtime/engine/README.md`, "Reactions and schedules"
-and "The runner"). The compiler neither sees nor checks them; the engine
-checks them when the implementation registers.
+with an interval, which a schema's config may turn off and whose runs may
+write the behavior's own tables where no operation's result changes
+(`runtime/engine/README.md`, "Reactions and schedules" and "The
+runner"). The compiler neither sees nor checks them; the engine checks
+them when the implementation registers. Nor does it see what
+`parseConfig` reads of the schema's other types (`ConfigTarget.types`):
+the engine holds each type read there to its document checks and its
+compatibility rule, and a behavior's contexts check a value against one
+with `validate(type, value)` ("Other types" there).
 
 `superschematic behaviors --out <dir>` copies the declaration there: one
 canonical `<name>.behavior.json` per behavior the binary registers
@@ -1007,7 +1055,9 @@ write the same object:
 ```
 
 A marker such as acme's `@feedKey` is `true` in the same object:
-`"acme": { "feedKey": true, "shelf": { ... } }`.
+`"acme": { "feedKey": true, "shelf": { ... } }`. A class in an argument is
+a class reference there (section 3.4): acme's `@crossSell({ with: Product })`
+is `"acme": { "crossSell": { "with": { "class": "Product" } } }` on the type.
 
 ### 4.2 Codecs
 
@@ -1145,8 +1195,9 @@ For each decorator on a node the walker calls `applyDecorator`
 3. Resolve the spec's class type arguments, if it takes any (section
    3.4), to class names. Evaluate the arguments statically: literals,
    object and array literals, enum members, `const` variables with an
-   initializer, `service({...})` sentinel calls and `as` expressions.
-   Anything computed is an error.
+   initializer, `service({...})` sentinel calls, `as` expressions and
+   classes, local or imported, which become class references (section
+   3.4). Anything computed is an error.
 4. Validate against `Args`, then call `Apply`.
 
 The walker, not the registry, decides the shape of a class: a table, an
@@ -1413,6 +1464,7 @@ its provider, which supplies those two functions. D15 in
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |
+| Platforms, connectors, targets, DNS platforms, provisioners | none (`docs/stack-model.md`, section 6) |
 | Commands | `build`, `build-all`, `json-schema`, `format` |
 
 The core stays provider-neutral (`CONTRIBUTING.md`, "The core stays
@@ -1432,7 +1484,7 @@ each surface:
 | Surface | acme | File |
 | --- | --- | --- |
 | Kind | `Catalog`, pipeline `types`, `catalog` | `ext/kind.go` |
-| Decorators | `@shelf` (an argument) and `@feedKey` (a marker) from `@acme/schema`, on Catalog fields | `ext/decorator.go`, `packages/schema` |
+| Decorators | `@shelf` (an argument) and `@feedKey` (a marker) from `@acme/schema`, on Catalog fields; `@crossSell`, whose argument names a class, on Catalog types | `ext/decorator.go`, `ext/cross_sell.go`, `packages/schema` |
 | Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar; `Product.photo` in the Catalog service bounds it with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
 | Document | `catalog.config.yaml` on Catalog services, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
@@ -1458,9 +1510,9 @@ that way. Two scripts check it, and the `acme` job in
   each surface did its work: `describe` lists the kind, document,
   provider and checks; `catalog.json`, the document's output and a
   manifest per service exist, and the inventory hook merges them again
-  when every service is restored from the cache; the `@shelf` payload and
-  the `@feedKey` marker, which `format` writes as YAML and as JSON and
-  which load back to the same IR,
+  when every service is restored from the cache; the `@shelf` payload,
+  the `@feedKey` marker and `@crossSell`'s class reference, which `format`
+  writes as YAML and as JSON and which load back to the same IR,
   `Acme.Photo`'s upload metadata with the `uploadMaxBytes` bound on
   `Product.photo`, and the scoped projection view are in the IR, and the view, its migration and
   its Arrow schema are written under acme's metadata key prefix; the
@@ -1488,14 +1540,22 @@ that way. Two scripts check it, and the `acme` job in
   smoke, checks the new payload reached the IR, and fails if any path
   outside `examples/acme-schematic/` changed.
 
-Inside the core module, three extensions test the seams against the real
-loader and generators:
+Inside the core module, four extensions test the seams against the real
+loader, generators and resolver:
 
 - `internal/registry/registrytest` is an in-tree fixture extension with a
   kind, decorators on all four targets, a data-form document, a generator
   and two behaviors. `TestAcmeExtensionEndToEnd` loads a TypeScript fixture and its
   data-form twin, checks both produce the same IR with the decorator values
-  in their slots, and runs the generator.
+  in their slots, and runs the generator. Its `@pairsWith` takes a class:
+  the tests in `class_ref_test.go` load one of the schema's own classes and
+  one imported from another service's package from all three forms, carry
+  them through the writers `format` uses, and fail a class the schema
+  neither declares nor imports.
+- `stack/stacktest` registers a fake target with its platforms,
+  connectors, DNS platform and provisioner, through the public packages
+  alone, and resolves a stack over the acme-shop services into golden
+  `environment.json` files (`docs/stack-model.md`, section 6.7).
 - `extensions/deploy` registers a document and nothing else. Its test loads
   `testdata/services/example` and compares the generated values files byte
   for byte. See the [deploy guide](https://parable-work.github.io/superschematic/guides/deploy/).
@@ -1546,6 +1606,11 @@ a candidate for a change with its own test.
    `x-superschematic-scalar` and the tool `_meta` keys) with
    `RegisterOpenAPIHook` and `RegisterToolHook` (sections 3.13 and 3.14);
    the `x-superschematic` key of `values-schema.json` has no seam.
+9. A data form's class reference to an imported name is taken on trust.
+   The reader does not load the dependency, so it checks only that the
+   schema's imports list the name, and cannot tell a class from an enum or
+   a scalar of that name. The TypeScript form resolves the class through
+   the compiler.
 
 ## 12. References
 
@@ -1563,8 +1628,9 @@ a candidate for a change with its own test.
 | `internal/loader/documents.go` | document loading |
 | `internal/loader/tsreader/walker.go`, `evaluate.go` | decorator origin, dispatch, static evaluation |
 | `internal/loader/schemafile/schema.go`, `slots.go` | the data-form JSON Schema composition and slot checks |
-| `internal/loader/verify/` | import rules and `KindSpec.Verify` |
+| `internal/loader/verify/` | import rules, class references and `KindSpec.Verify` |
 | `ir/extensions.go` | the codecs |
+| `ir/class_ref.go`, `internal/registry/class_ref.go` | the class reference shape, `ClassRefSchema`, `DecodeClassRef` |
 | `ir/mcp_invocation.go`, `internal/generator/apigen/tool_invocation.go` | the IR's invocation policy and its encoding, `ToolInvocationPolicy` |
 | `cli/cli.go` | `cli.New`, `CommandProvider` |
 | `loader/loader.go` | the public loader package |

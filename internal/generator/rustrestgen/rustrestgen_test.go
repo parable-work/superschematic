@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
@@ -70,16 +69,12 @@ func generateRustAPI(t *testing.T, name string, public bool, upstream string, up
 	outDir := t.TempDir()
 	typesDir := filepath.Join(outDir, "types", "rust", name)
 
-	output, err := Generate(apiSchema, Options{
-		AuthProvider:   sessionauth.Provider{},
-		SchemaName:     name,
-		IsPublic:       public,
-		UpstreamSchema: upstream,
-		UpstreamIR:     upstreamIR,
-		TypesCrate:     "schemas-" + name + "-types",
-		TypesDir:       typesDir,
-		OutputDir:      filepath.Join(outDir, "api", name),
-		Clock:          codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	output, err := generateFrom(apiSchema, apiSource{public: public, upstream: upstream, upstreamIR: upstreamIR}, Options{
+		SchemaName: name,
+		TypesCrate: "schemas-" + name + "-types",
+		TypesDir:   typesDir,
+		OutputDir:  filepath.Join(outDir, "api", name),
+		Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
 		t.Fatalf("generate %s: %v", name, err)
@@ -112,6 +107,8 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 		filepath.Join("src", "lib.rs"),
 		filepath.Join("src", "interfaces.rs"),
 		filepath.Join("src", "router.rs"),
+		filepath.Join("src", "openapi.rs"),
+		"openapi.json",
 	}
 
 	generated := make(map[string]string, len(files))
