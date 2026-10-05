@@ -77,6 +77,16 @@ func TestDecodeValueRejectsMalformedReferences(t *testing.T) {
 	}
 }
 
+// TestResourcePropertiesMustBeAnObject: properties that decode to a
+// reference are an error, not a panic.
+func TestResourcePropertiesMustBeAnObject(t *testing.T) {
+	var res Resource
+	err := json.Unmarshal([]byte(`{"id": "x", "type": "t", "properties": {"$parameter": "pr"}}`), &res)
+	if err == nil || !strings.Contains(err.Error(), "properties must be an object") {
+		t.Fatalf("Unmarshal = %v", err)
+	}
+}
+
 // TestResolvedEnvironmentDecodesReferences: a deployable's name and
 // address, a binding's value and a DNS record decode their references.
 func TestResolvedEnvironmentDecodesReferences(t *testing.T) {

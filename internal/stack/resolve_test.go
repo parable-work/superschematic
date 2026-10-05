@@ -261,6 +261,28 @@ func TestCheckKindMismatch(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeKindMismatch, "service shop-api authDb holds a handle to shop-db of kind General")
 	})
+	t.Run("settings of", func(t *testing.T) {
+		s, services := shop()
+		s.Environments[0].Settings = append(s.Environments[0].Settings, &ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindDB}}})
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeKindMismatch, "settings[1] (of shop-api) holds a handle to shop-api of kind DB, but shop-api is a API service")
+	})
+	t.Run("expose", func(t *testing.T) {
+		s, services := shop()
+		s.Expose = []ir.DeployableRef{{Service: &ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindGeneral}}}
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeKindMismatch, "expose[0] (shop-api) holds a handle to shop-api of kind General")
+	})
+	t.Run("serves and hosts", func(t *testing.T) {
+		s, services := shop()
+		s.Deployables = append(s.Deployables,
+			&ir.DeployableDecl{Name: "Main", Kind: ir.DeployableDatabase, Hosts: []ir.ServiceRef{stacktest.ShopAPI}},
+			&ir.DeployableDecl{Name: "Common", Kind: ir.DeployableServer, Serves: []ir.ServiceRef{{Name: "shop-common", Kind: ir.SchemaKindGeneral}}},
+		)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeKindMismatch, "database Main hosts names shop-api, a API service; it takes DB services")
+		mustFail(t, errs, stack.CodeKindMismatch, "server Common serves names shop-common, a General service; it takes API services")
+	})
 	t.Run("a kind the place does not take", func(t *testing.T) {
 		s, services := shop()
 		service(services, "shop-orders").Calls = []ir.ServiceRef{stacktest.ShopDB}
@@ -451,6 +473,20 @@ func TestFieldCollision(t *testing.T) {
 	})
 }
 
+// TestDerivedFieldCollision: two edges of one server whose services' names
+// differ only in punctuation derive one field, which fails.
+func TestDerivedFieldCollision(t *testing.T) {
+	reg := assemble(t)
+	s, services := shop()
+	other := ir.ServiceRef{Name: "shop_db", Kind: ir.SchemaKindDB}
+	services = append(services, stack.Service{Name: "shop_db", Kind: ir.SchemaKindDB})
+	service(services, "shop-api").AuthDB = &other
+	s.Deployables[0].Serves = append(s.Deployables[0].Serves, stacktest.ShopAPI)
+	s.Expose = []ir.DeployableRef{{Deployable: "Orders"}}
+	_, errs := resolve(t, reg, s, services, "Staging")
+	mustFail(t, errs, stack.CodeFieldCollision, "server Orders: edges sql:Orders->shop-db and sql:Orders->shop_db derive the same field SHOP_DB_DATABASE")
+}
+
 func TestAmbiguousDatabase(t *testing.T) {
 	reg := assemble(t)
 	s, services := shop()
@@ -467,6 +503,14 @@ func TestCallCycle(t *testing.T) {
 	s, services := shop()
 	service(services, "shop-api").Calls = []ir.ServiceRef{stacktest.ShopOrders}
 	_, errs := resolve(t, reg, s, services, "Staging")
+	mustFail(t, errs, stack.CodeCallCycle, "Orders -> shop-api -> Orders")
+
+	// An edge no connector serves, found in the same stage, does not hide
+	// the cycle.
+	service(services, "shop-api").Language = registry.APILanguageTypeScript
+	settingsFor(s.Environments[0], stacktest.Of(stacktest.ShopAPI)).Platform = stacktest.EdgePlatform
+	_, errs = resolve(t, reg, s, services, "Staging")
+	mustFail(t, errs, stack.CodeNoConnector, "edge http:Orders->shop-api")
 	mustFail(t, errs, stack.CodeCallCycle, "Orders -> shop-api -> Orders")
 }
 
@@ -638,8 +682,8 @@ func TestResolveIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestResolveDoesNotModifyItsInputs: platforms get copies, and the stack
-// and services come back as they went in.
+// TestResolveDoesNotModifyItsInputs: the stack and services come back as
+// they went in.
 func TestResolveDoesNotModifyItsInputs(t *testing.T) {
 	reg := assemble(t)
 	s, services := shop()
@@ -651,40 +695,99 @@ func TestResolveDoesNotModifyItsInputs(t *testing.T) {
 	}
 }
 
+// TestProducersAndPoliciesGetCopies: a platform that changes the
+// deployable it is given, and a policy rule that changes the environment
+// it checks, change nothing in the result.
+func TestProducersAndPoliciesGetCopies(t *testing.T) {
+	var kept *ir.Resource
+	ext := &broken{
+		lower: func(ctx registry.PlatformContext) (registry.Lowered, error) {
+			ctx.Deployable.Services[0].Name = "meddled"
+			ctx.Deployable.Bindings[0].Field = "MEDDLED"
+			ctx.Deployable.Bindings[0].Value = "meddled"
+			kept = &ir.Resource{ID: "svc", Type: "broken:thing", Properties: map[string]any{"size": float64(1)}}
+			return registry.Lowered{Resources: []*ir.Resource{kept}}, nil
+		},
+		policy: func(env *ir.ResolvedEnvironment) []string {
+			env.Deployables[0].Platform = "meddled"
+			env.Resources.Resources = nil
+			return nil
+		},
+	}
+	reg := assemble(t, ext)
+	s, services := brokenStack()
+	env := mustResolve(t, reg, s, services, "Parent")
+	kept.Properties["size"] = float64(99)
+	api := env.Deployable("shop-api")
+	if api.Services[0].Name != "shop-api" || api.Bindings[0].Field != "LOG_LEVEL" || api.Bindings[0].Value != "info" {
+		t.Errorf("the platform changed shop-api: %+v %+v", api.Services, api.Bindings[0])
+	}
+	if api.Platform != "broken.run" || env.Resources.Resource("svc") == nil {
+		t.Errorf("the policy changed the result: platform %s, resources %v", api.Platform, env.Resources.Resources)
+	}
+	if size := env.Resources.Resource("svc").Properties["size"]; size != float64(1) {
+		t.Errorf("the resolver kept the platform's map: size %v", size)
+	}
+}
+
 // broken is an extension whose server platform lowers what a test says,
 // for the graph checks.
 type broken struct {
 	lower   func(registry.PlatformContext) (registry.Lowered, error)
+	lowerDB func(registry.PlatformContext) []*ir.Resource
+	name    any
 	address any
+	policy  func(*ir.ResolvedEnvironment) []string
 }
 
 func (*broken) Name() string { return "broken" }
 func (b *broken) Register(r *registry.Registry) error {
-	address := b.address
+	address, name := b.address, b.name
 	if address == nil {
 		address = "https://shop-api"
 	}
+	if name == nil {
+		name = "shop-api"
+	}
 	if err := r.RegisterPlatform(registry.PlatformSpec{
 		Name: "broken.run", Kind: ir.DeployableServer, Languages: []string{registry.APILanguageGo},
-		NameOf:    func(registry.PlatformContext) any { return "shop-api" },
+		NameOf:    func(registry.PlatformContext) any { return name },
 		AddressOf: func(registry.PlatformContext) any { return address },
 		Lower:     b.lower,
 	}); err != nil {
 		return err
 	}
+	if err := r.RegisterPlatform(registry.PlatformSpec{
+		Name: "broken.sql", Kind: ir.DeployableDatabase, Dialects: []string{registry.SQLDialectPostgres},
+		NameOf:    func(registry.PlatformContext) any { return "shop-db" },
+		AddressOf: func(registry.PlatformContext) any { return "shop-db:5432" },
+		Lower: func(ctx registry.PlatformContext) (registry.Lowered, error) {
+			if b.lowerDB == nil {
+				return registry.Lowered{}, nil
+			}
+			return registry.Lowered{Resources: b.lowerDB(ctx)}, nil
+		},
+	}); err != nil {
+		return err
+	}
 	if err := r.RegisterConnector(registry.ConnectorSpec{
-		Name: "broken.sql", Edge: ir.EdgeSQL, From: "broken.run", To: stacktest.SQLPlatform,
+		Name: "broken.sql", Edge: ir.EdgeSQL, From: "broken.run", To: "broken.sql",
 		Connect: func(registry.ConnectorContext) (registry.Connected, error) {
 			return registry.Connected{Value: "db", Resources: []*ir.Resource{{ID: "conflict", Type: "broken:thing", Properties: map[string]any{"size": float64(2)}}}}, nil
 		},
 	}); err != nil {
 		return err
 	}
+	var policies []registry.PolicyRule
+	if b.policy != nil {
+		policies = []registry.PolicyRule{{Name: "meddle", Check: b.policy}}
+	}
 	return r.RegisterTarget(registry.TargetSpec{
 		Name:      "broken",
-		Platforms: map[ir.DeployableKind]string{ir.DeployableServer: "broken.run", ir.DeployableDatabase: stacktest.SQLPlatform},
+		Platforms: map[ir.DeployableKind]string{ir.DeployableServer: "broken.run", ir.DeployableDatabase: "broken.sql"},
 		ResourceTypes: map[string]json.RawMessage{"broken:thing": json.RawMessage(
-			`{"type": "object", "properties": {"size": {"type": "integer"}}, "additionalProperties": false}`)},
+			`{"type": "object", "properties": {"size": {"type": "integer"}, "parts": {}}, "additionalProperties": false}`)},
+		Policies: policies,
 	})
 }
 
@@ -709,10 +812,32 @@ func TestGraphChecks(t *testing.T) {
 		name    string
 		env     string
 		lower   func(registry.PlatformContext) []*ir.Resource
+		lowerDB func(registry.PlatformContext) []*ir.Resource
+		nameOf  any
 		address any
 		code    stack.Code
 		want    string
 	}{
+		{name: "reference inside a typed list", lower: func(registry.PlatformContext) []*ir.Resource {
+			return []*ir.Resource{thing("svc", map[string]any{"parts": []map[string]any{{"v": ir.Output{Resource: "ghost", Name: "id"}}}})}
+		}, code: stack.CodeGraph, want: "resource svc depends on ghost"},
+		{name: "parameter inside a typed list", lower: func(registry.PlatformContext) []*ir.Resource {
+			return []*ir.Resource{thing("svc", map[string]any{"parts": []ir.Parameter{"undeclared"}})}
+		}, code: stack.CodeUnknownParameter, want: "resource svc references parameter undeclared"},
+		{name: "concat of a number", nameOf: ir.Concat{"shop-api-", float64(8080)}, lower: func(registry.PlatformContext) []*ir.Resource {
+			return nil
+		}, code: stack.CodeLowering, want: "platform broken.run names shop-api with a value environment.json cannot hold: $concat[1] must be a string"},
+		{name: "nested concat", lower: func(registry.PlatformContext) []*ir.Resource {
+			return []*ir.Resource{thing("svc", map[string]any{"parts": ir.Concat{"a", ir.Concat{"b"}}})}
+		}, code: stack.CodeLowering, want: "shop-api gives resource svc properties holding a value environment.json cannot hold"},
+		{name: "properties that are a reference", lower: func(registry.PlatformContext) []*ir.Resource {
+			return []*ir.Resource{thing("svc", map[string]any{"$parameter": "pr"})}
+		}, code: stack.CodeLowering, want: "shop-api gives resource svc properties that are not an object"},
+		{name: "database resource after the migration", lowerDB: func(registry.PlatformContext) []*ir.Resource {
+			return []*ir.Resource{{ID: "db", Type: "broken:thing", Phase: ir.PhaseExposure}}
+		}, lower: func(registry.PlatformContext) []*ir.Resource {
+			return nil
+		}, code: stack.CodeGraph, want: "resource db of database shop-db lands in exposure, after the migration that needs it"},
 		{name: "dangling dependency", lower: func(registry.PlatformContext) []*ir.Resource {
 			return []*ir.Resource{thing("svc", nil, "ghost")}
 		}, code: stack.CodeGraph, want: "resource svc depends on ghost, which no platform, connector or DNS platform produced"},
@@ -734,6 +859,7 @@ func TestGraphChecks(t *testing.T) {
 		{name: "two producers differ", lower: func(registry.PlatformContext) []*ir.Resource {
 			return []*ir.Resource{thing("conflict", map[string]any{"size": float64(3)})}
 		}, code: stack.CodeGraph, want: "resource conflict: sql:shop-api->shop-db and shop-api produce it differently"},
+
 		{name: "inherited without a parent", lower: func(registry.PlatformContext) []*ir.Resource {
 			return []*ir.Resource{{ID: "shared", Type: "broken:thing", Inherited: true}}
 		}, code: stack.CodeGraph, want: "resource shared is inherited, but environment Parent extends no environment"},
@@ -758,7 +884,7 @@ func TestGraphChecks(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ext := &broken{address: tc.address, lower: func(ctx registry.PlatformContext) (registry.Lowered, error) {
+			ext := &broken{address: tc.address, name: tc.nameOf, lowerDB: tc.lowerDB, lower: func(ctx registry.PlatformContext) (registry.Lowered, error) {
 				return registry.Lowered{Resources: tc.lower(ctx)}, nil
 			}}
 			reg := assemble(t, ext)
@@ -804,5 +930,12 @@ func TestParentResolvesForInheritedNodes(t *testing.T) {
 	}
 	if got, want := strings.Join(inherited, ","), "secret.PaymentsSecrets.STRIPE_KEY,shop-db.instance"; got != want {
 		t.Errorf("inherited = %s, want %s", got, want)
+	}
+	for _, step := range env.DeployOrder {
+		for _, id := range step.Resources {
+			if slices.Contains(inherited, id) {
+				t.Errorf("step %s applies %s, which Staging owns", step.Step, id)
+			}
+		}
 	}
 }

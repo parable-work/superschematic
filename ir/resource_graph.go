@@ -279,7 +279,11 @@ func (r *Resource) UnmarshalJSON(data []byte) error {
 		if err != nil {
 			return fmt.Errorf("resource %s: properties: %w", p.ID, err)
 		}
-		p.Properties = decoded.(map[string]any)
+		props, ok := decoded.(map[string]any)
+		if !ok {
+			return fmt.Errorf("resource %s: properties must be an object, not a reference", p.ID)
+		}
+		p.Properties = props
 	}
 	*r = Resource(p)
 	return nil

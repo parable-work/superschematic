@@ -707,12 +707,10 @@
         "Orders.account",
         "Orders.reads.PaymentsSecrets.STRIPE_KEY",
         "Orders.sql.shop-db",
-        "secret.PaymentsSecrets.STRIPE_KEY",
         "shop-api.account",
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.sql.shop-db",
-        "shop-db.database.shop-db",
-        "shop-db.instance"
+        "shop-db.database.shop-db"
       ]
     },
     {

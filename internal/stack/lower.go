@@ -65,7 +65,12 @@ func (r *resolver) lower(out *ir.ResolvedEnvironment) {
 			}
 			copied := *rec
 			copied.Deployable = name
-			r.checkParameters(fmt.Sprintf("platform %s names a DNS record of %s with", d.platform.Name, name), copied.Name)
+			where := fmt.Sprintf("platform %s names a DNS record of %s with", d.platform.Name, name)
+			copied.Name = r.normalize(where, rec.Name)
+			r.checkParameters(where, copied.Name)
+			where = fmt.Sprintf("platform %s sets a DNS record of %s to", d.platform.Name, name)
+			copied.Value = r.normalize(where, rec.Value)
+			r.checkParameters(where, copied.Value)
 			records = append(records, &copied)
 		}
 	}
@@ -139,7 +144,16 @@ func (r *resolver) mergeResources(out *ir.ResolvedEnvironment) {
 			res.Phase = p.phase
 		}
 		if len(src.Properties) > 0 {
-			res.Properties = deepCopy(src.Properties).(map[string]any)
+			normalized := r.normalize(fmt.Sprintf("%s gives resource %s properties holding", p.owner, src.ID), src.Properties)
+			if normalized == nil {
+				continue
+			}
+			props, ok := normalized.(map[string]any)
+			if !ok {
+				r.fail(CodeLowering, "%s gives resource %s properties that are not an object", p.owner, src.ID)
+				continue
+			}
+			res.Properties = props
 		}
 		deps := slices.Clone(src.DependsOn)
 		outputs, _ := ir.ValueRefs(res.Properties)
@@ -311,11 +325,26 @@ func findCycle(graph *ir.ResourceGraph) []string {
 	return nil
 }
 
+// policyView is a copy of the resolved environment for a policy rule, so
+// a rule cannot change the result.
+func policyView(out *ir.ResolvedEnvironment) (*ir.ResolvedEnvironment, error) {
+	data, err := Marshal(out)
+	if err != nil {
+		return nil, err
+	}
+	return Unmarshal(data)
+}
+
 // checkPolicies runs the target's policy rules over the resolved
 // environment.
 func (r *resolver) checkPolicies(out *ir.ResolvedEnvironment) {
 	for _, rule := range r.target.Policies {
-		for _, msg := range rule.Check(out) {
+		view, err := policyView(out)
+		if err != nil {
+			r.fail(CodePolicy, "target %s policy %s: %v", r.target.Name, rule.Name, err)
+			continue
+		}
+		for _, msg := range rule.Check(view) {
 			r.fail(CodePolicy, "target %s policy %s: %s", r.target.Name, rule.Name, msg)
 		}
 	}

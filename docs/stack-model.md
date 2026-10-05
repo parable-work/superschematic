@@ -553,8 +553,9 @@ There are five specs, registered like the others in section 3 of
 
 A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
 `Finalize` checks that each connector joins registered platforms of the
-kinds its edge joins, and that each target names registered platforms of
-the right kinds, a registered DNS platform and a registered provisioner.
+kinds its edge joins. It checks that each platform a target names is
+registered and of the kind it places, and that a DNS platform or
+provisioner the target names is registered; a target may name neither.
 
 The acceptance test is D10's. `stack/stacktest` imports only the public
 `registry`, `stack` and `ir` packages, registers a fake target with its
@@ -612,8 +613,8 @@ stack, the facts of the services it references and one environment. The
 facts come through a plain struct, `stack.Service`: name, kind, `authDb`,
 `dependencies`, `calls`, the API language, the SQL dialects and the
 `@envVars` fields with their `Secret`, `Default` and `InheritedFrom`. It
-works in stages, and stops after the first stage that fails, so every
-model error reports before a platform runs:
+works in stages and stops at the end of the first stage that fails, so
+every model check reports before anything is connected or lowered:
 
 1. It merges the environment's `extends` chain: values and settings merge
    key by key, the parent first, and parameters add up.
@@ -624,32 +625,46 @@ model error reports before a platform runs:
 3. It asks each platform for the deployable's name and address, derives
    the edges and finds their connectors, numbers each server's rollout
    wave from its calls, and binds every config field.
-4. It calls each edge's `Connect`, each deployable's `Lower` and the DNS
-   platform's `Lower`, in name order, and merges their nodes.
+4. It calls each edge's `Connect` in edge order. When every one succeeds,
+   it calls each deployable's `Lower` in name order, then the DNS
+   platform's `Lower`, and merges their nodes. Every value a platform,
+   connector or DNS platform returns is read through its JSON form, so
+   what resolution accepts is what `environment.json` reads back.
 5. It runs the graph checks of validation level 3: every dependency and
    referenced output names a node, every referenced parameter is
    declared, there is no cycle, every node's properties validate against
-   the schema a target registered for its type, and every inherited node
-   is a node of the same type in the parent environment, which it resolves
-   for the check.
+   the schema a registered target holds for its type, and every inherited
+   node is a node of the same type in the parent environment, which it
+   resolves for the check.
 6. It orders the deploy (section 5.3). A node lands in its phase, or in a
-   later step when one of its dependencies does; a server's own rollout
-   nodes land in its wave. Migrate steps name the databases and hold no
-   node, so the migration runner slots in there.
+   later step when one of its dependencies does. A server's own rollout
+   nodes must land in its wave, and a database's nodes in infrastructure,
+   before its migration. Migrate steps name the databases and hold no
+   node, so the migration runner slots in there. No step applies an
+   inherited node: the parent environment owns it.
 7. It runs the target's policy rules.
 
-Each failure carries a code: one per check of section 5.2
-(`unbound-field`, `unknown-env-key`, `secret-literal`, `kind-mismatch`,
-`unrealizable`, `no-connector`, `expose-not-server`, `policy`), and others
-for what section 5.2 does not list: an API with several DB dependencies and
-no `authDb` (`ambiguous-database`), a cycle of calls between servers, which
-no callee-first order serves (`call-cycle`), a config field two types
-declare for one server or that a derived field takes (`field-collision`),
-and the graph checks (`graph`).
+Each failure carries a code, and `internal/stack/errors.go` lists them
+all. The checks of section 5.2 have one each: `unbound-field`,
+`unknown-env-key`, `secret-literal`, `kind-mismatch`, `unrealizable`,
+`no-connector`, `expose-not-server` and `policy`. Malformed declarations,
+unknown names and values that fail a schema have their own codes. So do
+three failures section 5.2 does not list:
+
+- an API with several DB dependencies and no `authDb`
+  (`ambiguous-database`);
+- a cycle of calls between servers, which no callee-first order serves
+  (`call-cycle`);
+- a config field that two types declare for one server, or that a derived
+  field takes (`field-collision`).
+
+Errors from a platform, connector or DNS platform are `lowering`, and the
+graph checks are `graph`.
 
 `stack.Write` puts the result at
-`<output-root>/stack/<stack>/<environment>/environment.json`, with keys
-sorted, so a wiring change reads as a diff.
+`<output-root>/stack/<stack>/<environment>/environment.json`. Fields come
+in the order the IR declares them and map keys are sorted, so a wiring
+change reads as a diff.
 
 ## 7. The gcp target
 

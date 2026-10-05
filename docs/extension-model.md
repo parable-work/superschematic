@@ -203,10 +203,10 @@ Every one of them fails after `Finalize`.
   other than itself and not the same one in both, and each of its
   operations' `invocationPolicy` is a value of the policy in force
   (section 3.15), whichever extension registered it.
-- Every connector joins registered platforms of the kinds its edge joins,
-  and every target names registered platforms of the right kinds, a
-  registered DNS platform and a registered provisioner
-  (`docs/stack-model.md`, section 6.7).
+- Every connector joins registered platforms of the kinds its edge joins.
+  Every platform a target names is registered and of the right kind, and
+  so is any DNS platform or provisioner it names (`docs/stack-model.md`,
+  section 6.7).
 
 `Registry.Extensions()` is the set of names passed to `Use` or set on a
 spec. It closes the data-form `extensions` objects (section 5).

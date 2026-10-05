@@ -28,7 +28,10 @@ func (s slot) after(o slot) bool {
 // the databases and holds no resource: the deploy runs the migration
 // there. A resource lands in its phase, or in a later step when one of its
 // dependencies does, and its Phase is set to where it landed; a server's
-// own rollout resources land in its wave.
+// own rollout resources land in its wave, and a database's resources land
+// in infrastructure, before the migration that needs them. An inherited
+// resource is the parent environment's: no step applies it, and nothing
+// waits on it.
 func (r *resolver) order(out *ir.ResolvedEnvironment) {
 	waves := r.serverWaves
 	graph := out.Resources
@@ -39,6 +42,11 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 			return s
 		}
 		s := slot{phase: res.Phase}
+		if res.Inherited {
+			s = slot{phase: ir.PhaseInfrastructure}
+			slots[res.ID] = s
+			return s
+		}
 		if s.phase == ir.PhaseRollout {
 			s.wave = 1
 			first := true
@@ -58,14 +66,18 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 	}
 	for _, res := range graph.Resources {
 		s := slotOf(res)
+		landed := string(s.phase)
+		if s.phase == ir.PhaseRollout {
+			landed = fmt.Sprintf("rollout wave %d", s.wave)
+		}
 		for _, owner := range res.Owners {
+			if d := out.Deployable(owner); d != nil && d.Kind == ir.DeployableDatabase && !res.Inherited && s.phase != ir.PhaseInfrastructure {
+				r.fail(CodeGraph, "resource %s of database %s lands in %s, after the migration that needs it", res.ID, owner, landed)
+				continue
+			}
 			w, server := waves[owner]
 			if !server || res.Phase != ir.PhaseRollout || !s.after(slot{phase: ir.PhaseRollout, wave: w}) {
 				continue
-			}
-			landed := string(s.phase)
-			if s.phase == ir.PhaseRollout {
-				landed = fmt.Sprintf("rollout wave %d", s.wave)
 			}
 			r.fail(CodeGraph, "resource %s of server %s lands in %s through its dependencies, after the server's rollout wave %d", res.ID, owner, landed, w)
 		}
@@ -75,7 +87,9 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 	}
 
 	for _, res := range graph.Resources {
-		res.Phase = slots[res.ID].phase
+		if !res.Inherited {
+			res.Phase = slots[res.ID].phase
+		}
 	}
 
 	var databases []string
@@ -88,6 +102,9 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 	}
 	byPhase := map[slot][]string{}
 	for _, res := range graph.Resources {
+		if res.Inherited {
+			continue
+		}
 		s := slots[res.ID]
 		byPhase[s] = append(byPhase[s], res.ID)
 		if s.phase == ir.PhaseRollout {
@@ -119,6 +136,9 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 	if ids := byPhase[slot{phase: ir.PhaseExposure}]; len(ids) > 0 {
 		steps = append(steps, &ir.DeployStep{Step: ir.StepExposure, Resources: ids})
 	}
+	if steps == nil {
+		steps = []*ir.DeployStep{}
+	}
 	out.DeployOrder = steps
 }
 
@@ -136,6 +156,7 @@ func (r *resolver) orderServers() {
 	}
 	waves := map[string]int{}
 	visiting := map[string]bool{}
+	cycle := false
 	var path []string
 	var visit func(name string) int
 	visit = func(name string) int {
@@ -144,8 +165,9 @@ func (r *resolver) orderServers() {
 		}
 		if visiting[name] {
 			start := slices.Index(path, name)
-			cycle := append(slices.Clone(path[start:]), name)
-			r.fail(CodeCallCycle, "servers call each other in a cycle, so no order rolls out callees first: %s", strings.Join(cycle, " -> "))
+			names := append(slices.Clone(path[start:]), name)
+			r.fail(CodeCallCycle, "servers call each other in a cycle, so no order rolls out callees first: %s", strings.Join(names, " -> "))
+			cycle = true
 			return 0
 		}
 		visiting[name] = true
@@ -160,7 +182,7 @@ func (r *resolver) orderServers() {
 		return wave
 	}
 	for _, name := range sortedKeys(r.deployables) {
-		if r.deployables[name].res.Kind == ir.DeployableServer && !r.failed() {
+		if r.deployables[name].res.Kind == ir.DeployableServer && !cycle {
 			visit(name)
 		}
 	}

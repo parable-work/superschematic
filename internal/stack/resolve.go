@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -25,7 +26,7 @@ var parameterPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // finalized.
 func Resolve(reg *registry.Registry, in Input) (*ir.ResolvedEnvironment, error) {
 	if in.Stack == nil {
-		return nil, fmt.Errorf("stack: resolve %s: no stack", in.Environment)
+		return nil, &Errors{Environment: in.Environment, List: []Error{{Code: CodeInvalidStack, Message: "no stack to resolve"}}}
 	}
 	r := &resolver{
 		reg:         reg,
@@ -697,12 +698,37 @@ func (r *resolver) nameDeployables() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
 		ctx := registry.PlatformContext{Environment: r.stackEnvironment(), Deployable: cloneDeployable(d.res)}
-		d.res.ResourceName = d.platform.NameOf(ctx)
-		r.checkParameters(fmt.Sprintf("platform %s names %s with", d.platform.Name, name), d.res.ResourceName)
+		where := fmt.Sprintf("platform %s names %s with", d.platform.Name, name)
+		d.res.ResourceName = r.normalize(where, d.platform.NameOf(ctx))
+		r.checkParameters(where, d.res.ResourceName)
 		ctx = registry.PlatformContext{Environment: r.stackEnvironment(), Deployable: cloneDeployable(d.res)}
-		d.res.Address = d.platform.AddressOf(ctx)
-		r.checkParameters(fmt.Sprintf("platform %s addresses %s with", d.platform.Name, name), d.res.Address)
+		where = fmt.Sprintf("platform %s addresses %s with", d.platform.Name, name)
+		d.res.Address = r.normalize(where, d.platform.AddressOf(ctx))
+		r.checkParameters(where, d.res.Address)
 	}
+}
+
+// normalize returns a value a platform, connector or DNS platform
+// produced in the form environment.json reads back: it encodes the value
+// and decodes it again, so typed Go containers become maps and lists,
+// every reference becomes an Output, Parameter or Concat, and the resolver
+// holds its own copy. A value that does not encode, or whose references
+// are malformed, fails.
+func (r *resolver) normalize(where string, v any) any {
+	if v == nil {
+		return nil
+	}
+	data, err := json.Marshal(v)
+	if err == nil {
+		var raw any
+		if err = json.Unmarshal(data, &raw); err == nil {
+			if v, err = ir.DecodeValue(raw); err == nil {
+				return v
+			}
+		}
+	}
+	r.fail(CodeLowering, "%s a value environment.json cannot hold: %v", where, err)
+	return nil
 }
 
 // checkParameters reports a parameter v references that the environment
@@ -728,7 +754,8 @@ func (r *resolver) output() *ir.ResolvedEnvironment {
 		Provisioner: r.target.Provisioner,
 		Parameters:  slices.Clone(r.env.parameters),
 		Domain:      r.env.domain,
-		Resources:   &ir.ResourceGraph{Parameters: slices.Clone(r.env.parameters)},
+		Deployables: []*ir.ResolvedDeployable{},
+		Resources:   &ir.ResourceGraph{Parameters: slices.Clone(r.env.parameters), Resources: []*ir.Resource{}},
 	}
 	if len(r.env.values) > 0 {
 		out.Values = deepCopy(r.env.values).(map[string]any)

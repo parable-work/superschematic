@@ -125,7 +125,8 @@ func (s PlatformSpec) ValidateSettings(settings map[string]any) error {
 
 // ConnectorContext is what a connector's Connect receives. Edge is the
 // edge with its Connector and Field set; From and To are copies of the two
-// deployables, with their names and addresses.
+// deployables, with their names and addresses. From's derived bindings
+// have no values yet: every connector runs before any value is set.
 type ConnectorContext struct {
 	Environment StackEnvironment
 	Edge        ir.Edge
@@ -498,7 +499,8 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 		return fmt.Errorf("registry: target %q is already registered", spec.Name)
 	}
 	platforms := make(map[ir.DeployableKind]string, len(spec.Platforms))
-	for kind, platform := range spec.Platforms {
+	for _, kind := range slices.Sorted(maps.Keys(spec.Platforms)) {
+		platform := spec.Platforms[kind]
 		if !kind.Valid() {
 			return fmt.Errorf("registry: target %q names a platform for deployable kind %q (want %s or %s)", spec.Name, kind, ir.DeployableDatabase, ir.DeployableServer)
 		}
@@ -609,9 +611,10 @@ func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 }
 
 // checkStackReferences is Finalize's part for the stack specs: every
-// connector joins registered platforms of the kinds its edge joins, and
-// every target names registered platforms of the kinds it places, a
-// registered DNS platform and a registered provisioner.
+// connector joins registered platforms of the kinds its edge joins, every
+// platform a target names is registered and of the kind it places, and the
+// DNS platform and provisioner a target names, when it names one, are
+// registered.
 func (r *Registry) checkStackReferences() error {
 	for _, name := range keysOf(r.stack.connectors) {
 		spec := r.stack.connectors[name]

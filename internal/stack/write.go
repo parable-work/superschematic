@@ -20,7 +20,8 @@ func EnvironmentPath(outputRoot, stack, environment string) string {
 }
 
 // Marshal encodes a resolved environment in its stable JSON form: two-space
-// indentation, object keys sorted, no HTML escaping, and a final newline.
+// indentation, fields in the order the IR declares them, map keys sorted,
+// no HTML escaping, and a final newline.
 func Marshal(env *ir.ResolvedEnvironment) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

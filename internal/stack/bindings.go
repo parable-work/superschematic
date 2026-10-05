@@ -152,6 +152,9 @@ func (r *resolver) bindConfig() {
 		r.collectFields(d)
 		derived := map[string]*edge{}
 		for _, e := range r.edgesFrom(name) {
+			if other, clash := derived[e.res.Field]; clash {
+				r.fail(CodeFieldCollision, "server %s: edges %s and %s derive the same field %s", name, other.res.ID, e.res.ID, e.res.Field)
+			}
 			derived[e.res.Field] = e
 			if f, clash := d.fields[e.res.Field]; clash {
 				r.fail(CodeFieldCollision, "server %s: config field %s of %s has the name of the field edge %s derives", name, f.name, f.declaring, e.res.ID)
@@ -302,8 +305,10 @@ func (r *resolver) secrets() []*ir.StackSecret {
 }
 
 // connectEdges asks each edge's connector for its resources and its
-// derived binding's value.
+// derived binding's value. Every connector sees the bindings as they stood
+// before any connector ran: the derived bindings without values.
 func (r *resolver) connectEdges() {
+	values := map[string]any{}
 	for _, id := range sortedKeys(r.edges) {
 		e := r.edges[id]
 		ctx := registry.ConnectorContext{
@@ -320,12 +325,16 @@ func (r *resolver) connectEdges() {
 		if connected.Value == nil {
 			r.fail(CodeLowering, "connector %s on edge %s derives no value for %s", e.connector.Name, id, e.res.Field)
 		}
-		r.checkParameters(fmt.Sprintf("connector %s derives %s with", e.connector.Name, e.res.Field), connected.Value)
-		for _, b := range e.from.res.Bindings {
+		where := fmt.Sprintf("connector %s derives %s with", e.connector.Name, e.res.Field)
+		values[id] = r.normalize(where, connected.Value)
+		r.checkParameters(where, values[id])
+		r.produce(id, ir.PhaseInfrastructure, connected.Resources)
+	}
+	for _, id := range sortedKeys(r.edges) {
+		for _, b := range r.edges[id].from.res.Bindings {
 			if b.Edge == id {
-				b.Value = connected.Value
+				b.Value = values[id]
 			}
 		}
-		r.produce(id, ir.PhaseInfrastructure, connected.Resources)
 	}
 }
