@@ -1383,9 +1383,12 @@ The `api` generator takes the provider `auth_provider` selects
   (imports, context shims, store adapters, config fields, route setup, the
   per-route permission middleware, `go.mod` lines). A provider defines every
   one, empty when it adds nothing. The per-route permission middleware runs
-  after the route's rate and body limits and before its payload decryptor
-  and timeout, so it reads the caller from the request context, never from
-  the body. The generator checks the set when it
+  after the route's rate and body limits and its service step (D37), and
+  before its payload decryptor and timeout, so it reads the caller from the
+  request context, never from the body. A route with a service clause runs
+  `AuthMiddleware` and `routesProtectedMiddleware` in its own chain, just
+  before the permission middleware, instead of on the protected group. The
+  generator checks the set when it
   parses the templates, before it writes a file, and
   `registry.AuthSnippetFunc(provider)` runs the same check in a provider's
   own test;

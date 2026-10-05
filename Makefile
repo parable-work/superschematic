@@ -77,7 +77,7 @@ go-lint:
 # Schema and TypeScript types. Review the diff by eye.
 go-goldens: schema-file-types
 	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | xargs -n1 dirname | sort -u); do \
-		go test -count=1 $$p -update || exit 1; done
+		(cd $$p && go test -count=1 . -update) || exit 1; done
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
 # Go package, the TypeScript one with each scalar's value class from the

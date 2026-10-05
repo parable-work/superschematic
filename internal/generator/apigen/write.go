@@ -231,6 +231,7 @@ func templateFuncs(provider AuthProvider) (template.FuncMap, error) {
 		"commentLines":            commentLines,
 		"isPlainImage":            isPlainImage,
 		"isImageWithTransparency": isImageWithTransparency,
+		"route":                   newRouteData,
 	}
 	for name, fn := range provider.Funcs() {
 		funcs[name] = fn
@@ -241,6 +242,19 @@ func templateFuncs(provider AuthProvider) (template.FuncMap, error) {
 	}
 	funcs["authSnippet"] = snippet
 	return funcs, nil
+}
+
+// routeData is what routes.tmpl renders a mounted route's middlewares from:
+// the endpoint, and the API whose Config and setup the chain reads.
+type routeData struct {
+	EndpointInfo
+	// Output is the API the endpoint belongs to.
+	Output *APIOutput
+}
+
+// newRouteData is the template function route.
+func newRouteData(output *APIOutput, endpoint EndpointInfo) routeData {
+	return routeData{EndpointInfo: endpoint, Output: output}
 }
 
 // AuthSnippetFunc returns the authSnippet template function for provider:
