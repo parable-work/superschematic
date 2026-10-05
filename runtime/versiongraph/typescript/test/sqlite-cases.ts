@@ -327,7 +327,8 @@ export const cases: Case[] = [
   {
     name: "the adapter writes a row's ref, root, tombstone, actor and time, never its id or version, and keeps or defaults what it lacks",
     run(binding) {
-      const s = setup(binding, { clock: () => 1_800_000_000_000_000 });
+      let now = 1_800_000_000_000_000;
+      const s = setup(binding, { clock: () => now });
       using([s], () => {
         const { ref } = s.storage.transact((tx) => refAndCommit(tx));
         const write = (row: string, tombstone = false, actor = cook) =>
@@ -358,7 +359,12 @@ export const cases: Case[] = [
         assert.equal(member(inserted, "updated_by"), '"Cook"');
         // A column the insert lacks holds null.
         assert.equal(member(inserted, "scratch"), "null");
-        const updated = write(JSON.stringify({ entity_key: "Mix", instruction: "Stir", created_by: "Somebody" }), true, "Baker");
+        now += 1_500_000;
+        const updated = write(
+          JSON.stringify({ entity_key: "Mix", instruction: "Stir", created_at: "2000-01-01T00:00:00Z", created_by: "Somebody" }),
+          true,
+          "Baker",
+        );
         assertCanonicalRow("step", updated);
         const [read] = s.storage.transact((tx) => tx.rows("step", ref.id));
         assert.equal(read, updated);
@@ -367,7 +373,9 @@ export const cases: Case[] = [
         assert.equal(member(updated, "deleted_on_ref"), "true");
         // A column the update lacks keeps its value, and the creation audit stays.
         assert.equal(member(updated, "position"), "1");
+        assert.equal(member(updated, "created_at"), '"2027-01-15T08:00:00Z"');
         assert.equal(member(updated, "created_by"), '"Cook"');
+        assert.equal(member(updated, "updated_at"), '"2027-01-15T08:00:01.5Z"');
         assert.equal(member(updated, "updated_by"), '"Baker"');
         // A row without an entity key is a new entity.
         const fresh = write(stepRow(null, "Rest"));
@@ -821,13 +829,14 @@ export const cases: Case[] = [
         // not at exactly 365 days.
         now = start + 365 * 86_400_000_000;
         assert.equal(prune(0), 0);
-        // Make the row with the greatest id the oldest by a microsecond more
-        // than the next, so oldest first and id order disagree.
+        // Make the row with the middle id the oldest, by a microsecond more
+        // than the row with the greatest id, so oldest first disagrees with
+        // id order either way.
         const ids = left();
-        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 2 WHERE id = ?1 AND _version = 1`, [ids[2]!]);
-        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 1 WHERE id = ?1 AND _version = 1`, [ids[1]!]);
+        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 2 WHERE id = ?1 AND _version = 1`, [ids[1]!]);
+        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 1 WHERE id = ?1 AND _version = 1`, [ids[2]!]);
         assert.equal(prune(1), 1);
-        assert.deepEqual(left(), [ids[0], ids[1]], "the oldest went first");
+        assert.deepEqual(left(), [ids[0], ids[2]], "the oldest went first");
         assert.equal(prune(0), 1);
         assert.deepEqual(left(), [ids[0]], "an image exactly 365 days old stays");
         now += 1;
