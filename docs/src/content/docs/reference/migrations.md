@@ -318,8 +318,12 @@ With `sqlite` listed, the build also writes
 `<out>/sql/<service>/sqlite/create.sql`: the SQLite plan from an empty
 database, its steps' statements as one script. `migrate plan --dialect
 sqlite` plans the service's SQLite database, and refuses a service that
-does not list `sqlite`. The Postgres DDL is the same whether `sqlite` is
-listed or not.
+does not list `sqlite`. It refuses a previous version, a service
+directory (`--from <service-dir>`) or a git ref (`--from-ref`), that
+does not list `sqlite` either: no build of it wrote a SQLite database.
+Plan from the model the database recorded (`--from <model.json>`), which
+is checked by its own `dialect`, or from an empty database. The Postgres
+DDL is the same whether `sqlite` is listed or not.
 
 ### Types and defaults
 

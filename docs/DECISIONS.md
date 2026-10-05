@@ -2265,8 +2265,10 @@ a plan that drops two tables that reference each other fails on SQLite,
 since dropping the foreign key that closes the cycle needs a rebuild of a
 table the plan drops; a change between a list, a JSON value and text, all
 `TEXT`, is no step and converts no value; `migrate plan --dialect sqlite`
-refuses a service whose new version does not list `sqlite`, and builds
-the previous version's SQLite model without checking its list; and the
+refuses a service whose new version does not list `sqlite`, and a
+previous version, a service directory or a git ref, whose list lacks it,
+pointing to the model the database recorded or an empty database, while a
+`--from` model is checked by its own `dialect`; and the
 SQLite convergence test compares a column's collation through an index
 it builds and rolls back, since no pragma reports it. D32 takes the
 version graph to SQLite through its adapter's own tables, which write
