@@ -71,7 +71,11 @@ It puts the caller's id and roles on the request context; the generated
 routes read them. With the `session` provider, your middleware verifies the
 bearer token, then resolves it through the generated stores:
 
-<Snippet file="go/auth.go" symbol={['Auth', 'Auth.Middleware']} />
+<Snippet file="go/auth.go" symbol={['Auth', 'Auth.Middleware', 'Auth.resolve']} />
+
+The session store finds an expired session too, and a revoked one when the
+`Session` table is soft-deletable (has a nullable `deletedAt`), with its
+`ExpiresAt` and `DeletedAt` set. Refusing both is the middleware's job.
 
 Roles are yours to supply: a `session.RoleStore` returns the caller's
 roles, each with its permissions. `session.RequireAuth` answers 401 when no

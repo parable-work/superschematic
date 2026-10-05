@@ -1318,8 +1318,10 @@ The `api` generator takes the provider `auth_provider` selects
 - calls `Analyze` once with the API schema and the upstream DB schema its
   config's `authDb` names (nil when the API is not public). `AuthModel`
   reports whether the upstream can back the session store
-  (`Session(id, jti, user, expiresAt)`) and the principal store
-  (`User(id, name)`); `Extra` holds the provider's own findings.
+  (`Session(id, jti, user, expiresAt)`), whether that table is
+  soft-deletable with a nullable `deletedAt` the store reports
+  (`SessionSoftDelete`, D33), and the principal store (`User(id, name)`);
+  `Extra` holds the provider's own findings.
   `registry.AnalyzeSessionStores` is the core half and `registry.HasTable`
   the probe;
 - calls `Endpoint` per operation. The core has already set `RequiresAuth`

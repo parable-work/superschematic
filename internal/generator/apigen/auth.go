@@ -57,6 +57,11 @@ type AuthModel struct {
 	// HasSessionStore reports an upstream Session(id, jti, user, expiresAt)
 	// table.
 	HasSessionStore bool
+	// SessionSoftDelete reports that the Session table is soft-deletable
+	// with a nullable Temporal.DateTime deletedAt. The session store then
+	// finds a revoked (soft-deleted) session with its DeletedAt set; for any
+	// other Session table it leaves soft-deleted rows to the ORM's filter.
+	SessionSoftDelete bool
 	// HasPrincipalStore reports an upstream User(id, name) table.
 	HasPrincipalStore bool
 	// Extra is provider-owned data the provider's templates read.
@@ -128,8 +133,23 @@ func HasTable(upstream *ir.Schema, name string, fields ...string) bool {
 // generic session model reads. Providers that extend the model call it and
 // fill Extra.
 func AnalyzeSessionStores(upstream *ir.Schema) AuthModel {
+	hasSession := HasTable(upstream, "Session", "id", "jti", "user", "expiresAt")
 	return AuthModel{
-		HasSessionStore:   HasTable(upstream, "Session", "id", "jti", "user", "expiresAt"),
+		HasSessionStore:   hasSession,
+		SessionSoftDelete: hasSession && hasNullableDeletedAt(upstream.Types["Session"]),
 		HasPrincipalStore: HasTable(upstream, "User", "id", "name"),
 	}
+}
+
+// hasNullableDeletedAt reports whether table has the deletedAt a store can
+// read a soft delete's time from: a nullable Temporal.DateTime, which the
+// generated type holds as a pointer.
+func hasNullableDeletedAt(table *ir.TypeDef) bool {
+	for _, field := range table.Fields {
+		if field.Name == "deletedAt" {
+			ref := field.TypeRef
+			return !field.Required && ref.Name == "Temporal.DateTime" && !ref.IsArray && !ref.IsMap
+		}
+	}
+	return false
 }
