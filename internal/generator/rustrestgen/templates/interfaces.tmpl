@@ -14,7 +14,7 @@ use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
 {{- end }}
-use {{ .RuntimeCrateIdent }}::{ {{- if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end -}} };
+use {{ .RuntimeCrateIdent }}::{ {{- if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end }}{{ if .HasServiceCallers }}, ServiceAuthenticator{{ end -}} };
 use std::collections::HashMap;
 use std::sync::Arc;
 {{- range .Endpoints }}
@@ -83,6 +83,12 @@ pub struct Implementations {
     /// @requirePermission, @requireOwnership, an Authenticated set), and
     /// decides whether its permissions satisfy a @requirePermission list.
     pub authenticator: Arc<dyn Authenticator>,
+{{- end }}
+{{- if .HasServiceCallers }}
+    /// Verifies the `Service-Authorization` credential of every request
+    /// that carries one, and establishes the calling service each
+    /// @requireService and @allowService route checks (D37).
+    pub service_authenticator: Arc<dyn ServiceAuthenticator>,
 {{- end }}
 {{- if .WebhookProviders }}
     /// The verifier of each @hmacVerified provider, keyed by provider.

@@ -26,5 +26,9 @@ pub(super) async fn {{ .Endpoint.FunctionName }}(
     // @requireOwnership: the router has established the caller
     // (ctx.principal); check that it owns the resource (403 otherwise).
 {{- end }}
+{{- if .Endpoint.AllowsService }}
+    // @allowService: a listed service may call with no end user; then
+    // ctx.principal is None and ctx.service_caller names the service.
+{{- end }}
     Err(ApiError::not_implemented("{{ .Endpoint.FunctionName }} is not implemented"))
 }
