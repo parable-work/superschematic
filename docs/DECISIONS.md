@@ -2614,7 +2614,7 @@ Status: phases 1 to 5 are built, `Branches` last
 
 ### D32, amended: Branches as it was built
 
-Building `Branches` settled four points that the entry above left open
+Building `Branches` settled five points that the entry above left open
 or put otherwise.
 
 | Decision | Alternatives not taken |
@@ -2623,6 +2623,7 @@ or put otherwise.
 | A scalar the document declares under a builtin's name takes the scalar catalog's class, where the `Branches` row gives it the class its JSON type gives. The engine validates such a scalar with the catalog's row, whatever the document declares, as the Go loader fills it in, and `format --to=json` declares every catalog scalar a schema uses, so the row as written would class every catalog scalar by its JSON type. | The document's JSON type, which gives `Identity.UUID` the class `string` |
 | `configChange` decides per kind: removing a kind, or changing its type, parent, order, singleton or a field's unit, is refused. `primary`, `snapshotEvery`, `sweep` and a retention may change, and a unit may be given a field the old type lacked, of which no stored row holds a value. | Refusing every change but a kind's fields and a retention, which freezes the sweep and the primary line's name for good |
 | `discard` refuses an instance's primary line, with the veto `primary_line`: the instance gets no other, so once discarded it would have no live ref to branch from. | Discarding it as the version graph engine allows |
+| `branch`'s `fromRef` is optional: left out, the draft branches from the instance's primary line. An instance created before its schema composed `Branches` gets its primary line at its first write, and every other writing operation names a ref or a commit it has none of, so its first `branch` makes the line, as the caller, and a draft of it, even where `Branches` is the schema's only writing behavior. | Only an update or another behavior's write, a dead end where `Branches` is the only writing behavior; creating each older instance's line in `afterConfigChange`, which the `Branches` rows rule out since it acts for no principal while a ref records its creator; a separate operation that only creates the line |
 
 ## D33. The session store reports a revoked session's `DeletedAt`
 
