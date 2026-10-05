@@ -125,14 +125,15 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 | `history` | What the kind's history keeps (below). Required. |
 | `columns` | Every column of the kind's table, with its value class (below). Every column another member names must be here. |
 
-The role columns (`key`, `id`, `ref`, `root`, `tombstone`, `version`, `author`)
-must be distinct and are never content. Every other column of a row is
-content unless it is excluded. Only content is compared, merged, diffed and
-hashed, so two rows with equal content are the same version whatever their
-ids, refs, versions and audit columns say. Role columns may also be listed in
-`excluded`. The `parent` key and `order` columns must be content, and a unit
-may only name a content column. Unknown members are refused, and so is an
-empty table or column name.
+The role columns (`key`, `id`, `ref`, `root`, `tombstone`, `version`,
+`author`) must be distinct and are never content. Every other column of a
+row is content unless it is excluded. Only content is compared, merged,
+diffed and hashed, so two rows with equal content are the same version
+whatever their ids, refs, versions and audit columns say; a content column a
+row lacks is `null` to the core ([Trees and rows](#trees-and-rows)). Role
+columns may also be listed in `excluded`. The `parent` key and `order`
+columns must be content, and a unit may only name a content column. Unknown
+members are refused, and so is an empty table or column name.
 
 `history` holds what the sql generator's history trigger and prune
 function hold for the kind's table, for a storage adapter that writes
@@ -194,6 +195,25 @@ wider than a double survives.
 A row whose tombstone is `true` is a delete. Everywhere but `compose`, a
 tombstone row and an absent row are the same deleted state.
 
+A kind's content columns are the descriptor's `columns` less the role
+columns and `excluded`. A row that lacks one holds it as `null` wherever the
+core compares, merges, diffs or hashes content. After a kind gains a
+column, the history images written before the change lack it while the live
+rows read it as `null` (Postgres's `ADD COLUMN` gives an existing row
+`null`), and both are the same content, so adding a column moves no
+comparison, patch or merge on any backend. A role or excluded column a row
+lacks is nothing, as it is when the row has it. A column a row carries that
+`columns` lacks is content unless it is a role or excluded column, but it is
+not read as `null` where another row lacks it.
+
+`compose` returns each row as its input gave it. The rows `diff` and
+`merge` return are the ones an engine writes back, and a storage adapter
+keeps a row's stored value for a column a write lacks, so each of them
+carries every content column the descriptor declares, `null` where its input
+row lacked one. Otherwise a revert to a commit written before the gain would
+write the commit's image, which lacks the column, over a row that holds a
+value there, and the value would stay.
+
 An order must be an integer inside +/-(2^53-1), the integers a JavaScript
 number holds exactly; outside it, a browser would sort rows differently from
 the server. An integer of any width outside the range, even one too wide for
@@ -232,8 +252,9 @@ turns a value from that rendering into its canonical JSON:
 
 A canonical row's members are sorted by column name. A column the row has
 and the descriptor's `columns` lacks is refused; a declared column the row
-lacks (a history image leaves out a `@versioned({ exclude })` column) stays
-absent.
+lacks (a history image leaves out a `@versioned({ exclude })` column, and
+one taken before its kind gained a column lacks that column) stays absent,
+and the core reads it as `null` when it is content.
 
 `testdata/canonical` holds the vectors: one file per element class,
 `{"cases": [{"name", "class", "sql", "timeZone"?, "postgres", "canonical"}]}`,
@@ -282,6 +303,10 @@ A three-way merge per entity, then per unit:
 - Two different edits of a live entity, or two different adds of one entity
   key, merge column by column. A unit changed differently on both sides
   conflicts; an add has no base, so every unit is absent in it.
+- On every side, a content column a row lacks is `null`, so absent and
+  `null` are one value in every unit: a side that never set a column the
+  base lacks does not conflict with a side that sets it. A `keyed` or
+  `jsonSchema` column a row lacks is the JSON value `null`.
 
 Units, and their paths (JSON Pointers into the row):
 
@@ -300,7 +325,9 @@ then the names only theirs added.
 A conflict is `{"kind", "entityKey", "path", "base"?, "ours"?, "theirs"?,
 "oursAuthor"?, "theirsAuthor"?}`. `base`, `ours` and `theirs` are the unit's
 values, each left out where the unit is absent; for path `""` they are whole
-rows, left out on a deleted side. The authors are each side's `author`
+rows as the input gave them, left out on a deleted side. A content column a
+row lacks is reported as `null`, so a unit is absent only in an add's base,
+or as a key or property a JSON value lacks. The authors are each side's `author`
 column, tombstones included.
 
 `resolutions` settle conflicts by unit path:
@@ -317,14 +344,16 @@ an add has no base value.
 
 `merged` is a tree of every entity's result: the winning row, a winning
 delete's tombstone when that side has one, or, for a unit-level merge, ours'
-row with the merged content. A conflicted entity is not in it, so apply
-`merged` only when `conflicts` is empty. `entities` lists every entity as
-`{"kind", "entityKey", "side", "deleted"?}`: `side` is `ours` when the result
-equals ours (nothing to write onto ours), `theirs` when it equals theirs,
-`merged` when it equals neither, and `conflict` when a conflict is left;
-`deleted` is `true` when the result is a delete. The merge does not check the
-singleton rule or parent edges across entities; run `validate` on the
-result.
+row with the merged content. Each row of `merged` carries every content
+column the descriptor declares, `null` where the input row it came from
+lacked one (a unit a resolution took from an add's base included). A
+conflicted entity is not in it, so apply `merged` only when `conflicts` is
+empty. `entities` lists every entity as `{"kind", "entityKey", "side",
+"deleted"?}`: `side` is `ours` when the result equals ours (nothing to write
+onto ours), `theirs` when it equals theirs, `merged` when it equals neither,
+and `conflict` when a conflict is left; `deleted` is `true` when the result
+is a delete. The merge does not check the singleton rule or parent edges
+across entities; run `validate` on the result.
 
 ### diff
 
@@ -332,8 +361,11 @@ Input `{"descriptor", "from", "to"}`, output `{"changes"}`.
 
 Each change is `{"kind", "entityKey", "operation", "row"?}`. An entity live
 only in `to` is an `ADD` and one live in both with different content an
-`UPDATE`, both with `to`'s row. One live only in `from` is a `DELETE`, with
-`to`'s tombstone row when it has one.
+`UPDATE`, both with `to`'s row. A content column absent on one side and
+`null` on the other is no difference. A change's row carries every content
+column the descriptor declares, `null` where `to`'s row lacks one, since an
+engine writes it back (a revert, a rebase). One live only in `from` is a
+`DELETE`, with `to`'s tombstone row when it has one.
 
 ### content_hash
 
@@ -345,9 +377,18 @@ insignificant whitespace, numbers as written) of
 {"<kind>": [{"entityKey": "...", "content": {<content columns>}}, ...], ...}
 ```
 
-with each kind's live rows sorted by entity key. Tombstone rows are left
-out, as are kinds with no live rows, so a delete hashes as an absence and a
-kind added to the descriptor does not move existing hashes.
+with each kind's live rows sorted by entity key. The content holds every
+content column the descriptor declares, `null` where the row lacks one, and
+any other content column the row carries. A row that lacks a declared
+content column hashes as the row with it `null`, so a ref's composed tree
+and its head commit's tree hash the same whichever rows carry the column,
+and a hash over rows that carry every column does not move. Nulls are
+hashed, not dropped: a column a kind gains is content, `null` in each row
+written before it, so under the descriptor that declares it a tree hashes
+differently from how it hashed under the descriptor before the gain, which
+is the hash a commit written before the gain recorded. Tombstone rows are
+left out, as are kinds with no live rows, so a delete hashes as an absence
+and a kind added to the descriptor does not move existing hashes.
 
 ### validate
 
@@ -485,8 +526,9 @@ declares as one canonical JSON object, `data`; read back, it is the
 kind's canonical row, keyed by the descriptor's column names, with every
 column the kind declares: one the stored row lacks, because the kind
 gained it after the row was written, reads as `null`, as a Postgres row
-reads a column added after it. An image likewise reads with every column
-the kind declares and its history does not exclude. Foreign keys
+reads a column added after it. An image reads as it was stored, as a
+Postgres history image does: one taken before the kind gained a column
+lacks it, and the core reads it as `null`. Foreign keys
 check every edge inside the layout, immediately: a ref is written before a
 commit of it, and its head moves to a commit only once the commit is
 written. There is no root table, so no key checks a root; the adapter
@@ -679,7 +721,7 @@ cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
-make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine
+make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
 make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
 ```

@@ -172,14 +172,27 @@ take one JSON document and return one:
 | `compose` | `{descriptor, base, overlay}` | `{tree, findings}`: the overlay's rows laid over the base by entity key; a tombstone removes the entity and its descendants. |
 | `merge` | `{descriptor, base, ours, theirs, resolutions?}` | `{merged, conflicts, entities}`: a three-way merge per entity, then per conflict unit. |
 | `diff` | `{descriptor, from, to}` | `{changes}`: each entity's `ADD`, `UPDATE` or `DELETE`, with `to`'s row. |
-| `content_hash` | `{descriptor, tree}` | `{contentHash}`: SHA-256 over the canonical JSON of each kind's content columns, rows sorted by entity key. |
+| `content_hash` | `{descriptor, tree}` | `{contentHash}`: SHA-256 over the canonical JSON of each kind's content columns, `null` for one a row lacks, rows sorted by entity key. |
 | `validate` | `{descriptor, tree}` | `{findings}`: duplicate entity keys, the singleton rule, absent parents, parent cycles, orders outside the integers a JavaScript number holds exactly. |
 
 A tree is `{"<kind>": [row, ...]}`, and a row is a canonical row: a JSON
 object keyed by column name whose values are the schema runtime's JSON for
 each field's type, in one form per value class (below), so a live row and
-its history image hash the same whatever database stored them. A refused
-input returns `{"error": {"code", "message"}}` with a stable code. The
+its history image hash the same whatever database stored them. A kind's
+content columns are its declared columns less the role and excluded ones,
+and a row that lacks one holds it as `null` wherever the core compares,
+merges, diffs or hashes content: after a kind gains a column, history
+images written before the change lack it while live rows read it as `null`,
+and both are the same content, so a ref and its head commit hash the same,
+a save of a row as its base holds it is nothing to commit, and a side that
+never set the column merges with one that sets it. `compose` returns each
+row as it was given; each row `diff` and `merge` return, which an engine
+writes back, carries every declared content column, `null` where its input
+lacked one, so a revert to a commit written before the gain clears a value
+the column holds. Nulls are hashed, so under the descriptor that declares a
+gained column a tree hashes differently from how it hashed before the gain.
+A refused input returns `{"error": {"code", "message"}}` with a stable
+code. The
 contract, with the descriptor's members, every rule, the error codes and the
 C ABI, is
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md).
@@ -717,6 +730,10 @@ does. Refs and release pointers keep history too. A transaction reads its
 time once, from a clock option, and every write in it takes that time; ids
 are version-4 UUIDs the adapter generates; and every value is stored in its
 canonical form, so a row reads back as the canonical row it was written as.
+A live row reads with every column its kind declares, `null` where the
+stored row lacks one, as Postgres's `ADD COLUMN` gives an existing row, and
+a history image reads as it was stored, as a Postgres image does: one taken
+before its kind gained a column lacks it, which the core reads as `null`.
 
 On a connection of its own the adapter begins each transaction with
 `BEGIN IMMEDIATE`, which takes the file's write lock, and runs one begun
@@ -768,7 +785,7 @@ no TypeScript ORM, so refs, commits and release pointers come back as the
 engine's `Ref`, `Commit` and `Release`.
 
 ```
-make versiongraph-scenarios-ts   # every scenario on SQLite and the SQLite adapter's tests; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
+make versiongraph-scenarios-ts   # every scenario on SQLite and the SQLite adapter's tests; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests; a gained column end to end on each backend
 ```
 
 The SQLite pass needs no database server. The Postgres pass needs
