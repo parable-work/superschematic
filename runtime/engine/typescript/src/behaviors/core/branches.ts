@@ -116,6 +116,7 @@ import {
   type SqlWriter,
 } from '../behavior.js';
 import declaration from './declarations/Branches.behavior.json' with { type: 'json' };
+import { DEFAULT_PAGE_SIZE } from '../../paging.js';
 import { page, pageRequest } from '../paging.js';
 
 /** The namespace an actor is the version-5 UUID of a principal's subject in. */
@@ -725,6 +726,25 @@ function conflictsOf(graph: Store, conflicts: readonly Conflict[]): Array<Record
   });
 }
 
+// refsCursor reads refs' cursor: the key of the last ref of the page
+// before, (whether it is a draft, its creation time, its id); the key
+// before every ref's for the first page.
+function refsCursor(cursor: string | undefined): [number, number, string] {
+  if (cursor === undefined) {
+    return [-1, 0, ''];
+  }
+  let key: unknown;
+  try {
+    key = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+  } catch {
+    key = undefined;
+  }
+  if (!Array.isArray(key) || key.length !== 3 || (key[0] !== 0 && key[0] !== 1) || !Number.isSafeInteger(key[1]) || typeof key[2] !== 'string') {
+    throw new OperationParamsError('Branches', 'refs', [{ path: '/cursor', message: 'is not a cursor this operation returned' }]);
+  }
+  return key as [number, number, string];
+}
+
 // pointer turns a validation issue's path (`steps[0].name`) into a JSON
 // pointer under base.
 function pointer(base: string, path: string): string {
@@ -1139,21 +1159,25 @@ export const branches = defineBehavior<BranchesConfig>({
     },
 
     refs(context, params) {
-      const { limit, after } = pageRequest('Branches', 'refs', params);
+      const limit = (params.limit as number | undefined) ?? DEFAULT_PAGE_SIZE;
+      const after = refsCursor(params.cursor as string | undefined);
       const store = storeOf(context);
+      // The primary line first, then the drafts in the order they were
+      // created: a key every ref keeps for good, which a VACUUM that
+      // renumbers rows does not move.
       const rows = context.sql.all(
-        `SELECT rowid AS seq, ${REF_COLUMNS} FROM ${store.tables.ref}
-         WHERE graph = ? AND root_id = ? AND deleted_at IS NULL AND rowid > ?
-         ORDER BY rowid LIMIT ?`,
-        [store.name, rootOf(context.id), after, limit + 1]
+        `SELECT ${REF_COLUMNS}, parent_ref_id IS NOT NULL AS draft FROM ${store.tables.ref}
+         WHERE graph = ? AND root_id = ? AND deleted_at IS NULL
+           AND (parent_ref_id IS NOT NULL, created_at, id) > (?, ?, ?)
+         ORDER BY parent_ref_id IS NOT NULL, created_at, id LIMIT ?`,
+        [store.name, rootOf(context.id), ...after, limit + 1]
       );
-      const refs = refsOf(store, rows);
-      const listed = page(
-        refs.map((ref, index) => ({ ref, seq: Number(rows[index].seq) })),
-        limit,
-        (item) => item.seq
-      );
-      return { items: listed.items.map((item) => item.ref), next: listed.next };
+      const refs = refsOf(store, rows.slice(0, limit));
+      const last = rows[limit - 1];
+      return {
+        items: refs,
+        next: rows.length > limit ? Buffer.from(JSON.stringify([Number(last.draft), Number(last.created_at), String(last.id)]), 'utf8').toString('base64url') : null,
+      };
     },
 
     releases(context, params) {

@@ -362,6 +362,29 @@ for (const driver of drivers) {
       assert.deepEqual(rebased.conflicts, []);
     });
 
+    test('refs pages the live refs, the primary line first and then the drafts as they were created, by a key no row renumbering moves', () => {
+      let now = 1_000_000;
+      const handle = openBranches(driver, { clock: () => now });
+      publish(handle.engine, recipeDocument());
+      handle.engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
+      const soup = new Calls(handle.engine, 'soup');
+      const main = soup.main();
+      // Drafts made in one millisecond order by id; later ones after them.
+      const same = [soup.branch('a'), soup.branch('b')].map((ref) => ref.id).sort();
+      now += 1;
+      const later = soup.branch('c');
+      const discarded = soup.branch('d');
+      soup.invoke('discard', { ref: discarded.id, version: discarded.version });
+      const first = soup.invoke<{ items: Ref[]; next: string | null }>('refs', { limit: 2 });
+      const second = soup.invoke<{ items: Ref[]; next: string | null }>('refs', { limit: 2, cursor: first.next });
+      assert.deepEqual(
+        [...first.items, ...second.items].map((ref) => ref.id),
+        [main.id, ...same, later.id]
+      );
+      assert.equal(second.next, null);
+      assert.deepEqual(paramsOf(() => soup.invoke('refs', { cursor: 'nope' })), [['/cursor', 'is not a cursor this operation returned']]);
+    });
+
     test("the engine's refusals are vetoes with its codes", () => {
       const { soup } = opened();
       const draft = soup.branch('edit');
