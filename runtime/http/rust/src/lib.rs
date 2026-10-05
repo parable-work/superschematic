@@ -18,7 +18,7 @@ mod ratelimit;
 mod request_id;
 mod response;
 
-pub use auth::{bearer_token, covers, has_any_permission, Authenticator, Principal};
+pub use auth::{admit, bearer_token, covers, has_any_permission, Authenticator, Principal};
 pub use body::{json_body, query_values};
 pub use context::RequestContext;
 pub use controls::RouteControls;
@@ -28,7 +28,8 @@ pub use openapi::{
     DEFAULT_OPENAPI_VERSION,
 };
 pub use operation::{
-    body_fields, input, input_refusal, operation_response, required_input, InputParse,
+    body_fields, check_input, input, input_refusal, operation_response, required_input, InputParse,
+    OperationInfo,
 };
 pub use params::{
     decode_json_param, decode_param, ObjectPrepare, ParamKind, ParamLocation, ParamSpec,

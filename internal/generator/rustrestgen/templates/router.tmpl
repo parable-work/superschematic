@@ -20,9 +20,10 @@ use axum::Extension;
 use axum::Router;
 use {{ .RuntimeCrateIdent }}::schema::{self, Pattern};
 use {{ .RuntimeCrateIdent }}::{
-    body_fields, error_response, input, json_body, openapi_router, operation_response,
-    path_is_percent_encoded, query_values, request_id_from_headers, request_ids, required_input,
-    ApiError, ParamKind, ParamSpec, QueryValues, RequestContext, RouterOptions, ScalarConstraints,
+    body_fields, check_input, error_response, input, json_body, openapi_router,
+    operation_response, path_is_percent_encoded, query_values, request_id_from_headers,
+    request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
+    RequestContext, RouterOptions, ScalarConstraints,
 };
 {{- if .HasAuth }}
 use {{ .RuntimeCrateIdent }}::Principal;
@@ -198,6 +199,36 @@ fn decode_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}({{ join .DecodeParams
         {{ .Field }}: {{ .Spec }}.{{ if .KeepNull }}body_keep_null{{ else }}body{{ end }}(body_fields(body.as_ref(), {{ $endpoint.BodyRequired }})?)?,
 {{- end }}
     })
+}
+
+impl {{ .ArgsName }} {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+{{- range .PathArgs }}
+        {{ .Spec }}.check_value(ParamLocation::Path, &self.{{ .Field }})?;
+{{- end }}
+{{- range .QueryArgs }}
+        {{ .Spec }}.check_value(ParamLocation::Query, &self.{{ .Field }})?;
+{{- end }}
+{{- with .Input }}
+{{- if .Prepare }}
+{{- if .Required }}
+        check_input(&self.input, {{ .Prepare }})?;
+{{- else }}
+        if let Some(input) = &self.input {
+            check_input(input, {{ .Prepare }})?;
+        }
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .BodyArgs }}
+        {{ .Spec }}.check_value(ParamLocation::Body, &self.{{ .Field }})?;
+{{- end }}
+        Ok(())
+    }
 }
 {{- end }}
 

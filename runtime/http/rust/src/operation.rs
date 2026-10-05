@@ -1,15 +1,96 @@
 //! An operation's input and result, as the generated handlers take and
 //! answer them: the input type parsed by its generated `parse_<type>` with
 //! undeclared top-level keys refused, the body object scalar arguments are
-//! read from, and the result in the success envelope.
+//! read from, and the result in the success envelope. Also what an
+//! in-process caller needs to run an operation by the route's rules: the
+//! route's facts (`OperationInfo`) and the input check.
 
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use http::Method;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::schema::{ParseError, UnknownFields, ValidationErrors};
-use crate::{error_response, wrap_envelope, ApiError};
+use crate::{
+    admit, error_response, wrap_envelope, ApiError, Authenticator, ObjectPrepare, Principal,
+    RequestContext,
+};
+
+/// One operation as the service's router serves it. The generated crate's
+/// `operations` module declares one for each operation
+/// (`operations::ORDERS_GET_ORDER`), so a caller that runs an operation
+/// in-process (a page, a job) applies the route's own rules instead of
+/// restating them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OperationInfo {
+    /// The operation set the operation belongs to and the operation's name,
+    /// as the schema declares them.
+    pub namespace: &'static str,
+    pub name: &'static str,
+    /// The route's method, upper case, and its path with `{param}`
+    /// captures.
+    pub method: &'static str,
+    pub path: &'static str,
+    /// Whether the route needs a caller: `@auth`, `@requirePermission`,
+    /// `@requireOwnership`, or an `Authenticated` operation set.
+    pub requires_auth: bool,
+    /// The route's `@requirePermission` list, of which the caller must
+    /// satisfy one; empty without one.
+    pub permissions: &'static [&'static str],
+    /// `@requireOwnership`: the implementation checks that the caller owns
+    /// the resource.
+    pub require_ownership: bool,
+    /// `@manualRouteRegistration`: the service mounts the route itself; the
+    /// router does not, and the namespace trait has no method for it.
+    pub manual: bool,
+}
+
+impl OperationInfo {
+    /// The caller the route would hand the implementation, admitted as the
+    /// route admits a request's: for an operation that needs one,
+    /// `principal` through [`admit`] (401 without one, 403 without a
+    /// permission the operation lists); for one that does not, none, as the
+    /// route establishes none.
+    pub fn admit(
+        &self,
+        authenticator: &dyn Authenticator,
+        principal: Option<Principal>,
+    ) -> Result<Option<Principal>, ApiError> {
+        if !self.requires_auth {
+            return Ok(None);
+        }
+        let required: Vec<String> = self
+            .permissions
+            .iter()
+            .map(|permission| (*permission).to_owned())
+            .collect();
+        admit(authenticator, principal, &required).map(Some)
+    }
+
+    /// The `RequestContext` the route would build for the implementation,
+    /// for a call that is not a request: the route's method and path and the
+    /// admitted caller. It has no headers and no path or query parameters;
+    /// the operation's `Args` carry its arguments.
+    pub fn context(&self, principal: Option<Principal>) -> RequestContext {
+        let method = Method::from_bytes(self.method.as_bytes()).unwrap_or(Method::POST);
+        let mut ctx = RequestContext::new(method, self.path.to_owned());
+        ctx.principal = principal;
+        ctx
+    }
+}
+
+/// Checks an input a caller built, not a request's body, as the router
+/// checks a body: its JSON goes through the input type's generated
+/// `prepare_<type>` with undeclared keys refused, so an input the router
+/// would refuse is refused with the same 400 ([`input_refusal`]).
+pub fn check_input<T: Serialize>(input: &T, prepare: ObjectPrepare) -> Result<(), ApiError> {
+    let value =
+        serde_json::to_value(input).map_err(|err| input_refusal(ParseError::Decode(err)))?;
+    prepare(value, UnknownFields::Refuse)
+        .map(drop)
+        .map_err(input_refusal)
+}
 
 /// An input type's generated `parse_<type>`.
 pub type InputParse<T> = fn(Value, UnknownFields) -> Result<T, ParseError>;
@@ -155,6 +236,102 @@ mod tests {
 
         let err = input(Some(json!([])), parse_named).unwrap_err();
         assert!(err.errors.is_none());
+    }
+
+    fn prepare_named(value: Value, unknown: UnknownFields) -> Result<Value, ParseError> {
+        parse_named(value.clone(), unknown).map(|_| value)
+    }
+
+    #[derive(Serialize)]
+    struct Named {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    }
+
+    #[test]
+    fn a_built_input_is_checked_as_a_body_is() {
+        check_input(
+            &Named {
+                name: Some("a".to_owned()),
+            },
+            prepare_named,
+        )
+        .unwrap();
+        let err = check_input(&Named { name: None }, prepare_named).unwrap_err();
+        let refused = input(Some(json!({})), parse_named).unwrap_err();
+        assert_eq!(
+            (err.status, &err.message, &err.details, &err.errors),
+            (
+                refused.status,
+                &refused.message,
+                &refused.details,
+                &refused.errors
+            )
+        );
+    }
+
+    struct Tokens;
+
+    #[async_trait::async_trait]
+    impl Authenticator for Tokens {
+        async fn authenticate(
+            &self,
+            _request: &http::request::Parts,
+        ) -> Result<Option<Principal>, ApiError> {
+            Ok(None)
+        }
+    }
+
+    const AUDIT: OperationInfo = OperationInfo {
+        namespace: "orders",
+        name: "audit",
+        method: "GET",
+        path: "/api/orders/{id}/audit",
+        requires_auth: true,
+        permissions: &["orders.audit"],
+        require_ownership: false,
+        manual: false,
+    };
+
+    #[test]
+    fn an_operation_admits_a_caller_as_its_route_does() {
+        let err = AUDIT.admit(&Tokens, None).unwrap_err();
+        assert_eq!(
+            (err.status, err.message.as_str()),
+            (StatusCode::UNAUTHORIZED, "Authentication required")
+        );
+        let err = AUDIT
+            .admit(&Tokens, Some(Principal::new("u", ["orders.read"])))
+            .unwrap_err();
+        assert_eq!(
+            (err.status, err.message.as_str()),
+            (StatusCode::FORBIDDEN, "Insufficient permissions")
+        );
+        let caller = AUDIT
+            .admit(&Tokens, Some(Principal::new("u", ["orders"])))
+            .unwrap();
+        assert_eq!(caller.map(|caller| caller.subject), Some("u".to_owned()));
+
+        let open = OperationInfo {
+            requires_auth: false,
+            permissions: &[],
+            ..AUDIT
+        };
+        assert_eq!(
+            open.admit(&Tokens, Some(Principal::new("u", ["orders"])))
+                .unwrap(),
+            None
+        );
+
+        let ctx = AUDIT.context(Some(Principal::new("u", ["orders"])));
+        assert_eq!(
+            (ctx.method, ctx.route.as_str()),
+            (Method::GET, "/api/orders/{id}/audit")
+        );
+        assert_eq!(
+            ctx.principal.map(|caller| caller.subject),
+            Some("u".to_owned())
+        );
     }
 
     #[test]

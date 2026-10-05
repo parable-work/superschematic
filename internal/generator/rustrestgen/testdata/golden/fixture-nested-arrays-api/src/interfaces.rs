@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The arguments of grid.saveGrid (`POST /api/grids`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct GridSaveGridArgs {
     /// The request body.
@@ -17,7 +18,8 @@ pub struct GridSaveGridArgs {
 }
 
 /// The arguments of grid.getGrid (`GET /api/grids/{id}`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct GridGetGridArgs {
     /// The `id` path parameter.
@@ -25,7 +27,8 @@ pub struct GridGetGridArgs {
 }
 
 /// The arguments of grid.gridLabels (`GET /api/grids/{id}/labels`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct GridGridLabelsArgs {
     /// The `id` path parameter.
@@ -35,7 +38,8 @@ pub struct GridGridLabelsArgs {
 }
 
 /// The arguments of grid.replaceLabels (`PUT /api/grids/{id}/labels`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct GridReplaceLabelsArgs {
     /// The `id` path parameter.

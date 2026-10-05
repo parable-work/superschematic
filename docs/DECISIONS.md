@@ -3154,3 +3154,27 @@ undeclared keys. A Go caller sending an undeclared key now gets a 400
 where it was ignored.
 
 The rule is reversible until the first release.
+
+## D43. An in-process caller runs a Rust operation by its route's rules
+
+D39 gave each operation of a Rust API a typed `Args` struct and result, so
+a Rust caller in the same process (a server-rendered page, a job, the
+Topcoat extension's crate) can call the implementation directly. The
+route's checks ran only in the router, though: the caller, its
+permissions, and each argument's rules. A direct caller had to restate
+them, and could drift from the route.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each `Args` struct has `check()`. It runs the router's `ParamSpec` of each argument on the argument's JSON (`ParamSpec::check_value`), at the argument's location, and the input type's `prepare_<type>` with undeclared keys refused (`check_input`). A refusal is the 400 the router answers a request carrying the same values. | A second set of validators written for typed values, which would drift from the router's; validating only the input, where a list bound or a scalar's rule of an argument is the route's too |
+| The crate's `operations` module declares an `OperationInfo` per operation, manual ones included: its route, whether it needs a caller, its `@requirePermission` list, `@requireOwnership` and `@manualRouteRegistration`. `OperationInfo::admit` admits a caller by the route's rule, shared with `RouteControls::authorize` through the runtime's `admit`: 401 without one, 403 when `Authenticator::permits` refuses. `OperationInfo::context` builds the `RequestContext` the route would. | Each caller reading the auth rules from the schema itself, or the extension writing them into its own crate |
+| `ApiError` implements `Display` and `std::error::Error`, as `403 forbidden: Insufficient permissions`, so `?` carries it into a caller's own error type. The crate re-exports the runtime as `runtime`, so a crate built on it shares one version of it. | |
+| An extension reads the crate as the `api` generator builds it through `registry.RustAPIOf`, with its records aliased as `RustAPI`, `RustEndpoint`, `RustParam` and `RustInput`, and its directory through `registry.APIDir`. | Recomputing the endpoints in the extension from the IR, which would repeat rustrestgen's naming and typing |
+
+The router is unchanged: it keeps decoding what a request carries, and a
+request never reaches `check()`. A cargo test on fixture-api's crate
+(`operation_check_test.go`) compares `check()`'s refusal with the router's
+problem for a query list over its bound and an input that breaks its
+type's rule, and runs an operation in-process through `admit`, `check`
+and `context`. Serializing the arguments again costs a caller what the
+router spends decoding a request.

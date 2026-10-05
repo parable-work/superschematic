@@ -16,9 +16,10 @@ use axum::Extension;
 use axum::Router;
 use superschematic_http_runtime::schema::{self, Pattern};
 use superschematic_http_runtime::{
-    body_fields, error_response, input, json_body, openapi_router, operation_response,
-    path_is_percent_encoded, query_values, request_id_from_headers, request_ids, required_input,
-    ApiError, ParamKind, ParamSpec, QueryValues, RequestContext, RouterOptions, ScalarConstraints,
+    body_fields, check_input, error_response, input, json_body, openapi_router,
+    operation_response, path_is_percent_encoded, query_values, request_id_from_headers,
+    request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
+    RequestContext, RouterOptions, ScalarConstraints,
 };
 use superschematic_http_runtime::Principal;
 use superschematic_http_runtime::RouteControls;
@@ -149,6 +150,17 @@ fn decode_event_get_event(captures: &HashMap<String, String>) -> Result<EventGet
     })
 }
 
+impl EventGetEventArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        EVENT_GET_EVENT_ID.check_value(ParamLocation::Path, &self.id)?;
+        Ok(())
+    }
+}
+
 async fn handle_event_get_event(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
@@ -197,6 +209,18 @@ fn decode_webhook_receive_github_event(body: Option<Value>) -> Result<WebhookRec
     })
 }
 
+impl WebhookReceiveGithubEventArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        WEBHOOK_RECEIVE_GITHUB_EVENT_ID.check_value(ParamLocation::Body, &self.id)?;
+        WEBHOOK_RECEIVE_GITHUB_EVENT_ACTION.check_value(ParamLocation::Body, &self.action)?;
+        Ok(())
+    }
+}
+
 async fn handle_webhook_receive_github_event(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
@@ -237,6 +261,17 @@ fn decode_webhook_receive_stripe_event(body: Option<Value>) -> Result<WebhookRec
     Ok(WebhookReceiveStripeEventArgs {
         input: required_input(body, types::validators::parse_payment_event)?,
     })
+}
+
+impl WebhookReceiveStripeEventArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        check_input(&self.input, types::validators::prepare_payment_event)?;
+        Ok(())
+    }
 }
 
 async fn handle_webhook_receive_stripe_event(

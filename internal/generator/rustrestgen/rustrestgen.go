@@ -65,6 +65,15 @@ type EndpointInfo struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
+	// Manual marks an operation declared @manualRouteRegistration, which the
+	// service mounts itself.
+	Manual bool
+}
+
+// ConstName is the operation's OperationInfo constant in the crate's
+// operations module: ORDERS_GET_ORDER.
+func (e EndpointInfo) ConstName() string {
+	return constName(e.HandlerName)
 }
 
 // HasArgs reports whether the implementation method takes an Args struct.
@@ -181,6 +190,14 @@ type APIOutput struct {
 	DependencyCrates []DependencyCrate
 }
 
+// AllEndpoints are the mounted and the manual operations, in the order
+// sortEndpoints gives them: the operations module declares each.
+func (o *APIOutput) AllEndpoints() []EndpointInfo {
+	all := append(append([]EndpointInfo{}, o.Endpoints...), o.ManualEndpoints...)
+	sortEndpoints(all)
+	return all
+}
+
 // Specs are the ParamSpec statics of every mounted operation's arguments.
 func (o *APIOutput) Specs() []ParamInfo {
 	var specs []ParamInfo
@@ -256,7 +273,10 @@ type Options struct {
 // does (the runtime crate's ParamSpec), and parses an input with its type's
 // generated parse_<type>, refusing a top-level key the type does not
 // declare; a refusal is a 400 problem that names the parameter, or the
-// input's field errors.
+// input's field errors. Each Args struct's check makes the same checks on
+// arguments a caller builds, and the operations module declares each
+// operation's route and auth rules (OperationInfo), so an in-process caller
+// runs an operation by its route's rules.
 //
 // An operation declared @manualRouteRegistration is left to the service, as
 // the Go server leaves it out of RegisterRoutes and the TypeScript server
@@ -355,6 +375,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 			RateLimit:        positive(endpoint.RateLimit),
 			BodyLimit:        positive(endpoint.BodyLimit),
 			Timeout:          positive(endpoint.Timeout),
+			Manual:           endpoint.ManualRouteRegistration,
 		}
 		if info.WebhookProvider != "" {
 			webhookProviders[info.WebhookProvider] = struct{}{}
@@ -424,6 +445,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "interfaces.tmpl", outputName: filepath.Join("src", "interfaces.rs")},
 		{templateName: "router.tmpl", outputName: filepath.Join("src", "router.rs")},
 		{templateName: "openapi.tmpl", outputName: filepath.Join("src", "openapi.rs")},
+		{templateName: "operations.tmpl", outputName: filepath.Join("src", "operations.rs")},
 	}
 
 	for _, file := range files {

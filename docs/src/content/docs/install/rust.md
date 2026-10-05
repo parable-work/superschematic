@@ -440,3 +440,29 @@ let router = build_router(Implementations {
 
 An operation added to the schema later is a method the scaffold's impl
 lacks; the compiler names it, and you add it with its file.
+
+### Calling an operation in-process
+
+A Rust caller in the same process, such as a server-rendered page or a job,
+can call an implementation directly, by the route's rules. Each operation
+has an `OperationInfo` in the crate's `operations` module (its route,
+whether it needs a caller, its permissions), and each `Args` struct has
+`check()`, which refuses what the router would refuse, with the same 400:
+
+```rust
+use schemas_catalog_api::operations::PRODUCT_GET_PRODUCT;
+
+let caller = PRODUCT_GET_PRODUCT.admit(implementations.authenticator.as_ref(), caller)?;
+args.check()?;
+let product = implementations
+    .product
+    .get_product(PRODUCT_GET_PRODUCT.context(caller), args)
+    .await?;
+```
+
+`admit` answers 401 without a caller for an operation that needs one, and
+403 when the `Authenticator`'s `permits` refuses its permissions; for an
+operation that needs none it hands the implementation none, as the route
+does. `ApiError` implements `std::error::Error`, so `?` carries a refusal
+into the caller's own error type. The crate re-exports the runtime as
+`runtime`.
