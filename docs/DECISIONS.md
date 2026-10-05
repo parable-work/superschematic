@@ -2536,3 +2536,29 @@ without `deletedAt` the store now passes `nil` find options and is
 otherwise unchanged.
 
 The rule is reversible until the first release.
+
+## D36. `@publicRoute` opens its route, and a caller decorator beside it is refused
+
+`@publicRoute` on a method of an `Authenticated` set meant different things
+to different targets. The TypeScript reader folded the set into the
+operation, so it carried both `Public` and `Auth`. apigen's `RequiresAuth`
+ignores `Public`, so the Go server, the OpenAPI document, every SDK and the
+Rust server (D29) kept the route protected; the TypeScript server's gate
+returns early on `public`, so it served the route to anyone. Nothing
+refused `@publicRoute` together with `@auth`, `@requirePermission` or
+`@requireOwnership` on the same method either, and the auth guide said a
+`@publicRoute` route is one anyone may call.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@publicRoute` on a method of an `Authenticated` set opens that one route in every target. The TypeScript reader does not fold the set's `Authenticated` into an `@publicRoute` operation, so its `Auth` is false, apigen's `RequiresAuth` is false, and the Go router mounts it with the public routes, the OpenAPI document gives it no bearer scheme, and the TypeScript operation table says `required: false`. | Letting the caller requirement win everywhere, which makes `@publicRoute` in an `Authenticated` set a no-op and changes what the TypeScript server serves |
+| `@publicRoute` together with `@auth`, `@requirePermission` or `@requireOwnership` on the same method is refused, naming the operation and the decorator: by the TypeScript reader at the method, and by the verify pass for a schema authored as IR, where `auth` also stands for an `Authenticated` set. `verify.PublicRouteConflict` is the one rule both use. | Refusing `@publicRoute` inside an `Authenticated` set as well, which forces an open route out of the set it belongs with |
+
+apigen's formula for `RequiresAuth` does not change: the reader is the one
+place that decides `Auth`, and the verify pass keeps an IR schema from
+saying both. `internal/loader/tsreader/public_route_test.go` loads an
+`Authenticated` set with an `@publicRoute` method and checks each refused
+pair; `internal/loader/verify/publicroute_test.go` checks the IR form. No
+fixture or example declares either, so no golden changes.
+
+The rule is reversible until the first release.

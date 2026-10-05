@@ -57,7 +57,7 @@ as their support lands in every generator.
 | `@auth` | method | the route needs a caller | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@requirePermission([...])` | method | the route needs a caller holding one of the permissions | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@requireOwnership` | method | the route needs a caller; your implementation checks ownership | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
-| `@publicRoute` | method | marks a route anyone may call | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
+| `@publicRoute` | method | marks a route anyone may call, in an `Authenticated` set too; refused with `@auth`, `@requirePermission` or `@requireOwnership` | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@webhook` | method | an operation a third party calls; the Go and TypeScript SDKs leave it out | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | `@hmacVerified({ provider })` | method | the Go server checks the request's signature with the provider's verifier | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | `@rateLimit`, `@bodyLimit`, `@timeout` | class, method | bound a route's requests per minute, body size and duration (Go and TypeScript servers; not yet Rust) | [API routes](/superschematic/guides/api-routes/#traffic-controls) |

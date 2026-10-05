@@ -21,14 +21,18 @@ it mounts answers any caller
 
 | In the schema | The route needs |
 | --- | --- |
-| `extends Authenticated` on the set | a caller, on every route of the set |
+| `extends Authenticated` on the set | a caller, on every route of the set except one marked `@publicRoute` |
 | `@auth` on a method | a caller |
 | `@requirePermission([...])` on a method | a caller holding one of the permissions |
 | `@requireOwnership` on a method | a caller, as `@auth` does; whether the caller owns the resource is for your implementation to check |
+| `@publicRoute` on a method | nothing: anyone may call it, even in an `Authenticated` set |
 | none of these | nothing: anyone may call it |
 
 Mark a route that anyone may call `@publicRoute`, so an open route reads as
-a decision rather than an oversight. `shop-orders` uses each form:
+a decision rather than an oversight. In an `Authenticated` set it opens that
+one route. On the same method as `@auth`, `@requirePermission` or
+`@requireOwnership` it contradicts them, and the build refuses it.
+`shop-orders` uses each form:
 
 <Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol="ProductReviews" />
 

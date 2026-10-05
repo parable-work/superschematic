@@ -1228,7 +1228,14 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 			w.addErr(serr)
 			continue
 		}
-		op.Auth = op.Auth || auth
+		// @publicRoute opens its route: the set's Authenticated does not reach
+		// it, and a caller decorator on the same method contradicts it.
+		if conflict := verify.PublicRouteConflict(op); conflict != "" {
+			w.addErr(errorAtNode(m, "@publicRoute contradicts %s on %s: a public route needs no caller", conflict, op.Name))
+		}
+		if !op.Public {
+			op.Auth = op.Auth || auth
+		}
 		set.Operations = append(set.Operations, op)
 	}
 
