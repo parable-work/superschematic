@@ -22,11 +22,11 @@ import (
 // unless a step deleted them; for each plan case with contract steps,
 // create.sql of A, the rows and the plan's expand steps leave the catalog
 // of the plan from an empty database to the plan's expandedModel (D27,
-// amended); for every fixture, the plan from an empty
-// database leaves the same catalog as its create.sql, and the primary key
-// and unique constraints have the names the model gives them; and the
-// runner's vectors, applied in order, leave the catalog of their last
-// version's create.sql.
+// amended); for every fixture, the plan from an empty database leaves the
+// same catalog as its create.sql, and the primary key and unique
+// constraints have the names the model gives them; and the runner's
+// vectors, applied in order, a plan the next one supersedes up to its
+// contract, leave the catalog of their last version's create.sql.
 //
 // The checks live in testdata/pgconverge, a module of its own, so the
 // Postgres driver stays out of this module. Set
@@ -62,8 +62,8 @@ func TestConvergenceOnPostgres(t *testing.T) {
 			continue
 		}
 		dir := filepath.Join(cases, "vectors-"+name)
-		for i, plan := range run.plans {
-			writeJSON(t, filepath.Join(dir, fmt.Sprintf("plan-%02d.json", i+1)), plan)
+		for i := range run.plans {
+			writeJSON(t, filepath.Join(dir, fmt.Sprintf("plan-%02d.json", i+1)), run.applied(i))
 		}
 		writeFile(t, filepath.Join(dir, "to.sql"), []byte(createSQL(t, run.schema, sqlgen.Options{SchemaName: "ledger-db"})))
 	}

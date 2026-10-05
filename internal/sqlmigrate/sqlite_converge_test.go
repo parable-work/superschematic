@@ -18,10 +18,11 @@ import (
 // deleted them; for each case with contract steps, sqlite/create.sql of A,
 // the rows and the plan's expand steps leave the schema of the plan from an
 // empty database to the plan's expandedModel (D27, amended); for every
-// SQLite fixture, the plan from an empty database
-// leaves the same schema as its create.sql; and the runner's SQLite
-// vectors, applied in order, leave the schema of their last version's
-// create.sql. The steps run as the runner runs them: foreign keys on, and
+// SQLite fixture, the plan from an empty database leaves the same schema as
+// its create.sql; and the runner's SQLite vectors, applied in order, a plan
+// the next one supersedes up to its contract, leave the schema of their
+// last version's create.sql. The steps run as the runner runs them: foreign
+// keys on, and
 // off around a step that asks, with PRAGMA foreign_key_check before its
 // commit.
 //
@@ -59,8 +60,8 @@ func TestConvergenceOnSQLite(t *testing.T) {
 			continue
 		}
 		dir := filepath.Join(cases, "vectors-"+name)
-		for i, plan := range run.plans {
-			writeJSON(t, filepath.Join(dir, fmt.Sprintf("plan-%02d.json", i+1)), plan)
+		for i := range run.plans {
+			writeJSON(t, filepath.Join(dir, fmt.Sprintf("plan-%02d.json", i+1)), run.applied(i))
 		}
 		writeFile(t, filepath.Join(dir, "to.sql"), []byte(sqliteCreateSQL(t, run.model)))
 	}

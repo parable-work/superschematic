@@ -95,30 +95,43 @@ func TestApplyAChain(t *testing.T) {
 func TestResumeAfterAFailure(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
 		chain := []*migrate.Plan{plan(t, dialect, "01-create"), plan(t, dialect, "02-evolve"), plan(t, dialect, "03-audit")}
-		resumeAfterEveryStep(t, dialect, chain)
+		resumeAfterEveryStep(t, dialect, chain, nil)
 	})
 }
 
 // resumeAfterEveryStep applies chain once straight through, then once per
 // step of every plan with a failure injected after that step, and compares
-// each final catalog with the first.
-func resumeAfterEveryStep(t *testing.T, dialect migrate.Dialect, chain []*migrate.Plan) {
+// each final catalog with the first. phases holds the phases each plan
+// runs, All for every plan when nil; a plan that runs Expand only is
+// superseded by the next.
+func resumeAfterEveryStep(t *testing.T, dialect migrate.Dialect, chain []*migrate.Plan, phases []migrate.Phase) {
+	phaseOf := func(i int) migrate.Phase {
+		if phases == nil {
+			return migrate.All
+		}
+		return phases[i]
+	}
 	reference := testdb.New(t, dialect)
 	r := newRunner(t, reference)
-	for _, p := range chain {
-		apply(t, r, p, migrate.All)
+	for i, p := range chain {
+		apply(t, r, p, phaseOf(i))
 	}
 	want := testdb.Catalog(t, reference)
 	last := chain[len(chain)-1]
 
 	injected := errors.New("injected")
 	for i, p := range chain {
-		for k := 1; k <= len(p.Steps); k++ {
+		// The steps the plan runs are its first n.
+		n := len(p.Steps)
+		if phaseOf(i) == migrate.Expand {
+			n = len(stepsIn(p, migrate.Expand))
+		}
+		for k := 1; k <= n; k++ {
 			t.Run(fmt.Sprintf("plan %d step %d", i+1, k), func(t *testing.T) {
 				url := testdb.New(t, dialect)
 				r := newRunner(t, url)
-				for _, before := range chain[:i] {
-					apply(t, r, before, migrate.All)
+				for j, before := range chain[:i] {
+					apply(t, r, before, phaseOf(j))
 				}
 				r.AfterStep = func(_ context.Context, step *migrate.Step) error {
 					if step.Index == k {
@@ -126,20 +139,34 @@ func resumeAfterEveryStep(t *testing.T, dialect migrate.Dialect, chain []*migrat
 					}
 					return nil
 				}
-				if _, err := r.Apply(context.Background(), p, migrate.All); !errors.Is(err, injected) {
+				if _, err := r.Apply(context.Background(), p, phaseOf(i)); !errors.Is(err, injected) {
 					t.Fatalf("apply with a failure after step %d: %v", k, err)
 				}
 				r.AfterStep = nil
 				st := status(t, r, p.Service)
-				if k < len(p.Steps) {
+				switch {
+				case k < n:
 					if st.PlanHash != p.Hash || len(st.Steps) != k {
 						t.Fatalf("after the failure: plan %q with %d steps logged, want %s with %d", st.PlanHash, len(st.Steps), p.Hash, k)
 					}
-					result := apply(t, r, p, migrate.All)
-					if !equalInts(result.Ran, ints(k+1, len(p.Steps))) || !result.Finished {
-						t.Fatalf("resume ran %v, want %v", result.Ran, ints(k+1, len(p.Steps)))
+					result := apply(t, r, p, phaseOf(i))
+					done := result.Finished
+					if n < len(p.Steps) {
+						done = result.ExpandDone && !result.Finished
 					}
-				} else {
+					if !equalInts(result.Ran, ints(k+1, n)) || !done {
+						t.Fatalf("resume ran %v, want %v: %+v", result.Ran, ints(k+1, n), result)
+					}
+				case n < len(p.Steps):
+					// The failure came after the last expand step, which
+					// recorded the plan's expanded model.
+					if st.PlanHash != p.Hash || st.ModelHash != p.Expanded || st.PlanPhase != migrate.PlanPhaseExpanded {
+						t.Fatalf("after a failure past the last expand step: %+v", st)
+					}
+					if result := apply(t, r, p, phaseOf(i)); len(result.Ran) != 0 || !result.ExpandDone {
+						t.Fatalf("expand after its last step: %+v", result)
+					}
+				default:
 					if st.PlanHash != "" || st.ModelHash != p.To {
 						t.Fatalf("after a failure past the last step: %+v", st)
 					}
@@ -147,8 +174,8 @@ func resumeAfterEveryStep(t *testing.T, dialect migrate.Dialect, chain []*migrat
 						t.Fatalf("apply after the last step: %+v", result)
 					}
 				}
-				for _, after := range chain[i+1:] {
-					apply(t, r, after, migrate.All)
+				for j, after := range chain[i+1:] {
+					apply(t, r, after, phaseOf(i+1+j))
 				}
 				if st := status(t, r, last.Service); st.ModelHash != last.To {
 					t.Fatalf("final model %s, want %s", st.ModelHash, last.To)
