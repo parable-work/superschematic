@@ -15,7 +15,10 @@ import (
 // for each SQLite plan case (A, B), sqlite/create.sql of A, then rows seeded
 // into it, then the plan from A to B, leaves the same schema as
 // sqlite/create.sql of B, and the seeded rows are still there unless a step
-// deleted them; for every SQLite fixture, the plan from an empty database
+// deleted them; for each case with contract steps, sqlite/create.sql of A,
+// the rows and the plan's expand steps leave the schema of the plan from an
+// empty database to the plan's expandedModel (D27, amended); for every
+// SQLite fixture, the plan from an empty database
 // leaves the same schema as its create.sql; and the runner's SQLite
 // vectors, applied in order, leave the schema of their last version's
 // create.sql. The steps run as the runner runs them: foreign keys on, and
@@ -30,6 +33,10 @@ func TestConvergenceOnSQLite(t *testing.T) {
 	for _, pc := range sqlitePlanCases() {
 		if writeSQLitePlanCase(t, filepath.Join(cases, pc.golden()), pc) {
 			cascade = true
+		}
+		if plan := pc.plan(t); plan.Expanded != "" {
+			from, _ := pc.models(t)
+			writeExpandedCase(t, filepath.Join(cases, "expanded-"+pc.golden()), pc, plan, sqliteCreateSQL(t, from), sqliteSeeds)
 		}
 	}
 	// A rebuild of a parent must keep the rows of its ON DELETE CASCADE

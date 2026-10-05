@@ -1,6 +1,7 @@
 -- Migration plan for shop-db (postgres)
 -- from:    a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
 -- to:      b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+-- between: d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4 (expanded: the model between the phases)
 -- plan:    c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
 -- renames: purchase=order, order.amount=order.total_cents
 -- 6 steps (4 expand, 2 contract), 4 hazards (1 destructive, 1 compat, 1 data-dependent, 1 api-breaking)

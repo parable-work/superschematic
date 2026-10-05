@@ -8,8 +8,9 @@ import (
 )
 
 // Diff plans the migration from one model to another. A nil from is an
-// empty database. The returned plan is sealed ([Plan.Seal]). Diff is a pure
-// function of its arguments.
+// empty database. A plan with contract steps carries the model the
+// database holds between its phases (Plan.Expanded). The returned plan is
+// sealed ([Plan.Seal]). Diff is a pure function of its arguments.
 func Diff(from, to *Model, opts Options) (*Plan, error) {
 	if to == nil {
 		return nil, errors.New("sqlmigrate: diff needs the model to plan to")
@@ -61,6 +62,22 @@ func Diff(from, to *Model, opts Options) (*Plan, error) {
 		if plan.From, err = from.Hash(); err != nil {
 			return nil, err
 		}
+	}
+	for _, step := range steps {
+		if step.Phase != Contract {
+			continue
+		}
+		expanded, err := d.expandedModel()
+		if err != nil {
+			return nil, err
+		}
+		if plan.Expanded, err = expanded.Hash(); err != nil {
+			return nil, err
+		}
+		if plan.ExpandedModel, err = expanded.CanonicalJSON(); err != nil {
+			return nil, err
+		}
+		break
 	}
 	for _, rn := range opts.Renames {
 		plan.Renames = append(plan.Renames, rn.From+"="+rn.To)

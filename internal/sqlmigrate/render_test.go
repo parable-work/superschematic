@@ -14,27 +14,31 @@ import (
 // Hashes in the hand-built plans are placeholders: the renderings print
 // them and never check them.
 var (
-	renderFromHash = strings.Repeat("a1", 32)
-	renderToHash   = strings.Repeat("b2", 32)
-	renderPlanHash = strings.Repeat("c3", 32)
+	renderFromHash     = strings.Repeat("a1", 32)
+	renderToHash       = strings.Repeat("b2", 32)
+	renderPlanHash     = strings.Repeat("c3", 32)
+	renderExpandedHash = strings.Repeat("d4", 32)
 )
 
 // renderPlans are hand-built plans covering what the renderings show:
-// both phases, renames, hazards with and without a reader, a step outside
-// a transaction with its recovery, a step of several statements, a
-// statement over several lines with semicolons in its body, a SQLite
-// rebuild with foreign keys off, and a plan with no steps.
+// both phases and the model between them, renames, hazards with and
+// without a reader, a step outside a transaction with its recovery, a step
+// of several statements, a statement over several lines with semicolons in
+// its body, a SQLite rebuild with foreign keys off, and a plan with no
+// steps.
 func renderPlans() map[string]*Plan {
 	return map[string]*Plan{
 		"expand-contract": {
-			Version: PlanVersion,
-			Dialect: Postgres,
-			Service: "shop-db",
-			From:    renderFromHash,
-			To:      renderToHash,
-			ToModel: json.RawMessage(`{}`),
-			Renames: []string{"purchase=order", "order.amount=order.total_cents"},
-			Hash:    renderPlanHash,
+			Version:       PlanVersion,
+			Dialect:       Postgres,
+			Service:       "shop-db",
+			From:          renderFromHash,
+			To:            renderToHash,
+			ToModel:       json.RawMessage(`{}`),
+			Expanded:      renderExpandedHash,
+			ExpandedModel: json.RawMessage(`{}`),
+			Renames:       []string{"purchase=order", "order.amount=order.total_cents"},
+			Hash:          renderPlanHash,
 			Steps: []*Step{
 				{
 					Index: 1, Phase: Expand, Op: "renameTable", Subject: "table/order",
