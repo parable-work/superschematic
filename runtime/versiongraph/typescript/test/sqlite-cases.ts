@@ -573,7 +573,7 @@ export const cases: Case[] = [
     },
   },
   {
-    name: "two graphs in one file keep apart: each reads, names, sequences, releases and prunes only its own",
+    name: "two graphs in one file keep apart: each reads, names, sequences, releases, prunes and sweeps only its own",
     run(binding) {
       let now = 1_800_000_000_000_000;
       const clock = () => now;
@@ -640,6 +640,21 @@ export const cases: Case[] = [
         assert.equal(images("recipe"), kept);
         assert.deepEqual(a.engine.sweep({ actor: cook }).pruned, {});
         assert.equal(bEngine.compose(other.id).contentHash, a.engine.compose(main.id).contentHash);
+        // Each graph discards its draft, and a week and a day on, past the
+        // grace, menu's sweep collects its own draft's rows and leaves
+        // recipe's, which recipe's own sweep collects.
+        const rowsOf = (graph: string, ref: string) =>
+          a.client.get(`SELECT count(*) AS n FROM "graph_member" WHERE graph = ?1 AND ref_id = ?2`, [graph, ref])?.["n"];
+        a.engine.discard(cook, aw.draft.id, aw.draft.version);
+        bEngine.discard(cook, bw.draft.id, bw.draft.version);
+        assert.deepEqual([rowsOf("recipe", aw.draft.id), rowsOf("menu", bw.draft.id)], [1, 1]);
+        now += 8 * 86_400_000_000;
+        const swept = bEngine.sweep({ actor: cook });
+        assert.deepEqual([swept.collectedRefs, swept.collectedRows], [1, { step: 1 }]);
+        assert.deepEqual([rowsOf("recipe", aw.draft.id), rowsOf("menu", bw.draft.id)], [1, 0]);
+        const own = a.engine.sweep({ actor: cook });
+        assert.deepEqual([own.collectedRefs, own.collectedRows], [1, { step: 1 }]);
+        assert.equal(rowsOf("recipe", aw.draft.id), 0);
       });
     },
   },

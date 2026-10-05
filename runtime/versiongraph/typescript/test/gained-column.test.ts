@@ -6,9 +6,12 @@
 // The core reads a content column a row lacks as null, so the gain moves no
 // comparison, patch or merge: a ref and its head commit hash the same, a
 // save of a row as its base has it is nothing to commit, a side that never
-// touched the column merges with one that sets it, a revert to a commit
-// written before the gain takes a value off the column, and both backends
-// give the same trees and hashes.
+// touched the column merges with one that sets it, a rebase of a draft
+// branched before the gain moves it onto work written after it, an edit
+// against a delete settled by taking the edit of a row written before the
+// gain clears the column on the target, a revert to a commit written before
+// the gain takes a value off the column, and both backends give the same
+// trees and hashes.
 import { expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import {
@@ -47,6 +50,7 @@ interface Graph {
     resolutions?: readonly Resolution[],
     options?: CommitOptions,
   ): Awaitable<MergeResult>;
+  rebase(actor: string, draft: string, version: number, resolutions?: readonly Resolution[]): Awaitable<MergeResult>;
   revert(actor: string, ref: string, version: number, toCommit: string): Awaitable<CommitResult>;
   compose(ref: string): Awaitable<TreeResult>;
   materialize(commit: string): Awaitable<TreeResult>;
@@ -166,6 +170,13 @@ async function run(open: () => Promise<Backend>): Promise<Observed> {
     const first = await before.merge(cook, draft.id, main.id, main.version, [], { tag: true });
     main = first.ref;
     const recorded = first.commit!;
+    // Before the gain: a draft that a rebase moves later, a source that
+    // renames the whisk, and a target beside it that deletes the whisk.
+    let late = await before.branch(cook, main.id, "late");
+    let source = await before.branch(cook, main.id, "source");
+    source = (await before.save(cook, source.id, source.version, { utensil: { upsert: [utensil("Whisk", "whisk2")] } })).ref;
+    source = (await before.commit(cook, source.id, source.version)).ref;
+    let target = await before.branch(cook, main.id, "target");
 
     const graph = await backend.gain();
     const composed = await graph.compose(main.id);
@@ -190,7 +201,9 @@ async function run(open: () => Promise<Backend>): Promise<Observed> {
 
     // rename never touches color; paint sets it on the whisk.
     let rename = await graph.branch(cook, main.id, "rename");
-    rename = (await graph.save(cook, rename.id, rename.version, { utensil: { upsert: [utensil("Whisk", "big whisk")] } })).ref;
+    rename = (await graph.save(cook, rename.id, rename.version, {
+      utensil: { upsert: [utensil("Whisk", "big whisk"), utensil("Spoon", "big spoon")] },
+    })).ref;
     rename = (await graph.commit(cook, rename.id, rename.version)).ref;
     let paint = await graph.branch(cook, main.id, "paint");
     paint = (await graph.save(cook, paint.id, paint.version, { utensil: { upsert: [utensil("Whisk", "whisk", { color: "red" })] } })).ref;
@@ -226,6 +239,44 @@ async function run(open: () => Promise<Backend>): Promise<Observed> {
     expect(undone.contentHash).toBe(materialized.contentHash);
     expect(reverted.commit!.contentHash).toBe(materialized.contentHash);
 
+    // An edit against a delete, settled by taking the edit: the target
+    // painted the whisk and deleted it, and the source's whisk is an image
+    // from before the gain, which lacks color. The target's whisk is the
+    // source's, color null, not the color its tombstone row held.
+    target = (await graph.save(cook, target.id, target.version, { utensil: { upsert: [utensil("Whisk", "whisk", { color: "red" })] } })).ref;
+    target = (await graph.save(cook, target.id, target.version, { utensil: { delete: ["Whisk"] } })).ref;
+    const settled = await graph.merge(cook, source.id, target.id, target.version, [
+      { kind: "utensil", entityKey: "Whisk", path: "", take: "theirs" },
+    ]);
+    expect(settled.conflicts).toEqual([]);
+    const taken = await graph.compose(target.id);
+    const takenWhisk = rows(taken.tree)["utensil"]!.find((row) => row["entity_key"] === "Whisk")!;
+    expect([takenWhisk["name"], takenWhisk["color"]]).toEqual(["whisk2", null]);
+    expect(settled.commit!.contentHash).toBe(taken.contentHash);
+    expect((await graph.materialize(settled.commit!.id)).contentHash).toBe(taken.contentHash);
+
+    // A rebase of the draft branched before the gain onto main's head: the
+    // draft paints the spoon, main renamed it after the gain, and the base
+    // lacks color, which main's rows hold null, so the two merge.
+    late = (await graph.save(cook, late.id, late.version, { utensil: { upsert: [utensil("Spoon", "spoon", { color: "blue" })] } })).ref;
+    const rebased = await graph.rebase(cook, late.id, late.version);
+    expect(rebased.conflicts).toEqual([]);
+    late = rebased.ref;
+    const moved = await graph.compose(late.id);
+    expect(rows(moved.tree)["utensil"]!.map((row) => [row["name"], row["color"]])).toEqual([
+      ["big spoon", "blue"],
+      ["big whisk", "red"],
+    ]);
+    expect(rebased.commit!.contentHash).toBe(moved.contentHash);
+    expect((await graph.materialize(late.head!)).contentHash).toBe(moved.contentHash);
+    expect(await outcome(() => graph.commit(cook, late.id, late.version))).toBe("nothing_to_commit");
+    const landed = await graph.merge(cook, late.id, main.id, main.version);
+    expect(landed.conflicts).toEqual([]);
+    main = landed.ref;
+    const final = await graph.compose(main.id);
+    expect(final.contentHash).toBe((await graph.materialize(main.head!)).contentHash);
+    expect(final.contentHash).toBe(moved.contentHash);
+
     return normalize({
       recorded: recorded.contentHash,
       composed: shown(composed),
@@ -235,6 +286,9 @@ async function run(open: () => Promise<Backend>): Promise<Observed> {
       head: shown(head),
       after: shown(after),
       undone: shown(undone),
+      taken: shown(taken),
+      moved: shown(moved),
+      final: shown(final),
     }) as Observed;
   } finally {
     await backend.close();
