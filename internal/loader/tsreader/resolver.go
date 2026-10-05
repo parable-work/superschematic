@@ -523,12 +523,21 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 		}
 		switch prop.Name {
 		case "uploadMaxBytes":
-			uploadMaxBytes, valid := uploadMaxBytesLiteral(v)
+			uploadMaxBytes, valid := safeIntegerLiteral(v)
 			if !valid {
 				return nil, errorAtNode(node, "Validate uploadMaxBytes must be a finite JavaScript-safe integer literal")
 			}
 			cfg[prop.Name] = uploadMaxBytes
-		case "min", "max", "minLength", "maxLength", "listMin", "listMax", "pattern":
+		case "minLength", "maxLength", "listMin", "listMax":
+			// A length or item count is a whole number: the JSON and YAML
+			// forms type these bounds as integers, so a fraction is refused
+			// here rather than truncated.
+			bound, valid := safeIntegerLiteral(v)
+			if !valid {
+				return nil, errorAtNode(node, "Validate %s must be a finite JavaScript-safe integer literal, got %s", prop.Name, formatLiteral(v))
+			}
+			cfg[prop.Name] = int(bound)
+		case "min", "max", "pattern":
 			cfg[prop.Name] = v
 		default:
 			return nil, errorAtNode(node, "unsupported Validate config key %q", prop.Name)
@@ -541,9 +550,11 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 // TypeScript number literal carries exactly.
 const maxJavaScriptSafeInteger = float64(1<<53 - 1)
 
-// uploadMaxBytesLiteral accepts a number literal that is a finite integer a
-// TypeScript number represents exactly, and returns it as int64.
-func uploadMaxBytesLiteral(value any) (int64, bool) {
+// safeIntegerLiteral accepts a number literal that is a finite integer a
+// TypeScript number represents exactly, and returns it as int64. Integer
+// options read through it are refused, not truncated, when the author wrote
+// a fraction.
+func safeIntegerLiteral(value any) (int64, bool) {
 	number, ok := value.(float64)
 	if !ok || math.IsNaN(number) || math.IsInf(number, 0) ||
 		math.Trunc(number) != number || math.Abs(number) > maxJavaScriptSafeInteger {

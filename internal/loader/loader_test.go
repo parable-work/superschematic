@@ -1060,6 +1060,60 @@ types:
 	}
 }
 
+// TestLoadRefusesFractionalRetentionDays: history is kept in whole days, and
+// every form refuses retentionDays: 1.5 by name instead of keeping one day,
+// which the verify pass, the descriptor and the prune function would carry
+// unchanged.
+func TestLoadRefusesFractionalRetentionDays(t *testing.T) {
+	cases := []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{
+			name: "TypeScript",
+			dir:  filepath.Join("tsreader", "testdata", "services", "broken-versioned-fractional-retention"),
+			want: "broken.schema.ts:6:1: @versioned retentionDays must be an integer literal, got 1.5",
+		},
+		{
+			name: "JSON",
+			dir: writeService(t, map[string]string{
+				"schema.config.json": `{"name": "temp-db", "kind": "DB", "outputs": {}}`,
+				"src/recipe.schema.json": `{"types": {"Recipe": {"name": "Recipe", "role": "DBTable", "versioned": true,
+					"versionedConfig": {"retentionDays": 1.5},
+					"fields": [{"name": "id", "typeRef": {"name": "string"}, "required": true, "key": true}]}}}`,
+			}),
+			want: "at '/types/Recipe/versionedConfig/retentionDays': got number, want integer",
+		},
+		{
+			name: "YAML",
+			dir: writeService(t, map[string]string{
+				"schema.config.json": `{"name": "temp-db", "kind": "DB", "outputs": {}}`,
+				"src/recipe.schema.yaml": `
+types:
+  Recipe:
+    name: Recipe
+    role: DBTable
+    versioned: true
+    versionedConfig:
+      retentionDays: 1.5
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+        key: true
+`,
+			}),
+			want: "at '/types/Recipe/versionedConfig/retentionDays': got number, want integer",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertLoad(t, tc.dir, tc.want)
+		})
+	}
+}
+
 func requireBun(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("bun"); err != nil {

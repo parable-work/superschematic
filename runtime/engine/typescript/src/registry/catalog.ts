@@ -117,6 +117,9 @@ const COLUMNS = 'namespace, name, version, document, hash, defined_at, defined_b
 
 export class SchemaCatalog {
   private readonly runtimes = new Map<string, VersionRuntime>();
+  // What load composed of each model it returned, with no other schema in
+  // reach: composeReaching holds each behavior's reads with them to these.
+  private readonly alone = new WeakMap<SchemaModel, Composition>();
 
   constructor(
     private readonly storage: Storage,
@@ -290,14 +293,25 @@ export class SchemaCatalog {
   }
 
   private load(text: string, source: string): SchemaModel {
-    return readSchema(this.loader, text, source, (model) => compose(model, this.behaviors).issues);
+    let alone: Composition | undefined;
+    const model = readSchema(this.loader, text, source, (candidate) => {
+      const composed = compose(candidate, this.behaviors);
+      alone = composed.composition;
+      return composed.issues;
+    });
+    if (alone !== undefined) {
+      this.alone.set(model, alone);
+    }
+    return model;
   }
 
   // composeReaching composes a version being defined or published with
   // the namespace's other schemas in reach of parseConfig, and refuses it
-  // as load does for what a config says about them.
+  // as load does for what a config says about them, and for a config that
+  // reads other types through ConfigTarget.types with them than load's
+  // composition, with none in reach, read.
   private composeReaching(model: SchemaModel, namespace: string, ask: ReadCheck, source: string): Composition {
-    const { composition, issues } = compose(model, this.behaviors, this.configSchemas(model, namespace, ask));
+    const { composition, issues } = compose(model, this.behaviors, this.configSchemas(model, namespace, ask), this.alone.get(model));
     if (!composition) {
       throw new SchemaDocumentError(source, issues);
     }

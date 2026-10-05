@@ -31,11 +31,14 @@ const targets: Array<{ schemas: boolean; names: readonly string[] }> = [];
 let kept: ConfigTypes | undefined;
 /** What test.Kinds' afterConfigChange checked with the version being published. */
 const published: Array<readonly ValidationIssue[]> = [];
+/** Types test.Kinds' parseConfig also reads while other schemas are in reach, whatever its config says. */
+const extra = { withSchemas: [] as string[] };
 
 afterEach(() => {
   targets.length = 0;
   published.length = 0;
   kept = undefined;
+  extra.withSchemas = [];
   cleanup();
 });
 
@@ -65,6 +68,8 @@ const kinds = defineBehavior<KindsConfig>({
       additionalProperties: false,
       properties: {
         types: { type: 'array', items: { type: 'string' } },
+        withSchemas: { type: 'array', items: { type: 'string' } },
+        withoutSchemas: { type: 'array', items: { type: 'string' } },
         probe: { type: 'object', additionalProperties: false, required: ['type', 'value'], properties: { type: { type: 'string' }, value: {} } },
       },
     },
@@ -76,11 +81,16 @@ const kinds = defineBehavior<KindsConfig>({
     ],
   },
   parseConfig(config, target) {
-    const raw = config as { types?: string[]; probe?: { type: string; value: unknown } };
+    const raw = config as { types?: string[]; withSchemas?: string[]; withoutSchemas?: string[]; probe?: { type: string; value: unknown } };
     targets.push({ schemas: target.schemas !== undefined, names: target.types.names });
     kept = target.types;
     const read: Record<string, ConfigType> = {};
-    for (const name of raw.types ?? []) {
+    const reading = [
+      ...(raw.types ?? []),
+      ...((target.schemas === undefined ? raw.withoutSchemas : raw.withSchemas) ?? []),
+      ...(target.schemas === undefined ? [] : extra.withSchemas),
+    ];
+    for (const name of reading) {
       const type = target.types.get(name);
       if (type === undefined) {
         throw new BehaviorConfigError(`${name} is not a type of ${target.schema} besides ${target.type} (its types: ${target.types.names.join(', ')})`);
@@ -232,6 +242,42 @@ for (const driver of drivers) {
         thrown(() => define(engine, kitchen({ types: ['Wrapper'] })), SchemaDocumentError).issues.map((issue) => issue.path),
         ['/types/Loose/fields/0/typeRef']
       );
+    });
+
+    test('what parseConfig reads may not depend on the other schemas: a define or publish whose reads differ without them is refused', () => {
+      const engine = open();
+      const at = '/types/Kitchen/behaviors/0/config';
+      for (const [config, reads] of [
+        [{ types: ['Spare'], withSchemas: ['Recipe'] }, "Recipe through ConfigTarget.types only while other schemas"],
+        [{ withoutSchemas: ['Recipe', 'Step'] }, 'Recipe, Step through ConfigTarget.types only when no other schemas'],
+        // Reads that differ both ways name each side.
+        [
+          { withSchemas: ['Recipe'], withoutSchemas: ['Step'] },
+          'Recipe through ConfigTarget\\.types only while other schemas are in reach \\(ConfigTarget\\.schemas\\), and Step only when none are; ',
+        ],
+      ] as const) {
+        const refused = thrown(() => define(engine, kitchen(config)), SchemaDocumentError);
+        assert.deepEqual(
+          refused.issues.map((issue) => issue.path),
+          [at]
+        );
+        assert.match(refused.issues[0].message, new RegExp(`^type Kitchen: behavior test\.Kinds config: parseConfig reads ${reads}`));
+      }
+      // The same types with and without them stand.
+      define(engine, kitchen({ types: ['Recipe'], withSchemas: ['Spare'], withoutSchemas: ['Spare'] }));
+      // A publish composes the draft again, with the other schemas in reach
+      // and without, and refuses it as a define does.
+      define(engine, kitchen({ types: ['Recipe'] }));
+      extra.withSchemas = ['Spare'];
+      const atPublish = thrown(() => engine.schemas.publish(alice, 'Kitchen'), SchemaDocumentError);
+      assert.deepEqual(
+        atPublish.issues.map((issue) => issue.path),
+        [at]
+      );
+      assert.match(atPublish.issues[0].message, /parseConfig reads Spare through ConfigTarget\.types only while other schemas/);
+      assert.equal(engine.schemas.live(alice, 'Kitchen'), undefined);
+      extra.withSchemas = [];
+      engine.schemas.publish(alice, 'Kitchen');
     });
 
     test('a read is recorded only while parseConfig runs: a read after it returns is a BehaviorError', () => {

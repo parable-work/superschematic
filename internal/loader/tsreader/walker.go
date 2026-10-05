@@ -253,7 +253,11 @@ func (w *walker) versionedConfigFromDecorator(d decoratorRef) (*ir.VersionedConf
 			if !ok {
 				return nil, errorAtNode(d.node, "@versioned retentionDays must be a number literal")
 			}
-			n := int(f)
+			days, ok := safeIntegerLiteral(f)
+			if !ok {
+				return nil, errorAtNode(d.node, "@versioned retentionDays must be an integer literal, got %s", formatLiteral(f))
+			}
+			n := int(days)
 			out.RetentionDays = &n
 		case "partitionBy":
 			s, ok := value.(string)
@@ -1039,21 +1043,17 @@ func applyValidateConfig(cfg map[string]any, fd *ir.FieldDef) {
 	if v, ok := cfg["uploadMaxBytes"].(int64); ok {
 		fd.ValidateUploadMaxBytes = &v
 	}
-	if v, ok := cfg["minLength"].(float64); ok {
-		n := int(v)
-		fd.ValidateMinLength = &n
+	if v, ok := cfg["minLength"].(int); ok {
+		fd.ValidateMinLength = &v
 	}
-	if v, ok := cfg["maxLength"].(float64); ok {
-		n := int(v)
-		fd.ValidateMaxLength = &n
+	if v, ok := cfg["maxLength"].(int); ok {
+		fd.ValidateMaxLength = &v
 	}
-	if v, ok := cfg["listMin"].(float64); ok {
-		n := int(v)
-		fd.ValidateListMin = &n
+	if v, ok := cfg["listMin"].(int); ok {
+		fd.ValidateListMin = &v
 	}
-	if v, ok := cfg["listMax"].(float64); ok {
-		n := int(v)
-		fd.ValidateListMax = &n
+	if v, ok := cfg["listMax"].(int); ok {
+		fd.ValidateListMax = &v
 	}
 	if v, ok := cfg["pattern"].(string); ok {
 		fd.ValidatePattern = v
@@ -1244,7 +1244,14 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 			w.addErr(serr)
 			continue
 		}
-		op.Auth = op.Auth || auth
+		// @publicRoute opens its route: the set's Authenticated does not reach
+		// it, and a caller decorator on the same method contradicts it.
+		if conflict := verify.PublicRouteConflict(op); conflict != "" {
+			w.addErr(errorAtNode(m, "@publicRoute contradicts %s on %s: a public route needs no caller", conflict, op.Name))
+		}
+		if !op.Public {
+			op.Auth = op.Auth || auth
+		}
 		set.Operations = append(set.Operations, op)
 	}
 
