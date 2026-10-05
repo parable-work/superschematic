@@ -2240,8 +2240,9 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 58 pairs for Postgres and 49 for SQLite, 17 of them
-SQLite's own: rebuilds and changes of a list's element; every pair and every `sqlgen` fixture converges on Postgres, and
+Plan goldens cover 58 pairs for Postgres and 54 for SQLite, 22 of them
+SQLite's own: rebuilds, with the tables that reference the rebuilt one too,
+and changes of a list's element; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
 failure at every step, and serializes two runners. Rules settled as they
@@ -2287,7 +2288,9 @@ every value is `destructive`, never `data-dependent`, and a change between
 takes every change the phase makes to it but the renames of the table and
 its columns, which run first and in place, so the rebuild starts from the
 table with the renames applied, sits at the first change `ALTER TABLE`
-cannot make, and also adds the columns and indexes the phase adds; a
+cannot make, and also adds the columns and indexes the phase adds, and
+since D27's amendment on foreign keys (below) it copies every table that
+references the rebuilt one too, with foreign keys on; a
 foreign key added in `expand` is over a column the plan adds, and
 `ADD COLUMN ... REFERENCES` declares it when that column is nullable with
 no default; SQLite cannot rename an index, so an index or unique field
@@ -2295,14 +2298,13 @@ renamed is dropped and built again (`blocking`), and building an index on
 a table that exists and `DROP COLUMN`, which rewrites the table, are
 `blocking`; `DROP COLUMN` runs in place, since the column's indexes are
 dropped before it and a foreign key over it rebuilds the table; a dropped
-table is dropped with foreign keys off, since with them on `DROP TABLE`
-deletes its rows first, which a `RESTRICT` on the table itself refuses;
-tables a plan drops that reference each other are dropped in one step on
-SQLite, after the tables that reference them and before those they
-reference, since dropping the foreign key that closes the cycle needs a
-rebuild of a table the plan drops, and a `foreign_key_check` between two
-drops finds the rows of one referencing the other, while Postgres drops
-that foreign key first; a list, a JSON value and text are all `TEXT`, so
+table is dropped with foreign keys on, as every SQLite step runs since
+that amendment, after every table that references it; tables a plan drops
+that reference each other are dropped in one step on SQLite, after the
+tables that reference them and before those they reference, since
+dropping the foreign key that closes the cycle needs a rebuild of a table
+the plan drops, and the step defers the foreign key checks to its commit,
+when none of them is left, while Postgres drops that foreign key first; a list, a JSON value and text are all `TEXT`, so
 the SQLite model records what a column holds as JSON (`holds`: `list` or
 `json`; Postgres models never set it); a JSON value that becomes text
 keeps its JSON text through a rebuild, as Postgres's cast keeps it, and
@@ -2401,7 +2403,27 @@ statements as one batch.
 | The D1 driver refuses a step outside a transaction and a step with `foreignKeysOff`, which D1 cannot run. A plan written before this amendment may rebuild with `foreignKeysOff`; the SQLite file driver still runs it. | |
 | Every SQLite rebuild converges with enforcement on. The runner's tests run against a fake D1 REST server backed by SQLite with enforcement forced on and each request run in one transaction, and against a real D1 database when `SUPERSCHEMATIC_MIGRATE_TEST_D1_URL` and its token are set. Cloudflare documents a Worker's batch as a transaction but not a REST request's, so the driver is documented as unverified until that test has passed against D1. | Trusting the fake alone |
 
-Status: the design. The SQLite rebuild and the D1 driver are not built.
+Status: the SQLite rebuild is built (`internal/sqlmigrate`); the D1
+driver is another change. No plan sets `foreignKeysOff`, and every SQLite
+plan case, fixture and runner vector converges with enforcement on
+throughout, its seeded rows surviving every step that is not
+`destructive`. Rules settled as it was built: rebuilt tables that
+reference one another, before or after the phase, share one step, at the
+place of the first change among them that `ALTER TABLE` cannot make, so a
+table is copied at most once per phase; the step makes every change the
+phase makes to its tables, so a table `contract` drops that references a
+rebuilt one is dropped by the rebuild, with its hazards, not copied; the
+tables `expand` creates are left out of an `expand` rebuild, since they
+hold no rows yet and their keys name the new table once it takes the
+name; the step's hazards keep their ids, on the table whose change placed
+it; a step that drops tables in a reference cycle, or a table that
+references itself, defers the checks too; and while the checks are
+deferred SQLite runs no `RESTRICT` action and checks a `RESTRICT` key at
+the commit, as it checks `NO ACTION`, so a `RESTRICT` key on a table itself
+or in a cycle, `NOT NULL` or not, needs neither a statement that clears it
+nor a refusal: by the commit its rows are gone. The SQLite convergence test
+shows those steps fail without the deferral, and refuses a step that turns
+enforcement off.
 
 The rule is reversible until the first release.
 
