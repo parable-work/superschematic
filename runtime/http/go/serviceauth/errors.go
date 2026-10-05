@@ -83,9 +83,10 @@ type errorCodeRecorder interface {
 
 // WriteError answers a request with an authenticator's refusal: an *Error
 // (or an error wrapping one) as its status, code and detail; any other
-// error as 503 service_unavailable. The problem body is the response
-// package's, with the request id; the cause is logged on the request's
-// logger and never sent.
+// error as 503 service_unavailable. It logs the refusal and its cause on
+// the request's logger (Warn, or Error for a 5xx), and writes the problem
+// body the rate limit and the timeout write, with the request id. The cause
+// is never sent.
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	var e *Error
 	if !errors.As(err, &e) {
@@ -94,10 +95,15 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	if rec, ok := w.(errorCodeRecorder); ok {
 		rec.SetErrorCode(e.Code)
 	}
+	fields := []zap.Field{zap.Int("status", e.Status), zap.String("error_code", e.Code)}
 	if e.Err != nil {
-		ctx := r.Context()
-		logger := requestctx.LoggerFromContext(ctx).With(zap.NamedError("cause", e.Err))
-		r = r.WithContext(requestctx.ContextWithLogger(ctx, logger))
+		fields = append(fields, zap.NamedError("cause", e.Err))
 	}
-	response.LoggedError(w, r, e.Status, e.Detail, e.Code)
+	logger := requestctx.LoggerFromContext(r.Context())
+	if e.Status >= http.StatusInternalServerError {
+		logger.Error("service credential refused", fields...)
+	} else {
+		logger.Warn("service credential refused", fields...)
+	}
+	response.RequestError(w, r, e.Status, e.Detail, e.Code)
 }

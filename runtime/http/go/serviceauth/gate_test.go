@@ -10,7 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // authenticatorFunc adapts a function to serviceauth.Authenticator.
@@ -76,6 +80,44 @@ func TestWriteErrorRendersAProblemWithItsCode(t *testing.T) {
 	}
 	if msg := serviceauth.Invalid(errors.New("token has expired")).Error(); msg != "serviceauth: service_unauthorized: Invalid service credential: token has expired" {
 		t.Fatalf("Error() = %q", msg)
+	}
+}
+
+// TestWriteErrorWritesTheBodyTheOtherControlsWrite pins the body to the one
+// the rate limit and the timeout write (response.RequestError), with the
+// request id, and the cause to the log.
+func TestWriteErrorWritesTheBodyTheOtherControlsWrite(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	h := chimiddleware.RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(requestctx.ContextWithLogger(r.Context(), zap.New(core)))
+		serviceauth.WriteError(w, r, serviceauth.Invalid(errors.New("token has expired")))
+	}))
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Request-Id", "req-7")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+
+	want := `{"type":"about:blank","title":"Unauthorized","status":401,"detail":"Invalid service credential","code":"service_unauthorized","requestId":"req-7"}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Fatalf("body\n%s\nwant\n%s", got, want)
+	}
+	entries := logs.All()
+	if len(entries) != 1 || entries[0].Level != zap.WarnLevel {
+		t.Fatalf("log entries %+v, want one warning", entries)
+	}
+	fields := entries[0].ContextMap()
+	if fields["error_code"] != "service_unauthorized" || fields["cause"] != "token has expired" {
+		t.Fatalf("log fields %v", fields)
+	}
+
+	core, logs = observer.New(zap.WarnLevel)
+	h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(requestctx.ContextWithLogger(r.Context(), zap.New(core)))
+		serviceauth.WriteError(w, r, serviceauth.Unavailable(errors.New("fetch failed")))
+	})
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	if entries := logs.All(); len(entries) != 1 || entries[0].Level != zap.ErrorLevel {
+		t.Fatalf("a 503 logs at error level: %+v", entries)
 	}
 }
 
