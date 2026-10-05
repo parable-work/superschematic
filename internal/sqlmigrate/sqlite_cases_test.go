@@ -290,13 +290,6 @@ func jsonRef(s *ir.Schema) ir.TypeRef {
 	return ir.TypeRef{Name: "T.JSON"}
 }
 
-// jsonRef declares a JSON scalar in s, which sqlgen stores as JSONB, and
-// returns a reference to it.
-func jsonRef(s *ir.Schema) ir.TypeRef {
-	s.Scalars["T.JSON"] = &ir.ScalarDef{Name: "T.JSON", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "JSONB"}}
-	return ir.TypeRef{Name: "T.JSON"}
-}
-
 // sqlitePlanCases are the SQLite plan goldens: the plan cases SQLite
 // supports, then sqliteOnlyCases.
 func sqlitePlanCases() []planCase {
