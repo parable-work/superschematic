@@ -20,8 +20,9 @@ import (
 // database, records its model, and a second apply of it runs nothing and
 // says the plan is applied.
 func TestApplyFromAnEmptyDatabase(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
 		create := plan(t, dialect, "01-create")
 
@@ -52,10 +53,11 @@ func TestApplyFromAnEmptyDatabase(t *testing.T) {
 // one's model; rows survive every step that does not drop them; a plan
 // taken back and forth (A to B, B to A, A to B again) runs again.
 func TestApplyAChain(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
-		create, evolve, audit, dropAudit := plan(t, dialect, "01-create"), plan(t, dialect, "02-evolve"),
+		create, evolve, audit, dropAudit := plan(t, dialect, "01-create"), plan(t, dialect, evolveFixture(db)),
 			plan(t, dialect, "03-audit"), plan(t, dialect, "04-drop-audit")
 
 		apply(t, r, create, migrate.All)
@@ -93,9 +95,10 @@ func TestApplyAChain(t *testing.T) {
 // the next apply runs only the rest, and the database ends with the same
 // catalog as one that never failed.
 func TestResumeAfterAFailure(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		chain := []*migrate.Plan{plan(t, dialect, "01-create"), plan(t, dialect, "02-evolve"), plan(t, dialect, "03-audit")}
-		resumeAfterEveryStep(t, dialect, chain, nil)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		chain := []*migrate.Plan{plan(t, dialect, "01-create"), plan(t, dialect, evolveFixture(db)), plan(t, dialect, "03-audit")}
+		resumeAfterEveryStep(t, db, chain, nil)
 	})
 }
 
@@ -104,14 +107,14 @@ func TestResumeAfterAFailure(t *testing.T) {
 // each final catalog with the first. phases holds the phases each plan
 // runs, All for every plan when nil; a plan that runs Expand only is
 // superseded by the next.
-func resumeAfterEveryStep(t *testing.T, dialect migrate.Dialect, chain []*migrate.Plan, phases []migrate.Phase) {
+func resumeAfterEveryStep(t *testing.T, db testdb.Backend, chain []*migrate.Plan, phases []migrate.Phase) {
 	phaseOf := func(i int) migrate.Phase {
 		if phases == nil {
 			return migrate.All
 		}
 		return phases[i]
 	}
-	reference := testdb.New(t, dialect)
+	reference := testdb.New(t, db)
 	r := newRunner(t, reference)
 	for i, p := range chain {
 		apply(t, r, p, phaseOf(i))
@@ -128,7 +131,7 @@ func resumeAfterEveryStep(t *testing.T, dialect migrate.Dialect, chain []*migrat
 		}
 		for k := 1; k <= n; k++ {
 			t.Run(fmt.Sprintf("plan %d step %d", i+1, k), func(t *testing.T) {
-				url := testdb.New(t, dialect)
+				url := testdb.New(t, db)
 				r := newRunner(t, url)
 				for j, before := range chain[:i] {
 					apply(t, r, before, phaseOf(j))
@@ -189,11 +192,13 @@ func resumeAfterEveryStep(t *testing.T, dialect migrate.Dialect, chain []*migrat
 }
 
 // TestAFailedStepNamesItself: a statement that fails stops the run with an
-// error naming the step's index, subject and statement; the plan stays in
-// progress at that step and the steps before it stay done.
+// error naming the step's index, subject and statement (on D1, D1's error,
+// since it names no statement); the plan stays in progress at that step
+// and the steps before it stay done.
 func TestAFailedStepNamesItself(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
 		broken := edited(t, dialect, "01-create", func(p map[string]any) {
 			p["steps"] = append(steps(p), map[string]any{
@@ -207,10 +212,16 @@ func TestAFailedStepNamesItself(t *testing.T) {
 			t.Fatalf("apply = %v, want a StepError", err)
 		}
 		last := len(broken.Steps)
-		if stepErr.Index != last || stepErr.Subject != "table/missing/index/missing_idx" || stepErr.Statement != "CREATE INDEX missing_idx ON missing (id)" {
+		// D1 sends the step as one batch and names no statement of it in
+		// its error, which names the table instead.
+		statement, says := "CREATE INDEX missing_idx ON missing (id)", "CREATE INDEX missing_idx ON missing (id)"
+		if db == testdb.D1 {
+			statement, says = "", "no such table: main.missing"
+		}
+		if stepErr.Index != last || stepErr.Subject != "table/missing/index/missing_idx" || stepErr.Statement != statement {
 			t.Fatalf("StepError %+v", stepErr)
 		}
-		for _, want := range []string{fmt.Sprintf("step %d", last), "table/missing/index/missing_idx", "CREATE INDEX missing_idx ON missing (id)"} {
+		for _, want := range []string{fmt.Sprintf("step %d", last), "table/missing/index/missing_idx", says} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%q does not name %q", err, want)
 			}
@@ -231,7 +242,7 @@ func TestAFailedStepNamesItself(t *testing.T) {
 // TestSQLHashOfManyStatements: a step of two statements (Postgres's 03)
 // logs the SHA-256 of both joined by "\n;\n" (computed with shasum).
 func TestSQLHashOfManyStatements(t *testing.T) {
-	url := testdb.Postgres(t)
+	url := testdb.NewPostgres(t)
 	r := newRunner(t, url)
 	apply(t, r, plan(t, migrate.Postgres, "01-create"), migrate.All)
 	apply(t, r, plan(t, migrate.Postgres, "02-evolve"), migrate.All)
@@ -247,8 +258,9 @@ func TestSQLHashOfManyStatements(t *testing.T) {
 // such as the one a version graph's content change gets, runs nothing, and
 // the runner logs it with the SHA-256 of no SQL.
 func TestApplyAStepWithNoStatements(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
 		p := edited(t, dialect, "01-create", func(p map[string]any) {
 			p["steps"] = append(steps(p), map[string]any{
@@ -278,21 +290,23 @@ func TestApplyAStepWithNoStatements(t *testing.T) {
 // TestTwoRunnersSerialize: two runners applying one plan at once never run
 // a step twice. On Postgres the second waits for the advisory lock until
 // the first is done and finds the plan applied, also across a CREATE INDEX
-// CONCURRENTLY (02), which waits for every older snapshot; on SQLite the two
-// take turns per step and split the steps between them.
+// CONCURRENTLY (02), which waits for every older snapshot; on D1 it waits
+// for the lease the same way; on SQLite the two take turns per step and
+// split the steps between them.
 func TestTwoRunnersSerialize(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		first, second := newRunner(t, url), newRunner(t, url)
-		for _, name := range []string{"01-create", "02-evolve"} {
-			twoRunners(t, dialect, url, plan(t, dialect, name), first, second)
+		for _, name := range []string{"01-create", evolveFixture(db)} {
+			twoRunners(t, db, url, plan(t, dialect, name), first, second)
 		}
 	})
 }
 
 // twoRunners applies p with first and second at once: second starts while
 // first, which has run step 1, pauses.
-func twoRunners(t *testing.T, dialect migrate.Dialect, url string, p *migrate.Plan, first, second *migrate.Runner) {
+func twoRunners(t *testing.T, db testdb.Backend, url string, p *migrate.Plan, first, second *migrate.Runner) {
 	t.Helper()
 	started := make(chan struct{})
 	first.AfterStep = func(_ context.Context, step *migrate.Step) error {
@@ -331,7 +345,7 @@ func twoRunners(t *testing.T, dialect migrate.Dialect, url string, p *migrate.Pl
 	if !firstResult.Finished || !secondResult.Finished {
 		t.Fatalf("plan %s: results %+v and %+v", p.Hash, firstResult, secondResult)
 	}
-	if dialect == migrate.Postgres && (!secondResult.AlreadyApplied || secondDone.Before(firstDone)) {
+	if db != testdb.SQLite && (!secondResult.AlreadyApplied || secondDone.Before(firstDone)) {
 		t.Fatalf("plan %s: the second runner did not wait for the first: %+v", p.Hash, secondResult)
 	}
 	logged := testdb.Strings(t, url, `SELECT count(*) FROM superschematic_migrations WHERE plan_hash = $1`, p.Hash)
@@ -348,11 +362,12 @@ func twoRunners(t *testing.T, dialect migrate.Dialect, url string, p *migrate.Pl
 // is asked for before expand has run, and when the plan, the database or
 // the recorded state are of different dialects.
 func TestRefusals(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		create, evolve, audit := plan(t, dialect, "01-create"), plan(t, dialect, "02-evolve"), plan(t, dialect, "03-audit")
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		create, evolve, audit := plan(t, dialect, "01-create"), plan(t, dialect, evolveFixture(db)), plan(t, dialect, "03-audit")
 
 		t.Run("the wrong baseline", func(t *testing.T) {
-			url := testdb.New(t, dialect)
+			url := testdb.New(t, db)
 			r := newRunner(t, url)
 			refused(t, r, evolve, migrate.All, "the plan starts from model "+evolve.From, "service shop has no applied model", "status --model")
 			apply(t, r, create, migrate.All)
@@ -363,7 +378,7 @@ func TestRefusals(t *testing.T) {
 		})
 
 		t.Run("another plan in progress", func(t *testing.T) {
-			url := testdb.New(t, dialect)
+			url := testdb.New(t, db)
 			r := newRunner(t, url)
 			apply(t, r, create, migrate.All)
 			apply(t, r, evolve, migrate.Expand)
@@ -371,7 +386,7 @@ func TestRefusals(t *testing.T) {
 		})
 
 		t.Run("contract before expand", func(t *testing.T) {
-			url := testdb.New(t, dialect)
+			url := testdb.New(t, db)
 			r := newRunner(t, url)
 			apply(t, r, create, migrate.All)
 			refused(t, r, evolve, migrate.Contract, "is not in progress", "--phase expand first")
@@ -395,12 +410,12 @@ func TestRefusals(t *testing.T) {
 			if dialect == migrate.SQLite {
 				other = migrate.Postgres
 			}
-			r := newRunner(t, testdb.New(t, dialect))
+			r := newRunner(t, testdb.New(t, db))
 			refused(t, r, plan(t, other, "01-create"), migrate.All, "the plan is for "+string(other)+" and the database is "+string(dialect))
 		})
 
 		t.Run("state recorded for another dialect", func(t *testing.T) {
-			url := testdb.New(t, dialect)
+			url := testdb.New(t, db)
 			r := newRunner(t, url)
 			apply(t, r, create, migrate.All)
 			testdb.Exec(t, url, `UPDATE superschematic_schema_state SET dialect = 'elsewhere'`)
@@ -414,10 +429,11 @@ func TestRefusals(t *testing.T) {
 // objects stay until --phase contract runs the rest and records the plan's
 // model.
 func TestPhases(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
-		create, evolve := plan(t, dialect, "01-create"), plan(t, dialect, "02-evolve")
+		create, evolve := plan(t, dialect, "01-create"), plan(t, dialect, evolveFixture(db))
 		apply(t, r, create, migrate.All)
 		seed(t, url)
 		expandSteps := 0
@@ -464,8 +480,9 @@ func TestPhases(t *testing.T) {
 // TestStatusChangesNothing: status on a database the runner never touched
 // reports no state and creates no table.
 func TestStatusChangesNothing(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
 		if st := status(t, r, "shop"); st.Recorded || st.ModelHash != "" || st.Model != nil {
 			t.Fatalf("status of an empty database: %+v", st)
@@ -487,10 +504,11 @@ func TestStatusChangesNothing(t *testing.T) {
 // hash it replaces; a plan from that model then applies. It refuses while a
 // plan is in progress and for a model of another dialect.
 func TestAdopt(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
-		create, evolve, audit := plan(t, dialect, "01-create"), plan(t, dialect, "02-evolve"), plan(t, dialect, "03-audit")
+		create, evolve, audit := plan(t, dialect, "01-create"), plan(t, dialect, evolveFixture(db)), plan(t, dialect, "03-audit")
 
 		// A database built by hand to 01's model.
 		for _, step := range create.Steps {
@@ -530,7 +548,7 @@ func TestAdopt(t *testing.T) {
 		if _, err := r.Adopt(context.Background(), create.Model()); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = r.Apply(context.Background(), edited(t, dialect, "02-evolve", func(p map[string]any) {
+		_, _ = r.Apply(context.Background(), edited(t, dialect, evolveFixture(db), func(p map[string]any) {
 			// 02 again from a database that already has its objects:
 			// stop it after step 1, which re-adds nothing, so it stays in
 			// progress.

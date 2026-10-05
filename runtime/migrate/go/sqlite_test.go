@@ -19,7 +19,7 @@ import (
 // back.
 func TestSQLiteForeignKeysOff(t *testing.T) {
 	t.Run("the rebuild keeps the children", func(t *testing.T) {
-		url := testdb.SQLite(t)
+		url := testdb.NewSQLite(t)
 		r := newRunner(t, url)
 		apply(t, r, plan(t, migrate.SQLite, "01-create"), migrate.All)
 		seed(t, url)
@@ -33,7 +33,7 @@ func TestSQLiteForeignKeysOff(t *testing.T) {
 	})
 
 	t.Run("with foreign keys on the rebuild deletes them", func(t *testing.T) {
-		url := testdb.SQLite(t)
+		url := testdb.NewSQLite(t)
 		r := newRunner(t, url)
 		apply(t, r, plan(t, migrate.SQLite, "01-create"), migrate.All)
 		seed(t, url)
@@ -46,7 +46,7 @@ func TestSQLiteForeignKeysOff(t *testing.T) {
 	})
 
 	t.Run("a violation rolls the step back", func(t *testing.T) {
-		url := testdb.SQLite(t)
+		url := testdb.NewSQLite(t)
 		r := newRunner(t, url)
 		apply(t, r, plan(t, migrate.SQLite, "01-create"), migrate.All)
 		seed(t, url)
@@ -88,7 +88,7 @@ func TestSQLiteBusyRetry(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			url := testdb.SQLite(t)
+			url := testdb.NewSQLite(t)
 			apply(t, newRunner(t, url), plan(t, migrate.SQLite, "01-create"), migrate.All)
 			holder, err := testdb.SQLiteDB(t, url).Conn(ctx)
 			if err != nil {
