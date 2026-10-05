@@ -15,10 +15,12 @@ import {
   notImplemented,
   payloadTooLarge,
   problemResponse,
+  serviceUnauthorized,
   tooManyRequests,
   unauthorized,
 } from './problem.js';
 import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
+import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
 
 /*
 The Hono binding of the http runtime. A generated router calls
@@ -27,8 +29,9 @@ handler that forwards decoded arguments to the service's implementation; the
 adapter owns the request pipeline, in the Go router's order (D36):
 
   request id -> @hmacVerified -> @rateLimit -> hono/body-limit ->
-  hono/bearer-auth + permission gate -> [@timeout: path/query decoding ->
-  JSON parse -> strict input parser -> implementation] -> envelope
+  service step -> hono/bearer-auth + permission gate -> [@timeout:
+  path/query decoding -> JSON parse -> strict input parser ->
+  implementation] -> envelope
 
 and turns every failure into the problem envelope. The cheap refusals come
 first: a request without a valid signature costs nothing else, one over the
@@ -37,9 +40,16 @@ hono/body-limit answers 413 to a declared Content-Length over the cap, and
 reads a body without one up front, answering 413 once it passes the cap.
 Operations marked @manualRouteRegistration are mounted through
 mountManualOperation: the webhook verifier, rate limit, body limit (when
-declared), gate and timeout still run, then the service's own handler
-receives the Hono context (a streaming response cannot be expressed as a
-JSON result).
+declared), service step, gate and timeout still run, then the service's own
+handler receives the Hono context (a streaming response cannot be expressed
+as a JSON result).
+
+The service step (D37) runs before the end-user step: with a service
+authenticator it verifies Service-Authorization on every route and puts the
+caller on ctx.serviceCaller, then applies the operation's @requireService
+or @allowService clause. A listed caller on an @allowService route stands
+in for the end user, so the route skips hono/bearer-auth and the permission
+gate.
 
 @rateLimit stays in this package (Go uses httprate); the body cap is
 hono/body-limit, and Bearer extraction hono/bearer-auth. The timeout covers
@@ -57,6 +67,13 @@ export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
 export interface RouterRuntimeOptions {
   /** Establishes the caller on routes that require one. Absent means every such route answers 401. */
   authenticate?: Authenticator;
+  /**
+   * Establishes the calling service from Service-Authorization, on every
+   * route, before the end-user step (D37); serviceAuthenticator is the
+   * standard one. Absent means a route with a service clause answers 401
+   * service_unauthorized, and other routes ignore the header.
+   */
+  authenticateService?: ServiceAuthenticator;
   /**
    * Decides whether the caller's permissions satisfy an operation's
    * @requirePermission list. Absent means hasAnyPermission: dotted-path
@@ -179,6 +196,7 @@ export function requestContextOf<E extends Env>(c: Context<E>, operation: Operat
     pathParams,
     query: url.searchParams,
     principal: null,
+    serviceCaller: null,
   };
 }
 
@@ -281,6 +299,19 @@ function hasBody(spec: OperationSpec): boolean {
   return spec.method !== 'GET' && (spec.input !== undefined || spec.bodyParams.length > 0);
 }
 
+/**
+ * The service step: establishes ctx.serviceCaller, then applies the route's
+ * service clause. Resolves true when the caller stands in for the end user,
+ * so the end-user step is skipped.
+ */
+async function establishServiceCaller(ctx: RequestContext, options: RouterRuntimeOptions): Promise<boolean> {
+  const { service } = ctx.operation;
+  if (options.authenticateService) ctx.serviceCaller = await options.authenticateService(ctx);
+  else if (service) throw serviceUnauthorized('Service credential required');
+  return authorizeService(ctx.serviceCaller, service);
+}
+
+/** The end-user step. */
 async function establishCaller(ctx: RequestContext, options: RouterRuntimeOptions): Promise<void> {
   const { auth } = ctx.operation;
   if (auth.public || !auth.required) return;
@@ -434,11 +465,11 @@ interface RouteSteps {
 }
 
 /**
- * Runs one route: the webhook verifier, the rate limit, the body limit and
- * the permission gate, in the Go router's order, then `work` (decoding and
- * the implementation, or a manual handler) under the timeout. Every refusal
- * is the problem envelope. One RequestContext serves every step, so the
- * principal the gate establishes reaches the implementation.
+ * Runs one route: the webhook verifier, the rate limit, the body limit, the
+ * service step and the permission gate, in the Go router's order, then
+ * `work` (decoding and the implementation, or a manual handler) under the
+ * timeout. Every refusal is the problem envelope. One RequestContext serves
+ * every step, so the callers the steps establish reach the implementation.
  */
 async function runRoute<E extends Env>(
   c: Context<E>,
@@ -468,9 +499,23 @@ async function runRoute<E extends Env>(
   const { rateLimitPerMinute } = steps;
   if (rateLimitPerMinute) middleware.push(refusing(ctx => admit(ctx, rateLimitPerMinute, options)));
   if (steps.bodyLimitBytes !== undefined) middleware.push(jsonBodyLimit(steps.bodyLimitBytes));
+  // A service caller that stands in for the end user skips the end-user step: no Bearer parse, no gate.
+  let standsIn = false;
+  if (options.authenticateService || spec.service) {
+    middleware.push(
+      refusing(async ctx => {
+        standsIn = await establishServiceCaller(ctx, options);
+      })
+    );
+  }
   if (!spec.auth.public && spec.auth.required) {
-    middleware.push(bearerMiddleware(contextOf));
-    middleware.push(refusing(ctx => establishCaller(ctx, options)));
+    const bearer = bearerMiddleware(contextOf);
+    middleware.push(async (current, next) => (standsIn ? next() : bearer(current, next)));
+    middleware.push(
+      refusing(async ctx => {
+        if (!standsIn) await establishCaller(ctx, options);
+      })
+    );
   }
   try {
     return await through(c, middleware, async () => {
@@ -514,11 +559,11 @@ export function mountOperation<E extends Env>(
 
 /**
  * Mounts a @manualRouteRegistration operation: the webhook verifier, rate
- * limit, body limit (when the spec or the mount declares one) and auth gate
- * run, then the service's handler owns the request and response, under the
- * timeout. A timeout covers the handler's return of a Response; a streaming
- * body it has started is not cut. Without a handler the route answers 501
- * so a forgotten hook is visible, not a 404.
+ * limit, body limit (when the spec or the mount declares one), service step
+ * and auth gate run, then the service's handler owns the request and
+ * response, under the timeout. A timeout covers the handler's return of a
+ * Response; a streaming body it has started is not cut. Without a handler
+ * the route answers 501 so a forgotten hook is visible, not a 404.
  */
 export function mountManualOperation<E extends Env>(
   app: Hono<E>,

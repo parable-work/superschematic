@@ -11,6 +11,10 @@ export const ErrorCode = {
   BAD_REQUEST: 'bad_request',
   UNAUTHORIZED: 'unauthorized',
   FORBIDDEN: 'forbidden',
+  /** A service credential that is required and missing, or that does not verify (D37). */
+  SERVICE_UNAUTHORIZED: 'service_unauthorized',
+  /** A verified service that is no caller of this server, or that the route does not list (D37). */
+  SERVICE_FORBIDDEN: 'service_forbidden',
   NOT_FOUND: 'not_found',
   CONFLICT: 'conflict',
   PAYLOAD_TOO_LARGE: 'payload_too_large',
@@ -131,6 +135,16 @@ export function unauthorized(detail = 'Authentication required', extra: Extra = 
 
 export function forbidden(detail = 'Insufficient permissions', extra: Extra = {}): HttpProblem {
   return new HttpProblem(403, detail, { code: ErrorCode.FORBIDDEN, ...extra });
+}
+
+/** A service credential that is required and missing, or present and not verified (D37). */
+export function serviceUnauthorized(detail = 'Invalid service credential', extra: Extra = {}): HttpProblem {
+  return new HttpProblem(401, detail, { code: ErrorCode.SERVICE_UNAUTHORIZED, ...extra });
+}
+
+/** A verified service that is no caller of this server, or that the route's `from` does not list (D37). */
+export function serviceForbidden(detail = 'Service not permitted', extra: Extra = {}): HttpProblem {
+  return new HttpProblem(403, detail, { code: ErrorCode.SERVICE_FORBIDDEN, ...extra });
 }
 
 export function notFound(detail = 'Not Found', extra: Extra = {}): HttpProblem {

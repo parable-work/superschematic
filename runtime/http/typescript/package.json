@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/http-runtime",
   "version": "0.0.0",
-  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, a token-bucket rate limiter, and the Hono adapter. Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, and the Hono adapter. Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
