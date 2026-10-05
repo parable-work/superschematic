@@ -3033,3 +3033,25 @@ The cost is that a change which breaks only the full tier merges, and `main`
 is red until its next candidate reports it, up to twelve hours later.
 CONTRIBUTING.md lists the full-tier checks to run before pushing a change
 they cover.
+
+### D14, amended: a nested object of a dependency's type is checked by that dependency's validator
+
+The Go and Python validators check a field whose type a dependency
+declares, such as acme-shop's `PlaceOrderInput.shippingAddress`, a
+`ShippingAddress` of shop-db, with the dependency's own validator, and
+report its errors under the field. The generated TypeScript and Rust
+validators checked only a nested type of their own package or crate. So
+the TypeScript and Rust servers accepted a shipping address whose
+`country` the Go server refuses, and a TypeScript date-time field of such
+a type stayed a string after parsing.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field, list element or map value of an object type a dependency declares is checked by that dependency's generated validator in the TypeScript and Rust validators, as in Go and Python. Its errors sit under the field's path. TypeScript imports `validate<Type>` (`validate<Type>Required` in a `@strictJSON` type) and `parse<Type>FromJSON` from the dependency package's `validators`, so the nested value is parsed too. Rust calls the dependency crate's `validators::validate_<type>`. | Copying the dependency's validators into each package, where two copies of one rule could drift |
+| A dependency type its package generates without validators stays unchecked, as before: one whose role is not a table, a view, an embedded struct or an input. | |
+
+`TestANestedDependencyObjectIsValidated` builds the dependency-types
+fixture in every language. It checks that the Rust and TypeScript
+validators of shop-orders' `OrderView` report a wrong `amount` and an
+unknown `currency` under `total`, a shop-common `Money`, and pass a valid
+one. Both checks fail without the change.
