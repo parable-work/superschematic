@@ -2383,11 +2383,11 @@ from the distribution and what did not.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | A stack is a service of a new core kind, `Stack`, read statically like any schema. It declares entry points, deployables that differ from the defaults, and environments. Each API service is one server and each DB service one database unless a declaration says otherwise. | An executable TypeScript model run under bun, as the source tree's is, which flattened references to strings and re-validated them in Go; an extension kind, whose output the core generators (env config, entrypoints) could not consume |
-| Wiring is derived. A server's database comes from each served API's `authDb`, and the one wiring fact a person writes is `calls`, as service handles. Each edge adds a typed field to the server's generated config, and the platform fills it. | A values document per environment that names each connection string, as `extensions/deploy` does; environment variables declared by hand in `@envVars` and checked for agreement |
+| Wiring is derived. A server's database comes from each served API's `authDb`. The one wiring fact a person writes is `calls`, a list of service handles in an API service's config beside `authDb`, since it describes what the implementation needs. A server's edges are the union of its APIs' edges. Each edge adds a typed field to the server's generated config, and the platform fills it. | A values document per environment that names each connection string, as `extensions/deploy` does; environment variables declared by hand in `@envVars` and checked for agreement |
 | Platforms (a deployable kind on a runtime), connectors (an edge between two platforms), targets (a bundle of platforms) and provisioners (a tool that applies resources) are four registrations. Cloud Run with Cloud SQL is the first target. GKE, hosted Kubernetes and Cloudflare are later registrations, not core edits. | One target per cloud owning everything, which ties Cloud Run to Cloud SQL and makes GKE a rewrite; a closed set of environment kinds, as the source tree has |
-| Platforms and connectors lower to a resource graph whose vocabulary is Pulumi's package schemas, pinned and checked in for offline validation. Provisioners read only that graph. | Platforms written as Pulumi Go components, which ties every platform to Pulumi; a vocabulary of our own, which would re-model every cloud resource |
+| Platforms and connectors lower to a resource graph whose vocabulary is Pulumi's package schemas, pinned and checked in for offline validation. Each pinned type also records its Terraform name and property renames, so a Terraform-family provisioner is a lookup. Provisioners read only that graph. | Platforms written as Pulumi Go components, which ties every platform to Pulumi; a vocabulary of our own, which would re-model every cloud resource |
 | Pulumi is the first provisioner. superschematic drives it from Go through the Automation API, renders the program as Pulumi YAML from the graph, and keeps state in a GCS bucket with a Cloud KMS secrets provider that bootstrap creates. Code outside the stack reaches its resources through a generated, typed binding over the stack's outputs. | A generated, typed Pulumi Go program, which needs schema-aware code generation and a compile on every run for checks the offline graph validation already makes; OpenTofu first, which superschematic could drive only by running its CLI; Config Connector or Crossplane, which need a cluster; Pulumi Cloud for state, an account beyond the GCP project |
-| superschematic generates each server's entrypoint and Dockerfile. The engineer writes the implementation interfaces and one constructor whose signature is generated. | Pointing a deployable at an image the engineer maintains, which leaves the wiring in a hand-written `main` |
+| superschematic generates each server's entrypoint and Dockerfile. The engineer writes only each API's implementation, at a naming-file path template per language, which superschematic scaffolds once. A generated constructor signature takes a typed `Deps`: the config, the database, and an SDK client per `calls` entry. | Pointing a deployable at an image the engineer maintains, which leaves the wiring in a hand-written `main`; a package path named on each server, which default servers could not have |
 | Migrations belong to `sqlgen`, for Postgres and SQLite, and get their own entry. The stack model consumes an offline plan with hazards, and an apply step. | A schema-diff step inside the deploy, which SQLite (the engine, D16) could not share |
 | End-user auth and service auth are separate concepts. Platforms admit callers along edges, and an application-level service principal travels in its own header beside the end user's `Authorization`. | Service calls through the end-user auth provider with a minted token, which merges the two principals |
 
@@ -2701,3 +2701,226 @@ decorators (fixture-multiword-api, fixture-nested-arrays-api) is unchanged
 byte for byte.
 
 The rule is reversible until the first release.
+
+### D29, amended: the Rust router refuses with RFC 9457 problems and names each request
+
+D29 kept the Rust router's error envelope, `{"error": {"code",
+"message"}}`, for its refusals and left the switch to the problem body
+the Go and TypeScript servers write as a change of its own. The SDKs read
+a problem's `detail` and `code`; reading the envelope, the TypeScript SDK
+reported `[object Object]` and the Go and Python SDKs a generic message.
+The router also answered axum's own plain-text rejections for a body that
+was not JSON or had no JSON `Content-Type`, put no request id on a
+response but in a success's body, and dropped a non-`GET` route's query.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every refusal and every `ApiError` an implementation returns is an RFC 9457 problem, `application/problem+json`, as the TypeScript runtime writes it: `type` `about:blank`, `title` (the status's Go reason phrase), `status`, `detail` (the error's message), `code`, `requestId`, and `details` and `errors` when the error carries them. `ApiError` gains those two members (`with_details`, `with_errors`) and the TypeScript runtime's codes (`conflict`, `unprocessable_entity`, `service_unavailable`, `method_not_allowed`). | Keeping the envelope, which no SDK reads |
+| A middleware around every generated route (`request_ids`) settles the request's id before the webhook verifier and the controls run: the caller's `X-Request-ID` when it is non-empty, at most 128 characters and free of control characters, else a UUID v4, as the TypeScript runtime keeps it. It writes the id to the request, so the handler's `meta.requestId` is the same id, and on the way out sets `x-request-id` and `cache-control: no-store`, adds `requestId` to a problem body, and turns an empty error response (axum's 405) into the problem of its status. A refusal anywhere in the route, D29's controls included, names its request without passing the id along. | Passing the id to every place that refuses, which a service's own layer could not do |
+| A handler reads its body as JSON whatever its `Content-Type`, an empty body as `null`, as the Go and TypeScript servers read it; a body that is not JSON is a 400 problem, and one axum could not read is a problem of its status. Every route reads its query, so a non-`GET` route's `@query` parameters reach the implementation. | axum's `Json` extractor, which refuses a body without `Content-Type: application/json` and an empty body with plain text |
+| A `@manualRouteRegistration` route the service adds after `build_router` wraps itself in `request_ids`, as `build_router`'s doc says. | Mounting manual routes, which D26 and D29 left to the service |
+
+The generated crate's `tests/problems.rs` (in
+`TestNestedArraysAPICrateBuildsAndRoutes`) checks the id on a success and
+a refusal, a generated id, a body without `Content-Type`, an empty body,
+a body that is not JSON, an implementation's error with `details`, a
+405, and a `POST`'s query; the D29 and D26 crate tests check their
+refusals as problems. The runtime crate's tests run with and without
+serde_json's `arbitrary_precision` and `preserve_order`.
+
+The rule is reversible until the first release.
+
+## D34. A schema config imports a sibling's sentinel
+
+A `schema.config.ts` names other services in `authDb` and `dependencies`,
+and D30 adds `calls`. The build plan lets a config import only
+`@superschematic/schema-config` (`checkConfigPurity` in
+`internal/buildplan/buildplan.go`, from the bootstrap commit `0b783d15`),
+so each reference is an inline `service({ name, kind })`: a name in a
+string, which the loader checks and the editor cannot. The rule's comment
+gives the source tree's reason: its platform model imports configs as
+identity references and runs them. superschematic reads a config
+statically and never runs one, and D30 rejected an executable model. The
+static read already follows an imported sentinel to its `service({...})`
+initializer, so `build` loads `fixture-authdb-import`, whose config imports
+`FixtureDb`, where `build-all` and `build --with-deps` refuse it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `schema.config.ts` may import a sibling service's sentinel (`import { ShopDb } from "@acme/shop-db"`) and use it wherever a handle goes: `authDb`, `dependencies` and `calls`. `service({ name, kind })` stays valid in the TypeScript form, and the data forms keep their spellings: `authDb` a name, the lists `{name, kind}`. A reference is then the value D30 asks for. tsc refuses a misspelt or renamed service where it is written, and the editor finds every config that names a service. | `service({...})` as the only spelling, which restates the callee's name and kind as strings in every caller and leaves a typo to the next build; a naming-file switch that keeps the old rule for a tree whose configs run as modules, which no superschematic tree has, and whose configs can keep writing `service({...})` |
+| One import rule, in the static read every command shares (`tsreader`). A config imports the config package, under its name or an alias, and from any other module only bindings that resolve to a sentinel: an `export const X = service({...})` in a `service.generated.ts`. A type, a schema class, a default or namespace import and a side-effect import are refused at the import. The build plan's textual scan goes, so `build`, `build-all` and `build --with-deps` accept the same configs. | Extending the scan with the siblings' package names, which differ per tree (`@acme/*`, `@schemas/*`) and still admit a schema class; no rule, which lets a config pull in any code |
+| Configs are leaves. No module imports one, and a sentinel imports only the config package and, under typed handles (`docs/stack-model.md` section 4.3), its own service's `@envVars` type. So no import path leads from a sentinel back to a config, and two APIs that call each other import each other's sentinels without a module cycle. The build-order cycle that mutual `calls` forms is the build plan's to report (stack-model section 3.3). | Importing a sibling's config, which makes configs import configs and brings back the cycle the old rule guarded against |
+| Sentinels come before discovery. A sentinel is a function of its own service's `name` and `kind`, plus the `@envVars` type that loading the service adds, and never of another sentinel. The sweep that writes sentinels reads only those two properties, which must be literals. `build-all`, `build --with-deps` and a `build` whose config imports a sentinel run it before any config is read in full. It writes a sentinel that is missing or whose name or kind changed, and keeps the type arguments a build wrote. | Ordering discovery by the configs' imports, which reads each config twice and still fails on a sentinel no build has written; relying on committed sentinels, which leaves a new service unreferenceable until it is built once |
+| Under typed handles, a config that imports an API's sentinel type-depends on that API's `@envVars` class, so tsc checks the config with the callee's schema files in its program. That cost is tsc's: superschematic's read follows only the `service({...})` argument, and the type import is erased at run time. | A second, untyped handle per service for configs to import, which keeps the callee's schema out of the config's program but gives each service two handles and two spellings |
+
+Nothing here is built yet. The rule is reversible until the first release.
+
+## D38. The Rust server builds from the shared API output, and serves its OpenAPI document
+
+The Rust server's generator ran apigen itself, without the service's
+dependencies, naming, OpenAPI and tool hooks or its `authDb`, where the Go
+and TypeScript servers and every SDK read the output `generator.Run`
+builds once. An OpenAPI hook's edit never reached a Rust service, a public
+Rust API skipped the `authDb` check every other server makes, and the
+crate wrote no `openapi.json`. The env loader the build wrote beside the
+crate (`src/config.rs`) was never declared in `lib.rs`, so it never
+compiled, and the scaffolds stopped compiling once a namespace had two
+operations: each operation's file held an impl of the namespace trait of
+its own.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Rust server takes `generator.Run`'s `APIOutput`, as the TypeScript server does. A public Rust API needs an `authDb` or a DB dependency, as the other servers do, and an OpenAPI or tool hook's edit reaches it. | Handing the missing options to a second apigen run, which can drift from the shared one again |
+| The crate writes `openapi.json`, the document every server's build writes, embeds it in `src/openapi.rs`, and serves it at `GET /api/openapi.json` with a RapiDoc page at `GET /api/docs`, as the Go server does, stating the running version and server URL (`1.0.0` and `http://localhost:8080` by default, the Go server's defaults). `build_router` keeps its signature; `build_router_with` takes the runtime crate's `RouterOptions` to restate them or to serve neither route. | Writing the file only, as the TypeScript server does; changing `build_router`'s signature, which D26 and D29 declined |
+| `lib.rs` declares the env loader, and the crate depends on `dotenvy`, when the schema has an `@envVars` class. | |
+| A namespace's scaffold is a directory named as a Rust module (snake_case): `mod.rs`, `implementation.rs` with the struct and its one impl of the namespace trait, and a file per operation with the function that impl calls. A `mod.rs` at the root declares the namespaces. The files name the generated crate, not `crate::`, since they belong to the service's crate. | An impl per operation file, which Rust refuses for a second operation; inherent methods named as the trait's, which call the trait method, and so themselves, when one is missing |
+
+`TestScaffoldsPlugIntoTheRouterThatServesOpenAPI` builds `Implementations`
+from fixture-api's scaffolds in an integration test crate, and checks a
+scaffolded route's 501 and both documentation routes, restated and turned
+off. `TestRustAPIWithEnvVarsCompilesItsConfigModule` builds a Rust API with
+an `@envVars` class through `generator.Run` and loads its config. The
+`rustapigen` package keeps the crate metadata the Rust server and SDK
+share and no longer extracts endpoints.
+
+The rule is reversible until the first release.
+
+## D35. The servers agree on a route's traffic controls
+
+An audit of the traffic controls (D29) found the Go and TypeScript servers
+disagreeing where nothing said so. A `@rateLimit`, `@bodyLimit` or
+`@timeout` of 0 built: the Go router then answered 429 or 504 to every
+request, and the TypeScript and Rust routers dropped the directive. A
+fraction was truncated, so `@timeout({ seconds: 0.5 })` was 0. The
+TypeScript router keyed its rate limit by the first `X-Forwarded-For` hop,
+so a client chose its own bucket by sending the header; the Go router keys
+by chi's client IP, which the service sets from a proxy it trusts, or by
+the socket. Its pipeline ran the body limit before the rate limit and the
+gate, and its timeout covered `authenticate` too; the Go router runs the
+rate limit, the body limit and the permission check, then the timeout
+around the handler. A non-Bearer `Authorization` header (`ApiKey …`)
+answered 400 from hono/bearer-auth before a custom `authenticate` saw it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `@rateLimit`, `@bodyLimit` or `@timeout` value is a whole number of at least 1. The TypeScript reader refuses another when it reads the decorator; the verify pass refuses a value below 1 in a schema authored as IR. The Rust generator's reading of a value below 1 as no directive (D29) stays as a guard. | Reading 0 as no directive, which the TypeScript and Rust servers did, leaving the Go server's reading unexplained |
+| The TypeScript runtime keys a rate limit by the transport's peer address (`remoteAddressKey`), as the Go and Rust runtimes fall back to the socket. `RequestContext.remoteAddress` carries it; `clientIp` stays the forwarded client IP for a service that wants it, and `clientIpKey` keys by it behind a proxy the service trusts (`rateLimit: { keyOf: clientIpKey }`). | Keeping `X-Forwarded-For` as the default, which lets a client pick its bucket when no proxy sets the header |
+| The TypeScript route runs the Go router's order: the webhook verifier, the rate limit, the body limit, the bearer parse and the permission gate, then decoding and the implementation under the timeout. One `RequestContext` serves every step; its `raw` reads the Hono request when read, since the verifier and hono/body-limit each hand the route a fresh copy. The timeout is the runtime's own race, not hono/timeout, and still aborts `ctx.signal`. | Leaving the order as it was, with a refused body costing no rate-limit token but an authentication's cost charged to every route with a timeout |
+| hono/bearer-auth parses only a Bearer `Authorization` header (case-insensitively), and a malformed one still answers 400. Any other scheme reaches `authenticate` untouched, and `ctx.bearerToken` is set by the parse before the gate. | Parsing every `Authorization` header, which refuses an API-key scheme before the service's authenticator sees it |
+
+`runtime/http/typescript/src/hono.test.ts` checks the order of the
+refusals, the peer-address key and `clientIpKey`, the timeout around the
+handler and not the gate, and an `ApiKey` header reaching `authenticate`;
+`internal/registry` and `internal/loader/verify` test the refusal of a
+value below 1. The engine serves its routes through the same pipeline.
+
+The rule is reversible until the first release.
+
+## D36. `@publicRoute` opens its route, and a caller decorator beside it is refused
+
+`@publicRoute` on a method of an `Authenticated` set meant different things
+to different targets. The TypeScript reader folded the set into the
+operation, so it carried both `Public` and `Auth`. apigen's `RequiresAuth`
+ignores `Public`, so the Go server, the OpenAPI document, every SDK and the
+Rust server (D29) kept the route protected; the TypeScript server's gate
+returns early on `public`, so it served the route to anyone. Nothing
+refused `@publicRoute` together with `@auth`, `@requirePermission` or
+`@requireOwnership` on the same method either, and the auth guide said a
+`@publicRoute` route is one anyone may call.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@publicRoute` on a method of an `Authenticated` set opens that one route in every target. The TypeScript reader does not fold the set's `Authenticated` into an `@publicRoute` operation, so its `Auth` is false, apigen's `RequiresAuth` is false, and the Go router mounts it with the public routes, the OpenAPI document gives it no bearer scheme, and the TypeScript operation table says `required: false`. | Letting the caller requirement win everywhere, which makes `@publicRoute` in an `Authenticated` set a no-op and changes what the TypeScript server serves |
+| `@publicRoute` together with `@auth`, `@requirePermission` or `@requireOwnership` on the same method is refused, naming the operation and the decorator: by the TypeScript reader at the method, and by the verify pass for a schema authored as IR, where `auth` also stands for an `Authenticated` set. `verify.PublicRouteConflict` is the one rule both use. | Refusing `@publicRoute` inside an `Authenticated` set as well, which forces an open route out of the set it belongs with |
+
+apigen's formula for `RequiresAuth` does not change: the reader is the one
+place that decides `Auth`, and the verify pass keeps an IR schema from
+saying both. `internal/loader/tsreader/public_route_test.go` loads an
+`Authenticated` set with an `@publicRoute` method and checks each refused
+pair; `internal/loader/verify/publicroute_test.go` checks the IR form. No
+fixture or example declares either, so no golden changes.
+
+The rule is reversible until the first release.
+
+## D39. The Rust server hands each method typed arguments, decoded and checked as the TypeScript server checks them
+
+Each method of the Rust server took the request body as a
+`serde_json::Value` and returned one. It decoded no argument: the
+implementation read path and query values as strings from
+`RequestContext`, a query list as its last value, and a body field from the
+`Value`. It validated nothing, so an input the Go and TypeScript servers
+refuse reached the implementation, and a Rust service could not call its
+own operations with types, as the Topcoat extension will.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each mounted operation's method takes `<Namespace><Operation>Args`: a field per path, query and body argument, typed as the schema declares it (`Option`, `Vec`, `Vec<Vec<T>>`, `HashMap<String, T>`), and `input` for an input type. It returns `Result<T, ApiError>` of the result type, `()` without one. An operation without arguments takes no `args`. The scaffolds take and return the same. The old signature is gone (pre-release). | An argument per parameter, as the Go interface has, which every added argument breaks; typed methods beside the `Value` ones, which leaves two contracts to keep |
+| The router decodes each argument as the TypeScript router does. `params.ts` is ported to the runtime crate's `ParamSpec`: the same kinds, list and map rules, messages and `details` (`location`, `parameter`, `path`, `reason`, `errors`). There are two exceptions. An integer is an `i64`, as in the Go server, where JavaScript stops at 2^53. A UUID or timestamp is checked by its scalar's generated validator, which runs the scalar core, rather than by the scalar library's parse. serde then builds the field from the checked value. | serde alone on the Args struct, whose errors name no parameter and which takes what the other servers refuse |
+| An input is parsed by its type's generated `parse_<type>`, which refuses undeclared top-level keys as the TypeScript server's parser does (D14 validators). A refused input is a 400 with the TypeScript server's detail. `details` is `{location: "body", reason}`, and a top-level `errors` holds the field errors by path: the Go server's member, which every SDK reads. An object-typed body argument goes through `prepare_<type>`, new in the types crate, which runs the same steps and returns the checked JSON. A type a dependency declares is parsed by that dependency's validators, and the crate then depends on its types crate. | The TypeScript server's bare 400, which names no field (a follow-up adds `errors` there); allowing undeclared keys, as the Go server does |
+| The HTTP runtime depends on the schema runtime, by path and by the release version, and re-exports it as `schema`. A spec's pattern, a scalar check's result and an input's `ParseError` are then the types crate's own types. `ApiError` boxes `details` and `errors`, so a `Result` of it stays small when superscalar turns on serde_json's `preserve_order`. CI lints and tests the runtime with and without those features. | A copy of the pattern translation (D14, amended) in the HTTP runtime |
+| The API crate re-exports the types crate as `types`, so an implementation names `types::<Type>` and the Args structs through the API crate alone. | |
+
+The runtime's parameter, input and response rules have unit tests.
+`TestNestedArraysAPICrateBuildsAndRoutes` checks these refusals: a
+list-of-lists, enum and object element at its path; a UUID and a number
+that do not parse; and an input's rule failures and undeclared keys, with
+its `errors`. It also checks the D23 path vectors on a string label. Four
+`TestRustSDKCallsTheRustServer*` tests serve a generated router on a socket
+and call it through the generated Rust SDK:
+
+- fixture-api: the auth refusals, and typed path, query, input and body
+  arguments;
+- fixture-nested-arrays-api: lists of lists, path labels and nested input
+  objects;
+- query lists, an optional `Generic.JSON` whose null is kept apart from
+  absent, and a result of none;
+- body-args-api: its body and query arguments of every kind, maps among
+  them.
+
+The rule is reversible until the first release.
+## D37. A service caller beside the end user, admitted per operation
+
+D30 made end-user auth and service auth separate concepts: platforms admit
+callers along `calls` edges, and a service principal travels in its own
+header beside the end user's `Authorization`. Section 9 of
+`docs/stack-model.md` sketched the rest. It left open the decorators,
+whether an application verifies again a credential its platform has
+admitted, and whether services hold permissions. Nothing in the runtimes
+knows a calling service. D15 left service-to-service tokens to each
+deployment's provider package, the TypeScript `Principal` lists a service
+identity among its subjects, and every SDK runs its one refresh on any
+401. This entry settles the design, and section 9 of `docs/stack-model.md`
+is rewritten to match.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An operation admits services with `@requireService` or `@allowService`, beside the end-user decorators (the user clause: `@auth`, `@requirePermission`, `@requireOwnership`). `@requireService` alone admits only listed services and looks at no end user; with a user clause, it admits only a listed service forwarding an end user who meets the clause. `@allowService` with a user clause admits an end user who meets it, or a listed service with no end user, which then stands in for the user: the clause is not checked. Both register for operations and operation sets, and an operation's own replaces its set's. | One decorator with a mode, such as `@callers({ services, users: "or" \| "and" })`, whose modes a reader must learn. A flag on the end-user decorators. A list of rules, each an AND of principals, as Istio's authorization policies have, which covers more than a schema needs. |
+| The TypeScript reader refuses, and the verify pass refuses in a schema authored as IR: `@allowService` without a user clause (that operation is `@requireService`); either decorator with `@publicRoute`, `@webhook` or `@hmacVerified` on one operation, since a third party holds no service credential; and both on one operation or one set. So each rule has one spelling. An `@publicRoute` operation opens its route even in a set with a service clause. | Reading `@allowService` alone as "anyone, and services", which is `@publicRoute`. |
+| `from` lists API service handles, and a listed service is the server that serves that API in the stack. Without `from`, every server with a `calls` edge to the API is listed. `from` narrows the edges and never widens them. A handle in `from` is an identity, so it adds no build-order edge, and two APIs may name each other. | Narrowing on `calls` in the stack by operation name: a name in a string, and the API's rules restated in every stack. The caller's deployable class, which an API cannot import because the stack imports the API. Service names in strings. |
+| The IR has `FieldDef.ServiceCallers` and `OperationSet.ServiceCallers`, a `ServiceCallers{Mode, From}` with `Mode` `require` or `allow` and `From` the API service names. `EndpointInfo` carries the effective rule. The OpenAPI document gains a `serviceAuth` bearer scheme in `Service-Authorization`, and writes each rule as a security list, which is an OR of ANDs. The tool manifest leaves out a `@requireService` operation, which no end user's agent can call. | |
+| Resolution checks that every `calls` edge from a server C to an API A reaches an operation of A that C may invoke: one open to anyone; an `@allowService` one that lists C; a `@requireService` one that lists C, when it has no user clause or C can forward an end user; or one with a user clause and no `@requireService`, when C can forward an end user. C can when an API it serves has an operation with a user clause. A `from` handle for a service the stack does not deploy is not an error, since an API is deployed in many stacks. | Counting only what C may invoke with no end user, which fails every edge a server uses to act for its users. Counting every operation with a user clause, which passes an edge from a server that has no users to forward. |
+| Each HTTP runtime has a `ServiceAuthenticator` and a `ServiceCaller` (the deployable, the APIs it serves, the credential's subject) beside the end-user authenticator and principal. Go: `serviceauth.Authenticator` on the router's `Config`, and `serviceauth.CallerFromContext`. TypeScript: a `buildRouter` option beside `authenticate`, and `ctx.serviceCaller`. Rust: `Implementations.service_authenticator`, and `RequestContext.service_caller`. No caller means no service credential; a credential that does not verify is 401 `service_unauthorized`; a verified identity that is no caller of the server is 403 `service_forbidden`; a failure that is not the caller's is 503. | A service caller as one more `Principal` from the end-user authenticator: one principal for two, which D30 rejected, and a provider that must read every platform's tokens. |
+| A route runs the `@hmacVerified` verifier (D26), the rate limit and the body limit (D29), the service step, the end-user step, then the rest. The service step verifies a service credential wherever one is present, then applies the route's service clause; a listed caller on an `@allowService` route skips the end-user step. Go keeps the provider's `AuthMiddleware` on its protected group for routes without a service clause, and runs it inside a route with one, at the end-user step. When an operation has a service clause and there is no service authenticator, Go's `Config.Validate` refuses to start the server, the Rust crate does not compile, and the TypeScript router answers the route with 401, as it does without `authenticate`. | The end-user step first, which can read a session from the database for a caller the service step would refuse. Verifying only on routes with a service clause, which hides a delegated call from the implementation and lets a forged credential pass unremarked. |
+| End-user auth providers do not change: no auth snippet is added, a provider never sees the service header, and the service authenticator never sees `Authorization`. The service authenticator is the core's. For services in a stack this supersedes D15's sentence that service-to-service token verification belongs in a deployment's provider package. | A registry of service auth providers. Platforms differ in data (next row), not code, and a deployment whose credential the data cannot express passes its own authenticator through the same seam. |
+| The service credential is a short-lived JWT on every v1 platform, and each runtime ships one verifier over keys, issuers, audiences and a claim that names the caller, with no cloud library (D6). Each inbound edge's connector writes what is specific to its platform into the callee's config: the issuer, the keys or where to fetch them, the audience, the claim, and the deployable each identity is. An identity the config does not list is no caller. | A verifier per platform in each runtime, linking cloud clients. Mutual TLS, which Cloud Run does not pass to the container. HTTP message signatures (RFC 9421), whose body digest every runtime and SDK must agree on, while Google's and Kubernetes' tokens are bearer tokens anyway. |
+| The credential travels in `Service-Authorization: Bearer <token>`, and the service authenticator reads only that header. On Cloud Run, a caller sends a Google ID token for the callee's URL, from the metadata server, and adds the same token in `X-Serverless-Authorization` when the callee's invoker check is on (every server that is not exposed). Cloud Run admits the call by that header, which leaves `Authorization` to the end user, and removes the token's signature before the container sees it. So the application verifies the copy in `Service-Authorization`, against Google's keys, with the caller's service account named by its unique id in `sub`. On an exposed server, whose invoker check is off, that is the only check. | Trusting the unsigned claims Cloud Run passes on: one header fewer, but every runtime would carry a mode that accepts a JWT without its signature, safe only while the invoker check stays on. Google does not document the header's handling with the check off, and one report says the signature is removed there too, unchecked. `X-Serverless-Authorization` as the service header everywhere, which an exposed Cloud Run server cannot verify. |
+| On Kubernetes, the caller sends a projected service account token whose audience is the callee, with a 10-minute lifetime, the shortest allowed, read again from its file each minute as the kubelet replaces it. The callee verifies it against the issuer's keys from the API server's `/openid/v1/jwks`, which default RBAC lets any service account read, with the caller in `sub`. | The TokenReview API, which notices a token whose pod was deleted, but calls the API server per request and needs a Kubernetes client in each runtime; the short lifetime bounds the same window. Google ID tokens through GKE Workload Identity, which only GKE has. |
+| The generic connector and the `local` target use a compact JWS signed with the edge's Ed25519 key: `alg` `EdDSA` (the callee also accepts RFC 9864's `Ed25519`, which the Go and Rust libraries do not read yet), `kid` the key's RFC 7638 thumbprint, `iss` and `sub` the caller's deployable, `aud` the callee's, `exp` 5 minutes after `iat`, and 60 seconds of leeway. Each edge has two key slots, each replaced every 180 days and offset by 90 by a `Rotating` node of the `time` provider. The callee accepts both keys, the caller signs with the younger, and callees deploy first (section 5.3 of `docs/stack-model.md`), so a callee holds a new key before any caller uses it. `stack dev` generates local keys, so a local stack runs the deployed code path. | ES256, which WebCrypto supported first, but whose signatures are not deterministic, so parity vectors could not be regenerated byte for byte. A long-lived token or a shared secret, which a leak exposes for longer and with which a callee could sign as its caller. No service auth locally, or an unsigned header naming the caller: a path only production runs, and a mode that could ship. |
+| Each SDK's config gains a service credential source beside the end-user auth config: a function from a `fresh` flag to a token, and the headers to send it in (`serviceCredential`, `ServiceCredential`, `service_credential`). The SDK sends the token on every request. A 401 with `service_unauthorized` asks the source for a fresh token once and never runs the end-user refresh; an end-user 401 never asks the source. The runtimes ship a source per platform, and the generated entrypoint builds one client per `calls` edge with the source the edge's config names. Python has the slot and no sources, since no server is written in Python. | The request interceptors, which are synchronous in Rust and Python, so cannot await a token, and after which the end-user refresh would still run on a service 401. |
+| Delegation forwards the end user's `Authorization` unchanged, per call, from the request being served: in Go through the call's `context.Context`, which the entrypoint's token hook reads, and in TypeScript and Rust through a `forward` option naming the `RequestContext`. A client built for an edge holds no end-user token and no refresh. The callee's end-user provider decides whether the forwarded token is good. Token exchange (RFC 8693) belongs to that provider, and v1 has none. | Forwarding on every call a server makes, which TypeScript and Rust could do only with request-scoped storage that not every runtime carries across an `await`. A token the core mints for the user, the merged principal D30 rejected. |
+| Services hold no permissions. `@requirePermission` checks end users only, and an operation admits a service through `@requireService` or `@allowService`. A service's authority is its edge, declared once in `calls` and narrowed per operation by `from`. | Permissions granted to services and checked by `@requirePermission`. The grant restates the edge where nothing checks it against `calls`; the provider's matcher and role store know end users, not deployables; and a service holding a user's permission is one principal for two. |
+| `runtime/http/testdata/serviceauth_parity.json` holds shared vectors, which a Go test writes with `-update` and the Go, TypeScript and Rust runtimes read in their own tests: test keys and tokens signed with them, the callee config, the clock, the route's rule, the headers and an end-user authenticator stub; then the expected status, code, caller and end user. Rust's error envelope differs (D29), so vectors compare status and code. | Cases per runtime, which is how the three permission matchers came to have three inline test sets. |
+
+The generator tests compile a fixture API with each rule in the three
+servers and check the order against the verifier and the rate limit, the
+codes, and that a schema without the decorators is unchanged byte for
+byte. The SDK tests check the retry on `service_unauthorized`.
+
+Section 9.9 of `docs/stack-model.md` keeps three questions open: how a
+deployable that serves no API, such as a job, is named in `from`; a
+credential the callee config cannot express, such as a mesh's mTLS
+identity, which until then is the deployment's own authenticator; and
+whether Workers callers present the identity a service binding carries or
+sign key-pair tokens.
+
+Nothing here is built. The design is reversible until the first release.

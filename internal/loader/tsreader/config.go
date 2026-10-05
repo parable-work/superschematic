@@ -76,22 +76,35 @@ func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*Sc
 	}
 	if authDB, ok := obj["authDb"].(serviceHandle); ok {
 		cfg.AuthDB = authDB.name
+		cfg.AuthDBKind = ir.SchemaKind(authDB.kind)
 	}
-	if deps, ok := obj["dependencies"].([]any); ok {
-		for _, d := range deps {
-			handle, ok := d.(serviceHandle)
-			if !ok {
-				return nil, errorAtNode(at, "dependencies entries must be service({...}) sentinels")
-			}
-			cfg.Dependencies = append(cfg.Dependencies, ServiceDependency{
-				Name: handle.name,
-				Kind: ir.SchemaKind(handle.kind),
-			})
-		}
+	var err *SchemaError
+	if cfg.Dependencies, err = handleList(obj, "dependencies", at); err != nil {
+		return nil, err
+	}
+	if cfg.Calls, err = handleList(obj, "calls", at); err != nil {
+		return nil, err
 	}
 	if outputs, ok := obj["outputs"].(map[string]any); ok {
 		cfg.Outputs = outputs
 	}
 
 	return schemaconfig.ValidateShapeWith(cfg, reg)
+}
+
+// handleList reads a config key that holds a list of service handles.
+func handleList(obj map[string]any, key string, at *astNode) ([]ServiceDependency, *SchemaError) {
+	items, ok := obj[key].([]any)
+	if !ok {
+		return nil, nil
+	}
+	var deps []ServiceDependency
+	for _, item := range items {
+		handle, ok := item.(serviceHandle)
+		if !ok {
+			return nil, errorAtNode(at, "%s entries must be service({...}) sentinels", key)
+		}
+		deps = append(deps, ServiceDependency{Name: handle.name, Kind: ir.SchemaKind(handle.kind)})
+	}
+	return deps, nil
 }

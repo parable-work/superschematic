@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -296,7 +297,9 @@ func indexDef(args []any) (ir.IndexDef, error) {
 }
 
 // applyMiddleware folds one of @rateLimit/@bodyLimit/@timeout into a
-// MiddlewareConfig, allocating it on first use.
+// MiddlewareConfig, allocating it on first use. Its value is a whole number
+// of at least 1: a server cannot apply a limit of 0 (the Go runtime would
+// refuse every request) or a fraction of a request, megabyte or second.
 func applyMiddleware(name string, args []any, target **ir.MiddlewareConfig) error {
 	if len(args) != 1 {
 		return fmt.Errorf("@%s takes exactly one config object", name)
@@ -308,30 +311,27 @@ func applyMiddleware(name string, args []any, target **ir.MiddlewareConfig) erro
 	if *target == nil {
 		*target = &ir.MiddlewareConfig{}
 	}
-	readInt := func(key string) (int, bool) {
-		f, ok := cfg[key].(float64)
-		return int(f), ok
-	}
+	var key string
+	var slot **int
 	switch name {
 	case "rateLimit":
-		n, ok := readInt("requestsPerMinute")
-		if !ok {
-			return fmt.Errorf("@rateLimit requires a literal requestsPerMinute")
-		}
-		(*target).RateLimit = &n
+		key, slot = "requestsPerMinute", &(*target).RateLimit
 	case "bodyLimit":
-		n, ok := readInt("megabytes")
-		if !ok {
-			return fmt.Errorf("@bodyLimit requires a literal megabytes")
-		}
-		(*target).BodyLimit = &n
+		key, slot = "megabytes", &(*target).BodyLimit
 	case "timeout":
-		n, ok := readInt("seconds")
-		if !ok {
-			return fmt.Errorf("@timeout requires a literal seconds")
-		}
-		(*target).Timeout = &n
+		key, slot = "seconds", &(*target).Timeout
+	default:
+		return nil
 	}
+	f, ok := cfg[key].(float64)
+	if !ok {
+		return fmt.Errorf("@%s requires a literal %s", name, key)
+	}
+	if f < 1 || f != math.Trunc(f) || f > math.MaxInt32 {
+		return fmt.Errorf("@%s %s must be a whole number of at least 1, not %v", name, key, f)
+	}
+	n := int(f)
+	*slot = &n
 	return nil
 }
 

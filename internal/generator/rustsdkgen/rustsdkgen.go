@@ -1045,31 +1045,7 @@ func toRustModuleName(name string) string {
 }
 
 func toRustIdentifier(name, fallback string) string {
-	base := codegen.ToSnakeCase(strings.TrimSpace(name))
-	if base == "" {
-		return fallback
-	}
-
-	var b strings.Builder
-	for _, r := range base {
-		switch {
-		case r == '_':
-			b.WriteRune(r)
-		case unicode.IsLetter(r), unicode.IsDigit(r):
-			b.WriteRune(unicode.ToLower(r))
-		default:
-			b.WriteRune('_')
-		}
-	}
-
-	identifier := rustutil.CollapseUnderscores(strings.Trim(b.String(), "_"))
-	if identifier == "" {
-		identifier = fallback
-	}
-	if identifier[0] >= '0' && identifier[0] <= '9' {
-		identifier = "_" + identifier
-	}
-	return rustutil.EscapeKeyword(identifier)
+	return rustutil.Identifier(name, fallback)
 }
 
 // FormatSDK runs cargo fmt on the generated Rust SDK crate.

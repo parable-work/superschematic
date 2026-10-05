@@ -247,6 +247,26 @@ func TestCoreApplyBodiesReproduceWalkerBehaviour(t *testing.T) {
 	if err := apply("timeout", TargetOperationSet, Node{OperationSet: set}, map[string]any{"seconds": "5"}); err == nil || err.Error() != "@timeout requires a literal seconds" {
 		t.Errorf("timeout error = %v", err)
 	}
+	// A limit is a whole number of at least 1: no server can apply 0, and a
+	// fraction was truncated, 0.5 seconds to 0.
+	for _, tc := range []struct {
+		name, key string
+		value     float64
+		want      string
+	}{
+		{"rateLimit", "requestsPerMinute", 0, "@rateLimit requestsPerMinute must be a whole number of at least 1, not 0"},
+		{"bodyLimit", "megabytes", -2, "@bodyLimit megabytes must be a whole number of at least 1, not -2"},
+		{"timeout", "seconds", 0.5, "@timeout seconds must be a whole number of at least 1, not 0.5"},
+		{"rateLimit", "requestsPerMinute", 1.5, "@rateLimit requestsPerMinute must be a whole number of at least 1, not 1.5"},
+	} {
+		limited := &ir.OperationSet{}
+		if err := apply(tc.name, TargetOperationSet, Node{OperationSet: limited}, map[string]any{tc.key: tc.value}); err == nil || err.Error() != tc.want {
+			t.Errorf("@%s %v error = %v, want %q", tc.name, tc.value, err, tc.want)
+		}
+	}
+	if err := apply("timeout", TargetOperationSet, Node{OperationSet: set}, map[string]any{"seconds": float64(1)}); err != nil || *set.Middleware.Timeout != 1 {
+		t.Errorf("timeout = %+v, err %v", set.Middleware, err)
+	}
 
 	op := &ir.FieldDef{}
 	if err := apply("rest", TargetOperation, Node{Field: op}, "GET", "tenants/{id}"); err != nil || op.HTTPMethod != "GET" || op.RestPath != "tenants/{id}" {

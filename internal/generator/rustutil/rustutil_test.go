@@ -63,6 +63,27 @@ func TestEscapedKeywordsCompile(t *testing.T) {
 	}
 }
 
+// TestIdentifier pins the rule the Rust SDK names its fields and methods
+// with and the Rust server its argument fields: snake_case of letters and
+// digits, a leading digit prefixed, a keyword escaped and an empty name the
+// fallback.
+func TestIdentifier(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"includeArchived", "include_archived"},
+		{"shadeByName", "shade_by_name"},
+		{"pin-label", "pin_label"},
+		{"2fa", "_2fa"},
+		{"type", "r#type"},
+		{"self", "self_"},
+		{"__", "value"},
+		{"", "value"},
+	} {
+		if got := Identifier(tc.name, "value"); got != tc.want {
+			t.Errorf("Identifier(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestIsRustKeyword(t *testing.T) {
 	for _, kw := range []string{"type", "match", "self", "Self", "async", "yield"} {
 		if !IsRustKeyword(kw) {

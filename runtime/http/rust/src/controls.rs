@@ -16,7 +16,7 @@
 //!
 //! A webhook verifier (`@hmacVerified`) runs before all of them; the
 //! generated `webhook_verified` wraps a route [`RouteControls::apply`]
-//! returned. Each refusal is the error envelope of [`error_response`].
+//! returned. Each refusal is the problem of [`error_response`].
 
 use crate::{error_response, ApiError, Authenticator, Principal, RateLimiter};
 use axum::body::Body;
@@ -301,7 +301,7 @@ mod tests {
     }
 
     fn code(body: &Value) -> &str {
-        body["error"]["code"].as_str().unwrap_or_default()
+        body["code"].as_str().unwrap_or_default()
     }
 
     #[tokio::test]
@@ -317,11 +317,11 @@ mod tests {
             (status, code(&body)),
             (StatusCode::UNAUTHORIZED, "unauthorized")
         );
-        assert_eq!(body["error"]["message"], "Authentication required");
+        assert_eq!(body["detail"], "Authentication required");
 
         let (status, _, body) = send(&app, Some("ana:orders.write"), "").await;
         assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, "forbidden"));
-        assert_eq!(body["error"]["message"], "Insufficient permissions");
+        assert_eq!(body["detail"], "Insufficient permissions");
 
         let (status, _, body) = send(&app, Some("down"), "").await;
         assert_eq!(

@@ -29,7 +29,7 @@ export {
   unauthorized,
   unprocessableEntity,
 } from './problem.js';
-export { MemoryRateLimitStore, clientIpKey, clientIpOf } from './ratelimit.js';
+export { MemoryRateLimitStore, clientIpKey, clientIpOf, remoteAddressKey } from './ratelimit.js';
 export type { RateLimitDecision, RateLimitOptions, RateLimitStore } from './ratelimit.js';
 export { OperationResult, envelope, envelopeResponse, requestIdOf } from './envelope.js';
 export type { Envelope, EnvelopeMeta } from './envelope.js';

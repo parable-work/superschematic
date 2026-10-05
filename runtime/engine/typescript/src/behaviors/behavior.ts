@@ -366,9 +366,13 @@ export interface BehaviorScope<Config> {
  * holds. The type is one the version's checks cover: a type the instance
  * type's fields reach, one a behavior's checkedTypes names, or one a
  * behavior's parseConfig read through ConfigTarget.types, and the types
- * those reach. The compatibility rule holds a new version to each of
- * them, so a value it accepts today is accepted by every later version.
- * Any other name, the instance type's included, is a BehaviorError.
+ * those reach. The compatibility rule holds the next version to each of
+ * them only while the version it replaces covers it (a checkedTypes type
+ * while both versions name it, a type read while the live version reads
+ * it): once a version stops covering a type, the version after it may
+ * change the type, so a value accepted now is not promised to every later
+ * version. Any other name, the instance type's included, is a
+ * BehaviorError.
  */
 export type TypeCheck = (type: string, value: unknown) => readonly ValidationIssue[];
 
@@ -784,7 +788,10 @@ export interface ConfigTypes {
    * instance type's, since a value stored under the live version was
    * checked against them, whether or not the new version's configs read
    * them too. Reading is recorded only while parseConfig runs: get after
-   * it returns is a BehaviorError.
+   * it returns is a BehaviorError. Which types a config reads depends only
+   * on the config and the document: a define or publish whose parseConfig
+   * reads other types with ConfigTarget.schemas in reach than without
+   * them is refused (BehaviorImplementation.parseConfig).
    */
   get(name: string): ConfigType | undefined;
 }
@@ -877,7 +884,12 @@ export interface BehaviorImplementation<Config = unknown> {
    * and publish, when it runs a published version and when it checks a new
    * version against the live one, so it returns the same value for the
    * same config and document. The types it reads through target.types are
-   * held by the version's checks and the compatibility rule.
+   * held by the version's checks and the compatibility rule, so which it
+   * reads depends only on the config and the document, never on
+   * target.schemas: a version runs and is checked with no other schema in
+   * reach. A define or publish parses the config without them as well,
+   * and refuses it when it reads other types then, or refuses the config
+   * then.
    */
   parseConfig?(config: unknown, target: ConfigTarget): Config;
 

@@ -526,6 +526,8 @@ class SyncHTTPClient:
         except error.HTTPError as err:
             payload = self._decode_error_payload(err)
             message = self._extract_error_message(payload) or str(err.reason or "Request failed")
+            code = self._extract_error_code(payload)
+            request_id = self._extract_request_id(payload, err.headers)
             self._log_error(
                 "HTTP request failed",
                 method=method,
@@ -534,14 +536,16 @@ class SyncHTTPClient:
                 error_message=message,
             )
             if err.code == 401:
-                raise AuthenticationError(message, err.code, payload) from err
+                raise AuthenticationError(message, err.code, payload, code=code, request_id=request_id) from err
             if err.code == 403:
-                raise AuthorizationError(message, err.code, payload) from err
+                raise AuthorizationError(message, err.code, payload, code=code, request_id=request_id) from err
             if err.code == 429:
                 retry_after_header = err.headers.get("Retry-After") if err.headers is not None else None
                 retry_after = self._parse_retry_after_header(retry_after_header)
-                raise RateLimitError(message, retry_after=retry_after, payload=payload) from err
-            raise APIError(message, err.code, payload) from err
+                raise RateLimitError(
+                    message, retry_after=retry_after, payload=payload, code=code, request_id=request_id
+                ) from err
+            raise APIError(message, err.code, payload, code=code, request_id=request_id) from err
         except error.URLError as err:
             self._log_error(
                 "Network request failed",
@@ -597,13 +601,34 @@ class SyncHTTPClient:
             return text
 
     def _extract_error_message(self, payload: Any) -> str | None:
+        # The RFC 9457 problem's detail first, as the Go and TypeScript SDKs read it.
         if isinstance(payload, dict):
-            for key in ("error", "message", "detail"):
+            for key in ("detail", "error", "message"):
                 value = payload.get(key)
                 if isinstance(value, str) and value.strip() != "":
                     return value
         if isinstance(payload, str) and payload.strip() != "":
             return payload
+        return None
+
+    @staticmethod
+    def _extract_error_code(payload: Any) -> str | None:
+        if isinstance(payload, dict):
+            value = payload.get("code")
+            if isinstance(value, str) and value.strip() != "":
+                return value
+        return None
+
+    @staticmethod
+    def _extract_request_id(payload: Any, headers: Any) -> str | None:
+        # The problem's requestId, else the response's X-Request-Id header.
+        if isinstance(payload, dict):
+            value = payload.get("requestId")
+            if isinstance(value, str) and value.strip() != "":
+                return value
+        header = headers.get("X-Request-Id") if headers is not None else None
+        if isinstance(header, str) and header.strip() != "":
+            return header
         return None
 
     @staticmethod
