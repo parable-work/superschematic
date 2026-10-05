@@ -153,6 +153,34 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
   issuer, keys and audience, and the deployable each caller identity is
   (section 9.2).
 
+What a connector derives for each edge kind has a contract, in
+`ir/derived_value.go`. Resolution checks every connector's value against
+it and refuses one that breaks it with a `lowering` failure that names the
+member at fault:
+
+| Edge | Value | Members |
+| --- | --- | --- |
+| sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
+| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization` |
+
+A member holds a string or a reference to an output or a parameter. A
+credential's `source` and `headers` are literals, and a member the
+contract lacks, or that the credential's source does not read, is
+refused.
+
+In environment variables, a derived field is one variable per member:
+the field's name, an underscore and the member's path in upper snake case,
+with a list joined by commas (`SHOP_DB_DATABASE_URL`,
+`SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `SHOP_API_SERVICE_URL`,
+`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). `ir.DerivedVariables` encodes a
+value that way for platforms, and the generated loaders read it back.
+Each variable is a plain string a platform can set from an output
+reference, or from its secret store for a member such as a signing key.
+
+Not taken: the value as one JSON document in one variable. Every
+provisioner would have to render references inside a JSON string, and no
+member of it could come from a secret store.
+
 Field and variable names follow a naming-file rule over the callee's
 service name, with the core's rule as the default (D7, D8). A server's own
 `@envVars` type holds only the application's settings. The loader refuses
@@ -1401,7 +1429,10 @@ registrations.
      (`validateHandleKinds` in `internal/buildplan/buildplan.go`).
    - Build-order edges from the handles a schema references, so a stack does
      not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
-3. **envgen.** The derived binding fields of section 3.4.
+3. **envgen.** The derived binding fields of section 3.4. Landed: the
+   contract of the values connectors derive, with its environment
+   variable encoding (`ir/derived_value.go`), and the resolver's check of
+   every connector's value against it.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
    (section 8.5).

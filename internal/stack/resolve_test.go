@@ -738,11 +738,16 @@ type broken struct {
 	name    any
 	address any
 	policy  func(*ir.ResolvedEnvironment) []string
+	// connection is what broken.sql derives; nil is a connection string.
+	connection any
 }
 
 func (*broken) Name() string { return "broken" }
 func (b *broken) Register(r *registry.Registry) error {
-	address, name := b.address, b.name
+	address, name, connection := b.address, b.name, b.connection
+	if connection == nil {
+		connection = ir.DatabaseConnection{URL: "postgres://shop-db:5432/shop_db"}
+	}
 	if address == nil {
 		address = "https://shop-api"
 	}
@@ -773,7 +778,7 @@ func (b *broken) Register(r *registry.Registry) error {
 	if err := r.RegisterConnector(registry.ConnectorSpec{
 		Name: "broken.sql", Edge: ir.EdgeSQL, From: "broken.run", To: "broken.sql",
 		Connect: func(registry.ConnectorContext) (registry.Connected, error) {
-			return registry.Connected{Value: "db", Resources: []*ir.Resource{{ID: "conflict", Type: "broken:thing", Properties: map[string]any{"size": float64(2)}}}}, nil
+			return registry.Connected{Value: connection, Resources: []*ir.Resource{{ID: "conflict", Type: "broken:thing", Properties: map[string]any{"size": float64(2)}}}}, nil
 		},
 	}); err != nil {
 		return err
@@ -914,6 +919,28 @@ func TestLoweringErrors(t *testing.T) {
 	}})
 	_, errs = resolve(t, reg, s, services, "Parent")
 	mustFail(t, errs, stack.CodeLowering, "platform broken.run returned DNS records for shop-api, which is not exposed")
+}
+
+// TestDerivedValueContract: a connector's value that is no database
+// connection is a lowering failure that names the member at fault, and
+// the free-form values connectors returned before the contract are
+// refused.
+func TestDerivedValueContract(t *testing.T) {
+	s, services := brokenStack()
+	for _, tc := range []struct {
+		connection any
+		want       string
+	}{
+		{"postgres://shop-db:5432/shop_db", `a database connection must be an object, not "postgres://shop-db:5432/shop_db"`},
+		{map[string]any{"instance": "shop-db:5432", "database": "shop_db"}, "a database connection has no member database"},
+		{ir.DatabaseConnection{CloudSQL: &ir.CloudSQLConnection{Instance: "acme:us:shop", Database: "shop_db"}}, "cloudSql.user is null"},
+	} {
+		reg := assemble(t, &broken{connection: tc.connection, lower: func(registry.PlatformContext) (registry.Lowered, error) {
+			return registry.Lowered{}, nil
+		}})
+		_, errs := resolve(t, reg, s, services, "Parent")
+		mustFail(t, errs, stack.CodeLowering, "connector broken.sql on edge sql:shop-api->shop-db derives a value for SHOP_DB_DATABASE that is no database connection (ir.DatabaseConnection): "+tc.want)
+	}
 }
 
 // TestParentResolvesForInheritedNodes: the inherited nodes of a member of
