@@ -148,6 +148,7 @@ export interface FieldDef {
   restPath?: string;
   searchField?: boolean;
   secret?: boolean;
+  serviceCallers?: ServiceCallers;
   sourceMustProject?: boolean;
   temporalFormat?: string;
   title?: string;
@@ -270,6 +271,7 @@ export interface OperationSet {
   middleware?: MiddlewareConfig;
   name: string;
   operations: FieldDef[];
+  serviceCallers?: ServiceCallers;
 }
 
 export interface OperationSetFile {
@@ -281,6 +283,7 @@ export interface OperationSetFile {
   middleware?: MiddlewareConfig;
   name: string;
   operations: FieldDef[];
+  serviceCallers?: ServiceCallers;
 }
 
 export interface ProjectionCollapse {
@@ -413,6 +416,11 @@ export interface ScalarFile {
   reservedWordsCaseInsensitive?: boolean;
   reservedWordsMatchPartial?: boolean;
   typeMappings?: { [key: string]: string };
+}
+
+export interface ServiceCallers {
+  from?: string[];
+  mode: 'require' | 'allow';
 }
 
 export interface SourceRef {

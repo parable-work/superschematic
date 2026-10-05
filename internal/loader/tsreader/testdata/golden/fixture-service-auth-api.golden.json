@@ -1,0 +1,224 @@
+{
+  "name": "fixture-service-auth-api",
+  "kind": "API",
+  "types": {
+    "Reservation": {
+      "name": "Reservation",
+      "owner": "src/stock-api.schema.ts",
+      "comment": "A hold on stock for an order.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "sku",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "held",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true
+        }
+      ]
+    },
+    "StockRun": {
+      "name": "StockRun",
+      "owner": "src/stock-api.schema.ts",
+      "comment": "The outcome of a stock run.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "done",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "StockMutations",
+      "operations": [
+        {
+          "name": "reserveStock",
+          "comment": "Only the caller API's server, placing an order for a user who may.",
+          "typeRef": {
+            "name": "Reservation"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "sku",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "stock.reserve"
+          ],
+          "serviceCallers": {
+            "mode": "require",
+            "from": [
+              "fixture-service-caller-api"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "stock/reservations"
+        },
+        {
+          "name": "releaseReservation",
+          "comment": "A user who may, or the caller API's server on its own.",
+          "typeRef": {
+            "name": "Reservation"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "stock.write"
+          ],
+          "serviceCallers": {
+            "mode": "allow",
+            "from": [
+              "fixture-service-caller-api"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "stock/reservations/{id}/release"
+        },
+        {
+          "name": "reindexStock",
+          "comment": "Any server with an edge to this API, and no end user.",
+          "typeRef": {
+            "name": "StockRun"
+          },
+          "required": true,
+          "serviceCallers": {
+            "mode": "require"
+          },
+          "httpMethod": "POST",
+          "restPath": "stock/reindex"
+        },
+        {
+          "name": "getReservation",
+          "comment": "An end user only, as before service clauses.",
+          "typeRef": {
+            "name": "Reservation"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "httpMethod": "GET",
+          "restPath": "stock/reservations/{id}"
+        }
+      ]
+    },
+    {
+      "name": "SyncOperations",
+      "comment": "Every operation takes the set's clause unless it declares its own or is\n@publicRoute.",
+      "operations": [
+        {
+          "name": "syncStock",
+          "comment": "The set's: only the caller API's server.",
+          "typeRef": {
+            "name": "StockRun"
+          },
+          "required": true,
+          "httpMethod": "POST",
+          "restPath": "sync/stock"
+        },
+        {
+          "name": "syncMyStock",
+          "comment": "Its own replaces the set's: a user, or any server with an edge.",
+          "typeRef": {
+            "name": "StockRun"
+          },
+          "required": true,
+          "auth": true,
+          "serviceCallers": {
+            "mode": "allow"
+          },
+          "httpMethod": "POST",
+          "restPath": "sync/stock/mine"
+        },
+        {
+          "name": "syncStatus",
+          "comment": "Open to anyone, in a set with a service clause.",
+          "typeRef": {
+            "name": "StockRun"
+          },
+          "required": true,
+          "public": true,
+          "httpMethod": "GET",
+          "restPath": "sync/status"
+        }
+      ],
+      "serviceCallers": {
+        "mode": "require",
+        "from": [
+          "fixture-service-caller-api"
+        ]
+      }
+    },
+    {
+      "name": "LedgerQueries",
+      "comment": "An Authenticated set is the user clause the set's @allowService needs.",
+      "operations": [
+        {
+          "name": "listReservations",
+          "comment": "A signed-in user, or the caller API's server with no end user.",
+          "typeRef": {
+            "name": "Reservation",
+            "isArray": true
+          },
+          "required": true,
+          "auth": true,
+          "httpMethod": "GET",
+          "restPath": "ledger/reservations"
+        }
+      ],
+      "serviceCallers": {
+        "mode": "allow",
+        "from": [
+          "fixture-service-caller-api"
+        ]
+      }
+    }
+  ]
+}

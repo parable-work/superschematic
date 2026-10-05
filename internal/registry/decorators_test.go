@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -15,8 +16,8 @@ func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	want := map[DecoratorTarget][]string{
 		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "versioned", "optimistic", "versionGraph", "graphMember", "index", "projection", "join", "behavior"},
 		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "sourceMustProject", "docs", "purpose", "icon", "column"},
-		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout"},
-		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "docs", "mcp", "icon"},
+		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService"},
+		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "docs", "mcp", "icon"},
 	}
 	total := 0
 	for target, names := range want {
@@ -263,5 +264,75 @@ func TestCoreApplyBodiesReproduceWalkerBehaviour(t *testing.T) {
 	}
 	if err := apply("bodyLimit", TargetOperation, Node{Field: op}, map[string]any{"megabytes": float64(1)}); err != nil || *op.Middleware.BodyLimit != 1 {
 		t.Errorf("operation bodyLimit = %+v, err %v", op.Middleware, err)
+	}
+}
+
+// TestServiceCallersApply: @requireService and @allowService write the
+// operation's or the set's clause, with each from handle as its service
+// name; an operation or a set takes one of the pair, once; and a handle
+// that is not an API service, or not a handle, is refused at the config.
+func TestServiceCallersApply(t *testing.T) {
+	reg := New(naming.Naming{})
+	apply := func(name string, target DecoratorTarget, n Node, args ...any) error {
+		spec, ok := reg.Decorator(name, target)
+		if !ok {
+			t.Fatalf("no core decorator @%s for %v", name, target)
+		}
+		if spec.Args != nil {
+			t.Errorf("@%s: Args must stay nil, since the config is optional", name)
+		}
+		return spec.Apply(n, args, Site{})
+	}
+	handle := func(name, kind string) map[string]any { return map[string]any{"name": name, "kind": kind} }
+
+	op := &ir.FieldDef{}
+	if err := apply("requireService", TargetOperation, Node{Field: op}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.ServiceCallers{Mode: ir.ServiceCallersRequire}); !reflect.DeepEqual(op.ServiceCallers, want) {
+		t.Errorf("requireService() = %+v, want %+v", op.ServiceCallers, want)
+	}
+	if err := apply("allowService", TargetOperation, Node{Field: op}); err == nil || err.Error() != "@allowService contradicts @requireService on the same operation: declare one of them" {
+		t.Errorf("both on one operation: %v", err)
+	}
+	if err := apply("requireService", TargetOperation, Node{Field: op}); err == nil || err.Error() != "@requireService is declared twice on the same operation" {
+		t.Errorf("twice on one operation: %v", err)
+	}
+
+	set := &ir.OperationSet{}
+	from := []any{handle("orders-api", "API"), handle("billing-api", "API")}
+	if err := apply("allowService", TargetOperationSet, Node{OperationSet: set}, map[string]any{"from": from}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.ServiceCallers{Mode: ir.ServiceCallersAllow, From: []string{"orders-api", "billing-api"}}); !reflect.DeepEqual(set.ServiceCallers, want) {
+		t.Errorf("allowService({ from }) = %+v, want %+v", set.ServiceCallers, want)
+	}
+	if err := apply("requireService", TargetOperationSet, Node{OperationSet: set}); err == nil || err.Error() != "@requireService contradicts @allowService on the same operation set: declare one of them" {
+		t.Errorf("both on one set: %v", err)
+	}
+
+	empty := &ir.FieldDef{}
+	if err := apply("requireService", TargetOperation, Node{Field: empty}, map[string]any{"from": []any{}}); err != nil || empty.ServiceCallers.From != nil {
+		t.Errorf("from: [] = %+v, err %v; want every edge", empty.ServiceCallers, err)
+	}
+
+	for _, tc := range []struct {
+		arg  any
+		want string
+	}{
+		{map[string]any{"from": []any{handle("orders-db", "DB")}}, `@requireService from lists "orders-db", a DB service: only an API service's server calls an operation`},
+		{map[string]any{"from": []any{"orders-api"}}, "@requireService from entries must be service handles: import the API service's sentinel from its package"},
+		{map[string]any{"from": "orders-api"}, "@requireService from must be an array of service handles"},
+		{map[string]any{"services": []any{}}, `@requireService config has unknown key "services"`},
+		{"orders-api", "@requireService config must be an object literal"},
+	} {
+		err := apply("requireService", TargetOperation, Node{Field: &ir.FieldDef{}}, tc.arg)
+		var argErr *ArgError
+		if !errors.As(err, &argErr) || argErr.Index != 0 || argErr.Msg != tc.want {
+			t.Errorf("requireService(%v) = %v, want the config error %q", tc.arg, err, tc.want)
+		}
+	}
+	if err := apply("requireService", TargetOperation, Node{Field: &ir.FieldDef{}}, map[string]any{}, map[string]any{}); err == nil || err.Error() != "@requireService takes at most one config object" {
+		t.Errorf("two configs: %v", err)
 	}
 }

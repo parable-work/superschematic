@@ -6,7 +6,8 @@
 // trait shape checks, version graph declarations, projection view
 // declarations, the contexts that refuse an array of arrays, the arguments
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
-// cannot be encrypted, @index placement and keys, each type's
+// cannot be encrypted, the service clauses an operation cannot take,
+// @index placement and keys, each type's
 // behaviors against their declarations, the kind's own KindSpec.Verify and
 // every registered CheckSpec.
 //
@@ -196,6 +197,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkArraysOfArrays(schema, r)
 	checkEncryptedArguments(schema, r)
 	checkEncryptedOperations(schema, r)
+	checkServiceCallers(schema, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)
 	reg := in.registry()

@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 
@@ -128,6 +129,28 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 				return applyMiddleware(name, args, &n.Field.Middleware)
 			},
 			recordsErrors: true,
+		})
+	}
+
+	// Operation sets and operations share the service clause pair (D37).
+	for _, clause := range []struct {
+		name string
+		mode ir.ServiceCallersMode
+	}{
+		{"requireService", ir.ServiceCallersRequire},
+		{"allowService", ir.ServiceCallersAllow},
+	} {
+		specs = append(specs, DecoratorSpec{
+			Name: clause.name, Packages: []string{pkgAPI}, Target: TargetOperationSet,
+			Apply: func(n Node, args []any, _ Site) error {
+				return applyServiceCallers(clause.name, clause.mode, args, &n.OperationSet.ServiceCallers, "operation set")
+			},
+		})
+		specs = append(specs, DecoratorSpec{
+			Name: clause.name, Packages: []string{pkgAPI}, Target: TargetOperation,
+			Apply: func(n Node, args []any, _ Site) error {
+				return applyServiceCallers(clause.name, clause.mode, args, &n.Field.ServiceCallers, "operation")
+			},
 		})
 	}
 
@@ -321,6 +344,69 @@ func applyMiddleware(name string, args []any, target **ir.MiddlewareConfig) erro
 		(*target).Timeout = &n
 	}
 	return nil
+}
+
+// applyServiceCallers reads @requireService({ from? }) or
+// @allowService({ from? }) into a ServiceCallers. Each from entry is a
+// service handle, which reaches Apply as {name, kind}; only an API service's
+// server calls an operation, so a handle of any other kind is refused. An
+// operation or a set takes one of the pair, once. Errors in the config are
+// ArgErrors so the frontend points at it.
+func applyServiceCallers(name string, mode ir.ServiceCallersMode, args []any, target **ir.ServiceCallers, holder string) error {
+	if prior := *target; prior != nil {
+		if other := serviceCallersDecorator(prior.Mode); other != name {
+			return fmt.Errorf("@%s contradicts @%s on the same %s: declare one of them", name, other, holder)
+		}
+		return fmt.Errorf("@%s is declared twice on the same %s", name, holder)
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("@%s takes at most one config object", name)
+	}
+	clause := &ir.ServiceCallers{Mode: mode}
+	if len(args) == 1 && args[0] != nil {
+		raw, err := json.Marshal(args[0])
+		if err != nil {
+			return ArgErrorf(0, "@%s config must be an object literal", name)
+		}
+		var cfg map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return ArgErrorf(0, "@%s config must be an object literal", name)
+		}
+		for key := range cfg {
+			if key != "from" {
+				return ArgErrorf(0, "@%s config has unknown key %q", name, key)
+			}
+		}
+		var from []json.RawMessage
+		if list, ok := cfg["from"]; ok {
+			if err := json.Unmarshal(list, &from); err != nil {
+				return ArgErrorf(0, "@%s from must be an array of service handles", name)
+			}
+		}
+		for _, entry := range from {
+			var handle struct {
+				Name string `json:"name"`
+				Kind string `json:"kind"`
+			}
+			if err := json.Unmarshal(entry, &handle); err != nil || handle.Name == "" || handle.Kind == "" {
+				return ArgErrorf(0, "@%s from entries must be service handles: import the API service's sentinel from its package", name)
+			}
+			if handle.Kind != string(ir.SchemaKindAPI) {
+				return ArgErrorf(0, "@%s from lists %q, a %s service: only an API service's server calls an operation", name, handle.Name, handle.Kind)
+			}
+			clause.From = append(clause.From, handle.Name)
+		}
+	}
+	*target = clause
+	return nil
+}
+
+// serviceCallersDecorator names the decorator that declares mode.
+func serviceCallersDecorator(mode ir.ServiceCallersMode) string {
+	if mode == ir.ServiceCallersAllow {
+		return "allowService"
+	}
+	return "requireService"
 }
 
 // applyRest reads @rest(HttpMethod.X, "path"?).

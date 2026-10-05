@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -44,6 +46,7 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 	e.body.WriteString("\n")
 	e.comment("", set.Comment)
 	e.emitMiddlewareDecorators("", set.Middleware)
+	e.emitServiceCallersDecorator("", set.ServiceCallers)
 
 	heritage := ""
 	if auth {
@@ -102,6 +105,7 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 	if op.RequireOwnership {
 		fmt.Fprintf(&e.body, "  @%s\n", e.use("requireOwnership"))
 	}
+	e.emitServiceCallersDecorator("  ", op.ServiceCallers)
 	if op.ManualRouteRegistration {
 		fmt.Fprintf(&e.body, "  @%s\n", e.use("manualRouteRegistration"))
 	}
@@ -153,6 +157,35 @@ func (e *emitter) emitMiddlewareDecorators(indent string, mw *ir.MiddlewareConfi
 	}
 }
 
+// emitServiceCallersDecorator renders @requireService or @allowService. Each
+// name in from becomes the API service's sentinel, imported from its
+// package, as the reader resolves it.
+func (e *emitter) emitServiceCallersDecorator(indent string, clause *ir.ServiceCallers) {
+	if clause == nil {
+		return
+	}
+	var decorator string
+	switch clause.Mode {
+	case ir.ServiceCallersRequire:
+		decorator = e.use("requireService")
+	case ir.ServiceCallersAllow:
+		decorator = e.use("allowService")
+	default:
+		e.failf("service clause mode %q is not require or allow", clause.Mode)
+		return
+	}
+	if len(clause.From) == 0 {
+		fmt.Fprintf(&e.body, "%s@%s()\n", indent, decorator)
+		return
+	}
+	handles := make([]string, len(clause.From))
+	for i, name := range clause.From {
+		handles[i] = tsutil.ToClassName(name)
+		e.importSymbol(naming.Active().NpmServicePackage(name), handles[i])
+	}
+	fmt.Fprintf(&e.body, "%s@%s({ from: [%s] })\n", indent, decorator, strings.Join(handles, ", "))
+}
+
 // checkOperationField rejects FieldDef metadata that has no authoring form
 // on an operation method.
 func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
@@ -170,6 +203,7 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	rest.RestPath = ""
 	rest.Permissions = nil
 	rest.RequireOwnership = false
+	rest.ServiceCallers = nil
 	rest.ManualRouteRegistration = false
 	rest.Middleware = nil
 	rest.Arguments = nil
