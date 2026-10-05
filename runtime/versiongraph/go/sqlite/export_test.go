@@ -11,3 +11,12 @@ func SetIDSource(fill func(b []byte)) (restore func()) {
 	}
 	return func() { randRead = old }
 }
+
+// SetRollbackStatement makes a binding end the transactions it began with
+// statement, as a ROLLBACK that fails when statement does not parse, until
+// the restore it returns runs.
+func SetRollbackStatement(statement string) (restore func()) {
+	old := rollbackStatement
+	rollbackStatement = statement
+	return func() { rollbackStatement = old }
+}

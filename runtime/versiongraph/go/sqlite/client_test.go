@@ -158,8 +158,8 @@ func TestStorageRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
-		version, refuse string
-		noJSON          bool
+		version, refuse   string
+		noJSON, emptyJSON bool
 	}{
 		{version: "3.36.9", refuse: "SQLite 3.36.9 is older than 3.37.0"},
 		{version: "2.99.99", refuse: "SQLite 2.99.99 is older than 3.37.0"},
@@ -169,40 +169,48 @@ func TestStorageRefuses(t *testing.T) {
 		{version: "4.0.0"},
 		{version: "3.38", refuse: `not major.minor.patch`},
 		{version: "3.37.2", noJSON: true, refuse: "SQLite 3.37.2 lacks the JSON functions json_each and json_extract"},
+		{version: "3.37.2", emptyJSON: true, refuse: "SQLite 3.37.2 lacks the JSON functions json_each and json_extract, which the adapter's statements use (built in from 3.38.0, and in 3.37 with JSON1): they returned no 1"},
 	} {
-		_, err := adapter.Storage(ctx, versionClient{inner: sqlite.DB(db), version: c.version, noJSON: c.noJSON})
+		_, err := adapter.Storage(ctx, versionClient{inner: sqlite.DB(db), version: c.version, noJSON: c.noJSON, emptyJSON: c.emptyJSON})
 		if c.refuse == "" && err != nil {
 			t.Fatalf("SQLite %s: %v", c.version, err)
 		}
 		if c.refuse != "" {
 			errorContains(t, err, c.refuse, "SQLite "+c.version)
+			if strings.HasSuffix(err.Error(), "<nil>") {
+				t.Fatalf("SQLite %s: the refusal ends with no cause: %v", c.version, err)
+			}
 		}
 	}
 }
 
-// versionClient is a client whose SQLite reports version, and lacks the
-// JSON functions when noJSON is set.
+// versionClient is a client whose SQLite reports version, lacks the JSON
+// functions when noJSON is set, and whose JSON functions return no row
+// when emptyJSON is.
 type versionClient struct {
-	inner   sqlite.Client
-	version string
-	noJSON  bool
+	inner             sqlite.Client
+	version           string
+	noJSON, emptyJSON bool
 }
 
 func (c versionClient) Transact(ctx context.Context, fn func(ctx context.Context, conn sqlite.Conn) error) error {
 	return c.inner.Transact(ctx, func(ctx context.Context, conn sqlite.Conn) error {
-		return fn(ctx, versionConn{Conn: conn, version: c.version, noJSON: c.noJSON})
+		return fn(ctx, versionConn{Conn: conn, version: c.version, noJSON: c.noJSON, emptyJSON: c.emptyJSON})
 	})
 }
 
 type versionConn struct {
 	sqlite.Conn
-	version string
-	noJSON  bool
+	version           string
+	noJSON, emptyJSON bool
 }
 
 func (c versionConn) Query(ctx context.Context, sql string, args []any, row func(scan func(dest ...any) error) error) error {
 	if sql == "SELECT sqlite_version()" {
 		sql, args = "SELECT ?1", []any{c.version}
+	}
+	if c.emptyJSON && strings.Contains(sql, "json_each(") {
+		sql = "SELECT 1 WHERE 0"
 	}
 	if c.noJSON && strings.Contains(sql, "json_") {
 		// What a SQLite built without JSON1 says of json_each.
@@ -422,12 +430,25 @@ func TestCallerTransaction(t *testing.T) {
 	}
 }
 
-// TestDBNested: on the pool's binding, a transaction begun with the
-// context of another's function is a savepoint on its connection: it sees
-// the outer one's writes, and rolls back alone.
+// TestDBNested: on the pool's binding and on a connection's, a
+// transaction begun with the context of another's function is a savepoint
+// on its connection: it sees the outer one's writes, and rolls back alone.
 func TestDBNested(t *testing.T) {
-	db := openDB(t, "", "")
-	client := sqlite.DB(db)
+	for _, binding := range []string{"pool", "connection"} {
+		t.Run(binding, func(t *testing.T) {
+			db := openDB(t, "", "")
+			client := sqlite.DB(db)
+			if binding == "connection" {
+				conn := must(db.Conn(context.Background()))(t)
+				t.Cleanup(func() { _ = conn.Close() })
+				client = sqlite.DBConn(conn)
+			}
+			testNested(t, client)
+		})
+	}
+}
+
+func testNested(t *testing.T, client sqlite.Client) {
 	count := func(ctx context.Context, conn sqlite.Conn) int64 {
 		var n int64
 		if err := conn.Query(ctx, "SELECT count(*) FROM t", nil, func(scan func(dest ...any) error) error { return scan(&n) }); err != nil {

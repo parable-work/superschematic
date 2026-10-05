@@ -263,9 +263,14 @@ func (a *Adapter) Storage(ctx context.Context, client Client) (storage.Storage, 
 		if older {
 			return fmt.Errorf("sqlite: SQLite %s is older than %s, which the layout's STRICT tables and its statements' RETURNING need", version, MinVersion)
 		}
+		const lacks = "sqlite: SQLite %s lacks the JSON functions json_each and json_extract, which the adapter's statements use (built in from 3.38.0, and in 3.37 with JSON1)"
 		var one int64
-		if found, err := queryRow(ctx, conn, jsonProbe, nil, &one); err != nil || !found || one != 1 {
-			return fmt.Errorf("sqlite: SQLite %s lacks the JSON functions json_each and json_extract, which the adapter's statements use (built in from 3.38.0, and in 3.37 with JSON1): %v", version, err)
+		found, err = queryRow(ctx, conn, jsonProbe, nil, &one)
+		if err != nil {
+			return fmt.Errorf(lacks+": %w", version, err)
+		}
+		if !found || one != 1 {
+			return fmt.Errorf(lacks+": they returned no 1", version)
 		}
 		return nil
 	})

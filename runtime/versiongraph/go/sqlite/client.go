@@ -158,6 +158,10 @@ func (c *txClient) Transact(ctx context.Context, fn func(ctx context.Context, co
 // still be open: a rollback that failed.
 var errConnState = errors.New("the connection's transaction may still be open")
 
+// rollbackStatement ends a transaction a binding began. A test swaps it for
+// one that fails (export_test.go), since no real ROLLBACK fails on demand.
+var rollbackStatement = "ROLLBACK"
+
 // errUnfinished is the cause of a rollback whose function did not return.
 var errUnfinished = errors.New("the transaction's function did not return")
 
@@ -175,7 +179,7 @@ func begin(ctx context.Context, conn *sqlConn, key openKey, fn func(ctx context.
 	// Some errors end the transaction on their own, and then ROLLBACK finds
 	// none to end.
 	rollback := func(cause error) error {
-		_, rbErr := conn.Exec(context.WithoutCancel(ctx), "ROLLBACK")
+		_, rbErr := conn.Exec(context.WithoutCancel(ctx), rollbackStatement)
 		if rbErr != nil && !strings.Contains(rbErr.Error(), "no transaction is active") {
 			return fmt.Errorf("sqlite: roll back: %w (after %w, %w)", rbErr, cause, errConnState)
 		}
