@@ -1,8 +1,15 @@
 {
-  "dialect": "sqlite",
-  "expanded": "995fc1b3eeab6e66ca8da6f51155cd8501de751bba929e3c4e7fe4bada948b66",
+  "dialect": "postgres",
+  "expanded": "9d27fa82b08fc299d393bfbcddd0555988da5501872f7af75d1d65ac709c22d1",
   "expandedModel": {
-    "dialect": "sqlite",
+    "dialect": "postgres",
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION order_total_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.total \u003c 0 THEN RAISE EXCEPTION 'total must not be negative; got %', NEW.total; END IF; RETURN NEW; END; $$",
+        "name": "order_total_check",
+        "origin": "Order"
+      }
+    ],
     "service": "shop",
     "tables": [
       {
@@ -10,7 +17,7 @@
           {
             "name": "id",
             "origin": "Customer.id",
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "name": "email",
@@ -20,19 +27,14 @@
           },
           {
             "name": "name",
-            "nullable": true,
             "origin": "Customer.name",
             "type": "TEXT"
-          }
-        ],
-        "indexes": [
+          },
           {
-            "columns": [
-              "email"
-            ],
-            "method": "BTREE",
-            "name": "customer_email_key",
-            "unique": true
+            "name": "phone",
+            "nullable": true,
+            "origin": "Customer.phone",
+            "type": "TEXT"
           }
         ],
         "kind": "entity",
@@ -50,17 +52,17 @@
           {
             "name": "id",
             "origin": "Order.id",
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "name": "customer_id",
             "origin": "Order.customer",
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "name": "total",
             "origin": "Order.total",
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "name": "note",
@@ -89,6 +91,13 @@
             ],
             "method": "BTREE",
             "name": "order_customer_id_idx"
+          },
+          {
+            "columns": [
+              "total"
+            ],
+            "method": "BTREE",
+            "name": "order_total_idx"
           }
         ],
         "kind": "entity",
@@ -102,10 +111,18 @@
         }
       }
     ],
+    "triggers": [
+      {
+        "definition": "CREATE TRIGGER order_total_check BEFORE INSERT OR UPDATE ON \"order\" FOR EACH ROW EXECUTE FUNCTION order_total_check()",
+        "name": "order_total_check",
+        "origin": "Order",
+        "table": "order"
+      }
+    ],
     "version": 1
   },
-  "from": "df19b9e8e1a4d5890f05477816cd7bcb91b68dd4250522dc0ab747a4c79d148c",
-  "hash": "6b6a43475dfb21a2fa1af9e66daedad748fc7ff45e4ed77b95e2100399e1ac91",
+  "from": "f55fcf84b2cd60699834a6d1aad510c7b7ad8e9f487c5ce61c86db3f6cf5d811",
+  "hash": "64e55da3723b3f8ca7522401cc05c4f26db6a0a4a058384e3eb2a1de2f65c014",
   "service": "shop",
   "steps": [
     {
@@ -113,71 +130,32 @@
       "op": "addColumn",
       "phase": "expand",
       "statements": [
-        "ALTER TABLE \"order\" ADD COLUMN note TEXT"
+        "ALTER TABLE customer ADD COLUMN phone TEXT"
       ],
-      "subject": "table/order/column/note",
+      "subject": "table/customer/column/phone",
       "transactional": true
     },
     {
-      "foreignKeysOff": true,
-      "hazards": [
-        {
-          "class": "blocking",
-          "id": "blocking:table/customer",
-          "reason": "Customer.name becomes optional: SQLite rebuilds the table.",
-          "subject": "table/customer"
-        },
-        {
-          "class": "copy-table",
-          "id": "copy-table:table/customer",
-          "reason": "Customer.name becomes optional: SQLite rebuilds the table.",
-          "subject": "table/customer"
-        }
-      ],
       "index": 2,
-      "op": "copyTable",
-      "phase": "expand",
-      "statements": [
-        "CREATE TABLE customer__new (id INTEGER NOT NULL, name TEXT, email TEXT, CONSTRAINT customer_pkey PRIMARY KEY (id))",
-        "INSERT INTO customer__new (id, name) SELECT id, name FROM customer",
-        "DROP TABLE customer",
-        "ALTER TABLE customer__new RENAME TO customer"
-      ],
-      "subject": "table/customer",
-      "transactional": true
-    },
-    {
-      "index": 3,
-      "op": "createIndex",
-      "phase": "expand",
-      "statements": [
-        "CREATE UNIQUE INDEX customer_email_key ON customer (email)"
-      ],
-      "subject": "table/customer/index/customer_email_key",
-      "transactional": true
-    },
-    {
-      "hazards": [
-        {
-          "class": "destructive",
-          "id": "destructive:table/customer/column/name",
-          "reason": "Customer.name is dropped with its data.",
-          "subject": "table/customer/column/name"
-        }
-      ],
-      "index": 4,
-      "op": "dropColumn",
+      "op": "dropIndex",
       "phase": "contract",
       "statements": [
-        "ALTER TABLE customer DROP COLUMN name"
+        "DROP INDEX order_customer_id_idx"
       ],
-      "subject": "table/customer/column/name",
+      "subject": "table/order/index/order_customer_id_idx",
       "transactional": true
     }
   ],
-  "to": "14d676a954dbee841ceead456228d2237fd5aef1f0bd11fe0b6b0421e5daaa60",
+  "to": "ace6e5f0a7277afb61a2d73f782186624b58cd6725f8d314d63be04ca8d1891a",
   "toModel": {
-    "dialect": "sqlite",
+    "dialect": "postgres",
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION order_total_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.total \u003c 0 THEN RAISE EXCEPTION 'total must not be negative; got %', NEW.total; END IF; RETURN NEW; END; $$",
+        "name": "order_total_check",
+        "origin": "Order"
+      }
+    ],
     "service": "shop",
     "tables": [
       {
@@ -185,23 +163,24 @@
           {
             "name": "id",
             "origin": "Customer.id",
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "name": "email",
             "nullable": true,
             "origin": "Customer.email",
             "type": "TEXT"
-          }
-        ],
-        "indexes": [
+          },
           {
-            "columns": [
-              "email"
-            ],
-            "method": "BTREE",
-            "name": "customer_email_key",
-            "unique": true
+            "name": "name",
+            "origin": "Customer.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "phone",
+            "nullable": true,
+            "origin": "Customer.phone",
+            "type": "TEXT"
           }
         ],
         "kind": "entity",
@@ -219,17 +198,17 @@
           {
             "name": "id",
             "origin": "Order.id",
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "name": "customer_id",
             "origin": "Order.customer",
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "name": "total",
             "origin": "Order.total",
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "name": "note",
@@ -254,10 +233,10 @@
         "indexes": [
           {
             "columns": [
-              "customer_id"
+              "total"
             ],
             "method": "BTREE",
-            "name": "order_customer_id_idx"
+            "name": "order_total_idx"
           }
         ],
         "kind": "entity",
@@ -269,6 +248,14 @@
           ],
           "name": "order_pkey"
         }
+      }
+    ],
+    "triggers": [
+      {
+        "definition": "CREATE TRIGGER order_total_check BEFORE INSERT OR UPDATE ON \"order\" FOR EACH ROW EXECUTE FUNCTION order_total_check()",
+        "name": "order_total_check",
+        "origin": "Order",
+        "table": "order"
       }
     ],
     "version": 1

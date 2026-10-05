@@ -52,6 +52,9 @@ type Result struct {
 	// Finished is true when the plan has finished: the database's applied
 	// model is the plan's to.
 	Finished bool
+	// Superseded is the plan whose pending contract this plan superseded,
+	// or empty.
+	Superseded string
 }
 
 // Apply runs the steps of plan in phase (Expand, Contract or All) that have
@@ -90,9 +93,23 @@ func (r *Runner) Apply(ctx context.Context, plan *Plan, phase Phase) (*Result, e
 		if err != nil {
 			return err
 		}
-		resume, result.AlreadyApplied, err = decide(st, plan)
-		if err != nil || result.AlreadyApplied {
+		started := false
+		if st.planHash != "" && st.planHash != plan.Hash && st.planPhase == PlanPhaseExpanded {
+			if started, err = contractStarted(ctx, conn, st.planHash); err != nil {
+				return err
+			}
+		}
+		d, err := decide(st, plan, started)
+		if err != nil {
 			return err
+		}
+		result.AlreadyApplied, resume = d == alreadyApplied, d == resumePlan
+		result.Superseded = ""
+		if d == supersede {
+			result.Superseded = st.planHash
+		}
+		if result.AlreadyApplied {
+			return nil
 		}
 		if phase == Contract {
 			if err := expandFinished(ctx, conn, plan, resume); err != nil {
@@ -111,6 +128,10 @@ func (r *Runner) Apply(ctx context.Context, plan *Plan, phase Phase) (*Result, e
 		r.logf("plan %s is already applied: service %s is at model %s", plan.Hash, plan.Service, plan.To)
 		result.ExpandDone, result.Finished = true, true
 		return result, nil
+	}
+	if result.Superseded != "" {
+		r.logf("plan %s supersedes plan %s, whose contract was pending: service %s is at that plan's expanded model %s, and its contract will not run",
+			plan.Hash, result.Superseded, plan.Service, plan.From)
 	}
 	if resume {
 		r.logf("resuming plan %s for service %s", plan.Hash, plan.Service)
@@ -174,28 +195,53 @@ func (r *Runner) Apply(ctx context.Context, plan *Plan, phase Phase) (*Result, e
 	return result, nil
 }
 
+// decision is what step 4 of apply decides to do with a plan.
+type decision int
+
+const (
+	// start: no plan is in progress and the database is at the plan's
+	// from.
+	start decision = iota
+	// resumePlan: the plan is in progress.
+	resumePlan
+	// alreadyApplied: the database is at the plan's to.
+	alreadyApplied
+	// supersede: another plan is in progress with only its contract left,
+	// none of it started, and the database is at that plan's expanded
+	// model, the plan's from.
+	supersede
+)
+
 // decide is step 4 of apply: resume the plan, report it applied, start it,
-// or refuse.
-func decide(st state, plan *Plan) (resume, applied bool, err error) {
+// start it in place of a pending contract, or refuse. contractStarted is
+// whether a contract step of the plan in progress has started; decide reads
+// it only when that plan recorded its expanded model.
+func decide(st state, plan *Plan, contractStarted bool) (decision, error) {
+	pending := st.planHash != "" && st.planPhase == PlanPhaseExpanded && st.modelHash == plan.From
 	switch {
 	case st.planHash == plan.Hash:
-		return true, false, nil
+		return resumePlan, nil
 	case st.planHash == "" && st.modelHash == plan.To && plan.To != plan.From:
-		return false, true, nil
-	case st.planHash != "":
-		return false, false, refusef("service %s has plan %s in progress (%s); finish it before applying plan %s",
+		return alreadyApplied, nil
+	case pending && contractStarted:
+		return 0, refusef("service %s has plan %s in progress, and its contract has started; finish it before applying plan %s",
+			plan.Service, st.planHash, plan.Hash)
+	case st.planHash != "" && !pending:
+		return 0, refusef("service %s has plan %s in progress (%s); finish it before applying plan %s",
 			plan.Service, st.planHash, describePhase(st.planPhase), plan.Hash)
 	case st.modelHash != plan.From:
 		applied := "has no applied model"
 		if st.modelHash != "" {
 			applied = "is at model " + st.modelHash
 		}
-		return false, false, refusef("the plan starts from %s, but service %s %s; plan again from the applied model (superschematic-migrate status --model)",
+		return 0, refusef("the plan starts from %s, but service %s %s; plan again from the applied model (superschematic-migrate status --model)",
 			describeModel(plan.From), plan.Service, applied)
 	case st.recorded && st.dialect != plan.Dialect:
-		return false, false, refusef("service %s's state records dialect %s; the plan is for %s", plan.Service, st.dialect, plan.Dialect)
+		return 0, refusef("service %s's state records dialect %s; the plan is for %s", plan.Service, st.dialect, plan.Dialect)
+	case pending:
+		return supersede, nil
 	}
-	return false, false, nil
+	return start, nil
 }
 
 // expandFinished is step 5 of apply: --phase contract runs only once every
@@ -221,7 +267,8 @@ func expandFinished(ctx context.Context, conn Conn, plan *Plan, resume bool) err
 }
 
 // advance is step 8 of apply: when every expand step has finished and the
-// plan has contract steps, plan_phase becomes expand; when every step has
+// plan has contract steps, plan_phase records it, with the plan's expanded
+// model as the applied model when it has one; when every step has
 // finished, the plan's model becomes the applied model.
 func (r *Runner) advance(ctx context.Context, conn Conn, plan *Plan, st state, finished map[int]bool, result *Result) error {
 	expandDone, allDone := true, true
@@ -238,7 +285,7 @@ func (r *Runner) advance(ctx context.Context, conn Conn, plan *Plan, st state, f
 	case allDone:
 		result.Finished = true
 		return setModel(ctx, conn, plan.model)
-	case expandDone && st.planPhase != string(Expand):
+	case expandDone && st.planPhase == "":
 		return setExpandDone(ctx, conn, plan)
 	}
 	return nil
@@ -418,8 +465,10 @@ type Status struct {
 	// finished and no model was adopted. Model is its canonical JSON.
 	ModelHash string
 	Model     []byte
-	// PlanHash is the plan in progress; PlanPhase is "expand" once its
-	// expand steps have finished.
+	// PlanHash is the plan in progress. PlanPhase is empty until its expand
+	// steps have finished, then "expanded" when ModelHash is the plan's
+	// expanded model, which a plan from it supersedes, or "expand" when the
+	// plan has none and ModelHash is still its from.
 	PlanHash  string
 	PlanPhase string
 	UpdatedAt string
@@ -565,7 +614,7 @@ func describeModel(hash string) string {
 }
 
 func describePhase(phase string) string {
-	if phase == string(Expand) {
+	if phase == PlanPhaseExpand || phase == PlanPhaseExpanded {
 		return "its expand steps are done"
 	}
 	return "its expand steps are not all done"

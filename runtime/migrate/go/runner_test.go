@@ -291,18 +291,6 @@ func twoRunners(t *testing.T, dialect migrate.Dialect, url string, p *migrate.Pl
 func TestRefusals(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
 		create, evolve, audit := plan(t, dialect, "01-create"), plan(t, dialect, "02-evolve"), plan(t, dialect, "03-audit")
-		refused := func(t *testing.T, r *migrate.Runner, p *migrate.Plan, phase migrate.Phase, want ...string) {
-			t.Helper()
-			_, err := r.Apply(context.Background(), p, phase)
-			if !errors.Is(err, migrate.ErrRefused) {
-				t.Fatalf("apply = %v, want a refusal", err)
-			}
-			for _, w := range want {
-				if !strings.Contains(err.Error(), w) {
-					t.Fatalf("%q does not say %q", err, w)
-				}
-			}
-		}
 
 		t.Run("the wrong baseline", func(t *testing.T) {
 			url := testdb.New(t, dialect)
@@ -362,9 +350,10 @@ func TestRefusals(t *testing.T) {
 	})
 }
 
-// TestPhases: --phase expand runs the expand steps and records the phase;
-// the contract-only objects stay until --phase contract runs the rest and
-// records the plan's model.
+// TestPhases: --phase expand runs the expand steps and records the phase,
+// with the plan's expanded model as the applied model; the contract-only
+// objects stay until --phase contract runs the rest and records the plan's
+// model.
 func TestPhases(t *testing.T) {
 	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
 		url := testdb.New(t, dialect)
@@ -384,8 +373,11 @@ func TestPhases(t *testing.T) {
 			t.Fatalf("expand: %+v", result)
 		}
 		st := status(t, r, "shop")
-		if st.PlanHash != evolve.Hash || st.PlanPhase != "expand" || st.ModelHash != create.To || len(st.Steps) != expandSteps {
+		if st.PlanHash != evolve.Hash || st.PlanPhase != migrate.PlanPhaseExpanded || len(st.Steps) != expandSteps {
 			t.Fatalf("status between the phases: %+v", st)
+		}
+		if st.ModelHash != evolve.Expanded || string(st.Model) != string(evolve.BetweenPhases().Canonical) {
+			t.Fatalf("the applied model between the phases is %s, want the plan's expanded %s", st.ModelHash, evolve.Expanded)
 		}
 		// customer.name is dropped in contract, so it is still there.
 		if got := testdb.Strings(t, url, `SELECT name FROM customer WHERE id = 1`); len(got) != 1 || got[0] != "Ada" {

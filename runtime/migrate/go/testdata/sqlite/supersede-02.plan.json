@@ -1,6 +1,6 @@
 {
   "dialect": "sqlite",
-  "expanded": "995fc1b3eeab6e66ca8da6f51155cd8501de751bba929e3c4e7fe4bada948b66",
+  "expanded": "3e3686c4b510b936558c14fd76c5ee912863d5a9454ce8efcb075159e593a41d",
   "expandedModel": {
     "dialect": "sqlite",
     "service": "shop",
@@ -22,6 +22,12 @@
             "name": "name",
             "nullable": true,
             "origin": "Customer.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "phone",
+            "nullable": true,
+            "origin": "Customer.phone",
             "type": "TEXT"
           }
         ],
@@ -104,8 +110,8 @@
     ],
     "version": 1
   },
-  "from": "df19b9e8e1a4d5890f05477816cd7bcb91b68dd4250522dc0ab747a4c79d148c",
-  "hash": "6b6a43475dfb21a2fa1af9e66daedad748fc7ff45e4ed77b95e2100399e1ac91",
+  "from": "995fc1b3eeab6e66ca8da6f51155cd8501de751bba929e3c4e7fe4bada948b66",
+  "hash": "54ee79843c8613d3ef7016afdfa1c1a7eb0719ee2ccb9ad667667069e698445d",
   "service": "shop",
   "steps": [
     {
@@ -113,69 +119,23 @@
       "op": "addColumn",
       "phase": "expand",
       "statements": [
-        "ALTER TABLE \"order\" ADD COLUMN note TEXT"
+        "ALTER TABLE customer ADD COLUMN phone TEXT"
       ],
-      "subject": "table/order/column/note",
+      "subject": "table/customer/column/phone",
       "transactional": true
     },
     {
-      "foreignKeysOff": true,
-      "hazards": [
-        {
-          "class": "blocking",
-          "id": "blocking:table/customer",
-          "reason": "Customer.name becomes optional: SQLite rebuilds the table.",
-          "subject": "table/customer"
-        },
-        {
-          "class": "copy-table",
-          "id": "copy-table:table/customer",
-          "reason": "Customer.name becomes optional: SQLite rebuilds the table.",
-          "subject": "table/customer"
-        }
-      ],
       "index": 2,
-      "op": "copyTable",
-      "phase": "expand",
-      "statements": [
-        "CREATE TABLE customer__new (id INTEGER NOT NULL, name TEXT, email TEXT, CONSTRAINT customer_pkey PRIMARY KEY (id))",
-        "INSERT INTO customer__new (id, name) SELECT id, name FROM customer",
-        "DROP TABLE customer",
-        "ALTER TABLE customer__new RENAME TO customer"
-      ],
-      "subject": "table/customer",
-      "transactional": true
-    },
-    {
-      "index": 3,
-      "op": "createIndex",
-      "phase": "expand",
-      "statements": [
-        "CREATE UNIQUE INDEX customer_email_key ON customer (email)"
-      ],
-      "subject": "table/customer/index/customer_email_key",
-      "transactional": true
-    },
-    {
-      "hazards": [
-        {
-          "class": "destructive",
-          "id": "destructive:table/customer/column/name",
-          "reason": "Customer.name is dropped with its data.",
-          "subject": "table/customer/column/name"
-        }
-      ],
-      "index": 4,
-      "op": "dropColumn",
+      "op": "dropIndex",
       "phase": "contract",
       "statements": [
-        "ALTER TABLE customer DROP COLUMN name"
+        "DROP INDEX order_customer_id_idx"
       ],
-      "subject": "table/customer/column/name",
+      "subject": "table/order/index/order_customer_id_idx",
       "transactional": true
     }
   ],
-  "to": "14d676a954dbee841ceead456228d2237fd5aef1f0bd11fe0b6b0421e5daaa60",
+  "to": "c0baffa78c6a3efd60601a88abb71e132101a97f8c1c3aa800e1b622c9956d72",
   "toModel": {
     "dialect": "sqlite",
     "service": "shop",
@@ -191,6 +151,18 @@
             "name": "email",
             "nullable": true,
             "origin": "Customer.email",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "nullable": true,
+            "origin": "Customer.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "phone",
+            "nullable": true,
+            "origin": "Customer.phone",
             "type": "TEXT"
           }
         ],
@@ -249,15 +221,6 @@
               "id"
             ],
             "refTable": "customer"
-          }
-        ],
-        "indexes": [
-          {
-            "columns": [
-              "customer_id"
-            ],
-            "method": "BTREE",
-            "name": "order_customer_id_idx"
           }
         ],
         "kind": "entity",
