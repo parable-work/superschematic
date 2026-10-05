@@ -2,6 +2,7 @@ package tsreader
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 
@@ -198,7 +199,62 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 		}
 		return errorAtNode(d.node, "%s", err)
 	}
+	w.recordHandles(spec, args[len(typeArgNodes):])
 	return nil
+}
+
+// recordHandles records the service handles in a decorator's evaluated
+// arguments (D41). A handle under one of the spec's identity paths only
+// names its service, so the schema keeps just the sentinel it was imported
+// from; any other references its service (ir.Schema.References).
+func (w *walker) recordHandles(spec registry.DecoratorSpec, args []any) {
+	if w.schema == nil || w.suppressRecording {
+		return
+	}
+	for _, arg := range args {
+		visitHandles(arg, "", func(at string, handle serviceHandle) {
+			if !underIdentityPath(spec.Identities, at) {
+				w.schema.AddReference(ir.ServiceRef{Name: handle.name, Kind: ir.SchemaKind(handle.kind)})
+				return
+			}
+			if handle.sentinel != "" && handle.name != w.schema.Name && !slices.Contains(w.schema.IdentitySentinels, handle.sentinel) {
+				w.schema.IdentitySentinels = append(w.schema.IdentitySentinels, handle.sentinel)
+			}
+		})
+	}
+}
+
+// visitHandles calls visit with each service handle in an evaluated
+// argument and the dot-separated object keys that lead to it; a list adds
+// no key.
+func visitHandles(value any, at string, visit func(at string, handle serviceHandle)) {
+	switch v := value.(type) {
+	case serviceHandle:
+		visit(at, v)
+	case []any:
+		for _, element := range v {
+			visitHandles(element, at, visit)
+		}
+	case map[string]any:
+		for key, element := range v {
+			next := key
+			if at != "" {
+				next = at + "." + key
+			}
+			visitHandles(element, next, visit)
+		}
+	}
+}
+
+// underIdentityPath reports whether at is one of the identity paths or lies
+// under one ("" covers every path).
+func underIdentityPath(paths []string, at string) bool {
+	for _, p := range paths {
+		if p == "" || at == p || strings.HasPrefix(at, p+".") {
+			return true
+		}
+	}
+	return false
 }
 
 // decoratorTypeArgs returns the type arguments of a decorator call

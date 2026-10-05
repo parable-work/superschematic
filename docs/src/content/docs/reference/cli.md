@@ -198,6 +198,18 @@ input hash covers those files' contents. `build`, `build --with-deps` and
 `build-all` all write it under the schemas root they resolved, whatever the
 schemas root is named and wherever `--out` points.
 
+A service whose decorators take other services' handles gets
+`<schemas-root>/dist/.schema-references/<service>.json` the same way. It
+lists the services the decorators reference, and the sentinel files of
+those a decorator only names, in an argument it declares an identity
+(D41). The input hash covers each referenced service's
+sources and those of every service its config reaches through
+`dependencies`, `authDb` and `calls`, and each listed sentinel. So an edit
+to a referenced service rebuilds the service that references it. A
+reference does not order the build, so two services may name each other.
+The IR lists the references under `references`, and a JSON or YAML schema
+file states them there, as it states `imports`.
+
 ## `migrate plan <service-dir>`
 
 Plan the migration of a DB service's database from a previous version of

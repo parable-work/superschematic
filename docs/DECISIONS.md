@@ -2843,7 +2843,8 @@ discover a tree with no sentinels before and after the sweep, and two APIs
 that import each other's sentinels, which the build plan reports as a
 cycle of `calls`. CLI tests run each build command on a tree whose
 imported sentinel was deleted, and on a config that imports a schema class
-beside its sentinel, which all three refuse with one message.
+beside its sentinel, which all three refuse with one message. A handle in
+a schema's body, rather than its config, is D41's.
 
 The rule is reversible until the first release.
 
@@ -3016,3 +3017,50 @@ whether Workers callers present the identity a service binding carries or
 sign key-pair tokens.
 
 Nothing here is built. The design is reversible until the first release.
+
+## D41. A handle in a schema's decorator argument is a cache edge, not a build-order edge
+
+D34 lets a config import a sibling's sentinel. A schema file can import
+one too and pass it to a decorator: the Stack kind's `@stack({ deploy })`
+and `@environment({ settings: [{ of }] })` (`docs/stack-model.md` section
+4.1), and D37's `@requireService({ from })`. Section 12 of the stack model
+planned build-order edges from the handles a schema references, so a stack
+need not restate them in `dependencies`. Nothing recorded such a handle:
+the build cache keyed a service on its own tree, its `authDb` and its
+`dependencies`, so a stack's output would stay cached when an API it
+deploys changed. D37 needs the opposite for `from`, a handle that names a
+caller and must not order the build, since two APIs may name each other.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A service handle in a decorator argument references its service. The TypeScript reader records each one it evaluates in `ir.Schema.References`, sorted and once each, leaving out the schema itself. | Requiring the referenced service in `dependencies` as well, which restates every handle in the config, and which `validateDependencyKinds` refuses for a service that emits no packages |
+| A reference is a cache edge and not a build-order edge. What reads it is the referencing service's own build: a stack's resolution reads the referenced services' IR and configs, which the build loads from their sources, and no generated output of theirs. Sentinels are swept before discovery (D34), so the import resolves without building the service. Two services may reference each other, and `build --with-deps` builds neither for the other. | A build-order edge, as section 12 planned: it orders a build that reads no output, makes two services that name each other a cycle, and pulls every deployed API into a stack's `--with-deps` closure |
+| The input hash of a referencing service covers the tree digest of the referenced service and of every service its config reaches through `dependencies`, `authDb` and `calls`: what a stack's resolution reads, as section 4.1 joins those services to a stack. The walk collects a set, so references between services that reach each other digest without a cycle. A name no discovered service has digests as missing, so a rename changes the hash. | The referenced service's Merkle hash, which exists only once that service has been hashed, an order again, and leaves out `calls`, which no output read until now (section 3.3) and which resolution reads; the referenced service's tree alone, which misses an edit to the database its API authenticates against |
+| A decorator declares where its argument holds handles that only name a service: `DecoratorSpec.Identities`, paths of object keys (`"from"`, `"settings.of"`), a list on the way read element by element. A handle there is an identity, not a reference. An identity reads only the name and kind its sentinel holds, so the hash covers that file (`ir.Schema.IdentitySentinels`) and nothing else of the service: an edit to the service leaves the namer cached, and a rename does not. D37's `@requireService` and `@allowService` are to declare `from` when they land. | One flag per decorator, which a decorator that holds both kinds of handle cannot use; an identity that keys nothing, which keeps a schema's output naming a sibling by its old name after a rename; a marker in the handle's TypeScript type, which the data forms cannot see |
+| Discovery reads configs, not schemas, so a build persists its references and identity sentinels to `<schemas-root>/dist/.schema-references/<service>.json`, and the next hash reads it, as the authoring imports do. A new reference can only appear by editing a file the service's own tree digest covers, and a fresh worktree rebuilds a referencing service once. | Loading every schema at discovery to find its references, which costs a program per service before anything builds |
+| The data forms state their references in a top-level `references` list of `{name, kind}`, as they state `imports`, and the JSON Schema closes its kinds to the registered ones. The writer puts the list on the first document. A data form names an identity in a string, so it has no identity sentinels. | Finding handles in a data form's decorator arguments, where a handle is `{name, kind}`, a shape an argument may hold for other reasons, and where a core decorator, written as a typed IR field, never reaches the registry |
+
+`recordHandles` in `internal/loader/tsreader/walker.go` records the
+handles after a decorator applies. `buildcache.WriteSchemaReferences`
+writes the depfile, which `buildService` writes after every build, and
+`InputHasher.Recompute` reads it. `references_test.go` in `registrytest`
+loads a schema whose `@meta` references two services, one through an
+imported sentinel and one through `service({...})`, and whose `@admits`
+names a third under its identity path, in TypeScript, JSON and YAML and
+through the writer, to the same IR. The build cache's tests change a
+referenced service, the services its config reaches and an unrelated one;
+an identity's service and its sentinel; and two services that reference
+each other. A CLI test runs `build-all --cache` twice over a tree where one
+service references fixture-db, another names it as an identity, and two
+more name each other as identities, then edits fixture-db and one of the
+pair: only the referencing service and the edited ones rebuild.
+
+A kind whose schema files import sentinels sets
+`KindSpec.ImportsSiblingSentinels`, so a plain `build` sweeps first; for
+any other kind, `build` relies on the sentinel being on disk, as for a
+class imported from a sibling. If an output ever compiles against a
+referenced service's generated code, such as an entrypoint that imports a
+served API's package, that output needs a build-order edge, which nothing
+here gives.
+
+The rule is reversible until the first release.

@@ -67,6 +67,9 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 	for _, imp := range doc.Imports {
 		mergeImport(schema, imp)
 	}
+	for _, ref := range doc.References {
+		schema.AddReference(ref)
+	}
 
 	// Decode has already canonicalized a read document; a caller building
 	// a Document by hand gets the same treatment so the schema never holds

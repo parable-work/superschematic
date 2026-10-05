@@ -1399,8 +1399,23 @@ registrations.
      Build-plan discovery, which `build-all` and `build --with-deps` run,
      checks each config handle's kind against the service it names
      (`validateHandleKinds` in `internal/buildplan/buildplan.go`).
-   - Build-order edges from the handles a schema references, so a stack does
-     not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
+   - Done: references from a schema's body (D41). A service handle in a
+     decorator argument, such as `deploy` or a settings element's `of`,
+     references its service, so a stack does not restate it in
+     `dependencies`. `ir.Schema.References` records it, and the build
+     cache keys the referencing service on the sources of the referenced
+     service and of every service its config reaches, so the stack's
+     output rebuilds when any of them changes. A reference is a cache
+     edge, not a build-order edge: resolution reads the referenced
+     services' IR and configs, which a build loads from their sources,
+     and none of their outputs, so the build plan does not order them and
+     two services may name each other. A decorator declares the argument
+     paths whose handles only name a service (`DecoratorSpec.Identities`,
+     for D37's `from`): an identity adds no edge, and the cache tracks only
+     the sentinel it was imported from. Should an output compile against
+     a referenced service's generated code, such as an entrypoint that
+     imports a served API's package, that output will need a build-order
+     edge.
 3. **envgen.** The derived binding fields of section 3.4.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
@@ -1510,7 +1525,10 @@ model, or retired, when it lands.
    a handle goes, and `service({ name, kind })` stays as the data form and
    the fallback spelling. The import rule moves into the static read every
    command shares, and the sentinel sweep, which reads only `name` and
-   `kind`, runs before build-plan discovery (D34).
+   `kind`, runs before build-plan discovery (D34). A schema file may pass
+   an imported sentinel to a decorator too: the handle references the
+   service, a cache edge that orders nothing, unless the decorator
+   declares it an identity, which adds no edge (D41).
 
 ## 16. What the source tree taught
 
