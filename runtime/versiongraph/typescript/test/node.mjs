@@ -1,27 +1,41 @@
 // Under Node: import the built package and let init, and initSync, load its
 // bundled wasm file by default (a file: URL, which Node's fetch does not
 // read). The vectors run once, under bun (test/vectors.test.ts); this checks
-// only that the package loads and runs in Node, and that none of its
-// entries, the Postgres adapter's included, loads the pg driver: a resolve
-// hook refuses it, so an import of pg anywhere in the package's graph fails
-// the script.
+// that the package loads and runs in Node, and that none of its entries, the
+// Postgres and SQLite adapters' included, loads the pg driver or a SQLite
+// module: a resolve hook refuses them, so an import of one anywhere in the
+// package's graph fails the script. Then it runs the SQLite adapter's own
+// tests (test/sqlite-cases.ts, which Node loads by stripping its types)
+// through node:sqlite.
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
 import { registerHooks } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+const sqliteModules = new Set(["node:sqlite", "bun:sqlite"]);
+let sqliteAllowed = false;
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "pg" || specifier.startsWith("pg/")) {
+      throw new Error(`the package imported ${specifier}`);
+    }
+    if (sqliteModules.has(specifier) && !sqliteAllowed) {
       throw new Error(`the package imported ${specifier}`);
     }
     return nextResolve(specifier, context);
   },
 });
 await assert.rejects(import("pg"), /the package imported pg/);
+await assert.rejects(import("node:sqlite"), /the package imported node:sqlite/);
 
 const { init, initSync, VersionGraphError } = await import("../dist/index.js");
 const { Engine, SyncEngine } = await import("../dist/engine.js");
 const { PostgresAdapter, pgPool } = await import("../dist/postgres.js");
+const { SqliteAdapter, nodeSqlite } = await import("../dist/sqlite.js");
 const { VersionGraphFacade } = await import("../dist/facade.js");
+assert.equal(typeof SqliteAdapter, "function");
+assert.equal(typeof nodeSqlite, "function");
 assert.equal(typeof VersionGraphFacade, "function");
 
 const graph = await init();
@@ -73,4 +87,23 @@ const syncEngine = new SyncEngine(syncGraph, descriptor, {
   },
 });
 assert.throws(() => syncEngine.compose("1"), /no database/);
-console.log("node: @superschematic/versiongraph loads and runs, and no entry loads pg");
+console.log("node: @superschematic/versiongraph loads and runs, and no entry loads pg or a SQLite module");
+
+// The SQLite adapter's own tests, through node:sqlite.
+sqliteAllowed = true;
+const { DatabaseSync } = await import("node:sqlite");
+const { cases } = await import("./sqlite-cases.ts");
+const { nodeBinding } = await import("./sqlite.ts");
+const binding = nodeBinding(DatabaseSync);
+for (const c of cases) {
+  const dir = mkdtempSync(join(tmpdir(), "vg-sqlite-"));
+  try {
+    c.run(binding, dir);
+  } catch (err) {
+    console.error(`node: ${binding.name}: ${c.name}`);
+    throw err;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+console.log(`node: ${cases.length} SQLite adapter cases pass through ${binding.name}`);
