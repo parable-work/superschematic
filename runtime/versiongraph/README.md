@@ -1,7 +1,7 @@
 # Version-graph core
 
 The version-graph core composes, merges, diffs, hashes and validates trees
-of versioned rows (D17 and D19 in `docs/DECISIONS.md`). It is one Rust crate
+of versioned rows (D17, D19 and D32 in `docs/DECISIONS.md`). It is one Rust crate
 with no IO, clock or randomness. Its operations take one JSON document and
 return one. A graph descriptor tells it which columns of each kind's rows
 play which role, so it holds no per-kind code.
@@ -36,13 +36,15 @@ types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
 
-The descriptor is version 2. The core refuses any other version with
-`invalid_descriptor`; a descriptor without `version` is version 1, which
-nothing has shipped.
+The descriptor is version 3. The core refuses any other version with
+`invalid_descriptor`, version 2 included: a version 2 descriptor does not
+say what each kind's history keeps, and reading it as keeping everything
+forever would be wrong for a kind that prunes or leaves columns out. A
+descriptor without `version` is version 1, which nothing has shipped.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "graph": "recipe",
   "root": { "table": "recipe", "key": "id" },
   "refTable": "recipe_ref",
@@ -66,6 +68,7 @@ nothing has shipped.
       "order": "position",
       "units": { "timings": "keyed", "inputs": "jsonSchema" },
       "excluded": ["created_at", "created_by", "updated_at", "recipe_id"],
+      "history": { "retentionDays": 365, "exclude": ["created_by"], "actor": "updated_by" },
       "columns": {
         "_version": "integer", "created_at": "dateTime", "created_by": "uuid",
         "deleted_on_ref": "boolean", "entity_key": "uuid", "id": "uuid",
@@ -81,6 +84,7 @@ nothing has shipped.
       "tombstone": "deleted_on_ref", "version": "_version",
       "singleton": true,
       "excluded": ["recipe_id"],
+      "history": { "exclude": [] },
       "columns": {
         "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
         "id": "uuid", "photo_url": "string", "recipe_id": "uuid", "ref_id": "uuid",
@@ -98,7 +102,7 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 
 | Member | Meaning |
 |---|---|
-| `version` | `2`. |
+| `version` | `3`. |
 | `graph` | Optional. The graph's name; the core does not read it. |
 | `root` | The graph root's `table` and its `key` column. |
 | `refTable`, `commitTable`, `patchTable`, `releaseTable`, `snapshotTable` | The tables of the graph's refs, commits, patches, release pointers and snapshot entries. Each is non-empty; the core does not read them. |
@@ -116,6 +120,7 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 | `singleton` | Optional, default `false`. At most one live row. |
 | `units` | Optional. A conflict unit per column: `atomic` (the default), `keyed` or `jsonSchema`. `keyed` and `jsonSchema` need a `json` column. |
 | `excluded` | Optional. Columns that are not content: audit columns and the graph's own columns. |
+| `history` | What the kind's history keeps (below). Required. |
 | `columns` | Every column of the kind's table, with its value class (below). Every column another member names must be here. |
 
 The role columns (`key`, `id`, `ref`, `root`, `tombstone`, `version`, `author`)
@@ -126,6 +131,22 @@ ids, refs, versions and audit columns say. Role columns may also be listed in
 `excluded`. The `parent` key and `order` columns must be content, and a unit
 may only name a content column. Unknown members are refused, and so is an
 empty table or column name.
+
+`history` holds what the sql generator's history trigger and prune
+function hold for the kind's table, for a storage adapter that writes
+history itself rather than through triggers (D32). The generator computes
+both from the same code (`sqlutil.VersionedHistory`), so they never
+disagree. The Postgres adapters do not read it, since their triggers and
+prune functions hold the same facts.
+
+| Member | Meaning |
+|---|---|
+| `retentionDays` | Optional. How many days of history pruning keeps, `@versioned({ retentionDays })`: an integer from 1 to 2147483647, the largest Postgres `INTEGER`, which the prune function's `retention_days` is. Absent for no retention, and then nothing is pruned. |
+| `exclude` | The columns every history image leaves out, `@versioned({ exclude })`, in the order it names them; `[]` for none. Each is a column of the kind that is not content (it is `excluded` or the `author`) and is not one of the role columns a history image is found and read by (`key`, `id`, `ref`, `root`, `tombstone`, `version`), and none is named twice. |
+| `actor` | Optional. The column a delete's image names its actor in: `deleted_by` when the kind has it, else `updated_by`. Absent when the kind has neither, or when that column is in `exclude`, since a delete's image leaves it out too. It is a column of the kind, not in `exclude`, and not one of those role columns; it may be the `author`. |
+
+The core checks `history` against the kind's columns and does not read it
+otherwise. An unknown member is refused, and so is a `null` member.
 
 The tables and the value classes are for a storage adapter, which builds its
 statements from them and normalizes each row it reads (below). The core
@@ -345,7 +366,7 @@ A refused input returns `{"error": {"code", "message"}}`. `code` is stable;
 |---|---|
 | `invalid_json` | The input is not JSON. |
 | `invalid_request` | The input is not an object, a member is missing or unknown, or a tree is not an object of arrays. |
-| `invalid_descriptor` | The descriptor is malformed, is not version 2, or breaks a rule above. |
+| `invalid_descriptor` | The descriptor is malformed, is not version 3, or breaks a rule above. |
 | `unknown_kind` | A tree names a kind the descriptor lacks. |
 | `invalid_row` | A row is not an object, or its key, tombstone, parent key or order has the wrong type. |
 | `duplicate_entity_key` | Two rows of a kind share an entity key (every operation but `validate`, which reports it). |
@@ -378,7 +399,17 @@ past retention, and writes missing snapshots. The Go engine is package `engine`,
 over the interface in package `storage`; package `postgres` is its Postgres
 adapter, which builds its statements from the descriptor and needs each
 kind's `root`. The TypeScript engine, storage interface and Postgres
-adapter are `typescript/src/engine.ts`, `storage.ts` and `postgres.ts`. The
+adapter are `typescript/src/engine.ts`, `storage.ts` and `postgres.ts`.
+The TypeScript engine's operations are written once, as generators that
+yield each storage call, and two drivers run them (D32): `Engine` awaits
+each call over `Storage` and `Tx`, whose methods return promises, and
+`SyncEngine` makes each call over `SyncStorage` and `SyncTx`, which have
+the same methods returning their values, for a database whose driver
+blocks, as SQLite's does under D16's engine. Either driver throws a failed
+call's error back into the operation, so the operation handles it the same
+way under both (a sweep's discard of a ref that moved, say). A `SyncEngine`
+returns each operation's value, throws its error, and has no `runSweeper`;
+`initSync` instantiates the core it runs on without awaiting. The
 Rust engine is the crate in `rust-engine/`, over its `Storage` and `Tx`
 traits, with its Postgres adapter in module `postgres` and the canonical
 rules in module `canonical`. The Python engine, storage protocol and
@@ -414,11 +445,22 @@ An input the core refuses keeps the core's code (`unmatched_resolution`).
 ## Scenarios
 
 `testdata/scenarios` holds one scenario per file, named by its `name`:
-`{"name", "description", "steps": [step, ...]}`. A runner applies
+`{"name", "description", "roots", "steps": [step, ...]}`. A runner runs on
+one backend. The backends a scenario may name are `postgres` and `sqlite`;
+every runner runs on `postgres` today. It applies
 `testdata/fixture/create.sql` to an empty Postgres schema, builds its
 engine and Postgres adapter from `testdata/fixture/recipe.json` at schema
-epoch 1 and snapshot interval 3, the fixture graph's, and runs each step in
-order. Unknown members are refused.
+epoch 1 and snapshot interval 3, the fixture graph's, seeds the scenario's
+roots, and runs each step in order. It reads the whole scenario before the
+first step, and refuses one with an unknown member or one that breaks a
+rule below.
+
+`roots` lists the roots the scenario uses, in order: at least one, each a
+name and named once (`["Bread", "Soup"]`). Before the first step a runner
+seeds them as its backend needs. On Postgres it inserts, in one statement,
+a `recipe` row per root whose `id` is the root, whose `title` is the root's
+name and whose `created_by` is `Cook`, so `recipe_ref.root_id`'s foreign
+key finds it. A root the scenario does not list has no row.
 
 A step is `{"op", ...arguments, "expect"?}`. `as` names the ref or commit a
 step returns, and later steps name it: `ref`, `from`, `source` and `target`
@@ -432,6 +474,14 @@ pointer's version as the last release left it, 0 before any. `walkCeiling`,
 ceiling, epoch or interval. Entity keys, roots and
 actors are UUIDs written in their canonical form, which reads as a word
 (`"Mix"`, `"Bread"`).
+
+A step may list the backends that run it (`backends`): a non-empty list of
+known backends, each named once. A runner skips a step whose list leaves
+out its own backend; a step without the member, or with it `null`, runs on
+every backend. The sweep scenario's `holdSweepLock`, `releaseSweepLock` and
+the sweep between them that expects to be skipped run on `postgres` only,
+since under SQLite's one writer no transaction can hold the lock while a
+sweep runs.
 
 | `op` | Arguments | Runs |
 |---|---|---|
@@ -455,7 +505,15 @@ actors are UUIDs written in their canonical form, which reads as a word
 | `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
 | `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
 | `snapshot` | `commit` | The adapter's snapshot entries of the commit, by kind and entity key |
-| `sql` | `statement`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text | A statement on the scenario's schema; with `rows` expected, a query whose rows the step returns |
+| `sql` | `statement`: `{"<backend>": "<statement>"}`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text on Postgres | The runner's backend's statement on the scenario's schema; with `rows` expected, a query whose rows the step returns |
+
+An `sql` step's `statement` is an object of one statement per backend,
+`{"postgres": "...", "sqlite": "..."}`; a `null` statement is none. On any
+step that has one, a runner refuses a plain string, a statement for a
+backend it does not know, and a statement that is not text (`null`
+included). It refuses an `sql` step it runs that has no statement for its
+backend, so no step is skipped silently; a step it skips needs none. The
+scenarios give `postgres` statements only until a runner runs on SQLite.
 
 `expect` holds what the step must return; a step without `error` must
 succeed.
@@ -509,7 +567,7 @@ cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
-make versiongraph-scenarios-ts  # every scenario through the TypeScript engine and its Postgres adapter
+make versiongraph-scenarios-ts  # every scenario through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
 make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
 ```

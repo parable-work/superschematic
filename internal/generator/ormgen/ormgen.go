@@ -1186,22 +1186,14 @@ func mapIRToGoType(irType string, scalars map[string]scalarLookup) string {
 }
 
 // historyActorColumn returns the column a versioned table's delete
-// tombstone records its actor in, as sqlgen's history trigger picks it:
-// deleted_by when the table has one, else updated_by, else "". An actor
-// column @versioned({ exclude }) leaves out of history records none.
+// tombstone records its actor in, as sqlgen's history trigger picks it
+// (sqlutil.VersionedHistory): deleted_by when the table has one, else
+// updated_by, else "". An actor column @versioned({ exclude }) leaves out
+// of history records none.
 func historyActorColumn(fields []Field, cfg *ir.VersionedConfig) string {
-	for _, name := range []string{"deleted_by", "updated_by"} {
-		for _, field := range fields {
-			if field.DBName != name {
-				continue
-			}
-			if cfg != nil && slices.Contains(cfg.Exclude, field.Name) {
-				return ""
-			}
-			return name
-		}
-	}
-	return ""
+	return sqlutil.VersionedHistory(cfg, func(column string) bool {
+		return slices.ContainsFunc(fields, func(field Field) bool { return field.DBName == column })
+	}).Actor
 }
 
 // computeImportNeeds derives the repository file's conditional imports from

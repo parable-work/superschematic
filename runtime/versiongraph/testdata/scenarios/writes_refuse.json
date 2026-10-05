@@ -1,8 +1,8 @@
 {
   "name": "writes_refuse",
   "description": "Writes refuse what the graph forbids: a write with no actor, a taken ref name, a merge into itself or across roots, a revert to another root's commit, a tree that breaks the graph's rules, and a resolution that matches no conflict. A discarded ref is gone, and its name is free again.",
+  "roots": ["Bread", "Soup"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid), ($3::uuid, 'Soup', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}, {"uuid": "Soup"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "createPrimary", "root": "Bread", "name": "main", "expect": {"error": "name_taken"}},
     {"op": "createPrimary", "root": "Soup", "name": "main", "as": "soup"},

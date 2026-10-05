@@ -5,7 +5,9 @@
 // scenario_test.go: the same files, the same rules for reading them, the
 // same checks. It needs the Postgres SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL
 // names, and skips without it; make versiongraph-scenarios-ts fails
-// without it.
+// without it. Each engine operation is also replayed through SyncEngine
+// (test/replay.ts), which must make the same storage calls and return the
+// same result.
 import { beforeAll, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import type pg from "pg";
@@ -33,6 +35,7 @@ import {
 import { init, type VersionGraph } from "../dist/index.js";
 import { PostgresAdapter, pgClient, pgPool } from "../dist/postgres.js";
 import { dsn, descriptor, rawTypes, scratchSchema, type Scratch } from "./postgres.js";
+import { replayed } from "./replay.js";
 
 // The schema epoch and snapshot interval the fixture's Recipe graph declares,
 // which the engine of every step runs at unless the step names another.
@@ -42,6 +45,14 @@ const fixtureSnapshotEvery = 3;
 // The actor of a step that names none: "Cook", a UUID in its canonical form.
 const defaultActor = "Cook";
 
+// The backend this runner runs the scenarios on. A step that lists its
+// backends runs here only when it lists this one, and an sql step runs its
+// statement for this backend.
+const backend = "postgres";
+
+// The backends a scenario may name.
+const knownBackends: readonly string[] = ["postgres", "sqlite"];
+
 const scenarioDir = new URL("../../testdata/scenarios/", import.meta.url);
 const files = readdirSync(scenarioDir)
   .filter((name) => name.endsWith(".json"))
@@ -50,9 +61,10 @@ const files = readdirSync(scenarioDir)
 // The members each object of a scenario may have; any other is refused, as
 // the Go runner's decoder refuses it.
 const members = {
-  scenario: ["name", "description", "steps"],
+  scenario: ["name", "description", "roots", "steps"],
   step: [
     "op",
+    "backends",
     "as",
     "actor",
     "root",
@@ -160,6 +172,135 @@ function withJson(value: object, jsonMembers: readonly string[]): JsonValue {
   return out;
 }
 
+/** A scenario as the format says: its name, its roots, and its steps, each checked. */
+interface Scenario {
+  name: string;
+  roots: string[];
+  steps: JsonObject[];
+}
+
+/** A list of distinct strings, or the reason it is not one. */
+function names(value: JsonValue, what: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${what} is a list`);
+  }
+  const out: string[] = [];
+  for (const name of value) {
+    if (typeof name !== "string") {
+      throw new Error(`${what} lists ${stringifyJson(name)}, not a name`);
+    }
+    if (out.includes(name)) {
+      throw new Error(`${what} lists ${JSON.stringify(name)} twice`);
+    }
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Reads a scenario as the format says (runtime/versiongraph/README.md,
+ * "Scenarios") for a runner of `runnerBackend`. It refuses an unknown
+ * member; a scenario with no steps or no roots; a list of roots or backends
+ * that holds a value other than a name or names one twice; an empty
+ * backends list or one that names a backend no runner knows; a statement,
+ * on any step, that is not an object of one string per backend or that
+ * names an unknown backend; and an sql step that runs on `runnerBackend`
+ * with no statement for it. A null `backends` or `statement` is none.
+ */
+function readScenario(text: string, where: string, runnerBackend: string): Scenario {
+  const scenario = object(parseJson(text), "scenario", where);
+  const steps = scenario.get("steps");
+  if (!Array.isArray(steps) || steps.length === 0) {
+    throw new Error(`${where}: a scenario has steps`);
+  }
+  const roots = scenario.get("roots");
+  if (roots === undefined || roots === null) {
+    throw new Error(`${where}: a scenario names its roots`);
+  }
+  let rootNames: string[];
+  try {
+    rootNames = names(roots, "roots");
+  } catch (err) {
+    throw new Error(`${where}: ${(err as Error).message}`);
+  }
+  if (rootNames.length === 0) {
+    throw new Error(`${where}: a scenario names at least one root`);
+  }
+  const checked = steps.map((value, i) => {
+    const stepWhere = `${where} step ${i}`;
+    const step = object(value, "step", stepWhere);
+    try {
+      checkStep(step, runnerBackend);
+    } catch (err) {
+      throw new Error(`${stepWhere} (${str(step.get("op"))}): ${(err as Error).message}`);
+    }
+    return step;
+  });
+  return { name: str(scenario.get("name")), roots: rootNames, steps: checked };
+}
+
+/** Checks a step's backends and statement. */
+function checkStep(step: JsonObject, runnerBackend: string): void {
+  const backends = step.get("backends");
+  if (backends !== undefined && backends !== null) {
+    const listed = names(backends, "backends");
+    if (listed.length === 0) {
+      throw new Error("backends lists no backend");
+    }
+    for (const name of listed) {
+      if (!knownBackends.includes(name)) {
+        throw new Error(`backends lists unknown backend ${JSON.stringify(name)}`);
+      }
+    }
+  }
+  const statement = step.get("statement");
+  if (statement !== undefined && statement !== null) {
+    if (!isJsonObject(statement)) {
+      throw new Error(`a statement is an object of one statement per backend, not ${stringifyJson(statement)}`);
+    }
+    for (const [name, text] of [...statement].sort(([a], [b]) => compareCodePoints(a, b))) {
+      if (!knownBackends.includes(name)) {
+        throw new Error(`a statement for unknown backend ${JSON.stringify(name)}`);
+      }
+      if (typeof text !== "string") {
+        throw new Error(`a statement is an object of one statement per backend, not ${stringifyJson(statement)}`);
+      }
+    }
+  }
+  if (str(step.get("op")) === "sql" && runsOn(step, runnerBackend)) {
+    if (!isJsonObject(statement) || !statement.has(runnerBackend)) {
+      throw new Error(`the sql step has no ${runnerBackend} statement`);
+    }
+  }
+}
+
+/** Whether a step runs on the backend: a step runs on every backend unless it lists the ones it runs on. */
+function runsOn(step: JsonObject, runnerBackend: string): boolean {
+  const backends = step.get("backends");
+  return backends === undefined || backends === null || (backends as JsonValue[]).includes(runnerBackend);
+}
+
+/**
+ * Opens a runner, seeds the scenario's roots, and runs each step that runs on
+ * the runner's backend, in order; `then` runs on the runner before it closes.
+ */
+async function runScenario(scenario: Scenario, then?: (runner: Runner) => Promise<void>): Promise<void> {
+  const runner = await Runner.open();
+  try {
+    await runner.seed(scenario.roots);
+    for (const [i, step] of scenario.steps.entries()) {
+      if (!runsOn(step, backend)) {
+        continue;
+      }
+      runner.where = `${scenario.name} step ${i} (${str(step.get("op"))})`;
+      await runner.run(step);
+    }
+    await then?.(runner);
+  } finally {
+    await runner.close();
+  }
+}
+
 let core: VersionGraph;
 
 beforeAll(async () => {
@@ -170,28 +311,117 @@ test("the scenario directory holds scenarios", () => {
   expect(files.length).toBeGreaterThan(0);
 });
 
+test("every scenario file reads as the format says", () => {
+  for (const file of files) {
+    const scenario = readScenario(readFileSync(new URL(file, scenarioDir), "utf8"), file, backend);
+    expect(scenario.name).toBe(file.replace(/\.json$/, ""));
+  }
+});
+
+/** A scenario of the given roots (raw JSON, or "" for none) and steps. */
+function formatScenario(roots: string, ...steps: string[]): string {
+  const member = roots === "" ? "" : `"roots": ${roots}, `;
+  return `{"name": "format", "description": "", ${member}"steps": [${steps.join(", ")}]}`;
+}
+
+const createPrimaryStep = `{"op": "createPrimary", "root": "Bread", "name": "main"}`;
+
+// Scenarios that each break one rule of the format, with a part of the error
+// each is refused with, and ones that keep them ("" for none).
+const formatCases: [string, string, string][] = [
+  ["a statement per backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}`), ""],
+  ["a plain string statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": "SELECT 1"}`), "a statement is an object of one statement per backend"],
+  ["a statement that is not text", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": 1}}`), "a statement is an object of one statement per backend"],
+  ["an sql step without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"sqlite": "SELECT 1"}}`), "the sql step has no postgres statement"],
+  ["an sql step with no statement", formatScenario(`["Bread"]`, `{"op": "sql"}`), "the sql step has no postgres statement"],
+  ["a null statement for the runner's backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": null}}`), "a statement is an object of one statement per backend"],
+  ["a null statement on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": null}`), ""],
+  ["a statement for an unknown backend on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": {"mysql": "x"}}`), `a statement for unknown backend "mysql"`],
+  ["a plain string statement on a step that is not sql", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "statement": "x"}`), "a statement is an object of one statement per backend"],
+  ["a statement for an unknown backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "mysql": "SELECT 1"}}`), `a statement for unknown backend "mysql"`],
+  ["an sql step for another backend, without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "backends": ["sqlite"], "statement": {"sqlite": "SELECT 1"}}`), ""],
+  ["backends listing the runner's", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["sqlite", "postgres"]}`), ""],
+  ["backends listing an unknown backend", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "mysql"]}`), `backends lists unknown backend "mysql"`],
+  ["an empty backends", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": []}`), "backends lists no backend"],
+  ["null backends", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": null}`), ""],
+  ["backends listing a backend twice", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "postgres"]}`), `backends lists "postgres" twice`],
+  ["no roots", formatScenario("", createPrimaryStep), "a scenario names its roots"],
+  ["null roots", formatScenario("null", createPrimaryStep), "a scenario names its roots"],
+  ["empty roots", formatScenario("[]", createPrimaryStep), "a scenario names at least one root"],
+  ["a root named twice", formatScenario(`["Bread", "Soup", "Bread"]`, createPrimaryStep), `roots lists "Bread" twice`],
+  ["a null root", formatScenario("[null]", createPrimaryStep), "roots lists null, not a name"],
+  ["no steps", formatScenario(`["Bread"]`), "a scenario has steps"],
+  ["an unknown scenario member", `{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": [${createPrimaryStep}]}`, `unknown scenario member "backend"`],
+  ["an unknown step member", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}`), `unknown step member "backend"`],
+];
+
+for (const [name, text, refused] of formatCases) {
+  test(`the scenario format: ${name}`, () => {
+    if (refused === "") {
+      readScenario(text, "format", backend);
+    } else {
+      expect(() => readScenario(text, "format", backend)).toThrow(refused);
+    }
+  });
+}
+
+// A scenario whose steps list their backends: a save listed for SQLite alone
+// is skipped and leaves no row, and a save listed for Postgres too writes its
+// row.
+test.skipIf(dsn === "")("a step whose backends leave out the runner's is skipped", async () => {
+  await runScenario(
+    readScenario(
+      formatScenario(
+        `["Bread"]`,
+        `{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}`,
+        `{"op": "branch", "from": "main", "name": "mix", "as": "mix"}`,
+        `{"op": "save", "ref": "mix", "backends": ["sqlite"], "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}}`,
+        `{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}}`,
+        `{"op": "save", "ref": "mix", "backends": ["sqlite", "postgres"], "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}}`,
+        `{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": [{"entity_key": "Rest"}]}}`,
+      ),
+      "backends",
+      backend,
+    ),
+  );
+});
+
+// A scenario of two roots: each has the recipe row the seeding sql steps gave
+// it (its id, its name as the title and the default actor as its creator) and
+// no other root has one, so a primary line of a root the scenario does not
+// name fails on the foreign key from recipe_ref.root_id.
+test.skipIf(dsn === "")("a scenario's roots are seeded, and only they", async () => {
+  await runScenario(
+    readScenario(
+      formatScenario(
+        `["Soup", "Pie"]`,
+        `{"op": "sql", "statement": {"postgres": "SELECT title, CASE id WHEN $1::uuid THEN 'Soup' WHEN $2::uuid THEN 'Pie' ELSE id::text END AS id, CASE created_by WHEN $3::uuid THEN 'Cook' ELSE created_by::text END AS created_by FROM recipe ORDER BY title"},
+          "args": [{"uuid": "Soup"}, {"uuid": "Pie"}, {"uuid": "Cook"}],
+          "expect": {"rows": [{"title": "Pie", "id": "Pie", "created_by": "Cook"}, {"title": "Soup", "id": "Soup", "created_by": "Cook"}]}}`,
+        `{"op": "createPrimary", "root": "Soup", "name": "main"}`,
+        `{"op": "createPrimary", "root": "Pie", "name": "main"}`,
+      ),
+      "roots",
+      backend,
+    ),
+    async (runner) => {
+      const error = await runner.engine.createPrimary(defaultActor, "Bread", "main").then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      expect((error as { code?: string } | undefined)?.code).toBe("23503");
+    },
+  );
+});
+
 for (const file of files) {
   const name = file.replace(/\.json$/, "");
   test.skipIf(dsn === "")(
     `scenario ${name}`,
     async () => {
-      const text = readFileSync(new URL(file, scenarioDir), "utf8");
-      const scenario = object(parseJson(text), "scenario", file);
-      expect(str(scenario.get("name"))).toBe(name);
-      const steps = scenario.get("steps");
-      if (!Array.isArray(steps) || steps.length === 0) {
-        throw new Error(`${file}: a scenario has steps`);
-      }
-      const runner = await Runner.open();
-      try {
-        for (const [i, value] of steps.entries()) {
-          const step = object(value, "step", `${file} step ${i}`);
-          runner.where = `${name} step ${i} (${str(step.get("op"))})`;
-          await runner.run(step);
-        }
-      } finally {
-        await runner.close();
-      }
+      const scenario = readScenario(readFileSync(new URL(file, scenarioDir), "utf8"), file, backend);
+      expect(scenario.name).toBe(name);
+      await runScenario(scenario);
     },
     120_000,
   );
@@ -216,7 +446,7 @@ class Runner {
   static async open(): Promise<Runner> {
     const scratch = await scratchSchema("vg_scenario_ts");
     const adapter = new PostgresAdapter(descriptor);
-    const engine = new Engine(core, descriptor, adapter.storage(pgPool(scratch.pool)), {
+    const engine = replayed(core, descriptor, adapter.storage(pgPool(scratch.pool)), {
       schemaEpoch: fixtureSchemaEpoch,
       snapshotEvery: fixtureSnapshotEvery,
     });
@@ -230,6 +460,20 @@ class Runner {
       this.holder = undefined;
     }
     await this.scratch.close();
+  }
+
+  /**
+   * Gives each root the row a root has on Postgres: a recipe whose id is the
+   * root, whose title is the root's name and whose creator is the default
+   * actor, all in one statement.
+   */
+  async seed(roots: string[]): Promise<void> {
+    const args = [uuidHyphenated(defaultActor)];
+    const values = roots.map((root) => {
+      args.push(uuidHyphenated(root), root);
+      return `($${args.length - 1}::uuid, $${args.length}, $1::uuid)`;
+    });
+    await this.scratch.pool.query(`INSERT INTO recipe (id, title, created_by) VALUES ${values.join(", ")}`, args);
   }
 
   fail(message: string): never {
@@ -288,7 +532,7 @@ class Runner {
     const schemaEpoch = num(step.get("schemaEpoch"));
     const snapshotEvery = num(step.get("snapshotEvery")) ?? 0;
     if (schemaEpoch !== undefined || snapshotEvery !== 0) {
-      engine = new Engine(core, descriptor, this.adapter.storage(pgPool(this.scratch.pool)), {
+      engine = replayed(core, descriptor, this.adapter.storage(pgPool(this.scratch.pool)), {
         schemaEpoch: schemaEpoch ?? fixtureSchemaEpoch,
         snapshotEvery: snapshotEvery !== 0 ? snapshotEvery : fixtureSnapshotEvery,
       });
@@ -450,7 +694,8 @@ class Runner {
           break;
         case "sql": {
           const args = ((step.get("args") as JsonValue[] | undefined) ?? []).map((arg) => this.sqlArg(arg));
-          const result = await this.scratch.pool.query({ text: str(step.get("statement")), values: args, types: rawTypes });
+          const statement = str((step.get("statement") as JsonObject).get(backend));
+          const result = await this.scratch.pool.query({ text: statement, values: args, types: rawTypes });
           // A query's rows, in the order it returns them, every column as
           // the text Postgres writes.
           rows = result.rows.map((row: Record<string, string | null>) => JSON.stringify(row));

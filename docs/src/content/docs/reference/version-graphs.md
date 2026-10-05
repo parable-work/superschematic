@@ -42,7 +42,7 @@ export abstract class Recipe {
   title: string;
 }
 
-@versioned({ retentionDays: 365 })
+@versioned({ retentionDays: 365, exclude: ["scratch"] })
 @graphMember({ graph: Recipe, order: "position" })
 export abstract class Step {
   @key
@@ -207,16 +207,23 @@ same one. Writing the types module removes each
 `versiongraph/*.json` that no graph of the schema writes and leaves any
 other file there.
 
-The descriptor is version 2, and the core refuses any other. Besides each
-kind's roles, it names the graph's tables and gives every column of each
-kind's table a value class, which a storage adapter reads to build its
-statements and to normalize the rows it reads. `root` names the column
-that holds the root's key, which the adapter writes on every row; the core
-does not read it:
+The descriptor is version 3, and the core refuses any other, version 2
+included. Besides each kind's roles, it names the graph's tables and gives
+every column of each kind's table a value class, which a storage adapter
+reads to build its statements and to normalize the rows it reads. `root`
+names the column that holds the root's key, which the adapter writes on
+every row; the core does not read it. `history` says what the kind's
+history keeps, as the sql generator's triggers and prune function hold it:
+`retentionDays` from `@versioned({ retentionDays })` (absent for none),
+`exclude`, the columns `@versioned({ exclude })` leaves out of every image,
+and `actor`, the column a delete's image names its actor in (`deleted_by`,
+else `updated_by`; absent when the kind has neither or excludes it). An
+adapter that writes history itself reads it; the Postgres adapters leave
+it to the triggers:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "graph": "recipe",
   "root": { "table": "recipe", "key": "id" },
   "refTable": "recipe_ref",
@@ -233,6 +240,7 @@ does not read it:
       "tombstone": "deleted_on_ref", "version": "_version",
       "parent": { "key": "step_key", "kind": "step" },
       "excluded": ["recipe_id"],
+      "history": { "retentionDays": 365, "exclude": [] },
       "columns": {
         "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
         "id": "uuid", "quantity": "string", "recipe_id": "uuid", "ref_id": "uuid",
@@ -249,6 +257,7 @@ does not read it:
       "order": "position",
       "units": { "timings": "keyed" },
       "excluded": ["recipe_id", "scratch", "updated_at"],
+      "history": { "retentionDays": 365, "exclude": ["scratch"], "actor": "updated_by" },
       "columns": {
         "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
         "id": "uuid", "instruction": "string", "position": "integer",
@@ -601,7 +610,7 @@ point of its own, so the core's entry loads in a browser without them:
 
 | Entry | Holds |
 | --- | --- |
-| `@superschematic/versiongraph/engine` | `Engine`, the storage interface (`Storage`, `Tx`), the named errors and `errorCode`, and the canonical rules (`canonicalRow`, `canonicalValue`) with the exact JSON codec they read with. |
+| `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, and the canonical rules (`canonicalRow`, `canonicalValue`) with the exact JSON codec they read with. |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
@@ -644,6 +653,28 @@ and a pass under way when it aborts finishes first, where Go's
 classes with the stable `code` the scenario files name
 (`VersionConflictError` is a `NotFoundError`, as in Go); `errorCode(err)`
 returns it, or the core's code for an input the core refused.
+
+`SyncEngine` runs the same operations, written once, over synchronous
+storage, for a database whose driver blocks, as SQLite's does in bun and
+Node: `SyncStorage.transact<T>(fn: (tx: SyncTx) => T): T`, and `SyncTx` has
+every method of `Tx` returning its value (`undefined` for the three with
+none, so an async method does not type-check). Each operation returns its
+value or throws, with `Engine`'s arguments, rules and errors, and a
+`SyncTx` method or a `transact` that returns a promise ends it with a
+`TypeError`. A `SyncEngine` is built over a core already instantiated,
+which `initSync` from `@superschematic/versiongraph` instantiates without
+awaiting: from the module's bytes or a compiled `WebAssembly.Module`, or,
+given neither under bun and Node, from the wasm file the package ships. A
+`SyncEngine` has no `runSweeper`, since a loop that waits between passes
+would block its thread, so its host schedules `sweep`.
+
+```ts
+import { initSync } from "@superschematic/versiongraph";
+import { SyncEngine } from "@superschematic/versiongraph/engine";
+
+const engine = new SyncEngine(initSync(), descriptor, storage, { schemaEpoch: 1, snapshotEvery: 32 });
+const main = engine.createPrimary(actor, root, "main");
+```
 
 When a schema declares a graph, tsgen writes a typed facade per graph into
 the TypeScript types package, `versiongraph/<name>.ts`, exported as

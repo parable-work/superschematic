@@ -45,7 +45,7 @@ export abstract class RecipeCard {
 
 | Option | Meaning |
 | --- | --- |
-| `retentionDays` | Greater than 0. Generates `<table>_prune_history`, which deletes history rows older than this many days, and the ORM's `PruneHistory`. Nothing schedules it for a table on its own; a [version graph](/superschematic/reference/version-graphs/#sweep)'s sweep prunes its members' history. |
+| `retentionDays` | Greater than 0 and at most 2147483647, the largest Postgres `INTEGER`, which the prune function's `retention_days` is. Generates `<table>_prune_history`, which deletes history rows older than this many days, and the ORM's `PruneHistory`. Nothing schedules it for a table on its own; a [version graph](/superschematic/reference/version-graphs/#sweep)'s sweep prunes its members' history. |
 | `partitionBy` | `"month"` is the only value. The history table is partitioned by range on `recorded_at`. The generator writes only its default partition. |
 | `pruneKeepReferencedBy` | One `{ table, keyColumn, versionColumn }` or a list of them. The prune function keeps every history row whose `(key, _version)` a row of `table` names in `(keyColumn, versionColumn)`. Requires `retentionDays`. |
 | `exclude` | Fields left out of every history image. |

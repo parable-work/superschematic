@@ -53,7 +53,7 @@ trees.
 
 ## The Postgres adapter
 
-`postgres::Adapter::new(descriptor, options)` reads a version 2 descriptor
+`postgres::Adapter::new(descriptor, options)` reads a version 3 descriptor
 and builds its statements from it at run time. It reaches Postgres through
 `postgres::Client`, a small seam of two traits (begin a transaction; query,
 execute, commit, roll back) over `postgres::SqlValue` arguments and columns.

@@ -92,11 +92,11 @@
 #      expands in the IR into PlanogramRef, PlanogramCommit, PlanogramPatch,
 #      PlanogramRelease, PlanogramSnapshotEntry, their enums and each
 #      member's graph fields and prune pins; the types module writes
-#      its descriptor (version 2: the graph's tables and every column's
-#      value class) and the ORM its facade (db.PlanogramGraph()), which
-#      compiled with the ORM module in step 17; format writes the
-#      declarations, not the expansion, and the YAML twin expands to the
-#      same types;
+#      its descriptor (version 3: the graph's tables, every column's
+#      value class and each kind's history) and the ORM its facade
+#      (db.PlanogramGraph()), which compiled with the ORM module in step
+#      17; format writes the declarations, not the expansion, and the YAML
+#      twin expands to the same types;
 #  20. acme.Rating runs in @superschematic/engine: the declaration's copy in
 #      @acme/behaviors (packages/behaviors/declarations) is what
 #      `acme-schematic behaviors --check` would write; the package
@@ -481,12 +481,14 @@ for member in Bay Facing; do
   jq -e --arg m "$member" '.types[$m].versionedConfig.pruneKeepReferencedBy == [{"table": "planogram_patch", "keyColumn": "entity_id", "versionColumn": "entity_version", "origin": "versionGraph"}, {"table": "planogram_snapshot_entry", "keyColumn": "entity_id", "versionColumn": "entity_version", "origin": "versionGraph"}]' \
     "$OUT/db-ir.json" >/dev/null
 done
-# The descriptor the core reads: version 2, with the graph's tables, a keyed
+# The descriptor the core reads: version 3, with the graph's tables, a keyed
 # conflict unit on Bay.shelf_heights, the parent edge and order on Facing,
-# the audit and root columns left out of the content, and every column's
-# value class.
+# the audit and root columns left out of the content, every column's value
+# class, and each kind's history: 90 days kept, nothing left out of an
+# image, and no actor column, since neither kind has updated_by.
 DESCRIPTOR="$DIST/types/go/shop-db/versiongraph/planogram.json"
-jq -e '.version == 2 and .graph == "planogram" and ([.kinds[].kind] == ["bay", "facing"])' "$DESCRIPTOR" >/dev/null
+jq -e '.version == 3 and .graph == "planogram" and ([.kinds[].kind] == ["bay", "facing"])' "$DESCRIPTOR" >/dev/null
+jq -e '[.kinds[].history] == [{"retentionDays": 90, "exclude": []}, {"retentionDays": 90, "exclude": []}]' "$DESCRIPTOR" >/dev/null
 jq -e '.root == {"table": "planogram", "key": "id"} and .refTable == "planogram_ref" and .commitTable == "planogram_commit" and .patchTable == "planogram_patch" and .releaseTable == "planogram_release" and .snapshotTable == "planogram_snapshot_entry"' \
   "$DESCRIPTOR" >/dev/null
 jq -e '[.kinds[] | [.table, .historyTable]] == [["bay", "bay_history"], ["facing", "facing_history"]]' "$DESCRIPTOR" >/dev/null

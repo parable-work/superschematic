@@ -1,6 +1,6 @@
 """The Postgres storage adapter of the version-graph engine (D19), the Python
 counterpart of the Go module's package ``postgres``. It builds its
-statements at run time from a graph's descriptor (version 2), which names
+statements at run time from a graph's descriptor (version 3), which names
 the graph's tables, each kind's role columns and every column's value class,
 and it returns every row as a canonical row (``canonical``).
 
@@ -171,8 +171,8 @@ class PostgresAdapter:
         hard delete's actor from: the schema's history_actor_setting naming
         key ("" is DEFAULT_HISTORY_ACTOR_SETTING)."""
         d = json.loads(descriptor) if isinstance(descriptor, str) else descriptor
-        if d.get("version") != 2:
-            raise ValueError(f"postgres: descriptor version {d.get('version', 0)}; this adapter reads version 2")
+        if d.get("version") != 3:
+            raise ValueError(f"postgres: descriptor version {d.get('version', 0)}; this adapter reads version 3")
         root = d.get("root") or {}
         for member, value in (
             ("root table", root.get("table")),

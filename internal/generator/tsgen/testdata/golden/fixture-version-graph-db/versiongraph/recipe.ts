@@ -38,11 +38,11 @@ import {
 /**
  * RecipeGraphDescriptor is the descriptor of the Recipe version graph:
  * its tables, which column of each kind's rows plays which role, how each
- * column merges, which columns are not content and each column's value
- * class.
+ * column merges, which columns are not content, each column's value class
+ * and what each kind's history keeps.
  */
 export const RecipeGraphDescriptor: Descriptor = {
-  "version": 2,
+  "version": 3,
   "graph": "recipe",
   "root": {
     "table": "recipe",
@@ -68,6 +68,9 @@ export const RecipeGraphDescriptor: Descriptor = {
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "deleted_on_ref": "boolean",
@@ -98,6 +101,10 @@ export const RecipeGraphDescriptor: Descriptor = {
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "retentionDays": 365,
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "deleted_on_ref": "boolean",
@@ -127,6 +134,9 @@ export const RecipeGraphDescriptor: Descriptor = {
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "body": "string",
@@ -160,6 +170,13 @@ export const RecipeGraphDescriptor: Descriptor = {
         "created_by",
         "updated_at"
       ],
+      "history": {
+        "retentionDays": 365,
+        "exclude": [
+          "scratch"
+        ],
+        "actor": "updated_by"
+      },
       "columns": {
         "_version": "integer",
         "created_at": "dateTime",
@@ -190,6 +207,9 @@ export const RecipeGraphDescriptor: Descriptor = {
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "bites": "integer[][]",
@@ -225,6 +245,9 @@ export const RecipeGraphDescriptor: Descriptor = {
       "excluded": [
         "recipe_id"
       ],
+      "history": {
+        "exclude": []
+      },
       "columns": {
         "_version": "integer",
         "deleted_on_ref": "boolean",

@@ -1,8 +1,8 @@
 {
   "name": "unset_and_seal",
   "description": "A change set's override is unset, which removes its row and reads the entity through the base again; a stale version is fenced out; a seal with nothing to commit seals the ref, which then refuses writes; a seal with changes commits them.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "mix", "as": "mix"},
     {"op": "save", "ref": "mix", "edits": {"step": {"upsert": [

@@ -39,6 +39,7 @@ import {
   type Finding,
   type FindingCode,
   type KindDescriptor,
+  type KindHistory,
   type MergeInput,
   type MergeOutput,
   type OperationName,
@@ -216,6 +217,11 @@ const valueClass = literal<ValueClass>("ValueClass", {
 });
 
 const parentEdge = decoder<ParentEdge>("ParentEdge", { key: req(same), kind: req(same) });
+const kindHistory = decoder<KindHistory>("KindHistory", {
+  retentionDays: opt(same),
+  exclude: req(same),
+  actor: opt(same),
+});
 const kindDescriptor = decoder<KindDescriptor>("KindDescriptor", {
   kind: req(same),
   table: req(same),
@@ -232,6 +238,7 @@ const kindDescriptor = decoder<KindDescriptor>("KindDescriptor", {
   singleton: opt(same),
   units: opt(record(unit)),
   excluded: opt(same),
+  history: req(kindHistory),
   columns: req(record(valueClass)),
 });
 const rootTable = decoder<RootTable>("RootTable", { table: req(same), key: req(same) });

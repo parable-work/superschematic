@@ -77,7 +77,7 @@ type kindRoles struct {
 	Version   string `json:"version"`
 }
 
-// New returns the engine of the graph descriptor describes (version 2),
+// New returns the engine of the graph descriptor describes (version 3),
 // over s. The core checks the descriptor.
 func New(descriptor json.RawMessage, s storage.Storage, opts Options) (*Engine, error) {
 	if _, err := versiongraph.Validate(versiongraph.TreeRequest{Descriptor: descriptor, Tree: json.RawMessage(`{}`)}); err != nil {

@@ -20,7 +20,8 @@ use crate::*;
 
 /// The descriptor of the {{$g.Name}} version graph: its tables, which column
 /// of each kind's rows plays which role, how each column merges, which
-/// columns are not content and each column's value class.
+/// columns are not content, each column's value class and what each kind's
+/// history keeps.
 pub const {{$g.ConstPrefix}}_GRAPH_DESCRIPTOR: &str = {{$g.Descriptor}};
 
 /// The schema epoch every commit of the {{$g.Name}} graph records. Reading a

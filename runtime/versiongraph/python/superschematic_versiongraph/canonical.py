@@ -7,7 +7,7 @@ vectors.
 
 A canonical row is a JSON object keyed by column name whose values are the
 schema runtime's JSON for each field's type, in one canonical form per value
-class. A graph descriptor (version 2) gives every column a value class; each
+class. A graph descriptor (version 3) gives every column a value class; each
 class has one rule. The rules read and write JSON text through ``exactjson``,
 so a number keeps its digits.
 """

@@ -116,7 +116,9 @@ loss. It also checks every vector's input and output against the types
 in `contract.py` and fails when a member or literal there appears in no
 vector. `tests/test_binding.py` checks the errors, that many calls do not
 grow the process, and that the core runs with the GIL released.
-`tests/test_engine.py` checks the engine's rules that need no database.
+`tests/test_engine.py` checks the engine's rules that need no database, and
+`tests/test_scenarios.py` reads every scenario file and checks the scenario
+format's rules without one.
 
 The Postgres tests need `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and
 skip without it; `make versiongraph-scenarios-python` fails without it.

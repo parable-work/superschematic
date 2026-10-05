@@ -107,7 +107,7 @@ func checkTyped[Req, Res any](t *testing.T, v vector, fn func(Req) (*Res, error)
 }
 
 func TestErrorIsReturnedAsError(t *testing.T) {
-	descriptor := `{"version":2,"root":{"table":"recipe","key":"id"},"refTable":"recipe_ref",` +
+	descriptor := `{"version":3,"root":{"table":"recipe","key":"id"},"refTable":"recipe_ref",` +
 		`"commitTable":"recipe_commit","patchTable":"recipe_patch","releaseTable":"recipe_release",` +
 		`"snapshotTable":"recipe_snapshot_entry","kinds":[]}`
 	_, err := Validate(TreeRequest{Descriptor: json.RawMessage(descriptor), Tree: json.RawMessage(`[]`)})
@@ -117,6 +117,32 @@ func TestErrorIsReturnedAsError(t *testing.T) {
 	}
 	if coreErr.Code != "invalid_request" || !strings.Contains(err.Error(), "a tree is a JSON object") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestVersion2DescriptorIsRefused: the fixture's descriptor as version 2
+// wrote it, without each kind's history, is invalid_descriptor.
+func TestVersion2DescriptorIsRefused(t *testing.T) {
+	text, err := os.ReadFile(filepath.Join("..", "testdata", "fixture", "recipe.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var descriptor map[string]any
+	if err := json.Unmarshal(text, &descriptor); err != nil {
+		t.Fatal(err)
+	}
+	descriptor["version"] = 2
+	for _, kind := range descriptor["kinds"].([]any) {
+		delete(kind.(map[string]any), "history")
+	}
+	v2, err := json.Marshal(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Validate(TreeRequest{Descriptor: v2, Tree: json.RawMessage(`{}`)})
+	var coreErr *Error
+	if !errors.As(err, &coreErr) || coreErr.Code != "invalid_descriptor" || !strings.Contains(err.Error(), "version 2 is not supported") {
+		t.Fatalf("Validate of a version 2 descriptor = %v, want invalid_descriptor", err)
 	}
 }
 

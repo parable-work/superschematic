@@ -18,6 +18,7 @@ __all__ = [
     "ElementClass",
     "ValueClass",
     "ParentEdge",
+    "KindHistory",
     "KindDescriptor",
     "RootTable",
     "Descriptor",
@@ -116,6 +117,25 @@ class ParentEdge(TypedDict):
     """The parent's kind, which may be the kind itself."""
 
 
+class _KindHistoryRequired(TypedDict):
+    exclude: List[str]
+    """The columns every history image leaves out: none of them content, nor a
+    role column other than the author."""
+
+
+class KindHistory(_KindHistoryRequired, total=False):
+    """What a kind's history keeps: the facts the sql generator's triggers and
+    prune function hold, for a storage adapter that writes history itself. The
+    core checks it against the kind's columns and does not read it otherwise."""
+
+    retentionDays: int
+    """How many days of history pruning keeps, an integer from 1 to
+    2147483647; absent for no retention."""
+    actor: str
+    """The column a delete's image names its actor in, which history keeps;
+    absent for none."""
+
+
 class _KindDescriptorRequired(TypedDict):
     kind: str
     """The kind's name: the tree member that holds its rows. Unique."""
@@ -133,6 +153,8 @@ class _KindDescriptorRequired(TypedDict):
     """A boolean column; true marks the row as the entity's delete."""
     version: str
     """The row version column."""
+    history: KindHistory
+    """What the kind's history keeps."""
     columns: Dict[str, ValueClass]
     """Every column of the kind's table, with its value class."""
 
@@ -164,8 +186,8 @@ class RootTable(TypedDict):
 
 
 class _DescriptorRequired(TypedDict):
-    version: Literal[2]
-    """The descriptor format; the core reads version 2 and refuses any other."""
+    version: Literal[3]
+    """The descriptor format; the core reads version 3 and refuses any other."""
     root: RootTable
     refTable: str
     commitTable: str

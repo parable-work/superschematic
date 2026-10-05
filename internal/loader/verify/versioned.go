@@ -2,12 +2,19 @@ package verify
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
+
+// maxRetentionDays is the longest @versioned retentionDays: the largest
+// Postgres INTEGER, which the generated prune function's retention_days
+// is. A larger default creates a function no call can run, and the version
+// graph's core refuses a descriptor that carries it.
+const maxRetentionDays = math.MaxInt32
 
 // sqlIdentifierPattern matches the unquoted snake_case identifiers the prune
 // exclusion is interpolated into DDL as; anything else is rejected up front.
@@ -74,6 +81,9 @@ func checkVersionedConfig(schema *ir.Schema, td *ir.TypeDef, singleKey bool, r *
 	cfg := td.VersionedConfig
 	if cfg.RetentionDays != nil && *cfg.RetentionDays <= 0 {
 		r.errorf(td.Owner, "%s: @versioned retentionDays must be greater than 0", td.Name)
+	}
+	if cfg.RetentionDays != nil && *cfg.RetentionDays > maxRetentionDays {
+		r.errorf(td.Owner, "%s: @versioned retentionDays must be at most %d, the largest Postgres INTEGER the prune function takes, got %d", td.Name, maxRetentionDays, *cfg.RetentionDays)
 	}
 	if cfg.PartitionBy != "" && cfg.PartitionBy != "month" {
 		r.errorf(td.Owner, "%s: @versioned partitionBy must be \"month\" when set", td.Name)

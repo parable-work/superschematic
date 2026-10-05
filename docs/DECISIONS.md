@@ -2279,8 +2279,12 @@ table the plan drops; a change between a list, a JSON value and text, all
 refuses a service whose new version does not list `sqlite`, and builds
 the previous version's SQLite model without checking its list; and the
 SQLite convergence test compares a column's collation through an index
-it builds and rolls back, since no pragma reports it. Each change that
-lands a piece updates this paragraph.
+it builds and rolls back, since no pragma reports it. D32 takes the
+version graph to SQLite through its adapter's own tables, which write
+history without triggers, not through this dialect, so `@versioned` stays
+refused here. D30's deploy runs a plan's `expand` steps before the servers
+roll and its `contract` steps after (`docs/stack-model.md`, sections 5.3
+and 11.2). Each change that lands a piece updates this paragraph.
 
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
@@ -2506,10 +2510,46 @@ and each changes a D16 rule.
 | 5 | What D16 gains, the scalar catalog's value classes, and `Branches`: its declaration and registration in Go, its implementation in `@superschematic/engine`, and the docs. |
 | Later | SQLite adapters in Go (a `database/sql` seam), Python (`sqlite3`) and Rust (`rusqlite`), each running every scenario on SQLite, as D19 built its Postgres adapters. |
 
-Phases 1, 2 and 3 do not depend on each other. Phase 4 needs all three,
+Phases 1, 2 and 3 do not depend on each other; phase 4 needs all three,
 and phase 5 needs phase 4.
 
 Nothing here is built.
+
+## D33. The session store reports a revoked session's `DeletedAt`
+
+The core `session` provider's generated session store looked a session up
+with `IncludeDeleted: true`, so it found a soft-deleted (revoked) session,
+but built the `session.Record` without `DeletedAt`. The bootstrap template
+(`0b783d15`) set `DeletedAt: session.DeletedAt` for every Session table,
+which does not compile against one without `deletedAt`, such as
+`examples/acme-shop`'s; the fix that made the stores compile there
+(`95a73271`) dropped that line and kept `IncludeDeleted`. A caller refuses
+a session when `record.DeletedAt != nil`, as acme-shop's auth middleware
+does, so over a soft-deletable Session table a revoked session
+authenticated.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The store finds a revoked session and reports when it was revoked: `Record.DeletedAt` is the row's `deletedAt`, and the caller refuses it as it refuses an expired one. `session.Record` carries `DeletedAt` for this, and the store already returns an expired session for the caller to refuse, so the caller decides in one place that a session has ended. It can also tell a revoked token, which is worth logging, from a jti that names no session. | Dropping `IncludeDeleted`, so the ORM's soft-delete filter turns a revoked session into `ErrNotFound`. That fails closed for a caller that never checks `DeletedAt`, but every caller must check `ExpiresAt` already, `Record.DeletedAt` would be nil from every generated store, and a revoked token would look like an unknown one. |
+| The store reads soft-deleted rows only when it can report them: when the Session table's `deletedAt` is a nullable `Temporal.DateTime` (`AuthModel.SessionSoftDelete`, which `AnalyzeSessionStores` sets). For any other Session table it passes no find options. The ORM treats a `deletedAt` of any shape as soft delete, so a required or non-DateTime one leaves revoked rows to the ORM's filter, and the store answers `ErrNotFound`. | Passing `IncludeDeleted` for every Session table, as before. Without `deletedAt` it does nothing, but with a `deletedAt` the store cannot report it is the same bug. |
+
+`AuthModel.SessionSoftDelete` is new. An extension's provider that calls
+`registry.AnalyzeSessionStores` gets it and may ignore it.
+
+`internal/generator/apigen/session_store_test.go` compiles `fixture-api`
+over a `fixture-db` given a `User` table and a soft-deletable `Session`
+table, and runs a test in the generated module: a revoked session is found
+with its `DeletedAt`, and the check acme-shop's middleware makes refuses
+it. That test runs against an in-memory repository that applies the ORM's
+`IncludeDeleted` rule, and against Postgres, revoking with the generated
+`DeleteOne`, when `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` is set.
+`internal/generator/apigen/sessionauth/provider_test.go` checks the probe
+and both renderings of the store. `fixture-db` has no Session table, so
+the `fixture-api-session` golden is unchanged. For a Session table
+without `deletedAt` the store now passes `nil` find options and is
+otherwise unchanged.
+
+The rule is reversible until the first release.
 
 ## D29. The Rust server enforces a route's auth and traffic controls
 

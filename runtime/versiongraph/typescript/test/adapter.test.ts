@@ -27,7 +27,7 @@ const refusals: [string, (d: Doc) => void, string][] = [
     (d) => delete d.kinds[0]!.columns._version,
     'version column "_version" is not in its columns',
   ],
-  ["a descriptor of another version", (d) => (d.version = 1), "reads version 2"],
+  ["a descriptor of version 2", (d) => (d.version = 2), "reads version 3"],
 ];
 
 for (const [name, edit, refuse] of refusals) {

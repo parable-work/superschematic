@@ -158,9 +158,10 @@ versiongraph-scenarios: versiongraph
 	cd runtime/versiongraph/go && go test -count=1 -v -run '^TestScenarios$$' ./engine/
 
 # Every version-graph scenario through the TypeScript engine and its Postgres
-# adapter, with the canonical vectors checked against Postgres and the
-# adapter's, the sweeper's and the facade's own tests, against the Postgres
-# that SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+# adapter, each operation replayed through SyncEngine, with the canonical
+# vectors checked against Postgres and the adapter's, the sweeper's and the
+# facade's own tests, against the Postgres that
+# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
 versiongraph-scenarios-ts:
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
