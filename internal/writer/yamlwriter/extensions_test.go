@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -98,4 +100,17 @@ func TestWriteRootSlotsNeedTheDocumentForm(t *testing.T) {
 	}
 	got := readBack(t, out)
 	requireEqualDocs(t, doc, got, out)
+}
+
+// An element of a byte sequence outside 0 to 255 is refused, not wrapped
+// into a byte: 305 and -207 would both wrap to '1', which is valid JSON.
+func TestReplaceWithJSONRefusesAnElementThatIsNotAByte(t *testing.T) {
+	for _, value := range []string{"305", "-207"} {
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Tag: "!!int", Value: value},
+		}}
+		if err := replaceWithJSON(seq, "extensions", "acme"); err == nil {
+			t.Errorf("element %s: replaceWithJSON accepted it", value)
+		}
+	}
 }
