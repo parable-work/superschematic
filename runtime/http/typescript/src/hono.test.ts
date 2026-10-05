@@ -1,8 +1,20 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { createHmac } from 'node:crypto';
 import { parseIdentityUUID } from 'superscalar/scalars';
 import { Hono } from 'hono';
-import { HttpProblem, MemoryRateLimitStore, OperationResult, type OperationSpec, type Principal, type RateLimitStore } from './index';
+import {
+  HttpProblem,
+  MemoryRateLimitStore,
+  OperationResult,
+  serviceAuthenticator,
+  signedTokenSource,
+  type OperationSpec,
+  type Principal,
+  type RateLimitStore,
+  type RequestContext,
+  type ServiceAuthConfig,
+  type ServiceAuthenticator,
+} from './index';
 import { errorHandler, honoPath, mountManualOperation, mountOperation, notFoundHandler, parseJsonBody, type WebhookVerifier } from './hono';
 
 const getOrder: OperationSpec = {
@@ -620,5 +632,204 @@ describe('@hmacVerified', () => {
     expect(called).toBe(true);
     expect(response.status).toBe(403);
     expect(await response.text()).toBe('go away');
+  });
+});
+
+describe('service callers (D37)', () => {
+  // The clock the tokens are signed and checked against, in milliseconds.
+  const now = () => 1_767_225_600_000;
+  const signers: Record<string, (fresh: boolean) => Promise<string>> = {};
+  let config: ServiceAuthConfig;
+
+  beforeAll(async () => {
+    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as CryptoKeyPair;
+    const jwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
+    const key = { kty: 'OKP', crv: 'Ed25519', d: jwk.d!, x: jwk.x!, kid: 'edge-1' } as const;
+    for (const caller of ['orders', 'billing', 'stranger']) {
+      signers[caller] = signedTokenSource(key, { issuer: 'local', subject: caller, audience: 'shop-api' }, { now });
+    }
+    config = {
+      issuers: [
+        {
+          issuer: 'local',
+          audience: 'shop-api',
+          algorithms: ['EdDSA'],
+          keys: [{ kty: 'OKP', crv: 'Ed25519', x: key.x, kid: key.kid }],
+          callers: {
+            orders: { deployable: 'orders', serves: ['shop-orders'] },
+            billing: { deployable: 'billing', serves: ['shop-billing'] },
+          },
+        },
+      ],
+    };
+  });
+
+  const bare = { pathParams: [], queryParams: [], bodyParams: [], manual: false, namespace: 'stock' } as const;
+  const userClause = (permissions: string[]) => ({ public: false, required: true, permissions });
+  // @requireService() alone: any caller, no end user.
+  const reindex: OperationSpec = { ...bare, name: 'reindex', method: 'POST', path: '/api/reindex', auth: { public: false, required: false, permissions: [] }, service: { mode: 'require', from: [] } };
+  // @requireService({ from: [ShopOrders] }) with a user clause: the orders server forwarding a user who may.
+  const reserve: OperationSpec = { ...bare, name: 'reserve', method: 'POST', path: '/api/reserve', auth: userClause(['orders.read']), service: { mode: 'require', from: ['shop-orders'] } };
+  // @allowService({ from: [ShopOrders] }) with a user clause: a user who may, or the orders server alone.
+  const release: OperationSpec = { ...bare, name: 'release', method: 'POST', path: '/api/release', auth: userClause(['orders.read']), service: { mode: 'allow', from: ['shop-orders'] } };
+  // A user clause and no service clause.
+  const plain: OperationSpec = { ...bare, name: 'plain', method: 'GET', path: '/api/plain', auth: userClause(['orders.read']) };
+  const releaseManual: OperationSpec = { ...release, name: 'releaseManual', path: '/api/release-manual', manual: true };
+
+  function serviceApp(authenticateService?: ServiceAuthenticator) {
+    const authenticated: string[] = [];
+    const app = new Hono();
+    const options = {
+      authenticate: async (ctx: RequestContext) => {
+        authenticated.push(ctx.operation.name);
+        return principals[ctx.headers.get('x-user') ?? ''] ?? (ctx.bearerToken === 'reader-token' ? principals.reader! : null);
+      },
+      ...(authenticateService ? { authenticateService } : {}),
+    };
+    const report = async (ctx: RequestContext) => ({ service: ctx.serviceCaller, user: ctx.principal?.subject ?? null });
+    for (const spec of [reindex, reserve, release, plain, health]) mountOperation(app, spec, report, options);
+    mountManualOperation(app, releaseManual, (c, ctx) => c.json({ service: ctx.serviceCaller?.deployable ?? null, user: ctx.principal?.subject ?? null }), options);
+    return { app, authenticated };
+  }
+
+  const verified = () => serviceApp(serviceAuthenticator(config, { now }));
+  const as = async (caller: string) => ({ 'service-authorization': `Bearer ${await signers[caller]!(false)}` });
+  const ORDERS = { deployable: 'orders', serves: ['shop-orders'], subject: 'orders' };
+
+  async function call(app: Hono, path: string, headers: Record<string, string> = {}) {
+    const response = await app.request(path, { method: path === '/api/plain' || path === '/api/health' ? 'GET' : 'POST', headers });
+    return { status: response.status, body: await response.json() };
+  }
+
+  test('@requireService alone admits any caller and refuses a request without one', async () => {
+    const { app, authenticated } = verified();
+    expect(await call(app, '/api/reindex', await as('billing'))).toMatchObject({ status: 200, body: { data: { service: { deployable: 'billing' }, user: null } } });
+    const missing = await call(app, '/api/reindex', { 'x-user': 'writer' });
+    expect(missing.status).toBe(401);
+    expect(missing.body).toMatchObject({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Service credential required', code: 'service_unauthorized' });
+    expect(authenticated).toEqual([]);
+  });
+
+  test('@requireService with a user clause needs a listed caller forwarding a user who may', async () => {
+    const { app, authenticated } = verified();
+    expect(await call(app, '/api/reserve', { ...(await as('orders')), authorization: 'Bearer reader-token' })).toMatchObject({
+      status: 200,
+      body: { data: { service: ORDERS, user: 'u1' } },
+    });
+    const unlisted = await call(app, '/api/reserve', { ...(await as('billing')), 'x-user': 'reader' });
+    expect(unlisted.status).toBe(403);
+    expect(unlisted.body).toMatchObject({ status: 403, title: 'Forbidden', detail: 'Service not permitted', code: 'service_forbidden' });
+    expect(await call(app, '/api/reserve', { 'x-user': 'reader' })).toMatchObject({ status: 401, body: { code: 'service_unauthorized' } });
+    expect(await call(app, '/api/reserve', await as('orders'))).toMatchObject({ status: 401, body: { code: 'unauthorized' } });
+    expect(authenticated).toEqual(['reserve', 'reserve']);
+  });
+
+  test('the service refusal wins when both credentials are bad, and the end user is not authenticated', async () => {
+    const { app, authenticated } = verified();
+    const bad = await call(app, '/api/reserve', { 'service-authorization': 'Bearer not.a.token', authorization: 'Bearer nobody' });
+    expect(bad.status).toBe(401);
+    expect(bad.body).toMatchObject({ detail: 'Invalid service credential', code: 'service_unauthorized' });
+    const malformed = await call(app, '/api/reserve', { 'service-authorization': 'Bearer not.a.token', authorization: 'Bearer not a token' });
+    expect(malformed.body).toMatchObject({ code: 'service_unauthorized' });
+    const stranger = await call(app, '/api/reserve', { ...(await as('stranger')), authorization: 'Bearer nobody' });
+    expect(stranger.status).toBe(403);
+    expect(stranger.body).toMatchObject({ code: 'service_forbidden' });
+    expect(authenticated).toEqual([]);
+  });
+
+  test('@allowService: a listed caller stands in for the user and skips the end-user step entirely', async () => {
+    const { app, authenticated } = verified();
+    expect(await call(app, '/api/release', await as('orders'))).toMatchObject({ status: 200, body: { data: { service: ORDERS, user: null } } });
+    // Not even a malformed Authorization header is refused: hono/bearer-auth's refusal belongs to the end-user step.
+    expect(await call(app, '/api/release', { ...(await as('orders')), authorization: 'Bearer not a token' })).toMatchObject({ status: 200 });
+    expect(authenticated).toEqual([]);
+  });
+
+  test('@allowService: anyone else goes through the user clause', async () => {
+    const { app, authenticated } = verified();
+    expect(await call(app, '/api/release', await as('billing'))).toMatchObject({ status: 401, body: { code: 'unauthorized' } });
+    expect(await call(app, '/api/release', { ...(await as('billing')), 'x-user': 'reader' })).toMatchObject({
+      status: 200,
+      body: { data: { service: { deployable: 'billing' }, user: 'u1' } },
+    });
+    expect(await call(app, '/api/release', { authorization: 'Bearer reader-token' })).toMatchObject({ status: 200, body: { data: { service: null, user: 'u1' } } });
+    const malformed = await app.request('/api/release', { method: 'POST', headers: { authorization: 'Bearer not a token' } });
+    expect(malformed.status).toBe(400);
+    expect(await call(app, '/api/release', { 'service-authorization': 'Bearer not.a.token', 'x-user': 'reader' })).toMatchObject({
+      status: 401,
+      body: { code: 'service_unauthorized' },
+    });
+    expect(authenticated).toEqual(['release', 'release', 'release']);
+  });
+
+  test('a route without a service clause verifies a credential that is present, then runs the end-user step', async () => {
+    const { app } = verified();
+    expect(await call(app, '/api/plain', { ...(await as('orders')), 'x-user': 'reader' })).toMatchObject({ status: 200, body: { data: { service: ORDERS, user: 'u1' } } });
+    expect(await call(app, '/api/plain', await as('orders'))).toMatchObject({ status: 401, body: { code: 'unauthorized' } });
+    expect(await call(app, '/api/plain', { 'service-authorization': 'Bearer not.a.token', 'x-user': 'reader' })).toMatchObject({ status: 401, body: { code: 'service_unauthorized' } });
+    expect(await call(app, '/api/health', { 'service-authorization': 'Basic x' })).toMatchObject({ status: 401, body: { code: 'service_unauthorized' } });
+    expect(await call(app, '/api/plain', { 'x-user': 'reader' })).toMatchObject({ status: 200, body: { data: { service: null, user: 'u1' } } });
+  });
+
+  test('without a service authenticator a route with a service clause answers 401, and other routes ignore the header', async () => {
+    const { app, authenticated } = serviceApp();
+    for (const path of ['/api/reindex', '/api/reserve', '/api/release']) {
+      const refused = await call(app, path, { ...(await as('orders')), 'x-user': 'reader' });
+      expect(refused.status).toBe(401);
+      expect(refused.body).toMatchObject({ detail: 'Service credential required', code: 'service_unauthorized' });
+    }
+    expect(authenticated).toEqual([]);
+    expect(await call(app, '/api/plain', { ...(await as('orders')), 'x-user': 'reader' })).toMatchObject({ status: 200, body: { data: { service: null, user: 'u1' } } });
+    expect(await call(app, '/api/plain', { 'service-authorization': 'Bearer not.a.token', 'x-user': 'reader' })).toMatchObject({ status: 200 });
+  });
+
+  test('keys that cannot be fetched answer 503 service_unavailable', async () => {
+    const fetched: ServiceAuthConfig = {
+      issuers: [{ ...config.issuers[0]!, keys: undefined, jwksUrl: 'https://keys.test/edge' }],
+    };
+    const { app } = serviceApp(serviceAuthenticator(fetched, { now, fetchKeys: async () => Promise.reject(new Error('unreachable')) }));
+    const unavailable = await call(app, '/api/release', { ...(await as('orders')), 'x-user': 'reader' });
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.body).toMatchObject({ title: 'Service Unavailable', detail: 'Service credential could not be checked', code: 'service_unavailable' });
+  });
+
+  test('a manual route runs the service step and hands its caller to the hook', async () => {
+    const { app, authenticated } = verified();
+    const response = await app.request('/api/release-manual', { method: 'POST', headers: await as('orders') });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ service: 'orders', user: null });
+    expect((await app.request('/api/release-manual', { method: 'POST', headers: await as('billing') })).status).toBe(401);
+    expect(authenticated).toEqual(['releaseManual']);
+  });
+
+  test('the service step runs after the webhook verifier, the rate limit and the body limit', async () => {
+    const order: string[] = [];
+    const app = new Hono();
+    const options = {
+      authenticateService: async () => {
+        order.push('service');
+        throw new HttpProblem(401, 'Invalid service credential', { code: 'service_unauthorized' });
+      },
+    };
+    const verifier: WebhookVerifier = async (c, next) => {
+      order.push('verifier');
+      if (c.req.header('x-signature') !== 'ok') throw new HttpProblem(401, 'The webhook signature does not match', { code: 'invalid_signature' });
+      await next();
+    };
+    const limited: OperationSpec = { ...createOrder, name: 'limitedReserve', path: '/api/limited-reserve', rateLimitPerMinute: 1, webhookProvider: 'shop' };
+    mountOperation(app, limited, async () => null, options, { webhookVerifier: verifier });
+    const post = (body: string, headers: Record<string, string> = {}) =>
+      app.request('/api/limited-reserve', { method: 'POST', headers: { 'x-real-ip': '198.51.100.20', 'service-authorization': 'Bearer x.y.z', ...headers }, body });
+
+    expect(await (await post('{"name":"a"}')).json()).toMatchObject({ code: 'invalid_signature' });
+    expect(order).toEqual(['verifier']);
+    const large = JSON.stringify({ name: 'x'.repeat(100) });
+    expect((await post(large, { 'x-signature': 'ok', 'content-length': String(large.length) })).status).toBe(413);
+    expect(order).toEqual(['verifier', 'verifier']);
+    expect(await (await post('{"name":"a"}', { 'x-signature': 'ok' })).json()).toMatchObject({ code: 'service_unauthorized' });
+    expect(order).toEqual(['verifier', 'verifier', 'verifier', 'service']);
+    // The refused request took the rate limit's one token: the limit ran first.
+    expect((await post('{"name":"a"}', { 'x-signature': 'ok' })).status).toBe(429);
+    expect(order).toEqual(['verifier', 'verifier', 'verifier', 'service', 'verifier']);
   });
 });

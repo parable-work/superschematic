@@ -1,5 +1,6 @@
 import type { Principal } from './auth.js';
 import type { ParamSpec } from './params.js';
+import type { ServiceCaller } from './serviceauth.js';
 
 /*
 The operation table the generated router carries. One OperationSpec per @rest
@@ -14,6 +15,21 @@ export interface OperationAuth {
   readonly required: boolean;
   /** @requirePermission: the principal must cover one of these (403 otherwise). */
   readonly permissions: readonly string[];
+}
+
+/**
+ * @requireService or @allowService (D37): which services may call. The
+ * service step applies it before the end-user step; see authorizeService.
+ */
+export interface OperationServiceCallers {
+  /**
+   * require: only a listed service, then the user clause when there is one.
+   * allow: a listed service stands in for the end user and skips the user
+   * clause; any other request goes through the user clause.
+   */
+  readonly mode: 'require' | 'allow';
+  /** The API services whose servers are listed; empty lists every caller the server's service config knows. */
+  readonly from: readonly string[];
 }
 
 export interface OperationInput {
@@ -38,6 +54,8 @@ export interface OperationSpec {
   /** The result is a list of lists (T[][]): the adapter sends a nullish outer or inner list as []. */
   readonly outputIsArrayOfArrays?: boolean;
   readonly auth: OperationAuth;
+  /** @requireService or @allowService; absent when the operation has neither. */
+  readonly service?: OperationServiceCallers;
   /** @bodyLimit in bytes; the adapter's default applies when absent. */
   readonly bodyLimitBytes?: number;
   /** @rateLimit: requests per minute per client (the Go runtime's per-route, per-IP limiter); 429 past it. */
@@ -70,4 +88,10 @@ export interface RequestContext {
   readonly query: URLSearchParams;
   /** The authenticated caller, null on public and unauthenticated routes. */
   principal: Principal | null;
+  /**
+   * The calling service, verified from Service-Authorization on any route
+   * (D37); null when the request carried no service credential or the
+   * router has no service authenticator.
+   */
+  serviceCaller: ServiceCaller | null;
 }

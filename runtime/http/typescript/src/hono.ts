@@ -16,10 +16,12 @@ import {
   notImplemented,
   payloadTooLarge,
   problemResponse,
+  serviceUnauthorized,
   tooManyRequests,
   unauthorized,
 } from './problem.js';
 import { MemoryRateLimitStore, clientIpKey, clientIpOf, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
+import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
 
 /*
 The Hono binding of the http runtime. A generated router calls
@@ -28,9 +30,9 @@ handler that forwards decoded arguments to the service's implementation; the
 adapter owns the request pipeline:
 
   request id -> @hmacVerified -> [hono/timeout: hono/body-limit ->
-  hono/bearer-auth -> @rateLimit -> permission gate -> path/query
-  decoding -> JSON parse -> strict input parser -> implementation]
-  -> envelope
+  hono/bearer-auth -> @rateLimit -> service step -> permission gate ->
+  path/query decoding -> JSON parse -> strict input parser ->
+  implementation] -> envelope
 
 and turns every failure into the problem envelope. hono/body-limit answers
 413 to a declared Content-Length over the cap, and reads a body without one
@@ -43,6 +45,14 @@ expressed as a JSON result).
 An @hmacVerified operation is mounted with its provider's WebhookVerifier,
 which runs before every other step, as the Go router runs the provider's
 WebhookVerifier: a request without a valid signature costs nothing else.
+
+The service step (D37) runs right before the permission gate: with a
+service authenticator it verifies Service-Authorization on every route and
+puts the caller on ctx.serviceCaller, then applies the operation's
+@requireService or @allowService clause. A listed caller on an
+@allowService route skips the end-user step, so a malformed Authorization
+header that hono/bearer-auth refuses is refused at the end-user step, not
+ahead of the service step.
 
 @rateLimit stays in this package (Go uses httprate). @timeout and the body
 cap are hono/timeout and hono/body-limit; Bearer extraction is
@@ -58,10 +68,19 @@ operation that needs them is a manual route.
 export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
 
 const extractedBearer = new WeakMap<Request, string>();
+/** hono/bearer-auth's refusal of a malformed Authorization header, raised at the end-user step. */
+const bearerRefusals = new WeakMap<Request, unknown>();
 
 export interface RouterRuntimeOptions {
   /** Establishes the caller on routes that require one. Absent means every such route answers 401. */
   authenticate?: Authenticator;
+  /**
+   * Establishes the calling service from Service-Authorization, on every
+   * route, before the end-user step (D37); serviceAuthenticator is the
+   * standard one. Absent means a route with a service clause answers 401
+   * service_unauthorized, and other routes ignore the header.
+   */
+  authenticateService?: ServiceAuthenticator;
   /**
    * Decides whether the caller's permissions satisfy an operation's
    * @requirePermission list. Absent means hasAnyPermission: dotted-path
@@ -179,6 +198,7 @@ export function requestContextOf<E extends Env>(c: Context<E>, operation: Operat
     pathParams,
     query: url.searchParams,
     principal: null,
+    serviceCaller: null,
   };
 }
 
@@ -235,7 +255,9 @@ function timeoutMiddleware(timeoutSeconds: number): MiddlewareHandler {
 /**
  * Extracts a Bearer token with hono/bearer-auth when the header is present.
  * Missing Authorization is left to authenticate + authorize (401), so a
- * custom Authenticator that does not use Bearer still works.
+ * custom Authenticator that does not use Bearer still works. A malformed
+ * header is refused at the end-user step (establishCaller), which a service
+ * admitted to an @allowService route skips.
  */
 function bearerMiddleware(): MiddlewareHandler {
   const parse = bearerAuth({
@@ -245,8 +267,14 @@ function bearerMiddleware(): MiddlewareHandler {
     },
   });
   return async (c, next) => {
-    if (!c.req.header('authorization')) return next();
-    return parse(c, next);
+    if (c.req.header('authorization')) {
+      try {
+        await parse(c, async () => {});
+      } catch (error) {
+        bearerRefusals.set(c.req.raw, error);
+      }
+    }
+    return next();
   };
 }
 
@@ -273,9 +301,24 @@ function hasBody(spec: OperationSpec): boolean {
   return spec.method !== 'GET' && (spec.input !== undefined || spec.bodyParams.length > 0);
 }
 
+/**
+ * The service step: establishes ctx.serviceCaller, then applies the route's
+ * service clause. Resolves true when the caller stands in for the end user,
+ * so the end-user step is skipped.
+ */
+async function establishServiceCaller(ctx: RequestContext, options: RouterRuntimeOptions): Promise<boolean> {
+  const { service } = ctx.operation;
+  if (options.authenticateService) ctx.serviceCaller = await options.authenticateService(ctx);
+  else if (service) throw serviceUnauthorized('Service credential required');
+  return authorizeService(ctx.serviceCaller, service);
+}
+
+/** The end-user step. */
 async function establishCaller(ctx: RequestContext, options: RouterRuntimeOptions): Promise<void> {
   const { auth } = ctx.operation;
   if (auth.public || !auth.required) return;
+  const refusal = bearerRefusals.get(ctx.raw);
+  if (refusal !== undefined) throw refusal;
   ctx.principal = options.authenticate ? await options.authenticate(ctx) : null;
   authorize(ctx.principal, auth, options.permissionMatcher);
 }
@@ -453,7 +496,7 @@ export function mountOperation<E extends Env>(
         const ctx = requestContextOf(c, spec, deadline?.signal);
         try {
           if (rateLimitPerMinute) await admit(ctx, rateLimitPerMinute, options);
-          await establishCaller(ctx, options);
+          if (!(await establishServiceCaller(ctx, options))) await establishCaller(ctx, options);
           const decoded = await decode(ctx, spec);
           return successResponse(await handler(ctx, decoded), ctx.requestId, spec);
         } catch (error) {
@@ -475,8 +518,8 @@ export function mountOperation<E extends Env>(
 
 /**
  * Mounts a @manualRouteRegistration operation: the webhook verifier, rate
- * limit, timeout and auth gate run, then the service's handler owns the
- * request and response.
+ * limit, timeout, service step and auth gate run, then the service's handler
+ * owns the request and response.
  * A timeout covers the handler's return of a Response; a streaming body it
  * has started is not cut. Without a handler the route answers 501 so a
  * forgotten hook is visible, not a 404.
@@ -498,7 +541,7 @@ export function mountManualOperation<E extends Env>(
         const ctx = requestContextOf(c, spec, deadline?.signal);
         try {
           if (rateLimitPerMinute) await admit(ctx, rateLimitPerMinute, options);
-          await establishCaller(ctx, options);
+          if (!(await establishServiceCaller(ctx, options))) await establishCaller(ctx, options);
           if (!handler) throw notImplemented(`${spec.name} has no manual route handler`);
           refuseUndecodablePath(ctx);
           return handler(c, ctx);
