@@ -6,15 +6,17 @@ use crate::interfaces::WebhookVerifier;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::routing::MethodRouter;
-use axum::extract::rejection::PathRejection;
+use axum::body::Bytes;
+use axum::extract::rejection::{BytesRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::Extension;
 use axum::{Json, Router};
 use superschematic_http_runtime::{
-    error_response, openapi_router, path_is_percent_encoded, request_id_from_headers,
-    wrap_envelope, ApiError, RequestContext, RouterOptions,
+    error_response, json_body, openapi_router, path_is_percent_encoded, query_map,
+    request_id_from_headers, request_ids, wrap_envelope, ApiError, RequestContext, RouterOptions,
 };
 use superschematic_http_runtime::Principal;
 use superschematic_http_runtime::RouteControls;
@@ -33,6 +35,10 @@ pub struct RouterState {
 ///
 /// - `POST /api/webhooks/github/raw` (webhook.receiveRawGithubEvent), @hmacVerified:
 ///   wrap its route in `webhook_verified` with the github verifier
+///
+/// Wrap each such route last in `request_ids`
+/// (`.route_layer(axum::middleware::from_fn(request_ids))`), so it names its
+/// request and refuses with problems as the mounted routes do.
 ///
 /// A route's controls run in the order the Go server runs them: the rate
 /// limit, the body limit, the permission check of a route that needs a
@@ -86,6 +92,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     );
     router
         .with_state(state)
+        .layer(axum::middleware::from_fn(request_ids))
         .merge(openapi_router(crate::openapi::OPENAPI_JSON, "fixture-webhooks-api", &options))
 }
 
@@ -130,20 +137,25 @@ async fn handle_event_get_event(
     headers: HeaderMap,
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
     // axum decodes each capture once, but keeps an escape it cannot decode
     // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
-    // both answer the error envelope here.
+    // both answer a problem here.
     let path_params = match path_params {
         Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
         _ => {
-            return Err(error_response(ApiError::bad_request(
+            return error_response(ApiError::bad_request(
                 "The request path is not valid percent-encoding",
-            )))
+            ))
         }
     };
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let payload = Value::Null;
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/events/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
     for (key, value) in path_params {
@@ -152,52 +164,79 @@ async fn handle_event_get_event(
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
-    let payload = Value::Null;
     let result = state
         .implementations
         .event
         .get_event(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_webhook_receive_github_event(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
     Extension(principal): Extension<Principal>,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is null.
+    let payload = match json_body(body) {
+        Ok(payload) => payload,
+        Err(err) => return error_response(err),
+    };
     let mut ctx = RequestContext::new(method_from_str("post"), "/api/webhooks/github".to_string());
     ctx.headers = headers_to_map(&headers);
     ctx.principal = Some(principal);
+    for (key, value) in query {
+        ctx.query_params.insert(key, value);
+    }
     let result = state
         .implementations
         .webhook
         .receive_github_event(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_webhook_receive_stripe_event(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is null.
+    let payload = match json_body(body) {
+        Ok(payload) => payload,
+        Err(err) => return error_response(err),
+    };
     let mut ctx = RequestContext::new(method_from_str("post"), "/api/webhooks/stripe".to_string());
     ctx.headers = headers_to_map(&headers);
+    for (key, value) in query {
+        ctx.query_params.insert(key, value);
+    }
     let result = state
         .implementations
         .webhook
         .receive_stripe_event(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }

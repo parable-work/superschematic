@@ -133,7 +133,13 @@ func addImportOperation(t *testing.T, schema *ir.Schema) {
 func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 	schema := loadNestedArraysSchema(t, true)
 	addImportOperation(t, schema)
-	cargoTestAPICrate(t, nestedArraysService, schema, "nested_arrays", nestedArraysRouterTest)
+	cargoTestAPICrate(t, nestedArraysService, schema, "nested_arrays", nestedArraysRouterTest, func(apiDir string, output *APIOutput) error {
+		test := strings.NewReplacer("API_CRATE", strings.ReplaceAll(output.CrateName, "-", "_"), "RUNTIME_CRATE", output.RuntimeCrateIdent).Replace(problemsRouterTest)
+		if err := os.MkdirAll(filepath.Join(apiDir, "tests"), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(apiDir, "tests", "problems.rs"), []byte(test), 0o644)
+	})
 }
 
 // cargoTestAPICrate generates the Rust types crate and the Rust API crate of
@@ -361,7 +367,7 @@ async fn a_path_parameter_is_decoded_once() {
     for segment in ["%", "100%", "%ZZ", "a%2", "%E9", "%C3%28"] {
         let (status, envelope) = call("PUT", format!("/api/grids/{segment}/labels"), Some(json!({"labels": []}))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{segment}");
-        assert_eq!(envelope["error"]["code"], "bad_request", "{segment}");
+        assert_eq!(envelope["code"], "bad_request", "{segment}");
     }
 }
 

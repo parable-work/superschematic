@@ -234,7 +234,7 @@ async fn an_unsigned_event_is_refused_before_the_handler_and_its_extractor() {
     ] {
         let (status, envelope) = send(router(&log), "POST", path, body, signed_by, Some("octocat")).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{path} {body}");
-        assert_eq!(envelope["error"]["code"], "unauthorized", "{path} {body}");
+        assert_eq!(envelope["code"], "unauthorized", "{path} {body}");
     }
     assert_eq!(entries(&log), vec!["verify stripe", "verify stripe", "verify github"]);
 
@@ -256,7 +256,7 @@ async fn the_verifier_runs_before_the_rate_limit() {
     assert_eq!(status, StatusCode::OK);
     let (status, envelope) = send(router.clone(), "POST", "/api/webhooks/stripe", body, Some("stripe"), None).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(envelope["error"]["code"], "too_many_requests");
+    assert_eq!(envelope["code"], "too_many_requests");
     let (status, _) = send(router, "POST", "/api/webhooks/stripe", body, None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(
@@ -277,10 +277,10 @@ async fn the_verifier_runs_before_the_permission_check() {
 
     let (status, envelope) = send(router(&log), "POST", "/api/webhooks/github", body, Some("github"), None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert_eq!(envelope["error"]["message"], "Authentication required");
+    assert_eq!(envelope["detail"], "Authentication required");
     let (status, envelope) = send(router(&log), "POST", "/api/webhooks/github", body, Some("github"), Some("outsider")).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(envelope["error"]["code"], "forbidden");
+    assert_eq!(envelope["code"], "forbidden");
     assert_eq!(entries(&log), vec!["verify github", "verify github", "authenticate", "verify github", "authenticate"]);
 }
 

@@ -7,4 +7,4 @@ pub mod router;
 
 pub use interfaces::*;
 pub use router::{build_router, build_router_with, RouterState};
-pub use superschematic_http_runtime::RouterOptions;
+pub use superschematic_http_runtime::{request_ids, RouterOptions};

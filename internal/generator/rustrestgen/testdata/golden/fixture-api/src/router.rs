@@ -2,15 +2,17 @@
 #![allow(unused_imports)]
 
 use crate::interfaces::Implementations;
-use axum::extract::rejection::PathRejection;
+use axum::body::Bytes;
+use axum::extract::rejection::{BytesRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::Extension;
 use axum::{Json, Router};
 use superschematic_http_runtime::{
-    error_response, openapi_router, path_is_percent_encoded, request_id_from_headers,
-    wrap_envelope, ApiError, RequestContext, RouterOptions,
+    error_response, json_body, openapi_router, path_is_percent_encoded, query_map,
+    request_id_from_headers, request_ids, wrap_envelope, ApiError, RequestContext, RouterOptions,
 };
 use superschematic_http_runtime::Principal;
 use superschematic_http_runtime::RouteControls;
@@ -28,6 +30,10 @@ pub struct RouterState {
 /// returned router:
 ///
 /// - `POST /api/tenant/custom-handler` (tenant.customHandler)
+///
+/// Wrap each such route last in `request_ids`
+/// (`.route_layer(axum::middleware::from_fn(request_ids))`), so it names its
+/// request and refuses with problems as the mounted routes do.
 ///
 /// A route's controls run in the order the Go server runs them: the rate
 /// limit, the body limit, the permission check of a route that needs a
@@ -71,6 +77,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/tenants/{id}", route);
     router
         .with_state(state)
+        .layer(axum::middleware::from_fn(request_ids))
         .merge(openapi_router(crate::openapi::OPENAPI_JSON, "fixture-api", &options))
 }
 
@@ -101,68 +108,90 @@ async fn handle_session_current_tenant(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
     Extension(principal): Extension<Principal>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let payload = Value::Null;
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/auth/me".to_string());
     ctx.headers = headers_to_map(&headers);
     ctx.principal = Some(principal);
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
-    let payload = Value::Null;
     let result = state
         .implementations
         .session
         .current_tenant(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_tenant_list_tenants(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
     Extension(principal): Extension<Principal>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let payload = Value::Null;
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/tenants".to_string());
     ctx.headers = headers_to_map(&headers);
     ctx.principal = Some(principal);
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
-    let payload = Value::Null;
     let result = state
         .implementations
         .tenant
         .list_tenants(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_tenant_create_tenant(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
     Extension(principal): Extension<Principal>,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is null.
+    let payload = match json_body(body) {
+        Ok(payload) => payload,
+        Err(err) => return error_response(err),
+    };
     let mut ctx = RequestContext::new(method_from_str("post"), "/api/tenants".to_string());
     ctx.headers = headers_to_map(&headers);
     ctx.principal = Some(principal);
+    for (key, value) in query {
+        ctx.query_params.insert(key, value);
+    }
     let result = state
         .implementations
         .tenant
         .create_tenant(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_tenant_get_tenant(
@@ -171,20 +200,25 @@ async fn handle_tenant_get_tenant(
     Extension(principal): Extension<Principal>,
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
     // axum decodes each capture once, but keeps an escape it cannot decode
     // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
-    // both answer the error envelope here.
+    // both answer a problem here.
     let path_params = match path_params {
         Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
         _ => {
-            return Err(error_response(ApiError::bad_request(
+            return error_response(ApiError::bad_request(
                 "The request path is not valid percent-encoding",
-            )))
+            ))
         }
     };
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let payload = Value::Null;
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/tenants/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
     ctx.principal = Some(principal);
@@ -194,15 +228,14 @@ async fn handle_tenant_get_tenant(
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
-    let payload = Value::Null;
     let result = state
         .implementations
         .tenant
         .get_tenant(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_tenant_update_secret(
@@ -211,19 +244,30 @@ async fn handle_tenant_update_secret(
     Extension(principal): Extension<Principal>,
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
     // axum decodes each capture once, but keeps an escape it cannot decode
     // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
-    // both answer the error envelope here.
+    // both answer a problem here.
     let path_params = match path_params {
         Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
         _ => {
-            return Err(error_response(ApiError::bad_request(
+            return error_response(ApiError::bad_request(
                 "The request path is not valid percent-encoding",
-            )))
+            ))
         }
+    };
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is null.
+    let payload = match json_body(body) {
+        Ok(payload) => payload,
+        Err(err) => return error_response(err),
     };
     let mut ctx = RequestContext::new(method_from_str("patch"), "/api/tenants/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
@@ -231,13 +275,16 @@ async fn handle_tenant_update_secret(
     for (key, value) in path_params {
         ctx.path_params.insert(key, value);
     }
+    for (key, value) in query {
+        ctx.query_params.insert(key, value);
+    }
     let result = state
         .implementations
         .tenant
         .update_secret(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }

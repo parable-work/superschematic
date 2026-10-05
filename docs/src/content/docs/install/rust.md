@@ -309,10 +309,21 @@ route's body; a route without it keeps axum's default. `@timeout` answers
 
 A route's steps run in the Go server's order: the webhook verifier, the
 rate limit, the body limit, the permission check, then the timeout around
-the handler. Each refusal is the router's error envelope,
-`{"error": {"code", "message"}}`, with the code `unauthorized`,
-`forbidden`, `payload_too_large`, `too_many_requests` or
-`gateway_timeout`.
+the handler. Each refusal, and each `ApiError` an implementation returns,
+is an RFC 9457 problem (`application/problem+json`) as the Go and
+TypeScript servers write it: `type`, `title`, `status`, `detail` (the
+error's message), `code` (`unauthorized`, `forbidden`,
+`payload_too_large`, `too_many_requests`, `gateway_timeout`, or the
+implementation's own), `requestId`, and `details` and `errors` when the
+error has them (`ApiError::with_details`, `with_errors`).
+
+Every response carries the request's id in `x-request-id`: the caller's
+`X-Request-ID` when it is at most 128 characters without control
+characters, else a fresh UUID. A success's `meta.requestId` and a
+problem's `requestId` are the same id, and no response is cached
+(`cache-control: no-store`). The router reads a body as JSON whatever its
+`Content-Type`, an empty body as `null`, and a body that is not JSON as a
+400 problem.
 
 `build_router` applies none of this to a `@manualRouteRegistration`
 operation, since it does not mount one. Its doc lists each such
