@@ -6,14 +6,27 @@
 // project every create gives, fixture-rollups-json, whose projects roll their tasks up,
 // fixture-search-json, whose notes are searched,
 // fixture-reactions-json, whose projects start, finish and fail their
-// parent, and fixture-variants-json, whose steps keep their kind and hold
-// a result of the kind's shape.
+// parent, fixture-variants-json, whose steps keep their kind and hold
+// a result of the kind's shape, and fixture-branches-json, whose recipes
+// are version graphs.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { EngineError, defineBehavior, type Principal } from '../dist/index.js';
-import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectTreeDocument, projectsDocument, stepsDocument, tasksDocument } from './helpers.ts';
+import {
+  alice,
+  cleanup,
+  documentsDocument,
+  drivers,
+  notesDocument,
+  openTestEngine,
+  projectTreeDocument,
+  projectsDocument,
+  recipesDocument,
+  stepsDocument,
+  tasksDocument,
+} from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -32,7 +45,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Variants', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Variants', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -330,6 +343,44 @@ for (const driver of drivers) {
         kind: 'verify',
         result: { passed: false, checks: [{ name: 'eslint', ok: true }] },
       });
+    });
+
+    test('it runs the recipes document: a recipe is a graph root whose drafts merge into its primary line, and a tagged commit is released', () => {
+      const engine = openTestEngine({ driver, runner: { principal: { subject: 'runner', permissions: [] } } });
+      engine.schemas.define(alice, recipesDocument());
+      engine.schemas.publish(alice, 'Recipe');
+      engine.instances.create(writer, 'Recipe', { title: 'Soup' }, { id: 'soup' });
+      const invoke = <T>(operation: string, params: Record<string, unknown> = {}): T =>
+        engine.instances.invoke(writer, 'Recipe', 'soup', operation, params) as T;
+      type Ref = { id: string; version: number; parent: string | null };
+      const [main] = invoke<{ items: Ref[] }>('refs').items;
+      const draft = invoke<Ref>('branch', { fromRef: main.id, name: 'first' });
+      const saved = invoke<{ ref: Ref; saved: { step: Array<{ entity_key: string }> } }>('save', {
+        ref: draft.id,
+        version: draft.version,
+        edits: { step: { upsert: [{ instruction: 'Boil', position: 1 }] }, cover: { upsert: [{ photoUrl: 'soup.jpg' }] } },
+      });
+      invoke('save', {
+        ref: draft.id,
+        version: saved.ref.version,
+        edits: { ingredient: { upsert: [{ stepKey: saved.saved.step[0].entity_key, quantity: '1 l' }] } },
+      });
+      const committed = invoke<{ ref: Ref }>('commit', { ref: draft.id, version: saved.ref.version + 1 });
+      const merged = invoke<{ commit: { id: string; sequence: number } }>('merge', { source: draft.id, target: main.id, targetVersion: main.version, tag: true });
+      assert.equal(merged.commit.sequence, 1);
+      assert.deepEqual(invoke('release', { commit: merged.commit.id, version: 0 }), { commit: merged.commit.id, version: 1 });
+      const released = invoke<{ tree: Record<string, Array<Record<string, unknown>>> }>('released');
+      assert.deepEqual(
+        Object.fromEntries(Object.entries(released.tree).map(([kind, rows]) => [kind, rows.length])),
+        { cover: 1, ingredient: 1, step: 1 }
+      );
+      assert.equal(committed.ref.parent, main.id);
+      // The sweep is on for the schema, at the interval its config gives.
+      engine.runner.runDue();
+      assert.deepEqual(
+        engine.runner.status().schedules.filter((schedule) => schedule.behavior === 'Branches').map(({ state, everyMs }) => [state, everyMs]),
+        [['active', 3600000]]
+      );
     });
   });
 }

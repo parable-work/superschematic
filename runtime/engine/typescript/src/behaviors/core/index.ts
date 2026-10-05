@@ -2,7 +2,7 @@
 The behaviors the core declares (internal/registry/behaviors in the
 repository, D16), which every engine registers when it opens: Workflow,
 Comments, Revisions, Dependencies, Links, Rollups, Search, Reactions,
-Constants and Variants.
+Constants, Variants and Branches.
 Each implementation imports its declaration's copy from declarations/,
 which `superschematic behaviors --out` writes and CI checks, so the
 engine and the compiler read one declaration. They reach the engine only
@@ -10,6 +10,7 @@ through the plug-in interface an extension's behavior uses.
 */
 
 import type { AnyBehaviorImplementation } from '../behavior.js';
+import { branches } from './branches.js';
 import { comments } from './comments.js';
 import { constants } from './constants.js';
 import { dependencies } from './dependencies.js';
@@ -33,6 +34,7 @@ export const coreBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze
   reactions,
   constants,
   variants,
+  branches,
 ]);
 
 export { isTerminalState, stateOutcome } from './workflow.js';
@@ -47,3 +49,5 @@ export type { SearchConfig, SearchHit, SnippetPart } from './search.js';
 export type { ReactionsConfig, ReactionsRule, ReactionsTerminal, ReactionsThen, ReactionsWhen } from './reactions.js';
 export type { ConstantsConfig } from './constants.js';
 export type { VariantsConfig } from './variants.js';
+export { ACTOR_NAMESPACE, DEFAULT_PRIMARY, ROLE_COLUMNS, ROOT_NAMESPACE, uuidV5 } from './branches.js';
+export type { BranchCommit, BranchRef, BranchRelease, BranchesConfig, BranchesKind, BranchesSweep, BranchesUnit } from './branches.js';

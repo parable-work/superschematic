@@ -53,6 +53,7 @@ for (const driver of drivers) {
       assert.deepEqual(engine.behaviors.names(), [
         'Assignment',
         'Blueprint',
+        'Branches',
         'Budget',
         'Comments',
         'Constants',
