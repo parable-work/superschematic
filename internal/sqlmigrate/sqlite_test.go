@@ -195,6 +195,8 @@ func TestSQLiteHazardClasses(t *testing.T) {
 		{plan: "rebuild-retype", op: "copyTable", phase: Expand,
 			want: []HazardClass{destructive, blockingClass, compat, copyTable}, reason: "change the type of quantity"},
 		{plan: "rebuild-collation", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, compat, copyTable}},
+		{plan: "rebuild-json-to-text", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, compat, copyTable},
+			reason: "Order.details changes from a JSON value (TEXT) to a scalar (TEXT)"},
 		{plan: "rebuild-set-default", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable},
 			reason: "change the default of referrer_id"},
 		{plan: "rebuild-drop-default", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, copyTable},
@@ -371,10 +373,89 @@ func TestSQLiteConvert(t *testing.T) {
 		{"BLOB", "REAL", convertImpossible, false},
 	}
 	for _, tc := range tests {
-		got := sqliteDialect{}.convert(tc.from, tc.to)
+		got := sqliteConvert(tc.from, tc.to)
 		if got.kind != tc.kind || got.lossy != tc.lossy {
 			t.Errorf("convert(%s, %s) = %+v, want kind %d lossy %t", tc.from, tc.to, got, tc.kind, tc.lossy)
 		}
+	}
+}
+
+// TestSQLiteKindChanges: a list, a JSON value and text are all TEXT in
+// SQLite, and the model tells them apart by what a column holds. A JSON
+// value becomes a scalar as its text does, through a rebuild; every other
+// change between them is refused, naming the column and both kinds.
+func TestSQLiteKindChanges(t *testing.T) {
+	model := func(typ, holds string) *Model {
+		return &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{{
+			Name: "sample", Kind: TableEntity,
+			Columns: []*Column{
+				{Name: "id", Type: "TEXT"},
+				{Name: "v", Origin: "Sample.v", Type: typ, Nullable: true, Holds: holds},
+			},
+			PrimaryKey: &Constraint{Name: "sample_pkey", Columns: []string{"id"}},
+		}}}
+	}
+	const (
+		scalar = ""
+		list   = holdsList
+		json   = holdsJSON
+	)
+	tests := []struct {
+		fromType, fromHolds, toType, toHolds string
+		// want is the refusal, or, for a change the plan makes, the
+		// rebuild's copy of v and its hazard classes.
+		want string
+	}{
+		{"TEXT", scalar, "TEXT", list, "changes from a scalar (TEXT) to a list (TEXT holding a JSON array)"},
+		{"INTEGER", scalar, "TEXT", list, "changes from a scalar (INTEGER) to a list (TEXT holding a JSON array)"},
+		{"TEXT", list, "TEXT", scalar, "changes from a list (TEXT holding a JSON array) to a scalar (TEXT)"},
+		{"TEXT", scalar, "TEXT", json, "changes from a scalar (TEXT) to a JSON value (TEXT)"},
+		{"INTEGER", scalar, "TEXT", json, "changes from a scalar (INTEGER) to a JSON value (TEXT)"},
+		{"TEXT", list, "TEXT", json, "changes from a list (TEXT holding a JSON array) to a JSON value (TEXT)"},
+		{"TEXT", json, "TEXT", list, "changes from a JSON value (TEXT) to a list (TEXT holding a JSON array)"},
+		{"TEXT", json, "TEXT", scalar, `"v" [blocking compat copy-table]`},
+		{"TEXT", json, "TEXT COLLATE NOCASE", scalar, `"v" [blocking compat copy-table]`},
+		{"TEXT", json, "INTEGER", scalar, `CAST("v" AS INTEGER) [destructive blocking compat copy-table]`},
+	}
+	for _, tc := range tests {
+		name := fmt.Sprintf("%s %s to %s %s", tc.fromType, tc.fromHolds, tc.toType, tc.toHolds)
+		plan, err := Diff(model(tc.fromType, tc.fromHolds), model(tc.toType, tc.toHolds), Options{})
+		if strings.HasPrefix(tc.want, "changes") {
+			want := "sqlmigrate: column sample.v (Sample.v) " + tc.want + ", which sqlite cannot convert; change the column by hand and adopt the new model"
+			if err == nil || err.Error() != want {
+				t.Errorf("%s: Diff = %v, want %s", name, err, want)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(plan.Steps) != 1 || plan.Steps[0].Op != "copyTable" {
+			t.Errorf("%s: steps %+v, want one rebuild", name, plan.Steps)
+			continue
+		}
+		var classes []string
+		for _, h := range plan.Steps[0].Hazards {
+			classes = append(classes, string(h.Class))
+		}
+		got := strings.TrimPrefix(plan.Steps[0].Statements[1], `INSERT INTO "_new_sample" ("id", "v")`+"\n"+`SELECT "id", `)
+		got = strings.TrimSuffix(got, "\n"+`FROM "sample"`) + " [" + strings.Join(classes, " ") + "]"
+		if got != tc.want {
+			t.Errorf("%s: %s, want %s", name, got, tc.want)
+		}
+	}
+
+	// The model of a schema tells the kinds apart: a field that becomes a
+	// list is refused.
+	pc := forSQLite(planCase{after: func(s *ir.Schema) {
+		fieldNamed(s, "Order", "note").TypeRef = ir.TypeRef{Name: "string", IsArray: true}
+	}})
+	from, to := pc.models(t)
+	_, err := Diff(from, to, Options{})
+	want := "column order.note (Order.note) changes from a scalar (TEXT) to a list (TEXT holding a JSON array), which sqlite cannot convert"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Diff = %v, want %s", err, want)
 	}
 }
 

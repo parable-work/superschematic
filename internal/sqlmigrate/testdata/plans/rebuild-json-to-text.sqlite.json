@@ -1,0 +1,46 @@
+{
+  "dialect": "sqlite",
+  "from": "e55120781ff9edb4139f7e521f392329b536190e6fb7269ac4b034f1af481ca8",
+  "hash": "5b29c0acc5c28596d0a6af766b18e7fb767dac4bf989a9b940602fc762fe2914",
+  "service": "shop-db",
+  "steps": [
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order",
+          "reason": "Copying order holds the database's write lock for time that grows with the table.",
+          "subject": "table/order"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/details",
+          "reason": "Order.details changes from a JSON value (TEXT) to a scalar (TEXT): servers built from the previous version still read and write a JSON value (TEXT).",
+          "subject": "table/order/column/details"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order",
+          "reason": "SQLite's ALTER TABLE cannot change the type of details, so the step rebuilds order: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "subject": "table/order"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"details\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\", \"details\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\", \"details\"\nFROM \"order\"",
+        "DROP TABLE \"order\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    }
+  ],
+  "to": "e7b0243884339726d7035f428f2c0a6a45a67c2e53234f24ed844f18cf8233a4",
+  "toModel": null,
+  "version": 1
+}

@@ -429,8 +429,18 @@ the feature and the dialect:
 - `VARCHAR(n)` and `NUMERIC(p, s)` are `TEXT` and `NUMERIC`: SQLite does
   not enforce the length, the precision or the scale, so a change of
   them is no step.
-- A list, a JSON value and text are all `TEXT`, so a field that changes
-  between them is no step either, and the plan converts no value.
+- A list, a JSON value and text are all `TEXT`. The model records what a
+  column holds as JSON (`"holds": "list"` or `"json"`), so a field that
+  changes between them is not lost. A JSON value that becomes text keeps
+  its JSON text, as Postgres's cast keeps it, through a rebuild that casts
+  nothing; one that becomes another scalar casts as text does. Every other
+  change between a scalar, a list and a JSON value fails the plan, naming
+  the column and both kinds: text is not a JSON array, Postgres parses
+  text as JSON where wrapping it in a JSON string would keep another
+  value, and Postgres converts no list to or from anything else. Change
+  the column by hand and adopt the new model.
+- A list whose element type changes is the same `TEXT` holding a JSON
+  array, so it is no step, and its elements keep their JSON types.
 
 ## The runner
 

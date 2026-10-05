@@ -2204,7 +2204,7 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 57 pairs for Postgres and 40 for SQLite, 9 of them
+Plan goldens cover 57 pairs for Postgres and 41 for SQLite, 10 of them
 rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
@@ -2266,14 +2266,22 @@ SQLite, after the tables that reference them and before those they
 reference, since dropping the foreign key that closes the cycle needs a
 rebuild of a table the plan drops, and a `foreign_key_check` between two
 drops finds the rows of one referencing the other, while Postgres drops
-that foreign key first; a change between a list, a JSON value and text, all
-`TEXT`, is no step and converts no value; `migrate plan --dialect sqlite`
-refuses a service whose new version does not list `sqlite`, and a
-previous version, a service directory or a git ref, whose list lacks it,
-pointing to the model the database recorded or an empty database, while a
-`--from` model is checked by its own `dialect`; and the
-SQLite convergence test compares a column's collation through an index
-it builds and rolls back, since no pragma reports it. D32 takes the
+that foreign key first; a list, a JSON value and text are all `TEXT`, so
+the SQLite model records what a column holds as JSON (`holds`: `list` or
+`json`; Postgres models never set it); a JSON value that becomes text
+keeps its JSON text through a rebuild, as Postgres's cast keeps it, and
+one that becomes another scalar casts as text does, while every other
+change between a scalar, a list and a JSON value fails the plan, since no
+conversion keeps every value as Postgres would: text is not a JSON array,
+Postgres parses text as JSON where `json_quote` would wrap it, and
+Postgres converts no list; a list whose element type changes is still no
+step on SQLite; `migrate plan --dialect sqlite` refuses a service whose
+new version does not list `sqlite`, and a previous version, a service
+directory or a git ref, whose list lacks it, pointing to the model the
+database recorded or an empty database, while a `--from` model is
+checked by its own `dialect`; and the SQLite convergence test compares
+a column's collation through an index it builds and rolls back, since no
+pragma reports it. D32 takes the
 version graph to SQLite through its adapter's own tables, which write
 history without triggers, not through this dialect, so `@versioned` stays
 refused here. D30's deploy runs a plan's `expand` steps before the servers

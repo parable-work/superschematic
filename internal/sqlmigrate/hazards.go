@@ -154,24 +154,45 @@ func graphOf(m *Model, t *Table) (*Graph, map[string]bool) {
 func (d *differ) retypeHazards(c *change, prevTable string, r *retype) {
 	ft, tt := d.fromTables[prevTable], d.toTables[r.table]
 	field := fieldOf(tt, r.after)
-	change := fmt.Sprintf("%s changes from %s to %s", field, r.before.Type, r.after.Type)
+	before, after := typeNames(r.before, r.after)
+	change := fmt.Sprintf("%s changes from %s to %s", field, before, after)
 	c.addHazard(HazardCompat, "", fmt.Sprintf(
-		"%s: servers built from the previous version still read and write %s.", change, r.before.Type))
+		"%s: servers built from the previous version still read and write %s.", change, before))
 	if r.conv.lossy {
 		c.addHazard(HazardDestructive, "", fmt.Sprintf(
-			"%s: the cast truncates or rounds values %s cannot hold exactly.", change, r.after.Type))
+			"%s: the cast truncates or rounds values %s cannot hold exactly.", change, after))
 	}
 	if r.conv.kind == convertMayFail {
 		c.addHazard(HazardDataDependent, "", fmt.Sprintf(
-			"%s: the cast fails on a value %s cannot hold.", change, r.after.Type))
+			"%s: the cast fails on a value %s cannot hold.", change, after))
 	}
 	if ft.History != "" && tt.History != "" {
 		c.addHazard(HazardHistory, "", fmt.Sprintf(
 			"%s is versioned: images recorded before this change keep %s as %s, which the history readers read as %s.",
-			tt.Name, field, r.before.Type, r.after.Type))
+			tt.Name, field, before, after))
 	}
 	d.graphContent(c, ft, r.before, tt, r.after)
-	d.breaksReaders(c, prevTable, r.before.Name, "changes its type to "+r.after.Type)
+	d.breaksReaders(c, prevTable, r.before.Name, "changes its type to "+after)
+}
+
+// typeNames names the types of a column before and after a change, in a
+// reason or an error. Where what the column holds changes (Column.Holds),
+// each name says whether the column is a scalar, a list or a JSON value,
+// since a SQLite type alone does not.
+func typeNames(before, after *Column) (string, string) {
+	if before.Holds == after.Holds {
+		return before.Type, after.Type
+	}
+	name := func(c *Column) string {
+		switch c.Holds {
+		case holdsList:
+			return "a list (" + c.Type + " holding a JSON array)"
+		case holdsJSON:
+			return "a JSON value (" + c.Type + ")"
+		}
+		return "a scalar (" + c.Type + ")"
+	}
+	return name(before), name(after)
 }
 
 // viewHazard adds an api-breaking hazard for a projection view whose

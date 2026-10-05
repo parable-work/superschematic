@@ -30,39 +30,46 @@
         },
         {
           "default": "'[]'",
+          "holds": "list",
           "name": "retasted_at",
           "origin": "Tasting.retastedAt",
           "type": "TEXT"
         },
         {
           "default": "'[]'",
+          "holds": "list",
           "name": "retasted_on",
           "origin": "Tasting.retastedOn",
           "type": "TEXT"
         },
         {
           "default": "'[]'",
+          "holds": "list",
           "name": "repoured_at",
           "origin": "Tasting.repouredAt",
           "type": "TEXT"
         },
         {
           "default": "'[]'",
+          "holds": "list",
           "name": "restocked_at",
           "origin": "Tasting.restockedAt",
           "type": "TEXT"
         },
         {
+          "holds": "json",
           "name": "flights",
           "origin": "Tasting.flights",
           "type": "TEXT"
         },
         {
+          "holds": "json",
           "name": "opened_at",
           "origin": "Tasting.openedAt",
           "type": "TEXT"
         },
         {
+          "holds": "json",
           "name": "bottled_at",
           "origin": "Tasting.bottledAt",
           "type": "TEXT"

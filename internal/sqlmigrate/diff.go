@@ -334,11 +334,12 @@ func (d *differ) diffColumns(ft, tt *Table) error {
 			generated = append(generated, genPair{fc, tc})
 			continue
 		}
-		conv := d.dialect.convert(fc.Type, tc.Type)
+		conv := d.dialect.convert(fc, tc)
 		switch conv.kind {
 		case convertImpossible:
+			before, after := typeNames(fc, tc)
 			return fmt.Errorf("sqlmigrate: column %s.%s%s changes from %s to %s, which %s cannot convert; change the column by hand and adopt the new model",
-				tt.Name, tc.Name, originNote(tc), fc.Type, tc.Type, d.dialect.name())
+				tt.Name, tc.Name, originNote(tc), before, after, d.dialect.name())
 		case convertSame:
 			d.diffDefault(tt, fc, tc)
 		default:
@@ -389,7 +390,7 @@ func (d *differ) diffColumns(ft, tt *Table) error {
 
 // sameShape reports whether two columns differ only by name.
 func sameShape(a, b *Column) bool {
-	return a.Type == b.Type && a.Nullable == b.Nullable && a.Default == b.Default && a.Generated == b.Generated
+	return a.Type == b.Type && a.Holds == b.Holds && a.Nullable == b.Nullable && a.Default == b.Default && a.Generated == b.Generated
 }
 
 func (d *differ) addColumn(ft, tt *Table, tc *Column) {

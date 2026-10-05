@@ -37,8 +37,8 @@ type dialect interface {
 	model(schema *ir.Schema, opts sqlgen.Options) (*Model, error)
 
 	// convert classifies changing a column from one type to another, both
-	// in the dialect's spelling.
-	convert(from, to string) conversion
+	// in the dialect's spelling, with what each holds (Column.Holds).
+	convert(from, to *Column) conversion
 
 	// canAlter reports whether the dialect changes a table that already
 	// exists by c in place. It is only asked about changes to such a table,

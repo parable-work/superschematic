@@ -213,7 +213,7 @@ func TestConvert(t *testing.T) {
 		{"JSONB", "UUID", convertImpossible, false},
 	}
 	for _, tc := range tests {
-		got := postgresDialect{}.convert(tc.from, tc.to)
+		got := pgConvert(tc.from, tc.to)
 		if got.kind != tc.kind || got.lossy != tc.lossy {
 			t.Errorf("convert(%s, %s) = %+v, want kind %d lossy %t", tc.from, tc.to, got, tc.kind, tc.lossy)
 		}
