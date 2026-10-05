@@ -28,10 +28,21 @@ export enum TargetLanguage {
   Rust = "rust"
 }
 
-export type ServiceHandle = {
+/**
+ * A handle to a service: what service() returns and a generated sentinel
+ * exports. K is the service's kind, as a string ("API"), and C the type of
+ * its @envVars class. Both are phantom: the sentinel generator writes them
+ * (`service<"API", ShopApiConfig>({...})`), and superschematic reads only
+ * name and kind. A DB or General handle has no config type, nor has an API
+ * without an @envVars class or a handle written by hand, so C keeps its
+ * default.
+ */
+export type ServiceHandle<K extends SchemaKindName = SchemaKindName, C = unknown> = {
   readonly __brand: "ServiceHandle";
   readonly name: string;
-  readonly kind: SchemaKindName;
+  readonly kind: K;
+  /** Phantom: carries C for the type checker and is never set. */
+  readonly __config?: C;
 };
 
 export type TargetOutputConfig = {
@@ -112,7 +123,7 @@ export type SchemaConfig = {
   /**
    * The API services this API's implementation calls. Only an API service sets it, and each entry is an API service's handle. Each callee is built before its caller.
    */
-  readonly calls?: readonly ServiceHandle[];
+  readonly calls?: readonly ServiceHandle<"API">[];
   readonly outputs: SchemaOutputs;
 };
 
@@ -154,11 +165,19 @@ export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfi
   return cfg;
 }
 
-export function service(cfg: { readonly name: string; readonly kind: SchemaKindName }): ServiceHandle {
+/**
+ * Builds a handle to the service named. The kind comes back as its string,
+ * so `service({ name: "shop-api", kind: SchemaKind.API })` is a
+ * `ServiceHandle<"API">`, the type the sentinel's `service<"API">` gives.
+ */
+export function service<K extends SchemaKindName, C = unknown>(cfg: {
+  readonly name: string;
+  readonly kind: K;
+}): ServiceHandle<`${K}`, C> {
   return {
     __brand: "ServiceHandle",
     name: cfg.name,
-    kind: cfg.kind
+    kind: cfg.kind as `${K}`
   };
 }
 

@@ -287,13 +287,19 @@ again; the types are the early warning. Nothing here changes how
 superschematic reads a schema, because the walker evaluates decorator
 arguments as data either way.
 
-- **Handles carry their kind and config type.** The generated
-  `service.generated.ts` writes the handle with two phantom type
-  parameters: `service<"API", ShopApiConfig>({ name: "shop-api", kind:
-  SchemaKind.API })`. The second names the service's `@envVars` type,
-  wherever it lives, so the sentinel is written after the service loads. A
-  DB or General handle has no config type. No person writes either
-  parameter.
+- **Handles carry their kind and config type.** `ServiceHandle<K, C>` in
+  `@superschematic/schema-config` has two phantom type parameters, the
+  kind as a string and the config type, with defaults, so a bare
+  `ServiceHandle` is any handle. An API's generated `service.generated.ts`
+  writes both: `service<"API", ShopApiConfig>({ name: "shop-api", kind:
+  SchemaKind.API })`, with `ShopApiConfig` imported as a type. The second
+  names the API's `@envVars` class, so the sentinel is written after the
+  service loads; the sentinel sweep, which reads only configs, keeps the
+  type a build wrote. A DB or General handle has no config type, nor has
+  an API without a TypeScript `@envVars` class, and `service()` infers the
+  kind from its argument (`kind: SchemaKind.DB` gives `ServiceHandle<"DB">`).
+  No person writes either parameter. `calls` takes `ServiceHandle<"API">`,
+  so tsc refuses a DB handle there.
 - **Targets type their own values and settings.** `@superschematic/stack`
   declares an empty `Targets` interface. Each target's authoring package
   augments it with the target's environment values and a settings type per
@@ -1032,14 +1038,15 @@ registrations.
      `settings: [{ of: Backend }]` needs no walker code of its own.
      `@source`, `@versionGraph` and `@graphMember` stay walker-read;
      `internal/registry/core_decorators.go` says why.
-   - `ServiceHandle` typed by kind and config type
-     (`ServiceHandle<"API", ShopApiConfig>`,
-     `packages/schema-config/src/index.ts:31`), written by the sentinel
+   - Done: `ServiceHandle` typed by kind and config type
+     (`ServiceHandle<"API", ShopApiConfig>`, in
+     `packages/schema-config/src/index.ts`), written by the sentinel
      generator (section 4.3), so TypeScript can restrict a handle argument
-     and type its settings. Build-plan discovery, which `build-all` and
-     `build --with-deps` run, checks each config handle's kind against the
-     service it names (`validateHandleKinds` in
-     `internal/buildplan/buildplan.go`).
+     and type its settings. `@ts-expect-error` cases in
+     `packages/schema-config/src/service-handle.typecheck.ts` pin it.
+     Build-plan discovery, which `build-all` and `build --with-deps` run,
+     checks each config handle's kind against the service it names
+     (`validateHandleKinds` in `internal/buildplan/buildplan.go`).
    - Build-order edges from the handles a schema references, so a stack does
      not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
 3. **envgen.** The derived binding fields of section 3.4.
