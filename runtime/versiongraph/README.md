@@ -631,11 +631,14 @@ binds one rusqlite connection, with the SQLite rusqlite bundles, behind the
 crate's `rusqlite` feature. It begins with `BEGIN IMMEDIATE` on a connection
 in autocommit mode and with a savepoint inside a transaction the caller
 holds on it, and reads its clock, in microseconds, once per transaction it
-begins. It refuses a SQLite older than 3.38.0, from which `json_each` and
-`json_extract` are SQLite's own. Its tests hold it to the vectors: its
-layout's statements are `layout.json`'s, and `typescript.sql` reads back
-through it and the Rust engine as `typescript.json`, with nothing of one
-graph read through another's.
+begins. It refuses a SQLite older than 3.37.0, and one whose `json_each`
+and `json_extract` fail a probe, and a time outside 2^53 - 1 microseconds
+either side of the epoch, from its clock or read back, as the TypeScript
+adapter does. Its tests hold it to the vectors: its layout's statements
+are `layout.json`'s; `typescript.sql` reads back through it and the Rust
+engine as `typescript.json`, with nothing of one graph read through
+another's; and the script that wrote `typescript.sql`, run through it with
+the same clock and seeded ids, writes `typescript.sql` byte for byte.
 
 ## Scenarios
 

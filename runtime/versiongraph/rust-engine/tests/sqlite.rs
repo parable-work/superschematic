@@ -727,6 +727,11 @@ async fn prune_deletes_images_past_retention_but_the_newest_and_the_pinned_at_mo
         "a batch is a whole number",
         &prune(&s, "step", 0, -1).await,
     );
+    refused(
+        "a kind the descriptor does not declare",
+        "unknown kind \"garnish\"",
+        &prune(&s, "garnish", 0, 0).await,
+    );
 }
 
 async fn version_ones(s: &Setup) -> Vec<String> {
@@ -838,7 +843,10 @@ async fn the_adapter_writes_a_rows_roles_actor_and_time_never_its_id_or_version_
     assert_eq!(inserted["updated_by"], json!("Cook"));
     // A column the insert lacks holds null.
     assert_eq!(inserted.get("scratch"), Some(&Value::Null));
-    let row = json!({"entity_key": "Mix", "instruction": "Stir", "created_by": "Somebody"});
+    let row = json!({
+        "entity_key": "Mix", "instruction": "Stir",
+        "created_at": "2000-01-01T00:00:00Z", "created_by": "Somebody",
+    });
     let updated = transact!(s.storage, |tx| tx
         .upsert_row("step", write(row, true, "Baker"))
         .await)
@@ -851,6 +859,7 @@ async fn the_adapter_writes_a_rows_roles_actor_and_time_never_its_id_or_version_
     // A column the update lacks keeps its value, and the creation audit
     // stays.
     assert_eq!(updated["position"], json!(1));
+    assert_eq!(updated["created_at"], json!("2027-01-15T08:00:00Z"));
     assert_eq!(updated["created_by"], json!("Cook"));
     assert_eq!(updated["updated_by"], json!("Baker"));
     // What the adapter stores is canonical: a live row's data and every
@@ -1769,7 +1778,9 @@ async fn a_transaction_reads_the_clock_once_the_write_lock_is_held() {
         .create_primary(COOK, SOUP, "main")
         .await
         .expect("main");
-    assert_eq!(*held.lock().expect("held"), vec![true, true]);
+    // create_tables's transaction reads it too, as the TypeScript adapter's
+    // does.
+    assert_eq!(*held.lock().expect("held"), vec![true, true, true]);
 }
 
 #[tokio::test]
@@ -1841,6 +1852,20 @@ async fn a_dropped_transaction_rolls_back_at_once_and_frees_the_write_lock() {
     assert_eq!(ref_names(&s.client).await, vec!["kept"]);
 }
 
+/// Asserts the binding's savepoint is gone, released or rolled back to and
+/// released, so the caller's transaction holds none.
+async fn assert_no_savepoint(client: &Rusqlite, when: &str) {
+    let error = client
+        .connection()
+        .await
+        .execute_batch("RELEASE superschematic_versiongraph")
+        .expect_err(when);
+    assert!(
+        error.to_string().contains("no such savepoint"),
+        "{when}: {error}"
+    );
+}
+
 async fn ref_names(client: &Rusqlite) -> Vec<String> {
     select(client, "SELECT name FROM \"graph_ref\" ORDER BY name", &[])
         .await
@@ -1884,6 +1909,7 @@ async fn a_transaction_that_fails_rolls_back_and_one_inside_the_callers_is_a_sav
         .await
         .expect("create");
     tx.commit().await.expect("release the savepoint");
+    assert_no_savepoint(&s.client, "after its commit").await;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let times = select(
         &s.client,
@@ -1899,6 +1925,7 @@ async fn a_transaction_that_fails_rolls_back_and_one_inside_the_callers_is_a_sav
     let taken = tx.create_ref(new_ref(BREAD, None, "kept")).await;
     assert!(matches!(taken, Err(Error::NameTaken(_))), "{taken:?}");
     tx.rollback().await.expect("roll back to the savepoint");
+    assert_no_savepoint(&s.client, "after its rollback").await;
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     let after = s
         .engine
@@ -1968,6 +1995,92 @@ async fn storage_refuses_a_connection_whose_foreign_keys_would_not_turn_on() {
         .expect("bind outside a transaction");
     let on = select(&client, "PRAGMA foreign_keys", &[]).await;
     assert_eq!(on, vec![vec![Cell::Integer(1)]]);
+}
+
+#[tokio::test]
+async fn a_time_is_refused_outside_2_to_the_53_microseconds_when_written_and_when_read() {
+    let (now, options) = moving_clock(sqlite::MAX_MICROS + 1);
+    // The layout's transaction reads the clock too.
+    let client = Arc::new(Rusqlite::new(memory()));
+    let adapter = Arc::new(sqlite::Adapter::new(&descriptor(), options).expect("the adapter"));
+    refused(
+        "create_tables at 2^53 microseconds",
+        "the clock returned 9007199254740992 microseconds, outside the 2^53 - 1",
+        &adapter.create_tables(&client).await,
+    );
+    now.store(START, Ordering::SeqCst);
+    adapter
+        .create_tables(&client)
+        .await
+        .expect("create the layout");
+    let storage = adapter.storage(Arc::clone(&client)).await.expect("bind");
+    let r = transact!(storage, |tx| tx
+        .create_ref(new_ref(BREAD, None, "main"))
+        .await)
+    .expect("create");
+    for out in [sqlite::MAX_MICROS + 1, -sqlite::MAX_MICROS - 1] {
+        now.store(out, Ordering::SeqCst);
+        refused(
+            &format!("a transaction at {out} microseconds"),
+            "outside the 2^53 - 1",
+            &storage.begin().await.map(|_| ()),
+        );
+        // The transaction it began rolled back as it went.
+        assert!(
+            client.connection().await.is_autocommit(),
+            "{out}: no transaction is left open"
+        );
+    }
+    for (edge, created_at) in [
+        (sqlite::MAX_MICROS, "2255-06-05T23:47:34.740991Z"),
+        (-sqlite::MAX_MICROS, "1684-07-28T00:12:25.259009Z"),
+    ] {
+        now.store(edge, Ordering::SeqCst);
+        let commit = transact!(storage, |tx| tx
+            .insert_commit(new_commit(BREAD, &r.id, None, None))
+            .await)
+        .expect("a commit at the edge");
+        assert_eq!(commit.created_at, created_at);
+        let read = transact!(storage, |tx| tx.read_commit(&commit.id).await).expect("read");
+        assert_eq!(read.created_at, created_at);
+    }
+    // A stored integer outside the range, as no adapter writes, is refused
+    // on read, as the TypeScript adapter refuses one.
+    now.store(START, Ordering::SeqCst);
+    let commit = transact!(storage, |tx| tx
+        .insert_commit(new_commit(BREAD, &r.id, None, None))
+        .await)
+    .expect("a commit");
+    for (sql, read) in [
+        (
+            format!(
+                "UPDATE \"graph_commit\" SET created_at = 9007199254740992 WHERE id = '{}'",
+                commit.id
+            ),
+            "commit",
+        ),
+        (
+            format!(
+                "UPDATE \"graph_ref\" SET _version = -9007199254740992 WHERE id = '{}'",
+                r.id
+            ),
+            "ref",
+        ),
+    ] {
+        run_sql(&client, &sql)
+            .await
+            .expect("store an integer out of range");
+        let result = if read == "commit" {
+            transact!(storage, |tx| tx.read_commit(&commit.id).await).map(|_| ())
+        } else {
+            transact!(storage, |tx| tx.read_ref(&r.id).await).map(|_| ())
+        };
+        refused(
+            &format!("a {read} holding an integer out of range"),
+            "not an integer a JavaScript number holds exactly",
+            &result,
+        );
+    }
 }
 
 #[tokio::test]

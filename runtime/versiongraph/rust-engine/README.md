@@ -2,10 +2,11 @@
 
 The Rust engine of the version graph (D17, D19 and D32 in
 `docs/DECISIONS.md`): every graph operation, written once over a storage
-adapter, with a Postgres adapter and a SQLite adapter. It calls the core (`../rust`, crate `superschematic-versiongraph`)
-natively through a path dependency. `../README.md` is the contract it keeps:
-the descriptor, canonical rows, the engine's rules and error codes, and the
-scenario format.
+adapter, with a Postgres adapter and a SQLite adapter. It calls the core
+(`../rust`, crate `superschematic-versiongraph`) natively through a path
+dependency. `../README.md` is the contract it keeps: the descriptor,
+canonical rows, the engine's rules and error codes, and the scenario
+format.
 
 ```
 src/engine.rs      Engine: create_primary, branch, save, commit, seal, merge, rebase,
@@ -79,7 +80,10 @@ does, so a file one writes the other reads. It writes history itself, as
 Postgres's triggers do: `_version`, an image of every insert and update,
 and a delete's image naming its actor. A transaction reads its time once,
 from `options.clock` (microseconds since the Unix epoch; the system clock
-by default), after it has taken the file's write lock.
+by default), after it has taken the file's write lock; `create_tables`
+reads it too, as the TypeScript adapter's does, and a row's id is drawn
+before a key the row lacks, so a seeded run writes the TypeScript adapter's
+file byte for byte (`src/sqlite/write_parity.rs`, a test of the crate).
 
 ```rust
 use std::sync::Arc;
@@ -106,8 +110,13 @@ inside a transaction the caller holds on the connection
 rolls back with the caller's transaction. A transaction an operation
 dropped is rolled back at once. rusqlite's calls are synchronous, so each
 statement blocks the executor while SQLite runs it. `storage` and
-`create_tables` refuse a SQLite older than 3.38.0, and `storage` turns the
-connection's foreign keys on and refuses one where they stay off. Its tests
+`create_tables` refuse a SQLite older than 3.37.0, and one whose `json_each`
+and `json_extract` do not work (SQLite builds them in from 3.38.0, and 3.37
+has them in builds with JSON1), and `storage` turns the connection's
+foreign keys on and refuses one where they stay off. A time, from the clock
+when a transaction begins or stored and read back, and every integer read
+back, must lie within 2^53 - 1 either side of zero, as the TypeScript
+adapter holds them, so a file one adapter writes the other reads. Its tests
 hold it to the SQLite vectors (`../testdata/sqlite`): its layout under the
 default names is `layout.json`, and the database the TypeScript adapter
 wrote, `typescript.sql`, reads back through it and the engine as

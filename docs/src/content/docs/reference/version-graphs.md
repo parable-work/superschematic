@@ -826,9 +826,11 @@ one rusqlite connection, with the SQLite rusqlite bundles, behind the
 on the connection, and a transaction a dropped operation left is rolled
 back at once. rusqlite's calls are synchronous, so each statement blocks
 the executor while SQLite runs it. The adapter refuses a SQLite older than
-3.38.0. Every scenario runs through it too, with no database server, and
-it reads the SQLite vectors' database, which the TypeScript adapter wrote,
-as they say it reads.
+3.37.0, and one without working `json_each` and `json_extract`. Every
+scenario runs through it too, with no database server; it reads the SQLite
+vectors' database, which the TypeScript adapter wrote, as they say it
+reads, and the script that wrote it, run through the Rust adapter, writes
+the same file byte for byte.
 
 ```rust
 use std::sync::Arc;

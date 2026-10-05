@@ -43,6 +43,8 @@
 //! sequence plus 1, and [`Tx::sweep_lock`] is true.
 
 mod client;
+#[cfg(all(test, feature = "rusqlite"))]
+mod write_parity;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -71,11 +73,23 @@ pub const SQLITE_BUSY: i32 = 5;
 pub const SQLITE_CONSTRAINT_UNIQUE: i32 = 2067;
 
 /// The oldest SQLite the layout and the statements run on, as
-/// `(major, minor, patch)`: 3.38.0, from which `json_each` and
-/// `json_extract` are part of SQLite itself rather than an extension a
-/// build may leave out. The layout's `STRICT` tables need 3.37.0, and
-/// `RETURNING` 3.35.0.
-pub const MIN_SQLITE_VERSION: (u32, u32, u32) = (3, 38, 0);
+/// `(major, minor, patch)`: 3.37.0, which added `STRICT` tables;
+/// `RETURNING` needs 3.35.0. The statements also read lists through
+/// `json_each` and `json_extract`, which SQLite builds in from 3.38.0 and
+/// 3.37 has in builds with JSON1, and which a later build can still leave
+/// out, so the adapter checks that they work as well ([`JSON_PROBE`]).
+pub const MIN_SQLITE_VERSION: (u32, u32, u32) = (3, 37, 0);
+
+/// A statement that uses the JSON functions the adapter's statements use,
+/// and returns 1 where they work: a SQLite built without them refuses it.
+pub const JSON_PROBE: &str = "SELECT json_extract(p.value, '$[0]') FROM json_each('[[1]]') AS p";
+
+/// The widest time, in microseconds either side of the Unix epoch, a
+/// transaction writes and a stored time reads as: 2^53 - 1, the integers a
+/// JavaScript number holds exactly, so every adapter reads what another
+/// writes. Every integer the adapter reads back is held to it, as the
+/// TypeScript adapter holds them.
+pub const MAX_MICROS: i64 = (1 << 53) - 1;
 
 /// The local names of the layout's tables, in the order the layout creates
 /// them.
@@ -348,8 +362,10 @@ pub fn layout(table_name: &dyn Fn(&str) -> String) -> Result<Vec<String>, Error>
 
 /// A time in whole microseconds since the Unix epoch as a canonical
 /// date-time: UTC with `Z`, its fraction of a second without trailing zeros
-/// and left out when zero. A year outside 0000-9999 is refused.
+/// and left out when zero. A time outside [`MAX_MICROS`] either side of the
+/// epoch is refused, and so is a year outside 0000-9999.
 pub fn micros_to_date_time(micros: i64) -> Result<String, Error> {
+    check_micros(micros, "a time of")?;
     canonical::date_time_of_micros(micros).map_err(|e| Error::Invalid(format!("sqlite: {e}")))
 }
 
@@ -388,10 +404,36 @@ async fn check_version<C: Client + ?Sized>(client: &C) -> Result<(), Error> {
         let (major, minor, patch) = MIN_SQLITE_VERSION;
         return Err(Error::Invalid(format!(
             "sqlite: the connection runs SQLite {text}, and the adapter needs {major}.{minor}.{patch} or later \
-             (STRICT tables, RETURNING, and json_each and json_extract built in)"
+             (STRICT tables and RETURNING)"
+        )));
+    }
+    let probed = client.exec(JSON_PROBE).await;
+    if !matches!(probed.as_deref(), Ok([row]) if row.as_slice() == [SqlValue::Int(1)]) {
+        let why = match probed {
+            Ok(rows) => format!("it returned {rows:?}"),
+            Err(error) => error.to_string(),
+        };
+        return Err(Error::Invalid(format!(
+            "sqlite: the connection's SQLite {text} lacks json_each and json_extract, which the adapter's \
+             statements use (built in from 3.38.0, and in 3.37 with JSON1): {why}"
         )));
     }
     Ok(())
+}
+
+/// Refuses a time outside [`MAX_MICROS`] either side of the epoch.
+fn check_micros(micros: i64, what: &str) -> Result<i64, Error> {
+    if !(-MAX_MICROS..=MAX_MICROS).contains(&micros) {
+        return Err(Error::Invalid(format!(
+            "sqlite: {what} {micros} microseconds, outside the 2^53 - 1 either side of the Unix epoch a time holds"
+        )));
+    }
+    Ok(micros)
+}
+
+/// Reads the clock once, refusing a time outside [`MAX_MICROS`].
+fn read_clock(clock: &Clock) -> Result<i64, Error> {
+    check_micros(clock(), "the clock returned")
 }
 
 /// SQLite's extended result code of an error the adapter or its client
@@ -495,6 +537,18 @@ struct DescriptorHistory {
     actor: Option<String>,
 }
 
+/// The 128 random bits of each new id, before the adapter sets its version
+/// and variant: the system's random source, or a test's seeded one.
+type IdBits = Arc<dyn Fn() -> Result<[u8; 16], Error> + Send + Sync>;
+
+/// The system's random source.
+fn system_bits() -> Result<[u8; 16], Error> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes)
+        .map_err(|e| Error::storage(format!("sqlite: generate an id: {e}")))?;
+    Ok(bytes)
+}
+
 /// One graph's statements over the layout, built from its descriptor. Bind a
 /// [`Client`] with [`Adapter::storage`].
 pub struct Adapter {
@@ -502,6 +556,7 @@ pub struct Adapter {
     tables: Tables,
     layout: Vec<String>,
     clock: Clock,
+    ids: IdBits,
     kinds: HashMap<String, Kind>,
 }
 
@@ -614,8 +669,34 @@ impl Adapter {
             tables: Tables::new(table_name.as_ref())?,
             layout: layout(table_name.as_ref())?,
             clock: options.clock.unwrap_or_else(|| Arc::new(system_clock)),
+            ids: Arc::new(system_bits),
             kinds,
         })
+    }
+
+    /// The adapter, its ids' random bits drawn from `ids`: a test's seeded
+    /// source, so a run writes the same file each time.
+    #[cfg(all(test, feature = "rusqlite"))]
+    pub(crate) fn with_ids(mut self, ids: IdBits) -> Self {
+        self.ids = ids;
+        self
+    }
+
+    /// A new id: a version-4 UUID in its canonical form.
+    fn new_id(&self) -> Result<String, Error> {
+        let mut bytes = (self.ids)()?;
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        let hex = format!("{:032x}", u128::from_be_bytes(bytes));
+        let hyphenated = format!(
+            "{}-{}-{}-{}-{}",
+            &hex[0..8],
+            &hex[8..12],
+            &hex[12..16],
+            &hex[16..20],
+            &hex[20..32]
+        );
+        Ok(canonical::uuid(&hyphenated)?)
     }
 
     /// The statements that create the layout under the adapter's names
@@ -627,10 +708,18 @@ impl Adapter {
     /// Creates the layout's tables and indexes where they are missing, in
     /// one transaction of the client: its own on the connection, or a
     /// savepoint in the caller's. It refuses a SQLite older than
-    /// [`MIN_SQLITE_VERSION`] first.
+    /// [`MIN_SQLITE_VERSION`], or one whose JSON functions fail
+    /// [`JSON_PROBE`], first.
     pub async fn create_tables<C: Client + ?Sized>(&self, client: &C) -> Result<(), Error> {
         check_version(client).await?;
         let mut conn = client.begin().await.map_err(|e| failed("begin", e))?;
+        // A transaction reads the clock once it has begun, this one too,
+        // though it writes no time, as the TypeScript adapter's does: a
+        // seeded run reads each time in the same transaction in both.
+        if let Err(error) = read_clock(&self.clock) {
+            let _ = conn.rollback().await;
+            return Err(error);
+        }
         for statement in &self.layout {
             if let Err(error) = conn.execute(statement, &[]).await {
                 // The statement's error is the one to report.
@@ -642,7 +731,8 @@ impl Adapter {
     }
 
     /// Binds the adapter to a client. It refuses a SQLite older than
-    /// [`MIN_SQLITE_VERSION`], and turns the connection's foreign keys on,
+    /// [`MIN_SQLITE_VERSION`], or one whose JSON functions fail
+    /// [`JSON_PROBE`], and turns the connection's foreign keys on,
     /// which SQLite ignores inside a transaction, so bind it outside one: a
     /// connection whose foreign keys stay off is refused.
     pub async fn storage<C: Client + 'static>(
@@ -712,8 +802,14 @@ impl<C: Client + 'static> Storage for SqliteStorage<C> {
     async fn begin(&self) -> Result<Box<dyn Tx + '_>, Error> {
         let conn = self.client.begin().await.map_err(|e| failed("begin", e))?;
         // Read once the transaction holds the write lock, so times order as
-        // the writes do.
-        let time = (self.adapter.clock)();
+        // the writes do. A time out of range ends the transaction.
+        let time = match read_clock(&self.adapter.clock) {
+            Ok(time) => time,
+            Err(error) => {
+                let _ = conn.rollback().await;
+                return Err(error);
+            }
+        };
         Ok(Box::new(SqliteTx {
             a: &self.adapter,
             conn,
@@ -784,7 +880,7 @@ impl<'r> Cells<'r> {
     fn optional_int(&mut self) -> Result<Option<i64>, Error> {
         match self.next()? {
             (SqlValue::Null, _) => Ok(None),
-            (SqlValue::Int(n), _) => Ok(Some(*n)),
+            (SqlValue::Int(n), column) => in_range(*n, column).map(Some),
             (other, column) => Err(Error::Invalid(format!(
                 "sqlite: column {column} is {other:?}, not an integer"
             ))),
@@ -793,12 +889,24 @@ impl<'r> Cells<'r> {
 
     fn int(&mut self) -> Result<i64, Error> {
         match self.next()? {
-            (SqlValue::Int(n), _) => Ok(*n),
+            (SqlValue::Int(n), column) => in_range(*n, column),
             (other, column) => Err(Error::Invalid(format!(
                 "sqlite: column {column} is {other:?}, not an integer"
             ))),
         }
     }
+}
+
+/// An integer the adapter reads back, refused outside [`MAX_MICROS`] either
+/// side of zero, the integers a JavaScript number holds exactly, as the
+/// TypeScript adapter refuses one.
+fn in_range(n: i64, column: &str) -> Result<i64, Error> {
+    if !(-MAX_MICROS..=MAX_MICROS).contains(&n) {
+        return Err(Error::Invalid(format!(
+            "sqlite: column {column} is {n}, not an integer a JavaScript number holds exactly"
+        )));
+    }
+    Ok(n)
 }
 
 const REF_NAMES: [&str; 14] = [
@@ -1080,25 +1188,6 @@ fn json_time(micros: Option<i64>) -> Result<String, Error> {
     }
 }
 
-/// A new id: a version-4 UUID in its canonical form.
-fn new_id() -> Result<String, Error> {
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes)
-        .map_err(|e| Error::storage(format!("sqlite: generate an id: {e}")))?;
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex = format!("{:032x}", u128::from_be_bytes(bytes));
-    let hyphenated = format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    );
-    Ok(canonical::uuid(&hyphenated)?)
-}
-
 /// The canonical text of a value of a column's class, with the column named
 /// in its error.
 fn canonical_of(k: &Kind, column: &str, value: &Value) -> Result<String, Error> {
@@ -1244,7 +1333,7 @@ impl SqliteTx<'_> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
         );
         let args = [
-            new_id()?.into(),
+            self.a.new_id()?.into(),
             self.graph(),
             id.into(),
             version.into(),
@@ -1277,7 +1366,7 @@ impl SqliteTx<'_> {
             self.a.tables.member_history
         );
         let args = [
-            new_id()?.into(),
+            self.a.new_id()?.into(),
             self.graph(),
             k.name.as_str().into(),
             id.into(),
@@ -1441,12 +1530,15 @@ impl SqliteTx<'_> {
                 (column.clone(), value.unwrap_or_else(|| "null".to_owned()))
             })
             .collect();
+        // The row's id first, then a key the row lacks, as the TypeScript
+        // adapter draws them, so seeded ids fall the same way in both.
+        let id = role_value(k, &k.id, &self.a.new_id()?)?;
         let key = match key {
             Some(key) => key,
-            None => role_value(k, &k.key, &new_id()?)?,
+            None => role_value(k, &k.key, &self.a.new_id()?)?,
         };
         let stored = Member {
-            id: role_value(k, &k.id, &new_id()?)?,
+            id,
             key,
             ref_id,
             root,
@@ -1540,7 +1632,7 @@ impl Tx for SqliteTx<'_> {
             self.require_commit(what, base, &new.root, "the base")
                 .await?;
         }
-        let id = new_id()?;
+        let id = self.a.new_id()?;
         let sql = format!(
             "INSERT INTO {} (id, graph, root_id, parent_ref_id, base_commit_id, head_commit_id, name, sealed_at, \
              created_at, created_by, updated_at, updated_by, deleted_at, deleted_by, _version) \
@@ -1773,7 +1865,7 @@ impl Tx for SqliteTx<'_> {
             self.require_commit(what, parent, &commit.root, "the commit's parent")
                 .await?;
         }
-        let id = new_id()?;
+        let id = self.a.new_id()?;
         let sql = format!(
             "INSERT INTO {} (id, graph, root_id, ref_id, parent_commit_id, message, schema_epoch, content_hash, sequence, created_at, created_by) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
@@ -1821,7 +1913,7 @@ impl Tx for SqliteTx<'_> {
         for p in patches {
             let (kind, key, id) = self.pinned(&p.kind, &p.entity_key, &p.entity_id)?;
             let args = [
-                new_id()?.into(),
+                self.a.new_id()?.into(),
                 self.graph(),
                 commit.into(),
                 kind.into(),
@@ -1961,7 +2053,7 @@ impl Tx for SqliteTx<'_> {
         for e in entries {
             let (kind, key, id) = self.pinned(&e.kind, &e.entity_key, &e.entity_id)?;
             let args = [
-                new_id()?.into(),
+                self.a.new_id()?.into(),
                 self.graph(),
                 commit.into(),
                 kind.into(),
@@ -2023,7 +2115,7 @@ impl Tx for SqliteTx<'_> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?5, ?6, 1) ON CONFLICT (graph, root_id) DO NOTHING RETURNING {RELEASE_COLUMNS}"
             );
             let args = [
-                new_id()?.into(),
+                self.a.new_id()?.into(),
                 self.graph(),
                 write.root.as_str().into(),
                 write.commit.as_str().into(),
@@ -2269,8 +2361,6 @@ mod tests {
             (1_800_000_000_000_001, "2027-01-15T08:00:00.000001Z"),
             (0, "1970-01-01T00:00:00Z"),
             (-1, "1969-12-31T23:59:59.999999Z"),
-            (-62_167_219_200_000_000, "0000-01-01T00:00:00Z"),
-            (253_402_300_799_999_999, "9999-12-31T23:59:59.999999Z"),
         ] {
             assert_eq!(
                 micros_to_date_time(micros).expect("a time"),
@@ -2278,17 +2368,19 @@ mod tests {
                 "{micros}"
             );
         }
-        for micros in [-62_167_219_200_000_001, 253_402_300_800_000_000, i64::MAX] {
-            let error = micros_to_date_time(micros).expect_err("out of range");
-            assert!(
-                error.to_string().contains("outside the years 0000-9999"),
-                "{micros}: {error}"
-            );
+        for (micros, want) in [
+            (-62_167_219_200_000_000, "0000-01-01T00:00:00Z"),
+            (253_402_300_799_999_999, "9999-12-31T23:59:59.999999Z"),
+        ] {
+            let text = canonical::date_time_of_micros(micros).expect("a time");
+            assert_eq!(text, want, "{micros}");
         }
     }
 
-    /// A client that reports one SQLite version and runs nothing else.
-    struct Version(&'static str);
+    /// A client that reports one SQLite version, and runs the JSON probe as
+    /// a build with the JSON functions or without them does, and nothing
+    /// else.
+    struct Version(&'static str, bool);
 
     #[async_trait]
     impl Client for Version {
@@ -2297,44 +2389,110 @@ mod tests {
         }
 
         async fn exec(&self, sql: &str) -> Result<Vec<Vec<SqlValue>>, ClientError> {
-            assert_eq!(sql, "SELECT sqlite_version()");
-            Ok(vec![vec![SqlValue::Text(self.0.to_owned())]])
+            match sql {
+                "SELECT sqlite_version()" => Ok(vec![vec![SqlValue::Text(self.0.to_owned())]]),
+                JSON_PROBE if self.1 => Ok(vec![vec![SqlValue::Int(1)]]),
+                JSON_PROBE => Err(ClientError {
+                    code: Some(1),
+                    source: "no such function: json_each".into(),
+                }),
+                other => panic!("ran {other}"),
+            }
         }
     }
 
     /// The adapter refuses a SQLite older than the layout and its statements
-    /// need, before it runs anything, with a clear error, and takes any
-    /// version from 3.38.0, compared as numbers.
+    /// need, before it runs anything, with a clear error: one before
+    /// 3.37.0, compared as numbers, and one of any version whose JSON
+    /// functions do not work. It takes 3.37.0 and later with them.
     #[tokio::test]
-    async fn the_adapter_refuses_an_older_sqlite() {
+    async fn the_adapter_refuses_an_older_sqlite_and_one_without_json() {
         let adapter = Arc::new(Adapter::new(&fixture().to_string(), graph()).expect("adapter"));
-        for old in ["3.37.2", "3.9.0", "2.8.17"] {
-            let error = check_version(&Version(old)).await.expect_err(old);
-            assert!(
-                error.to_string().contains(&format!(
-                    "runs SQLite {old}, and the adapter needs 3.38.0 or later"
-                )),
-                "{old}: {error}"
-            );
-            let refused = adapter.create_tables(&Version(old)).await.expect_err(old);
-            assert!(refused.to_string().contains("needs 3.38.0"), "{refused}");
-            let refused = adapter.storage(Version(old)).await.map(|_| ());
+        for (version, json, refuse) in [
+            (
+                "3.36.0",
+                true,
+                "runs SQLite 3.36.0, and the adapter needs 3.37.0 or later",
+            ),
+            (
+                "3.9.0",
+                true,
+                "runs SQLite 3.9.0, and the adapter needs 3.37.0 or later",
+            ),
+            (
+                "2.8.17",
+                true,
+                "runs SQLite 2.8.17, and the adapter needs 3.37.0 or later",
+            ),
+            (
+                "3.37.2",
+                false,
+                "SQLite 3.37.2 lacks json_each and json_extract",
+            ),
+            (
+                "3.46.1",
+                false,
+                "SQLite 3.46.1 lacks json_each and json_extract",
+            ),
+        ] {
+            let error = check_version(&Version(version, json))
+                .await
+                .expect_err(version);
+            assert!(error.to_string().contains(refuse), "{version}: {error}");
+            let refused = adapter
+                .create_tables(&Version(version, json))
+                .await
+                .expect_err(version);
+            assert!(refused.to_string().contains(refuse), "{refused}");
+            let refused = adapter.storage(Version(version, json)).await.map(|_| ());
             assert!(
                 refused
                     .as_ref()
-                    .is_err_and(|e| e.to_string().contains("needs 3.38.0")),
+                    .is_err_and(|e| e.to_string().contains(refuse)),
                 "{refused:?}"
             );
         }
-        for new in ["3.38.0", "3.38", "3.46.1", "3.100.0", "4.0.0"] {
-            check_version(&Version(new)).await.expect(new);
+        for version in ["3.37.0", "3.37.2", "3.38", "3.46.1", "3.100.0", "4.0.0"] {
+            check_version(&Version(version, true)).await.expect(version);
         }
         for garbage in ["", "three", "3.x.0"] {
-            let error = check_version(&Version(garbage)).await.expect_err(garbage);
+            let error = check_version(&Version(garbage, true))
+                .await
+                .expect_err(garbage);
             assert!(
                 error.to_string().contains("not a version"),
                 "{garbage:?}: {error}"
             );
         }
+    }
+
+    /// A time holds 2^53 - 1 microseconds either side of the epoch, and a
+    /// year from 0000 to 9999: past the first a time is refused before its
+    /// date is read, and the year rule still holds for any time it reads.
+    #[test]
+    fn a_time_holds_2_to_the_53_microseconds_and_a_year_from_0000_to_9999() {
+        for micros in [MAX_MICROS, -MAX_MICROS] {
+            micros_to_date_time(micros).expect("in range");
+        }
+        assert_eq!(
+            micros_to_date_time(MAX_MICROS).expect("in range"),
+            "2255-06-05T23:47:34.740991Z"
+        );
+        for micros in [MAX_MICROS + 1, -MAX_MICROS - 1, i64::MAX, i64::MIN] {
+            let error = micros_to_date_time(micros).expect_err("out of range");
+            assert!(
+                error.to_string().contains("outside the 2^53 - 1"),
+                "{micros}: {error}"
+            );
+        }
+        for micros in [-62_167_219_200_000_001, 253_402_300_800_000_000] {
+            let error = canonical::date_time_of_micros(micros).expect_err("out of years");
+            assert!(
+                error.to_string().contains("outside the years 0000-9999"),
+                "{micros}: {error}"
+            );
+        }
+        canonical::date_time_of_micros(-62_167_219_200_000_000).expect("0000-01-01");
+        canonical::date_time_of_micros(253_402_300_799_999_999).expect("9999-12-31");
     }
 }
