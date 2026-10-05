@@ -19,7 +19,7 @@ export GOTOOLCHAIN := go$(GO_VERSION)
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages.
 export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/pulumi
 BIN := bin/superschematic
 
 # build-all keys its cache on a hash of this binary. -trimpath drops the
@@ -74,10 +74,12 @@ go-lint:
 	@for m in $(GO_MODULES); do echo "==> golangci-lint $$m"; (cd $$m && golangci-lint run ./...) || exit 1; done
 
 # Rewrite every golden file from the generators, and the schema-file JSON
-# Schema and TypeScript types. Review the diff by eye.
+# Schema and TypeScript types. Review the diff by eye. Each package's tests
+# run in the module that holds it.
 go-goldens: schema-file-types
-	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | xargs -n1 dirname | sort -u); do \
-		go test -count=1 $$p -update || exit 1; done
+	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | grep -v '^./third_party/' | xargs -n1 dirname | sort -u); do \
+		m=$$p; while [ ! -f $$m/go.mod ]; do m=$$(dirname $$m); done; \
+		(cd $$m && go test -count=1 .$${p#$$m} -update) || exit 1; done
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
 # Go package, the TypeScript one with each scalar's value class from the

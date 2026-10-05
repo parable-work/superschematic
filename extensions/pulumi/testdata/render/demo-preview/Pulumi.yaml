@@ -1,0 +1,61 @@
+# Rendered by superschematic from the resource graph of environment Preview of
+# stack Demo. Do not edit: change the stack and render it again.
+
+name: demo
+runtime: yaml
+description: Environment Preview of stack Demo
+config:
+  pr:
+    type: string
+resources:
+  # The stack of environment Shared, which owns the nodes this environment
+  # inherits: shared.pet.
+  parent-stack:
+    type: pulumi:pulumi:StackReference
+    properties:
+      name: shared
+  # phase rollout; owners api
+  api-id:
+    name: api.id
+    type: random:index/randomId:RandomId
+    properties:
+      byteLength: 4
+      keepers:
+        suffix: ${api-suffix.result}
+      prefix: api-${pr}-
+    options:
+      dependsOn:
+        - ${api-suffix}
+      version: 4.21.2
+  # phase exposure; owners api
+  api-name:
+    name: api.name
+    type: random:index/randomPet:RandomPet
+    properties:
+      prefix: ${api-id.hex}
+    options:
+      dependsOn:
+        - ${api-id}
+      version: 4.21.2
+  # phase infrastructure; owners api
+  api-suffix:
+    name: api.suffix
+    type: random:index/randomString:RandomString
+    properties:
+      keepers:
+        pet: ${parent-stack.outputs["shared.pet.id"]}
+        pr: ${pr}
+      length: 8
+      special: false
+      upper: false
+    options:
+      dependsOn:
+        - ${parent-stack}
+      version: 4.21.2
+outputs:
+  api.id.hex: ${api-id.hex}
+  api.id.id: ${api-id.id}
+  api.name.id: ${api-name.id}
+  api.suffix.id: ${api-suffix.id}
+  api.suffix.result: ${api-suffix.result}
+  shared.pet.id: ${parent-stack.outputs["shared.pet.id"]}

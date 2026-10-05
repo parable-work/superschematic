@@ -1,0 +1,212 @@
+# Rendered by superschematic from the resource graph of environment Staging of
+# stack Shop. Do not edit: change the stack and render it again.
+
+name: shop
+runtime: yaml
+description: Environment Staging of stack Shop
+resources:
+  # phase infrastructure; owners Orders
+  Orders-account:
+    name: Orders.account
+    type: fake:iam/account:Account
+    properties:
+      name: orders
+  # phase rollout; owners http:Orders->shop-api
+  Orders-invokes-shop-api:
+    name: Orders.invokes.shop-api
+    type: fake:iam/grant:Grant
+    properties:
+      member: ${Orders-account.email}
+      resource: ${shop-api-service.id}
+      role: run.invoker
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${shop-api-service}
+  # phase infrastructure; owners Orders
+  Orders-reads-PaymentsSecrets-STRIPE_KEY:
+    name: Orders.reads.PaymentsSecrets.STRIPE_KEY
+    type: fake:iam/grant:Grant
+    properties:
+      member: ${Orders-account.email}
+      resource: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+      role: secret.accessor
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+  # phase rollout; owners Orders
+  Orders-service:
+    name: Orders.service
+    type: fake:run/service:Service
+    properties:
+      account: ${Orders-account.email}
+      env:
+        - name: FULFILLMENT_REGION
+          value: us
+        - name: MAX_LINE_ITEMS
+          value: "50"
+        - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
+          value: ${shop-api-service.url}
+        - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
+          value: google-id-token
+        - name: SHOP_API_SERVICE_URL
+          value: ${shop-api-service.url}
+        - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
+          value: ${shop-db-database-shop-db.name}
+        - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
+          value: ${shop-db-instance.connectionName}
+        - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
+          value: ${Orders-account.email}
+        - name: STRIPE_KEY
+          secret: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+      image: orders
+      language: go
+      name: orders
+      public: false
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-service}
+        - ${shop-db-database-shop-db}
+        - ${shop-db-instance}
+  # phase infrastructure; owners sql:Orders->shop-db
+  Orders-sql-shop-db:
+    name: Orders.sql.shop-db
+    type: fake:iam/grant:Grant
+    properties:
+      member: ${Orders-account.email}
+      resource: ${shop-db-instance.id}
+      role: sql.client
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${shop-db-instance}
+  # phase exposure; owners dns
+  dns-shop-api-1:
+    name: dns.shop-api.1
+    type: fake:dns/record:Record
+    properties:
+      name: shop-api.staging.acme.dev
+      type: CNAME
+      value: ${shop-api-route.target}
+      zone: acme.dev
+    options:
+      dependsOn:
+        - ${shop-api-route}
+  # phase infrastructure; owners Orders, shop-api
+  secret-PaymentsSecrets-STRIPE_KEY:
+    name: secret.PaymentsSecrets.STRIPE_KEY
+    type: fake:secrets/secret:Secret
+    properties:
+      name: PaymentsSecrets.STRIPE_KEY
+  # phase infrastructure; owners shop-api
+  shop-api-account:
+    name: shop-api.account
+    type: fake:iam/account:Account
+    properties:
+      name: shop-api
+  # phase infrastructure; owners shop-api
+  shop-api-reads-PaymentsSecrets-STRIPE_KEY:
+    name: shop-api.reads.PaymentsSecrets.STRIPE_KEY
+    type: fake:iam/grant:Grant
+    properties:
+      member: ${shop-api-account.email}
+      resource: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+      role: secret.accessor
+    options:
+      dependsOn:
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-account}
+  # phase exposure; owners shop-api
+  shop-api-route:
+    name: shop-api.route
+    type: fake:run/route:Route
+    properties:
+      host: shop-api.staging.acme.dev
+      service: ${shop-api-service.id}
+    options:
+      dependsOn:
+        - ${shop-api-service}
+  # phase rollout; owners shop-api
+  shop-api-service:
+    name: shop-api.service
+    type: fake:run/service:Service
+    properties:
+      account: ${shop-api-account.email}
+      env:
+        - name: LOG_LEVEL
+          value: info
+        - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
+          value: ${shop-db-database-shop-db.name}
+        - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
+          value: ${shop-db-instance.connectionName}
+        - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
+          value: ${shop-api-account.email}
+        - name: STRIPE_KEY
+          secret: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+      image: shop-api
+      language: go
+      name: shop-api
+      public: true
+    options:
+      dependsOn:
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-account}
+        - ${shop-db-database-shop-db}
+        - ${shop-db-instance}
+  # phase infrastructure; owners sql:shop-api->shop-db
+  shop-api-sql-shop-db:
+    name: shop-api.sql.shop-db
+    type: fake:iam/grant:Grant
+    properties:
+      member: ${shop-api-account.email}
+      resource: ${shop-db-instance.id}
+      role: sql.client
+    options:
+      dependsOn:
+        - ${shop-api-account}
+        - ${shop-db-instance}
+  # phase infrastructure; owners shop-db
+  shop-db-database-shop-db:
+    name: shop-db.database.shop-db
+    type: fake:sql/database:Database
+    properties:
+      instance: ${shop-db-instance.name}
+      name: shop_db
+    options:
+      dependsOn:
+        - ${shop-db-instance}
+  # phase infrastructure; owners shop-db
+  shop-db-instance:
+    name: shop-db.instance
+    type: fake:sql/instance:Instance
+    properties:
+      dialect: postgres
+      highAvailability: false
+      name: shop-db
+      tier: small
+outputs:
+  Orders.account.email: ${Orders-account.email}
+  Orders.account.id: ${Orders-account.id}
+  Orders.invokes.shop-api.id: ${Orders-invokes-shop-api.id}
+  Orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${Orders-reads-PaymentsSecrets-STRIPE_KEY.id}
+  Orders.service.id: ${Orders-service.id}
+  Orders.service.url: ${Orders-service.url}
+  Orders.sql.shop-db.id: ${Orders-sql-shop-db.id}
+  dns.shop-api.1.id: ${dns-shop-api-1.id}
+  secret.PaymentsSecrets.STRIPE_KEY.id: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+  shop-api.account.email: ${shop-api-account.email}
+  shop-api.account.id: ${shop-api-account.id}
+  shop-api.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-api-reads-PaymentsSecrets-STRIPE_KEY.id}
+  shop-api.route.id: ${shop-api-route.id}
+  shop-api.route.target: ${shop-api-route.target}
+  shop-api.service.id: ${shop-api-service.id}
+  shop-api.service.url: ${shop-api-service.url}
+  shop-api.sql.shop-db.id: ${shop-api-sql-shop-db.id}
+  shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
+  shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
+  shop-db.instance.connectionName: ${shop-db-instance.connectionName}
+  shop-db.instance.id: ${shop-db-instance.id}
+  shop-db.instance.name: ${shop-db-instance.name}
