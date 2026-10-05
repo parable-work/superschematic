@@ -1,0 +1,2126 @@
+{
+  "name": "Branches",
+  "description": "Makes each instance the root of a version graph: refs, a primary line and drafts of it, over rows of the kinds the config names, each kind's content a type of the schema document; commits, merges, rebases and reverts; and a release pointer whose history is the release log. The instance's own fields stay outside the graph. The graph lives in the behavior's own tables, and deleting the instance deletes it. With sweep in its config, a schedule discards idle drafts and keeps the graph's storage in bounds.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "kinds": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "properties": {
+            "order": {
+              "description": "The kind's integer field that orders siblings, as @graphMember's order.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "parent": {
+              "additionalProperties": false,
+              "description": "Containment, as @graphMember's parent: key is the kind's field, of a UUID scalar, that holds the parent row's entity key, and of is the parent's kind, this one included. Deleting a parent removes its descendants.",
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "of": {
+                  "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "of"
+              ],
+              "type": "object"
+            },
+            "retentionDays": {
+              "description": "How many days of the kind's history the sweep keeps, as @versioned's retentionDays; all of it when absent.",
+              "maximum": 2147483647,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "singleton": {
+              "description": "At most one live row of the kind, as @graphMember's singleton.",
+              "type": "boolean"
+            },
+            "type": {
+              "description": "The type of the schema document, besides the instance type, whose fields are the kind's content.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "units": {
+              "additionalProperties": {
+                "enum": [
+                  "atomic",
+                  "keyed",
+                  "jsonSchema",
+                  "excluded"
+                ],
+                "type": "string"
+              },
+              "description": "A field's conflict unit, as @conflictUnit sets it: atomic (the default), keyed (each top-level key of a JSON object), jsonSchema, or excluded (not content: never merged or hashed).",
+              "propertyNames": {
+                "minLength": 1
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        "description": "The graph's kinds, by name: camelCase, at most 64 characters.",
+        "maxProperties": 64,
+        "minProperties": 1,
+        "propertyNames": {
+          "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+        },
+        "type": "object"
+      },
+      "primary": {
+        "description": "The name of each instance's primary line; main when absent.",
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "snapshotEvery": {
+        "description": "How many commits past the nearest snapshot on its chain a commit is snapshotted at, as @versionGraph's snapshotEvery; 64 when absent.",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sweep": {
+        "additionalProperties": false,
+        "description": "Turns the sweep schedule on for the schema: each run discards the drafts idle past abandonAfter, then deletes the rows of refs discarded longer ago than discardGrace, prunes each kind's history past its retentionDays and writes missing snapshots.",
+        "properties": {
+          "abandonAfter": {
+            "description": "Discards a draft with no write for this many milliseconds; none when absent.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "discardGrace": {
+            "description": "How long a discarded ref's rows are kept, in milliseconds; seven days when absent.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "intervalMs": {
+            "description": "How often it runs, in milliseconds; at least 1000.",
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "pruneBatch": {
+            "description": "At most this many history images of each kind pruned per run; no limit when absent.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "intervalMs"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "kinds"
+    ],
+    "type": "object"
+  },
+  "operations": [
+    {
+      "name": "branch",
+      "description": "Creates a draft of a ref of the instance, its primary line or another draft, whose rows lay over the ref's head.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "fromRef": {
+            "description": "The ref to branch from, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "The draft's name, unique among the instance's live refs.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromRef",
+          "name"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The draft.",
+        "properties": {
+          "base": {
+            "description": "The commit its rows lay over: its parent's head when it was branched or last rebased; null for none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "description": "When it was created, a date-time in UTC.",
+            "type": "string"
+          },
+          "createdBy": {
+            "description": "The subject of the caller who created it.",
+            "type": "string"
+          },
+          "discarded": {
+            "description": "Whether it is discarded.",
+            "type": "boolean"
+          },
+          "head": {
+            "description": "Its latest commit; null before its first.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Its id, a UUID in its canonical form.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, unique among the instance's live refs.",
+            "type": "string"
+          },
+          "parent": {
+            "description": "The ref it was branched from; null for the primary line.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sealed": {
+            "description": "Whether it is sealed, so it takes no more writes.",
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "description": "When it was last written, a date-time in UTC.",
+            "type": "string"
+          },
+          "updatedBy": {
+            "description": "The subject of the caller who last wrote it.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Its version, which every write through it names and moves on.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "parent",
+          "base",
+          "head",
+          "sealed",
+          "discarded",
+          "version",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "save",
+      "description": "Writes rows on a draft, at its version: by kind, each upsert row is an entity's whole content and, to replace an entity the draft reads, its entity_key, and is checked against the kind's type; each delete removes an entity from the draft; each unset drops the draft's own row of an entity, so the draft reads it through its base again. A primary line takes no save: work merges into it.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "edits": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "delete": {
+                  "description": "Entity keys of entities the draft reads.",
+                  "items": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 10000,
+                  "type": "array"
+                },
+                "unset": {
+                  "description": "Entity keys of entities the draft has rows of its own for.",
+                  "items": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 10000,
+                  "type": "array"
+                },
+                "upsert": {
+                  "description": "Rows: entity_key and the kind's fields.",
+                  "items": {
+                    "type": "object"
+                  },
+                  "maxItems": 10000,
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "description": "The edits by kind: upserts, then deletes, then unsets, kind by kind.",
+            "type": "object"
+          },
+          "ref": {
+            "description": "The draft, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "The draft's version.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ref",
+          "version",
+          "edits"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The draft at its new version, and the rows the upserts stored.",
+        "properties": {
+          "ref": {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "discarded": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sealed": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "updatedBy": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "parent",
+              "base",
+              "head",
+              "sealed",
+              "discarded",
+              "version",
+              "createdAt",
+              "createdBy",
+              "updatedAt",
+              "updatedBy"
+            ],
+            "type": "object"
+          },
+          "saved": {
+            "additionalProperties": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "description": "By kind, each upsert's row as stored, in edit order.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "ref",
+          "saved"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "commit",
+      "description": "Commits a draft at its version: what it composes to that its last commit, or its base, does not. A tagged commit takes the instance's next sequence, and only a tagged commit can be released.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 10000,
+            "type": "string"
+          },
+          "ref": {
+            "description": "The draft, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tag": {
+            "description": "Whether the commit takes the instance's next sequence.",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The draft's version.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ref",
+          "version"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The draft at its new version, and the commit.",
+        "properties": {
+          "commit": {
+            "additionalProperties": false,
+            "description": "The commit written; null when there was nothing to commit.",
+            "properties": {
+              "contentHash": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ref": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "snapshot": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "ref",
+              "parent",
+              "message",
+              "sequence",
+              "contentHash",
+              "createdAt",
+              "createdBy",
+              "snapshot"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "ref": {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "discarded": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sealed": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "updatedBy": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "parent",
+              "base",
+              "head",
+              "sealed",
+              "discarded",
+              "version",
+              "createdAt",
+              "createdBy",
+              "updatedAt",
+              "updatedBy"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "ref",
+          "commit"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "seal",
+      "description": "Commits a draft at its version when it has changes, and seals it: it takes no more writes.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "description": "The draft, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "The draft's version.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ref",
+          "version"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The ref at its new version, and the commit written.",
+        "properties": {
+          "commit": {
+            "additionalProperties": false,
+            "description": "The commit written; null when there was nothing to commit.",
+            "properties": {
+              "contentHash": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ref": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "snapshot": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "ref",
+              "parent",
+              "message",
+              "sequence",
+              "contentHash",
+              "createdAt",
+              "createdBy",
+              "snapshot"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "ref": {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "discarded": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sealed": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "updatedBy": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "parent",
+              "base",
+              "head",
+              "sealed",
+              "discarded",
+              "version",
+              "createdAt",
+              "createdBy",
+              "updatedAt",
+              "updatedBy"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "ref",
+          "commit"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "merge",
+      "description": "Merges a ref's head into another ref of the instance at its version, against the source's base: an entity or a unit changed on one side takes that side, and one changed differently on both is a conflict. With conflicts left after the resolutions it writes nothing and returns them; otherwise it writes the result onto the target and commits it. Merge is the only write a primary line takes.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 10000,
+            "type": "string"
+          },
+          "resolutions": {
+            "description": "How to settle conflicts, by kind, entity key and unit path: take a side's value (take) or give one (value, null included).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "entityKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "kind": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "take": {
+                  "enum": [
+                    "base",
+                    "ours",
+                    "theirs"
+                  ],
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "kind",
+                "entityKey",
+                "path"
+              ],
+              "type": "object"
+            },
+            "maxItems": 10000,
+            "type": "array"
+          },
+          "source": {
+            "description": "The ref to merge from, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tag": {
+            "description": "Whether the commit takes the instance's next sequence.",
+            "type": "boolean"
+          },
+          "target": {
+            "description": "The ref to merge into, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "targetVersion": {
+            "description": "The target's version.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "targetVersion"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The ref merged into, and the commit written; with conflicts nothing was written, the ref is as it was and the commit is null.",
+        "properties": {
+          "commit": {
+            "additionalProperties": false,
+            "description": "The commit written; null when there was nothing to commit.",
+            "properties": {
+              "contentHash": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ref": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "snapshot": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "ref",
+              "parent",
+              "message",
+              "sequence",
+              "contentHash",
+              "createdAt",
+              "createdBy",
+              "snapshot"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "conflicts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "description": "The unit's value at the merge base; absent where it is absent."
+                },
+                "entityKey": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "ours": {
+                  "description": "The unit's value on the side merged into."
+                },
+                "oursAuthor": {
+                  "description": "The subject who last wrote our side's row.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "A JSON Pointer to the unit in the row; empty for an edit against a delete.",
+                  "type": "string"
+                },
+                "theirs": {
+                  "description": "The unit's value on the side merged from."
+                },
+                "theirsAuthor": {
+                  "description": "The subject who last wrote their side's row.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "entityKey",
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "ref": {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "discarded": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sealed": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "updatedBy": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "parent",
+              "base",
+              "head",
+              "sealed",
+              "discarded",
+              "version",
+              "createdAt",
+              "createdBy",
+              "updatedAt",
+              "updatedBy"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "ref",
+          "commit",
+          "conflicts"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "rebase",
+      "description": "Moves a draft at its version onto its parent's head: merges the parent's head into the draft, its uncommitted work included, against the draft's base, and commits on the draft. With conflicts left after the resolutions it writes nothing and returns them.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "draft": {
+            "description": "The draft, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "resolutions": {
+            "description": "How to settle conflicts, by kind, entity key and unit path: take a side's value (take) or give one (value, null included).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "entityKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "kind": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "take": {
+                  "enum": [
+                    "base",
+                    "ours",
+                    "theirs"
+                  ],
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "kind",
+                "entityKey",
+                "path"
+              ],
+              "type": "object"
+            },
+            "maxItems": 10000,
+            "type": "array"
+          },
+          "version": {
+            "description": "The draft's version.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draft",
+          "version"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The draft, and the commit written; with conflicts nothing was written.",
+        "properties": {
+          "commit": {
+            "additionalProperties": false,
+            "description": "The commit written; null when there was nothing to commit.",
+            "properties": {
+              "contentHash": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ref": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "snapshot": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "ref",
+              "parent",
+              "message",
+              "sequence",
+              "contentHash",
+              "createdAt",
+              "createdBy",
+              "snapshot"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "conflicts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "description": "The unit's value at the merge base; absent where it is absent."
+                },
+                "entityKey": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "ours": {
+                  "description": "The unit's value on the side merged into."
+                },
+                "oursAuthor": {
+                  "description": "The subject who last wrote our side's row.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "A JSON Pointer to the unit in the row; empty for an edit against a delete.",
+                  "type": "string"
+                },
+                "theirs": {
+                  "description": "The unit's value on the side merged from."
+                },
+                "theirsAuthor": {
+                  "description": "The subject who last wrote their side's row.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "entityKey",
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "ref": {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "discarded": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sealed": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "updatedBy": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "parent",
+              "base",
+              "head",
+              "sealed",
+              "discarded",
+              "version",
+              "createdAt",
+              "createdBy",
+              "updatedAt",
+              "updatedBy"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "ref",
+          "commit",
+          "conflicts"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "revert",
+      "description": "Writes the rows that make a draft at its version compose to an earlier commit's tree, and commits them. History is never rewritten.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "description": "The draft, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "toCommit": {
+            "description": "The commit of the instance whose tree the draft takes, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "The draft's version.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ref",
+          "version",
+          "toCommit"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The ref at its new version, and the commit written.",
+        "properties": {
+          "commit": {
+            "additionalProperties": false,
+            "description": "The commit written; null when there was nothing to commit.",
+            "properties": {
+              "contentHash": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ref": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "snapshot": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "ref",
+              "parent",
+              "message",
+              "sequence",
+              "contentHash",
+              "createdAt",
+              "createdBy",
+              "snapshot"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "ref": {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "createdBy": {
+                "type": "string"
+              },
+              "discarded": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sealed": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "updatedBy": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "parent",
+              "base",
+              "head",
+              "sealed",
+              "discarded",
+              "version",
+              "createdAt",
+              "createdBy",
+              "updatedAt",
+              "updatedBy"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "ref",
+          "commit"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "release",
+      "description": "Points the instance's release at a tagged commit of the instance, fenced by the pointer's version, 0 for the first release. It writes no rows: a rollback is a release of an earlier tagged commit, and the pointer's history is the release log.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "commit": {
+            "description": "The tagged commit, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "The release pointer's version; 0 for the instance's first release.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "commit",
+          "version"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The instance's release pointer.",
+        "properties": {
+          "commit": {
+            "description": "The tagged commit it names.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Its version, which the next release names.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "commit",
+          "version"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "discard",
+      "description": "Discards a ref at its version, which frees its name. The sweep deletes a discarded ref's rows once its grace has passed; its commits stay.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "description": "The ref, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "The ref's version.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ref",
+          "version"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The ref, discarded.",
+        "properties": {
+          "base": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "discarded": {
+            "type": "boolean"
+          },
+          "head": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sealed": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "parent",
+          "base",
+          "head",
+          "sealed",
+          "discarded",
+          "version",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "refs",
+      "description": "Lists the instance's live refs, its primary line first, in the order they were created, one page at a time.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many refs; 50 when absent.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The refs.",
+            "items": {
+              "additionalProperties": false,
+              "description": "A ref: the instance's primary line or a draft of it.",
+              "properties": {
+                "base": {
+                  "description": "The commit its rows lay over: its parent's head when it was branched or last rebased; null for none.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "description": "When it was created, a date-time in UTC.",
+                  "type": "string"
+                },
+                "createdBy": {
+                  "description": "The subject of the caller who created it.",
+                  "type": "string"
+                },
+                "discarded": {
+                  "description": "Whether it is discarded.",
+                  "type": "boolean"
+                },
+                "head": {
+                  "description": "Its latest commit; null before its first.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "description": "Its id, a UUID in its canonical form.",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Its name, unique among the instance's live refs.",
+                  "type": "string"
+                },
+                "parent": {
+                  "description": "The ref it was branched from; null for the primary line.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "sealed": {
+                  "description": "Whether it is sealed, so it takes no more writes.",
+                  "type": "boolean"
+                },
+                "updatedAt": {
+                  "description": "When it was last written, a date-time in UTC.",
+                  "type": "string"
+                },
+                "updatedBy": {
+                  "description": "The subject of the caller who last wrote it.",
+                  "type": "string"
+                },
+                "version": {
+                  "description": "Its version, which every write through it names and moves on.",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "parent",
+                "base",
+                "head",
+                "sealed",
+                "discarded",
+                "version",
+                "createdAt",
+                "createdBy",
+                "updatedAt",
+                "updatedBy"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "releases",
+      "description": "Lists the instance's release log, oldest first, one page at a time: each version of its release pointer, the commit it named and who released it when.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many releases; 50 when absent.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The releases.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "commit": {
+                  "description": "The commit it named.",
+                  "type": "string"
+                },
+                "releasedAt": {
+                  "description": "When, a date-time in UTC.",
+                  "type": "string"
+                },
+                "releasedBy": {
+                  "description": "The subject of the caller who released it.",
+                  "type": "string"
+                },
+                "version": {
+                  "description": "The pointer's version: 1 for the first release.",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "version",
+                "commit",
+                "releasedAt",
+                "releasedBy"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "compose",
+      "description": "Reads a ref's tree: its base commit's tree with the ref's own rows laid over it, uncommitted work included.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "description": "The ref, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "A tree, its content hash and what was found wrong in it.",
+        "properties": {
+          "contentHash": {
+            "description": "The SHA-256 of the tree's content, as lowercase hex.",
+            "type": "string"
+          },
+          "findings": {
+            "description": "What compose found wrong in the tree; none for a commit's.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "enum": [
+                    "absent_parent",
+                    "duplicate_entity_key",
+                    "singleton",
+                    "parent_cycle",
+                    "order_out_of_range"
+                  ],
+                  "type": "string"
+                },
+                "entityKey": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "kind",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tree": {
+            "additionalProperties": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "description": "The tree: by kind, its rows, each with its role, audit and content columns, an actor as a subject.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "tree",
+          "contentHash",
+          "findings"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "materialize",
+      "description": "Reads a commit's tree.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "commit": {
+            "description": "The commit, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "commit"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "A tree, its content hash and what was found wrong in it.",
+        "properties": {
+          "contentHash": {
+            "description": "The SHA-256 of the tree's content, as lowercase hex.",
+            "type": "string"
+          },
+          "findings": {
+            "description": "What compose found wrong in the tree; none for a commit's.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "enum": [
+                    "absent_parent",
+                    "duplicate_entity_key",
+                    "singleton",
+                    "parent_cycle",
+                    "order_out_of_range"
+                  ],
+                  "type": "string"
+                },
+                "entityKey": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "kind",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tree": {
+            "additionalProperties": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "description": "The tree: by kind, its rows, each with its role, audit and content columns, an actor as a subject.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "tree",
+          "contentHash",
+          "findings"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "released",
+      "description": "Reads the instance's release pointer and the tree of the commit it names. An instance never released has none (not_found).",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The release pointer and its commit's tree.",
+        "properties": {
+          "contentHash": {
+            "description": "The SHA-256 of the tree's content, as lowercase hex.",
+            "type": "string"
+          },
+          "findings": {
+            "description": "What compose found wrong in the tree; none for a commit's.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "enum": [
+                    "absent_parent",
+                    "duplicate_entity_key",
+                    "singleton",
+                    "parent_cycle",
+                    "order_out_of_range"
+                  ],
+                  "type": "string"
+                },
+                "entityKey": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "kind",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "release": {
+            "additionalProperties": false,
+            "description": "The instance's release pointer.",
+            "properties": {
+              "commit": {
+                "description": "The tagged commit it names.",
+                "type": "string"
+              },
+              "version": {
+                "description": "Its version, which the next release names.",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "commit",
+              "version"
+            ],
+            "type": "object"
+          },
+          "tree": {
+            "additionalProperties": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "description": "The tree: by kind, its rows, each with its role, audit and content columns, an actor as a subject.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "release",
+          "tree",
+          "contentHash",
+          "findings"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "diff",
+      "description": "Lists the entities the trees of two commits of the instance differ on.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "description": "The earlier commit, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "to": {
+            "description": "The later commit, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "entityKey": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "operation": {
+                  "enum": [
+                    "ADD",
+                    "UPDATE",
+                    "DELETE"
+                  ],
+                  "type": "string"
+                },
+                "row": {
+                  "description": "The later tree's row: its tombstone for a DELETE, when it has one.",
+                  "type": "object"
+                }
+              },
+              "required": [
+                "kind",
+                "entityKey",
+                "operation"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "changes"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "history",
+      "description": "Lists the commits a ref wrote, newest first.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "description": "The ref, by id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "commits": {
+            "items": {
+              "additionalProperties": false,
+              "description": "A commit.",
+              "properties": {
+                "contentHash": {
+                  "description": "The SHA-256 of its tree's content, as lowercase hex.",
+                  "type": "string"
+                },
+                "createdAt": {
+                  "description": "When it was written, a date-time in UTC.",
+                  "type": "string"
+                },
+                "createdBy": {
+                  "description": "The subject of the caller who wrote it.",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Its id, a UUID in its canonical form.",
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "parent": {
+                  "description": "The commit before it on its ref's chain; null for none.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ref": {
+                  "description": "The ref it was written on.",
+                  "type": "string"
+                },
+                "sequence": {
+                  "description": "Its number among the instance's tagged commits, 1, 2, 3, ...; null for an untagged commit.",
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "snapshot": {
+                  "description": "Whether its full set of row versions is stored, so a read of its tree stops there.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "ref",
+                "parent",
+                "message",
+                "sequence",
+                "contentHash",
+                "createdAt",
+                "createdBy",
+                "snapshot"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "commits"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "version_conflict",
+      "description": "A write through a ref, or a release, at a version the ref or the release pointer has moved past."
+    },
+    {
+      "code": "name_taken",
+      "description": "branch to a name another live ref of the instance has."
+    },
+    {
+      "code": "ref_sealed",
+      "description": "A write through a sealed ref."
+    },
+    {
+      "code": "primary_merge_only",
+      "description": "save, commit, seal or revert on a primary line, which takes writes only from merge."
+    },
+    {
+      "code": "nothing_to_commit",
+      "description": "commit of a draft that composes to the tree of its last commit, or of its base."
+    },
+    {
+      "code": "entity_not_found",
+      "description": "save that deletes an entity the draft does not read, or unsets a row the draft does not have."
+    },
+    {
+      "code": "invalid_tree",
+      "description": "A commit whose tree breaks the graph's rules (an absent parent, a second singleton, a parent cycle, an order out of range), with the findings in details."
+    },
+    {
+      "code": "merge_into_itself",
+      "description": "merge of a ref into itself."
+    },
+    {
+      "code": "no_parent",
+      "description": "rebase of a primary line, which has no parent to rebase onto."
+    },
+    {
+      "code": "not_tagged",
+      "description": "release of a commit that is not tagged."
+    },
+    {
+      "code": "walk_ceiling",
+      "description": "A read of a commit's tree that would walk more commits than the engine's ceiling."
+    }
+  ]
+}

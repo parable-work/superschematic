@@ -1,0 +1,65 @@
+{
+  "kind": "General",
+  "name": "Recipe",
+  "description": "A recipe an engine versions with the core's Branches and no extension: each recipe is the root of a version graph whose steps are ordered by position, whose ingredients belong to a step, and which has at most one cover. Work happens on drafts, which merge into the recipe's primary line, and a tagged commit of it is released.",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "languagePrimitive": "number"
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "languagePrimitive": "object"
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string"
+    }
+  },
+  "types": {
+    "Recipe": {
+      "name": "Recipe",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Branches",
+          "config": {
+            "kinds": {
+              "step": { "type": "Step", "order": "position", "units": { "timings": "keyed" }, "retentionDays": 365 },
+              "ingredient": { "type": "Ingredient", "parent": { "key": "stepKey", "of": "step" } },
+              "cover": { "type": "Cover", "singleton": true }
+            },
+            "sweep": { "intervalMs": 3600000, "abandonAfter": 2592000000 }
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true }
+      ]
+    },
+    "Step": {
+      "name": "Step",
+      "role": "EmbeddedStruct",
+      "fields": [
+        { "name": "instruction", "typeRef": { "name": "string" }, "required": true },
+        { "name": "position", "typeRef": { "name": "Generic.Int64" }, "required": true },
+        { "name": "timings", "typeRef": { "name": "Generic.JSON" } }
+      ]
+    },
+    "Ingredient": {
+      "name": "Ingredient",
+      "role": "EmbeddedStruct",
+      "fields": [
+        { "name": "stepKey", "typeRef": { "name": "Identity.UUID" }, "required": true },
+        { "name": "quantity", "typeRef": { "name": "string" }, "required": true }
+      ]
+    },
+    "Cover": {
+      "name": "Cover",
+      "role": "EmbeddedStruct",
+      "fields": [
+        { "name": "photoUrl", "typeRef": { "name": "string" }, "required": true }
+      ]
+    }
+  }
+}
