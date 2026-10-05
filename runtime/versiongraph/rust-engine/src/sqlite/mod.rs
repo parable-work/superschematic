@@ -2377,10 +2377,18 @@ mod tests {
         }
     }
 
-    /// A client that reports one SQLite version, and runs the JSON probe as
-    /// a build with the JSON functions or without them does, and nothing
-    /// else.
-    struct Version(&'static str, bool);
+    /// How a test client runs the JSON probe: as a build whose JSON
+    /// functions work, as one without them, or returning other rows.
+    #[derive(Clone)]
+    enum Json {
+        Works,
+        Missing,
+        Returns(Vec<Vec<SqlValue>>),
+    }
+
+    /// A client that reports one SQLite version, runs the JSON probe as
+    /// `Json` says, and runs nothing else.
+    struct Version(&'static str, Json);
 
     #[async_trait]
     impl Client for Version {
@@ -2389,14 +2397,15 @@ mod tests {
         }
 
         async fn exec(&self, sql: &str) -> Result<Vec<Vec<SqlValue>>, ClientError> {
-            match sql {
-                "SELECT sqlite_version()" => Ok(vec![vec![SqlValue::Text(self.0.to_owned())]]),
-                JSON_PROBE if self.1 => Ok(vec![vec![SqlValue::Int(1)]]),
-                JSON_PROBE => Err(ClientError {
+            match (sql, &self.1) {
+                ("SELECT sqlite_version()", _) => Ok(vec![vec![SqlValue::Text(self.0.to_owned())]]),
+                (JSON_PROBE, Json::Works) => Ok(vec![vec![SqlValue::Int(1)]]),
+                (JSON_PROBE, Json::Missing) => Err(ClientError {
                     code: Some(1),
                     source: "no such function: json_each".into(),
                 }),
-                other => panic!("ran {other}"),
+                (JSON_PROBE, Json::Returns(rows)) => Ok(rows.clone()),
+                (other, _) => panic!("ran {other}"),
             }
         }
     }
@@ -2404,43 +2413,46 @@ mod tests {
     /// The adapter refuses a SQLite older than the layout and its statements
     /// need, before it runs anything, with a clear error: one before
     /// 3.37.0, compared as numbers, and one of any version whose JSON
-    /// functions do not work. It takes 3.37.0 and later with them.
+    /// functions fail the probe or return anything but its one row of 1. It
+    /// takes 3.37.0 and later with them.
     #[tokio::test]
     async fn the_adapter_refuses_an_older_sqlite_and_one_without_json() {
         let adapter = Arc::new(Adapter::new(&fixture().to_string(), graph()).expect("adapter"));
-        for (version, json, refuse) in [
+        let older = "and the adapter needs 3.37.0 or later";
+        let lacks = "lacks json_each and json_extract";
+        let cases = [
+            ("3.36.0", Json::Works, older),
+            ("3.9.0", Json::Works, older),
+            ("2.8.17", Json::Works, older),
+            ("3.37.2", Json::Missing, lacks),
+            ("3.46.1", Json::Missing, lacks),
+            ("3.46.1", Json::Returns(vec![vec![SqlValue::Int(2)]]), lacks),
+            ("3.46.1", Json::Returns(vec![vec![SqlValue::Null]]), lacks),
             (
-                "3.36.0",
-                true,
-                "runs SQLite 3.36.0, and the adapter needs 3.37.0 or later",
+                "3.46.1",
+                Json::Returns(vec![vec![SqlValue::Text("1".to_owned())]]),
+                lacks,
             ),
+            ("3.46.1", Json::Returns(Vec::new()), lacks),
             (
-                "3.9.0",
-                true,
-                "runs SQLite 3.9.0, and the adapter needs 3.37.0 or later",
-            ),
-            (
-                "2.8.17",
-                true,
-                "runs SQLite 2.8.17, and the adapter needs 3.37.0 or later",
-            ),
-            (
-                "3.37.2",
-                false,
-                "SQLite 3.37.2 lacks json_each and json_extract",
+                "3.46.1",
+                Json::Returns(vec![vec![SqlValue::Int(1)], vec![SqlValue::Int(1)]]),
+                lacks,
             ),
             (
                 "3.46.1",
-                false,
-                "SQLite 3.46.1 lacks json_each and json_extract",
+                Json::Returns(vec![vec![SqlValue::Int(1), SqlValue::Int(1)]]),
+                lacks,
             ),
-        ] {
-            let error = check_version(&Version(version, json))
+        ];
+        for (version, json, refuse) in cases {
+            let error = check_version(&Version(version, json.clone()))
                 .await
                 .expect_err(version);
             assert!(error.to_string().contains(refuse), "{version}: {error}");
+            assert!(error.to_string().contains(version), "{version}: {error}");
             let refused = adapter
-                .create_tables(&Version(version, json))
+                .create_tables(&Version(version, json.clone()))
                 .await
                 .expect_err(version);
             assert!(refused.to_string().contains(refuse), "{refused}");
@@ -2453,10 +2465,12 @@ mod tests {
             );
         }
         for version in ["3.37.0", "3.37.2", "3.38", "3.46.1", "3.100.0", "4.0.0"] {
-            check_version(&Version(version, true)).await.expect(version);
+            check_version(&Version(version, Json::Works))
+                .await
+                .expect(version);
         }
         for garbage in ["", "three", "3.x.0"] {
-            let error = check_version(&Version(garbage, true))
+            let error = check_version(&Version(garbage, Json::Works))
                 .await
                 .expect_err(garbage);
             assert!(

@@ -2081,6 +2081,70 @@ async fn a_time_is_refused_outside_2_to_the_53_microseconds_when_written_and_whe
             &result,
         );
     }
+    // So is an optional one: a ref's sealed_at and deleted_at, a commit's
+    // sequence, each on a row of its own whose other columns are in range.
+    let sealed = transact!(storage, |tx| tx
+        .create_ref(new_ref(BREAD, None, "sealed"))
+        .await)
+    .expect("create");
+    let discarded = transact!(storage, |tx| tx
+        .create_ref(new_ref(BREAD, None, "discarded"))
+        .await)
+    .expect("create");
+    let tagged = transact!(storage, |tx| tx
+        .insert_commit(new_commit(BREAD, &sealed.id, None, Some(1)))
+        .await)
+    .expect("a tagged commit");
+    for (sql, column, read) in [
+        (
+            format!(
+                "UPDATE \"graph_ref\" SET sealed_at = 9007199254740992 WHERE id = '{}'",
+                sealed.id
+            ),
+            "sealed_at",
+            Read::Ref(&sealed.id),
+        ),
+        (
+            format!(
+                "UPDATE \"graph_ref\" SET deleted_at = -9007199254740992 WHERE id = '{}'",
+                discarded.id
+            ),
+            "deleted_at",
+            Read::Ref(&discarded.id),
+        ),
+        (
+            format!(
+                "UPDATE \"graph_commit\" SET sequence = 9007199254740992 WHERE id = '{}'",
+                tagged.id
+            ),
+            "sequence",
+            Read::Commit(&tagged.id),
+        ),
+    ] {
+        run_sql(&client, &sql)
+            .await
+            .expect("store an integer out of range");
+        let result = match read {
+            Read::Ref(id) => transact!(storage, |tx| tx.read_ref(id).await).map(|_| ()),
+            Read::Commit(id) => transact!(storage, |tx| tx.read_commit(id).await).map(|_| ()),
+        };
+        refused(
+            &format!("a {column} out of range"),
+            &format!("column {column} is "),
+            &result,
+        );
+        refused(
+            &format!("a {column} out of range"),
+            "not an integer a JavaScript number holds exactly",
+            &result,
+        );
+    }
+}
+
+/// Which read a stored value is refused through.
+enum Read<'a> {
+    Ref(&'a str),
+    Commit(&'a str),
 }
 
 #[tokio::test]
