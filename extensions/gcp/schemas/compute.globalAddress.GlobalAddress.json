@@ -1,0 +1,50 @@
+{
+  "token": "gcp:compute/globalAddress:GlobalAddress",
+  "terraform": {
+    "type": "google_compute_global_address",
+    "renames": {
+      "addressType": "address_type",
+      "deletionPolicy": "deletion_policy",
+      "ipVersion": "ip_version",
+      "prefixLength": "prefix_length"
+    }
+  },
+  "inputProperties": {
+    "address": {
+      "type": "string"
+    },
+    "addressType": {
+      "type": "string"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "ipVersion": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "network": {
+      "type": "string"
+    },
+    "prefixLength": {
+      "type": "integer"
+    },
+    "project": {
+      "type": "string"
+    },
+    "purpose": {
+      "type": "string"
+    }
+  }
+}
