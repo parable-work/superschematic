@@ -1033,6 +1033,11 @@ export const branches = defineBehavior<BranchesConfig>({
       version: 1,
       name: 'the version graph layout, roots and actors',
       up(sql) {
+        // A shipped migration never changes, and this one takes the
+        // layout's statements from @superschematic/versiongraph as it runs.
+        // test/core-branches.test.ts pins them, so a layout the adapter
+        // changes fails there until a migration of its own brings a file
+        // created at this one up to it.
         for (const statement of sqliteLayout((local) => sql.table(local))) {
           sql.run(statement);
         }

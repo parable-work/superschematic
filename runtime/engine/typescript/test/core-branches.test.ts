@@ -21,6 +21,11 @@ import {
   type AccessRequest,
   type Principal,
 } from '../dist/index.js';
+import { createHash } from 'node:crypto';
+
+import { uuidHyphenated } from '@superschematic/versiongraph/engine';
+import { sqliteLayout } from '@superschematic/versiongraph/sqlite';
+
 import { branches, type BranchesConfig } from '../dist/behaviors/core/branches.js';
 import { Calls, contentOf, openBranches, publish, recipeConfig, recipeDocument, type Commit, type Ref, type Tree } from './branches-fixtures.ts';
 import { alice, cleanup, clone, drivers, thrown } from './helpers.ts';
@@ -539,6 +544,81 @@ for (const driver of drivers) {
       assert.deepEqual(new Calls(engine, 'new').refs().map((ref) => ref.createdBy), ['alice']);
     });
 
+    test("another behavior's writing operation is a first write too, and gives an older instance its primary line", () => {
+      const { engine } = openBranches(driver);
+      const before = recipeDocument(null);
+      before.types.Recipe.behaviors = [{ name: 'Comments' }];
+      publish(engine, before);
+      engine.instances.create(alice, 'Recipe', { title: 'Old soup' }, { id: 'old' });
+      const after = recipeDocument();
+      after.types.Recipe.behaviors = [{ name: 'Comments' }, ...(after.types.Recipe.behaviors ?? [])];
+      publish(engine, after);
+      const old = new Calls(engine, 'old', bob);
+      assert.deepEqual(old.refs(), []);
+      engine.instances.invoke(bob, 'Recipe', 'old', 'comment', { body: 'Needs salt.' });
+      assert.deepEqual(
+        old.refs().map((ref) => [ref.name, ref.createdBy]),
+        [['main', bob.subject]]
+      );
+    });
+
+    test('two namespaces that share a schema of the shared namespace keep a graph each, and the sweep in each discards only its own', () => {
+      let now = 1_800_000_000_000;
+      const runner: Principal = { subject: 'sweeper', permissions: [] };
+      const { engine, all } = openBranches(driver, {
+        clock: () => now,
+        runner: { principal: runner },
+        namespaces: { names: ['east', 'west', 'lib'], shared: 'lib' },
+      });
+      engine.schemas.define(alice, recipeDocument({ ...recipeConfig, sweep: { intervalMs: 1000, abandonAfter: 60_000 } }) as unknown as Record<string, unknown>, {
+        namespace: 'lib',
+      });
+      engine.schemas.publish(alice, 'Recipe', { namespace: 'lib' });
+      const drafts: Record<string, string> = {};
+      for (const namespace of ['east', 'west']) {
+        engine.instances.create(alice, 'Recipe', { title: namespace }, { id: 'soup', namespace });
+        const [main] = (engine.instances.invoke(alice, 'Recipe', 'soup', 'refs', {}, { namespace }) as { items: Ref[] }).items;
+        drafts[namespace] = (engine.instances.invoke(alice, 'Recipe', 'soup', 'branch', { fromRef: main.id, name: 'idle' }, { namespace }) as Ref).id;
+      }
+      assert.deepEqual(
+        all('SELECT graph, root_id FROM bhv_branches__roots ORDER BY graph'),
+        [
+          { graph: 'east/Recipe', root_id: uuidV5(ROOT_NAMESPACE, 'soup') },
+          { graph: 'west/Recipe', root_id: uuidV5(ROOT_NAMESPACE, 'soup') },
+        ]
+      );
+      // One namespace's ref is no ref of the other's instance.
+      assert.equal(
+        thrown(() => engine.instances.invoke(alice, 'Recipe', 'soup', 'compose', { ref: drafts.east }, { namespace: 'west' }), OperationParamsError).issues[0].path,
+        '/ref'
+      );
+      engine.runner.runDue();
+      // A write keeps west's draft from going idle; east's goes.
+      now += 50_000;
+      const west = (engine.instances.invoke(alice, 'Recipe', 'soup', 'refs', {}, { namespace: 'west' }) as { items: Ref[] }).items[1];
+      engine.instances.invoke(alice, 'Recipe', 'soup', 'save', { ref: west.id, version: west.version, edits: { step: { upsert: [boil] } } }, { namespace: 'west' });
+      now += 20_000;
+      engine.runner.runDue();
+      const names = (namespace: string) =>
+        (engine.instances.invoke(alice, 'Recipe', 'soup', 'refs', {}, { namespace }) as { items: Ref[] }).items.map((ref) => ref.name);
+      assert.deepEqual([names('east'), names('west')], [['main'], ['main', 'idle']]);
+      // The schedule runs in each namespace the shared schema serves, each
+      // run on that namespace's graph.
+      assert.deepEqual(
+        engine.runner
+          .status()
+          .schedules.filter((schedule) => schedule.behavior === 'Branches')
+          .map(({ namespace, state }) => [namespace, state])
+          .sort(),
+        [
+          ['default', 'active'],
+          ['east', 'active'],
+          ['lib', 'active'],
+          ['west', 'active'],
+        ]
+      );
+    });
+
     test('a delete image of a row names its actor, and history images exclude nothing', () => {
       const { all, soup } = opened();
       const draft = soup.branch('edit');
@@ -643,6 +723,29 @@ for (const driver of drivers) {
   });
 }
 
+
+// What the behavior takes from its dependencies as it is: the layout its
+// first migration creates, and the version-5 UUIDs of actors and roots.
+describe("Branches' fixed points", () => {
+  test("the first migration's layout is pinned: a layout @superschematic/versiongraph changes needs a migration of its own", () => {
+    // Migration 1 runs sqliteLayout() as the installed adapter gives it, and
+    // a file it already created keeps what it created then. Were the
+    // adapter's statements to change, a new file would get the new layout
+    // and an old one would not, so the change must come as migration 2,
+    // which brings an old file up to it; then pin the new statements here.
+    const statements = sqliteLayout((local) => `bhv_branches__${local}`);
+    assert.deepEqual(
+      [statements.length, createHash('sha256').update(statements.join('\n')).digest('hex')],
+      [21, 'f3583c44e0634b535f54adb1637dabed879ee18179e53327c13334a11e45f49d']
+    );
+  });
+
+  test("uuidV5 is RFC 9562's version-5 UUID, in its canonical form", () => {
+    // RFC 9562, Appendix A.4: the DNS namespace and www.example.com.
+    assert.equal(uuidHyphenated(uuidV5('6ba7b810-9dad-11d1-80b4-00c04fd430c8', 'www.example.com')), '2ed6657d-e927-568b-95e1-2665a8aea6a2');
+    assert.equal(uuidHyphenated(uuidV5(ACTOR_NAMESPACE, 'alice')).charAt(14), '5');
+  });
+});
 
 // parseConfig on its own, over a ConfigTarget whose types the test gives:
 // the descriptor the graph runs with, and each field's value class.
