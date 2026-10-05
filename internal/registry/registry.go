@@ -53,6 +53,9 @@ type Registry struct {
 	toolInvocation *ToolInvocationPolicy
 	// behaviors holds every RegisterBehavior declaration by name.
 	behaviors map[string]Behavior
+	// stack holds the stack model's platforms, connectors, targets, DNS
+	// platforms and provisioners (stack.go).
+	stack stackSpecs
 
 	// authoring is Naming.AuthoringPackages plus every registered
 	// decorator's Packages: the set IsAuthoringPackage answers from.
@@ -93,6 +96,7 @@ func New(n naming.Naming) *Registry {
 		generators:    map[string]GeneratorSpec{},
 		authProviders: map[string]AuthProvider{},
 		behaviors:     map[string]Behavior{},
+		stack:         newStackSpecs(),
 		authoring:     map[string]bool{},
 		extensions:    map[string]bool{},
 	}
@@ -170,7 +174,9 @@ func (r *Registry) noteExtension(name string) {
 // registered kinds, every OutputKey is unique, Naming.AuthProvider names
 // a registered auth provider, and every behavior's requires and conflicts
 // name registered behaviors and its operations' invocation policies are
-// values of the policy in force. Registration after Finalize is an error.
+// values of the policy in force, and the stack specs name registered
+// platforms, DNS platforms and provisioners of the right kinds
+// (checkStackReferences). Registration after Finalize is an error.
 func (r *Registry) Finalize() error {
 	if r.failed != nil {
 		return r.failed
@@ -204,6 +210,9 @@ func (r *Registry) Finalize() error {
 		owners[key] = name
 	}
 	if err := r.checkBehaviorReferences(); err != nil {
+		return err
+	}
+	if err := r.checkStackReferences(); err != nil {
 		return err
 	}
 	r.finalized = true

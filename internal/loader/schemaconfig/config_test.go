@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -160,6 +161,73 @@ func TestReadFileRejectsMalformedDependencies(t *testing.T) {
 // extension may register any name), so this check is where a typo in kind
 // is caught, and the message has to list the kinds the binary knows or the
 // author cannot tell a typo from a missing extension.
+func TestReadFileReadsCallsAndTheIRRecordsEveryReference(t *testing.T) {
+	dir := writeConfig(t, "schema.config.yaml", `name: shop-orders
+kind: API
+authDb: shop-db
+dependencies:
+  - { name: shop-db, kind: DB }
+calls:
+  - { name: shop-api, kind: API }
+outputs: {}
+`)
+	cfg, err := ReadFile(dir, coreKinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	want := []ServiceDependency{{Name: "shop-api", Kind: ir.SchemaKindAPI}}
+	if !reflect.DeepEqual(cfg.Calls, want) {
+		t.Errorf("calls = %+v, want %+v", cfg.Calls, want)
+	}
+	if cfg.AuthDBKind != "" {
+		t.Errorf("a data-form authDb is a name, so AuthDBKind = %q, want empty", cfg.AuthDBKind)
+	}
+
+	schema := cfg.NewSchema()
+	if schema.Name != "shop-orders" || schema.Kind != ir.SchemaKindAPI || schema.AuthDB != "shop-db" {
+		t.Errorf("schema identity = %q/%q, authDb %q", schema.Name, schema.Kind, schema.AuthDB)
+	}
+	if want := []ir.ServiceRef{{Name: "shop-db", Kind: ir.SchemaKindDB}}; !reflect.DeepEqual(schema.Dependencies, want) {
+		t.Errorf("schema dependencies = %+v, want %+v", schema.Dependencies, want)
+	}
+	if want := []ir.ServiceRef{{Name: "shop-api", Kind: ir.SchemaKindAPI}}; !reflect.DeepEqual(schema.Calls, want) {
+		t.Errorf("schema calls = %+v, want %+v", schema.Calls, want)
+	}
+
+	bare := (&SchemaConfig{Name: "shop-db", Kind: ir.SchemaKindDB}).NewSchema()
+	if bare.AuthDB != "" || bare.Dependencies != nil || bare.Calls != nil {
+		t.Errorf("a config without references gives the IR none: %+v %+v %+v", bare.AuthDB, bare.Dependencies, bare.Calls)
+	}
+}
+
+func TestValidateShapeChecksCalls(t *testing.T) {
+	api := func(calls ...ServiceDependency) *SchemaConfig {
+		return &SchemaConfig{Name: "shop-orders", Kind: ir.SchemaKindAPI, Calls: calls}
+	}
+	for _, tc := range []struct {
+		name string
+		cfg  *SchemaConfig
+		want string
+	}{
+		{"on a DB service", &SchemaConfig{Name: "shop-db", Kind: ir.SchemaKindDB, Calls: []ServiceDependency{{Name: "shop-api", Kind: ir.SchemaKindAPI}}}, "schema config for shop-db sets calls, which only an API service may set (this service is kind DB)"},
+		{"a DB handle", api(ServiceDependency{Name: "shop-db", Kind: ir.SchemaKindDB}), `schema config for shop-orders calls shop-db, a handle of kind "DB"; calls names API services only`},
+		{"no name", api(ServiceDependency{Kind: ir.SchemaKindAPI}), "schema config for shop-orders has a calls entry with no name"},
+		{"itself", api(ServiceDependency{Name: "shop-orders", Kind: ir.SchemaKindAPI}), "schema config for shop-orders calls itself"},
+		{"twice", api(ServiceDependency{Name: "shop-api", Kind: ir.SchemaKindAPI}, ServiceDependency{Name: "shop-api", Kind: ir.SchemaKindAPI}), "schema config for shop-orders calls shop-api more than once"},
+		{"an authDb of unknown kind", &SchemaConfig{Name: "shop-orders", Kind: ir.SchemaKindAPI, AuthDB: "shop-db", AuthDBKind: "Nope"}, `schema config for shop-orders has an authDb of unknown kind "Nope" (registered kinds: API, DB, General)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ValidateShapeWith(tc.cfg, coreKinds)
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("ValidateShapeWith error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	if _, err := ValidateShapeWith(api(ServiceDependency{Name: "shop-api", Kind: ir.SchemaKindAPI}), coreKinds); err != nil {
+		t.Errorf("an API calling another API: %v", err)
+	}
+}
+
 func TestValidateShapeRejectsUnknownKind(t *testing.T) {
 	_, err := ValidateShapeWith(&SchemaConfig{Name: "x", Kind: ir.SchemaKind("DBB")}, coreKinds)
 	if err == nil {

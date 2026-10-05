@@ -9,17 +9,19 @@
     {"op": "save", "ref": "mix", "actor": "Baker", "edits": {"step": {"unset": ["Mix"]}}},
     {"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}},
     {"op": "sql",
-      "statement": {"postgres": "SELECT operation, CASE (data->>'updated_by')::uuid WHEN $1::uuid THEN 'Cook' WHEN $2::uuid THEN 'Baker' ELSE data->>'updated_by' END AS actor FROM step_history WHERE (data->>'ref_id')::uuid = $3::uuid ORDER BY _version"},
+      "statement": {"postgres": "SELECT operation, CASE (data->>'updated_by')::uuid WHEN $1::uuid THEN 'Cook' WHEN $2::uuid THEN 'Baker' ELSE data->>'updated_by' END AS actor FROM step_history WHERE (data->>'ref_id')::uuid = $3::uuid ORDER BY _version",
+        "sqlite": "SELECT operation, CASE json_extract(data, '$.updated_by') WHEN ?1 THEN 'Cook' WHEN ?2 THEN 'Baker' ELSE json_extract(data, '$.updated_by') END AS actor FROM graph_member_history WHERE kind = 'step' AND json_extract(data, '$.ref_id') = ?3 ORDER BY _version"},
       "args": [{"uuid": "Cook"}, {"uuid": "Baker"}, {"ref": "mix"}],
       "expect": {"rows": [{"operation": "INSERT", "actor": "Cook"}, {"operation": "DELETE", "actor": "Baker"}]}},
 
     {"op": "branch", "from": "main", "name": "dropped", "as": "dropped"},
     {"op": "save", "ref": "dropped", "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 1, "instruction": "Rest", "timings": {}}]}}},
     {"op": "discard", "ref": "dropped"},
-    {"op": "sql", "statement": {"postgres": "UPDATE recipe_ref SET deleted_at = now() - interval '8 days' WHERE id = $1::uuid"}, "args": [{"ref": "dropped"}]},
+    {"op": "sql", "statement": {"postgres": "UPDATE recipe_ref SET deleted_at = now() - interval '8 days' WHERE id = $1::uuid", "sqlite": "UPDATE graph_ref SET deleted_at = deleted_at - 8 * 86400000000 WHERE id = ?1"}, "args": [{"ref": "dropped"}]},
     {"op": "sweep", "actor": "Janitor", "expect": {"report": {"collectedRefs": 1, "collectedRows": {"step": 1}}}},
     {"op": "sql",
-      "statement": {"postgres": "SELECT operation, CASE (data->>'updated_by')::uuid WHEN $1::uuid THEN 'Cook' WHEN $2::uuid THEN 'Janitor' ELSE data->>'updated_by' END AS actor FROM step_history WHERE (data->>'ref_id')::uuid = $3::uuid ORDER BY _version"},
+      "statement": {"postgres": "SELECT operation, CASE (data->>'updated_by')::uuid WHEN $1::uuid THEN 'Cook' WHEN $2::uuid THEN 'Janitor' ELSE data->>'updated_by' END AS actor FROM step_history WHERE (data->>'ref_id')::uuid = $3::uuid ORDER BY _version",
+        "sqlite": "SELECT operation, CASE json_extract(data, '$.updated_by') WHEN ?1 THEN 'Cook' WHEN ?2 THEN 'Janitor' ELSE json_extract(data, '$.updated_by') END AS actor FROM graph_member_history WHERE kind = 'step' AND json_extract(data, '$.ref_id') = ?3 ORDER BY _version"},
       "args": [{"uuid": "Cook"}, {"uuid": "Janitor"}, {"ref": "dropped"}],
       "expect": {"rows": [{"operation": "INSERT", "actor": "Cook"}, {"operation": "DELETE", "actor": "Janitor"}]}}
   ]

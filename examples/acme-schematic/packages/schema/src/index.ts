@@ -31,3 +31,18 @@ export function shelf(_args: ShelfArgs): PropertyDecorator {
 // feedKey marks a field of a Catalog schema as part of the key acme's
 // supplier feed matches rows on. It takes no argument.
 export const feedKey: PropertyDecorator = () => {};
+
+// SchemaClass is a schema class named as a value.
+export type SchemaClass = abstract new (...args: never[]) => unknown;
+
+// CrossSellArgs is @crossSell's argument: with names the class whose
+// listing a type is offered beside, the class itself and not its name.
+export interface CrossSellArgs {
+  readonly with: SchemaClass;
+}
+
+// crossSell offers a type of a Catalog schema beside another class's
+// listing.
+export function crossSell(_args: CrossSellArgs): ClassDecorator {
+  return () => {};
+}

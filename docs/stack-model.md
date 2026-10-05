@@ -2,9 +2,10 @@
 
 This is the design of the stack model: how a schema tree declares what
 runs where, how superschematic resolves the wiring between the services in
-it, and how it deploys them. Nothing in it is built yet. D30 in
-`docs/DECISIONS.md` records the decisions; this document is the design they
-point at.
+it, and how it deploys them. The Stack IR, the resource graph, the
+registry specs and the resolver are built (section 12); the rest is design.
+D30 in `docs/DECISIONS.md` records the decisions; this document is the
+design they point at.
 
 Cite sections by number, as source comments cite `docs/extension-model.md`.
 Add a section at the end of its group rather than renumbering.
@@ -81,8 +82,10 @@ With nothing declared, each API service in a stack is one server and each
 DB service is one database. A deployable is declared only to change that:
 
 - to run several APIs in one process;
-- to host several DB schemas on one database;
-- to add an edge the schemas cannot show (`calls`, section 3.3).
+- to host several DB schemas on one database.
+
+A declared deployable only groups. It declares no needs: a server's edges
+are the union of its APIs' edges, so grouping APIs never restates one.
 
 ### 3.3 Edges
 
@@ -91,12 +94,47 @@ An edge is a need met by something that provides it. v1 has two kinds:
 | Edge | From | To | Derived from |
 | --- | --- | --- | --- |
 | sql | server | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
-| http | server | server | `calls` on the calling server, a list of service handles |
+| http | server | server | `calls` in the config of each API the calling server serves |
 
 `calls` is the one wiring fact a person writes, because no schema says that
-one server's code calls another's API. It is written once, as a handle. The
-config field, the URL, the invoker grant and the network rule all follow
-from it.
+one API's implementation calls another API. It sits in the API service's
+config next to `authDb`, because both describe what the implementation
+needs, and the implementation belongs to the API (section 8.5):
+
+```ts
+// schemas/services/shop-orders/schema.config.ts
+import { ShopApi } from "@acme/shop-api";
+import { ShopDb } from "@acme/shop-db";
+import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+
+export default defineConfig({
+  name: "shop-orders",
+  kind: SchemaKind.API,
+  authDb: ShopDb,
+  calls: [ShopApi],
+  outputs: { /* ... */ },
+});
+```
+
+It is written once, as a handle: the callee's imported sentinel, or
+`service({ name, kind })` (D34). The config field, the SDK client in the
+implementation's `Deps`, the URL, the invoker grant and the network rule
+all follow from it. A call between two APIs that one server serves stays an
+HTTP call to the server's own address.
+
+`calls` is also a build dependency, since the caller's generated `Deps`
+imports the callee's SDK. The build plan builds each callee before its
+caller, and `build --with-deps` builds the callees with the caller. Two
+APIs that call each other form a cycle between services. The build plan
+orders whole services, so it refuses that cycle, with an error that names
+each edge (`shop-api calls shop-orders, shop-orders calls shop-api`).
+
+Follow-up: order outputs instead, each SDK before the APIs that call it, so
+two APIs may call each other. It waits for the `Deps` generator (section
+8.5), the first output that imports a callee's SDK, and it splits a
+service's build, which the build cache stores as one entry. That generator
+also adds each callee's key to the caller's cache key, which leaves `calls`
+out while no output reads it.
 
 ### 3.4 Bindings in the generated config
 
@@ -107,8 +145,13 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a database field per sql edge. It holds a connection the edge's connector
   fills (a Cloud SQL connector configuration on GCP, a connection string
   locally), not a string the application parses;
-- a service field per http edge. It holds the callee's base URL and the
-  source of the service credential (section 9.2).
+- a service field per http edge. It holds the callee's base URL, the
+  source of the service credential and the headers that carry it (section
+  9.2);
+- a service-auth field on a server that an http edge reaches. It holds
+  what the server's `ServiceAuthenticator` checks: each inbound edge's
+  issuer, keys and audience, and the deployable each caller identity is
+  (section 9.2).
 
 Field and variable names follow a naming-file rule over the callee's
 service name, with the core's rule as the default (D7, D8). A server's own
@@ -138,8 +181,8 @@ import { environment, server, stack } from "@superschematic/stack";
 @stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
 export abstract class Shop {}
 
-@server({ serves: [ShopOrders], calls: [ShopApi] })
-export abstract class Orders {}
+@server({ serves: [ShopApi, ShopOrders] })
+export abstract class Backend {}
 
 @environment({ target: "local" })
 export abstract class Dev {}
@@ -158,7 +201,7 @@ export abstract class Staging {}
   domain: "acme.dev",
   settings: [
     { of: ShopDb, tier: "db-custom-2-7680", highAvailability: true },
-    { of: ShopApi, minInstances: 1, env: { LOG_LEVEL: "warn" } },
+    { of: Backend, minInstances: 1, env: { LOG_LEVEL: "warn" } },
   ],
 })
 export abstract class Production {}
@@ -173,7 +216,9 @@ export abstract class Preview extends Staging {}
 - **`expose`** names what is reachable from outside the environment.
   Everything else is internal, and reachable only along its edges.
 - **`@server`** declares a deployable only to change a default. Here it
-  replaces shop-orders' default server with one that calls shop-api.
+  runs both APIs in one process in place of their two default servers. Its
+  edges are its APIs' edges: shop-db through `authDb`, and shop-api
+  through shop-orders' `calls` (section 3.3).
 - **`target`** picks a target (section 6.3). `gcp` holds that target's
   values, checked against the schema the target registers.
 - **`domain`** is where exposed servers are reached, and **`dns`** places
@@ -214,7 +259,7 @@ export abstract class PaymentsSecrets {
 
 - In each environment, `PaymentsSecrets.STRIPE_KEY` is one secret. Every
   server whose config includes the field gets an accessor grant to it:
-  here, shop-api and the orders server.
+  here, the servers of shop-api and shop-orders.
 - Two servers whose config is the same type share all its secrets with no
   further declaration.
 - The platform stores the secret (Secret Manager on GCP, a gitignored file
@@ -247,13 +292,19 @@ again; the types are the early warning. Nothing here changes how
 superschematic reads a schema, because the walker evaluates decorator
 arguments as data either way.
 
-- **Handles carry their kind and config type.** The generated
-  `service.generated.ts` writes the handle with two phantom type
-  parameters: `service<"API", ShopApiConfig>({ name: "shop-api", kind:
-  SchemaKind.API })`. The second names the service's `@envVars` type,
-  wherever it lives, so the sentinel is written after the service loads. A
-  DB or General handle has no config type. No person writes either
-  parameter.
+- **Handles carry their kind and config type.** `ServiceHandle<K, C>` in
+  `@superschematic/schema-config` has two phantom type parameters, the
+  kind as a string and the config type, with defaults, so a bare
+  `ServiceHandle` is any handle. An API's generated `service.generated.ts`
+  writes both: `service<"API", ShopApiConfig>({ name: "shop-api", kind:
+  SchemaKind.API })`, with `ShopApiConfig` imported as a type. The second
+  names the API's `@envVars` class, so the sentinel is written after the
+  service loads; the sentinel sweep, which reads only configs, keeps the
+  type a build wrote. A DB or General handle has no config type, nor has
+  an API without a TypeScript `@envVars` class, and `service()` infers the
+  kind from its argument (`kind: SchemaKind.DB` gives `ServiceHandle<"DB">`).
+  No person writes either parameter. `calls` takes `ServiceHandle<"API">`,
+  so tsc refuses a DB handle there.
 - **Targets type their own values and settings.** `@superschematic/stack`
   declares an empty `Targets` interface. Each target's authoring package
   augments it with the target's environment values and a settings type per
@@ -355,12 +406,13 @@ supplies it at run time.
 
 ## 6. Plug-in interfaces
 
-Four registrations keep platforms and tools independent of each other and
+Five registrations keep platforms and tools independent of each other and
 of the core:
 
 - a deployable is placed on a **platform**;
 - an edge between two placed deployables is realized by a **connector**;
 - a **target** names a platform for each deployable kind;
+- a **DNS platform** holds an environment's domain records (section 6.9);
 - a **provisioner** turns the resulting resource graph into running
   resources.
 
@@ -368,20 +420,35 @@ of the core:
 
 A platform realizes one deployable kind on one runtime: Cloud Run servers,
 Cloud SQL databases, local processes, a local Postgres container. It
-registers:
+registers a `PlatformSpec`:
 
-- the deployable kind, and what it accepts: server languages, SQL dialects;
-- the JSON Schema of its settings (`minInstances`, `tier`);
-- how it names and addresses a deployable in an environment, including
-  under a parameter;
-- `Lower(deployable, environment)`, a pure function that returns resources.
+- `Kind`, the deployable kind, and what it accepts: `Languages` for a
+  server platform, spelt as `outputs.api.language` spells them (`GO`,
+  `TYPESCRIPT`, `RUST`), or `Dialects` for a database platform
+  (`postgres`, `sqlite`), in order of preference;
+- `Settings`, the JSON Schema of its settings (`minInstances`, `tier`);
+- `NameOf` and `AddressOf`, how it names and addresses a deployable in an
+  environment. Under a parameter the name references the parameter
+  (`{"$concat": ["shop-api-", {"$parameter": "pr"}]}`), and an address
+  usually references an output of one of the deployable's nodes;
+- `Lower`, a pure function from the environment and the resolved
+  deployable, bindings included, to the deployable's resources and, for an
+  exposed server, the DNS records it needs (section 6.9).
+
+A resource a platform leaves without a phase gets the default of its
+producer: rollout for a server's own resources, infrastructure for a
+database's.
 
 ### 6.2 Connector
 
 A connector realizes one edge kind between two platforms: Cloud Run to
-Cloud SQL over sql, Cloud Run to Cloud Run over http. It returns the
-resources the edge needs (an IAM grant, a Cloud SQL connection on the
-service) and the value of the derived binding.
+Cloud SQL over sql, Cloud Run to Cloud Run over http. It registers a
+`ConnectorSpec` with the edge kind, its `From` and `To` platforms and a
+pure `Connect`, which returns the resources the edge needs (an IAM grant, a
+Cloud SQL connection on the service) and the value of the derived binding.
+One connector serves an edge kind between two platforms; a second is
+refused. An http edge between two APIs one server serves runs from the
+server to itself, and its connector derives the server's own address.
 
 A generic connector covers a pair of platforms on different providers that
 no specific connector serves, such as a Cloudflare Worker calling a Cloud
@@ -400,13 +467,18 @@ mix with.
 
 ### 6.3 Target
 
-A target is a named bundle of:
+A target is a named bundle, registered as a `TargetSpec`, of:
 
 - a platform for each deployable kind;
 - the schema of its environment values (`project` and `region` for
   `gcp`);
 - its default DNS platform (section 6.9);
-- policy rules over the resource graph.
+- the provisioner that applies its environments, whose state backend its
+  bootstrap creates (section 6.5);
+- the schema of the properties of each resource type its platforms,
+  connectors and DNS platform emit (section 6.4);
+- policy rules over the resource graph, each a named check over the
+  resolved environment.
 
 `gcp` is Cloud Run, Cloud SQL, Secret Manager, Cloud Build with Artifact
 Registry, and a load balancer. `local` is processes, a Postgres container
@@ -430,6 +502,16 @@ side and provisioners on the other. A node has an id, a resource type,
 properties and dependencies. A property may reference another node's output
 or a parameter.
 
+In `environment.json` a reference is an object with one reserved key:
+`{"$output": {"resource": "shop-api.service", "name": "uri"}}`,
+`{"$parameter": "pr"}`, or `{"$concat": [...]}` for strings and references
+joined. A node also records its phase (infrastructure, rollout or
+exposure), whether it is `inherited` from the parent environment
+(section 5.4), and its `owners`: the deployables, edges or DNS that
+produced it. Two producers that return the same node share it, and two that
+return different nodes under one id fail. A node's `dependsOn` holds the
+dependencies its producer named and every node its properties reference.
+
 Resource types and properties use Pulumi package schemas as their
 vocabulary (`gcp:cloudrunv2/service:Service`,
 `kubernetes:apps/v1:Deployment`):
@@ -446,6 +528,37 @@ the types it uses. A Go tool with a `-check` mode keeps them current, as
 `internal/tools/scalarcatalog` does for the scalar catalog, so properties
 validate offline.
 
+Each pinned file also records the type's Terraform name and any property
+renames, taken from the bridged provider's published mapping:
+
+```json
+{
+  "token": "gcp:cloudrunv2/service:Service",
+  "terraform": {
+    "type": "google_cloud_run_v2_service",
+    "renames": { "invokerIamDisabled": "invoker_iam_disabled" }
+  },
+  "inputProperties": { "...": "..." }
+}
+```
+
+The Pulumi provisioner uses the token as it is. A Terraform-family
+provisioner such as OpenTofu uses `terraform.type` and `renames`, so adding
+one is a lookup, not a translation layer. A round-trip test, from Pulumi
+names to Terraform and back over every pinned type, lands with that
+provisioner. Kubernetes types need no mapping, because a token is an
+apiVersion and a kind.
+
+Not taken:
+
+- Terraform provider schemas as the vocabulary. They are the most widely
+  shared: OpenTofu speaks them, and Pulumi and Crossplane both generate
+  providers from them. But the first provisioner would run them through
+  Pulumi's bridge for arbitrary Terraform providers, a less mature path
+  than its native GCP provider, and Kubernetes fits them poorly.
+- A vocabulary of superschematic's own, which re-models every cloud
+  resource it uses and needs a mapping per resource per provisioner.
+
 ### 6.5 Provisioner
 
 A provisioner takes a resource graph to running resources and back:
@@ -456,6 +569,13 @@ A provisioner takes a resource graph to running resources and back:
   backend the target's bootstrap created;
 - `Outputs` reads the applied graph's outputs. They feed the bindings
   (section 6.6) and the deploy manifest (section 11.2).
+
+A provisioner registers a `ProvisionerSpec` that holds an implementation of
+the `Provisioner` interface: `Render(graph, dir)`, then `Plan`, `Apply`,
+`Destroy` and `Outputs`, each with a request that carries the resolved
+environment, the parameter values of the run and the rendered program's
+directory. `Apply` applies one step of the deploy order, so the deploy runs
+image builds and migrations between steps.
 
 Pulumi is the first provisioner:
 
@@ -490,17 +610,39 @@ name such a program, and the provisioner applies it after the stack.
 
 ### 6.7 Registry surface
 
-There are four specs, registered like the others in section 3 of
-`docs/extension-model.md`:
+There are five specs, registered like the others in section 3 of
+`docs/extension-model.md`. The core registers none of them.
 
-- `RegisterPlatform(PlatformSpec)`;
-- `RegisterConnector(ConnectorSpec)`;
-- `RegisterTarget(TargetSpec)`;
-- `RegisterProvisioner(ProvisionerSpec)`.
+- `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
+  unknown deployable kind, a server platform without languages or a
+  database platform without dialects (or either with the other's list), an
+  unknown or repeated language or dialect, a settings schema that does not
+  compile, and a missing `NameOf`, `AddressOf` or `Lower`.
+- `RegisterConnector(ConnectorSpec)` refuses a malformed or repeated name,
+  an unknown edge kind, a missing platform or `Connect`, and a second
+  connector for one edge kind between the same two platforms.
+- `RegisterTarget(TargetSpec)` refuses a malformed or repeated name, an
+  unknown deployable kind, a values or resource type schema that does not
+  compile, a resource type another target registered with a different
+  schema, and a policy rule without a name or a check, or with a repeated
+  name.
+- `RegisterDNSPlatform(DNSPlatformSpec)` refuses a malformed or repeated
+  name, the reserved name `manual`, a values schema that does not compile
+  and a missing `Lower`.
+- `RegisterProvisioner(ProvisionerSpec)` refuses a malformed or repeated
+  name and a missing implementation.
 
-Each rejects a duplicate key and is checked when the registry is assembled.
-The acceptance test is D10's: a test extension adds a platform, a connector
-and a provisioner with no core edit.
+A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
+`Finalize` checks that each connector joins registered platforms of the
+kinds its edge joins. It checks that each platform a target names is
+registered and of the kind it places, and that a DNS platform or
+provisioner the target names is registered; a target may name neither.
+
+The acceptance test is D10's. `stack/stacktest` imports only the public
+`registry`, `stack` and `ir` packages, registers a fake target with its
+platforms, connectors, DNS platform and provisioner, and resolves a stack
+over the acme-shop services. Its golden `environment.json` files are under
+`stack/stacktest/testdata/golden`.
 
 ### 6.8 Targets after Cloud Run
 
@@ -508,7 +650,7 @@ and a provisioner with no core edit.
 | --- | --- | --- | --- |
 | GKE | Kubernetes servers; Cloud SQL databases | GKE to Cloud SQL through Workload Identity and the Cloud SQL proxy; server to server through a Service and a NetworkPolicy derived from the edge | only the Cloud SQL connector; the Kubernetes server platform is shared |
 | Hosted Kubernetes (EKS, AKS, DOKS and others) | Kubernetes servers; the cloud's managed Postgres, or an in-cluster operator | a database connector per cloud; the shared Kubernetes connector between servers | the database platform and its connector |
-| Cloudflare | Workers for TypeScript servers (the generated TypeScript server uses Hono, which runs on Workers); D1 for SQLite-dialect databases | Hyperdrive to a Postgres database on another target; service bindings between Workers | everything, but through the same four specs |
+| Cloudflare | Workers for TypeScript servers (the generated TypeScript server uses Hono, which runs on Workers); D1 for SQLite-dialect databases | Hyperdrive to a Postgres database on another target; service bindings between Workers | everything, but through the same specs |
 
 Resolution refuses a Go or Rust server on Workers, by the languages the
 platform declares (section 5.2).
@@ -525,6 +667,11 @@ of each exposed server, and the records its certificate needs for
 validation. The DNS platform lowers them to its provider's resources, in the
 same provisioner run as the rest of the environment.
 
+A DNS platform registers a `DNSPlatformSpec`: the JSON Schema of an
+environment's values for it (a zone) and a pure `Lower` from the records
+to resources. It is a spec of its own, not a `PlatformSpec`, because it
+lowers records rather than a deployable.
+
 v1 has two DNS platforms:
 
 - **Cloud DNS**, the gcp target's default. It writes into the managed zone
@@ -539,6 +686,66 @@ gets `manual`, and `stack plan` prints the records to create.
 Being a platform kind makes DNS the first mix of providers in v1, before
 compute can mix (section 6.3). DNS records are not edges, so this needs no
 connector.
+
+### 6.10 How resolution drives the specs
+
+`stack.Resolve` (`internal/stack`) is a pure function of the registry, a
+stack, the facts of the services it references and one environment. The
+facts come through a plain struct, `stack.Service`: name, kind, `authDb`,
+`dependencies`, `calls`, the API language, the SQL dialects and the
+`@envVars` fields with their `Secret`, `Default` and `InheritedFrom`. It
+works in stages and stops at the end of the first stage that fails, so
+every model check reports before anything is connected or lowered:
+
+1. It merges the environment's `extends` chain: values and settings merge
+   key by key, the parent first, and parameters add up.
+2. It collects the services the stack reaches, makes the default
+   deployables (section 3.2), places each deployable on its settings
+   platform or its target's, and checks that the platform runs its
+   language or dialect and accepts its settings.
+3. It asks each platform for the deployable's name and address, derives
+   the edges and finds their connectors, numbers each server's rollout
+   wave from its calls, and binds every config field.
+4. It calls each edge's `Connect` in edge order. When every one succeeds,
+   it calls each deployable's `Lower` in name order, then the DNS
+   platform's `Lower`, and merges their nodes. Every value a platform,
+   connector or DNS platform returns is read through its JSON form, so
+   what resolution accepts is what `environment.json` reads back.
+5. It runs the graph checks of validation level 3: every dependency and
+   referenced output names a node, every referenced parameter is
+   declared, there is no cycle, every node's properties validate against
+   the schema a registered target holds for its type, and every inherited
+   node is a node of the same type in the parent environment, which it
+   resolves for the check.
+6. It orders the deploy (section 5.3). A node lands in its phase, or in a
+   later step when one of its dependencies does. A server's own rollout
+   nodes must land in its wave, and a database's nodes in infrastructure,
+   before its migration. Migrate steps name the databases and hold no
+   node, so the migration runner slots in there. No step applies an
+   inherited node: the parent environment owns it.
+7. It runs the target's policy rules.
+
+Each failure carries a code, and `internal/stack/errors.go` lists them
+all. The checks of section 5.2 have one each: `unbound-field`,
+`unknown-env-key`, `secret-literal`, `kind-mismatch`, `unrealizable`,
+`no-connector`, `expose-not-server` and `policy`. Malformed declarations,
+unknown names and values that fail a schema have their own codes. So do
+three failures section 5.2 does not list:
+
+- an API with several DB dependencies and no `authDb`
+  (`ambiguous-database`);
+- a cycle of calls between servers, which no callee-first order serves
+  (`call-cycle`);
+- a config field that two types declare for one server, or that a derived
+  field takes (`field-collision`).
+
+Errors from a platform, connector or DNS platform are `lowering`, and the
+graph checks are `graph`.
+
+`stack.Write` puts the result at
+`<output-root>/stack/<stack>/<environment>/environment.json`. Fields come
+in the order the IR declares them and map keys are sorted, so a wiring
+change reads as a diff.
 
 ## 7. The gcp target
 
@@ -615,9 +822,10 @@ A generator per server language, Go first, writes a `main` that:
   endpoints;
 - sets up OpenTelemetry and graceful shutdown.
 
-The engineer still writes the implementation interfaces. They also write one
-constructor, whose signature the generator writes, in a package the server
-names once. A mismatch fails to compile at level 2 of section 10.
+The engineer writes the implementation of each served API, and nothing else
+(section 8.5). The entrypoint calls each implementation's constructor with
+its `Deps`. A mismatch between the code and the generated signature fails
+to compile at level 2 of section 10.
 
 ### 8.2 Container image
 
@@ -654,60 +862,444 @@ them: `superschematic migrate plan` and the `superschematic-migrate` runner
 - a check that a plan does not drop or retype a column that an `@source`
   view of a deployed API reads.
 
+### 8.5 Where the implementation lives
+
+The unit of implementation is the API service, not the server. Each API
+service has one implementation per language, at a conventional location,
+found with no declaration:
+
+- **Location.** The naming file holds a path template per language (for
+  example `go/{service}`, from the repository root), with a core default.
+  The service name fills it. A distribution changes the template, not each
+  service.
+- **Scaffold.** When the package is missing, superschematic writes it once,
+  with each method returning a not-implemented error. From then on the
+  package is the engineer's and is never regenerated.
+- **Signature.** The API generator writes `Deps` and the constructor's
+  signature: `func New(deps Deps) (Implementations, error)` in Go, and the
+  equivalent in TypeScript and Rust. `Deps` is typed and filled by the
+  entrypoint:
+
+  ```go
+  type Deps struct {
+      Config  Config                 // the API's @envVars, derived fields included
+      DB      orm.DatabaseInterface  // from authDb
+      ShopApi *shopapisdk.Client     // from calls, with service credentials
+      Logger  *slog.Logger
+  }
+  ```
+
+A server that serves several APIs calls each one's constructor with that
+API's `Deps`, built from the server's shared connections and clients.
+
+Not taken:
+
+- A package path named on each server, such as `@server({ go:
+  "example.com/acme/orders" })`. That is a string per server, and default
+  servers would still need a convention.
+- A `main` the engineer writes, calling a generated `Run(impl)`. That brings
+  hand wiring back, and the server still has to name its main package.
+
 ## 9. End-user auth and service auth
 
 These are two concepts, with separate credentials, context values and
-checks.
+checks. D37 in `docs/DECISIONS.md` records the decisions in this section.
 
 ### 9.1 End-user auth
 
 End-user auth is what exists today: the auth providers of section 8 of
-`docs/extension-model.md`, the `Authorization` header, the session
-runtime's principal and `@requirePermission`. It answers who the person is,
-and this model leaves it unchanged.
+`docs/extension-model.md`, the `Authorization` header, the end-user
+principal and `@requirePermission`. It answers who the person is, and this
+model leaves it unchanged. Permissions belong to end users only; no service
+holds one (section 9.7).
 
 ### 9.2 Service auth
 
-Service auth is new. It answers which deployable is calling, at two layers:
+Service auth answers which deployable is calling, at two layers:
 
 - **Admission, at the platform.** Only a caller with an edge reaches the
   callee at all. Connectors derive this from edges: `roles/run.invoker` on
   Cloud Run, a NetworkPolicy on Kubernetes, a service binding on Workers.
-- **Identity, in the application.** The callee knows the calling service as
-  a service principal, separate from the end-user principal.
-  - The HTTP runtimes gain a `ServiceAuthenticator`. It verifies the
-    platform's workload credential (a Google ID token on GCP, a projected
-    service account token on Kubernetes) and puts a `ServiceCaller` on the
-    request context.
-  - The SDKs gain a service credential source, which the generated
-    entrypoint picks per platform.
-  - The service credential travels in its own header, so `Authorization`
-    stays the end user's. On Cloud Run, `X-Serverless-Authorization` carries
-    the ID token the platform checks.
+  An exposed server admits every caller at this layer, since browsers call
+  it.
+- **Identity, in the application.** The callee knows the calling deployable
+  as a `ServiceCaller`, separate from the end-user principal. The HTTP
+  runtimes' `ServiceAuthenticator` establishes it (section 9.5), and it
+  verifies the credential's signature on every platform, whether or not the
+  platform admitted the call.
+
+The service credential is a short-lived JWT on every v1 platform, so one
+verifier in each runtime reads all of them. It knows JWTs and keys, not
+clouds; what is specific to a platform is data the connector writes into
+the callee's config (section 3.4).
+
+| Platform | The caller sends | Lifetime | The callee checks |
+| --- | --- | --- | --- |
+| Cloud Run | a Google ID token whose audience is the callee's URL, from the metadata server | 1 hour; fetched again 5 minutes before it expires | RS256 against Google's keys; `iss` `https://accounts.google.com` or `accounts.google.com`; `aud`; `exp`; the caller's service account by its unique id in `sub` |
+| Kubernetes | a projected service account token whose audience is the callee, read from the file the kubelet keeps current | 10 minutes, the shortest Kubernetes allows; the kubelet replaces it at 80% of that, and the caller reads the file again each minute | the signature against the issuer's keys; `iss`; `aud`; `exp`; the caller's service account in `sub` |
+| local, and the generic connector (section 6.2) | a token the caller signs with the edge's Ed25519 key | 5 minutes | the signature against the edge's public keys; `iss`; `aud`; `exp` |
+
+The callee's config holds, for each inbound edge, the issuer, the keys or
+where to fetch them, the audience, the claim that names the caller, and the
+deployable each caller identity is, with the APIs it serves. An identity
+the config does not list is no caller, whatever signed its token. The
+Kubernetes platform reads the issuer's keys from the API server's
+`/openid/v1/jwks`, which default RBAC lets any service account read, with
+the server's own token.
+
+**Headers.** The credential travels in `Service-Authorization: Bearer
+<token>` on every platform, and the `ServiceAuthenticator` reads only that
+header. `Authorization` stays the end user's. On Cloud Run the caller also
+sends the same token in `X-Serverless-Authorization` to a callee whose
+invoker check is on, which is every server that is not exposed:
+
+- Cloud Run admits a call by the ID token in `X-Serverless-Authorization`
+  when the header is present, and in `Authorization` otherwise. The
+  platform header is what lets an internal server take the end user's
+  `Authorization` at all.
+- Cloud Run removes that token's signature before the request reaches the
+  container, so the application cannot verify that copy. It verifies the
+  copy in `Service-Authorization` instead.
+- An exposed server's invoker check is off, because browsers call it. There
+  Cloud Run checks nothing, and its documentation does not say what it does
+  to `X-Serverless-Authorization`, so callers do not send it and the
+  application ignores it.
+
+So the application verifies again on Cloud Run: on an internal server it
+checks what the platform already checked, at the cost of one header; on an
+exposed one it is the only check.
+
+The generic connector's token:
+
+- is a compact JWS with the header `{"alg": "EdDSA", "kid": <the key's
+  RFC 7638 thumbprint>, "typ": "JWT"}`. RFC 9864 renames the algorithm
+  `Ed25519`, which the Go and Rust JWT libraries do not read yet, so the
+  caller writes `EdDSA` and the callee accepts both;
+- carries `iss` and `sub`, the caller's deployable name in the
+  environment; `aud`, the callee's; `iat`; `exp`, 5 minutes after `iat`;
+  and `jti`, for logs;
+- is accepted when its `kid` is one of the edge's keys, the key belongs to
+  the deployable `iss` names, `aud` is the callee, and `exp` is in the
+  future and at most 5 minutes after `iat`, with 60 seconds of leeway for
+  clocks. The caller signs a new token when the one it holds has less than
+  a minute left.
+
+Each edge has two key slots. Each slot is replaced every 180 days, the two
+offset by 90 days, by a `Rotating` node of the `time` provider in the
+resource graph; the period is a connector setting. The callee accepts both
+public keys and the caller signs with the younger private key. Callees
+deploy before callers (section 5.3), so a callee holds a new public key
+before any caller signs with it. A key pair is a credential the platform
+generates, not a secret a person enters (section 4.2): the private key goes
+into the caller's secret store, the public key into the callee's config.
+
+The `local` target uses the same tokens. `stack dev` generates a key pair
+per edge into the gitignored local file, so a local stack runs the code
+path a deployed one does.
+
+Not taken:
+
+- Trusting the claims Cloud Run passes on in `X-Serverless-Authorization`.
+  It saves a header, but every runtime would carry a mode that accepts a
+  JWT without its signature, which is safe only while the invoker check
+  stays on. Google does not document the header's handling with the check
+  off, and one report says the signature is removed there too, unchecked.
+- `X-Serverless-Authorization` as the service header everywhere, which an
+  exposed Cloud Run server cannot verify.
+- A verifier per platform in each runtime, linking a cloud's client
+  library: D6 keeps the runtimes provider-neutral, and three runtimes would
+  each need every cloud.
+- The Kubernetes TokenReview API. It notices a token whose pod was deleted
+  before the token expires, but it calls the API server per request and
+  needs a Kubernetes client in each runtime. A 10-minute token bounds the
+  same window offline.
+- Mutual TLS, which Cloud Run does not pass to the container.
+- HTTP message signatures (RFC 9421) over the method, path and body
+  digest. They stop a token being replayed on another request within its
+  lifetime, but every runtime and SDK would have to agree on the body's
+  digest, and Google's and Kubernetes' tokens are bearer tokens anyway.
+- ES256 for the generic connector's key, which WebCrypto supported first,
+  but whose signatures are not deterministic, so the parity vectors could
+  not be regenerated byte for byte. Every runtime the servers target verifies Ed25519 now: Go, Rust's
+  `jsonwebtoken`, and WebCrypto in Node.js 22.13, Bun and Workers.
+- No service auth locally, or a header that names the caller unsigned. It
+  leaves a code path only production runs, and a mode that could ship.
 
 ### 9.3 Schema surface
 
-An operation says who may call it: end users with permissions
-(`@requirePermission`, as today), services, or both. The services that may
-call an API are the deployables with an edge to it, which is derived; a
-handle on the operation can narrow that set. Resolution checks that every
-`calls` edge reaches at least one operation the caller may invoke.
+An operation says who may call it with two decorators beside the end-user
+ones, registered for operations and operation sets like `@rateLimit`. An
+operation's own declaration replaces its set's.
+
+| Declared | Who may call |
+| --- | --- |
+| `@auth`, `@requirePermission` or `@requireOwnership` (the user clause, as today) | an end user who meets it, directly or forwarded by a service (section 9.4) |
+| `@requireService(...)` | only a listed service. No end user is looked at |
+| `@requireService(...)` and a user clause | only a listed service, forwarding an end user who meets the user clause |
+| `@allowService(...)` and a user clause | an end user who meets the user clause, or a listed service with no end user |
+
+```ts
+// schemas/services/shop-api/src/stock.schema.ts
+import { ShopOrders } from "@acme/shop-orders";
+
+export class StockMutations {
+  // Only the orders server, placing an order for a user who may.
+  @rest(HttpMethod.POST, "stock/reservations")
+  @requirePermission(["orders.create"])
+  @requireService({ from: [ShopOrders] })
+  reserveStock(input: ReserveStockInput): Reservation {
+    throw new Error("schema declaration only");
+  }
+
+  // A user who may, or the orders server on its own.
+  @rest(HttpMethod.POST, "stock/reservations/{id}/release")
+  @requirePermission(["stock.write"])
+  @allowService({ from: [ShopOrders] })
+  releaseReservation(id: Identity.UUID): Reservation {
+    throw new Error("schema declaration only");
+  }
+
+  // Any server with an edge to shop-api, and no end user.
+  @rest(HttpMethod.POST, "stock/reindex")
+  @requireService()
+  reindexStock(): ReindexResult {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- **`from`** is a list of API service handles. A listed service is the
+  server that serves that API in the stack. Without `from`, every server
+  with a `calls` edge to the API is listed. `from` narrows the edges and
+  never widens them: a listed service without an edge is not admitted by
+  the platform. A handle in `from` is an identity, so it adds no
+  build-order edge (section 12), and two APIs may name each other.
+- When a listed service admits an `@allowService` operation, it stands in
+  for the end user: the user clause is not checked and no end user is
+  authenticated. A service that is not listed, or that forwards a user it
+  wants checked, goes through the user clause.
+- The TypeScript reader refuses, and the verify pass refuses in a schema
+  authored as IR: `@allowService` without a user clause (an operation only
+  services call is `@requireService`); either decorator with
+  `@publicRoute`, `@webhook` or `@hmacVerified` on one operation (a third
+  party holds no service credential); and both on one operation or one
+  set. An `@publicRoute` operation opens its route even in a set with a
+  service clause.
+
+The IR records the effective rule on `FieldDef.ServiceCallers` and
+`OperationSet.ServiceCallers`, a `ServiceCallers{Mode, From}` where `Mode`
+is `require` or `allow` and `From` holds the API service names. The
+generators read it through `EndpointInfo`, as they read `RequiresAuth`.
+
+Resolution adds a check to those of section 5.2. Every `calls` edge from a
+server C to an API A must reach at least one operation of A that C may
+invoke:
+
+- an operation open to anyone;
+- an `@allowService` operation that lists C;
+- a `@requireService` operation that lists C, when it has no user clause or
+  C can forward an end user;
+- an operation with a user clause and no `@requireService`, when C can
+  forward an end user.
+
+C can forward an end user when an API it serves has an operation with a
+user clause. So an edge fails when every operation of the callee lists
+other services or needs an end user the caller does not have: "orders
+calls shop-api, but no shop-api operation admits orders". A handle in `from` that names a service
+the stack does not deploy, or deploys without an edge, is not an error: an
+API is written once and deployed in many stacks.
+
+The OpenAPI document gains a `serviceAuth` security scheme, a bearer token
+in the `Service-Authorization` header. OpenAPI's security list is an OR of
+ANDs, so each row of the table above is one list: `[{bearerAuth}]`,
+`[{serviceAuth}]`, `[{serviceAuth, bearerAuth}]` and
+`[{bearerAuth}, {serviceAuth}]`. The tool manifest leaves out a
+`@requireService` operation, which no end user's agent can call.
+
+Not taken:
+
+- One decorator with a mode argument, such as `@callers({ services,
+  users: "or" | "and" })`. The pair reads as the rule it states, and each
+  rule has one spelling.
+- Narrowing in the stack, on `calls`, by operation name. It is a name in a
+  string, and it puts the API's access rules in every stack that deploys
+  it.
+- Naming the calling deployable's class in `from`. A stack imports its
+  APIs, so an API cannot import the stack's classes.
 
 ### 9.4 Delegation
 
 A server that calls on behalf of a user forwards the user's
-`Authorization` and adds its own service credential. The callee sees both
-principals and checks each against what the operation requires. Whether a
-forwarded user token is accepted as is, or exchanged for a narrower one, is
-the end-user auth provider's decision.
+`Authorization`, unchanged, beside its own service credential. The callee
+puts the service caller and the end user on the request context and checks
+each against the operation's rule (section 9.3).
 
-### 9.5 Open
+- **Forwarding is per call, from the request being served.** In Go, the
+  generated entrypoint sets each client's end-user token hook to read the
+  token of the request on the call's `context.Context`, so a handler that
+  passes its context forwards. TypeScript and Rust have no context that
+  every runtime carries across an `await`, so a call forwards when its
+  options name the `RequestContext` it serves: `{ forward: ctx }` and
+  `RequestOptions::forward(&ctx)`.
+- **A client built for an edge holds no end-user token.** It has no static
+  token and no refresh, since a server cannot refresh a user's session. A
+  call with nothing to forward, from a background task say, carries the
+  service credential alone.
+- **The callee's end-user provider decides whether the forwarded token is
+  good.** With the `session` provider it is when the callee's `authDb`
+  holds the same Session table as the caller's, which is the case in a stack
+  whose APIs share one auth database.
+- **Token exchange belongs to the end-user provider, and v1 has none.** The
+  core never mints, narrows or exchanges a user's token. A provider that
+  wants narrower forwarded tokens would exchange them in the caller before
+  the call, with the service credential as the actor token of RFC 8693; the
+  core's part would be a hook on the forward option. Nothing needs it yet.
 
-- The decorators and their IR fields.
-- Per platform, whether the application verifies again a credential the
-  platform has already admitted.
-- Whether services hold permissions that `@requirePermission` checks, or
-  operations are only marked as callable by services.
+### 9.5 Runtime
+
+Each HTTP runtime gains a `ServiceAuthenticator` and a `ServiceCaller`
+beside the end-user `Authenticator` and principal:
+
+| Runtime | Seam | The caller |
+| --- | --- | --- |
+| Go | `serviceauth.Authenticator`, `Authenticate(*http.Request) (*serviceauth.Caller, error)`, set on the router's `Config.ServiceAuthenticator` | `serviceauth.CallerFromContext(ctx)` |
+| TypeScript | `ServiceAuthenticator`, `(ctx: RequestContext) => Promise<ServiceCaller \| null>`, a `buildRouter` option beside `authenticate` | `ctx.serviceCaller` |
+| Rust | `ServiceAuthenticator`, `async fn authenticate(&self, &Parts) -> Result<Option<ServiceCaller>, ApiError>`, on `Implementations.service_authenticator` | `RequestContext.service_caller` |
+
+A `ServiceCaller` has the calling deployable's name, the APIs it serves
+(which `from` is checked against) and the credential's subject, for logs.
+An authenticator returns no caller when the request carries no service
+credential. It refuses a credential it cannot verify with 401, code
+`service_unauthorized`, and a verified identity that is no caller of this
+server with 403, code `service_forbidden`. A failure that is not the
+caller's, such as keys it cannot fetch, answers 503. Each runtime ships one
+implementation over the config of section 9.2, which the generated
+entrypoint builds; a deployment with a credential that config cannot
+express passes its own.
+
+A route runs its steps in this order:
+
+1. the `@hmacVerified` verifier (D26);
+2. the rate limit, then the body limit (D29);
+3. **the service step.** When the server has a service authenticator and
+   the request carries a service credential, the authenticator verifies
+   it, on every route. Then the route's service clause applies:
+   `@requireService` refuses a missing caller with 401 and an unlisted one
+   with 403, both with the service codes; `@allowService` with a listed
+   caller skips step 4;
+4. **the end-user step,** as today: authenticate the end user, then check
+   the user clause with the permission matcher;
+5. the rest of the route: Go's payload decryptor, the timeout and the
+   handler.
+
+The Go server authenticates the end user with the provider's
+`AuthMiddleware` on its protected group, ahead of the route, and keeps
+doing so for routes without a service clause, where the end user is
+therefore authenticated before the service step. A route with a service
+clause takes `AuthMiddleware` into its own chain at step 4 instead, so a
+service that admits an `@allowService` route skips it.
+
+When an operation has a service clause and the server has no service
+authenticator, the Go server's `Config.Validate` refuses to start it, the
+Rust crate does not compile, as D29 makes it for an end-user
+authenticator, and the TypeScript router answers the route with 401, as it
+does without `authenticate`. A server with no service clause may still
+be given one, so its routes can tell a delegated call from a direct one.
+
+End-user auth providers do not change. No auth snippet is added; a
+provider never sees the service header and the service authenticator never
+sees `Authorization`. The TypeScript `Principal` stops listing a service
+identity among its subjects. D15 put service-to-service token verification
+in each deployment's provider package; for services in a stack it is now
+the runtime's.
+
+### 9.6 SDKs
+
+Each SDK's config gains a service credential source beside the end-user
+auth config: a function from a `fresh` flag to a token (`serviceCredential`
+in TypeScript, `ServiceCredential` in Go, `service_credential` in Rust and
+Python), and the headers that carry it. The SDK sends the token on every
+request, whether or not the API has an operation that needs a caller: in
+`Service-Authorization`, and also in `X-Serverless-Authorization` when the
+edge's config says the callee is a Cloud Run server whose invoker check is
+on (section 9.2).
+
+A 401 with the code `service_unauthorized` asks the source for a fresh
+token once and retries. It never runs the end-user refresh, which today
+runs on any 401, and an end-user 401 never asks the service source. Cloud
+Run's own refusals carry no problem code, so they are end-user 401s to the
+SDK, and a client built for an edge has no end-user refresh to run.
+
+The runtimes ship a source for each row of section 9.2's table: a Google ID
+token from the metadata server, a projected token read from its file, and
+a token signed with an edge's key. Each caches its token and fetches or
+signs a new one before expiry. The generated entrypoint builds one client
+per `calls` edge, with the callee's URL and the source the edge's derived
+config field names (section 3.4). Python has the config slot and no
+sources, since no server is written in Python.
+
+### 9.7 Permissions
+
+Services hold no permissions. `@requirePermission` checks end users only,
+and an operation admits a service through `@requireService` or
+`@allowService`. A service's authority is its edge, declared once in
+`calls` and narrowed per operation by `from`.
+
+Not taken: permissions granted to services, in the stack or in the auth
+database, and checked by `@requirePermission`. A grant restates the edge,
+and lives where nothing checks it against `calls`. The provider's
+permission matcher and role store know end users, not deployables. And a
+service that holds an end user's permission is one principal standing in
+for two, which D30 rejected.
+
+### 9.8 Testing and parity
+
+`runtime/http/testdata/serviceauth_parity.json` holds shared vectors, as
+`runtime/schema/testdata/validation_parity.json` does for validation:
+
+- the keys (RSA, P-256 and Ed25519, for tests only), the callee configs
+  built from them, and tokens signed with them;
+- per vector: the clock, the route's rule (service clause, `from`, user
+  clause), the request's headers, and an end-user authenticator stub keyed
+  by token;
+- the expected status and code, the `ServiceCaller` and end user on the
+  context, and whether the end-user authenticator ran.
+
+The cases cover each row of section 9.3's table; expiry, a token not yet
+valid, the wrong audience and the wrong issuer; an unknown `kid`, `alg:
+none` and an RS256 key used as an HS256 secret; an identity no config
+lists; a caller left out of `from`; both credentials invalid on a route
+with a service clause; a forwarded user on each rule; and a service
+credential on a route with no service clause.
+
+A Go test writes the file with `-update`, as `TestRuntimeParityCorpus`
+writes the validation corpus. Go, TypeScript and Rust each read it in the
+runtime's own tests and run their gate with a fixed clock and a stub key
+endpoint. Rust's envelope differs from the RFC 9457 body of Go and
+TypeScript (D29), so the vectors compare status and code, not bodies.
+
+The generator tests compile a fixture API with each rule in all three
+servers and run requests through it, as D26's and D29's do: the order
+against the verifier and the rate limit, the codes, and a schema without
+the decorators unchanged byte for byte. The SDK tests check the retry: one
+fresh service token on `service_unauthorized`, and the end-user refresh
+left alone.
+
+### 9.9 Open
+
+- A deployable that serves no API, such as a job (section 3.1), has no
+  handle to put in `from`. Until jobs land with a way to name one, it may
+  call only operations whose `from` is empty.
+- A credential the callee config cannot express, such as a service mesh's
+  mTLS identity in `X-Forwarded-Client-Cert`. A deployment can pass its
+  own service authenticator today; a platform kind of credential can come
+  with the first platform that needs it.
+- Workers service bindings. A call over a binding carries no token; the
+  caller's binding config sets `ctx.props`, which Cloudflare documents as
+  safe to trust unsigned, and the platform delivers it beside the request
+  rather than in it. The Workers platform (section 6.8) decides whether the
+  TypeScript service authenticator reads it there, or whether Workers
+  callers sign key-pair tokens like the generic connector's.
 
 ## 10. Validation and simulation
 
@@ -783,28 +1375,50 @@ registrations.
 
 ## 12. Core changes
 
-1. **IR.** `authDb` and `dependencies` move into the IR (`ir/schema.go`
-   records only `Imports` today), and the Stack IR types are added.
+1. **IR.** The IR records the config's `authDb`, `dependencies` and
+   `calls` (`ir.Schema`'s `AuthDB`, `Dependencies` and `Calls`), so
+   generators and the resolver read every reference from it.
+   Landed: the Stack IR types, the stack (`ir/stack.go`), the resolved
+   environment (`ir/stack_environment.go`) and the resource graph
+   (`ir/resource_graph.go`).
+   Operations and operation sets gain `ServiceCallers` (section 9.3).
 2. **Loader:**
-   - Class values in the arguments of any registered decorator. Today the
-     walker special-cases the decorators that take classes
-     (`internal/registry/core_decorators.go:58`).
-   - `ServiceHandle` typed by kind and config type
-     (`ServiceHandle<"API", ShopApiConfig>`,
-     `packages/schema-config/src/index.ts:31`), written by the sentinel
+   - Landed: class values in the arguments of any registered decorator.
+     The argument evaluator reads a class, local or imported from another
+     service's package, as the class reference `{"class": name}`, and the
+     data forms write the same object (extension-model.md section 3.4), so
+     `settings: [{ of: Backend }]` needs no walker code of its own.
+     `@source`, `@versionGraph` and `@graphMember` stay walker-read;
+     `internal/registry/core_decorators.go` says why.
+   - Done: `ServiceHandle` typed by kind and config type
+     (`ServiceHandle<"API", ShopApiConfig>`, in
+     `packages/schema-config/src/index.ts`), written by the sentinel
      generator (section 4.3), so TypeScript can restrict a handle argument
-     and type its settings. The loader checks a handle's kind against the
-     service it names; `internal/loader/schemaconfig/config.go:177` checks
-     only that the kind exists.
+     and type its settings. `@ts-expect-error` cases in
+     `packages/schema-config/src/service-handle.typecheck.ts` pin it.
+     Build-plan discovery, which `build-all` and `build --with-deps` run,
+     checks each config handle's kind against the service it names
+     (`validateHandleKinds` in `internal/buildplan/buildplan.go`).
    - Build-order edges from the handles a schema references, so a stack does
      not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
 3. **envgen.** The derived binding fields of section 3.4.
-4. **Generators.** The server entrypoint and the Dockerfile.
-5. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
-   and TypeScript HTTP runtimes, and a service credential source in the
-   SDKs.
-6. **Registry.** The four specs of section 6.7.
-7. **CLI.** The `stack` command group.
+4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
+   and constructor signature, and the one-time implementation scaffold
+   (section 8.5).
+5. **Config and build plan.** `calls` is in the schema config, beside
+   `authDb`, in the TypeScript type and the data-form schema, valid on an
+   API config and naming API services. It is a build-order edge, and the
+   build plan refuses a cycle of `calls`; ordering outputs instead is the
+   follow-up in section 3.3. A naming-file key holds the implementation
+   path templates.
+6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
+   and TypeScript HTTP runtimes (section 9.5), and a service credential
+   source in the SDKs (section 9.6).
+7. **Registry.** The specs of section 6.7, and the resolver that drives
+   them (section 6.10). Landed: `internal/registry/stack.go`, the resolver
+   in `internal/stack` with its public face in `stack`, and the acceptance
+   extension `stack/stacktest`.
+8. **CLI.** The `stack` command group.
 
 ## 13. Module layout
 
@@ -851,7 +1465,7 @@ model, or retired, when it lands.
    nothing in `examples/acme-shop` writes a connection string, a URL or a
    port by hand.
 2. **Model, resolver and seams.** The Stack kind, environments,
-   `environment.json`, the four registry specs, and levels 1 to 3 in CI.
+   `environment.json`, the registry specs, and levels 1 to 3 in CI.
    Done when a test extension adds a platform and a provisioner with no
    core edit.
 3. **GCP and Pulumi.** Bootstrap, the gcp platforms and connectors, the
@@ -881,11 +1495,20 @@ model, or retired, when it lands.
 4. **Shared secrets.** Settled: a secret is identified by the type that
    declares the field and the field's name, so servers that include the
    same declared field share one secret (section 4.2).
-5. **Where a server's implementation lives.** Is it named once on the
-   server, or found by a convention for default servers?
-6. **The resource vocabulary.** Pulumi's schemas are a choice of
-   convenience. If OpenTofu becomes a first-class provisioner, test the
-   name translation in both directions.
+5. **Where a server's implementation lives.** Settled: one implementation
+   per API service per language at a naming-file path template, scaffolded
+   once, with a generated `Deps`. `calls` moves to the API service's config
+   (sections 3.3 and 8.5).
+6. **The resource vocabulary.** Settled: Pulumi's package schemas, with
+   each pinned type's Terraform name and property renames recorded beside
+   it from v1, and a round-trip test with the first Terraform-family
+   provisioner (section 6.4).
+7. **References in `schema.config.ts`.** Settled: a config may import a
+   sibling's sentinel (`import { ShopDb } from "@acme/shop-db"`) wherever
+   a handle goes, and `service({ name, kind })` stays as the data form and
+   the fallback spelling. The import rule moves into the static read every
+   command shares, and the sentinel sweep, which reads only `name` and
+   `kind`, runs before build-plan discovery (D34).
 
 ## 16. What the source tree taught
 

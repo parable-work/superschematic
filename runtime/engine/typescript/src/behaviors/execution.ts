@@ -49,7 +49,15 @@ the schema's instances (sql.instances(), storage.ts). A schema-level
 operation runs in a SchemaExecution, with the same reach and no instance.
 The runner's work, a reaction or a schedule run, runs in a WorkExecution:
 a schema-level context whose invokes and creates write, as the runner's
-principal, on a chain whose cause the events it writes record.
+principal, on a chain whose cause the events it writes record. A
+schedule's SQL also writes the behavior's own tables, in the run's
+transaction (D32); a reaction's writes nothing.
+
+Every context but validate's gets validate(type, value) (typeCheck),
+which checks a value against a type the version's checks cover with the
+version's validator, as validateUpdate checks the instance's own fields.
+validate's own context keeps checkType, held to the types its
+checkedTypes names.
 */
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
@@ -97,6 +105,7 @@ import type {
   SchemaContext,
   SchemaOperationHandler,
   Schemas,
+  TypeCheck,
   ValidationContext,
   ValidationRequest,
   WorkContext,
@@ -517,7 +526,7 @@ export class Execution {
   private viewMembers(bound: BoundBehavior, invokeWrites: boolean) {
     const source: ReferenceSource = { schema: this.target.schema, id: this.target.id, behavior: bound.behavior.name };
     return {
-      ...scopeMembers(this.chain, this.reach, bound, this.target.schema, this.target.version, invokeWrites),
+      ...scopeMembers(this.chain, this.reach, this.runtime, bound, this.target.schema, this.target.version, invokeWrites),
       id: this.target.id,
       columns: this.columns(bound, 'reading'),
       sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.target.schema, 'read'),
@@ -544,7 +553,7 @@ export class Execution {
 
   private contextMembers(bound: BoundBehavior, writable: boolean) {
     return {
-      ...scopeMembers(this.chain, this.reach, bound, this.target.schema, this.target.version, writable),
+      ...scopeMembers(this.chain, this.reach, this.runtime, bound, this.target.schema, this.target.version, writable),
       id: this.target.id,
       columns: this.columns(bound, writable ? 'writing' : 'a read-only operation'),
       sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.target.schema, writable ? 'write' : 'read'),
@@ -607,7 +616,9 @@ export class Execution {
  * or one run of a schedule, for one behavior the live version composes,
  * with no instance and no event of its own. Its context is a schema-level
  * one whose invokes run writing operations; the chain carries the cause
- * their events record.
+ * their events record. A schedule's SQL writes the behavior's own tables
+ * (D32), in the run's transaction, which the runner rolls back when the
+ * run throws; a reaction's only reads.
  */
 export class WorkExecution {
   constructor(
@@ -623,7 +634,7 @@ export class WorkExecution {
   react(bound: BoundBehavior, reactions: BehaviorReactions<unknown>, event: EngineEvent): void {
     const name = bound.behavior.name;
     const context: ReactionContext<unknown> = Object.freeze({
-      ...this.members(bound),
+      ...this.members(bound, 'read'),
       before: (of: EngineEvent) => this.reach.before(this.chain, name, of),
     });
     const frozen = deepFreeze(JSON.parse(JSON.stringify(event)) as EngineEvent);
@@ -635,16 +646,18 @@ export class WorkExecution {
   /** schedule runs one schedule of the behavior once. */
   schedule(bound: BoundBehavior, schedule: string, spec: BehaviorSchedule<unknown>, previous: number | undefined): void {
     const name = bound.behavior.name;
-    const context: ScheduleContext<unknown> = Object.freeze({ ...this.members(bound), schedule, previous });
+    const context: ScheduleContext<unknown> = Object.freeze({ ...this.members(bound, 'write'), schedule, previous });
     this.chain.nest(name, `schedule ${schedule}`, () => {
       synchronous(name, `schedule ${schedule}`, spec.run.call(spec, context));
     });
   }
 
-  private members(bound: BoundBehavior): WorkContext<unknown> {
+  // members is a work context: its SQL reads in a reaction and writes the
+  // behavior's tables in a schedule run.
+  private members(bound: BoundBehavior, mode: 'read' | 'write'): WorkContext<unknown> & { readonly sql: BehaviorSql } {
     return {
-      ...scopeMembers(this.chain, this.reach, bound, this.schema, this.version, true),
-      sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, 'read'),
+      ...scopeMembers(this.chain, this.reach, this.runtime, bound, this.schema, this.version, true),
+      sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, mode),
     };
   }
 }
@@ -668,7 +681,7 @@ export class SchemaExecution {
     return this.chain.nest(operation.behavior.name, `operation ${operation.name}`, () => {
       const bound = this.runtime.composition.bound(operation.behavior.name) as BoundBehavior;
       const context: SchemaContext<unknown> = Object.freeze({
-        ...scopeMembers(this.chain, this.reach, bound, this.schema, this.version, operation.writes),
+        ...scopeMembers(this.chain, this.reach, this.runtime, bound, this.schema, this.version, operation.writes),
         sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, 'read'),
       });
       const result: unknown = declaredVetoes(this.runtime.composition, () =>
@@ -694,9 +707,18 @@ function behaviorSql(storage: Storage, runtime: Runtime, chain: Chain, reach: Re
 }
 
 // scopeMembers are what every function of a behavior gets: the behavior,
-// its config, the call, can(), and its reach into other instances and
-// schemas. invokeWrites lets instances.invoke run writing operations.
-function scopeMembers(chain: Chain, reach: Reach, bound: BoundBehavior, schema: string, version: number, invokeWrites: boolean) {
+// its config, the call, can(), validate(), and its reach into other
+// instances and schemas. invokeWrites lets instances.invoke run writing
+// operations.
+function scopeMembers(
+  chain: Chain,
+  reach: Reach,
+  runtime: Runtime,
+  bound: BoundBehavior,
+  schema: string,
+  version: number,
+  invokeWrites: boolean
+) {
   const name = bound.behavior.name;
   return {
     behavior: name,
@@ -709,6 +731,28 @@ function scopeMembers(chain: Chain, reach: Reach, bound: BoundBehavior, schema: 
     can: (permission: string) => can(chain, name, permission),
     instances: instancesOf(chain, reach, name, invokeWrites),
     schemas: schemasOf(chain, reach, name, schema),
+    validate: typeCheck(runtime, name),
+  };
+}
+
+/**
+ * typeCheck is a context's validate(type, value) for one behavior of a
+ * version: the version's validator holds the value to a type its checks
+ * cover besides the instance type (Composition.covered), as it holds a
+ * nested value of the type in an instance, and returns every issue, with
+ * paths into the value. Any other name is a BehaviorError of the behavior.
+ */
+export function typeCheck(runtime: Pick<Runtime, 'composition' | 'validator'>, behavior: string): TypeCheck {
+  return (type: string, value: unknown) => {
+    const { composition } = runtime;
+    if (typeof type !== 'string' || type === composition.type || !composition.covered.has(type)) {
+      const covered = [...composition.covered].filter((name) => name !== composition.type).sort();
+      throw new BehaviorError(
+        behavior,
+        `validate: ${String(type)} is not a type the version checks besides ${composition.type}, one its fields reach, a behavior's checkedTypes names or a behavior's parseConfig read through ConfigTarget.types (${covered.length > 0 ? covered.join(', ') : 'none'})`
+      );
+    }
+    return runtime.validator.validateType(type, value, '');
   };
 }
 

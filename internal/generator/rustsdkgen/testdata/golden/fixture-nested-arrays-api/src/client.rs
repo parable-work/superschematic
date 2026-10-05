@@ -355,9 +355,10 @@ impl HttpClient {
         T: DeserializeOwned,
     {
         let status = response.status();
+        let headers = response.headers().clone();
         let body = response.text().await?;
         if !status.is_success() {
-            return Err(SDKError::api(status.as_u16(), &body));
+            return Err(SDKError::api(status.as_u16(), &headers, &body));
         }
 
         if body.trim().is_empty() {

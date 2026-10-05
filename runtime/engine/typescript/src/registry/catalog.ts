@@ -38,8 +38,8 @@ import type { SchemaFileLoader } from '@superschematic/schema-runtime';
 import type { Document } from '@superschematic/schema-ir/schema-file';
 
 import type { ConfigSchema, ConfigSchemas } from '../behaviors/behavior.js';
-import { checkedTypes, compose, configChanges, configSchemaOf, configTransitions, type Composition } from '../behaviors/composition.js';
-import type { Prefixes } from '../behaviors/execution.js';
+import { checkedTypes, compose, configChanges, configSchemaOf, configTransitions, readTypes, type Composition } from '../behaviors/composition.js';
+import type { InstanceValidator, Prefixes } from '../behaviors/execution.js';
 import { afterConfigChanges } from '../behaviors/publish.js';
 import type { BehaviorRegistry } from '../behaviors/registry.js';
 import { prefixOf, storedKey } from '../behaviors/storage.js';
@@ -117,6 +117,9 @@ const COLUMNS = 'namespace, name, version, document, hash, defined_at, defined_b
 
 export class SchemaCatalog {
   private readonly runtimes = new Map<string, VersionRuntime>();
+  // What load composed of each model it returned, with no other schema in
+  // reach: composeReaching holds each behavior's reads with them to these.
+  private readonly alone = new WeakMap<SchemaModel, Composition>();
 
   constructor(
     private readonly storage: Storage,
@@ -178,7 +181,8 @@ export class SchemaCatalog {
       if (live) {
         this.checkCompatible(namespace, live, model);
       }
-      for (const bound of this.composeReaching(model, namespace, ask, `${namespace}/${name} draft`).behaviors) {
+      const composition = this.composeReaching(model, namespace, ask, `${namespace}/${name} draft`);
+      for (const bound of composition.behaviors) {
         this.behaviors.ensureStorage(bound.behavior);
       }
       const version = live ? Number(live.version) + 1 : 1;
@@ -193,6 +197,7 @@ export class SchemaCatalog {
         version,
         now,
         namespaces: namespace === this.namespaces.shared ? this.namespaces.names : [namespace],
+        runtime: { composition, validator: lazyValidator(model, composition) },
       });
       appendEvent(this.storage, {
         kind: 'publish',
@@ -288,14 +293,25 @@ export class SchemaCatalog {
   }
 
   private load(text: string, source: string): SchemaModel {
-    return readSchema(this.loader, text, source, (model) => compose(model, this.behaviors).issues);
+    let alone: Composition | undefined;
+    const model = readSchema(this.loader, text, source, (candidate) => {
+      const composed = compose(candidate, this.behaviors);
+      alone = composed.composition;
+      return composed.issues;
+    });
+    if (alone !== undefined) {
+      this.alone.set(model, alone);
+    }
+    return model;
   }
 
   // composeReaching composes a version being defined or published with
   // the namespace's other schemas in reach of parseConfig, and refuses it
-  // as load does for what a config says about them.
+  // as load does for what a config says about them, and for a config that
+  // reads other types through ConfigTarget.types with them than load's
+  // composition, with none in reach, read.
   private composeReaching(model: SchemaModel, namespace: string, ask: ReadCheck, source: string): Composition {
-    const { composition, issues } = compose(model, this.behaviors, this.configSchemas(model, namespace, ask));
+    const { composition, issues } = compose(model, this.behaviors, this.configSchemas(model, namespace, ask), this.alone.get(model));
     if (!composition) {
       throw new SchemaDocumentError(source, issues);
     }
@@ -363,9 +379,18 @@ export class SchemaCatalog {
     }
   }
 
+  // checkCompatible holds a new version to the live one: its fields, those
+  // of the types they reach, and those of the types a behavior holds
+  // values to, the ones both versions check (checkedTypes) and the ones
+  // the live version read through ConfigTarget.types (readTypes), then
+  // each behavior's rule for its config.
   private checkCompatible(namespace: string, live: Row, model: SchemaModel): void {
     const before = modelOf(String(live.document));
-    const changes = incompatibleChanges(before, model, before.instanceType === model.instanceType ? checkedTypes(before, model, this.behaviors) : []);
+    const held =
+      before.instanceType === model.instanceType
+        ? [...new Set([...checkedTypes(before, model, this.behaviors), ...readTypes(before, this.behaviors)])].sort()
+        : [];
+    const changes = incompatibleChanges(before, model, held);
     if (before.instanceType === model.instanceType) {
       changes.push(...configChanges(before, model, this.behaviors, () => this.hasInstances(namespace, model.name)));
     }
@@ -402,6 +427,20 @@ function toRecord(row: Row): SchemaRecord {
     definedBy: row.defined_by === null ? null : String(row.defined_by),
     publishedAt: row.published_at === null ? null : Number(row.published_at),
     publishedBy: row.published_by === null ? null : String(row.published_by),
+  };
+}
+
+// lazyValidator is the validator of a version being published, built at
+// its first use: a publish whose afterConfigChange checks no value builds
+// none. It is not cached with the runtimes, since the publish may roll
+// back.
+function lazyValidator(model: SchemaModel, composition: Composition): InstanceValidator {
+  let validator: SchemaValidator | undefined;
+  const built = (): SchemaValidator =>
+    (validator ??= new SchemaValidator(model, new Map([...composition.fields].map(([field, bound]) => [field, bound.behavior.name]))));
+  return {
+    validate: (value: unknown) => built().validate(value),
+    validateType: (type: string, value: unknown, path: string) => built().validateType(type, value, path),
   };
 }
 

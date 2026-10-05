@@ -579,17 +579,19 @@ jobs:
             runtime/http/rust
             runtime/schema/rust
 
+      # superscalar's default lossless-json feature turns on serde_json's
+      # arbitrary_precision and preserve_order, and Cargo unifies them into
+      # every crate of a build that uses it, so both runtimes' lints and
+      # tests run with and without them.
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings
           cargo test
+          cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 
-      # superscalar's default lossless-json feature turns on serde_json's
-      # arbitrary_precision and preserve_order, and Cargo unifies them into
-      # every crate of a build that uses it, so the schema runtime's tests run
-      # with and without them.
       - name: schema runtime fmt / clippy / test
         working-directory: runtime/schema/rust
         run: |
@@ -694,7 +696,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: TypeScript package (wasm32 build, typecheck, every vector through the package, Node load)
+      - name: TypeScript package (wasm32 build, typecheck, every vector through the package, every scenario on SQLite, Node load)
         # The only place CI runs the vectors through the wasm build; the
         # typescript job leaves this package to this job.
         working-directory: runtime/versiongraph/typescript
@@ -703,8 +705,9 @@ jobs:
           bun run typecheck
           bun run test
 
-      - name: Scenarios through the TypeScript engine (every scenario, the canonical vectors against Postgres, the adapter, the sweeper and the facade)
-        # Fails, rather than skips, without the database.
+      - name: Scenarios through the TypeScript engine (every scenario on SQLite, then on Postgres with the canonical vectors against Postgres, the adapter, the sweeper and the facade)
+        # The SQLite pass needs no database; the Postgres pass fails, rather
+        # than skips, without one.
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: make versiongraph-scenarios-ts
