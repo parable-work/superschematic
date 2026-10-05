@@ -1,0 +1,143 @@
+{
+  "token": "gcp:certificatemanager/certificate:Certificate",
+  "terraform": {
+    "type": "google_certificate_manager_certificate",
+    "renames": {
+      "deletionPolicy": "deletion_policy",
+      "managed.authorizationAttemptInfos": "authorization_attempt_info",
+      "managed.authorizationAttemptInfos.failureReason": "failure_reason",
+      "managed.dnsAuthorizations": "dns_authorizations",
+      "managed.issuanceConfig": "issuance_config",
+      "managed.provisioningIssues": "provisioning_issue",
+      "selfManaged": "self_managed",
+      "selfManaged.certificatePem": "certificate_pem",
+      "selfManaged.pemCertificate": "pem_certificate",
+      "selfManaged.pemPrivateKey": "pem_private_key",
+      "selfManaged.pemPrivateKeyWo": "pem_private_key_wo",
+      "selfManaged.pemPrivateKeyWoVersion": "pem_private_key_wo_version",
+      "selfManaged.privateKeyPem": "private_key_pem"
+    }
+  },
+  "inputProperties": {
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "location": {
+      "type": "string"
+    },
+    "managed": {
+      "$ref": "#/types/gcp:certificatemanager/CertificateManaged:CertificateManaged"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "selfManaged": {
+      "$ref": "#/types/gcp:certificatemanager/CertificateSelfManaged:CertificateSelfManaged"
+    }
+  },
+  "types": {
+    "gcp:certificatemanager/CertificateManaged:CertificateManaged": {
+      "type": "object",
+      "properties": {
+        "authorizationAttemptInfos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:certificatemanager/CertificateManagedAuthorizationAttemptInfo:CertificateManagedAuthorizationAttemptInfo"
+          }
+        },
+        "dnsAuthorizations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "issuanceConfig": {
+          "type": "string"
+        },
+        "provisioningIssues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:certificatemanager/CertificateManagedProvisioningIssue:CertificateManagedProvisioningIssue"
+          }
+        },
+        "state": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:certificatemanager/CertificateManagedAuthorizationAttemptInfo:CertificateManagedAuthorizationAttemptInfo": {
+      "type": "object",
+      "properties": {
+        "details": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "failureReason": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:certificatemanager/CertificateManagedProvisioningIssue:CertificateManagedProvisioningIssue": {
+      "type": "object",
+      "properties": {
+        "details": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:certificatemanager/CertificateSelfManaged:CertificateSelfManaged": {
+      "type": "object",
+      "properties": {
+        "certificatePem": {
+          "type": "string",
+          "deprecationMessage": "<span pulumi-lang-nodejs=\"`certificatePem`\" pulumi-lang-dotnet=\"`CertificatePem`\" pulumi-lang-go=\"`certificatePem`\" pulumi-lang-python=\"`certificate_pem`\" pulumi-lang-yaml=\"`certificatePem`\" pulumi-lang-java=\"`certificatePem`\" pulumi-lang-hcl=\"`certificate_pem`\">`certificatePem`</span> is deprecated and will be removed in a future major release. Use <span pulumi-lang-nodejs=\"`pemCertificate`\" pulumi-lang-dotnet=\"`PemCertificate`\" pulumi-lang-go=\"`pemCertificate`\" pulumi-lang-python=\"`pem_certificate`\" pulumi-lang-yaml=\"`pemCertificate`\" pulumi-lang-java=\"`pemCertificate`\" pulumi-lang-hcl=\"`pem_certificate`\">`pemCertificate`</span> instead."
+        },
+        "pemCertificate": {
+          "type": "string"
+        },
+        "pemPrivateKey": {
+          "type": "string"
+        },
+        "pemPrivateKeyWo": {
+          "type": "string"
+        },
+        "pemPrivateKeyWoVersion": {
+          "type": "string"
+        },
+        "privateKeyPem": {
+          "type": "string",
+          "deprecationMessage": "<span pulumi-lang-nodejs=\"`privateKeyPem`\" pulumi-lang-dotnet=\"`PrivateKeyPem`\" pulumi-lang-go=\"`privateKeyPem`\" pulumi-lang-python=\"`private_key_pem`\" pulumi-lang-yaml=\"`privateKeyPem`\" pulumi-lang-java=\"`privateKeyPem`\" pulumi-lang-hcl=\"`private_key_pem`\">`privateKeyPem`</span> is deprecated and will be removed in a future major release. Use <span pulumi-lang-nodejs=\"`pemPrivateKey`\" pulumi-lang-dotnet=\"`PemPrivateKey`\" pulumi-lang-go=\"`pemPrivateKey`\" pulumi-lang-python=\"`pem_private_key`\" pulumi-lang-yaml=\"`pemPrivateKey`\" pulumi-lang-java=\"`pemPrivateKey`\" pulumi-lang-hcl=\"`pem_private_key`\">`pemPrivateKey`</span> instead."
+        }
+      }
+    }
+  }
+}

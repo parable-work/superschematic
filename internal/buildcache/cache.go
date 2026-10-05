@@ -233,6 +233,10 @@ type InputHasher struct {
 	// surfaces are each service's hash without its calls, which HashAll
 	// fills and Recompute reads.
 	surfaces map[string]string
+
+	// services are the discovered services by name, whose configs the
+	// digest of a schema reference follows (references.go).
+	services map[string]buildplan.Service
 }
 
 // NewInputHasher digests the shared inputs for the given services. names is
@@ -260,18 +264,20 @@ func NewInputHasher(services []buildplan.Service, repoRoot string, names naming.
 
 	serviceDigests := make(map[string]string, len(services))
 	serviceDirs := make(map[string]string, len(services))
+	byName := make(map[string]buildplan.Service, len(services))
 	for _, service := range services {
 		serviceDigests[service.Name] = TreeDigest(service.Dir)
 		serviceDirs[service.Name] = service.Dir
+		byName[service.Name] = service
 	}
-	return &InputHasher{base: base, repoRoot: repoRoot, serviceDigests: serviceDigests, serviceDirs: serviceDirs}
+	return &InputHasher{base: base, repoRoot: repoRoot, serviceDigests: serviceDigests, serviceDirs: serviceDirs, services: byName}
 }
 
 // HashAll computes hashes for services that TopologicalSort ordered: each
 // service's build dependencies precede it, so the Merkle chain over them
-// resolves. A service's hash is its surface (its own inputs and the
-// surfaces of its build dependencies), plus the surface of each API it
-// calls, whose SDK its generated Deps imports (docs/stack-model.md, section
+// resolves. A service's hash is its surface (its own inputs, the surfaces
+// of its build dependencies and the services its schema references), plus
+// the surface of each API it calls, whose SDK its generated Deps imports (docs/stack-model.md, section
 // 3.3). The surfaces leave the calls out, so two APIs that call each other
 // hash without a cycle: what a caller's output reads of a callee is its
 // SDK and types, which the callee's surface covers.
@@ -288,15 +294,16 @@ func (ih *InputHasher) HashAll(services []buildplan.Service) map[string]string {
 }
 
 // Recompute hashes one service again after HashAll. Called after a build
-// so the freshly written authoring-import depfile is part of the stored
-// key (see authoring.go for why storing under the pre-build hash would be
-// unsound).
+// so the freshly written authoring-import and schema-reference depfiles are
+// part of the stored key (see authoring.go for why storing under the
+// pre-build hash would be unsound).
 func (ih *InputHasher) Recompute(service buildplan.Service) string {
 	return ih.withCalls(service, ih.surface(service))
 }
 
-// surface hashes a service's own inputs and the surfaces of its build
-// dependencies: its authDb and declared dependencies.
+// surface hashes a service's own inputs, the surfaces of its build
+// dependencies (its authDb and declared dependencies) and the services its
+// schema's decorator arguments reference.
 func (ih *InputHasher) surface(service buildplan.Service) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(ih.base))
@@ -329,6 +336,9 @@ func (ih *InputHasher) surface(service buildplan.Service) string {
 		}
 		_, _ = fmt.Fprintf(h, "|dep:%s:%s", dep, depHash)
 	}
+	// The services the schema's decorator arguments name, from the depfile
+	// its last build wrote (references.go).
+	ih.writeReferences(h, service.Name)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

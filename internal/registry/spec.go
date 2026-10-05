@@ -157,6 +157,15 @@ type DecoratorSpec struct {
 	// decorator takes no arguments and is encoded as `true`. When set, both
 	// frontends validate the argument against it before calling Apply.
 	Args json.RawMessage
+	// Identities lists where the decorator's argument holds service handles
+	// that only name a service: D37's `from`, which says who may call. Each
+	// entry is a path of object keys from the argument, dot-separated
+	// ("from", "settings.of"), and a list on the way is read element by
+	// element; "" is the whole argument. A handle anywhere else in the
+	// argument references its service (ir.Schema.References): the build
+	// cache keys the schema on that service's sources. An identity adds no
+	// edge, so two services may name each other through one (D41).
+	Identities []string
 	// Apply writes the decorator into the IR node. args holds the
 	// statically evaluated decorator arguments (string, float64, bool, nil,
 	// []any, map[string]any), in order. Only the null literal is nil; an

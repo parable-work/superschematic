@@ -37,6 +37,16 @@ directory two levels above the service directory (`<schemas-root>/dist`
 for services under `<schemas-root>/services/`). Names come from
 `<schemas-root>/superschematic.toml` or `--naming`.
 
+A config may import a sibling's sentinel (`import { ShopDb } from
+"@acme/shop-db"`). When the target's config imports anything but
+`@superschematic/schema-config`, or its kind's schema files import
+sentinels, `build` first writes every sibling's sentinel that is missing
+or stale, as `build-all` does. `--with-deps` always does. A config that
+imports anything else (a class, a type, another module's namespace, a
+default export or a module for its side effects) fails to load with a
+message naming the import, in every build command:
+`schema.config.ts imports Product from "@acme/shop-db", which is a class, not a service sentinel; a config imports only @superschematic/schema-config and other services' sentinels (D34)`.
+
 A type that composes a behavior (`behaviors` in the data forms) loads,
 and `--emit-ir` prints it, but no generator renders behaviors yet: the
 build fails and names the first generator that would run, the type and the
@@ -201,6 +211,18 @@ files elsewhere under the schemas root that its documents import. The
 input hash covers those files' contents. `build`, `build --with-deps` and
 `build-all` all write it under the schemas root they resolved, whatever the
 schemas root is named and wherever `--out` points.
+
+A service whose decorators take other services' handles gets
+`<schemas-root>/dist/.schema-references/<service>.json` the same way. It
+lists the services the decorators reference, and the sentinel files of
+those a decorator only names, in an argument it declares an identity
+(D41). The input hash covers each referenced service's
+sources and those of every service its config reaches through
+`dependencies`, `authDb` and `calls`, and each listed sentinel. So an edit
+to a referenced service rebuilds the service that references it. A
+reference does not order the build, so two services may name each other.
+The IR lists the references under `references`, and a JSON or YAML schema
+file states them there, as it states `imports`.
 
 ## `migrate plan <service-dir>`
 

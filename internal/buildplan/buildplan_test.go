@@ -483,7 +483,7 @@ export default defineConfig({ name: "shop-db", kind: SchemaKind.DB, outputs: { t
 	require.NoError(t, EnsureSentinels(servicesRoot, reg, nil))
 	_, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), reg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `schema.config.ts imports Product from "@acme/shop-db", which is neither from @superschematic/schema-config nor a service sentinel`)
+	assert.Contains(t, err.Error(), `schema.config.ts imports Product from "@acme/shop-db", which is a class, not a service sentinel`)
 }
 
 // aliasedConfigService writes a TypeScript-form service whose

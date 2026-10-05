@@ -190,6 +190,13 @@ func generateService(opts buildServiceOptions, schema *ir.Schema, cfg *schemacon
 	}); err != nil {
 		return nil, err
 	}
+	// The same for the services the schema's decorator arguments name
+	// (D41), which only a load finds.
+	if err := prof.Measure("build.schema-references", func() error {
+		return buildcache.WriteSchemaReferences(opts.SchemasRoot, schema.Name, schema.References, schema.IdentitySentinels)
+	}); err != nil {
+		return nil, err
+	}
 
 	label := "Build"
 	if opts.Stage == registry.StageBase {

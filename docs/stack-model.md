@@ -573,7 +573,9 @@ In `environment.json` a reference is an object with one reserved key:
 joined. A node also records its phase (infrastructure, rollout or
 exposure), whether it is `inherited` from the parent environment
 (section 5.4), and its `owners`: the deployables, edges or DNS that
-produced it. Two producers that return the same node share it, and two that
+produced it. An output's name may be a path into the output, names joined
+by dots with list indexes in brackets: the gcp target reads a certificate
+authorization's record as `dnsResourceRecords[0].data`. Two producers that return the same node share it, and two that
 return different nodes under one id fail. A node's `dependsOn` holds the
 dependencies its producer named and every node its properties reference.
 
@@ -591,7 +593,13 @@ vocabulary (`gcp:cloudrunv2/service:Service`,
 A target pins each provider schema's version and checks in the schemas of
 the types it uses. A Go tool with a `-check` mode keeps them current, as
 `internal/tools/scalarcatalog` does for the scalar catalog, so properties
-validate offline.
+validate offline. The gcp target pins pulumi-gcp in
+`extensions/gcp/schemas/pulumi-gcp.json`: the release, the digest of each
+upstream file the schemas come from, and the types its platforms,
+connectors and DNS platform emit. `extensions/gcp/internal/tools/providerschemas`
+writes one file per type beside it, and CI runs it with `-check`. The
+target registers each file as the JSON Schema of its type's properties,
+with every object type closed, since Pulumi refuses an unknown property.
 
 Each pinned file also records the type's Terraform name and any property
 renames, taken from the bridged provider's published mapping:
@@ -601,11 +609,29 @@ renames, taken from the bridged provider's published mapping:
   "token": "gcp:cloudrunv2/service:Service",
   "terraform": {
     "type": "google_cloud_run_v2_service",
-    "renames": { "invokerIamDisabled": "invoker_iam_disabled" }
+    "renames": {
+      "invokerIamDisabled": "invoker_iam_disabled",
+      "template.containers.envs": "env"
+    }
   },
-  "inputProperties": { "...": "..." }
+  "inputProperties": { "...": "..." },
+  "requiredInputs": ["location", "template"],
+  "types": { "gcp:cloudrunv2/ServiceTemplate:ServiceTemplate": { "...": "..." } }
 }
 ```
+
+- `inputProperties` and `requiredInputs` are the type's own, and `types`
+  holds every object and enum type they reach. Descriptions are left out.
+- A rename's key is the property's path: the Pulumi names from the
+  resource down, joined with dots, through lists and objects alike.
+- The mapping is `bridge-metadata.json`, which the bridge publishes beside
+  `schema.json`. Its alias table names the Terraform type each token is
+  the current name of, and every list and block field. A property's
+  Terraform name is its snake case, except a list the bridge pluralized
+  (`env` is `envs`), which a list field names. The tool fails on a list no
+  field names rather than guess. Pulumi's full mapping (`pulumi package
+  get-mapping terraform gcp`) agreed with every path of the first pin, but
+  it needs the provider's plugin, so the tool does not read it.
 
 The Pulumi provisioner uses the token as it is. A Terraform-family
 provisioner such as OpenTofu uses `terraform.type` and `renames`, so adding
@@ -814,11 +840,23 @@ change reads as a diff.
 
 ## 7. The gcp target
 
+`extensions/gcp` builds this section, apart from bootstrap (section 7.3)
+and image builds: the target, its Cloud Run and Cloud SQL platforms, their
+connectors, the Cloud DNS platform, the policy rules and the pinned
+provider schemas (section 6.4), at pulumi-gcp 9.37.1. Its golden
+environments resolve the acme-shop stack of section 4.1 in a staging, a
+production and a parameterized preview environment.
+
 ### 7.1 What the engineer enters
 
-- `project` and `region`, which are required;
+- `project` and `region`, which are required, and `production: true` for
+  an environment the production defaults (section 7.5) and policy rules
+  (section 7.6) apply to;
 - `domain`, which is optional, and its DNS platform: Cloud DNS by default,
-  or Cloudflare with a zone and an API token (section 6.9);
+  or Cloudflare with a zone and an API token (section 6.9). Cloud DNS
+  writes into the managed zone that holds the domain. The zone is named
+  after the domain with its dots as hyphens unless `zone` names it, and
+  lives in the environment's project unless `project` names another;
 - secret values, through `stack secrets set`.
 
 Bootstrap reads the GitHub repository from the git remote.
@@ -827,15 +865,32 @@ Bootstrap reads the GitHub repository from the git remote.
 
 | Stack concept | gcp |
 | --- | --- |
-| database | a Cloud SQL Postgres instance and a database per hosted schema; a migration job |
-| server | a Cloud Run service with its own service account |
-| sql edge | `roles/cloudsql.client` and an IAM database user for the server's account; a Cloud SQL connection on the service |
-| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's URL in the caller's config |
-| internal server | internal-only ingress; callers reach it over Direct VPC egress |
-| exposure | a global external Application Load Balancer, with a Google-managed certificate on a host under the domain and records written by the environment's DNS platform (section 6.9); without a domain, the `run.app` URL |
-| secret | a Secret Manager secret, an accessor grant to the server's account, and an environment variable that references it |
-| image | built by Cloud Build, pushed to Artifact Registry and deployed by digest |
-| parameter | names suffixed with the value; a database per value on the parent's instance |
+| database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
+| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service mounts |
+| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for that URL as the service credential (section 9.2) |
+| internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
+| calling server | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable |
+| exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
+| secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's account, and an environment variable that references its latest version |
+| image | built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
+| parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits |
+
+A caller reaches every callee at its `run.app` URL, exposed or not, from
+inside the VPC. Cloud Run counts a request from a VPC as internal, which
+an internal server's ingress requires and a server behind a load balancer
+accepts, so no caller waits on a load balancer the exposure step applies
+last. A call to an API the same server serves stays on loopback, with no
+grant and no credential.
+
+Each exposed server gets a load balancer of its own. A platform lowers one
+deployable, so it cannot write the host rules of a load balancer the
+environment's exposed servers would share; sharing one waits for a
+lowering that sees the whole environment.
+
+Every node sets its `project`, so the provisioner needs no provider
+configuration, and the network lives in the environment's graph rather
+than in bootstrap, since the edges decide whether there is one.
 
 ### 7.3 Bootstrap
 
@@ -846,11 +901,10 @@ credentials (application default credentials), and is safe to run again:
 2. It creates the state bucket and the KMS key directly, since Pulumi needs
    them before it can run.
 3. It applies a bootstrap graph through the provisioner:
-   - an Artifact Registry repository;
+   - an Artifact Registry repository named after the stack, in the
+     environment's region;
    - a `deployer` service account and a read-only `planner` one;
-   - Workload Identity Federation for the repository the git remote names;
-   - a VPC with a subnet for Direct VPC egress, when a server is internal
-     and called.
+   - Workload Identity Federation for the repository the git remote names.
 4. When the environment's DNS platform is Cloudflare, it asks for an API
    token scoped to the zone's DNS, and stores it in Secret Manager where
    only the `deployer` and `planner` accounts can read it.
@@ -863,14 +917,35 @@ password. Otherwise the platform generates a password into Secret Manager
 and uses the Cloud SQL mount Cloud Run provides. The server's database
 field is the same either way (section 3.4).
 
+The connector form is built. A Rust server's sql edge fails to lower until
+the derived value has a password form. An IAM database user starts with no
+privileges in its database; granting them belongs to the migration job
+(section 8.4), which is not built.
+
 ### 7.5 Defaults
 
 The target sets defaults that `settings` can override:
 
 - one service account per server;
-- deletion protection on production databases;
+- deletion protection on production databases (`deletionProtection`);
+- a zonal instance unless `highAvailability` is set, on the
+  `db-custom-1-3840` tier of the Enterprise edition (`tier`), running
+  Postgres 16, the version CI tests against (`version`), with backups on
+  and point-in-time recovery in production;
+- one CPU, 512 MiB and no minimum instances per server (`cpu`, `memory`,
+  `minInstances`, `maxInstances`, `concurrency`);
 - logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
   OpenTelemetry setup.
+
+### 7.6 Policy rules
+
+- `production-databases-highly-available`: in an environment whose values
+  set `production`, every Cloud SQL instance it creates is regional.
+- `nothing-public-unless-exposed`: nothing admits the public on behalf of
+  anything but an exposed server. It refuses an internal server's service
+  that takes outside traffic or turns its invoker check off, a load
+  balancer's address or forwarding rule, a grant to `allUsers` or
+  `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`.
 
 ## 8. Generated build and runtime
 
@@ -1485,8 +1560,23 @@ registrations.
      Build-plan discovery, which `build-all` and `build --with-deps` run,
      checks each config handle's kind against the service it names
      (`validateHandleKinds` in `internal/buildplan/buildplan.go`).
-   - Build-order edges from the handles a schema references, so a stack does
-     not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
+   - Done: references from a schema's body (D41). A service handle in a
+     decorator argument, such as `deploy` or a settings element's `of`,
+     references its service, so a stack does not restate it in
+     `dependencies`. `ir.Schema.References` records it, and the build
+     cache keys the referencing service on the sources of the referenced
+     service and of every service its config reaches, so the stack's
+     output rebuilds when any of them changes. A reference is a cache
+     edge, not a build-order edge: resolution reads the referenced
+     services' IR and configs, which a build loads from their sources,
+     and none of their outputs, so the build plan does not order them and
+     two services may name each other. A decorator declares the argument
+     paths whose handles only name a service (`DecoratorSpec.Identities`,
+     for D37's `from`): an identity adds no edge, and the cache tracks only
+     the sentinel it was imported from. Should an output compile against
+     a referenced service's generated code, such as an entrypoint that
+     imports a served API's package, that output will need a build-order
+     edge.
 3. **envgen.** The derived binding fields of section 3.4. Landed: the
    contract of the values connectors derive, with its environment
    variable encoding (`ir/derived_value.go`), and the resolver's check of
@@ -1532,7 +1622,9 @@ registrations.
 - **The root module:** the Stack kind, the resolver, the registry specs,
   the `local` target and the `stack` commands.
 - **`extensions/gcp`**, a Go module of its own (D1): the gcp target's
-  platforms, connectors and bootstrap, and its pinned provider schemas.
+  platforms, connectors and Cloud DNS platform, its policy rules, and its
+  pinned provider schemas with the tool that keeps them current (sections
+  6.4 and 7). Bootstrap is to come.
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
   binding generator.
 - **`extensions/cloudflare`**: the Cloudflare DNS platform in v1, and
@@ -1615,7 +1707,10 @@ model, or retired, when it lands.
    a handle goes, and `service({ name, kind })` stays as the data form and
    the fallback spelling. The import rule moves into the static read every
    command shares, and the sentinel sweep, which reads only `name` and
-   `kind`, runs before build-plan discovery (D34).
+   `kind`, runs before build-plan discovery (D34). A schema file may pass
+   an imported sentinel to a decorator too: the handle references the
+   service, a cache edge that orders nothing, unless the decorator
+   declares it an identity, which adds no edge (D41).
 
 ## 16. What the source tree taught
 

@@ -1,6 +1,7 @@
 package shop_test
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -72,26 +73,66 @@ func status(err error) string {
 	return err.Error()
 }
 
+// clientsSee is what every client prints against shop-orders, served in
+// Go or in Rust.
+const clientsSee = "reviews: 0\nwrite a review without a token: 401\norder a product that does not exist: 400\nget a missing order: 404\n"
+
 // Every generated SDK calls the same Go server and sees the same answers.
 // scripts/check.sh sets ACME_SHOP_CLIENTS=1 once it has built and linked the
 // TypeScript, Python and Rust clients; without it only the Go client runs.
 func TestEverySDKCallsTheGoServer(t *testing.T) {
-	server := ordersServer(t, "orders")
-	want, err := ordersClientGo(context.Background(), server.URL)
+	runClients(t, ordersServer(t, "orders").URL)
+}
+
+// Every generated SDK calls shop-orders served by the generated Rust server
+// (rust-server/) and sees what it sees from the Go server. scripts/check.sh
+// builds the server and sets ACME_SHOP_RUST_SERVER to its binary, which
+// prints the URL it serves on.
+func TestEverySDKCallsTheRustServer(t *testing.T) {
+	binary := os.Getenv("ACME_SHOP_RUST_SERVER")
+	if binary == "" {
+		t.Skip("set ACME_SHOP_RUST_SERVER to rust-server's binary, as scripts/check.sh does, to run the clients against it")
+	}
+	server := exec.Command(binary)
+	stdout, err := server.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want != "reviews: 0\nwrite a review without a token: 401\norder a product that does not exist: 400\nget a missing order: 404\n" {
-		t.Fatalf("the Go client printed:\n%s", want)
+	server.Stderr = os.Stderr
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = server.Process.Kill()
+		_ = server.Wait()
+	})
+	baseURL, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatalf("the Rust server printed no URL: %v", err)
+	}
+	runClients(t, strings.TrimSpace(baseURL))
+}
+
+// runClients runs the Go client against baseURL, then, with
+// ACME_SHOP_CLIENTS=1, the TypeScript, Python and Rust clients, and checks
+// that each prints clientsSee.
+func runClients(t *testing.T, baseURL string) {
+	t.Helper()
+	got, err := ordersClientGo(context.Background(), baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != clientsSee {
+		t.Fatalf("the Go client printed:\n%s", got)
 	}
 	if os.Getenv("ACME_SHOP_CLIENTS") != "1" {
 		t.Skip("set ACME_SHOP_CLIENTS=1, as scripts/check.sh does, to run the other languages' clients")
 	}
 
 	clients := map[string][]string{
-		"typescript": {"bun", "run", "../typescript/orders-client.ts", server.URL},
-		"python":     {os.Getenv("ACME_SHOP_PYTHON"), "-B", "../python/orders_client.py", server.URL},
-		"rust":       {"../rust/target/debug/acme-shop-orders-client", server.URL},
+		"typescript": {"bun", "run", "../typescript/orders-client.ts", baseURL},
+		"python":     {os.Getenv("ACME_SHOP_PYTHON"), "-B", "../python/orders_client.py", baseURL},
+		"rust":       {rustClient(), baseURL},
 	}
 	for language, argv := range clients {
 		t.Run(language, func(t *testing.T) {
@@ -105,9 +146,18 @@ func TestEverySDKCallsTheGoServer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s client: %v\n%s%s", language, err, got, stderr.String())
 			}
-			if string(got) != want {
-				t.Fatalf("%s client printed:\n%s\nthe Go client printed:\n%s", language, got, want)
+			if string(got) != clientsSee {
+				t.Fatalf("%s client printed:\n%s\nthe Go client printed:\n%s", language, got, clientsSee)
 			}
 		})
 	}
+}
+
+// rustClient is the Rust client's binary: ACME_SHOP_RUST_CLIENT, which
+// scripts/check.sh sets from CARGO_TARGET_DIR, or rust/'s own target.
+func rustClient() string {
+	if binary := os.Getenv("ACME_SHOP_RUST_CLIENT"); binary != "" {
+		return binary
+	}
+	return "../rust/target/debug/acme-shop-orders-client"
 }

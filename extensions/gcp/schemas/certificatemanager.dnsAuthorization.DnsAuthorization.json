@@ -1,0 +1,41 @@
+{
+  "token": "gcp:certificatemanager/dnsAuthorization:DnsAuthorization",
+  "terraform": {
+    "type": "google_certificate_manager_dns_authorization",
+    "renames": {
+      "deletionPolicy": "deletion_policy"
+    }
+  },
+  "inputProperties": {
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "domain": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "location": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "domain"
+  ]
+}

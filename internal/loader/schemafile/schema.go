@@ -63,6 +63,7 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		values   []string
 	}{
 		{"Document", "kind", reg.Kinds()},
+		{"ServiceRef", "kind", reg.Kinds()},
 		{"TypeDef", "role", roleNames()},
 		{"ScalarDef", "languagePrimitive", []string{
 			string(ir.LanguageString), string(ir.LanguageNumber),
