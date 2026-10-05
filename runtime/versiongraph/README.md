@@ -465,7 +465,8 @@ Postgres adapter are the modules `engine`, `storage` and `postgres` of
 `python/superschematic_versiongraph`. Every Postgres adapter takes the
 sweep lock under the same key, so sweepers in different languages exclude
 each other. The TypeScript package also has a SQLite adapter,
-`typescript/src/sqlite.ts`, which `SyncEngine` runs over (below).
+`typescript/src/sqlite.ts`, which `SyncEngine` runs over (below), and so
+does the Rust engine, in module `sqlite`.
 
 Every id an engine takes or returns is a UUID in its canonical form. Each
 write takes an actor, and each write through a ref the ref's expected
@@ -592,22 +593,34 @@ settings. `nodeSqlite` and `bunSqlite` bind an open `node:sqlite`
 `DatabaseSync` and an open `bun:sqlite` `Database`, using only the methods
 they call, so no entry imports either module.
 
+The Rust engine's adapter is module `sqlite` of `rust-engine/`, the same
+layout, statements and stored forms over the `Storage` and `Tx` traits. It
+reaches SQLite through `sqlite::Client`, a two-trait seam as its Postgres
+one is, whose errors carry the extended result code; `sqlite::Rusqlite`
+binds one rusqlite connection, with the SQLite rusqlite bundles, behind the
+crate's `rusqlite` feature. It begins with `BEGIN IMMEDIATE` on a connection
+in autocommit mode and with a savepoint inside a transaction the caller
+holds on it, and reads its clock, in microseconds, once per transaction it
+begins. It refuses a SQLite older than 3.38.0, from which `json_each` and
+`json_extract` are SQLite's own.
+
 ## Scenarios
 
 `testdata/scenarios` holds one scenario per file, named by its `name`:
 `{"name", "description", "roots", "steps": [step, ...]}`. A runner runs on
 one backend. The backends a scenario may name are `postgres` and `sqlite`;
-every runner runs on `postgres`, and the TypeScript runner on `sqlite` too.
+every runner runs on `postgres`, and the TypeScript and Rust runners on
+`sqlite` too.
 On Postgres a runner applies `testdata/fixture/create.sql` to an empty
 schema and builds its engine and Postgres adapter from
-`testdata/fixture/recipe.json`; on SQLite the TypeScript runner creates the
-SQLite adapter's layout, under its default names, in an in-memory database
-and builds a `SyncEngine` and the SQLite adapter, graph `recipe`, from the
-same descriptor. Either way the engine runs at schema epoch 1 and snapshot
-interval 3, the fixture graph's; the runner seeds the scenario's roots and
-runs each step in order. It reads the whole scenario before the first
-step, and refuses one with an unknown member or one that breaks a rule
-below.
+`testdata/fixture/recipe.json`; on SQLite a runner creates the SQLite
+adapter's layout, under its default names, in an in-memory database and
+builds its engine (TypeScript's `SyncEngine`) and the SQLite adapter, graph
+`recipe`, from the same descriptor. Either way the engine runs at schema
+epoch 1 and snapshot interval 3, the fixture graph's; the runner seeds the
+scenario's roots and runs each step in order. It reads the whole scenario
+before the first step, and refuses one with an unknown member or one that
+breaks a rule below.
 
 `roots` lists the roots the scenario uses, in order: at least one, each a
 name and named once (`["Bread", "Soup"]`). Before the first step a runner
@@ -727,7 +740,7 @@ SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
 make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
-make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
+make versiongraph-scenarios-rust  # every scenario through the Rust engine and its SQLite adapter, with the adapter's tests; then every scenario and canonical vector through its Postgres adapter
 make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
 ```
 
@@ -736,10 +749,10 @@ check run against the Postgres that
 `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names, and skip without it;
 `make versiongraph-scenarios`, `make versiongraph-scenarios-ts`,
 `make versiongraph-scenarios-rust` and `make versiongraph-scenarios-python`
-fail without it. The scenarios on SQLite and the SQLite adapter's tests
+fail without it. The scenarios on SQLite and the SQLite adapters' tests
 need no server and run with or without it, and
-`make versiongraph-scenarios-ts` runs them before it checks for the
-variable. The fixture is the
+`make versiongraph-scenarios-ts` and `make versiongraph-scenarios-rust` run
+them before they check for the variable. The fixture is the
 compiler's output for `fixture-version-graph-db`, and a compiler test
 (`go test ./internal/generator -run TestVersionGraphScenarioFixtureIsCurrent`)
 fails when the checked-in copy is stale; `-update` rewrites it.
@@ -748,7 +761,8 @@ superscalar turns on `serde_json`'s `preserve_order` feature, and Cargo
 unifies it into every crate of a build that uses superscalar, so the core
 and the Rust engine never rely on a `serde_json` map's order: the content
 hash and the canonical rules sort object keys themselves. `make rust` runs
-both crates' tests a second time with the feature on.
+both crates' tests a second time with the feature on, the Rust engine's
+with its `rusqlite` feature on both times.
 
 The Go binding links `libsuperschematic_versiongraph.a` from
 `go/lib/<goos>_<goarch>`, which `make versiongraph` stages; the Makefile

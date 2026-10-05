@@ -389,6 +389,20 @@ pub fn parse_duration(value: &str) -> Result<i64, Error> {
     temporal::parse_go_duration(value).map_err(|message| Error::value(DURATION, message))
 }
 
+/// The canonical date-time, without its quotes, of a time in whole
+/// microseconds since the Unix epoch. A year outside 0000-9999 is refused.
+pub(crate) fn date_time_of_micros(micros: i64) -> Result<String, Error> {
+    temporal::date_time_of_micros(micros).map_err(|message| Error::value(DATE_TIME, message))
+}
+
+/// Writes canonical JSON's text of a string: [`write_string`] into a new
+/// string.
+pub(crate) fn string_text(s: &str) -> String {
+    let mut out = String::new();
+    write_string(&mut out, s);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
