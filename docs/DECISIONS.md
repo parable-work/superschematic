@@ -3011,3 +3011,34 @@ whether Workers callers present the identity a service binding carries or
 sign key-pair tokens.
 
 Nothing here is built. The design is reversible until the first release.
+
+## D42. A refused input is one problem on every server
+
+The three servers refused an input body three ways:
+
+- **Go:** "Validation Failed", code `WA-VL-001`, with the field errors. A
+  body that failed to decode, such as a number for a string, was "Invalid
+  request body" with no field errors, and null was "input is required".
+  An undeclared key passed silently.
+- **TypeScript:** "Request body does not match the declared input",
+  without the reason or the field errors.
+- **Rust (D39):** the TypeScript detail with `details` and `errors`.
+
+An SDK that read one server's refusal misread another's, and a Go caller
+learned only from a TypeScript or Rust server that a key was undeclared.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every server refuses an input body with code `bad_request`, titled as its status ("Bad Request"). A missing body is "Request body is required" and one that is not JSON "Request body is not valid JSON". A body the input type refuses is "Request body does not match the declared input", with `details: {location: "body", reason}`. The reason is `expected an object`, `unknown fields: a, b`, `validation failed` or `does not match the declared type`. An undeclared key and a broken rule also put their field errors in the top-level `errors`, keyed by path. | Go's `WA-VL-001` and "Validation Failed", an application code no other server or SDK knew |
+| The Go server refuses a top-level key the input type does not declare, as the TypeScript and Rust servers do: `unknown` at the key, in the order the body holds them. Each generated Go type lists its keys (`JSONFieldNames`), and the runtime's `bodyargs.ReadInput` reads the body and makes the checks before the type decodes it. A nested object's undeclared keys still pass, unless its type is `@strictJSON`. | Accepting them, where a misspelt optional field is lost without a word |
+| The TypeScript parsers throw a `ParseError` with the reason and the field errors, exported from each types package's `validators`. The router copies both into the 400; its message stays as it was. | Parsing the parser's message, which carries the errors only as text |
+| The Go route's other validation refusals, of a parameter or a body argument, keep their field errors and detail. Their title becomes "Bad Request" and their code `bad_request` too. | |
+
+`bodyargs.ReadInput`, `response.LoggedInputRefusal`, the TypeScript
+runtime's input refusal and the generated TypeScript router have tests of
+the shape. The generated Go route test (`raw_body_check_routes_test.go`)
+checks a body that fails to decode, null, an empty body and two
+undeclared keys. A Go caller sending an undeclared key now gets a 400
+where it was ignored.
+
+The rule is reversible until the first release.

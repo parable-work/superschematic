@@ -9,6 +9,7 @@ import {
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectBoolean, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { Note, Recipe, RecipeRef } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
@@ -156,12 +157,15 @@ function parseNoteInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseNote ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseNote ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseNote ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseNote ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -177,8 +181,14 @@ function parseNoteInput(
       (fieldName) => !NoteKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseNote ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseNote ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -186,8 +196,10 @@ function parseNoteInput(
   const typedCandidate = candidate as unknown as Note;
   const validationResult = validateNote(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseNote ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseNote ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

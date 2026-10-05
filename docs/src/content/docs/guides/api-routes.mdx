@@ -80,7 +80,8 @@ A method's arguments say where each value comes from:
 
 Before a method runs, the server decodes every argument, checks it
 against its type and constraints, and answers 400 with every failure at
-once, keyed by path, as an RFC 9457 problem body. A list of order lines
+once, keyed by path, as an RFC 9457 problem body. A top-level key an
+input type does not declare is refused too, by every server. A list of order lines
 must hold one to 50 lines, and a country must match `^[A-Z]{2}$`:
 
 <Snippet file="go/orders_test.go" symbol="TestValidation" />

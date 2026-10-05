@@ -587,6 +587,13 @@ func (t *Cover) MaskSecrets() *Cover {
 	return masked
 }
 
+// JSONFieldNames are the keys Cover's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Cover) JSONFieldNames() []string {
+	return []string{"id", "recipe", "photoUrl", "entityKey", "ref", "deletedOnRef", "_version"}
+}
+
 // Validate validates all fields in Cover
 func (t *Cover) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -899,6 +906,13 @@ func (t *Ingredient) MaskSecrets() *Ingredient {
 	masked.Version = t.Version
 
 	return masked
+}
+
+// JSONFieldNames are the keys Ingredient's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Ingredient) JSONFieldNames() []string {
+	return []string{"id", "recipe", "stepKey", "quantity", "substitutes", "entityKey", "ref", "deletedOnRef", "_version"}
 }
 
 // Validate validates all fields in Ingredient
@@ -1222,6 +1236,13 @@ func (t *Note) MaskSecrets() *Note {
 	return masked
 }
 
+// JSONFieldNames are the keys Note's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Note) JSONFieldNames() []string {
+	return []string{"id", "recipe", "replyTo", "body", "entityKey", "ref", "deletedOnRef", "_version"}
+}
+
 // Validate validates all fields in Note
 func (t *Note) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -1494,6 +1515,13 @@ func (t *Recipe) MaskSecrets() *Recipe {
 	masked.CreatedBy = t.CreatedBy
 
 	return masked
+}
+
+// JSONFieldNames are the keys Recipe's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Recipe) JSONFieldNames() []string {
+	return []string{"id", "title", "createdAt", "createdBy"}
 }
 
 // Validate validates all fields in Recipe
@@ -1773,6 +1801,13 @@ func (t *RecipeCommit) MaskSecrets() *RecipeCommit {
 	masked.CreatedBy = t.CreatedBy
 
 	return masked
+}
+
+// JSONFieldNames are the keys RecipeCommit's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RecipeCommit) JSONFieldNames() []string {
+	return []string{"id", "root", "ref", "parentCommit", "message", "schemaEpoch", "contentHash", "sequence", "createdAt", "createdBy"}
 }
 
 // Validate validates all fields in RecipeCommit
@@ -2072,6 +2107,13 @@ func (t *RecipePatch) MaskSecrets() *RecipePatch {
 	masked.Operation = t.Operation
 
 	return masked
+}
+
+// JSONFieldNames are the keys RecipePatch's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RecipePatch) JSONFieldNames() []string {
+	return []string{"id", "commit", "entityKind", "entityKey", "entityId", "entityVersion", "operation"}
 }
 
 // Validate validates all fields in RecipePatch
@@ -2391,6 +2433,13 @@ func (t *RecipeRef) MaskSecrets() *RecipeRef {
 	masked.Version = t.Version
 
 	return masked
+}
+
+// JSONFieldNames are the keys RecipeRef's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RecipeRef) JSONFieldNames() []string {
+	return []string{"id", "root", "parentRef", "baseCommit", "headCommit", "name", "sealedAt", "createdAt", "createdBy", "updatedAt", "updatedBy", "deletedAt", "deletedBy", "_version"}
 }
 
 // Validate validates all fields in RecipeRef
@@ -2730,6 +2779,13 @@ func (t *RecipeRelease) MaskSecrets() *RecipeRelease {
 	return masked
 }
 
+// JSONFieldNames are the keys RecipeRelease's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RecipeRelease) JSONFieldNames() []string {
+	return []string{"id", "root", "commit", "createdAt", "createdBy", "updatedAt", "updatedBy", "_version"}
+}
+
 // Validate validates all fields in RecipeRelease
 func (t *RecipeRelease) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -3009,6 +3065,13 @@ func (t *RecipeSnapshotEntry) MaskSecrets() *RecipeSnapshotEntry {
 	masked.EntityVersion = t.EntityVersion
 
 	return masked
+}
+
+// JSONFieldNames are the keys RecipeSnapshotEntry's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RecipeSnapshotEntry) JSONFieldNames() []string {
+	return []string{"id", "commit", "entityKind", "entityKey", "entityId", "entityVersion"}
 }
 
 // Validate validates all fields in RecipeSnapshotEntry
@@ -3348,6 +3411,13 @@ func (t *Step) MaskSecrets() *Step {
 	masked.Version = t.Version
 
 	return masked
+}
+
+// JSONFieldNames are the keys Step's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Step) JSONFieldNames() []string {
+	return []string{"id", "recipe", "position", "instruction", "timings", "scratch", "createdAt", "createdBy", "updatedAt", "updatedBy", "entityKey", "ref", "deletedOnRef", "_version"}
 }
 
 // Validate validates all fields in Step
@@ -3754,6 +3824,13 @@ func (t *Tasting) MaskSecrets() *Tasting {
 	return masked
 }
 
+// JSONFieldNames are the keys Tasting's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Tasting) JSONFieldNames() []string {
+	return []string{"id", "recipe", "taster", "salty", "score", "servings", "tastedOn", "tastedAt", "servedAt", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entityKey", "ref", "deletedOnRef", "_version"}
+}
+
 // Validate validates all fields in Tasting
 func (t *Tasting) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -4148,6 +4225,13 @@ func (t *Utensil) MaskSecrets() *Utensil {
 	masked.Version = t.Version
 
 	return masked
+}
+
+// JSONFieldNames are the keys Utensil's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Utensil) JSONFieldNames() []string {
+	return []string{"id", "recipe", "name", "entityKey", "ref", "deletedOnRef", "_version"}
 }
 
 // Validate validates all fields in Utensil

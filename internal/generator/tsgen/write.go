@@ -280,6 +280,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: hasScalars, Template: "validators_scalars_index.tmpl", Filename: filepath.Join("scalars", "index.ts")},
 		{Condition: hasEnums, Template: "validator_enums.tmpl", Filename: "enums.ts"},
 		{Condition: len(output.Types) > 0, Template: "validators_types_index.tmpl", Filename: filepath.Join("types", "index.ts")},
+		{Condition: len(output.Types) > 0, Template: "validator_errors.tmpl", Filename: "errors.ts"},
 		{Condition: true, Template: "validators_index.tmpl", Filename: "index.ts"},
 	}
 	if err := codegen.WriteConditionalFilesParallel(validatorFiles, validatorsDir, func(templateName, outputPath string) error {

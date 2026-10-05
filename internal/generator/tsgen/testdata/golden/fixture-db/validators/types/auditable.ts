@@ -7,6 +7,7 @@ import {
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { Auditable, JSDate } from '../../types';
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
@@ -73,12 +74,15 @@ function parseAuditableInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseAuditable ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseAuditable ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseAuditable ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseAuditable ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -90,8 +94,14 @@ function parseAuditableInput(
       (fieldName) => !AuditableKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseAuditable ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseAuditable ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -99,8 +109,10 @@ function parseAuditableInput(
   const typedCandidate = candidate as unknown as Auditable;
   const validationResult = validateAuditable(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseAuditable ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseAuditable ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

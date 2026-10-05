@@ -8,6 +8,7 @@ import {
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectNumber } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { Point } from '../../types';
 
 /**
@@ -68,12 +69,15 @@ function parsePointInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parsePoint ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parsePoint ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parsePoint ${sourceFormat} expects an object input`);
+    throw new ParseError(`parsePoint ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -85,8 +89,14 @@ function parsePointInput(
       (fieldName) => !PointKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parsePoint ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parsePoint ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -94,8 +104,10 @@ function parsePointInput(
   const typedCandidate = candidate as unknown as Point;
   const validationResult = validatePoint(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parsePoint ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parsePoint ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

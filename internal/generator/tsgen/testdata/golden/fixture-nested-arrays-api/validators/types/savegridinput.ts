@@ -9,6 +9,7 @@ import {
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectList, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { SaveGridInput, Point } from '../../types';
 
 import { validateShadeRequired, validateShade } from '../enums';
@@ -230,12 +231,15 @@ function parseSaveGridInputInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseSaveGridInput ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseSaveGridInput ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseSaveGridInput ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseSaveGridInput ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -247,8 +251,14 @@ function parseSaveGridInputInput(
       (fieldName) => !SaveGridInputKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseSaveGridInput ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseSaveGridInput ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -256,8 +266,10 @@ function parseSaveGridInputInput(
   const typedCandidate = candidate as unknown as SaveGridInput;
   const validationResult = validateSaveGridInput(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseSaveGridInput ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseSaveGridInput ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

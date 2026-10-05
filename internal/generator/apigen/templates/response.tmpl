@@ -9,6 +9,7 @@ import (
 {{- if .HasFilterableEndpoints }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
 {{- end }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/bodyargs"
 	runtimeresponse "{{ $.Naming.HTTPRuntimeGoModule }}/response"
 	types "{{ .TypesModule }}"
 )
@@ -23,12 +24,19 @@ func RespondError(w http.ResponseWriter, r *http.Request, status int, message st
 	runtimeresponse.LoggedError(w, r, status, message)
 }
 
-// RespondValidationErrors sends a logged validation errors response.
-// Hardcodes WA-VL-001: schema-level validation errors always
-// use this code because they originate in the generated route handler before
-// reaching route-impl, so there is no call site to chain .WithCode() on.
+// RespondValidationErrors sends a logged validation errors response, with
+// the bad_request code every generated server sends for a request its
+// validation refuses.
 func RespondValidationErrors(w http.ResponseWriter, r *http.Request, errors types.ValidationErrors) {
-	runtimeresponse.LoggedValidationErrors(w, r, errors, "WA-VL-001")
+	runtimeresponse.LoggedValidationErrors(w, r, errors)
+}
+
+// RespondInputRefusal sends the logged 400 of a refused input body, the
+// problem every generated server sends: its detail, and for a body the
+// input type refuses details {location: "body", reason} and the field
+// errors in errors.
+func RespondInputRefusal(w http.ResponseWriter, r *http.Request, refusal *bodyargs.InputRefusal) {
+	runtimeresponse.LoggedInputRefusal(w, r, refusal)
 }
 
 // RespondCreated sends a 201 Created response.

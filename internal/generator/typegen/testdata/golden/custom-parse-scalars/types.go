@@ -499,6 +499,13 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 	return masked
 }
 
+// JSONFieldNames are the keys CustomParseScalars's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CustomParseScalars) JSONFieldNames() []string {
+	return []string{"financeMoney", "genericInt64", "genericStringMap", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalMilliseconds", "temporalMinutes", "temporalSeconds"}
+}
+
 // Validate validates all fields in CustomParseScalars
 func (t *CustomParseScalars) Validate() ValidationErrors {
 	errors := NewValidationErrors()
