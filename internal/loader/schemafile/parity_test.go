@@ -130,6 +130,9 @@ var parityInputs = []struct{ name, registry, input string }{
 			{"name": "number", "typeRef": {"name": "String"}, "required": true, "encrypted": true}]}]}`},
 	{"a non-boolean encrypted argument flag", "core", `{"kind": "OperationSet", "name": "CardOps", "operations": [
 		{"name": "storeCard", "typeRef": {"name": "Card"}, "arguments": [{"name": "number", "typeRef": {"name": "String"}, "encrypted": "yes"}]}]}`},
+	{"a service clause on a set and an operation", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "require", "from": ["orders-api"]}, "operations": [
+		{"name": "release", "typeRef": {"name": "Order"}, "auth": true, "serviceCallers": {"mode": "allow", "from": []}}]}`},
+	{"a service clause mode outside the enum", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "sometimes"}, "operations": []}`},
 
 	// The invocation policy.
 	{"visible tool without a policy gets the default", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [

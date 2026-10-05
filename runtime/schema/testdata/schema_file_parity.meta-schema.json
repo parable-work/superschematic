@@ -1977,6 +1977,9 @@
           "default": false,
           "type": "boolean"
         },
+        "serviceCallers": {
+          "$ref": "#/$defs/ServiceCallers"
+        },
         "sourceMustProject": {
           "default": false,
           "type": "boolean"
@@ -2439,6 +2442,9 @@
             "$ref": "#/$defs/FieldDef"
           },
           "type": "array"
+        },
+        "serviceCallers": {
+          "$ref": "#/$defs/ServiceCallers"
         }
       },
       "required": [
@@ -2500,6 +2506,9 @@
             "$ref": "#/$defs/FieldDef"
           },
           "type": "array"
+        },
+        "serviceCallers": {
+          "$ref": "#/$defs/ServiceCallers"
         }
       },
       "required": [
@@ -3013,6 +3022,29 @@
         "name",
         "languagePrimitive",
         "kind"
+      ],
+      "type": "object"
+    },
+    "ServiceCallers": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "enum": [
+            "require",
+            "allow"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
       ],
       "type": "object"
     },

@@ -728,7 +728,8 @@ every model check reports before anything is connected or lowered:
 Each failure carries a code, and `internal/stack/errors.go` lists them
 all. The checks of section 5.2 have one each: `unbound-field`,
 `unknown-env-key`, `secret-literal`, `kind-mismatch`, `unrealizable`,
-`no-connector`, `expose-not-server` and `policy`. Malformed declarations,
+`no-connector`, `expose-not-server` and `policy`, and the check section
+9.3 adds has `unreachable-edge`. Malformed declarations,
 unknown names and values that fail a schema have their own codes. So do
 three failures section 5.2 does not list:
 
@@ -1082,9 +1083,12 @@ export class StockMutations {
   authored as IR: `@allowService` without a user clause (an operation only
   services call is `@requireService`); either decorator with
   `@publicRoute`, `@webhook` or `@hmacVerified` on one operation (a third
-  party holds no service credential); and both on one operation or one
-  set. An `@publicRoute` operation opens its route even in a set with a
-  service clause.
+  party holds no service credential), its set's included; a
+  `@requireService` operation, its own clause or its set's, whose `@mcp`
+  publishes a tool (no end user's agent can call it, so the record says
+  so with `hidden`); and both on one operation or one set. An
+  `@publicRoute` operation opens its route even in a set with a service
+  clause.
 
 The IR records the effective rule on `FieldDef.ServiceCallers` and
 `OperationSet.ServiceCallers`, a `ServiceCallers{Mode, From}` where `Mode`
@@ -1105,9 +1109,10 @@ invoke:
 C can forward an end user when an API it serves has an operation with a
 user clause. So an edge fails when every operation of the callee lists
 other services or needs an end user the caller does not have: "orders
-calls shop-api, but no shop-api operation admits orders". A handle in `from` that names a service
-the stack does not deploy, or deploys without an edge, is not an error: an
-API is written once and deployed in many stacks.
+calls shop-api, but no shop-api operation admits orders"
+(`unreachable-edge`). A handle in `from` that names a service the stack
+does not deploy, or deploys without an edge, is not an error: an API is
+written once and deployed in many stacks.
 
 The OpenAPI document gains a `serviceAuth` security scheme, a bearer token
 in the `Service-Authorization` header. OpenAPI's security list is an OR of

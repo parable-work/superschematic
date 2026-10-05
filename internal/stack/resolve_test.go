@@ -375,6 +375,106 @@ func TestCheckPolicy(t *testing.T) {
 	})
 }
 
+// TestCheckUnreachableEdge: the server Orders, which serves shop-orders,
+// calls shop-api, and the edge must reach a shop-api operation that admits
+// Orders (section 9.3). Orders forwards an end user when shop-orders has an
+// operation with a user clause; a clause lists Orders when its from is
+// empty or names shop-orders. A from naming a service the stack does not
+// deploy is no error.
+func TestCheckUnreachableEdge(t *testing.T) {
+	reg := assemble(t)
+	require := func(from ...string) *ir.ServiceCallers {
+		return &ir.ServiceCallers{Mode: ir.ServiceCallersRequire, From: from}
+	}
+	allow := func(from ...string) *ir.ServiceCallers {
+		return &ir.ServiceCallers{Mode: ir.ServiceCallersAllow, From: from}
+	}
+	noUsers := []stack.Operation{{Name: "ProductReviews.listReviews"}}
+	cases := []struct {
+		name   string
+		orders []stack.Operation // nil keeps shop-orders' own, with user clauses
+		api    []stack.Operation
+		admits bool
+	}{
+		{"a user operation, from a server with users", nil,
+			[]stack.Operation{{Name: "ProductQueries.getProduct", UserClause: true}}, true},
+		{"a user operation, from a server without users", noUsers,
+			[]stack.Operation{{Name: "ProductQueries.getProduct", UserClause: true}}, false},
+		{"an operation open to anyone", noUsers,
+			[]stack.Operation{{Name: "ProductQueries.listProducts"}}, true},
+		{"@allowService listing Orders, from a server without users", noUsers,
+			[]stack.Operation{{Name: "StockMutations.release", UserClause: true, ServiceCallers: allow("shop-orders")}}, true},
+		{"@allowService listing others, from a server with users", nil,
+			[]stack.Operation{{Name: "StockMutations.release", UserClause: true, ServiceCallers: allow("billing-api")}}, true},
+		{"@allowService listing others, from a server without users", noUsers,
+			[]stack.Operation{{Name: "StockMutations.release", UserClause: true, ServiceCallers: allow("billing-api")}}, false},
+		{"@requireService listing Orders", noUsers,
+			[]stack.Operation{{Name: "StockMutations.reindex", ServiceCallers: require("shop-orders")}}, true},
+		{"@requireService listing every edge", noUsers,
+			[]stack.Operation{{Name: "StockMutations.reindex", ServiceCallers: require()}}, true},
+		{"@requireService listing others", nil,
+			[]stack.Operation{{Name: "StockMutations.reindex", ServiceCallers: require("billing-api", "shop-storefront")}}, false},
+		{"@requireService with a user clause listing Orders, from a server with users", nil,
+			[]stack.Operation{{Name: "StockMutations.reserve", UserClause: true, ServiceCallers: require("shop-orders")}}, true},
+		{"@requireService with a user clause listing Orders, from a server without users", noUsers,
+			[]stack.Operation{{Name: "StockMutations.reserve", UserClause: true, ServiceCallers: require("shop-orders")}}, false},
+		{"no operations", nil, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, services := shop()
+			if tc.orders != nil {
+				service(services, "shop-orders").Operations = tc.orders
+			}
+			service(services, "shop-api").Operations = tc.api
+			_, errs := resolve(t, reg, s, services, "Staging")
+			if tc.admits {
+				if errs != nil {
+					t.Fatal(errs)
+				}
+				return
+			}
+			want := []string{"Orders calls shop-api, but no shop-api operation admits Orders"}
+			if tc.orders != nil {
+				want = append(want, "(Orders forwards no end user: no API it serves has an operation with a user clause)")
+			}
+			mustFail(t, errs, stack.CodeUnreachableEdge, want...)
+			if got := len(errs.List); got != 1 {
+				t.Errorf("got %d failures, want the one:\n%v", got, errs)
+			}
+		})
+	}
+}
+
+// TestOperationsOf: an API's operations carry their user clause and their
+// effective service clause, the set's unless the operation declares its
+// own or is @publicRoute.
+func TestOperationsOf(t *testing.T) {
+	setClause := &ir.ServiceCallers{Mode: ir.ServiceCallersRequire, From: []string{"shop-orders"}}
+	own := &ir.ServiceCallers{Mode: ir.ServiceCallersAllow}
+	schema := ir.NewSchema("shop-api", ir.SchemaKindAPI)
+	schema.OperationSets = []*ir.OperationSet{{
+		Name:           "StockMutations",
+		ServiceCallers: setClause,
+		Operations: []*ir.FieldDef{
+			{Name: "reserve", Permissions: []string{"stock.reserve"}},
+			{Name: "release", Auth: true, ServiceCallers: own},
+			{Name: "health", Public: true},
+		},
+	}}
+	got := stack.OperationsOf(schema)
+	want := []stack.Operation{
+		{Name: "StockMutations.reserve", UserClause: true, ServiceCallers: setClause},
+		{Name: "StockMutations.release", UserClause: true, ServiceCallers: own},
+		{Name: "StockMutations.health"},
+	}
+	if !slices.EqualFunc(got, want, func(a, b stack.Operation) bool {
+		return a.Name == b.Name && a.UserClause == b.UserClause && a.ServiceCallers == b.ServiceCallers
+	}) {
+		t.Errorf("OperationsOf = %+v, want %+v", got, want)
+	}
+}
+
 // The other failures.
 
 func TestUnknownService(t *testing.T) {

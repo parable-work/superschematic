@@ -177,6 +177,11 @@ type EndpointInfo struct {
 	// PublicRoute marks an operation declared @publicRoute: intentionally
 	// unauthenticated, as opposed to one that merely declares no auth.
 	PublicRoute bool
+	// ServiceCallers is the operation's effective service clause
+	// (@requireService or @allowService, its own or else its set's, as
+	// ir.EffectiveServiceCallers resolves it); nil when it has none.
+	// RequiresAuth and RequiredPerms stay the end-user clause alone.
+	ServiceCallers *ir.ServiceCallers
 
 	// IsScopedEndpoint and ScopeParamName are filled by the auth provider's
 	// Endpoint hook; the SDK generators read them to hoist one path
@@ -272,6 +277,9 @@ type APIOutput struct {
 	HasFileUpload            bool
 	HasWebhookHMACEndpoints  bool
 	RequiredWebhookProviders []string
+	// HasServiceCallers reports whether any endpoint has a service clause;
+	// the OpenAPI document then declares the serviceAuth scheme.
+	HasServiceCallers bool
 
 	// RoutesNeedTime gates the time import in routes.go: only @rateLimit and
 	// @timeout render a time call, and only on routes RegisterRoutes mounts.
@@ -655,6 +663,9 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		if endpoint.WebhookHMACProvider != "" {
 			output.HasWebhookHMACEndpoints = true
 		}
+		if endpoint.ServiceCallers != nil {
+			output.HasServiceCallers = true
+		}
 		if endpoint.NeedsTypesImport {
 			output.NeedsTypesImport = true
 		}
@@ -893,6 +904,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		RequiredPerms:                op.Permissions,
 		RequireOwnership:             op.RequireOwnership,
 		PublicRoute:                  op.Public,
+		ServiceCallers:               ir.EffectiveServiceCallers(set, op),
 		HasFileUpload:                len(fileUploadFields) > 0,
 		FileUploadFields:             fileUploadFields,
 		RateLimit:                    rateLimit,

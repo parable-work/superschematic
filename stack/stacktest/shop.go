@@ -9,12 +9,15 @@ import (
 // AcmeShop returns the facts of the acme-shop services
 // (examples/acme-shop/schemas/services) as the resolver reads them. The
 // names, kinds, `authDb`, dependencies and languages are those of the
-// services' schema configs. The services declare no `calls` and no
-// `@envVars` yet, so the fixture adds them: shop-orders calls shop-api,
+// services' schema configs, and the operations, with their user clauses,
+// those of the services' schema files. The services declare no `calls` and
+// no `@envVars` yet, so the fixture adds them: shop-orders calls shop-api,
 // and both APIs' configs extend PaymentsSecrets, as in
 // docs/stack-model.md, section 4.2.
 func AcmeShop() []stack.Service {
 	def := func(v string) *string { return &v }
+	user := func(name string) stack.Operation { return stack.Operation{Name: name, UserClause: true} }
+	open := func(name string) stack.Operation { return stack.Operation{Name: name} }
 	shopDB := ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
 	return []stack.Service{
 		{Name: "shop-common", Kind: ir.SchemaKindGeneral},
@@ -32,6 +35,10 @@ func AcmeShop() []stack.Service {
 					{Name: "PREVIEW_ID"},
 				},
 			},
+			Operations: []stack.Operation{
+				user("ProductQueries.getProduct"), user("ProductQueries.listProducts"),
+				user("ProductMutations.createProduct"),
+			},
 		},
 		{
 			Name:         "shop-orders",
@@ -47,12 +54,21 @@ func AcmeShop() []stack.Service {
 					{Name: "MAX_LINE_ITEMS", Required: true, Default: def("50")},
 				},
 			},
+			Operations: []stack.Operation{
+				user("OrderQueries.getOrder"), user("OrderQueries.listOrders"),
+				user("OrderMutations.placeOrder"), user("OrderMutations.cancelOrder"),
+				open("ProductReviews.listReviews"), user("ProductReviews.writeReview"),
+			},
 		},
 		{
 			Name:         "shop-storefront",
 			Kind:         ir.SchemaKindAPI,
 			Language:     registry.APILanguageTypeScript,
 			Dependencies: []ir.ServiceRef{{Name: "shop-common", Kind: ir.SchemaKindGeneral}},
+			Operations: []stack.Operation{
+				open("StorefrontProbes.getHealth"),
+				user("CartQueries.getCart"), user("CartMutations.addCartLine"),
+			},
 		},
 	}
 }
