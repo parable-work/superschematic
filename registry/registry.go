@@ -104,6 +104,28 @@ type (
 	EndpointParam   = apigen.Param
 	ConditionalFile = codegen.ConditionalFile
 
+	// The stack model's registrations (docs/stack-model.md, section 6): a
+	// platform places a deployable kind on a runtime and lowers it to
+	// resources, a connector realizes an edge between two platforms, a
+	// target bundles a platform per deployable kind with its values
+	// schema, resource type schemas and policy rules, a DNS platform holds
+	// a domain's records, and a provisioner applies the resource graph.
+	PlatformSpec     = registry.PlatformSpec
+	PlatformContext  = registry.PlatformContext
+	Lowered          = registry.Lowered
+	ConnectorSpec    = registry.ConnectorSpec
+	ConnectorContext = registry.ConnectorContext
+	Connected        = registry.Connected
+	TargetSpec       = registry.TargetSpec
+	PolicyRule       = registry.PolicyRule
+	DNSPlatformSpec  = registry.DNSPlatformSpec
+	DNSContext       = registry.DNSContext
+	ProvisionerSpec  = registry.ProvisionerSpec
+	Provisioner      = registry.Provisioner
+	ProvisionRequest = registry.ProvisionRequest
+	PlannedChange    = registry.PlannedChange
+	StackEnvironment = registry.StackEnvironment
+
 	Naming             = registry.Naming
 	Options            = registry.Options
 	Result             = registry.Result
@@ -123,9 +145,15 @@ const (
 	LangPython     = registry.LangPython
 	LangRust       = registry.LangRust
 
-	APILanguageGo   = registry.APILanguageGo
-	APILanguageRust = registry.APILanguageRust
-	APIProtocolREST = registry.APIProtocolREST
+	APILanguageGo         = registry.APILanguageGo
+	APILanguageRust       = registry.APILanguageRust
+	APILanguageTypeScript = registry.APILanguageTypeScript
+	APIProtocolREST       = registry.APIProtocolREST
+
+	// SQLDialectPostgres and SQLDialectSQLite are the SQL dialects a
+	// database platform declares.
+	SQLDialectPostgres = registry.SQLDialectPostgres
+	SQLDialectSQLite   = registry.SQLDialectSQLite
 
 	// OpenAPIDocsKey is the vendor-extension key an operation's @docs record
 	// is written under in the OpenAPI document; an OpenAPIHook renames it.

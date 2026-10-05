@@ -2391,6 +2391,21 @@ from the distribution and what did not.
 | End-user auth and service auth are separate concepts. Platforms admit callers along edges, and an application-level service principal travels in its own header beside the end user's `Authorization`. | Service calls through the end-user auth provider with a minted token, which merges the two principals |
 
 Nothing here is built. The design is reversible until the first release.
+
+### D30, amended: a DNS platform is a registration of its own
+
+Building the stack model's core turned the four registrations into five.
+A DNS platform (`docs/stack-model.md`, section 6.9) lowers an
+environment's domain records, not a deployable, so it registers on its own.
+The Stack IR, the resource graph, the five specs and the resolver are
+built (sections 6.7, 6.10 and 12 of that document). The Stack kind's
+authoring package, the targets and the provisioners are not.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `RegisterDNSPlatform` registers a DNS platform: the schema of its values and a `Lower` from records to resources. A target names its default one, and `manual` is reserved for a domain that no DNS platform holds. | DNS as one more `PlatformSpec` kind, whose spec would carry a lowering that only DNS platforms set and a kind that no target places a deployable on |
+| A target also names its provisioner and registers the schema of each resource type its platforms emit. Resolution checks every node against the schema of its type, with references read as strings. | A provisioner chosen per environment; schemas registered per platform, which repeats a type that a platform and a connector share |
+
 ## D28. No SDK has a method for a `@webhook` operation
 
 `@webhook` marks an operation a third party calls. The Go and TypeScript

@@ -135,10 +135,11 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
+| `stack` | The stack model's resolver (`docs/stack-model.md`, section 6.10): `Resolve` over a stack, the facts of its services (`Service`, `Config`, `ConfigField`) and one environment, its failures (`Errors`, with a `Code` per check), and `Marshal`, `Unmarshal`, `Write` and `EnvironmentPath` for `environment.json`. An extension's tests resolve a stack over its platforms with it |
 | `schemadeps` | The dependency graph of the generated packages, which `build-all` writes to `<dist>/.deps.json` and, with `[deps] copy`, to a path a repository commits. Every package names the service that produced it. `Read`, `Closure`, `WriteFileAtomic` and `SyncCopy` (check or refresh the committed copy) are what an extension's command over the graph needs (section 3.8) |
 
 `registry` and `loader` are alias packages rather than the implementation;
@@ -183,6 +184,7 @@ Each `Register*` method checks its own spec:
 | `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog |
 | `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
+| `RegisterPlatform`, `RegisterConnector`, `RegisterTarget`, `RegisterDNSPlatform`, `RegisterProvisioner` | the stack model's specs; `docs/stack-model.md`, section 6.7, lists what each refuses |
 | `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params or precondition schema that is not an object schema or does not set `"additionalProperties": false`, a create params schema that is not an object schema or whose `additionalProperties` is neither `false` nor a schema, an operation or field name that is malformed or repeats, an operation named like one every schema has, a veto code that is not lowercase snake case or repeats (section 3.16) |
 
 Every one of them fails after `Finalize`.
@@ -201,6 +203,10 @@ Every one of them fails after `Finalize`.
   other than itself and not the same one in both, and each of its
   operations' `invocationPolicy` is a value of the policy in force
   (section 3.15), whichever extension registered it.
+- Every connector joins registered platforms of the kinds its edge joins.
+  Every platform a target names is registered and of the right kind, and
+  so is any DNS platform or provisioner it names (`docs/stack-model.md`,
+  section 6.7).
 
 `Registry.Extensions()` is the set of names passed to `Use` or set on a
 spec. It closes the data-form `extensions` objects (section 5).
@@ -1458,6 +1464,7 @@ its provider, which supplies those two functions. D15 in
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |
+| Platforms, connectors, targets, DNS platforms, provisioners | none (`docs/stack-model.md`, section 6) |
 | Commands | `build`, `build-all`, `json-schema`, `format` |
 
 The core stays provider-neutral (`CONTRIBUTING.md`, "The core stays
@@ -1533,8 +1540,8 @@ that way. Two scripts check it, and the `acme` job in
   smoke, checks the new payload reached the IR, and fails if any path
   outside `examples/acme-schematic/` changed.
 
-Inside the core module, three extensions test the seams against the real
-loader and generators:
+Inside the core module, four extensions test the seams against the real
+loader, generators and resolver:
 
 - `internal/registry/registrytest` is an in-tree fixture extension with a
   kind, decorators on all four targets, a data-form document, a generator
@@ -1545,6 +1552,10 @@ loader and generators:
   one imported from another service's package from all three forms, carry
   them through the writers `format` uses, and fail a class the schema
   neither declares nor imports.
+- `stack/stacktest` registers a fake target with its platforms,
+  connectors, DNS platform and provisioner, through the public packages
+  alone, and resolves a stack over the acme-shop services into golden
+  `environment.json` files (`docs/stack-model.md`, section 6.7).
 - `extensions/deploy` registers a document and nothing else. Its test loads
   `testdata/services/example` and compares the generated values files byte
   for byte. See the [deploy guide](https://parable-work.github.io/superschematic/guides/deploy/).
