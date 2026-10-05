@@ -1,0 +1,127 @@
+{
+  "token": "gcp:compute/router:Router",
+  "terraform": {
+    "type": "google_compute_router",
+    "renames": {
+      "bgp.advertiseMode": "advertise_mode",
+      "bgp.advertisedGroups": "advertised_groups",
+      "bgp.advertisedIpRanges": "advertised_ip_ranges",
+      "bgp.identifierRange": "identifier_range",
+      "bgp.keepaliveInterval": "keepalive_interval",
+      "deletionPolicy": "deletion_policy",
+      "encryptedInterconnectRouter": "encrypted_interconnect_router",
+      "md5AuthenticationKeys": "md5_authentication_keys",
+      "nccGateway": "ncc_gateway",
+      "params.resourceManagerTags": "resource_manager_tags"
+    }
+  },
+  "inputProperties": {
+    "bgp": {
+      "$ref": "#/types/gcp:compute/RouterBgp:RouterBgp"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "encryptedInterconnectRouter": {
+      "type": "boolean"
+    },
+    "md5AuthenticationKeys": {
+      "$ref": "#/types/gcp:compute/RouterMd5AuthenticationKeys:RouterMd5AuthenticationKeys"
+    },
+    "name": {
+      "type": "string"
+    },
+    "nccGateway": {
+      "type": "string"
+    },
+    "network": {
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/types/gcp:compute/RouterParams:RouterParams"
+    },
+    "project": {
+      "type": "string"
+    },
+    "region": {
+      "type": "string"
+    }
+  },
+  "types": {
+    "gcp:compute/RouterBgp:RouterBgp": {
+      "type": "object",
+      "properties": {
+        "advertiseMode": {
+          "type": "string"
+        },
+        "advertisedGroups": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "advertisedIpRanges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/RouterBgpAdvertisedIpRange:RouterBgpAdvertisedIpRange"
+          }
+        },
+        "asn": {
+          "type": "integer"
+        },
+        "identifierRange": {
+          "type": "string"
+        },
+        "keepaliveInterval": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "asn"
+      ]
+    },
+    "gcp:compute/RouterBgpAdvertisedIpRange:RouterBgpAdvertisedIpRange": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "range": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "range"
+      ]
+    },
+    "gcp:compute/RouterMd5AuthenticationKeys:RouterMd5AuthenticationKeys": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name"
+      ]
+    },
+    "gcp:compute/RouterParams:RouterParams": {
+      "type": "object",
+      "properties": {
+        "resourceManagerTags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

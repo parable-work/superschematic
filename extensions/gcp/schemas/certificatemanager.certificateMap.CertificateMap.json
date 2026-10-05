@@ -1,0 +1,29 @@
+{
+  "token": "gcp:certificatemanager/certificateMap:CertificateMap",
+  "terraform": {
+    "type": "google_certificate_manager_certificate_map",
+    "renames": {
+      "deletionPolicy": "deletion_policy"
+    }
+  },
+  "inputProperties": {
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    }
+  }
+}

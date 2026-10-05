@@ -109,7 +109,9 @@ const (
 // Symbol flags.
 const (
 	symbolFlagsAlias      = 1 << 21
+	symbolFlagsFunction   = 1 << 4
 	symbolFlagsClass      = 1 << 5
+	symbolFlagsModule     = 1<<9 | 1<<10
 	symbolFlagsInterface  = 1 << 6
 	symbolFlagsEnum       = 1<<7 | 1<<8
 	symbolFlagsTypeAlias  = 1 << 19

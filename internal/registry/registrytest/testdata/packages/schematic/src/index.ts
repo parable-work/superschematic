@@ -26,3 +26,10 @@ export function pairsWith(_class: abstract new (...args: never[]) => unknown): C
 }
 
 export const audited: ClassDecorator & MethodDecorator = () => {};
+
+// admits names, by their handles, the services that may call a type's
+// service. The tests that use it register it with `from` as an identity
+// path (DecoratorSpec.Identities): a name, not a reference.
+export function admits(_args: { readonly from: readonly unknown[] }): ClassDecorator {
+  return noopClassDecorator;
+}
