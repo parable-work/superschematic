@@ -2240,8 +2240,9 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 58 pairs for Postgres and 42 for SQLite, 10 of them
-rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
+Plan goldens cover 58 pairs for Postgres and 54 for SQLite, 22 of them
+SQLite's own: rebuilds, with the tables that reference the rebuilt one too,
+and changes of a list's element; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
 failure at every step, and serializes two runners. Rules settled as they
@@ -2287,7 +2288,9 @@ every value is `destructive`, never `data-dependent`, and a change between
 takes every change the phase makes to it but the renames of the table and
 its columns, which run first and in place, so the rebuild starts from the
 table with the renames applied, sits at the first change `ALTER TABLE`
-cannot make, and also adds the columns and indexes the phase adds; a
+cannot make, and also adds the columns and indexes the phase adds, and
+since D27's amendment on foreign keys (below) it copies every table that
+references the rebuilt one too, with foreign keys on; a
 foreign key added in `expand` is over a column the plan adds, and
 `ADD COLUMN ... REFERENCES` declares it when that column is nullable with
 no default; SQLite cannot rename an index, so an index or unique field
@@ -2295,14 +2298,13 @@ renamed is dropped and built again (`blocking`), and building an index on
 a table that exists and `DROP COLUMN`, which rewrites the table, are
 `blocking`; `DROP COLUMN` runs in place, since the column's indexes are
 dropped before it and a foreign key over it rebuilds the table; a dropped
-table is dropped with foreign keys off, since with them on `DROP TABLE`
-deletes its rows first, which a `RESTRICT` on the table itself refuses;
-tables a plan drops that reference each other are dropped in one step on
-SQLite, after the tables that reference them and before those they
-reference, since dropping the foreign key that closes the cycle needs a
-rebuild of a table the plan drops, and a `foreign_key_check` between two
-drops finds the rows of one referencing the other, while Postgres drops
-that foreign key first; a list, a JSON value and text are all `TEXT`, so
+table is dropped with foreign keys on, as every SQLite step runs since
+that amendment, after every table that references it; tables a plan drops
+that reference each other are dropped in one step on SQLite, after the
+tables that reference them and before those they reference, since
+dropping the foreign key that closes the cycle needs a rebuild of a table
+the plan drops, and the step defers the foreign key checks to its commit,
+when none of them is left, while Postgres drops that foreign key first; a list, a JSON value and text are all `TEXT`, so
 the SQLite model records what a column holds as JSON (`holds`: `list` or
 `json`; Postgres models never set it); a JSON value that becomes text
 keeps its JSON text through a rebuild, as Postgres's cast keeps it, and
@@ -2310,8 +2312,23 @@ one that becomes another scalar casts as text does, while every other
 change between a scalar, a list and a JSON value fails the plan, since no
 conversion keeps every value as Postgres would: text is not a JSON array,
 Postgres parses text as JSON where `json_quote` would wrap it, and
-Postgres converts no list; a list whose element type changes is still no
-step on SQLite; `migrate plan --dialect sqlite` refuses a service whose
+Postgres converts no list; the SQLite model records a list's element too
+(`element`: `TEXT`, `INTEGER`, `REAL` or `NUMERIC` as SQLite stores the
+element's type, `BOOLEAN` for JSON's `true` and `false`, `JSON` for a
+JSON value, `BLOB` for bytes), and a change of it rebuilds the table,
+whose copy converts each element in order with `json_each` and
+`json_group_array`, a `NULL` list staying `NULL`; a cast between `TEXT`,
+`INTEGER`, `REAL` and `NUMERIC` is lossy where the same cast of a column
+is, a boolean becomes `1` or `0` or the text `true` or `false`, and any
+other element becomes a boolean by SQLite's truth test, which is lossy,
+so each lossy change is `destructive` with what it loses in its reason,
+never `data-dependent` as Postgres's `USING col::T[]` is for text to a
+number; a change between elements SQLite stores alike, such as `UUID` to
+text, is no step, as the same change of a column is; a change to or from
+a JSON value or bytes fails the plan, since SQLite's `CAST` keeps a
+nested JSON value as JSON and its JSON holds no bytes; a list of lists is
+a JSON value on both dialects, so a change of its inner element is no
+step on either; `migrate plan --dialect sqlite` refuses a service whose
 new version does not list `sqlite`, and a previous version, a service
 directory or a git ref, whose list lacks it, pointing to the model the
 database recorded or an empty database, while a `--from` model is
@@ -2365,6 +2382,54 @@ not see; and the plan goldens record `expanded` and leave `expandedModel`
 out. Every Postgres and SQLite plan case with contract steps converges to
 its `expandedModel` after its expand steps, and the runner's vectors
 include a plan superseded after its expand phase.
+
+### D27, amended: SQLite rebuilds with foreign keys on, and the runner on D1
+
+D27 rebuilt a SQLite table with foreign key enforcement off, since
+dropping the old table otherwise runs the `ON DELETE` actions of the keys
+that reference it, and a `CASCADE` deletes their rows. D1, the SQLite
+database of D30's Cloudflare target, keeps enforcement on: a query cannot
+change `PRAGMA foreign_keys`, `PRAGMA defer_foreign_keys` only defers the
+checks to the end of the transaction, and renaming a table rewrites the
+keys that reference it even with `PRAGMA legacy_alter_table` on. D1 has
+no `BEGIN` or `COMMIT` either: a request to its REST API runs its
+statements as one batch.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A SQLite rebuild works with enforcement on. It rebuilds the table together with every table that references it, transitively, in one transaction with `defer_foreign_keys` on: it creates a new table for each, whose keys name the other new tables; copies the rows, referenced tables first; drops the old tables, referencing ones first, so no drop finds a key to act on; renames each new table to its name, which carries the references to the final names; and creates their indexes again. One SQLite plan serves a SQLite file and D1. The step's `copy-table` and `blocking` hazards name every table it copies. Plans no longer set `foreignKeysOff`. | Turning enforcement off around the step, which D1 refuses; renaming the old table first, which rewrites the referencing keys to it whatever `legacy_alter_table` says, so its drop cascades; a rendering of its own for D1, which would give one model two plans |
+| The runner gains a D1 driver over Cloudflare's REST API. Its URL is `d1://<account id>/<database id>`, and it reads its API token from `CLOUDFLARE_API_TOKEN`. A transactional step, with its log row and any state change, is one request run as one batch, so a repeated or concurrent run fails on the log row's primary key and the step runs once. The driver reads the state in requests of their own, outside the batch. | Exporting a plan as `wrangler d1 migrations` files, which would give up the baseline check, resuming and superseding; running the runner in a Worker, which a CI job deploying the stack cannot call |
+| A lease stands in for Postgres's advisory lock: a row of `superschematic_lock` holds the service, the holder and an expiry, taken with one conditional write, renewed at each step and released at the end. A runner that dies leaves its lease to expire, and the next one takes it over. D1 runs one write at a time, so the conditional write decides between two runners. | No lock, which leaves two runners deciding on the same read |
+| The D1 driver refuses a step outside a transaction and a step with `foreignKeysOff`, which D1 cannot run. A plan written before this amendment may rebuild with `foreignKeysOff`; the SQLite file driver still runs it. | |
+| Every SQLite rebuild converges with enforcement on. The runner's tests run against a fake D1 REST server backed by SQLite with enforcement forced on and each request run in one transaction, and against a real D1 database when `SUPERSCHEMATIC_MIGRATE_TEST_D1_URL` and its token are set. Cloudflare documents a Worker's batch as a transaction but not a REST request's, so the driver is documented as unverified until that test has passed against D1. | Trusting the fake alone |
+
+Status: the SQLite rebuild is built (`internal/sqlmigrate`), and so is
+the D1 driver (`runtime/migrate/go/d1`): the runner's suites, its compiler
+vectors and its CLI run on SQLite, Postgres and a fake D1
+(`internal/d1fake`), and `TestRealD1` runs against a real database when a
+URL and a token are set. The driver stays unverified until that test has
+passed against D1. No plan sets `foreignKeysOff`, and every SQLite
+plan case, fixture and runner vector converges with enforcement on
+throughout, its seeded rows surviving every step that is not
+`destructive`. Rules settled as it was built: rebuilt tables that
+reference one another, before or after the phase, share one step, at the
+place of the first change among them that `ALTER TABLE` cannot make, so a
+table is copied at most once per phase; the step makes every change the
+phase makes to its tables, so a table `contract` drops that references a
+rebuilt one is dropped by the rebuild, with its hazards, not copied; the
+tables `expand` creates are left out of an `expand` rebuild, since they
+hold no rows yet and their keys name the new table once it takes the
+name; the step's hazards keep their ids, on the table whose change placed
+it; a step that drops tables in a reference cycle, or a table that
+references itself, defers the checks too; and while the checks are
+deferred SQLite runs no `RESTRICT` action and checks a `RESTRICT` key at
+the commit, as it checks `NO ACTION`, so a `RESTRICT` key on a table itself
+or in a cycle, `NOT NULL` or not, needs neither a statement that clears it
+nor a refusal: by the commit its rows are gone. The SQLite convergence test
+shows those steps fail without the deferral, and refuses a step that turns
+enforcement off.
+
+The rule is reversible until the first release.
 
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
@@ -2734,12 +2799,24 @@ initializer, so `build` loads `fixture-authdb-import`, whose config imports
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | A `schema.config.ts` may import a sibling service's sentinel (`import { ShopDb } from "@acme/shop-db"`) and use it wherever a handle goes: `authDb`, `dependencies` and `calls`. `service({ name, kind })` stays valid in the TypeScript form, and the data forms keep their spellings: `authDb` a name, the lists `{name, kind}`. A reference is then the value D30 asks for. tsc refuses a misspelt or renamed service where it is written, and the editor finds every config that names a service. | `service({...})` as the only spelling, which restates the callee's name and kind as strings in every caller and leaves a typo to the next build; a naming-file switch that keeps the old rule for a tree whose configs run as modules, which no superschematic tree has, and whose configs can keep writing `service({...})` |
-| One import rule, in the static read every command shares (`tsreader`). A config imports the config package, under its name or an alias, and from any other module only bindings that resolve to a sentinel: an `export const X = service({...})` in a `service.generated.ts`. A type, a schema class, a default or namespace import and a side-effect import are refused at the import. The build plan's textual scan goes, so `build`, `build-all` and `build --with-deps` accept the same configs. | Extending the scan with the siblings' package names, which differ per tree (`@acme/*`, `@schemas/*`) and still admit a schema class; no rule, which lets a config pull in any code |
+| One import rule, in the static read every command shares (`tsreader`). It goes by what each imported name resolves to, not by the specifier: a binding declared in the config package, under any specifier that resolves to it, or a sentinel, an `export const X = service({...})` in a `service.generated.ts`. A type, a schema class, a namespace of another module and a side-effect import are refused at the import. The build plan's textual scan goes, so `build`, `build-all` and `build --with-deps` accept the same configs. | Extending the scan with the siblings' package names, which differ per tree (`@acme/*`, `@schemas/*`) and still admit a schema class; no rule, which lets a config pull in any code |
 | Configs are leaves. No module imports one, and a sentinel imports only the config package and, under typed handles (`docs/stack-model.md` section 4.3), its own service's `@envVars` type. So no import path leads from a sentinel back to a config, and two APIs that call each other import each other's sentinels without a module cycle. The build-order cycle that mutual `calls` forms is the build plan's to report (stack-model section 3.3). | Importing a sibling's config, which makes configs import configs and brings back the cycle the old rule guarded against |
 | Sentinels come before discovery. A sentinel is a function of its own service's `name` and `kind`, plus the `@envVars` type that loading the service adds, and never of another sentinel. The sweep that writes sentinels reads only those two properties, which must be literals. `build-all`, `build --with-deps` and a `build` whose config imports a sentinel run it before any config is read in full. It writes a sentinel that is missing or whose name or kind changed, and keeps the type arguments a build wrote. | Ordering discovery by the configs' imports, which reads each config twice and still fails on a sentinel no build has written; relying on committed sentinels, which leaves a new service unreferenceable until it is built once |
 | Under typed handles, a config that imports an API's sentinel type-depends on that API's `@envVars` class, so tsc checks the config with the callee's schema files in its program. That cost is tsc's: superschematic's read follows only the `service({...})` argument, and the type import is erased at run time. | A second, untyped handle per service for configs to import, which keeps the callee's schema out of the config's program but gives each service two handles and two spellings |
 
-Nothing here is built yet. The rule is reversible until the first release.
+`checkConfigImports` in `internal/loader/tsreader/config.go` is the rule,
+and `tsreader.ReadServiceIdentity` the read that evaluates only `name` and
+`kind`. `buildplan.EnsureSentinels` is the sweep: `build-all`,
+`build --with-deps` and `migrate` run it before discovery, and `build` runs
+it when the target's config imports anything but the config package. The
+acme-shop configs import their handles. `config_imports_test.go` pins each
+form the rule accepts or refuses. The build plan's tests discover a tree
+with no sentinels before and after the sweep, and two APIs that import
+each other's sentinels, which the build plan reports as a cycle of
+`calls`. A CLI test runs each build command on a tree whose imported
+sentinel was deleted.
+
+The rule is reversible until the first release.
 
 ## D38. The Rust server builds from the shared API output, and serves its OpenAPI document
 

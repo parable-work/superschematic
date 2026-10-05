@@ -118,8 +118,10 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 
 ## `build-all <services-root>`
 
-Discover every schema service under `<services-root>` and build them in
-one process, in dependency order. A service's `authDb`, and each API it
+Write every service's sentinel that is missing or stale, then discover
+every schema service under `<services-root>` and build them in one
+process, in dependency order. The sentinels come first because a config
+may import a sibling's. A service's `authDb`, and each API it
 `calls`, count as dependencies for ordering. Discovery fails, before any
 service is built, on a handle whose kind is not the kind of the service it
 names (`shop-orders: calls names shop-db with kind API, but shop-db is kind DB`),
@@ -201,8 +203,10 @@ The previous version is another checkout of the service (`--from
 the schemas root at a git ref (`--from-ref`); with none, the plan starts
 from an empty database. Each version loads with its dependencies resolved
 from its own schemas root, as `build --with-deps` resolves them, and with
-its own naming file when it has one. Both resolve to models with the
-options a build passes the `sql` generator.
+its own naming file when it has one: like `build-all`, it first writes a
+missing or stale sentinel there, since a config may import a sibling's.
+Both resolve to models with the options a build passes the `sql`
+generator.
 
 The API and General services in each version's schemas root are that
 version's readers: the columns their `@source` views read. A step that

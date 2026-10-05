@@ -135,7 +135,10 @@ type Step struct {
 
 	// ForeignKeysOff asks the runner to turn foreign key enforcement off
 	// around the step's transaction and to check every foreign key before
-	// its commit (SQLite's copy-table rebuild).
+	// its commit. Plans written before D27's amendment set it on SQLite's
+	// copy-table rebuild and dropped tables; the planner no longer does,
+	// since D1 cannot turn enforcement off. The field stays so the plan
+	// form keeps describing those plans.
 	ForeignKeysOff bool `json:"foreignKeysOff,omitempty"`
 
 	Hazards []*Hazard `json:"hazards,omitempty"`

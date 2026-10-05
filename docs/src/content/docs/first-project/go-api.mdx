@@ -44,7 +44,8 @@ SDK to call it. You write the business logic and say who the caller is.
   Without it, a `@requirePermission` route answers 401 unless the
   service's own middleware puts the caller on the context. The SDKs send
   a token either way, since those routes need a caller.
-- `authDb` names the DB schema the auth provider reads its stores from.
+- `authDb` names the DB schema the auth provider reads its stores from,
+  by `shop-db`'s handle, `ShopDb`, imported from `@acme/shop-db`.
   The core provider, `session`, finds `shop-db`'s `Session` and `User`
   tables and generates stores over the ORM for them.
 - `sdk` lists the SDK languages. Any API can have an SDK in Go, TypeScript,

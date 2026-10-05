@@ -119,8 +119,10 @@ func TestSQLiteRefusals(t *testing.T) {
 }
 
 // TestSQLiteSteps checks every SQLite plan case: every step runs in a
-// transaction with no recovery, only a rebuild or a dropped table turns
-// foreign keys off, and no statement ends in a semicolon.
+// transaction with no recovery and with foreign keys on, as D1 runs it
+// (D27, amended): no step turns them off, a rebuild defers their checks to
+// its commit first, no statement is a PRAGMA but that one or a transaction
+// statement, and no statement ends in a semicolon.
 func TestSQLiteSteps(t *testing.T) {
 	for _, pc := range sqlitePlanCases() {
 		plan := pc.plan(t)
@@ -132,8 +134,18 @@ func TestSQLiteSteps(t *testing.T) {
 			if !step.Transactional || len(step.Recovery) > 0 {
 				t.Errorf("%s: step %d %s does not run in a transaction alone", pc.name, step.Index, step.Op)
 			}
-			if step.ForeignKeysOff != (step.Op == "copyTable" || step.Op == "dropTable") {
-				t.Errorf("%s: step %d %s has foreignKeysOff %t", pc.name, step.Index, step.Op, step.ForeignKeysOff)
+			if step.ForeignKeysOff {
+				t.Errorf("%s: step %d %s turns foreign keys off", pc.name, step.Index, step.Op)
+			}
+			if step.Op == "copyTable" && (len(step.Statements) == 0 || step.Statements[0] != sqliteDeferForeignKeys) {
+				t.Errorf("%s: step %d copyTable does not start with %s", pc.name, step.Index, sqliteDeferForeignKeys)
+			}
+			for i, stmt := range step.Statements {
+				word := strings.ToUpper(strings.Fields(stmt)[0])
+				if (word == "PRAGMA" && (stmt != sqliteDeferForeignKeys || i > 0)) ||
+					word == "BEGIN" || word == "COMMIT" || word == "END" || word == "ROLLBACK" || word == "SAVEPOINT" || word == "RELEASE" {
+					t.Errorf("%s: step %d %s runs %s", pc.name, step.Index, step.Op, stmt)
+				}
 			}
 			if step.Phase == Contract {
 				contract = true
@@ -213,11 +225,43 @@ func TestSQLiteHazardClasses(t *testing.T) {
 		{plan: "rebuild-renamed-referenced-table", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable}},
 		{plan: "rebuild-foreign-keys", op: "addColumn", phase: Expand},
 		{plan: "rebuild-foreign-keys", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, dataDependent, copyTable}},
+		{plan: "rebuild-referenced-table", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable},
+			reason: "rebuilds customer with the tables that reference it, directly or through another table: invoice, order, order_label, order_line, review, review_reply and visit."},
+		{plan: "rebuild-referenced-table", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, copyTable},
+			reason: "Copying customer, invoice, order, order_label, order_line, review, review_reply and visit holds"},
+		{plan: "rebuild-self-referencing-table", op: "copyTable", subject: "table/category", phase: Expand, want: []HazardClass{blockingClass, copyTable},
+			reason: "so the step rebuilds category: it copies the rows"},
+		{plan: "rebuild-self-referencing-table", op: "copyTable", subject: "table/customer", phase: Expand, want: []HazardClass{blockingClass, copyTable}},
+		{plan: "rebuild-with-referencing-changes", op: "copyTable", phase: Expand,
+			want:   []HazardClass{destructive, blockingClass, compat, copyTable},
+			reason: "cannot drop NOT NULL from created_at in customer, nor change the type of total in order, so the step rebuilds customer and order with"},
+		{plan: "rebuild-and-drop-referencing-table", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable},
+			reason: "directly or through another table: order, order_label, order_line and review."},
+		{plan: "rebuild-and-drop-referencing-table", op: "copyTable", phase: Contract, want: []HazardClass{destructive, blockingClass, copyTable},
+			reason: "The phase drops review, which references it too, so the step drops it without copying it."},
+		{plan: "drop-tables-in-restrict-cycle", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
+
+		{plan: "list-element-text-to-integer", op: "copyTable", phase: Expand,
+			want:   []HazardClass{destructive, blockingClass, compat, copyTable},
+			reason: "text that is not a number becomes 0 and a fraction is cut toward zero"},
+		{plan: "list-element-integer-to-text", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, compat, copyTable},
+			reason: "cannot convert the elements of items"},
+		{plan: "list-element-integer-to-real", op: "copyTable", phase: Expand,
+			want: []HazardClass{destructive, blockingClass, compat, copyTable}, reason: "an integer past 2^53 is rounded"},
+		{plan: "list-element-integer-to-boolean", op: "copyTable", phase: Expand,
+			want: []HazardClass{destructive, blockingClass, compat, copyTable}, reason: "every number other than 0 becomes true"},
+		{plan: "list-element-boolean-to-text", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, compat, copyTable},
+			reason: "Product.items changes from a list of BOOLEAN to a list of TEXT"},
+		{plan: "list-element-and-drop-column", op: "copyTable", phase: Expand,
+			want:   []HazardClass{destructive, blockingClass, compat, copyTable},
+			reason: "cannot drop NOT NULL from price and convert the elements of items"},
+		{plan: "list-element-and-drop-column", op: "dropColumn", phase: Contract, want: []HazardClass{destructive, blockingClass}},
 	})
 }
 
-// TestSQLiteRebuildBatches: each table is rebuilt at most once per phase,
-// and a table rebuilt in a phase has no other step in it but its renames.
+// TestSQLiteRebuildBatches: each table is copied or dropped by at most one
+// rebuild per phase, and a table a rebuild copies or drops in a phase has
+// no other step in it but its renames.
 func TestSQLiteRebuildBatches(t *testing.T) {
 	for _, pc := range sqlitePlanCases() {
 		plan := pc.plan(t)
@@ -226,11 +270,17 @@ func TestSQLiteRebuildBatches(t *testing.T) {
 			if step.Op != "copyTable" {
 				continue
 			}
-			key := string(step.Phase) + " " + step.Subject
-			if rebuilt[key] {
-				t.Errorf("%s: %s is rebuilt twice in %s", pc.name, step.Subject, step.Phase)
+			for _, stmt := range step.Statements {
+				table, ok := strings.CutPrefix(stmt, "DROP TABLE ")
+				if !ok {
+					continue
+				}
+				key := string(step.Phase) + " table/" + strings.Trim(table, `"`)
+				if rebuilt[key] {
+					t.Errorf("%s: %s is rebuilt twice in %s", pc.name, table, step.Phase)
+				}
+				rebuilt[key] = true
 			}
-			rebuilt[key] = true
 		}
 		for _, step := range plan.Steps {
 			if step.Op == "copyTable" || step.Op == "renameTable" || step.Op == "renameColumn" {
@@ -439,7 +489,7 @@ func TestSQLiteKindChanges(t *testing.T) {
 		for _, h := range plan.Steps[0].Hazards {
 			classes = append(classes, string(h.Class))
 		}
-		got := strings.TrimPrefix(plan.Steps[0].Statements[1], `INSERT INTO "_new_sample" ("id", "v")`+"\n"+`SELECT "id", `)
+		got := strings.TrimPrefix(plan.Steps[0].Statements[2], `INSERT INTO "_new_sample" ("id", "v")`+"\n"+`SELECT "id", `)
 		got = strings.TrimSuffix(got, "\n"+`FROM "sample"`) + " [" + strings.Join(classes, " ") + "]"
 		if got != tc.want {
 			t.Errorf("%s: %s, want %s", name, got, tc.want)
@@ -456,6 +506,185 @@ func TestSQLiteKindChanges(t *testing.T) {
 	want := "column order.note (Order.note) changes from a scalar (TEXT) to a list (TEXT holding a JSON array), which sqlite cannot convert"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("Diff = %v, want %s", err, want)
+	}
+}
+
+// TestSQLiteElement: the model records what each element of a list's JSON
+// array holds, and nothing for a column that is not a list. A list of
+// lists is JSONB, which holds a JSON value, not a list.
+func TestSQLiteElement(t *testing.T) {
+	tests := map[string]string{
+		"TEXT[]": "TEXT", "UUID[]": "TEXT", "VARCHAR(80)[]": "TEXT", "CITEXT[]": "TEXT", "DATE[]": "TEXT",
+		"TIMESTAMPTZ[]": "TEXT", "INET[]": "TEXT", "SMALLINT[]": "INTEGER", "BIGINT[]": "INTEGER",
+		"BOOLEAN[]": "BOOLEAN", "DOUBLE PRECISION[]": "REAL", "NUMERIC(12,2)[]": "NUMERIC",
+		"JSONB[]": "JSON", "BYTEA[]": "BLOB",
+		"TEXT": "", "BIGINT": "", "BOOLEAN": "", "JSONB": "",
+	}
+	for pg, want := range tests {
+		if got := sqliteElement(pg); got != want {
+			t.Errorf("sqliteElement(%s) = %q, want %q", pg, got, want)
+		}
+	}
+}
+
+// TestSQLiteListConvert classifies a list's element changes as the same
+// cast of a column is classified: SQLite's CAST never fails, so a change
+// that cannot keep every element is lossy and says what it loses, never
+// one that may fail.
+func TestSQLiteListConvert(t *testing.T) {
+	tests := []struct {
+		from, to string
+		kind     conversionKind
+		lossy    bool
+	}{
+		{"TEXT", "TEXT", convertSame, false},
+		{"", "INTEGER", convertSame, false},
+		{"INTEGER", "", convertSame, false},
+		{"TEXT", "INTEGER", convertRewrite, true},
+		{"TEXT", "REAL", convertRewrite, true},
+		{"TEXT", "NUMERIC", convertRewrite, true},
+		{"TEXT", "BOOLEAN", convertRewrite, true},
+		{"INTEGER", "TEXT", convertRewrite, false},
+		{"REAL", "TEXT", convertRewrite, false},
+		{"NUMERIC", "TEXT", convertRewrite, false},
+		{"INTEGER", "REAL", convertRewrite, true},
+		{"INTEGER", "NUMERIC", convertRewrite, false},
+		{"REAL", "INTEGER", convertRewrite, true},
+		{"REAL", "NUMERIC", convertRewrite, false},
+		{"NUMERIC", "INTEGER", convertRewrite, true},
+		{"NUMERIC", "REAL", convertRewrite, true},
+		{"INTEGER", "BOOLEAN", convertRewrite, true},
+		{"REAL", "BOOLEAN", convertRewrite, true},
+		{"BOOLEAN", "TEXT", convertRewrite, false},
+		{"BOOLEAN", "INTEGER", convertRewrite, false},
+		{"BOOLEAN", "REAL", convertRewrite, false},
+		{"BOOLEAN", "NUMERIC", convertRewrite, false},
+		{"JSON", "TEXT", convertImpossible, false},
+		{"TEXT", "JSON", convertImpossible, false},
+		{"BOOLEAN", "JSON", convertImpossible, false},
+		{"BLOB", "TEXT", convertImpossible, false},
+		{"TEXT", "BLOB", convertImpossible, false},
+		{"JSON", "BLOB", convertImpossible, false},
+	}
+	for _, tc := range tests {
+		got := sqliteListConvert(tc.from, tc.to)
+		if got.kind != tc.kind || got.lossy != tc.lossy {
+			t.Errorf("sqliteListConvert(%s, %s) = %+v, want kind %d lossy %t", tc.from, tc.to, got, tc.kind, tc.lossy)
+		}
+		if got.lossy != (got.loss != "") || strings.Contains(got.loss, ":  ") || strings.HasSuffix(got.loss, ": .") {
+			t.Errorf("sqliteListConvert(%s, %s) loses %q", tc.from, tc.to, got.loss)
+		}
+	}
+}
+
+// TestSQLiteListElementChanges: a list whose element changes is rebuilt,
+// and the copy converts each element of its JSON array, in order, keeping
+// a NULL list NULL; the step carries the conversion's hazards. A change to
+// or from a JSON value or bytes is refused, naming the column and both
+// elements. A list whose element stays, or that a model does not record,
+// has no step.
+func TestSQLiteListElementChanges(t *testing.T) {
+	model := func(element string) *Model {
+		return &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{{
+			Name: "sample", Kind: TableEntity,
+			Columns: []*Column{
+				{Name: "id", Type: "TEXT"},
+				{Name: "v", Origin: "Sample.v", Type: "TEXT", Nullable: true, Holds: holdsList, Element: element},
+			},
+			PrimaryKey: &Constraint{Name: "sample_pkey", Columns: []string{"id"}},
+		}}}
+	}
+	const e = `"_element"."value"`
+	list := func(element string) string {
+		return `CASE WHEN "sample"."v" IS NOT NULL THEN (SELECT json_group_array(` + element +
+			` ORDER BY "_element"."key") FROM json_each("sample"."v") AS "_element") END`
+	}
+	truth := "CASE WHEN " + e + " THEN 'true' WHEN NOT " + e + " THEN 'false' END"
+	const (
+		lossy = " [destructive blocking compat copy-table]"
+		kept  = " [blocking compat copy-table]"
+	)
+	tests := []struct {
+		from, to string
+		// want is the refusal, or the rebuild's copy of v and its hazard
+		// classes.
+		want string
+	}{
+		{"TEXT", "INTEGER", list("CAST("+e+" AS INTEGER)") + lossy},
+		{"TEXT", "REAL", list("CAST("+e+" AS REAL)") + lossy},
+		{"TEXT", "NUMERIC", list("CAST("+e+" AS NUMERIC)") + lossy},
+		{"INTEGER", "TEXT", list("CAST("+e+" AS TEXT)") + kept},
+		{"REAL", "TEXT", list("CAST("+e+" AS TEXT)") + kept},
+		{"INTEGER", "REAL", list("CAST("+e+" AS REAL)") + lossy},
+		{"INTEGER", "NUMERIC", list("CAST("+e+" AS NUMERIC)") + kept},
+		{"REAL", "INTEGER", list("CAST("+e+" AS INTEGER)") + lossy},
+		{"NUMERIC", "REAL", list("CAST("+e+" AS REAL)") + lossy},
+		{"INTEGER", "BOOLEAN", list("json("+truth+")") + lossy},
+		{"TEXT", "BOOLEAN", list("json("+truth+")") + lossy},
+		{"BOOLEAN", "INTEGER", list("CAST("+e+" AS INTEGER)") + kept},
+		{"BOOLEAN", "REAL", list("CAST("+e+" AS REAL)") + kept},
+		{"BOOLEAN", "TEXT", list(truth) + kept},
+		{"JSON", "TEXT", "changes from a list of JSON to a list of TEXT"},
+		{"TEXT", "JSON", "changes from a list of TEXT to a list of JSON"},
+		{"BLOB", "TEXT", "changes from a list of BLOB to a list of TEXT"},
+		{"INTEGER", "BLOB", "changes from a list of INTEGER to a list of BLOB"},
+	}
+	for _, tc := range tests {
+		name := tc.from + " to " + tc.to
+		plan, err := Diff(model(tc.from), model(tc.to), Options{})
+		if strings.HasPrefix(tc.want, "changes") {
+			want := "sqlmigrate: column sample.v (Sample.v) " + tc.want + ", which sqlite cannot convert; change the column by hand and adopt the new model"
+			if err == nil || err.Error() != want {
+				t.Errorf("%s: Diff = %v, want %s", name, err, want)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(plan.Steps) != 1 || plan.Steps[0].Op != "copyTable" {
+			t.Errorf("%s: steps %+v, want one rebuild", name, plan.Steps)
+			continue
+		}
+		step := plan.Steps[0]
+		var classes []string
+		for _, h := range step.Hazards {
+			classes = append(classes, string(h.Class))
+			if h.Class == HazardCopyTable && !strings.Contains(h.Reason, "cannot convert the elements of v,") {
+				t.Errorf("%s: copy-table reason %q", name, h.Reason)
+			}
+		}
+		got := strings.TrimPrefix(step.Statements[2], `INSERT INTO "_new_sample" ("id", "v")`+"\n"+`SELECT "id", `)
+		got = strings.TrimSuffix(got, "\n"+`FROM "sample"`) + " [" + strings.Join(classes, " ") + "]"
+		if got != tc.want {
+			t.Errorf("%s:\n%s\nwant\n%s", name, got, tc.want)
+		}
+	}
+
+	for _, pair := range [][2]string{{"TEXT", "TEXT"}, {"", "INTEGER"}, {"BOOLEAN", ""}} {
+		plan, err := Diff(model(pair[0]), model(pair[1]), Options{})
+		if err != nil || len(plan.Steps) != 0 {
+			t.Errorf("%q to %q: %v, %d steps; want no step", pair[0], pair[1], err, len(plan.Steps))
+		}
+	}
+
+	// The destructive hazard says what the conversion loses.
+	for pair, want := range map[[2]string]string{
+		{"TEXT", "INTEGER"}: "Sample.v changes from a list of TEXT to a list of INTEGER: SQLite converts each element with a cast that never fails, " +
+			"so the conversion does not keep every element: text that is not a number becomes 0 and a fraction is cut toward zero.",
+		{"TEXT", "BOOLEAN"}: "Sample.v changes from a list of TEXT to a list of BOOLEAN: SQLite converts each element with a cast that never fails, " +
+			"so the conversion does not keep every element: text is true only where it reads as a number other than 0, so 'true' becomes false.",
+		{"NUMERIC", "INTEGER"}: "Sample.v changes from a list of NUMERIC to a list of INTEGER: SQLite converts each element with a cast that never fails, " +
+			"so the conversion does not keep every element: a fraction is cut toward zero.",
+	} {
+		plan, err := Diff(model(pair[0]), model(pair[1]), Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h := plan.Steps[0].Hazards[0]; h.Class != HazardDestructive || h.Reason != want {
+			t.Errorf("%s to %s: %s hazard %q, want destructive %q", pair[0], pair[1], h.Class, h.Reason, want)
+		}
 	}
 }
 
@@ -485,9 +714,10 @@ func TestSQLiteAddable(t *testing.T) {
 }
 
 // TestSQLiteDropCycle: SQLite drops the tables of a reference cycle in one
-// step, with foreign keys off, after the tables that reference them and
-// before the tables they reference, each table with its own hazard. A
-// table that is in the cycle only through another (z) is in the step too.
+// step, with foreign keys on and their checks deferred to the commit, after
+// the tables that reference them and before the tables they reference,
+// each table with its own hazard. A table that is in the cycle only
+// through another (z) is in the step too.
 func TestSQLiteDropCycle(t *testing.T) {
 	table := func(name string, refs ...string) *Table {
 		tb := &Table{
@@ -522,11 +752,182 @@ func TestSQLiteDropCycle(t *testing.T) {
 			strings.Join(step.Statements, "; "), strings.Join(ids, " ")))
 	}
 	want := []string{
-		`dropTable table/c true: DROP TABLE "c" [destructive:table/c]`,
-		`dropTable table/a true: DROP TABLE "a"; DROP TABLE "b"; DROP TABLE "z" [destructive:table/a destructive:table/b destructive:table/z]`,
-		`dropTable table/d true: DROP TABLE "d" [destructive:table/d]`,
+		`dropTable table/c false: DROP TABLE "c" [destructive:table/c]`,
+		`dropTable table/a false: PRAGMA defer_foreign_keys = ON; DROP TABLE "a"; DROP TABLE "b"; DROP TABLE "z" [destructive:table/a destructive:table/b destructive:table/z]`,
+		`dropTable table/d false: DROP TABLE "d" [destructive:table/d]`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("steps:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// refTable is a SQLite table with a text key and a column <ref>_id for
+// each foreign key in refs, "<ref> <ON DELETE action>", nullable unless the
+// action ends in "NOT NULL".
+func refTable(name string, refs ...string) *Table {
+	tb := &Table{
+		Name: name, Kind: TableEntity, Origin: strings.ToUpper(name),
+		Columns: []*Column{
+			{Name: "id", Type: "TEXT"},
+			{Name: "label", Type: "TEXT", Nullable: true},
+		},
+		PrimaryKey: &Constraint{Name: name + "_pkey", Columns: []string{"id"}},
+	}
+	for _, r := range refs {
+		ref, action, _ := strings.Cut(r, " ")
+		action, notNull := strings.CutSuffix(action, " NOT NULL")
+		tb.Columns = append(tb.Columns, &Column{Name: ref + "_id", Type: "TEXT", Nullable: !notNull})
+		tb.ForeignKeys = append(tb.ForeignKeys, &ForeignKey{
+			Name: "fk_" + name + "_" + ref + "_id", Columns: []string{ref + "_id"}, RefTable: ref, RefColumns: []string{"id"}, OnDelete: action,
+		})
+	}
+	return tb
+}
+
+// sqliteModelOf is a SQLite model of tables.
+func sqliteModelOf(tables ...*Table) *Model {
+	return &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: tables}
+}
+
+// TestSQLiteRestrict: a step that drops a table in a reference cycle, or a
+// table that references itself, defers the foreign key checks to its
+// commit first. SQLite then runs no RESTRICT action and checks a RESTRICT
+// key as it checks a NO ACTION one, at the commit, when the step has
+// dropped every row the key protects; with the checks not deferred, the
+// drop fails at once. So a RESTRICT key there plans as any other, NOT NULL
+// or not, whether a drop or a rebuild meets it. Tables dropped one after
+// the other need nothing. sqliteconverge applies such steps to rows that
+// reference one another, and sees them fail without the deferral
+// (TestConvergenceOnSQLite).
+func TestSQLiteRestrict(t *testing.T) {
+	// statements plans from one model to another and returns each step's
+	// statements, each cut at its first parenthesis.
+	statements := func(from, to *Model) string {
+		t.Helper()
+		plan, err := Diff(from, to, Options{})
+		if err != nil {
+			return err.Error()
+		}
+		var steps []string
+		for _, step := range plan.Steps {
+			var cut []string
+			for _, stmt := range step.Statements {
+				cut = append(cut, strings.SplitN(stmt, " (", 2)[0])
+			}
+			steps = append(steps, step.Op+": "+strings.Join(cut, "; "))
+		}
+		return strings.Join(steps, "\n")
+	}
+	// relabel makes label NOT NULL in the named tables, a change SQLite
+	// rebuilds a table for.
+	relabel := func(m *Model, names ...string) *Model {
+		out := *m
+		out.Tables = nil
+		for _, t := range m.Tables {
+			c := *t
+			if slices.Contains(names, t.Name) {
+				c.Columns = []*Column{t.Columns[0], {Name: "label", Type: "TEXT"}}
+				c.Columns = append(c.Columns, t.Columns[2:]...)
+			}
+			out.Tables = append(out.Tables, &c)
+		}
+		return &out
+	}
+	empty := sqliteModelOf()
+	self := func(action string) *Model { return sqliteModelOf(refTable("node", "node "+action)) }
+	cycle := func(action string) *Model {
+		return sqliteModelOf(refTable("p"), refTable("a", "p CASCADE", "b RESTRICT"), refTable("b", "a "+action))
+	}
+	const (
+		dropNode    = `dropTable: PRAGMA defer_foreign_keys = ON; DROP TABLE "node"`
+		dropCycle   = `dropTable: PRAGMA defer_foreign_keys = ON; DROP TABLE "a"; DROP TABLE "b"` + "\n" + `dropTable: DROP TABLE "p"`
+		rebuildNode = `copyTable: PRAGMA defer_foreign_keys = ON; CREATE TABLE "_new_node"; INSERT INTO "_new_node"; ` +
+			`DROP TABLE "node"; ALTER TABLE "_new_node" RENAME TO "node"`
+		rebuildP = `copyTable: PRAGMA defer_foreign_keys = ON; CREATE TABLE "_new_p"; CREATE TABLE "_new_a"; CREATE TABLE "_new_b"; ` +
+			`INSERT INTO "_new_p"; INSERT INTO "_new_a"; INSERT INTO "_new_b"; DROP TABLE "a"; DROP TABLE "b"; DROP TABLE "p"; ` +
+			`ALTER TABLE "_new_p" RENAME TO "p"; ALTER TABLE "_new_a" RENAME TO "a"; ALTER TABLE "_new_b" RENAME TO "b"`
+	)
+	tests := []struct {
+		name     string
+		from, to *Model
+		want     string
+	}{
+		{"a table that references itself, dropped", self("RESTRICT"), empty, dropNode},
+		{"a table that references itself NOT NULL, dropped", self("RESTRICT NOT NULL"), empty, dropNode},
+		{"a table that references itself, rebuilt", self("RESTRICT"), relabel(self("RESTRICT"), "node"), rebuildNode},
+		{"a table that references itself NOT NULL, rebuilt", self("RESTRICT NOT NULL"), relabel(self("RESTRICT NOT NULL"), "node"), rebuildNode},
+		{"a cycle, dropped", cycle("RESTRICT"), empty, dropCycle},
+		{"a cycle NOT NULL, dropped", cycle("RESTRICT NOT NULL"), empty, dropCycle},
+		// p is rebuilt, so a and b, which reference it, are rebuilt with it.
+		{"a cycle NOT NULL that references a rebuilt table", cycle("RESTRICT NOT NULL"), relabel(cycle("RESTRICT NOT NULL"), "p"), rebuildP},
+		{"a cycle of other actions, dropped",
+			sqliteModelOf(refTable("a", "b CASCADE NOT NULL", "a NO ACTION NOT NULL"), refTable("b", "a SET NULL")), empty,
+			`dropTable: PRAGMA defer_foreign_keys = ON; DROP TABLE "a"; DROP TABLE "b"`},
+		{"tables dropped one after the other",
+			sqliteModelOf(refTable("a", "b RESTRICT NOT NULL"), refTable("b")), empty,
+			"dropTable: DROP TABLE \"a\"\ndropTable: DROP TABLE \"b\""},
+	}
+	for _, tc := range tests {
+		if got := statements(tc.from, tc.to); got != tc.want {
+			t.Errorf("%s:\n%s\nwant:\n%s", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestSQLiteRebuildClosure: a rebuild copies every table that references the
+// rebuilt one, directly or through another table, and the rebuilt tables
+// that reference one another share a step; a table that references none
+// of them keeps its own. Each copy's foreign keys name the new tables until
+// the renames, the copies run referenced tables first and the drops
+// referencing ones first, and the hazards name every table copied.
+func TestSQLiteRebuildClosure(t *testing.T) {
+	from := sqliteModelOf(refTable("p"), refTable("child", "p CASCADE NOT NULL"), refTable("grandchild", "child CASCADE"),
+		refTable("pinned", "p RESTRICT NOT NULL"), refTable("q"), refTable("other", "q NO ACTION"))
+	to := sqliteModelOf(refTable("p"), refTable("child", "p CASCADE NOT NULL"), refTable("grandchild", "child CASCADE"),
+		refTable("pinned", "p RESTRICT NOT NULL"), refTable("q"), refTable("other", "q NO ACTION"))
+	to.Tables[0].Columns[1] = &Column{Name: "label", Type: "TEXT"}
+	to.Tables[4].Columns[1] = &Column{Name: "label", Type: "TEXT"}
+	plan, err := Diff(from, to, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 2 || plan.Steps[0].Subject != "table/p" || plan.Steps[1].Subject != "table/q" {
+		t.Fatalf("steps:\n%s", plan.SQL())
+	}
+	step := plan.Steps[0]
+	var got []string
+	for _, stmt := range step.Statements {
+		got = append(got, strings.SplitN(stmt, " (", 2)[0])
+	}
+	want := []string{
+		"PRAGMA defer_foreign_keys = ON",
+		`CREATE TABLE "_new_p"`, `CREATE TABLE "_new_child"`, `CREATE TABLE "_new_grandchild"`, `CREATE TABLE "_new_pinned"`,
+		`INSERT INTO "_new_p"`, `INSERT INTO "_new_child"`, `INSERT INTO "_new_grandchild"`, `INSERT INTO "_new_pinned"`,
+		`DROP TABLE "grandchild"`, `DROP TABLE "child"`, `DROP TABLE "pinned"`, `DROP TABLE "p"`,
+		`ALTER TABLE "_new_p" RENAME TO "p"`, `ALTER TABLE "_new_child" RENAME TO "child"`,
+		`ALTER TABLE "_new_grandchild" RENAME TO "grandchild"`, `ALTER TABLE "_new_pinned" RENAME TO "pinned"`,
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("step %s:\n%s\nwant:\n%s", step.Subject, strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	for _, key := range []string{`REFERENCES "_new_p" ("id") ON DELETE CASCADE`, `REFERENCES "_new_child" ("id") ON DELETE CASCADE`, `REFERENCES "_new_p" ("id") ON DELETE RESTRICT`} {
+		if !strings.Contains(strings.Join(step.Statements, "\n"), key) {
+			t.Errorf("no copy declares %s", key)
+		}
+	}
+	reasons := map[HazardClass]string{}
+	for _, h := range step.Hazards {
+		reasons[h.Class] = h.Reason
+	}
+	if want := "SQLite's ALTER TABLE cannot make label NOT NULL, so the step rebuilds p with the tables that reference it, directly or through another table: " +
+		"child, grandchild and pinned. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones."; reasons[HazardCopyTable] != want {
+		t.Errorf("copy-table reason %q", reasons[HazardCopyTable])
+	}
+	if want := "Copying child, grandchild, p and pinned holds the database's write lock for time that grows with the tables."; reasons[HazardBlocking] != want {
+		t.Errorf("blocking reason %q", reasons[HazardBlocking])
+	}
+	// q's rebuild copies other, and no table of p's.
+	if all := strings.Join(plan.Steps[1].Statements, "\n"); !strings.Contains(all, `CREATE TABLE "_new_other"`) || strings.Contains(all, `"_new_p"`) {
+		t.Errorf("q's rebuild:\n%s", all)
 	}
 }

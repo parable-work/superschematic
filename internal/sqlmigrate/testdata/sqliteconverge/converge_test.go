@@ -1,8 +1,10 @@
 // Package sqliteconverge checks migration plans against SQLite, through
 // the pure-Go modernc.org/sqlite. TestConvergenceOnSQLite in the sqlmigrate
-// package writes one directory per case and runs TestConvergence here with:
+// package writes one directory per case and runs TestConvergence and
+// TestRejects here with:
 //
-//	SQLITECONVERGE_CASES  the directory holding the cases
+//	SQLITECONVERGE_CASES    the directory holding the cases
+//	SQLITECONVERGE_REJECTS  the directory holding the cases that must fail
 //
 // A case directory holds:
 //
@@ -19,6 +21,13 @@
 // table's columns (pragma table_info, with each column's collation), its
 // indexes (pragma index_list and index_xinfo) and its foreign keys (pragma
 // foreign_key_list).
+//
+// Foreign keys stay on throughout, as D1 keeps them (D27, amended): a step
+// that asks for them off (foreignKeysOff) or runs a statement that would
+// turn them off fails the case, and so does a step after which they are
+// off. TestRejects runs the cases under SQLITECONVERGE_REJECTS, laid out
+// the same with a want.txt: each must fail to apply, with an error that
+// contains the text of want.txt.
 package sqliteconverge
 
 import (
@@ -131,63 +140,83 @@ func rows(t *testing.T, ctx context.Context, conn *sql.Conn, query string, args 
 }
 
 // applyPlans applies the case's plans in name order.
-func applyPlans(t *testing.T, ctx context.Context, conn *sql.Conn, dir string) {
-	t.Helper()
+func applyPlans(ctx context.Context, conn *sql.Conn, dir string) error {
 	files, err := filepath.Glob(filepath.Join(dir, "plan*.json"))
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	if len(files) == 0 {
-		t.Fatal("the case has no plan")
+		return fmt.Errorf("the case has no plan")
 	}
 	sort.Strings(files)
 	for _, file := range files {
-		applyPlan(t, ctx, conn, file)
+		if err := applyPlan(ctx, conn, file); err != nil {
+			return fmt.Errorf("%s: %w", filepath.Base(file), err)
+		}
 	}
+	return nil
 }
 
-// applyPlan runs the plan's steps as the runner does on SQLite: each step
-// in a BEGIN IMMEDIATE transaction, and a step with foreignKeysOff with
-// foreign keys turned off before it, checked with PRAGMA foreign_key_check
-// before its commit and turned on again after.
-func applyPlan(t *testing.T, ctx context.Context, conn *sql.Conn, file string) {
-	t.Helper()
+// setsForeignKeys reports whether a statement is PRAGMA foreign_keys
+// with a value, which would turn foreign keys off or on. Inside a
+// transaction SQLite ignores it, but D1 has none to be inside.
+func setsForeignKeys(stmt string) bool {
+	fields := strings.Fields(strings.ToLower(strings.NewReplacer("=", " = ", "(", " ( ").Replace(stmt)))
+	return len(fields) > 2 && fields[0] == "pragma" && strings.TrimPrefix(fields[1], "main.") == "foreign_keys"
+}
+
+// applyPlan runs the plan's steps as the runner does on SQLite, each in a
+// BEGIN IMMEDIATE transaction, with foreign keys on throughout: a step that
+// asks for them off, or with a statement that sets them, fails, and so
+// does a step after which they are off. A foreign key the step leaves
+// violated fails its commit.
+func applyPlan(ctx context.Context, conn *sql.Conn, file string) error {
 	b, err := os.ReadFile(file)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	var p plan
 	if err := json.Unmarshal(b, &p); err != nil {
-		t.Fatal(err)
+		return err
 	}
 	if p.Dialect != "sqlite" {
-		t.Fatalf("%s is a plan for %s", file, p.Dialect)
+		return fmt.Errorf("a plan for %s", p.Dialect)
 	}
 	for _, step := range p.Steps {
 		if !step.Transactional {
-			t.Fatalf("step %d %s does not run in a transaction", step.Index, step.Subject)
+			return fmt.Errorf("step %d %s does not run in a transaction", step.Index, step.Subject)
 		}
 		if step.ForeignKeysOff {
-			exec(t, ctx, conn, "PRAGMA foreign_keys = OFF")
+			return fmt.Errorf("step %d %s asks for foreign keys off, which D1 cannot run", step.Index, step.Subject)
 		}
-		exec(t, ctx, conn, "BEGIN IMMEDIATE")
+		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+			return err
+		}
 		for _, stmt := range step.Statements {
-			if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			err := error(nil)
+			if setsForeignKeys(stmt) {
+				err = fmt.Errorf("it sets foreign_keys, which D1 cannot run")
+			} else {
+				_, err = conn.ExecContext(ctx, stmt)
+			}
+			if err != nil {
 				_, _ = conn.ExecContext(ctx, "ROLLBACK")
-				t.Fatalf("step %d %s: %v\n%s", step.Index, step.Subject, err, stmt)
+				return fmt.Errorf("step %d %s: %w\n%s", step.Index, step.Subject, err, stmt)
 			}
 		}
-		if step.ForeignKeysOff {
-			if violations := rows(t, ctx, conn, "PRAGMA foreign_key_check"); len(violations) > 0 {
-				_, _ = conn.ExecContext(ctx, "ROLLBACK")
-				t.Fatalf("step %d %s: foreign_key_check: %v", step.Index, step.Subject, violations)
-			}
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			_, _ = conn.ExecContext(ctx, "ROLLBACK")
+			return fmt.Errorf("step %d %s: commit: %w", step.Index, step.Subject, err)
 		}
-		exec(t, ctx, conn, "COMMIT")
-		if step.ForeignKeysOff {
-			exec(t, ctx, conn, "PRAGMA foreign_keys = ON")
+		var on int
+		if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&on); err != nil {
+			return err
+		}
+		if on != 1 {
+			return fmt.Errorf("step %d %s leaves foreign keys off", step.Index, step.Subject)
 		}
 	}
+	return nil
 }
 
 // catalog reads the schema of a database as sorted lines, compared by name.
@@ -278,7 +307,9 @@ func TestConvergence(t *testing.T) {
 			planned := open(t, ctx, "planned.db")
 			execScript(t, ctx, planned, dir, "from.sql")
 			execScript(t, ctx, planned, dir, "seed.sql")
-			applyPlans(t, ctx, planned, dir)
+			if err := applyPlans(ctx, planned, dir); err != nil {
+				t.Fatal(err)
+			}
 			if violations := rows(t, ctx, planned, "PRAGMA foreign_key_check"); len(violations) > 0 {
 				t.Errorf("foreign_key_check after the plan: %v", violations)
 			}
@@ -300,6 +331,40 @@ func TestConvergence(t *testing.T) {
 			created := open(t, ctx, "created.db")
 			execScript(t, ctx, created, dir, "to.sql")
 			compare(t, catalog(t, ctx, planned), catalog(t, ctx, created))
+		})
+	}
+}
+
+// TestRejects shows that applying a plan fails on a step that turns
+// foreign keys off: each case under SQLITECONVERGE_REJECTS must fail to
+// apply, with an error that contains the text of its want.txt.
+func TestRejects(t *testing.T) {
+	casesDir := os.Getenv("SQLITECONVERGE_REJECTS")
+	if casesDir == "" {
+		t.Skip("SQLITECONVERGE_REJECTS is not set; run through TestConvergenceOnSQLite")
+	}
+	entries, err := os.ReadDir(casesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(casesDir, entry.Name())
+		t.Run(entry.Name(), func(t *testing.T) {
+			b, err := os.ReadFile(filepath.Join(dir, "want.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := strings.TrimSpace(string(b))
+			conn := open(t, ctx, "planned.db")
+			execScript(t, ctx, conn, dir, "from.sql")
+			execScript(t, ctx, conn, dir, "seed.sql")
+			if err := applyPlans(ctx, conn, dir); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("apply = %v, want an error containing %q", err, want)
+			}
 		})
 	}
 }

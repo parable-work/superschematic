@@ -36,10 +36,13 @@ const indexExportLine = `export * from "./service.generated";`
 
 // Options configures EnsureSiblings.
 type Options struct {
-	// ReadTSConfig reads a TypeScript-form schema.config.ts for a service
-	// directory. Wired to tsreader.ReadServiceConfig by the build command;
-	// kept as a hook so this package does not depend on the tsreader.
-	ReadTSConfig func(servicePath string) (*schemaconfig.SchemaConfig, error)
+	// ReadTSIdentity reads the name and kind of a TypeScript-form
+	// schema.config.ts for a service directory. Wired to
+	// tsreader.ReadServiceIdentity, which evaluates no other key, so a
+	// config that imports a sibling's sentinel is read before that sentinel
+	// exists (D34). Kept as a hook so this package does not depend on the
+	// tsreader.
+	ReadTSIdentity func(servicePath string) (*schemaconfig.SchemaConfig, error)
 
 	// Registry supplies the kind set and the KindSpec.NoSentinel flag per
 	// kind. nil means the core kinds, each of which gets a sentinel.
@@ -224,10 +227,10 @@ func EnsureSiblings(servicesRoot string, opts Options) error {
 
 		cfg, err := schemaconfig.ReadFile(dir, opts.Registry)
 		if errors.Is(err, os.ErrNotExist) {
-			if opts.ReadTSConfig == nil {
+			if opts.ReadTSIdentity == nil {
 				continue
 			}
-			cfg, err = opts.ReadTSConfig(dir)
+			cfg, err = opts.ReadTSIdentity(dir)
 		}
 		if err != nil {
 			return fmt.Errorf("service %s: reading config: %w", entry.Name(), err)

@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -78,5 +83,64 @@ func TestTargetImportsSiblingSentinelsReadsTheKindSpec(t *testing.T) {
 	}
 	if targetImportsSiblingSentinels(t.TempDir(), reg) {
 		t.Error("a directory with no config was detected")
+	}
+}
+
+// TestConfigImportsSentinelsScansForAnyOtherModule: a single build sweeps
+// the sibling sentinels when the target's config imports anything but the
+// config package, under its name or an alias.
+func TestConfigImportsSentinelsScansForAnyOtherModule(t *testing.T) {
+	n := naming.Default()
+	n.PackageAliases = map[string]string{"@acme/schema-config": "@superschematic/schema-config"}
+	configOnly := writeServiceDir(t, map[string]string{
+		"schema.config.ts": `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+import { service } from "@acme/schema-config";
+export default defineConfig({ name: "x", kind: SchemaKind.API, authDb: service({ name: "db", kind: SchemaKind.DB }), outputs: {} });
+`,
+	})
+	if configImportsSentinels(configOnly, n) {
+		t.Error("a config importing only the config package (and its alias) was taken for one importing sentinels")
+	}
+	importsSentinel := writeServiceDir(t, map[string]string{
+		"schema.config.ts": `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+import { ShopDb } from "@acme/shop-db";
+export default defineConfig({ name: "x", kind: SchemaKind.API, authDb: ShopDb, outputs: {} });
+`,
+	})
+	if !configImportsSentinels(importsSentinel, n) {
+		t.Error("a config importing a sibling's sentinel was not detected")
+	}
+	if configImportsSentinels(writeServiceDir(t, map[string]string{"schema.config.json": `{}`}), n) {
+		t.Error("a data-form config imports nothing")
+	}
+}
+
+// TestEveryBuildReadsAConfigWhoseSiblingHasNoSentinelYet: fixture-authdb-import's
+// config imports FixtureDb from fixture-db. With fixture-db's sentinel
+// deleted, as for a service never built, each build command writes the
+// sentinel before it reads the config (D34).
+func TestEveryBuildReadsAConfigWhoseSiblingHasNoSentinelYet(t *testing.T) {
+	for _, args := range [][]string{
+		{"build-all", "SERVICES"},
+		{"build", "--with-deps", "SERVICES/fixture-authdb-import"},
+		{"build", "SERVICES/fixture-authdb-import"},
+	} {
+		t.Run(strings.Join(args[:len(args)-1], " "), func(t *testing.T) {
+			servicesRoot := prepareTSServicesRoot(t, "fixture-db", "fixture-authdb-import")
+			dbSentinel := filepath.Join(servicesRoot, "fixture-db", "src", "service.generated.ts")
+			require.NoError(t, os.Remove(dbSentinel))
+
+			argv := append([]string(nil), args...)
+			argv[len(argv)-1] = strings.Replace(argv[len(argv)-1], "SERVICES", servicesRoot, 1)
+			buf := new(bytes.Buffer)
+			root := New(Config{})
+			root.SetOut(buf)
+			root.SetErr(new(bytes.Buffer))
+			root.SetArgs(append(argv, "--out", t.TempDir()))
+			require.NoError(t, root.Execute(), buf.String())
+
+			assert.Contains(t, buf.String(), "sentinel written for fixture-db")
+			assert.FileExists(t, dbSentinel)
+		})
 	}
 }

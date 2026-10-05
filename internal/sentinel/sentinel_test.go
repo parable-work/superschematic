@@ -261,7 +261,7 @@ func TestEnsureSiblings(t *testing.T) {
 	var tsReads []string
 	err := EnsureSiblings(root, Options{
 		Registry: groupingRegistry(t),
-		ReadTSConfig: func(servicePath string) (*schemaconfig.SchemaConfig, error) {
+		ReadTSIdentity: func(servicePath string) (*schemaconfig.SchemaConfig, error) {
 			name := filepath.Base(servicePath)
 			tsReads = append(tsReads, name)
 			if name == "grouping-svc" {
@@ -281,7 +281,7 @@ func TestEnsureSiblings(t *testing.T) {
 		t.Errorf("ts-form sibling got no sentinel: %v", err)
 	}
 	if len(tsReads) != 2 || tsReads[0] != "grouping-svc" || tsReads[1] != "ts-svc" {
-		t.Errorf("ReadTSConfig calls = %v, want grouping-svc and ts-svc", tsReads)
+		t.Errorf("ReadTSIdentity calls = %v, want grouping-svc and ts-svc", tsReads)
 	}
 	for _, dir := range []string{noTSConfig, notAService, underscoreSvc, groupingSvc} {
 		if _, err := os.Stat(filepath.Join(dir, "src", "service.generated.ts")); err == nil {
@@ -299,7 +299,7 @@ func TestEnsureSiblings(t *testing.T) {
 	tsReads = nil
 	err = EnsureSiblings(root, Options{
 		Registry: groupingRegistry(t),
-		ReadTSConfig: func(servicePath string) (*schemaconfig.SchemaConfig, error) {
+		ReadTSIdentity: func(servicePath string) (*schemaconfig.SchemaConfig, error) {
 			name := filepath.Base(servicePath)
 			tsReads = append(tsReads, name)
 			if name == "grouping-svc" {
@@ -312,7 +312,7 @@ func TestEnsureSiblings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(tsReads) != 1 || tsReads[0] != "grouping-svc" {
-		t.Errorf("ReadTSConfig calls = %v, want just grouping-svc (ts-svc is fresh)", tsReads)
+		t.Errorf("ReadTSIdentity calls = %v, want just grouping-svc (ts-svc is fresh)", tsReads)
 	}
 }
 

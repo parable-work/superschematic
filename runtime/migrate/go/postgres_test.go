@@ -24,7 +24,7 @@ func TestPostgresStepOutsideATransactionRecovers(t *testing.T) {
 			name = "without a recovery"
 		}
 		t.Run(name, func(t *testing.T) {
-			url := testdb.Postgres(t)
+			url := testdb.NewPostgres(t)
 			r := newRunner(t, url)
 			apply(t, r, plan(t, migrate.Postgres, "01-create"), migrate.All)
 			seed(t, url)
@@ -91,7 +91,7 @@ func TestPostgresLockTimeoutRetry(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ctx := context.Background()
-			url := testdb.Postgres(t)
+			url := testdb.NewPostgres(t)
 			apply(t, newRunner(t, url), plan(t, migrate.Postgres, "01-create"), migrate.All)
 
 			holder := testdb.PostgresConn(t, url)
@@ -156,7 +156,7 @@ func TestPostgresLockTimeoutRetry(t *testing.T) {
 // the last retry with the lock timeout, and the plan stays in progress.
 func TestPostgresLockTimeoutGivesUp(t *testing.T) {
 	ctx := context.Background()
-	url := testdb.Postgres(t)
+	url := testdb.NewPostgres(t)
 	apply(t, newRunner(t, url), plan(t, migrate.Postgres, "01-create"), migrate.All)
 	holder := testdb.PostgresConn(t, url)
 	tx, err := holder.Begin(ctx)

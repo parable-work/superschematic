@@ -1425,8 +1425,10 @@ registrations.
    `authDb`, in the TypeScript type and the data-form schema, valid on an
    API config and naming API services. It is a build-order edge, and the
    build plan refuses a cycle of `calls`; ordering outputs instead is the
-   follow-up in section 3.3. A naming-file key holds the implementation
-   path templates.
+   follow-up in section 3.3. A config imports its handles as siblings'
+   sentinels (D34): the import rule is in the static config read, and the
+   sentinel sweep runs before discovery. A naming-file key holds the
+   implementation path templates.
 6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
    and TypeScript HTTP runtimes (section 9.5), and a service credential
    source in the SDKs (section 9.6).

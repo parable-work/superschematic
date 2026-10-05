@@ -1,0 +1,108 @@
+{
+  "dialect": "sqlite",
+  "expanded": "69e79010513c0e6302fb14f3c909699a17e4c7c3bccd54993139b839dd9f186c",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "8163705036a768cc7a7f84f10752b989491029e08dcebc9077a6515c236b704e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/total",
+          "reason": "Order.total changes from INTEGER to REAL: the cast truncates or rounds values REAL cannot hold exactly.",
+          "subject": "table/order/column/total"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Copying customer, order, order_label and order_line holds the database's write lock for time that grows with the tables.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/total",
+          "reason": "Order.total changes from INTEGER to REAL: servers built from the previous version still read and write INTEGER.",
+          "subject": "table/order/column/total"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "SQLite's ALTER TABLE cannot drop NOT NULL from created_at in customer, nor change the type of total in order, so the step rebuilds customer and order with the tables that reference them, directly or through another table: order_label and order_line. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_customer\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"email\" TEXT COLLATE NOCASE NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),\n  \"referrer_id\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" REAL NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"note\" TEXT,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_customer\" (\"id\", \"name\", \"email\", \"created_at\", \"referrer_id\")\nSELECT \"id\", \"name\", \"email\", \"created_at\", \"referrer_id\"\nFROM \"customer\"",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"customer_id\", CAST(\"total\" AS REAL), \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"order_id\"\nFROM \"order_line\"",
+        "DROP TABLE \"order_label\"",
+        "DROP TABLE \"order_line\"",
+        "DROP TABLE \"order\"",
+        "DROP TABLE \"customer\"",
+        "ALTER TABLE \"_new_customer\" RENAME TO \"customer\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\"",
+        "CREATE UNIQUE INDEX \"customer_email_key\" ON \"customer\" (\"email\")",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Copying customer, order, order_label and order_line holds the database's write lock for time that grows with the tables.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "SQLite's ALTER TABLE cannot drop the default of created_at, so the step rebuilds customer with the tables that reference it, directly or through another table: order, order_label and order_line. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 2,
+      "op": "copyTable",
+      "phase": "contract",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_customer\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"email\" TEXT COLLATE NOCASE NOT NULL,\n  \"created_at\" TEXT,\n  \"referrer_id\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" REAL NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"note\" TEXT,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_customer\" (\"id\", \"name\", \"email\", \"created_at\", \"referrer_id\")\nSELECT \"id\", \"name\", \"email\", \"created_at\", \"referrer_id\"\nFROM \"customer\"",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"note\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"note\", \"order_id\"\nFROM \"order_line\"",
+        "DROP TABLE \"order_label\"",
+        "DROP TABLE \"order_line\"",
+        "DROP TABLE \"order\"",
+        "DROP TABLE \"customer\"",
+        "ALTER TABLE \"_new_customer\" RENAME TO \"customer\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\"",
+        "CREATE UNIQUE INDEX \"customer_email_key\" ON \"customer\" (\"email\")",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    }
+  ],
+  "to": "f4fc440137cf4bd1e00a2bf485ff7c412f7ace3502d50723eba8e6cc8cfeb580",
+  "toModel": null,
+  "version": 1
+}

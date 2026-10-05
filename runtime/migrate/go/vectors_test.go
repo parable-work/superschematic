@@ -23,7 +23,9 @@ import (
 var vectorsDir = filepath.Join("..", "testdata", "plans")
 
 // TestCompilerVectors applies every case of the compiler's plan vectors on
-// the dialect its plans name: the chain ends at the last plan's to, a second
+// each backend of the dialect its plans name (a SQLite case on a SQLite
+// file and on D1, unless a plan turns foreign keys off, which D1 cannot
+// run): the chain ends at the last plan's to, a second
 // run of each plan does nothing, a plan from the model the one before it
 // holds between its phases supersedes that plan's contract, a failure
 // injected after any step resumes to the same catalog, two runners at once
@@ -82,11 +84,23 @@ func compilerVector(t *testing.T, paths []string) {
 		chain = append(chain, p)
 		phases = append(phases, migrate.All)
 	}
-	dialect := chain[0].Dialect
+	for _, db := range testdb.Backends {
+		if db.Dialect() == chain[0].Dialect {
+			t.Run(string(db), func(t *testing.T) {
+				skipForeignKeysOff(t, db, chain...)
+				compilerVectorOn(t, db, chain, phases)
+			})
+		}
+	}
+}
+
+// compilerVectorOn applies a case's chain on one backend.
+func compilerVectorOn(t *testing.T, db testdb.Backend, chain []*migrate.Plan, phases []migrate.Phase) {
+	dialect := db.Dialect()
 	last := chain[len(chain)-1]
 
 	t.Run("applies", func(t *testing.T) {
-		url := testdb.New(t, dialect)
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
 		for i, p := range chain {
 			result := apply(t, r, p, phases[i])
@@ -124,11 +138,11 @@ func compilerVector(t *testing.T, paths []string) {
 	})
 
 	t.Run("resumes after a failure", func(t *testing.T) {
-		resumeAfterEveryStep(t, dialect, chain, phases)
+		resumeAfterEveryStep(t, db, chain, phases)
 	})
 
 	t.Run("two runners serialize", func(t *testing.T) {
-		url := testdb.New(t, dialect)
+		url := testdb.New(t, db)
 		first, second := newRunner(t, url), newRunner(t, url)
 		for i, p := range chain {
 			var wg sync.WaitGroup
@@ -159,7 +173,7 @@ func compilerVector(t *testing.T, paths []string) {
 	})
 
 	t.Run("the wrong baseline is refused", func(t *testing.T) {
-		url := testdb.New(t, dialect)
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
 		decoy, err := migrate.ReadModel([]byte(fmt.Sprintf(`{"version":1,"dialect":%q,"service":%q,"decoy":true}`, dialect, chain[0].Service)))
 		if err != nil {

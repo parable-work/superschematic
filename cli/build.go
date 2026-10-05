@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -128,6 +129,28 @@ func targetImportsSiblingSentinels(servicePath string, reg *registry.Registry) b
 	return false
 }
 
+// configImportPattern matches the import declarations of a schema.config.ts:
+// `import ... from "<specifier>"` and `import "<specifier>"`.
+var configImportPattern = regexp.MustCompile(`(?m)^\s*import\b[^'"]*['"]([^'"]+)['"]`)
+
+// configImportsSentinels reports whether the target's schema.config.ts
+// imports anything but the config package, which the config import rule
+// allows only for other services' sentinels (D34). It scans the text, so
+// it needs no compiler program; a false positive only triggers an extra
+// idempotent sentinel sweep.
+func configImportsSentinels(servicePath string, n naming.Naming) bool {
+	data, err := os.ReadFile(filepath.Join(servicePath, "schema.config.ts"))
+	if err != nil {
+		return false
+	}
+	for _, match := range configImportPattern.FindAllStringSubmatch(string(data), -1) {
+		if n.DeclaringPackage(match[1]) != sentinel.ConfigPackage {
+			return true
+		}
+	}
+	return false
+}
+
 func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string) error {
 	if info, err := os.Stat(servicePath); err != nil || !info.IsDir() {
 		return fmt.Errorf("service directory not found: %s", servicePath)
@@ -165,27 +188,19 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 		return err
 	}
 
-	// A service whose kind imports sibling sentinels needs those files on
-	// disk before its program is constructed.
+	// Sibling sentinels must be on disk before a program that imports them
+	// is constructed: for a target whose kind imports them, a target whose
+	// config imports them (D34), and --with-deps, whose discovery reads every
+	// sibling's config.
 	if err := prof.Measure("build.sibling-sentinels", func() error {
-		if !targetImportsSiblingSentinels(servicePath, reg) {
+		if !flags.withDeps && !targetImportsSiblingSentinels(servicePath, reg) && !configImportsSentinels(servicePath, names) {
 			return nil
 		}
 		absServicePath, err := filepath.Abs(servicePath)
 		if err != nil {
 			return fmt.Errorf("resolving service path: %w", err)
 		}
-		err = sentinel.EnsureSiblings(filepath.Dir(absServicePath), sentinel.Options{
-			ReadTSConfig: func(servicePath string) (*schemaconfig.SchemaConfig, error) {
-				return tsreader.ReadServiceConfig(servicePath, reg)
-			},
-			Registry: reg,
-			Log:      cmd.OutOrStdout(),
-		})
-		if err != nil {
-			return err
-		}
-		return nil
+		return buildplan.EnsureSentinels(filepath.Dir(absServicePath), reg, cmd.OutOrStdout())
 	}); err != nil {
 		return err
 	}
@@ -276,24 +291,6 @@ func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.N
 		closureNames = append(closureNames, service.Name)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Resolved %d schema services for %s: %s\n", len(closure), rootName, strings.Join(closureNames, ", "))
-
-	// runBuild wrote the target's sibling sentinels when its kind needs
-	// them; a closure member of such a kind needs them too.
-	for _, service := range closure {
-		if spec, ok := reg.Kind(string(service.Config.Kind)); !ok || !spec.ImportsSiblingSentinels {
-			continue
-		}
-		if err := sentinel.EnsureSiblings(servicesRoot, sentinel.Options{
-			ReadTSConfig: func(servicePath string) (*schemaconfig.SchemaConfig, error) {
-				return tsreader.ReadServiceConfig(servicePath, reg)
-			},
-			Registry: reg,
-			Log:      cmd.OutOrStdout(),
-		}); err != nil {
-			return err
-		}
-		break
-	}
 
 	// The catalog is build-all's: a document that references another service
 	// by name resolves it against every discovered service, not only the

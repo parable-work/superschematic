@@ -1,0 +1,45 @@
+{
+  "dialect": "sqlite",
+  "from": "2be41de309ceb7e25eeb709dbd0a2181962ed2c23f8da980de88903b6aafc0c3",
+  "hash": "2bcf7cd52f37038d70ca93fd80ec29acb60290ac1d362eabccb5dccb9744512e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/product",
+          "reason": "Copying product holds the database's write lock for time that grows with the table.",
+          "subject": "table/product"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/product/column/items",
+          "reason": "Product.items changes from a list of BOOLEAN to a list of TEXT: servers built from the previous version still read and write a list of BOOLEAN.",
+          "subject": "table/product/column/items"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/product",
+          "reason": "SQLite's ALTER TABLE cannot convert the elements of items, so the step rebuilds product: it copies the rows into a new table, drops the old one and renames the new one.",
+          "subject": "table/product"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"items\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "INSERT INTO \"_new_product\" (\"id\", \"title\", \"price\", \"items\")\nSELECT \"id\", \"title\", \"price\", CASE WHEN \"product\".\"items\" IS NOT NULL THEN (SELECT json_group_array(CASE WHEN \"_element\".\"value\" THEN 'true' WHEN NOT \"_element\".\"value\" THEN 'false' END ORDER BY \"_element\".\"key\") FROM json_each(\"product\".\"items\") AS \"_element\") END\nFROM \"product\"",
+        "DROP TABLE \"product\"",
+        "ALTER TABLE \"_new_product\" RENAME TO \"product\""
+      ],
+      "subject": "table/product",
+      "transactional": true
+    }
+  ],
+  "to": "70a84da9fa317641bee19121252de0ceb49115b491816fa7b7cb4d191f3934b1",
+  "toModel": null,
+  "version": 1
+}

@@ -187,21 +187,25 @@ type seedCheck struct {
 	SQL  string `json:"sql"`
 }
 
-// seeds is how a dialect seeds rows: value is a literal of a column type,
-// or false for a type it has none for, and same compares a column with a
-// literal, true when both are null.
+// seeds is how a dialect seeds rows: value is a literal for a column, or
+// false for a column whose type it has none for, and same compares a
+// column with a literal, true when both are null.
 type seeds struct {
-	value func(sqlType string, n, i int) (string, bool)
+	value func(col *Column, n, i int) (string, bool)
 	same  string
 }
 
-var postgresSeeds = seeds{value: seedValue, same: "IS NOT DISTINCT FROM"}
+var postgresSeeds = seeds{
+	value: func(col *Column, n, i int) (string, bool) { return seedValue(col.Type, n, i) },
+	same:  "IS NOT DISTINCT FROM",
+}
 
 // seedRows inserts one row into every entity and join table of from, with
 // a value in every column it can give one, and returns the checks that
 // each row is still there after the plan, under the new names, with the
-// values of the columns the plan keeps and does not retype. A table that
-// becomes versioned must have one history image per row.
+// values of the columns the plan keeps and does not retype, nor change a
+// list's element of. A table that becomes versioned must have one history
+// image per row.
 func seedRows(t *testing.T, from, to *Model, r *renames, dialect seeds) (string, []seedCheck) {
 	t.Helper()
 	keys := map[string]string{} // table -> literal of its seeded row's key
@@ -258,7 +262,7 @@ func seedRows(t *testing.T, from, to *Model, r *renames, dialect seeds) (string,
 		for _, col := range table.Columns {
 			v, ok := row[col.Name]
 			newCol := columnNamed(tt, r.column(table.Name, col.Name))
-			if !ok || newCol == nil || newCol.Type != col.Type {
+			if !ok || newCol == nil || newCol.Type != col.Type || newCol.Element != col.Element {
 				continue
 			}
 			conds = append(conds, fmt.Sprintf("%s %s %s", q(newCol.Name), dialect.same, v))
@@ -288,7 +292,7 @@ func seedRows(t *testing.T, from, to *Model, r *renames, dialect seeds) (string,
 // seedRow picks a value for every column of table it can: a foreign key
 // takes the seeded key of the table it references, which must be seeded
 // first unless the column is nullable.
-func seedRow(table *Table, n int, keys map[string]string, value func(sqlType string, n, i int) (string, bool)) (map[string]string, bool) {
+func seedRow(table *Table, n int, keys map[string]string, value func(col *Column, n, i int) (string, bool)) (map[string]string, bool) {
 	row := map[string]string{}
 	refs := map[string]string{}
 	for _, fk := range table.ForeignKeys {
@@ -308,7 +312,7 @@ func seedRow(table *Table, n int, keys map[string]string, value func(sqlType str
 			}
 			continue
 		}
-		v, ok := value(col.Type, n, i)
+		v, ok := value(col, n, i)
 		if !ok {
 			if !col.Nullable && col.Default == "" {
 				return nil, false

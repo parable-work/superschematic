@@ -21,7 +21,7 @@ func (postgresDialect) name() Dialect { return Postgres }
 
 func (postgresDialect) canAlter(*change) bool { return true }
 
-func (postgresDialect) rebuild(*Table, *Table, []*change) (rendered, error) {
+func (postgresDialect) rebuild(*tableRebuild) (rendered, error) {
 	return rendered{}, errors.New("sqlmigrate: postgres alters every table in place")
 }
 
