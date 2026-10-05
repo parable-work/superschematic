@@ -2688,31 +2688,6 @@ byte for byte.
 
 The rule is reversible until the first release.
 
-## D34. A schema config imports a sibling's sentinel
-
-A `schema.config.ts` names other services in `authDb` and `dependencies`,
-and D30 adds `calls`. The build plan lets a config import only
-`@superschematic/schema-config` (`checkConfigPurity` in
-`internal/buildplan/buildplan.go`, from the bootstrap commit `0b783d15`),
-so each reference is an inline `service({ name, kind })`: a name in a
-string, which the loader checks and the editor cannot. The rule's comment
-gives the source tree's reason: its platform model imports configs as
-identity references and runs them. superschematic reads a config
-statically and never runs one, and D30 rejected an executable model. The
-static read already follows an imported sentinel to its `service({...})`
-initializer, so `build` loads `fixture-authdb-import`, whose config imports
-`FixtureDb`, where `build-all` and `build --with-deps` refuse it.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A `schema.config.ts` may import a sibling service's sentinel (`import { ShopDb } from "@acme/shop-db"`) and use it wherever a handle goes: `authDb`, `dependencies` and `calls`. `service({ name, kind })` stays valid in the TypeScript form, and the data forms keep their spellings: `authDb` a name, the lists `{name, kind}`. A reference is then the value D30 asks for. tsc refuses a misspelt or renamed service where it is written, and the editor finds every config that names a service. | `service({...})` as the only spelling, which restates the callee's name and kind as strings in every caller and leaves a typo to the next build; a naming-file switch that keeps the old rule for a tree whose configs run as modules, which no superschematic tree has, and whose configs can keep writing `service({...})` |
-| One import rule, in the static read every command shares (`tsreader`). A config imports the config package, under its name or an alias, and from any other module only bindings that resolve to a sentinel: an `export const X = service({...})` in a `service.generated.ts`. A type, a schema class, a default or namespace import and a side-effect import are refused at the import. The build plan's textual scan goes, so `build`, `build-all` and `build --with-deps` accept the same configs. | Extending the scan with the siblings' package names, which differ per tree (`@acme/*`, `@schemas/*`) and still admit a schema class; no rule, which lets a config pull in any code |
-| Configs are leaves. No module imports one, and a sentinel imports only the config package and, under typed handles (`docs/stack-model.md` section 4.3), its own service's `@envVars` type. So no import path leads from a sentinel back to a config, and two APIs that call each other import each other's sentinels without a module cycle. The build-order cycle that mutual `calls` forms is the build plan's to report (stack-model section 3.3). | Importing a sibling's config, which makes configs import configs and brings back the cycle the old rule guarded against |
-| Sentinels come before discovery. A sentinel is a function of its own service's `name` and `kind`, plus the `@envVars` type that loading the service adds, and never of another sentinel. The sweep that writes sentinels reads only those two properties, which must be literals. `build-all`, `build --with-deps` and a `build` whose config imports a sentinel run it before any config is read in full. It writes a sentinel that is missing or whose name or kind changed, and keeps the type arguments a build wrote. | Ordering discovery by the configs' imports, which reads each config twice and still fails on a sentinel no build has written; relying on committed sentinels, which leaves a new service unreferenceable until it is built once |
-| Under typed handles, a config that imports an API's sentinel type-depends on that API's `@envVars` class, so tsc checks the config with the callee's schema files in its program. That cost is tsc's: superschematic's read follows only the `service({...})` argument, and the type import is erased at run time. | A second, untyped handle per service for configs to import, which keeps the callee's schema out of the config's program but gives each service two handles and two spellings |
-
-Nothing here is built yet. The rule is reversible until the first release.
-
 ### D29, amended: the Rust router refuses with RFC 9457 problems and names each request
 
 D29 kept the Rust router's error envelope, `{"error": {"code",
@@ -2741,6 +2716,31 @@ serde_json's `arbitrary_precision` and `preserve_order`.
 
 The rule is reversible until the first release.
 
+## D34. A schema config imports a sibling's sentinel
+
+A `schema.config.ts` names other services in `authDb` and `dependencies`,
+and D30 adds `calls`. The build plan lets a config import only
+`@superschematic/schema-config` (`checkConfigPurity` in
+`internal/buildplan/buildplan.go`, from the bootstrap commit `0b783d15`),
+so each reference is an inline `service({ name, kind })`: a name in a
+string, which the loader checks and the editor cannot. The rule's comment
+gives the source tree's reason: its platform model imports configs as
+identity references and runs them. superschematic reads a config
+statically and never runs one, and D30 rejected an executable model. The
+static read already follows an imported sentinel to its `service({...})`
+initializer, so `build` loads `fixture-authdb-import`, whose config imports
+`FixtureDb`, where `build-all` and `build --with-deps` refuse it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `schema.config.ts` may import a sibling service's sentinel (`import { ShopDb } from "@acme/shop-db"`) and use it wherever a handle goes: `authDb`, `dependencies` and `calls`. `service({ name, kind })` stays valid in the TypeScript form, and the data forms keep their spellings: `authDb` a name, the lists `{name, kind}`. A reference is then the value D30 asks for. tsc refuses a misspelt or renamed service where it is written, and the editor finds every config that names a service. | `service({...})` as the only spelling, which restates the callee's name and kind as strings in every caller and leaves a typo to the next build; a naming-file switch that keeps the old rule for a tree whose configs run as modules, which no superschematic tree has, and whose configs can keep writing `service({...})` |
+| One import rule, in the static read every command shares (`tsreader`). A config imports the config package, under its name or an alias, and from any other module only bindings that resolve to a sentinel: an `export const X = service({...})` in a `service.generated.ts`. A type, a schema class, a default or namespace import and a side-effect import are refused at the import. The build plan's textual scan goes, so `build`, `build-all` and `build --with-deps` accept the same configs. | Extending the scan with the siblings' package names, which differ per tree (`@acme/*`, `@schemas/*`) and still admit a schema class; no rule, which lets a config pull in any code |
+| Configs are leaves. No module imports one, and a sentinel imports only the config package and, under typed handles (`docs/stack-model.md` section 4.3), its own service's `@envVars` type. So no import path leads from a sentinel back to a config, and two APIs that call each other import each other's sentinels without a module cycle. The build-order cycle that mutual `calls` forms is the build plan's to report (stack-model section 3.3). | Importing a sibling's config, which makes configs import configs and brings back the cycle the old rule guarded against |
+| Sentinels come before discovery. A sentinel is a function of its own service's `name` and `kind`, plus the `@envVars` type that loading the service adds, and never of another sentinel. The sweep that writes sentinels reads only those two properties, which must be literals. `build-all`, `build --with-deps` and a `build` whose config imports a sentinel run it before any config is read in full. It writes a sentinel that is missing or whose name or kind changed, and keeps the type arguments a build wrote. | Ordering discovery by the configs' imports, which reads each config twice and still fails on a sentinel no build has written; relying on committed sentinels, which leaves a new service unreferenceable until it is built once |
+| Under typed handles, a config that imports an API's sentinel type-depends on that API's `@envVars` class, so tsc checks the config with the callee's schema files in its program. That cost is tsc's: superschematic's read follows only the `service({...})` argument, and the type import is erased at run time. | A second, untyped handle per service for configs to import, which keeps the callee's schema out of the config's program but gives each service two handles and two spellings |
+
+Nothing here is built yet. The rule is reversible until the first release.
+
 ## D38. The Rust server builds from the shared API output, and serves its OpenAPI document
 
 The Rust server's generator ran apigen itself, without the service's
@@ -2768,6 +2768,63 @@ off. `TestRustAPIWithEnvVarsCompilesItsConfigModule` builds a Rust API with
 an `@envVars` class through `generator.Run` and loads its config. The
 `rustapigen` package keeps the crate metadata the Rust server and SDK
 share and no longer extracts endpoints.
+
+The rule is reversible until the first release.
+
+## D35. The servers agree on a route's traffic controls
+
+An audit of the traffic controls (D29) found the Go and TypeScript servers
+disagreeing where nothing said so. A `@rateLimit`, `@bodyLimit` or
+`@timeout` of 0 built: the Go router then answered 429 or 504 to every
+request, and the TypeScript and Rust routers dropped the directive. A
+fraction was truncated, so `@timeout({ seconds: 0.5 })` was 0. The
+TypeScript router keyed its rate limit by the first `X-Forwarded-For` hop,
+so a client chose its own bucket by sending the header; the Go router keys
+by chi's client IP, which the service sets from a proxy it trusts, or by
+the socket. Its pipeline ran the body limit before the rate limit and the
+gate, and its timeout covered `authenticate` too; the Go router runs the
+rate limit, the body limit and the permission check, then the timeout
+around the handler. A non-Bearer `Authorization` header (`ApiKey …`)
+answered 400 from hono/bearer-auth before a custom `authenticate` saw it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `@rateLimit`, `@bodyLimit` or `@timeout` value is a whole number of at least 1. The TypeScript reader refuses another when it reads the decorator; the verify pass refuses a value below 1 in a schema authored as IR. The Rust generator's reading of a value below 1 as no directive (D29) stays as a guard. | Reading 0 as no directive, which the TypeScript and Rust servers did, leaving the Go server's reading unexplained |
+| The TypeScript runtime keys a rate limit by the transport's peer address (`remoteAddressKey`), as the Go and Rust runtimes fall back to the socket. `RequestContext.remoteAddress` carries it; `clientIp` stays the forwarded client IP for a service that wants it, and `clientIpKey` keys by it behind a proxy the service trusts (`rateLimit: { keyOf: clientIpKey }`). | Keeping `X-Forwarded-For` as the default, which lets a client pick its bucket when no proxy sets the header |
+| The TypeScript route runs the Go router's order: the webhook verifier, the rate limit, the body limit, the bearer parse and the permission gate, then decoding and the implementation under the timeout. One `RequestContext` serves every step; its `raw` reads the Hono request when read, since the verifier and hono/body-limit each hand the route a fresh copy. The timeout is the runtime's own race, not hono/timeout, and still aborts `ctx.signal`. | Leaving the order as it was, with a refused body costing no rate-limit token but an authentication's cost charged to every route with a timeout |
+| hono/bearer-auth parses only a Bearer `Authorization` header (case-insensitively), and a malformed one still answers 400. Any other scheme reaches `authenticate` untouched, and `ctx.bearerToken` is set by the parse before the gate. | Parsing every `Authorization` header, which refuses an API-key scheme before the service's authenticator sees it |
+
+`runtime/http/typescript/src/hono.test.ts` checks the order of the
+refusals, the peer-address key and `clientIpKey`, the timeout around the
+handler and not the gate, and an `ApiKey` header reaching `authenticate`;
+`internal/registry` and `internal/loader/verify` test the refusal of a
+value below 1. The engine serves its routes through the same pipeline.
+
+The rule is reversible until the first release.
+
+## D36. `@publicRoute` opens its route, and a caller decorator beside it is refused
+
+`@publicRoute` on a method of an `Authenticated` set meant different things
+to different targets. The TypeScript reader folded the set into the
+operation, so it carried both `Public` and `Auth`. apigen's `RequiresAuth`
+ignores `Public`, so the Go server, the OpenAPI document, every SDK and the
+Rust server (D29) kept the route protected; the TypeScript server's gate
+returns early on `public`, so it served the route to anyone. Nothing
+refused `@publicRoute` together with `@auth`, `@requirePermission` or
+`@requireOwnership` on the same method either, and the auth guide said a
+`@publicRoute` route is one anyone may call.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@publicRoute` on a method of an `Authenticated` set opens that one route in every target. The TypeScript reader does not fold the set's `Authenticated` into an `@publicRoute` operation, so its `Auth` is false, apigen's `RequiresAuth` is false, and the Go router mounts it with the public routes, the OpenAPI document gives it no bearer scheme, and the TypeScript operation table says `required: false`. | Letting the caller requirement win everywhere, which makes `@publicRoute` in an `Authenticated` set a no-op and changes what the TypeScript server serves |
+| `@publicRoute` together with `@auth`, `@requirePermission` or `@requireOwnership` on the same method is refused, naming the operation and the decorator: by the TypeScript reader at the method, and by the verify pass for a schema authored as IR, where `auth` also stands for an `Authenticated` set. `verify.PublicRouteConflict` is the one rule both use. | Refusing `@publicRoute` inside an `Authenticated` set as well, which forces an open route out of the set it belongs with |
+
+apigen's formula for `RequiresAuth` does not change: the reader is the one
+place that decides `Auth`, and the verify pass keeps an IR schema from
+saying both. `internal/loader/tsreader/public_route_test.go` loads an
+`Authenticated` set with an `@publicRoute` method and checks each refused
+pair; `internal/loader/verify/publicroute_test.go` checks the IR form. No
+fixture or example declares either, so no golden changes.
 
 The rule is reversible until the first release.
 

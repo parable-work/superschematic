@@ -17,7 +17,7 @@ func TestApplyValidateConfigPreservesUploadMaxBytes(t *testing.T) {
 	}
 }
 
-func TestUploadMaxBytesLiteralRejectsLossyNumbers(t *testing.T) {
+func TestSafeIntegerLiteralRejectsLossyNumbers(t *testing.T) {
 	tests := []struct {
 		name  string
 		value any
@@ -35,9 +35,9 @@ func TestUploadMaxBytesLiteralRejectsLossyNumbers(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, ok := uploadMaxBytesLiteral(test.value)
+			got, ok := safeIntegerLiteral(test.value)
 			if ok != test.ok || got != test.want {
-				t.Fatalf("uploadMaxBytes literal = (%d, %t), want (%d, %t)", got, ok, test.want, test.ok)
+				t.Fatalf("safe integer literal = (%d, %t), want (%d, %t)", got, ok, test.want, test.ok)
 			}
 		})
 	}
