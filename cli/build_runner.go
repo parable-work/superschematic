@@ -158,6 +158,13 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 	}); err != nil {
 		return nil, err
 	}
+	// The same for the services the schema's decorator arguments name
+	// (D41), which only a load finds.
+	if err := prof.Measure("build.schema-references", func() error {
+		return buildcache.WriteSchemaReferences(opts.SchemasRoot, schema.Name, schema.References, schema.IdentitySentinels)
+	}); err != nil {
+		return nil, err
+	}
 
 	_, _ = fmt.Fprintf(opts.Log, "Build complete: %d outputs generated, %d skipped\n",
 		len(result.Outputs), len(result.Skipped))

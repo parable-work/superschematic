@@ -1,0 +1,148 @@
+{
+  "token": "gcp:compute/globalForwardingRule:GlobalForwardingRule",
+  "terraform": {
+    "type": "google_compute_global_forwarding_rule",
+    "renames": {
+      "allowPscGlobalAccess": "allow_psc_global_access",
+      "deletionPolicy": "deletion_policy",
+      "externalManagedBackendBucketMigrationState": "external_managed_backend_bucket_migration_state",
+      "externalManagedBackendBucketMigrationTestingPercentage": "external_managed_backend_bucket_migration_testing_percentage",
+      "ipAddress": "ip_address",
+      "ipProtocol": "ip_protocol",
+      "ipVersion": "ip_version",
+      "loadBalancingScheme": "load_balancing_scheme",
+      "metadataFilters": "metadata_filters",
+      "metadataFilters.filterLabels": "filter_labels",
+      "metadataFilters.filterMatchCriteria": "filter_match_criteria",
+      "networkTier": "network_tier",
+      "noAutomateDnsZone": "no_automate_dns_zone",
+      "portRange": "port_range",
+      "serviceDirectoryRegistrations": "service_directory_registrations",
+      "serviceDirectoryRegistrations.serviceDirectoryRegion": "service_directory_region",
+      "sourceIpRanges": "source_ip_ranges"
+    }
+  },
+  "inputProperties": {
+    "allowPscGlobalAccess": {
+      "type": "boolean"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "externalManagedBackendBucketMigrationState": {
+      "type": "string"
+    },
+    "externalManagedBackendBucketMigrationTestingPercentage": {
+      "type": "number"
+    },
+    "ipAddress": {
+      "type": "string"
+    },
+    "ipProtocol": {
+      "type": "string"
+    },
+    "ipVersion": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "loadBalancingScheme": {
+      "type": "string"
+    },
+    "metadataFilters": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/GlobalForwardingRuleMetadataFilter:GlobalForwardingRuleMetadataFilter"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "network": {
+      "type": "string"
+    },
+    "networkTier": {
+      "type": "string"
+    },
+    "noAutomateDnsZone": {
+      "type": "boolean"
+    },
+    "portRange": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "serviceDirectoryRegistrations": {
+      "$ref": "#/types/gcp:compute/GlobalForwardingRuleServiceDirectoryRegistrations:GlobalForwardingRuleServiceDirectoryRegistrations"
+    },
+    "sourceIpRanges": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "subnetwork": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "target"
+  ],
+  "types": {
+    "gcp:compute/GlobalForwardingRuleMetadataFilter:GlobalForwardingRuleMetadataFilter": {
+      "type": "object",
+      "properties": {
+        "filterLabels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/GlobalForwardingRuleMetadataFilterFilterLabel:GlobalForwardingRuleMetadataFilterFilterLabel"
+          }
+        },
+        "filterMatchCriteria": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "filterLabels",
+        "filterMatchCriteria"
+      ]
+    },
+    "gcp:compute/GlobalForwardingRuleMetadataFilterFilterLabel:GlobalForwardingRuleMetadataFilterFilterLabel": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "gcp:compute/GlobalForwardingRuleServiceDirectoryRegistrations:GlobalForwardingRuleServiceDirectoryRegistrations": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "serviceDirectoryRegion": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

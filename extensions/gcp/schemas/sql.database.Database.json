@@ -1,0 +1,32 @@
+{
+  "token": "gcp:sql/database:Database",
+  "terraform": {
+    "type": "google_sql_database",
+    "renames": {
+      "deletionPolicy": "deletion_policy"
+    }
+  },
+  "inputProperties": {
+    "charset": {
+      "type": "string"
+    },
+    "collation": {
+      "type": "string"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "instance": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "instance"
+  ]
+}

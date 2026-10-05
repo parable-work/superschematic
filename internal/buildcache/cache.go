@@ -230,6 +230,10 @@ type InputHasher struct {
 	repoRoot       string
 	serviceDigests map[string]string
 	serviceDirs    map[string]string
+
+	// services are the discovered services by name, whose configs the
+	// digest of a schema reference follows (references.go).
+	services map[string]buildplan.Service
 }
 
 // NewInputHasher digests the shared inputs for the given services. names is
@@ -257,11 +261,13 @@ func NewInputHasher(services []buildplan.Service, repoRoot string, names naming.
 
 	serviceDigests := make(map[string]string, len(services))
 	serviceDirs := make(map[string]string, len(services))
+	byName := make(map[string]buildplan.Service, len(services))
 	for _, service := range services {
 		serviceDigests[service.Name] = TreeDigest(service.Dir)
 		serviceDirs[service.Name] = service.Dir
+		byName[service.Name] = service
 	}
-	return &InputHasher{base: base, repoRoot: repoRoot, serviceDigests: serviceDigests, serviceDirs: serviceDirs}
+	return &InputHasher{base: base, repoRoot: repoRoot, serviceDigests: serviceDigests, serviceDirs: serviceDirs, services: byName}
 }
 
 // HashAll computes hashes for topologically sorted services (dependencies
@@ -275,9 +281,9 @@ func (ih *InputHasher) HashAll(services []buildplan.Service) map[string]string {
 }
 
 // Recompute hashes one service against already-computed dependency hashes.
-// Called again after a build so the freshly written authoring-import depfile
-// is part of the stored key (see authoring.go for why storing under the
-// pre-build hash would be unsound).
+// Called again after a build so the freshly written authoring-import and
+// schema-reference depfiles are part of the stored key (see authoring.go for
+// why storing under the pre-build hash would be unsound).
 func (ih *InputHasher) Recompute(service buildplan.Service, depHashes map[string]string) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(ih.base))
@@ -310,6 +316,9 @@ func (ih *InputHasher) Recompute(service buildplan.Service, depHashes map[string
 		}
 		_, _ = fmt.Fprintf(h, "|dep:%s:%s", dep, depHash)
 	}
+	// The services the schema's decorator arguments name, from the depfile
+	// its last build wrote (references.go).
+	ih.writeReferences(h, service.Name)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

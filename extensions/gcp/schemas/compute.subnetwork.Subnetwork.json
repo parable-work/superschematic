@@ -1,0 +1,169 @@
+{
+  "token": "gcp:compute/subnetwork:Subnetwork",
+  "terraform": {
+    "type": "google_compute_subnetwork",
+    "renames": {
+      "allowSubnetCidrRoutesOverlap": "allow_subnet_cidr_routes_overlap",
+      "deletionPolicy": "deletion_policy",
+      "externalIpv6Prefix": "external_ipv6_prefix",
+      "internalIpv6Prefix": "internal_ipv6_prefix",
+      "ipCidrRange": "ip_cidr_range",
+      "ipCollection": "ip_collection",
+      "ipv6AccessType": "ipv6_access_type",
+      "logConfig": "log_config",
+      "logConfig.aggregationInterval": "aggregation_interval",
+      "logConfig.filterExpr": "filter_expr",
+      "logConfig.flowSampling": "flow_sampling",
+      "logConfig.metadataFields": "metadata_fields",
+      "params.resourceManagerTags": "resource_manager_tags",
+      "privateIpGoogleAccess": "private_ip_google_access",
+      "privateIpv6GoogleAccess": "private_ipv6_google_access",
+      "reservedInternalRange": "reserved_internal_range",
+      "resolveSubnetMask": "resolve_subnet_mask",
+      "secondaryIpRanges": "secondary_ip_range",
+      "secondaryIpRanges.ipCidrRange": "ip_cidr_range",
+      "secondaryIpRanges.ipCollection": "ip_collection",
+      "secondaryIpRanges.ipVersion": "ip_version",
+      "secondaryIpRanges.rangeName": "range_name",
+      "secondaryIpRanges.reservedInternalRange": "reserved_internal_range",
+      "sendSecondaryIpRangeIfEmpty": "send_secondary_ip_range_if_empty",
+      "stackType": "stack_type"
+    }
+  },
+  "inputProperties": {
+    "allowSubnetCidrRoutesOverlap": {
+      "type": "boolean"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "externalIpv6Prefix": {
+      "type": "string"
+    },
+    "internalIpv6Prefix": {
+      "type": "string"
+    },
+    "ipCidrRange": {
+      "type": "string"
+    },
+    "ipCollection": {
+      "type": "string"
+    },
+    "ipv6AccessType": {
+      "type": "string"
+    },
+    "logConfig": {
+      "$ref": "#/types/gcp:compute/SubnetworkLogConfig:SubnetworkLogConfig"
+    },
+    "name": {
+      "type": "string"
+    },
+    "network": {
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/types/gcp:compute/SubnetworkParams:SubnetworkParams"
+    },
+    "privateIpGoogleAccess": {
+      "type": "boolean"
+    },
+    "privateIpv6GoogleAccess": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "purpose": {
+      "type": "string"
+    },
+    "region": {
+      "type": "string"
+    },
+    "reservedInternalRange": {
+      "type": "string"
+    },
+    "resolveSubnetMask": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "secondaryIpRanges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/SubnetworkSecondaryIpRange:SubnetworkSecondaryIpRange"
+      }
+    },
+    "sendSecondaryIpRangeIfEmpty": {
+      "type": "boolean"
+    },
+    "stackType": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "network"
+  ],
+  "types": {
+    "gcp:compute/SubnetworkLogConfig:SubnetworkLogConfig": {
+      "type": "object",
+      "properties": {
+        "aggregationInterval": {
+          "type": "string"
+        },
+        "filterExpr": {
+          "type": "string"
+        },
+        "flowSampling": {
+          "type": "number"
+        },
+        "metadata": {
+          "type": "string"
+        },
+        "metadataFields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/SubnetworkParams:SubnetworkParams": {
+      "type": "object",
+      "properties": {
+        "resourceManagerTags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/SubnetworkSecondaryIpRange:SubnetworkSecondaryIpRange": {
+      "type": "object",
+      "properties": {
+        "ipCidrRange": {
+          "type": "string"
+        },
+        "ipCollection": {
+          "type": "string"
+        },
+        "ipVersion": {
+          "type": "string"
+        },
+        "rangeName": {
+          "type": "string"
+        },
+        "reservedInternalRange": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rangeName"
+      ]
+    }
+  }
+}

@@ -1,6 +1,10 @@
 package ir
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"slices"
+	"strings"
+)
 
 // SchemaKind classifies the purpose of a schema definition.
 // It determines which outputs and toolchain imports are valid for the schema.
@@ -61,6 +65,25 @@ type Schema struct {
 	// Calls lists the API services an API's implementation calls: the
 	// config's calls (docs/stack-model.md, section 3.3).
 	Calls []ServiceRef `json:"calls,omitempty" yaml:"calls,omitempty"`
+
+	// References lists the services the schema's decorator arguments name
+	// by a service handle, other than as identities: a stack's `deploy`,
+	// for example, but not `@requireService`'s `from` (D41). Each is a cache
+	// edge: the build cache keys the schema on the referenced service's
+	// sources and on those of every service it reaches through its config.
+	// None orders the build. The TypeScript form records the handles it
+	// evaluates; the data forms state the list, as they state imports.
+	// Sorted by name, then kind, with no repeats and never the schema
+	// itself (AddReference).
+	References []ServiceRef `json:"references,omitempty" yaml:"references,omitempty"`
+
+	// IdentitySentinels are the sentinel files, as absolute paths, of the
+	// handles the schema's decorator arguments import as identities. An
+	// identity reads only the service's name and kind, which its sentinel
+	// holds, so the build cache hashes the file and nothing else of that
+	// service (D41). Only the TypeScript form has them: a data form spells
+	// the name itself. Not part of the decoded document contract.
+	IdentitySentinels []string `json:"-" yaml:"-"`
 
 	// RootType is retained for services that still consume the legacy runtime
 	// runtime schema shape during the IR flip.
@@ -125,6 +148,27 @@ func NewSchema(name string, kind SchemaKind) *Schema {
 		Unions:            make(map[string]*UnionDef),
 		CompositeDefaults: make(map[string]*CompositeDefaultDef),
 	}
+}
+
+// AddReference records a service the schema's body references (see
+// References), keeping the list sorted and free of repeats. A reference to
+// the schema itself is dropped: a service is no edge of its own.
+func (s *Schema) AddReference(ref ServiceRef) {
+	if ref.Name == s.Name {
+		return
+	}
+	i, found := slices.BinarySearchFunc(s.References, ref, compareServiceRefs)
+	if !found {
+		s.References = slices.Insert(s.References, i, ref)
+	}
+}
+
+// compareServiceRefs orders references by name, then kind.
+func compareServiceRefs(a, b ServiceRef) int {
+	if c := strings.Compare(a.Name, b.Name); c != 0 {
+		return c
+	}
+	return strings.Compare(string(a.Kind), string(b.Kind))
 }
 
 // CompositeDefaultDef is a complete platform-owned default for one schema

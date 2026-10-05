@@ -166,6 +166,20 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 	for _, t := range output.Types {
 		generatedTypeNames[t.Name] = true
 	}
+	// A nested object whose type a dependency declares is validated and
+	// parsed as a local one is (D14, amended), with the dependency
+	// package's validate<Type> and parse<Type>FromJSON.
+	nestedTypeNames := make(map[string]bool, len(generatedTypeNames))
+	nestedModules := make(map[string]string, len(output.ImportedTypes))
+	for name := range generatedTypeNames {
+		nestedTypeNames[name] = true
+	}
+	for _, imported := range output.ImportedTypes {
+		if imported.IsObject && imported.HasValidators && !generatedTypeNames[imported.Name] {
+			nestedTypeNames[imported.Name] = true
+			nestedModules[imported.Name] = imported.ImportPackage + "/validators"
+		}
+	}
 	allEnums := append([]codegen.EnumInfo{}, output.Enums...)
 	for _, imported := range output.ImportedTypes {
 		if imported.IsEnum {
@@ -233,8 +247,12 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				// literals are cast to.
 				ScalarDefaultCasts []string
 				ParserNestedTypes  []string
-				ParserScalarsUsed  []ScalarInfo
-				NeedsJSONParse     bool
+				// ParserNestedImports are where each ParserNestedTypes
+				// entry's validator and parser come from: the local
+				// type's file, or a dependency package's validators.
+				ParserNestedImports []NestedImport
+				ParserScalarsUsed   []ScalarInfo
+				NeedsJSONParse      bool
 				// ValidatesNestedObjects is true when validate<Type>
 				// validates a nested object field and reports its errors
 				// with addNestedErrors.
@@ -252,11 +270,12 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				ImportedEnumsUsed:  typeImportedEnumsUsed(t, output.ImportedTypes),
 				EnumDefaultsUsed:   typeEnumDefaultsUsed(t, allEnums),
 				ScalarDefaultCasts: typeScalarDefaultCasts(t),
-				ParserNestedTypes:  typeParserNestedTypes(t, generatedTypeNames),
+				ParserNestedTypes:  typeParserNestedTypes(t, nestedTypeNames),
 				ParserScalarsUsed:  typeParserScalarsUsed(t),
-				NeedsJSONParse:     typeNeedsJSONParse(t, generatedTypeNames),
+				NeedsJSONParse:     typeNeedsJSONParse(t, nestedTypeNames),
 				PrimitiveHelpers:   typePrimitiveHelpers(t),
 			}
+			data.ParserNestedImports = nestedImports(data.ParserNestedTypes, nestedModules)
 			data.ValidatesNestedObjects = typeValidatesNestedObjects(t, data.ParserNestedTypes)
 			if err := generateFile(generator, "validator_type.tmpl", outPath, data); err != nil {
 				return fmt.Errorf("failed to generate %s: %w", outPath, err)

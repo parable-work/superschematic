@@ -127,12 +127,12 @@
   "operations": [
     {
       "name": "branch",
-      "description": "Creates a draft of a ref of the instance, its primary line or another draft, whose rows lay over the ref's head.",
+      "description": "Creates a draft of a ref of the instance, its primary line or another draft, whose rows lay over the ref's head. Without fromRef it branches from the primary line, which an instance created before its schema composed Branches gets then.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
           "fromRef": {
-            "description": "The ref to branch from, by id.",
+            "description": "The ref to branch from, by id; the instance's primary line when absent.",
             "maxLength": 64,
             "minLength": 1,
             "type": "string"
@@ -145,7 +145,6 @@
           }
         },
         "required": [
-          "fromRef",
           "name"
         ],
         "type": "object"

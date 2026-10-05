@@ -2,6 +2,7 @@ package tsgen
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -97,6 +98,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 			var doc string
 			isEnum := false
 			isObject := false
+			hasValidators := false
 			switch {
 			case depSchema.Enums[symbol] != nil:
 				enumDef := depSchema.Enums[symbol]
@@ -115,6 +117,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 				}
 				doc = codegen.DocText(typeDef.Description, typeDef.Comment)
 				isObject = true
+				hasValidators = slices.Contains(localObjectRoles, typeDef.Role) || typeDef.Role == ir.RoleAPIInput
 			default:
 				return nil, fmt.Errorf("tsgen: imported symbol %q not found in dependency schema %q", symbol, depName)
 			}
@@ -126,6 +129,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 				ImportPackage: pkgName,
 				IsEnum:        isEnum,
 				IsObject:      isObject,
+				HasValidators: hasValidators,
 			})
 			usedDep = true
 		}

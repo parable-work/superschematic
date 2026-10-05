@@ -203,7 +203,12 @@ one `SDKError::Config`:
 An API schema with `outputs.api` set to `language: "RUST"` writes the
 axum server crate `schemas-<name>-api` under `schemas/dist/api/<name>`. It
 needs `outputs.types` for Rust too: the crate depends on the types crate,
-and the build refuses the config without it.
+and the build refuses the config without it. `superschematic build
+--api-language RUST` builds one service's server in Rust whatever its
+config says; give it its own `--out`, so the two servers do not share an
+output root. The acme-shop example's `rust-server` crate serves its
+shop-orders service that way
+([The Rust server](/superschematic/guides/api-routes/#the-rust-server)).
 
 `build_router` mounts every operation except those declared
 `@manualRouteRegistration`, as the Go server's `RegisterRoutes` leaves

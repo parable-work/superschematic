@@ -1,0 +1,1041 @@
+{
+  "token": "gcp:cloudrunv2/service:Service",
+  "terraform": {
+    "type": "google_cloud_run_v2_service",
+    "renames": {
+      "binaryAuthorization": "binary_authorization",
+      "binaryAuthorization.breakglassJustification": "breakglass_justification",
+      "binaryAuthorization.useDefault": "use_default",
+      "buildConfig": "build_config",
+      "buildConfig.baseImage": "base_image",
+      "buildConfig.enableAutomaticUpdates": "enable_automatic_updates",
+      "buildConfig.environmentVariables": "environment_variables",
+      "buildConfig.functionTarget": "function_target",
+      "buildConfig.imageUri": "image_uri",
+      "buildConfig.serviceAccount": "service_account",
+      "buildConfig.sourceLocation": "source_location",
+      "buildConfig.workerPool": "worker_pool",
+      "clientVersion": "client_version",
+      "customAudiences": "custom_audiences",
+      "defaultUriDisabled": "default_uri_disabled",
+      "deletionPolicy": "deletion_policy",
+      "deletionProtection": "deletion_protection",
+      "iapEnabled": "iap_enabled",
+      "invokerIamDisabled": "invoker_iam_disabled",
+      "launchStage": "launch_stage",
+      "multiRegionSettings": "multi_region_settings",
+      "multiRegionSettings.multiRegionId": "multi_region_id",
+      "scaling.manualInstanceCount": "manual_instance_count",
+      "scaling.maxInstanceCount": "max_instance_count",
+      "scaling.minInstanceCount": "min_instance_count",
+      "scaling.scalingMode": "scaling_mode",
+      "template.containers.baseImageUri": "base_image_uri",
+      "template.containers.buildInfos": "build_info",
+      "template.containers.buildInfos.functionTarget": "function_target",
+      "template.containers.buildInfos.sourceLocation": "source_location",
+      "template.containers.commands": "command",
+      "template.containers.dependsOns": "depends_on",
+      "template.containers.envs": "env",
+      "template.containers.envs.valueSource": "value_source",
+      "template.containers.envs.valueSource.secretKeyRef": "secret_key_ref",
+      "template.containers.livenessProbe": "liveness_probe",
+      "template.containers.livenessProbe.failureThreshold": "failure_threshold",
+      "template.containers.livenessProbe.httpGet": "http_get",
+      "template.containers.livenessProbe.httpGet.httpHeaders": "http_headers",
+      "template.containers.livenessProbe.initialDelaySeconds": "initial_delay_seconds",
+      "template.containers.livenessProbe.periodSeconds": "period_seconds",
+      "template.containers.livenessProbe.tcpSocket": "tcp_socket",
+      "template.containers.livenessProbe.timeoutSeconds": "timeout_seconds",
+      "template.containers.ports.containerPort": "container_port",
+      "template.containers.readinessProbe": "readiness_probe",
+      "template.containers.readinessProbe.failureThreshold": "failure_threshold",
+      "template.containers.readinessProbe.httpGet": "http_get",
+      "template.containers.readinessProbe.periodSeconds": "period_seconds",
+      "template.containers.readinessProbe.successThreshold": "success_threshold",
+      "template.containers.readinessProbe.timeoutSeconds": "timeout_seconds",
+      "template.containers.resources.cpuIdle": "cpu_idle",
+      "template.containers.resources.startupCpuBoost": "startup_cpu_boost",
+      "template.containers.sandboxLauncher": "sandbox_launcher",
+      "template.containers.sourceCode": "source_code",
+      "template.containers.sourceCode.cloudStorageSource": "cloud_storage_source",
+      "template.containers.startupProbe": "startup_probe",
+      "template.containers.startupProbe.failureThreshold": "failure_threshold",
+      "template.containers.startupProbe.httpGet": "http_get",
+      "template.containers.startupProbe.httpGet.httpHeaders": "http_headers",
+      "template.containers.startupProbe.initialDelaySeconds": "initial_delay_seconds",
+      "template.containers.startupProbe.periodSeconds": "period_seconds",
+      "template.containers.startupProbe.tcpSocket": "tcp_socket",
+      "template.containers.startupProbe.timeoutSeconds": "timeout_seconds",
+      "template.containers.volumeMounts": "volume_mounts",
+      "template.containers.volumeMounts.mountPath": "mount_path",
+      "template.containers.volumeMounts.subPath": "sub_path",
+      "template.containers.workingDir": "working_dir",
+      "template.encryptionKey": "encryption_key",
+      "template.executionEnvironment": "execution_environment",
+      "template.gpuZonalRedundancyDisabled": "gpu_zonal_redundancy_disabled",
+      "template.healthCheckDisabled": "health_check_disabled",
+      "template.maxInstanceRequestConcurrency": "max_instance_request_concurrency",
+      "template.nodeSelector": "node_selector",
+      "template.sandboxes.templates.commands": "command",
+      "template.sandboxes.templates.envs": "env",
+      "template.sandboxes.templates.volumeMounts": "volume_mounts",
+      "template.sandboxes.templates.volumeMounts.mountPath": "mount_path",
+      "template.sandboxes.templates.volumeMounts.subPath": "sub_path",
+      "template.sandboxes.templates.workingDir": "working_dir",
+      "template.scaling.concurrencyUtilization": "concurrency_utilization",
+      "template.scaling.cpuUtilization": "cpu_utilization",
+      "template.scaling.maxInstanceCount": "max_instance_count",
+      "template.scaling.minInstanceCount": "min_instance_count",
+      "template.serviceAccount": "service_account",
+      "template.serviceMesh": "service_mesh",
+      "template.sessionAffinity": "session_affinity",
+      "template.volumes.cloudSqlInstance": "cloud_sql_instance",
+      "template.volumes.emptyDir": "empty_dir",
+      "template.volumes.emptyDir.sizeLimit": "size_limit",
+      "template.volumes.gcs.mountOptions": "mount_options",
+      "template.volumes.gcs.readOnly": "read_only",
+      "template.volumes.nfs.readOnly": "read_only",
+      "template.volumes.secret.defaultMode": "default_mode",
+      "template.vpcAccess": "vpc_access",
+      "template.vpcAccess.networkInterfaces": "network_interfaces",
+      "traffics": "traffic"
+    }
+  },
+  "inputProperties": {
+    "annotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "binaryAuthorization": {
+      "$ref": "#/types/gcp:cloudrunv2/ServiceBinaryAuthorization:ServiceBinaryAuthorization"
+    },
+    "buildConfig": {
+      "$ref": "#/types/gcp:cloudrunv2/ServiceBuildConfig:ServiceBuildConfig"
+    },
+    "client": {
+      "type": "string"
+    },
+    "clientVersion": {
+      "type": "string"
+    },
+    "customAudiences": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "defaultUriDisabled": {
+      "type": "boolean"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "deletionProtection": {
+      "type": "boolean"
+    },
+    "description": {
+      "type": "string"
+    },
+    "iapEnabled": {
+      "type": "boolean"
+    },
+    "ingress": {
+      "type": "string"
+    },
+    "invokerIamDisabled": {
+      "type": "boolean"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "launchStage": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    },
+    "multiRegionSettings": {
+      "$ref": "#/types/gcp:cloudrunv2/ServiceMultiRegionSettings:ServiceMultiRegionSettings"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "scaling": {
+      "$ref": "#/types/gcp:cloudrunv2/ServiceScaling:ServiceScaling"
+    },
+    "tags": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "template": {
+      "$ref": "#/types/gcp:cloudrunv2/ServiceTemplate:ServiceTemplate"
+    },
+    "traffics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:cloudrunv2/ServiceTraffic:ServiceTraffic"
+      }
+    }
+  },
+  "requiredInputs": [
+    "location",
+    "template"
+  ],
+  "types": {
+    "gcp:cloudrunv2/ServiceBinaryAuthorization:ServiceBinaryAuthorization": {
+      "type": "object",
+      "properties": {
+        "breakglassJustification": {
+          "type": "string"
+        },
+        "policy": {
+          "type": "string"
+        },
+        "useDefault": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceBuildConfig:ServiceBuildConfig": {
+      "type": "object",
+      "properties": {
+        "baseImage": {
+          "type": "string"
+        },
+        "enableAutomaticUpdates": {
+          "type": "boolean"
+        },
+        "environmentVariables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "functionTarget": {
+          "type": "string"
+        },
+        "imageUri": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "serviceAccount": {
+          "type": "string"
+        },
+        "sourceLocation": {
+          "type": "string"
+        },
+        "workerPool": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceMultiRegionSettings:ServiceMultiRegionSettings": {
+      "type": "object",
+      "properties": {
+        "multiRegionId": {
+          "type": "string"
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceScaling:ServiceScaling": {
+      "type": "object",
+      "properties": {
+        "manualInstanceCount": {
+          "type": "integer"
+        },
+        "maxInstanceCount": {
+          "type": "integer"
+        },
+        "minInstanceCount": {
+          "type": "integer"
+        },
+        "scalingMode": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplate:ServiceTemplate": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "containers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainer:ServiceTemplateContainer"
+          }
+        },
+        "encryptionKey": {
+          "type": "string"
+        },
+        "executionEnvironment": {
+          "type": "string"
+        },
+        "gpuZonalRedundancyDisabled": {
+          "type": "boolean"
+        },
+        "healthCheckDisabled": {
+          "type": "boolean"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "maxInstanceRequestConcurrency": {
+          "type": "integer"
+        },
+        "nodeSelector": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateNodeSelector:ServiceTemplateNodeSelector"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "sandboxes": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateSandboxes:ServiceTemplateSandboxes"
+        },
+        "scaling": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateScaling:ServiceTemplateScaling"
+        },
+        "serviceAccount": {
+          "type": "string"
+        },
+        "serviceMesh": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateServiceMesh:ServiceTemplateServiceMesh"
+        },
+        "sessionAffinity": {
+          "type": "boolean"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVolume:ServiceTemplateVolume"
+          }
+        },
+        "vpcAccess": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVpcAccess:ServiceTemplateVpcAccess"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainer:ServiceTemplateContainer": {
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "baseImageUri": {
+          "type": "string"
+        },
+        "buildInfos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerBuildInfo:ServiceTemplateContainerBuildInfo"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dependsOns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "envs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerEnv:ServiceTemplateContainerEnv"
+          }
+        },
+        "image": {
+          "type": "string"
+        },
+        "livenessProbe": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerLivenessProbe:ServiceTemplateContainerLivenessProbe"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ports": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerPorts:ServiceTemplateContainerPorts"
+        },
+        "readinessProbe": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerReadinessProbe:ServiceTemplateContainerReadinessProbe"
+        },
+        "resources": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerResources:ServiceTemplateContainerResources"
+        },
+        "sandboxLauncher": {
+          "type": "boolean"
+        },
+        "sourceCode": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerSourceCode:ServiceTemplateContainerSourceCode"
+        },
+        "startupProbe": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerStartupProbe:ServiceTemplateContainerStartupProbe"
+        },
+        "volumeMounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerVolumeMount:ServiceTemplateContainerVolumeMount"
+          }
+        },
+        "workingDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerBuildInfo:ServiceTemplateContainerBuildInfo": {
+      "type": "object",
+      "properties": {
+        "functionTarget": {
+          "type": "string"
+        },
+        "sourceLocation": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerEnv:ServiceTemplateContainerEnv": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "valueSource": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerEnvValueSource:ServiceTemplateContainerEnvValueSource"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerEnvValueSource:ServiceTemplateContainerEnvValueSource": {
+      "type": "object",
+      "properties": {
+        "secretKeyRef": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerEnvValueSourceSecretKeyRef:ServiceTemplateContainerEnvValueSourceSecretKeyRef"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerEnvValueSourceSecretKeyRef:ServiceTemplateContainerEnvValueSourceSecretKeyRef": {
+      "type": "object",
+      "properties": {
+        "secret": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerLivenessProbe:ServiceTemplateContainerLivenessProbe": {
+      "type": "object",
+      "properties": {
+        "failureThreshold": {
+          "type": "integer"
+        },
+        "grpc": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerLivenessProbeGrpc:ServiceTemplateContainerLivenessProbeGrpc"
+        },
+        "httpGet": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerLivenessProbeHttpGet:ServiceTemplateContainerLivenessProbeHttpGet"
+        },
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "tcpSocket": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerLivenessProbeTcpSocket:ServiceTemplateContainerLivenessProbeTcpSocket"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerLivenessProbeGrpc:ServiceTemplateContainerLivenessProbeGrpc": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        },
+        "service": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerLivenessProbeHttpGet:ServiceTemplateContainerLivenessProbeHttpGet": {
+      "type": "object",
+      "properties": {
+        "httpHeaders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerLivenessProbeHttpGetHttpHeader:ServiceTemplateContainerLivenessProbeHttpGetHttpHeader"
+          }
+        },
+        "path": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerLivenessProbeHttpGetHttpHeader:ServiceTemplateContainerLivenessProbeHttpGetHttpHeader": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerLivenessProbeTcpSocket:ServiceTemplateContainerLivenessProbeTcpSocket": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "port"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerPorts:ServiceTemplateContainerPorts": {
+      "type": "object",
+      "properties": {
+        "containerPort": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerReadinessProbe:ServiceTemplateContainerReadinessProbe": {
+      "type": "object",
+      "properties": {
+        "failureThreshold": {
+          "type": "integer"
+        },
+        "grpc": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerReadinessProbeGrpc:ServiceTemplateContainerReadinessProbeGrpc"
+        },
+        "httpGet": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerReadinessProbeHttpGet:ServiceTemplateContainerReadinessProbeHttpGet"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "successThreshold": {
+          "type": "integer"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerReadinessProbeGrpc:ServiceTemplateContainerReadinessProbeGrpc": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        },
+        "service": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerReadinessProbeHttpGet:ServiceTemplateContainerReadinessProbeHttpGet": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerResources:ServiceTemplateContainerResources": {
+      "type": "object",
+      "properties": {
+        "cpuIdle": {
+          "type": "boolean"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "startupCpuBoost": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerSourceCode:ServiceTemplateContainerSourceCode": {
+      "type": "object",
+      "properties": {
+        "cloudStorageSource": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerSourceCodeCloudStorageSource:ServiceTemplateContainerSourceCodeCloudStorageSource"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerSourceCodeCloudStorageSource:ServiceTemplateContainerSourceCodeCloudStorageSource": {
+      "type": "object",
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "object": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bucket",
+        "object"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerStartupProbe:ServiceTemplateContainerStartupProbe": {
+      "type": "object",
+      "properties": {
+        "failureThreshold": {
+          "type": "integer"
+        },
+        "grpc": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerStartupProbeGrpc:ServiceTemplateContainerStartupProbeGrpc"
+        },
+        "httpGet": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerStartupProbeHttpGet:ServiceTemplateContainerStartupProbeHttpGet"
+        },
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "tcpSocket": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerStartupProbeTcpSocket:ServiceTemplateContainerStartupProbeTcpSocket"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerStartupProbeGrpc:ServiceTemplateContainerStartupProbeGrpc": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        },
+        "service": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerStartupProbeHttpGet:ServiceTemplateContainerStartupProbeHttpGet": {
+      "type": "object",
+      "properties": {
+        "httpHeaders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateContainerStartupProbeHttpGetHttpHeader:ServiceTemplateContainerStartupProbeHttpGetHttpHeader"
+          }
+        },
+        "path": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerStartupProbeHttpGetHttpHeader:ServiceTemplateContainerStartupProbeHttpGetHttpHeader": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerStartupProbeTcpSocket:ServiceTemplateContainerStartupProbeTcpSocket": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateContainerVolumeMount:ServiceTemplateContainerVolumeMount": {
+      "type": "object",
+      "properties": {
+        "mountPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "subPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mountPath",
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateNodeSelector:ServiceTemplateNodeSelector": {
+      "type": "object",
+      "properties": {
+        "accelerator": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accelerator"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateSandboxes:ServiceTemplateSandboxes": {
+      "type": "object",
+      "properties": {
+        "templates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateSandboxesTemplate:ServiceTemplateSandboxesTemplate"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateSandboxesTemplate:ServiceTemplateSandboxesTemplate": {
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "envs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateSandboxesTemplateEnv:ServiceTemplateSandboxesTemplateEnv"
+          }
+        },
+        "image": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "volumeMounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateSandboxesTemplateVolumeMount:ServiceTemplateSandboxesTemplateVolumeMount"
+          }
+        },
+        "workingDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "image",
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateSandboxesTemplateEnv:ServiceTemplateSandboxesTemplateEnv": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateSandboxesTemplateVolumeMount:ServiceTemplateSandboxesTemplateVolumeMount": {
+      "type": "object",
+      "properties": {
+        "mountPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "subPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mountPath",
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateScaling:ServiceTemplateScaling": {
+      "type": "object",
+      "properties": {
+        "concurrencyUtilization": {
+          "type": "number"
+        },
+        "cpuUtilization": {
+          "type": "number"
+        },
+        "maxInstanceCount": {
+          "type": "integer"
+        },
+        "minInstanceCount": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateServiceMesh:ServiceTemplateServiceMesh": {
+      "type": "object",
+      "properties": {
+        "mesh": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateVolume:ServiceTemplateVolume": {
+      "type": "object",
+      "properties": {
+        "cloudSqlInstance": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVolumeCloudSqlInstance:ServiceTemplateVolumeCloudSqlInstance"
+        },
+        "emptyDir": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVolumeEmptyDir:ServiceTemplateVolumeEmptyDir"
+        },
+        "gcs": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVolumeGcs:ServiceTemplateVolumeGcs"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nfs": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVolumeNfs:ServiceTemplateVolumeNfs"
+        },
+        "secret": {
+          "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVolumeSecret:ServiceTemplateVolumeSecret"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateVolumeCloudSqlInstance:ServiceTemplateVolumeCloudSqlInstance": {
+      "type": "object",
+      "properties": {
+        "instances": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateVolumeEmptyDir:ServiceTemplateVolumeEmptyDir": {
+      "type": "object",
+      "properties": {
+        "medium": {
+          "type": "string"
+        },
+        "sizeLimit": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateVolumeGcs:ServiceTemplateVolumeGcs": {
+      "type": "object",
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "mountOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "readOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bucket"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateVolumeNfs:ServiceTemplateVolumeNfs": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "server": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "server"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateVolumeSecret:ServiceTemplateVolumeSecret": {
+      "type": "object",
+      "properties": {
+        "defaultMode": {
+          "type": "integer"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVolumeSecretItem:ServiceTemplateVolumeSecretItem"
+          }
+        },
+        "secret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateVolumeSecretItem:ServiceTemplateVolumeSecretItem": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "gcp:cloudrunv2/ServiceTemplateVpcAccess:ServiceTemplateVpcAccess": {
+      "type": "object",
+      "properties": {
+        "connector": {
+          "type": "string"
+        },
+        "egress": {
+          "type": "string"
+        },
+        "networkInterfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/ServiceTemplateVpcAccessNetworkInterface:ServiceTemplateVpcAccessNetworkInterface"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTemplateVpcAccessNetworkInterface:ServiceTemplateVpcAccessNetworkInterface": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "string"
+        },
+        "subnetwork": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/ServiceTraffic:ServiceTraffic": {
+      "type": "object",
+      "properties": {
+        "percent": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
