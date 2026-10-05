@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
@@ -49,11 +48,10 @@ func TestGenerateRefusesFileUploadWithoutManualRegistration(t *testing.T) {
 			t.Fatalf("load %s: %v", nestedArraysService, err)
 		}
 		addUploadOperation(schema, manual)
-		output, err := Generate(schema, Options{
-			AuthProvider: sessionauth.Provider{},
-			SchemaName:   nestedArraysService,
-			TypesCrate:   "schemas-" + nestedArraysService + "-types",
-			Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		output, err := generateFrom(schema, apiSource{}, Options{
+			SchemaName: nestedArraysService,
+			TypesCrate: "schemas-" + nestedArraysService + "-types",
+			Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 		})
 		if !manual {
 			if err == nil || !strings.Contains(err.Error(), "operation grid.uploadGrid uploads files") || !strings.Contains(err.Error(), "@manualRouteRegistration") {

@@ -198,6 +198,8 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkArraysOfArrays(schema, r)
 	checkEncryptedArguments(schema, r)
 	checkEncryptedOperations(schema, r)
+	checkMiddleware(schema, r)
+	checkPublicRoutes(schema, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)
 	reg := in.registry()

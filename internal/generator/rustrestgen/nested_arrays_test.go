@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -41,13 +40,12 @@ func loadNestedArraysSchema(t *testing.T, withPaint bool) *ir.Schema {
 
 func generateNestedArraysAPI(t *testing.T, schema *ir.Schema, typesDir, outputDir string) *APIOutput {
 	t.Helper()
-	output, err := Generate(schema, Options{
-		AuthProvider: sessionauth.Provider{},
-		SchemaName:   nestedArraysService,
-		TypesCrate:   naming.Default().RustTypesCrate(nestedArraysService),
-		TypesDir:     typesDir,
-		OutputDir:    outputDir,
-		Clock:        nestedArraysClock,
+	output, err := generateFrom(schema, apiSource{}, Options{
+		SchemaName: nestedArraysService,
+		TypesCrate: naming.Default().RustTypesCrate(nestedArraysService),
+		TypesDir:   typesDir,
+		OutputDir:  outputDir,
+		Clock:      nestedArraysClock,
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -135,7 +133,13 @@ func addImportOperation(t *testing.T, schema *ir.Schema) {
 func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 	schema := loadNestedArraysSchema(t, true)
 	addImportOperation(t, schema)
-	cargoTestAPICrate(t, nestedArraysService, schema, "nested_arrays", nestedArraysRouterTest)
+	cargoTestAPICrate(t, nestedArraysService, schema, "nested_arrays", nestedArraysRouterTest, func(apiDir string, output *APIOutput) error {
+		test := strings.NewReplacer("API_CRATE", strings.ReplaceAll(output.CrateName, "-", "_"), "RUNTIME_CRATE", output.RuntimeCrateIdent).Replace(problemsRouterTest)
+		if err := os.MkdirAll(filepath.Join(apiDir, "tests"), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(apiDir, "tests", "problems.rs"), []byte(test), 0o644)
+	})
 }
 
 // cargoTestAPICrate generates the Rust types crate and the Rust API crate of
@@ -144,9 +148,10 @@ func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 // replaced by the crates' module names, and runs cargo test on the API
 // crate. The types crate resolves superscalar from the checkout
 // scripts/superscalar-dep.sh stands up. A test may pause tokio's clock
-// (#[tokio::test(start_paused = true)]). CARGO_TARGET_DIR is honored when
-// set.
-func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName, test string) {
+// (#[tokio::test(start_paused = true)]). Each extra runs on the written
+// crate before the build, to add files of its own. CARGO_TARGET_DIR is
+// honored when set.
+func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName, test string, extras ...func(apiDir string, output *APIOutput) error) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -172,13 +177,12 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 	if err := rustgen.WriteTypes(typesOutput, typesDir); err != nil {
 		t.Fatalf("rustgen.WriteTypes: %v", err)
 	}
-	output, err := Generate(schema, Options{
-		AuthProvider: sessionauth.Provider{},
-		SchemaName:   service,
-		TypesCrate:   naming.Default().RustTypesCrate(service),
-		TypesDir:     typesDir,
-		OutputDir:    apiDir,
-		Clock:        nestedArraysClock,
+	output, err := generateFrom(schema, apiSource{}, Options{
+		SchemaName: service,
+		TypesCrate: naming.Default().RustTypesCrate(service),
+		TypesDir:   typesDir,
+		OutputDir:  apiDir,
+		Clock:      nestedArraysClock,
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -188,6 +192,11 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 	}
 	if err := WriteAPI(output, apiDir); err != nil {
 		t.Fatalf("write api: %v", err)
+	}
+	for _, extra := range extras {
+		if err := extra(apiDir, output); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	cargoToml, err := os.ReadFile(filepath.Join(apiDir, "Cargo.toml"))
@@ -358,7 +367,7 @@ async fn a_path_parameter_is_decoded_once() {
     for segment in ["%", "100%", "%ZZ", "a%2", "%E9", "%C3%28"] {
         let (status, envelope) = call("PUT", format!("/api/grids/{segment}/labels"), Some(json!({"labels": []}))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{segment}");
-        assert_eq!(envelope["error"]["code"], "bad_request", "{segment}");
+        assert_eq!(envelope["code"], "bad_request", "{segment}");
     }
 }
 

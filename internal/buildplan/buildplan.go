@@ -2,10 +2,12 @@
 package buildplan
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sentinel"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 var configNames = []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"}
@@ -28,25 +31,56 @@ type Service struct {
 	OutputDirs []string
 }
 
-// dependencyNames lists the services that must be built before this one:
-// the declared dependencies plus the authDb. The API generator loads the
+// reference is one service a config names: the build-order edge from the
+// config's service to it.
+type reference struct {
+	// name is the service named.
+	name string
+
+	// field is the config key that names it: dependencies, authDb or calls.
+	field string
+
+	// kind is the kind the handle gives the service. It is empty for an
+	// authDb a data-form config names by name alone.
+	kind ir.SchemaKind
+}
+
+// references lists every service the config names, in the order of its
+// fields: the declared dependencies, the authDb, then the calls. A service
+// named by two fields appears once for each.
+func (s Service) references() []reference {
+	refs := make([]reference, 0, len(s.Config.Dependencies))
+	for _, dep := range s.Config.Dependencies {
+		refs = append(refs, reference{name: dep.Name, field: "dependencies", kind: dep.Kind})
+	}
+	if s.Config.AuthDB != "" {
+		refs = append(refs, reference{name: s.Config.AuthDB, field: "authDb", kind: s.Config.AuthDBKind})
+	}
+	for _, call := range s.Config.Calls {
+		refs = append(refs, reference{name: call.Name, field: "calls", kind: call.Kind})
+	}
+	return refs
+}
+
+// dependencyNames lists the services that must be built before this one,
+// each once: every service its config names. The API generator loads the
 // authDb as the upstream auth schema and the generated API module imports
 // its ORM and types packages, so the authDb is a build-order edge even when
-// the config does not also declare it as a dependency.
+// the config does not also declare it as a dependency. A callee in calls is
+// one too: the code generated for the caller imports the callee's SDK
+// (docs/stack-model.md, sections 3.3 and 8.5).
 func (s Service) dependencyNames() []string {
-	names := make([]string, 0, len(s.Config.Dependencies))
-	for _, dep := range s.Config.Dependencies {
-		names = append(names, dep.Name)
-	}
-	if s.Config.AuthDB == "" {
-		return names
-	}
-	for _, name := range names {
-		if name == s.Config.AuthDB {
-			return names
+	refs := s.references()
+	names := make([]string, 0, len(refs))
+	seen := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		if seen[ref.name] {
+			continue
 		}
+		seen[ref.name] = true
+		names = append(names, ref.name)
 	}
-	return append(names, s.Config.AuthDB)
+	return names
 }
 
 // Discover scans servicesRoot for schema services and returns them in
@@ -98,7 +132,33 @@ func DiscoverWith(servicesRoot string, outputRoot string, reg *registry.Registry
 	if err := validateDependencyKinds(services); err != nil {
 		return nil, err
 	}
+	if err := validateHandleKinds(services); err != nil {
+		return nil, err
+	}
 	return TopologicalSort(services)
+}
+
+// validateHandleKinds checks the kind each handle gives against the service
+// it names: `authDb: service({ name: "shop-api", kind: SchemaKind.DB })` is
+// refused when shop-api is an API. The loader checks a handle's kind only
+// against the registry, and only discovery sees every service. A name that
+// is not discovered is left to the steps that need the service:
+// TopologicalSort tolerates it and Closure refuses it.
+func validateHandleKinds(services []Service) error {
+	byName := make(map[string]Service, len(services))
+	for _, service := range services {
+		byName[service.Name] = service
+	}
+	for _, service := range services {
+		for _, ref := range service.references() {
+			target, ok := byName[ref.name]
+			if !ok || ref.kind == "" || ref.kind == target.Config.Kind {
+				continue
+			}
+			return fmt.Errorf("%s: %s names %s with kind %s, but %s is kind %s", service.Name, ref.field, ref.name, ref.kind, ref.name, target.Config.Kind)
+		}
+	}
+	return nil
 }
 
 // validateDependencyKinds rejects declared dependencies on schemas that emit
@@ -205,7 +265,7 @@ func TopologicalSort(services []Service) ([]Service, error) {
 			return nil
 		}
 		if visiting[service.Name] {
-			return fmt.Errorf("circular dependency involving %s (%s)", service.Name, strings.Join(append(stack, service.Name), " -> "))
+			return cycleError(byName, append(stack, service.Name))
 		}
 		visiting[service.Name] = true
 		stack = append(stack, service.Name)
@@ -233,8 +293,59 @@ func TopologicalSort(services []Service) ([]Service, error) {
 	return result, nil
 }
 
+// cycleError describes the cycle at the end of path, whose last service
+// repeats an earlier one, edge by edge: "a calls b, b calls a". A cycle of
+// calls alone gets a pointer to why it cannot build yet.
+func cycleError(byName map[string]Service, path []string) error {
+	last := path[len(path)-1]
+	start := 0
+	for i, name := range path[:len(path)-1] {
+		if name == last {
+			start = i
+			break
+		}
+	}
+	cycle := path[start:]
+	edges := make([]string, 0, len(cycle)-1)
+	callsOnly := true
+	for i := 0; i+1 < len(cycle); i++ {
+		from, to := cycle[i], cycle[i+1]
+		var fields []string
+		for _, ref := range byName[from].references() {
+			if ref.name == to && !slices.Contains(fields, ref.field) {
+				fields = append(fields, ref.field)
+			}
+		}
+		if len(fields) != 1 || fields[0] != "calls" {
+			callsOnly = false
+		}
+		verbs := make([]string, len(fields))
+		for j, field := range fields {
+			verbs[j] = edgeVerb(field)
+		}
+		edges = append(edges, fmt.Sprintf("%s %s %s", from, strings.Join(verbs, " and "), to))
+	}
+	msg := fmt.Sprintf("circular dependency involving %s: %s", last, strings.Join(edges, ", "))
+	if callsOnly {
+		msg += "; the build plan orders whole services, so APIs that call each other cannot build until it orders their outputs, each SDK before the APIs that call it (docs/stack-model.md, section 3.3)"
+	}
+	return errors.New(msg)
+}
+
+// edgeVerb phrases a config field as the relation it gives two services.
+func edgeVerb(field string) string {
+	switch field {
+	case "calls":
+		return "calls"
+	case "authDb":
+		return "authenticates against"
+	default:
+		return "depends on"
+	}
+}
+
 // Closure returns root and every service it transitively depends on
-// (declared dependencies plus authDb), in the order services already
+// (declared dependencies, authDb and calls), in the order services already
 // carries. It filters the Discover output rather than re-sorting it, so
 // `build --with-deps` and build-all share one ordering. Where
 // TopologicalSort tolerates a dependency on an undiscovered service so a
