@@ -106,7 +106,7 @@ func TestNestedArrayRulesRender(t *testing.T) {
                             errors.add_field_error(f"codes[{index}][{inner_index}]", "minLength", "must be at least 2 characters")`,
 		`                        if item is not None and len(str(item)) > 4:
                             errors.add_field_error(f"codes[{index}][{inner_index}]", "maxLength", "must be at most 4 characters")`,
-		`                        if item is not None and re.search(r"^[a-z]+$", str(item)) is None:
+		`                        if item is not None and re.search(r"^[a-z]+$", str(item), re.ASCII) is None:
                             errors.add_field_error(f"codes[{index}][{inner_index}]", "pattern", "invalid format")`,
 		`                        if item is not None and float(item) < 0:
                             errors.add_field_error(f"scores[{index}][{inner_index}]", "min", "must be at least 0")`,

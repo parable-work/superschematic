@@ -143,7 +143,8 @@ func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 // tests/<testName>.rs of the API crate, with API_CRATE and RUNTIME_CRATE
 // replaced by the crates' module names, and runs cargo test on the API
 // crate. The types crate resolves superscalar from the checkout
-// scripts/superscalar-dep.sh stands up. CARGO_TARGET_DIR is honored when
+// scripts/superscalar-dep.sh stands up. A test may pause tokio's clock
+// (#[tokio::test(start_paused = true)]). CARGO_TARGET_DIR is honored when
 // set.
 func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName, test string) {
 	t.Helper()
@@ -195,6 +196,7 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 	}
 	cargoToml = append(cargoToml, []byte(`
 [dev-dependencies]
+tokio = { version = "1.52.2", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
 
 `+testpaths.RustPatch(paths, naming.Default()))...)

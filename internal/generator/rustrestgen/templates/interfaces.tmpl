@@ -11,7 +11,7 @@ use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
 {{- end }}
-use {{ .RuntimeCrateIdent }}::{ApiError, RequestContext};
+use {{ .RuntimeCrateIdent }}::{ {{- if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end -}} };
 use serde_json::Value;
 {{- if .WebhookProviders }}
 use std::collections::HashMap;
@@ -48,6 +48,12 @@ pub trait WebhookVerifier: Send + Sync + 'static {
 pub struct Implementations {
 {{- range .Namespaces }}
     pub {{ toSnakeCase . }}: Arc<dyn {{ toPascalCase . }}Implementation>,
+{{- end }}
+{{- if .HasAuth }}
+    /// Establishes the caller of each route that needs one (@auth,
+    /// @requirePermission, @requireOwnership, an Authenticated set), and
+    /// decides whether its permissions satisfy a @requirePermission list.
+    pub authenticator: Arc<dyn Authenticator>,
 {{- end }}
 {{- if .WebhookProviders }}
     /// The verifier of each @hmacVerified provider, keyed by provider.
