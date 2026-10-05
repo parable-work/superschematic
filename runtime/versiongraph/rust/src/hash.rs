@@ -8,9 +8,10 @@ use crate::tree::Tree;
 
 /// The canonical document the hash covers: for each kind with live rows,
 /// `{"<kind>": [{"entityKey": ..., "content": {...}}, ...]}` with rows sorted
-/// by entity key and only content columns kept. Tombstone rows are left out,
-/// as an absent row is. [`content_hash`] writes it with every object's keys
-/// sorted and no whitespace.
+/// by entity key and only content columns kept, every one the descriptor
+/// declares among them, null where the row lacks it. Tombstone rows are left
+/// out, as an absent row is. [`content_hash`] writes it with every object's
+/// keys sorted and no whitespace.
 pub fn canonical(graph: &Graph, tree: &Tree) -> Value {
     let mut out = Map::new();
     for (kind, rows) in graph.kinds.iter().zip(&tree.kinds) {
