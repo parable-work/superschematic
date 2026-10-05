@@ -24,7 +24,6 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/profile"
 	"github.com/parable-work/superschematic/internal/registry"
-	"github.com/parable-work/superschematic/internal/sentinel"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/schemadeps"
 )
@@ -133,6 +132,11 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		}
 	}
 
+	// A config may import a sibling's sentinel (D34), so every sentinel is
+	// written before discovery reads the configs.
+	if err := buildplan.EnsureSentinels(servicesRoot, reg, cmd.OutOrStdout()); err != nil {
+		return err
+	}
 	services, err := buildplan.DiscoverWith(servicesRoot, outputRoot, reg)
 	if err != nil {
 		return err
@@ -150,16 +154,6 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		mode = "parallel"
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Discovered %d schema services: %s (mode: %s)\n", len(services), strings.Join(names, ", "), mode)
-
-	if err := sentinel.EnsureSiblings(servicesRoot, sentinel.Options{
-		ReadTSConfig: func(servicePath string) (*schemaconfig.SchemaConfig, error) {
-			return tsreader.ReadServiceConfig(servicePath, reg)
-		},
-		Registry: reg,
-		Log:      cmd.OutOrStdout(),
-	}); err != nil {
-		return err
-	}
 
 	// The discovery pass doubles as the schema catalog: entity schema
 	// references in deploy documents resolve against it without adding build-order edges.

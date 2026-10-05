@@ -1,10 +1,11 @@
-import { defineConfig, SchemaKind, service, TargetLanguage } from "@superschematic/schema-config";
+import { ShopDb } from "@acme/shop-db";
+import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
 
 export default defineConfig({
   name: "shop-api",
   kind: SchemaKind.API,
   public: true,
-  authDb: service({ name: "shop-db", kind: SchemaKind.DB }),
+  authDb: ShopDb,
   outputs: {
     types: {
       [TargetLanguage.Go]: { enabled: true },

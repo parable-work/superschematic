@@ -4,9 +4,9 @@ package buildplan
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -198,50 +198,29 @@ func configPath(serviceDir string) string {
 
 func readConfig(serviceDir string, configPath string, reg *registry.Registry) (*schemaconfig.SchemaConfig, error) {
 	if filepath.Base(configPath) == "schema.config.ts" {
-		if err := checkConfigPurity(configPath, reg.Naming()); err != nil {
-			return nil, err
-		}
+		// The static read applies the config import rule (D34): the config
+		// package, and other services' sentinels, which EnsureSentinels
+		// writes before discovery.
 		return tsreader.ReadServiceConfig(serviceDir, reg)
 	}
 	return schemaconfig.ReadFile(serviceDir, reg)
 }
 
-// configImportPattern matches import declarations in a schema.config.ts:
-// `import ... from "<specifier>"` and side-effect `import "<specifier>"`.
-// schema.config.ts files are constrained enough (no strings containing
-// import statements) that a line-level scan is reliable.
-var configImportPattern = regexp.MustCompile(`(?m)^\s*import\b[^'"]*['"]([^'"]+)['"]`)
-
-// checkConfigPurity enforces the identity layer's cycle-proofing rule:
-// schema.config.ts may import only the config package
-// (sentinel.ConfigPackage), under its own name or under a specifier the
-// naming file's [package_aliases] maps onto it. Configs are imported as
-// identity references by the platform model; any richer import graph would
-// drag arbitrary code into every consumer's evaluation.
-func checkConfigPurity(configPath string, n naming.Naming) error {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-	for _, match := range configImportPattern.FindAllStringSubmatch(string(data), -1) {
-		if n.DeclaringPackage(match[1]) != sentinel.ConfigPackage {
-			return fmt.Errorf("%s: imports %q; schema.config.ts may import only %s (configs are identity references and must stay dependency-free)", configPath, match[1], strings.Join(configSpecifiers(n), " or "))
-		}
-	}
-	return nil
-}
-
-// configSpecifiers returns the specifiers a schema.config.ts may import,
-// sorted: the config package and every alias the naming maps onto it.
-func configSpecifiers(n naming.Naming) []string {
-	specifiers := []string{sentinel.ConfigPackage}
-	for specifier, declaring := range n.PackageAliases {
-		if declaring == sentinel.ConfigPackage && specifier != sentinel.ConfigPackage {
-			specifiers = append(specifiers, specifier)
-		}
-	}
-	sort.Strings(specifiers)
-	return specifiers
+// EnsureSentinels writes the sentinel of every service under servicesRoot
+// that lacks one or whose config's name or kind changed. A config may import
+// a sibling's sentinel (D34), so discovery, which reads every config in
+// full, needs them all on disk first: build-all, build --with-deps and
+// migrate run this before DiscoverWith. The sweep reads only each config's
+// name and kind, so it never needs a sentinel itself. log, when set,
+// receives a line per sentinel written.
+func EnsureSentinels(servicesRoot string, reg *registry.Registry, log io.Writer) error {
+	return sentinel.EnsureSiblings(servicesRoot, sentinel.Options{
+		ReadTSIdentity: func(servicePath string) (*schemaconfig.SchemaConfig, error) {
+			return tsreader.ReadServiceIdentity(servicePath, reg)
+		},
+		Registry: reg,
+		Log:      log,
+	})
 }
 
 // TopologicalSort returns services ordered so dependencies precede dependents.
