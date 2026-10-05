@@ -104,6 +104,9 @@ type conversion struct {
 	// lossy is set when the cast keeps a different value than it was given:
 	// a narrowing cast that truncates or rounds.
 	lossy bool
+	// loss says what a lossy cast loses, ending the destructive hazard's
+	// sentence. Empty gives the hazard its usual reason.
+	loss string
 }
 
 // dialects are the dialects the planner knows, by name.

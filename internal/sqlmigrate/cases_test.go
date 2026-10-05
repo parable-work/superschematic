@@ -45,6 +45,9 @@ type planCase struct {
 	// (sqlitePlanCases), with the reason.
 	dialect  Dialect
 	noSQLite string
+	// lists are rows of product a SQLite case seeds with lists in its
+	// items column, each with the JSON text it holds after the plan.
+	lists listRows
 }
 
 func (pc planCase) dialectOrDefault() Dialect {

@@ -133,6 +133,13 @@ type Column struct {
 	// every other column, and for every column of a Postgres model, whose
 	// types tell a list and JSON from text.
 	Holds string `json:"holds,omitempty"`
+
+	// Element is what each element of a SQLite list column's JSON array
+	// holds: TEXT, INTEGER, REAL or NUMERIC as SQLite stores the element's
+	// type, BOOLEAN for JSON's true and false, JSON for a JSON value, and
+	// BLOB for bytes. It is empty for every other column, and for every
+	// column of a Postgres model, whose types name the element.
+	Element string `json:"element,omitempty"`
 }
 
 // What a SQLite column holds as JSON TEXT (Column.Holds).

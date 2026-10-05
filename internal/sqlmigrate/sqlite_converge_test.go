@@ -1,6 +1,7 @@
 package sqlmigrate
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +16,8 @@ import (
 // for each SQLite plan case (A, B), sqlite/create.sql of A, then rows seeded
 // into it, then the plan from A to B, leaves the same schema as
 // sqlite/create.sql of B, and the seeded rows are still there unless a step
-// deleted them; for each case with contract steps, sqlite/create.sql of A,
+// deleted them, with the lists a case seeds (listRows) holding the JSON
+// text it expects; for each case with contract steps, sqlite/create.sql of A,
 // the rows and the plan's expand steps leave the schema of the plan from an
 // empty database to the plan's expandedModel (D27, amended); for every
 // SQLite fixture, the plan from an empty database leaves the same schema as
@@ -35,9 +37,12 @@ func TestConvergenceOnSQLite(t *testing.T) {
 		if writeSQLitePlanCase(t, filepath.Join(cases, pc.golden()), pc) {
 			cascade = true
 		}
+		writeListRows(t, filepath.Join(cases, pc.golden()), pc.lists)
 		if plan := pc.plan(t); plan.Expanded != "" {
 			from, _ := pc.models(t)
-			writeExpandedCase(t, filepath.Join(cases, "expanded-"+pc.golden()), pc, plan, sqliteCreateSQL(t, from), sqliteSeeds)
+			dir := filepath.Join(cases, "expanded-"+pc.golden())
+			writeExpandedCase(t, dir, pc, plan, sqliteCreateSQL(t, from), sqliteSeeds)
+			writeListRows(t, dir, pc.lists)
 		}
 	}
 	// A rebuild of a parent must keep the rows of its ON DELETE CASCADE
@@ -134,12 +139,49 @@ func writeSQLitePlanCase(t *testing.T, dir string, pc planCase) bool {
 	return false
 }
 
+// writeListRows adds a case's listRows to the seed.sql and checks.json in
+// dir: a row of product per list, and a check that its list holds the JSON
+// text the case expects after the plan.
+func writeListRows(t *testing.T, dir string, rows listRows) {
+	t.Helper()
+	if len(rows) == 0 {
+		return
+	}
+	seed, err := os.ReadFile(filepath.Join(dir, "seed.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "checks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checks []seedCheck
+	if err := json.Unmarshal(b, &checks); err != nil {
+		t.Fatal(err)
+	}
+	sql := string(seed)
+	for i, row := range rows {
+		id := literal(fmt.Sprintf("list-%d", i+1))
+		sql += fmt.Sprintf(`INSERT INTO "product" ("id", "title", "price", "items") VALUES (%s, 'listed', 1, %s);`+"\n", id, row[0])
+		checks = append(checks, seedCheck{
+			Name: fmt.Sprintf("the list %s becomes %s", row[0], row[1]),
+			SQL:  fmt.Sprintf(`SELECT count(*) = 1 FROM "product" WHERE "id" = %s AND "items" IS %s`, id, row[1]),
+		})
+	}
+	writeFile(t, filepath.Join(dir, "seed.sql"), []byte(sql))
+	writeJSON(t, filepath.Join(dir, "checks.json"), checks)
+}
+
 // sqliteSeeds seeds rows of SQLite types. Every text column of a row holds
 // the same UUID's text, so a foreign key added over a text column
-// references a row that exists, as the row's own key.
+// references a row that exists, as the row's own key. A list is empty: a
+// case with listRows seeds lists with elements.
 var sqliteSeeds = seeds{
-	value: func(sqlType string, n, i int) (string, bool) {
-		switch sqliteAffinity(sqlType) {
+	value: func(col *Column, n, i int) (string, bool) {
+		if col.Holds == holdsList {
+			return "'[]'", true
+		}
+		switch sqliteAffinity(col.Type) {
 		case sqliteText:
 			return literal(fmt.Sprintf("%08x-0000-4000-8000-000000000000", n)), true
 		case sqliteInteger, sqliteReal, sqliteNumeric:
@@ -158,7 +200,7 @@ func TestSQLiteSeeds(t *testing.T) {
 	for name, schema := range sqliteModelFixtures(t) {
 		for _, table := range sqliteModel(t, name, schema).Tables {
 			for _, col := range table.Columns {
-				if _, ok := sqliteSeeds.value(col.Type, 1, 0); !ok {
+				if _, ok := sqliteSeeds.value(col, 1, 0); !ok {
 					types = append(types, col.Type)
 				}
 			}

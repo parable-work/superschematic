@@ -159,8 +159,11 @@ func (d *differ) retypeHazards(c *change, prevTable string, r *retype) {
 	c.addHazard(HazardCompat, "", fmt.Sprintf(
 		"%s: servers built from the previous version still read and write %s.", change, before))
 	if r.conv.lossy {
-		c.addHazard(HazardDestructive, "", fmt.Sprintf(
-			"%s: the cast truncates or rounds values %s cannot hold exactly.", change, after))
+		loss := r.conv.loss
+		if loss == "" {
+			loss = fmt.Sprintf("the cast truncates or rounds values %s cannot hold exactly.", after)
+		}
+		c.addHazard(HazardDestructive, "", change+": "+loss)
 	}
 	if r.conv.kind == convertMayFail {
 		c.addHazard(HazardDataDependent, "", fmt.Sprintf(
@@ -178,8 +181,12 @@ func (d *differ) retypeHazards(c *change, prevTable string, r *retype) {
 // typeNames names the types of a column before and after a change, in a
 // reason or an error. Where what the column holds changes (Column.Holds),
 // each name says whether the column is a scalar, a list or a JSON value,
-// since a SQLite type alone does not.
+// since a SQLite type alone does not. Where a list's element changes
+// (Column.Element), each name gives the element.
 func typeNames(before, after *Column) (string, string) {
+	if before.Holds == after.Holds && before.Element != after.Element {
+		return "a list of " + before.Element, "a list of " + after.Element
+	}
 	if before.Holds == after.Holds {
 		return before.Type, after.Type
 	}

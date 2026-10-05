@@ -407,7 +407,8 @@ func (d *differ) diffColumns(ft, tt *Table) error {
 
 // sameShape reports whether two columns differ only by name.
 func sameShape(a, b *Column) bool {
-	return a.Type == b.Type && a.Holds == b.Holds && a.Nullable == b.Nullable && a.Default == b.Default && a.Generated == b.Generated
+	return a.Type == b.Type && a.Holds == b.Holds && a.Element == b.Element &&
+		a.Nullable == b.Nullable && a.Default == b.Default && a.Generated == b.Generated
 }
 
 func (d *differ) addColumn(ft, tt *Table, tc *Column) {

@@ -83,6 +83,33 @@ func sqliteHolds(pg string) string {
 	return ""
 }
 
+// The elements of a list's JSON array that no SQLite type names
+// (Column.Element).
+const (
+	elementBoolean = "BOOLEAN"
+	elementJSON    = "JSON"
+)
+
+// sqliteElement is what each element of a column of Postgres type pg holds
+// in the column's JSON array, or "" when the column is not a list. JSON
+// keeps text as a string and a number as a number, which SQLite reads as
+// the type it stores the element's type as; no collation applies inside
+// JSON. It keeps a boolean as true or false, which SQLite reads as 1 and 0
+// but keeps apart from them, and a JSON value as itself.
+func sqliteElement(pg string) string {
+	t := parsePGType(pg)
+	if !t.array {
+		return ""
+	}
+	switch t.base {
+	case "BOOLEAN":
+		return elementBoolean
+	case "JSONB", "JSON":
+		return elementJSON
+	}
+	return sqliteAffinity(sqliteTypes[t.base])
+}
+
 // SQLite defaults write the forms the schema runtime reads.
 const (
 	// sqliteUUIDDefault is a version 4 UUID in its lowercase string form:
@@ -158,9 +185,13 @@ func sqliteAffinity(t string) string {
 // gives it: text is not a JSON array, Postgres parses text as JSON where
 // SQLite's json_quote would wrap it, and Postgres converts no list to or
 // from anything else. So each of them is impossible: the operator changes
-// the column by hand and adopts the new model (D27).
+// the column by hand and adopts the new model (D27). A list is TEXT
+// whatever its element, so a list's change is its element's
+// (sqliteListConvert).
 func (sqliteDialect) convert(from, to *Column) conversion {
 	switch {
+	case from.Holds == holdsList && to.Holds == holdsList:
+		return sqliteListConvert(from.Element, to.Element)
 	case from.Holds == to.Holds:
 		return sqliteConvert(from.Type, to.Type)
 	case from.Holds == holdsJSON && to.Holds == "":
@@ -203,4 +234,62 @@ func sqliteConvert(from, to string) conversion {
 	// Text that is not a number becomes 0, a fraction is cut toward zero
 	// as an INTEGER, and an integer past 2^53 is rounded as a REAL.
 	return conversion{kind: convertRewrite, lossy: true}
+}
+
+// sqliteListConvert classifies a change of a list's element from one type
+// to another (Column.Element). A rebuild converts each element in order
+// (sqliteListValue). A cast between TEXT, INTEGER, REAL and NUMERIC keeps
+// or loses values as the same cast of a column does (sqliteConvert). A
+// boolean becomes 1 or 0 as a number and true or false as text, which
+// keeps every value; any other element becomes a boolean by SQLite's truth
+// test, which keeps only 0 and 1. SQLite's CAST never fails, so a
+// conversion that cannot keep every element is lossy, never one that may
+// fail, and says what it loses (sqliteElementLoss).
+//
+// A JSON value or bytes converts to and from nothing. SQLite's CAST keeps
+// a nested JSON value as JSON, where Postgres's cast to text gives its
+// text, and SQLite's JSON holds no BLOB, so bytes in a list are text in an
+// encoding no SQLite function reads. An element a model does not record,
+// as in a SQLite model built before models recorded one, is taken as
+// unchanged.
+func sqliteListConvert(from, to string) conversion {
+	switch {
+	case from == to, from == "", to == "":
+		return conversion{kind: convertSame}
+	case from == elementJSON, to == elementJSON, from == sqliteBlob, to == sqliteBlob:
+		return conversion{kind: convertImpossible}
+	case from == elementBoolean:
+		return conversion{kind: convertRewrite}
+	}
+	c := conversion{kind: convertRewrite, lossy: true}
+	if to != elementBoolean {
+		c = sqliteConvert(from, to)
+	}
+	if c.lossy {
+		c.loss = sqliteElementLoss(from, to)
+	}
+	return c
+}
+
+// sqliteElementLoss says what a lossy conversion of a list's elements
+// loses, ending the destructive hazard's sentence.
+func sqliteElementLoss(from, to string) string {
+	var lost []string
+	switch {
+	case to == elementBoolean && from == sqliteText:
+		lost = append(lost, "text is true only where it reads as a number other than 0, so 'true' becomes false")
+	case to == elementBoolean:
+		lost = append(lost, "every number other than 0 becomes true")
+	case from == sqliteText:
+		lost = append(lost, "text that is not a number becomes 0")
+		if to == sqliteInteger {
+			lost = append(lost, "a fraction is cut toward zero")
+		}
+	case to == sqliteInteger:
+		lost = append(lost, "a fraction is cut toward zero")
+	case to == sqliteReal:
+		lost = append(lost, "an integer past 2^53 is rounded")
+	}
+	return "SQLite converts each element with a cast that never fails, so the conversion does not keep every element: " +
+		joinAnd(lost) + "."
 }
