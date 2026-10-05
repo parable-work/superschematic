@@ -626,7 +626,7 @@ point of its own, so the core's entry loads in a browser without them:
 | --- | --- |
 | `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, and the canonical rules (`canonicalRow`, `canonicalValue`) with the exact JSON codec they read with. |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
-| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
+| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout`, `minSqliteVersion`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
 `pg` is an optional peer dependency. The bindings use only the methods they
@@ -743,7 +743,10 @@ inside the transaction its caller holds and issues no transaction control,
 for a host such as D16's engine that holds the transaction. With one
 writer per file, a ref needs no lock of its own and the sweep lock is
 always free. `sqliteLayout(tableName)` returns the layout's statements, one
-statement each, for a caller that runs its own migrations.
+statement each, for a caller that runs its own migrations. The adapter
+refuses a SQLite older than 3.37.0 (`minSqliteVersion`, the first with
+`STRICT` tables) and one without the JSON functions `json_each` and
+`json_extract`.
 `nodeSqlite(db)` and `bunSqlite(db)` bind an open `node:sqlite`
 `DatabaseSync` and an open `bun:sqlite` `Database`; another driver
 implements `SqliteClient` (`run`, `get` and `all` with numbered `?1`

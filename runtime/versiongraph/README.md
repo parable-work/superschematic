@@ -585,6 +585,16 @@ row's newest image and every image a patch or a snapshot pins, at most a
 batch of them, oldest first; a kind without `retentionDays` prunes
 nothing.
 
+`createTables` and binding the adapter refuse a SQLite older than 3.37.0,
+the first with `STRICT` tables, and one that cannot run `json_each` and
+`json_extract`, which its reads take lists through (built in from 3.38.0,
+and in 3.37 with JSON1); its statements need nothing later than that
+(`RETURNING` came in 3.35.0). On a connection of its own the adapter reads
+the version with `sqlite_version()`. In the caller's transaction it checks
+the JSON functions only, since D16 refuses a behavior's statement that
+names `sqlite_version`, and D16's engine, whose own tables are `STRICT`,
+needs 3.37.0 already. Every language's SQLite adapter refuses the same.
+
 The adapter reaches SQLite through `SqliteClient`: `run`, `get` and `all`
 with positional parameters for numbered placeholders (`?1`), returning
 plain rows and `undefined` for no row, and an error carrying SQLite's

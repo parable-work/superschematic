@@ -1209,4 +1209,76 @@ export const cases: Case[] = [
       }
     },
   },
+  {
+    name: "createTables and storage refuse a SQLite older than 3.37.0, or one without json_each and json_extract",
+    run(binding) {
+      const db = binding.open(":memory:");
+      try {
+        // The binding's own SQLite runs the adapter.
+        const own = new SqliteAdapter(descriptor, { graph });
+        own.createTables(db.client);
+        own.storage(db.client);
+        // A client over it that reports another version, or whose JSON
+        // functions fail or give another value.
+        const reporting = (version: string | null, json: "works" | "fails" | "wrong" = "works"): SqliteClient => ({
+          exec: (sql) => db.client.exec!(sql),
+          run: (sql, params) => db.client.run(sql, params),
+          all: (sql, params) => db.client.all(sql, params),
+          get: (sql, params) => {
+            if (/sqlite_version\(\)/.test(sql)) {
+              return { version };
+            }
+            if (/json_each/.test(sql) && json !== "works") {
+              if (json === "fails") {
+                throw new SqliteError("no such function: json_each", 1);
+              }
+              return { one: null };
+            }
+            return db.client.get(sql, params);
+          },
+        });
+        const opens = (client: SqliteClient, options: Partial<SqliteOptions> = {}) => {
+          const adapter = new SqliteAdapter(descriptor, { graph, ...options });
+          return [() => adapter.createTables(client), () => adapter.storage(client)];
+        };
+        for (const version of ["3.37.0", "3.37.2", "3.38.0", "3.100.0", "4.0.0"]) {
+          for (const open of opens(reporting(version))) {
+            open();
+          }
+        }
+        for (const version of ["3.36.9", "3.36.0", "3.9.99", "2.99.99"]) {
+          for (const open of opens(reporting(version))) {
+            assert.throws(open, new RegExp(`SQLite ${version.replace(/\./g, "\\.")} is older than 3\\.37\\.0`), version);
+          }
+        }
+        for (const version of ["3.37", "", null]) {
+          for (const open of opens(reporting(version))) {
+            assert.throws(open, /not major\.minor\.patch/, String(version));
+          }
+        }
+        for (const json of ["fails", "wrong"] as const) {
+          for (const open of opens(reporting("3.37.0", json))) {
+            assert.throws(open, /SQLite 3\.37\.0 (cannot run json_each and json_extract|gives null for json_extract over json_each)/, json);
+          }
+        }
+        // In the caller's transaction the adapter cannot read the version, a
+        // name D16 refuses a behavior, so it checks the JSON functions only.
+        const caller: Partial<SqliteOptions> = { callerTransaction: true, tableName: behaviorTable };
+        const ran: Ran[] = [];
+        inCallerTransaction(db.client, () => {
+          for (const open of opens(checkedClient(reporting("3.36.0"), "migrate", ran), caller)) {
+            open();
+          }
+          for (const json of ["fails", "wrong"] as const) {
+            for (const open of opens(checkedClient(reporting("3.36.0", json), "migrate"), caller)) {
+              assert.throws(open, /this SQLite (cannot run json_each and json_extract|gives null)/, json);
+            }
+          }
+        });
+        assert.ok(ran.some((r) => /json_each/.test(r.sql)), "the caller's transaction checks the JSON functions");
+      } finally {
+        db.close();
+      }
+    },
+  },
 ];

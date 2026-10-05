@@ -14,7 +14,7 @@ D32 in `docs/DECISIONS.md`).
 | `@superschematic/versiongraph` | The core: `init` and `initSync`, the operations, `VersionGraphError` and the contract's types. Runs in the browser, bun and Node, has no dependencies, and drives the module through its C ABI exports (`vg_alloc`, `vg_<op>`, `vg_free`, `vg_dealloc`) with no generated glue. |
 | `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, the canonical rules (`canonicalValue`, `canonicalRow`) and the exact JSON codec they read with (`parseJson`, `stringifyJson`, `JsonNumber`). |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
-| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout` and `sqliteTables`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
+| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout` and `sqliteTables`, `minSqliteVersion`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
 ## The core
@@ -170,7 +170,11 @@ as a savepoint; with `options.callerTransaction` it runs in the
 transaction its caller holds and issues no transaction control, as a D16
 behavior's `sql` requires. A taken name is the live-name index's
 `SQLITE_CONSTRAINT_UNIQUE`, and `lockRef`, `nextSequence` and `sweepLock`
-lean on SQLite's one writer. The engine's core `Branches` behavior runs it
+lean on SQLite's one writer. `createTables` and `storage` refuse a SQLite
+older than `minSqliteVersion` (3.37.0, the first with `STRICT` tables) and
+one that cannot run `json_each` and `json_extract`; in the caller's
+transaction, where D16 refuses the name `sqlite_version`, they check the
+JSON functions only. The engine's core `Branches` behavior runs it
 so, in each operation's transaction, over its `sql`
 (`runtime/engine/README.md`, "Branches").
 
