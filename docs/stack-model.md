@@ -145,8 +145,13 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a database field per sql edge. It holds a connection the edge's connector
   fills (a Cloud SQL connector configuration on GCP, a connection string
   locally), not a string the application parses;
-- a service field per http edge. It holds the callee's base URL and the
-  source of the service credential (section 9.2).
+- a service field per http edge. It holds the callee's base URL, the
+  source of the service credential and the headers that carry it (section
+  9.2);
+- a service-auth field on a server that an http edge reaches. It holds
+  what the server's `ServiceAuthenticator` checks: each inbound edge's
+  issuer, keys and audience, and the deployable each caller identity is
+  (section 9.2).
 
 Field and variable names follow a naming-file rule over the callee's
 service name, with the core's rule as the default (D7, D8). A server's own
@@ -898,57 +903,403 @@ Not taken:
 ## 9. End-user auth and service auth
 
 These are two concepts, with separate credentials, context values and
-checks.
+checks. D37 in `docs/DECISIONS.md` records the decisions in this section.
 
 ### 9.1 End-user auth
 
 End-user auth is what exists today: the auth providers of section 8 of
-`docs/extension-model.md`, the `Authorization` header, the session
-runtime's principal and `@requirePermission`. It answers who the person is,
-and this model leaves it unchanged.
+`docs/extension-model.md`, the `Authorization` header, the end-user
+principal and `@requirePermission`. It answers who the person is, and this
+model leaves it unchanged. Permissions belong to end users only; no service
+holds one (section 9.7).
 
 ### 9.2 Service auth
 
-Service auth is new. It answers which deployable is calling, at two layers:
+Service auth answers which deployable is calling, at two layers:
 
 - **Admission, at the platform.** Only a caller with an edge reaches the
   callee at all. Connectors derive this from edges: `roles/run.invoker` on
   Cloud Run, a NetworkPolicy on Kubernetes, a service binding on Workers.
-- **Identity, in the application.** The callee knows the calling service as
-  a service principal, separate from the end-user principal.
-  - The HTTP runtimes gain a `ServiceAuthenticator`. It verifies the
-    platform's workload credential (a Google ID token on GCP, a projected
-    service account token on Kubernetes) and puts a `ServiceCaller` on the
-    request context.
-  - The SDKs gain a service credential source, which the generated
-    entrypoint picks per platform.
-  - The service credential travels in its own header, so `Authorization`
-    stays the end user's. On Cloud Run, `X-Serverless-Authorization` carries
-    the ID token the platform checks.
+  An exposed server admits every caller at this layer, since browsers call
+  it.
+- **Identity, in the application.** The callee knows the calling deployable
+  as a `ServiceCaller`, separate from the end-user principal. The HTTP
+  runtimes' `ServiceAuthenticator` establishes it (section 9.5), and it
+  verifies the credential's signature on every platform, whether or not the
+  platform admitted the call.
+
+The service credential is a short-lived JWT on every v1 platform, so one
+verifier in each runtime reads all of them. It knows JWTs and keys, not
+clouds; what is specific to a platform is data the connector writes into
+the callee's config (section 3.4).
+
+| Platform | The caller sends | Lifetime | The callee checks |
+| --- | --- | --- | --- |
+| Cloud Run | a Google ID token whose audience is the callee's URL, from the metadata server | 1 hour; fetched again 5 minutes before it expires | RS256 against Google's keys; `iss` `https://accounts.google.com` or `accounts.google.com`; `aud`; `exp`; the caller's service account by its unique id in `sub` |
+| Kubernetes | a projected service account token whose audience is the callee, read from the file the kubelet keeps current | 10 minutes, the shortest Kubernetes allows; the kubelet replaces it at 80% of that, and the caller reads the file again each minute | the signature against the issuer's keys; `iss`; `aud`; `exp`; the caller's service account in `sub` |
+| local, and the generic connector (section 6.2) | a token the caller signs with the edge's Ed25519 key | 5 minutes | the signature against the edge's public keys; `iss`; `aud`; `exp` |
+
+The callee's config holds, for each inbound edge, the issuer, the keys or
+where to fetch them, the audience, the claim that names the caller, and the
+deployable each caller identity is, with the APIs it serves. An identity
+the config does not list is no caller, whatever signed its token. The
+Kubernetes platform reads the issuer's keys from the API server's
+`/openid/v1/jwks`, which default RBAC lets any service account read, with
+the server's own token.
+
+**Headers.** The credential travels in `Service-Authorization: Bearer
+<token>` on every platform, and the `ServiceAuthenticator` reads only that
+header. `Authorization` stays the end user's. On Cloud Run the caller also
+sends the same token in `X-Serverless-Authorization` to a callee whose
+invoker check is on, which is every server that is not exposed:
+
+- Cloud Run admits a call by the ID token in `X-Serverless-Authorization`
+  when the header is present, and in `Authorization` otherwise. The
+  platform header is what lets an internal server take the end user's
+  `Authorization` at all.
+- Cloud Run removes that token's signature before the request reaches the
+  container, so the application cannot verify that copy. It verifies the
+  copy in `Service-Authorization` instead.
+- An exposed server's invoker check is off, because browsers call it. There
+  Cloud Run checks nothing, and its documentation does not say what it does
+  to `X-Serverless-Authorization`, so callers do not send it and the
+  application ignores it.
+
+So the application verifies again on Cloud Run: on an internal server it
+checks what the platform already checked, at the cost of one header; on an
+exposed one it is the only check.
+
+The generic connector's token:
+
+- is a compact JWS with the header `{"alg": "EdDSA", "kid": <the key's
+  RFC 7638 thumbprint>, "typ": "JWT"}`. RFC 9864 renames the algorithm
+  `Ed25519`, which the Go and Rust JWT libraries do not read yet, so the
+  caller writes `EdDSA` and the callee accepts both;
+- carries `iss` and `sub`, the caller's deployable name in the
+  environment; `aud`, the callee's; `iat`; `exp`, 5 minutes after `iat`;
+  and `jti`, for logs;
+- is accepted when its `kid` is one of the edge's keys, the key belongs to
+  the deployable `iss` names, `aud` is the callee, and `exp` is in the
+  future and at most 5 minutes after `iat`, with 60 seconds of leeway for
+  clocks. The caller signs a new token when the one it holds has less than
+  a minute left.
+
+Each edge has two key slots. Each slot is replaced every 180 days, the two
+offset by 90 days, by a `Rotating` node of the `time` provider in the
+resource graph; the period is a connector setting. The callee accepts both
+public keys and the caller signs with the younger private key. Callees
+deploy before callers (section 5.3), so a callee holds a new public key
+before any caller signs with it. A key pair is a credential the platform
+generates, not a secret a person enters (section 4.2): the private key goes
+into the caller's secret store, the public key into the callee's config.
+
+The `local` target uses the same tokens. `stack dev` generates a key pair
+per edge into the gitignored local file, so a local stack runs the code
+path a deployed one does.
+
+Not taken:
+
+- Trusting the claims Cloud Run passes on in `X-Serverless-Authorization`.
+  It saves a header, but every runtime would carry a mode that accepts a
+  JWT without its signature, which is safe only while the invoker check
+  stays on. Google does not document the header's handling with the check
+  off, and one report says the signature is removed there too, unchecked.
+- `X-Serverless-Authorization` as the service header everywhere, which an
+  exposed Cloud Run server cannot verify.
+- A verifier per platform in each runtime, linking a cloud's client
+  library: D6 keeps the runtimes provider-neutral, and three runtimes would
+  each need every cloud.
+- The Kubernetes TokenReview API. It notices a token whose pod was deleted
+  before the token expires, but it calls the API server per request and
+  needs a Kubernetes client in each runtime. A 10-minute token bounds the
+  same window offline.
+- Mutual TLS, which Cloud Run does not pass to the container.
+- HTTP message signatures (RFC 9421) over the method, path and body
+  digest. They stop a token being replayed on another request within its
+  lifetime, but every runtime and SDK would have to agree on the body's
+  digest, and Google's and Kubernetes' tokens are bearer tokens anyway.
+- ES256 for the generic connector's key, which WebCrypto supported first,
+  but whose signatures are not deterministic, so the parity vectors could
+  not be regenerated byte for byte. Every runtime the servers target verifies Ed25519 now: Go, Rust's
+  `jsonwebtoken`, and WebCrypto in Node.js 22.13, Bun and Workers.
+- No service auth locally, or a header that names the caller unsigned. It
+  leaves a code path only production runs, and a mode that could ship.
 
 ### 9.3 Schema surface
 
-An operation says who may call it: end users with permissions
-(`@requirePermission`, as today), services, or both. The services that may
-call an API are the deployables with an edge to it, which is derived; a
-handle on the operation can narrow that set. Resolution checks that every
-`calls` edge reaches at least one operation the caller may invoke.
+An operation says who may call it with two decorators beside the end-user
+ones, registered for operations and operation sets like `@rateLimit`. An
+operation's own declaration replaces its set's.
+
+| Declared | Who may call |
+| --- | --- |
+| `@auth`, `@requirePermission` or `@requireOwnership` (the user clause, as today) | an end user who meets it, directly or forwarded by a service (section 9.4) |
+| `@requireService(...)` | only a listed service. No end user is looked at |
+| `@requireService(...)` and a user clause | only a listed service, forwarding an end user who meets the user clause |
+| `@allowService(...)` and a user clause | an end user who meets the user clause, or a listed service with no end user |
+
+```ts
+// schemas/services/shop-api/src/stock.schema.ts
+import { ShopOrders } from "@acme/shop-orders";
+
+export class StockMutations {
+  // Only the orders server, placing an order for a user who may.
+  @rest(HttpMethod.POST, "stock/reservations")
+  @requirePermission(["orders.create"])
+  @requireService({ from: [ShopOrders] })
+  reserveStock(input: ReserveStockInput): Reservation {
+    throw new Error("schema declaration only");
+  }
+
+  // A user who may, or the orders server on its own.
+  @rest(HttpMethod.POST, "stock/reservations/{id}/release")
+  @requirePermission(["stock.write"])
+  @allowService({ from: [ShopOrders] })
+  releaseReservation(id: Identity.UUID): Reservation {
+    throw new Error("schema declaration only");
+  }
+
+  // Any server with an edge to shop-api, and no end user.
+  @rest(HttpMethod.POST, "stock/reindex")
+  @requireService()
+  reindexStock(): ReindexResult {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- **`from`** is a list of API service handles. A listed service is the
+  server that serves that API in the stack. Without `from`, every server
+  with a `calls` edge to the API is listed. `from` narrows the edges and
+  never widens them: a listed service without an edge is not admitted by
+  the platform. A handle in `from` is an identity, so it adds no
+  build-order edge (section 12), and two APIs may name each other.
+- When a listed service admits an `@allowService` operation, it stands in
+  for the end user: the user clause is not checked and no end user is
+  authenticated. A service that is not listed, or that forwards a user it
+  wants checked, goes through the user clause.
+- The TypeScript reader refuses, and the verify pass refuses in a schema
+  authored as IR: `@allowService` without a user clause (an operation only
+  services call is `@requireService`); either decorator with
+  `@publicRoute`, `@webhook` or `@hmacVerified` on one operation (a third
+  party holds no service credential); and both on one operation or one
+  set. An `@publicRoute` operation opens its route even in a set with a
+  service clause.
+
+The IR records the effective rule on `FieldDef.ServiceCallers` and
+`OperationSet.ServiceCallers`, a `ServiceCallers{Mode, From}` where `Mode`
+is `require` or `allow` and `From` holds the API service names. The
+generators read it through `EndpointInfo`, as they read `RequiresAuth`.
+
+Resolution adds a check to those of section 5.2. Every `calls` edge from a
+server C to an API A must reach at least one operation of A that C may
+invoke:
+
+- an operation open to anyone;
+- an `@allowService` operation that lists C;
+- a `@requireService` operation that lists C, when it has no user clause or
+  C can forward an end user;
+- an operation with a user clause and no `@requireService`, when C can
+  forward an end user.
+
+C can forward an end user when an API it serves has an operation with a
+user clause. So an edge fails when every operation of the callee lists
+other services or needs an end user the caller does not have: "orders
+calls shop-api, but no shop-api operation admits orders". A handle in `from` that names a service
+the stack does not deploy, or deploys without an edge, is not an error: an
+API is written once and deployed in many stacks.
+
+The OpenAPI document gains a `serviceAuth` security scheme, a bearer token
+in the `Service-Authorization` header. OpenAPI's security list is an OR of
+ANDs, so each row of the table above is one list: `[{bearerAuth}]`,
+`[{serviceAuth}]`, `[{serviceAuth, bearerAuth}]` and
+`[{bearerAuth}, {serviceAuth}]`. The tool manifest leaves out a
+`@requireService` operation, which no end user's agent can call.
+
+Not taken:
+
+- One decorator with a mode argument, such as `@callers({ services,
+  users: "or" | "and" })`. The pair reads as the rule it states, and each
+  rule has one spelling.
+- Narrowing in the stack, on `calls`, by operation name. It is a name in a
+  string, and it puts the API's access rules in every stack that deploys
+  it.
+- Naming the calling deployable's class in `from`. A stack imports its
+  APIs, so an API cannot import the stack's classes.
 
 ### 9.4 Delegation
 
 A server that calls on behalf of a user forwards the user's
-`Authorization` and adds its own service credential. The callee sees both
-principals and checks each against what the operation requires. Whether a
-forwarded user token is accepted as is, or exchanged for a narrower one, is
-the end-user auth provider's decision.
+`Authorization`, unchanged, beside its own service credential. The callee
+puts the service caller and the end user on the request context and checks
+each against the operation's rule (section 9.3).
 
-### 9.5 Open
+- **Forwarding is per call, from the request being served.** In Go, the
+  generated entrypoint sets each client's end-user token hook to read the
+  token of the request on the call's `context.Context`, so a handler that
+  passes its context forwards. TypeScript and Rust have no context that
+  every runtime carries across an `await`, so a call forwards when its
+  options name the `RequestContext` it serves: `{ forward: ctx }` and
+  `RequestOptions::forward(&ctx)`.
+- **A client built for an edge holds no end-user token.** It has no static
+  token and no refresh, since a server cannot refresh a user's session. A
+  call with nothing to forward, from a background task say, carries the
+  service credential alone.
+- **The callee's end-user provider decides whether the forwarded token is
+  good.** With the `session` provider it is when the callee's `authDb`
+  holds the same Session table as the caller's, which is the case in a stack
+  whose APIs share one auth database.
+- **Token exchange belongs to the end-user provider, and v1 has none.** The
+  core never mints, narrows or exchanges a user's token. A provider that
+  wants narrower forwarded tokens would exchange them in the caller before
+  the call, with the service credential as the actor token of RFC 8693; the
+  core's part would be a hook on the forward option. Nothing needs it yet.
 
-- The decorators and their IR fields.
-- Per platform, whether the application verifies again a credential the
-  platform has already admitted.
-- Whether services hold permissions that `@requirePermission` checks, or
-  operations are only marked as callable by services.
+### 9.5 Runtime
+
+Each HTTP runtime gains a `ServiceAuthenticator` and a `ServiceCaller`
+beside the end-user `Authenticator` and principal:
+
+| Runtime | Seam | The caller |
+| --- | --- | --- |
+| Go | `serviceauth.Authenticator`, `Authenticate(*http.Request) (*serviceauth.Caller, error)`, set on the router's `Config.ServiceAuthenticator` | `serviceauth.CallerFromContext(ctx)` |
+| TypeScript | `ServiceAuthenticator`, `(ctx: RequestContext) => Promise<ServiceCaller \| null>`, a `buildRouter` option beside `authenticate` | `ctx.serviceCaller` |
+| Rust | `ServiceAuthenticator`, `async fn authenticate(&self, &Parts) -> Result<Option<ServiceCaller>, ApiError>`, on `Implementations.service_authenticator` | `RequestContext.service_caller` |
+
+A `ServiceCaller` has the calling deployable's name, the APIs it serves
+(which `from` is checked against) and the credential's subject, for logs.
+An authenticator returns no caller when the request carries no service
+credential. It refuses a credential it cannot verify with 401, code
+`service_unauthorized`, and a verified identity that is no caller of this
+server with 403, code `service_forbidden`. A failure that is not the
+caller's, such as keys it cannot fetch, answers 503. Each runtime ships one
+implementation over the config of section 9.2, which the generated
+entrypoint builds; a deployment with a credential that config cannot
+express passes its own.
+
+A route runs its steps in this order:
+
+1. the `@hmacVerified` verifier (D26);
+2. the rate limit, then the body limit (D29);
+3. **the service step.** When the server has a service authenticator and
+   the request carries a service credential, the authenticator verifies
+   it, on every route. Then the route's service clause applies:
+   `@requireService` refuses a missing caller with 401 and an unlisted one
+   with 403, both with the service codes; `@allowService` with a listed
+   caller skips step 4;
+4. **the end-user step,** as today: authenticate the end user, then check
+   the user clause with the permission matcher;
+5. the rest of the route: Go's payload decryptor, the timeout and the
+   handler.
+
+The Go server authenticates the end user with the provider's
+`AuthMiddleware` on its protected group, ahead of the route, and keeps
+doing so for routes without a service clause, where the end user is
+therefore authenticated before the service step. A route with a service
+clause takes `AuthMiddleware` into its own chain at step 4 instead, so a
+service that admits an `@allowService` route skips it.
+
+When an operation has a service clause and the server has no service
+authenticator, the Go server's `Config.Validate` refuses to start it, the
+Rust crate does not compile, as D29 makes it for an end-user
+authenticator, and the TypeScript router answers the route with 401, as it
+does without `authenticate`. A server with no service clause may still
+be given one, so its routes can tell a delegated call from a direct one.
+
+End-user auth providers do not change. No auth snippet is added; a
+provider never sees the service header and the service authenticator never
+sees `Authorization`. The TypeScript `Principal` stops listing a service
+identity among its subjects. D15 put service-to-service token verification
+in each deployment's provider package; for services in a stack it is now
+the runtime's.
+
+### 9.6 SDKs
+
+Each SDK's config gains a service credential source beside the end-user
+auth config: a function from a `fresh` flag to a token (`serviceCredential`
+in TypeScript, `ServiceCredential` in Go, `service_credential` in Rust and
+Python), and the headers that carry it. The SDK sends the token on every
+request, whether or not the API has an operation that needs a caller: in
+`Service-Authorization`, and also in `X-Serverless-Authorization` when the
+edge's config says the callee is a Cloud Run server whose invoker check is
+on (section 9.2).
+
+A 401 with the code `service_unauthorized` asks the source for a fresh
+token once and retries. It never runs the end-user refresh, which today
+runs on any 401, and an end-user 401 never asks the service source. Cloud
+Run's own refusals carry no problem code, so they are end-user 401s to the
+SDK, and a client built for an edge has no end-user refresh to run.
+
+The runtimes ship a source for each row of section 9.2's table: a Google ID
+token from the metadata server, a projected token read from its file, and
+a token signed with an edge's key. Each caches its token and fetches or
+signs a new one before expiry. The generated entrypoint builds one client
+per `calls` edge, with the callee's URL and the source the edge's derived
+config field names (section 3.4). Python has the config slot and no
+sources, since no server is written in Python.
+
+### 9.7 Permissions
+
+Services hold no permissions. `@requirePermission` checks end users only,
+and an operation admits a service through `@requireService` or
+`@allowService`. A service's authority is its edge, declared once in
+`calls` and narrowed per operation by `from`.
+
+Not taken: permissions granted to services, in the stack or in the auth
+database, and checked by `@requirePermission`. A grant restates the edge,
+and lives where nothing checks it against `calls`. The provider's
+permission matcher and role store know end users, not deployables. And a
+service that holds an end user's permission is one principal standing in
+for two, which D30 rejected.
+
+### 9.8 Testing and parity
+
+`runtime/http/testdata/serviceauth_parity.json` holds shared vectors, as
+`runtime/schema/testdata/validation_parity.json` does for validation:
+
+- the keys (RSA, P-256 and Ed25519, for tests only), the callee configs
+  built from them, and tokens signed with them;
+- per vector: the clock, the route's rule (service clause, `from`, user
+  clause), the request's headers, and an end-user authenticator stub keyed
+  by token;
+- the expected status and code, the `ServiceCaller` and end user on the
+  context, and whether the end-user authenticator ran.
+
+The cases cover each row of section 9.3's table; expiry, a token not yet
+valid, the wrong audience and the wrong issuer; an unknown `kid`, `alg:
+none` and an RS256 key used as an HS256 secret; an identity no config
+lists; a caller left out of `from`; both credentials invalid on a route
+with a service clause; a forwarded user on each rule; and a service
+credential on a route with no service clause.
+
+A Go test writes the file with `-update`, as `TestRuntimeParityCorpus`
+writes the validation corpus. Go, TypeScript and Rust each read it in the
+runtime's own tests and run their gate with a fixed clock and a stub key
+endpoint. Rust's envelope differs from the RFC 9457 body of Go and
+TypeScript (D29), so the vectors compare status and code, not bodies.
+
+The generator tests compile a fixture API with each rule in all three
+servers and run requests through it, as D26's and D29's do: the order
+against the verifier and the rate limit, the codes, and a schema without
+the decorators unchanged byte for byte. The SDK tests check the retry: one
+fresh service token on `service_unauthorized`, and the end-user refresh
+left alone.
+
+### 9.9 Open
+
+- A deployable that serves no API, such as a job (section 3.1), has no
+  handle to put in `from`. Until jobs land with a way to name one, it may
+  call only operations whose `from` is empty.
+- A credential the callee config cannot express, such as a service mesh's
+  mTLS identity in `X-Forwarded-Client-Cert`. A deployment can pass its
+  own service authenticator today; a platform kind of credential can come
+  with the first platform that needs it.
+- Workers service bindings. A call over a binding carries no token; the
+  caller's binding config sets `ctx.props`, which Cloudflare documents as
+  safe to trust unsigned, and the platform delivers it beside the request
+  rather than in it. The Workers platform (section 6.8) decides whether the
+  TypeScript service authenticator reads it there, or whether Workers
+  callers sign key-pair tokens like the generic connector's.
 
 ## 10. Validation and simulation
 
@@ -1030,6 +1381,7 @@ registrations.
    Landed: the Stack IR types, the stack (`ir/stack.go`), the resolved
    environment (`ir/stack_environment.go`) and the resource graph
    (`ir/resource_graph.go`).
+   Operations and operation sets gain `ServiceCallers` (section 9.3).
 2. **Loader:**
    - Landed: class values in the arguments of any registered decorator.
      The argument evaluator reads a class, local or imported from another
@@ -1060,8 +1412,8 @@ registrations.
    follow-up in section 3.3. A naming-file key holds the implementation
    path templates.
 6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
-   and TypeScript HTTP runtimes, and a service credential source in the
-   SDKs.
+   and TypeScript HTTP runtimes (section 9.5), and a service credential
+   source in the SDKs (section 9.6).
 7. **Registry.** The specs of section 6.7, and the resolver that drives
    them (section 6.10). Landed: `internal/registry/stack.go`, the resolver
    in `internal/stack` with its public face in `stack`, and the acceptance
