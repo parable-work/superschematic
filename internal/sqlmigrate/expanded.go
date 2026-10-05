@@ -170,52 +170,55 @@ func (d *differ) renamedView(v *View) *View {
 	return &out
 }
 
-// expandedGraphs are the version graphs between the phases: each graph of
-// the previous model, its member tables and content columns as renamed,
-// with the new model's members and content columns added, and each graph
-// only the new model has. A graph keeps the previous model's schema epoch:
-// commits made before the plan ran hash rows of the previous shape, and the
-// contract's history hazards compare that epoch with the new one.
+// expandedGraphs are the version graphs between the phases: the graphs of
+// both models, with the members of both. A member's content is the new
+// model's for every column the new model's table has, since expand makes
+// every change of content that leaves a column in place, and the previous
+// model's for the columns contract drops, renamed as expand renames them.
+// A graph keeps the previous model's schema epoch: commits made before the
+// plan ran hash rows of the previous shape, and the history hazards of the
+// contract's drops compare that epoch with the new one.
 func (d *differ) expandedGraphs() []*Graph {
 	var out []*Graph
-	byName := map[string]*Graph{}
-	for _, g := range d.from.Graphs {
-		eg := &Graph{Name: g.Name, SchemaEpoch: g.SchemaEpoch}
-		for _, member := range g.Members {
-			eg.Members = append(eg.Members, &GraphMember{
-				Table:   d.renames.table(member.Table),
-				Content: d.renamedColumns(member.Table, member.Content),
-			})
+	graphs := map[string]*Graph{}
+	members := map[string]*GraphMember{} // graph/table
+	member := func(name string, epoch int, table string) *GraphMember {
+		g := graphs[name]
+		if g == nil {
+			g = &Graph{Name: name, SchemaEpoch: epoch}
+			graphs[name] = g
+			out = append(out, g)
 		}
-		byName[g.Name] = eg
-		out = append(out, eg)
+		m := members[name+"/"+table]
+		if m == nil {
+			m = &GraphMember{Table: table}
+			members[name+"/"+table] = m
+			g.Members = append(g.Members, m)
+		}
+		return m
 	}
-	for _, g := range d.to.Graphs {
-		eg := byName[g.Name]
-		if eg == nil {
-			eg = &Graph{Name: g.Name, SchemaEpoch: g.SchemaEpoch}
-			out = append(out, eg)
-		}
-		for _, member := range g.Members {
-			var em *GraphMember
-			for _, existing := range eg.Members {
-				if existing.Table == member.Table {
-					em = existing
+	for _, g := range d.from.Graphs {
+		for _, fm := range g.Members {
+			table := d.renames.table(fm.Table)
+			tt := d.toTables[table]
+			m := member(g.Name, g.SchemaEpoch, table)
+			for _, col := range d.renamedColumns(fm.Table, fm.Content) {
+				if tt == nil || columnNamed(tt, col) == nil {
+					m.Content = append(m.Content, col)
 				}
 			}
-			if em == nil {
-				em = &GraphMember{Table: member.Table}
-				eg.Members = append(eg.Members, em)
-			}
-			em.Content = union(em.Content, member.Content)
 		}
 	}
-	for _, g := range out {
-		for _, member := range g.Members {
-			member.Content = union(member.Content, nil)
-			if member.Content == nil {
-				member.Content = []string{}
-			}
+	for _, g := range d.to.Graphs {
+		for _, tm := range g.Members {
+			m := member(g.Name, g.SchemaEpoch, tm.Table)
+			m.Content = append(m.Content, tm.Content...)
+		}
+	}
+	for _, m := range members {
+		m.Content = union(m.Content, nil)
+		if m.Content == nil {
+			m.Content = []string{}
 		}
 	}
 	return out

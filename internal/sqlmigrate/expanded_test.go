@@ -82,13 +82,38 @@ func TestExpandedModel(t *testing.T) {
 
 // expandedCases are checked by TestExpandedModel only: a content column of
 // a version graph dropped as the graph's schema epoch rises, whose contract
-// hazard compares the two epochs, with another added.
+// hazard compares the two epochs, with another added and a third leaving
+// the content while its column stays.
 var expandedCases = []planCase{
 	{name: "graph-content-drop", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
 		dropField(s, "Tasting", "remarks")
 		addField(s, "Tasting", &ir.FieldDef{Name: "notes", TypeRef: stringRef})
+		fieldNamed(s, "Note", "body").ConflictUnit = ir.ConflictUnitExcluded
 		typeNamed(s, "Recipe").VersionGraph.SchemaEpoch = 2
 	}},
+}
+
+// TestExpandedGraphs: between the phases a version graph keeps the previous
+// schema epoch, a member's content is the new model's for the columns the
+// new table has, and the previous model's for a column contract drops.
+func TestExpandedGraphs(t *testing.T) {
+	plan := expandedCases[0].plan(t)
+	expanded := decodeModel(t, plan.ExpandedModel)
+	if len(expanded.Graphs) != 1 || expanded.Graphs[0].SchemaEpoch != 1 {
+		t.Fatalf("graphs between the phases: %+v", expanded.Graphs)
+	}
+	content := map[string][]string{}
+	for _, m := range expanded.Graphs[0].Members {
+		content[m.Table] = m.Content
+	}
+	if got := content["note"]; !slices.Equal(got, []string{"reply_to"}) {
+		t.Errorf("note's content between the phases is %v; body left it in expand", got)
+	}
+	for _, col := range []string{"notes", "remarks", "taster"} {
+		if !slices.Contains(content["tasting"], col) {
+			t.Errorf("tasting's content between the phases %v lacks %s", content["tasting"], col)
+		}
+	}
 }
 
 // renameHint starts the sentence a destructive hazard ends with when the
