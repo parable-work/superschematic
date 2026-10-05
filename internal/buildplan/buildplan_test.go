@@ -324,58 +324,117 @@ func indexOf(names []string, want string) int {
 	return -1
 }
 
-func TestCheckConfigPurity(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "schema.config.ts")
-
-	clean := `import { defineConfig, SchemaKind, service } from "@superschematic/schema-config";
-export default defineConfig({ name: "x", kind: SchemaKind.General, outputs: {} });
-`
-	require.NoError(t, os.WriteFile(path, []byte(clean), 0o644))
-	require.NoError(t, checkConfigPurity(path, naming.Default()))
-
-	impure := `import { defineConfig } from "@superschematic/schema-config";
-import { webDb } from "../platform-deploy/model";
-export default defineConfig({ name: "x", kind: "General", outputs: {} });
-`
-	require.NoError(t, os.WriteFile(path, []byte(impure), 0o644))
-	err := checkConfigPurity(path, naming.Default())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "may import only @superschematic/schema-config")
+// tsService writes a TypeScript-form service under servicesRoot whose
+// tsconfig resolves @superschematic/schema-config to this checkout's sources
+// and @acme/<dir> to a sibling's src/index.ts, as a schemas workspace does.
+func tsService(t *testing.T, servicesRoot, dir, config string, files map[string]string) string {
+	t.Helper()
+	configPackage, err := filepath.Abs("../../packages/schema-config/src/index.ts")
+	require.NoError(t, err)
+	serviceDir := filepath.Join(servicesRoot, dir)
+	writeFile(t, filepath.Join(serviceDir, "tsconfig.json"), `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "paths": {
+      "@superschematic/schema-config": [`+strconv.Quote(filepath.ToSlash(configPackage))+`],
+      "@acme/*": ["../*/src/index.ts"]
+    }
+  },
+  "include": ["schema.config.ts", "src/**/*.ts"]
+}
+`)
+	writeFile(t, filepath.Join(serviceDir, "package.json"), `{"name": "@acme/`+dir+`", "private": true}`)
+	writeFile(t, filepath.Join(serviceDir, "schema.config.ts"), config)
+	for rel, content := range files {
+		writeFile(t, filepath.Join(serviceDir, filepath.FromSlash(rel)), content)
+	}
+	return serviceDir
 }
 
-// TestCheckConfigPurityHonoursPackageAliases: a specifier [package_aliases]
-// maps onto the config package is the config package; an alias onto any
-// other authoring package is not.
-func TestCheckConfigPurityHonoursPackageAliases(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema.config.ts")
-	n := naming.Default()
-	n.AuthoringPackages = []string{"@acme/db", "@acme/schema-config"}
-	n.PackageAliases = map[string]string{
-		"@acme/db":            "@superschematic/db",
-		"@acme/schema-config": "@superschematic/schema-config",
-	}
-
-	aliased := `import { defineConfig, SchemaKind } from "@acme/schema-config";
-export default defineConfig({ name: "x", kind: SchemaKind.General, outputs: {} });
+// apiConfig is a schema.config.ts for an API named name; imports and fields
+// are spliced in as written.
+func apiConfig(name, imports, fields string) string {
+	return `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+` + imports + `
+export default defineConfig({ name: "` + name + `", kind: SchemaKind.API, ` + fields + ` outputs: {} });
 `
-	require.NoError(t, os.WriteFile(path, []byte(aliased), 0o644))
-	require.NoError(t, checkConfigPurity(path, n))
-	// The declaring package's own name stays accepted next to its alias.
-	require.NoError(t, os.WriteFile(path, []byte(`import { defineConfig } from "@superschematic/schema-config";
-import { SchemaKind } from "@acme/schema-config";
-export default defineConfig({ name: "x", kind: SchemaKind.General, outputs: {} });
-`), 0o644))
-	require.NoError(t, checkConfigPurity(path, n))
+}
 
-	otherAlias := `import { defineConfig } from "@acme/schema-config";
-import { table } from "@acme/db";
-export default defineConfig({ name: "x", kind: "General", outputs: {} });
-`
-	require.NoError(t, os.WriteFile(path, []byte(otherAlias), 0o644))
-	err := checkConfigPurity(path, n)
+// TestDiscoverReadsConfigsThatImportSentinels: on a tree where no sentinel
+// exists yet, discovery cannot resolve a config's imported handles; the
+// sweep writes every sentinel from names and kinds alone, after which
+// discovery reads the handles and orders each service after the ones it
+// names (D34).
+func TestDiscoverReadsConfigsThatImportSentinels(t *testing.T) {
+	root := t.TempDir()
+	servicesRoot := filepath.Join(root, "services")
+	tsService(t, servicesRoot, "shop-db", `import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
+export default defineConfig({ name: "shop-db", kind: SchemaKind.DB, outputs: { types: { [TargetLanguage.Go]: { enabled: true } } } });
+`, nil)
+	tsService(t, servicesRoot, "shop-api", apiConfig("shop-api", "", ""), nil)
+	tsService(t, servicesRoot, "shop-orders", apiConfig("shop-orders", `import { ShopApi } from "@acme/shop-api";
+import { ShopDb } from "@acme/shop-db";`, "authDb: ShopDb, calls: [ShopApi],"), nil)
+	reg := generator.CoreRegistry(naming.Default())
+	outputRoot := filepath.Join(root, "dist")
+
+	_, err := DiscoverWith(servicesRoot, outputRoot, reg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `imports "@acme/db"; schema.config.ts may import only @acme/schema-config or @superschematic/schema-config`)
+	assert.Contains(t, err.Error(), `which does not resolve`)
+
+	require.NoError(t, EnsureSentinels(servicesRoot, reg, nil))
+	services, err := DiscoverWith(servicesRoot, outputRoot, reg)
+	require.NoError(t, err)
+	names := serviceNames(services)
+	assert.Less(t, indexOf(names, "shop-db"), indexOf(names, "shop-orders"))
+	assert.Less(t, indexOf(names, "shop-api"), indexOf(names, "shop-orders"))
+	orders := services[indexOf(names, "shop-orders")].Config
+	assert.Equal(t, "shop-db", orders.AuthDB)
+	assert.Equal(t, ir.SchemaKindDB, orders.AuthDBKind)
+	assert.Equal(t, []schemaconfig.ServiceDependency{{Name: "shop-api", Kind: ir.SchemaKindAPI}}, orders.Calls)
+}
+
+// TestDiscoverReachesTheCycleOfAPIsThatImportEachOther: two configs that
+// import each other's sentinels are no module cycle, since nothing imports a
+// config. The sweep and the static reads succeed, and the build plan
+// reports the cycle of calls.
+func TestDiscoverReachesTheCycleOfAPIsThatImportEachOther(t *testing.T) {
+	root := t.TempDir()
+	servicesRoot := filepath.Join(root, "services")
+	tsService(t, servicesRoot, "shop-api", apiConfig("shop-api", `import { ShopOrders } from "@acme/shop-orders";`, "calls: [ShopOrders],"), nil)
+	tsService(t, servicesRoot, "shop-orders", apiConfig("shop-orders", `import { ShopApi } from "@acme/shop-api";`, "calls: [ShopApi],"), nil)
+	reg := generator.CoreRegistry(naming.Default())
+
+	require.NoError(t, EnsureSentinels(servicesRoot, reg, nil))
+	_, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), reg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "circular dependency involving shop-api: shop-api calls shop-orders, shop-orders calls shop-api")
+}
+
+// TestDiscoverRefusesAConfigImportThatIsNotASentinel: a config imports the
+// config package and other services' sentinels, nothing else; a schema
+// class from the same package is refused at the import.
+func TestDiscoverRefusesAConfigImportThatIsNotASentinel(t *testing.T) {
+	root := t.TempDir()
+	servicesRoot := filepath.Join(root, "services")
+	tsService(t, servicesRoot, "shop-db", `import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
+export default defineConfig({ name: "shop-db", kind: SchemaKind.DB, outputs: { types: { [TargetLanguage.Go]: { enabled: true } } } });
+`, map[string]string{
+		"src/products.schema.ts": "export abstract class Product {\n  name: string;\n}\n",
+		"src/index.ts":           "export { Product } from \"./products.schema\";\nexport * from \"./service.generated\";\n",
+	})
+	tsService(t, servicesRoot, "shop-api", apiConfig("shop-api", `import { Product, ShopDb } from "@acme/shop-db";`, "authDb: ShopDb,"), nil)
+	reg := generator.CoreRegistry(naming.Default())
+
+	require.NoError(t, EnsureSentinels(servicesRoot, reg, nil))
+	_, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), reg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `schema.config.ts imports Product from "@acme/shop-db", which is neither from @superschematic/schema-config nor a service sentinel`)
 }
 
 // aliasedConfigService writes a TypeScript-form service whose
@@ -430,14 +489,18 @@ func TestDiscoverAcceptsAliasedConfigImport(t *testing.T) {
 	assert.Equal(t, ir.SchemaKindGeneral, services[0].Config.Kind)
 }
 
-// TestDiscoverRejectsUnaliasedConfigImport: without the alias the same
-// import is foreign to the config package and fails the purity check.
-func TestDiscoverRejectsUnaliasedConfigImport(t *testing.T) {
+// TestDiscoverReadsTheConfigPackageByIdentity: the import rule goes by what
+// a binding resolves to, not by its specifier, so a config whose tsconfig
+// resolves @acme/schema-config to the config package loads without a
+// [package_aliases] entry too. The alias still decides how a sentinel
+// spells the import.
+func TestDiscoverReadsTheConfigPackageByIdentity(t *testing.T) {
 	root := t.TempDir()
 	servicesRoot := filepath.Join(root, "services")
 	aliasedConfigService(t, servicesRoot)
 
-	_, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), generator.CoreRegistry(naming.Default()))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `imports "@acme/schema-config"; schema.config.ts may import only @superschematic/schema-config`)
+	services, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), generator.CoreRegistry(naming.Default()))
+	require.NoError(t, err)
+	require.Len(t, services, 1)
+	assert.Equal(t, "aliased", services[0].Name)
 }

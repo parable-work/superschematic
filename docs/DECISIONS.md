@@ -2734,12 +2734,24 @@ initializer, so `build` loads `fixture-authdb-import`, whose config imports
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | A `schema.config.ts` may import a sibling service's sentinel (`import { ShopDb } from "@acme/shop-db"`) and use it wherever a handle goes: `authDb`, `dependencies` and `calls`. `service({ name, kind })` stays valid in the TypeScript form, and the data forms keep their spellings: `authDb` a name, the lists `{name, kind}`. A reference is then the value D30 asks for. tsc refuses a misspelt or renamed service where it is written, and the editor finds every config that names a service. | `service({...})` as the only spelling, which restates the callee's name and kind as strings in every caller and leaves a typo to the next build; a naming-file switch that keeps the old rule for a tree whose configs run as modules, which no superschematic tree has, and whose configs can keep writing `service({...})` |
-| One import rule, in the static read every command shares (`tsreader`). A config imports the config package, under its name or an alias, and from any other module only bindings that resolve to a sentinel: an `export const X = service({...})` in a `service.generated.ts`. A type, a schema class, a default or namespace import and a side-effect import are refused at the import. The build plan's textual scan goes, so `build`, `build-all` and `build --with-deps` accept the same configs. | Extending the scan with the siblings' package names, which differ per tree (`@acme/*`, `@schemas/*`) and still admit a schema class; no rule, which lets a config pull in any code |
+| One import rule, in the static read every command shares (`tsreader`). It goes by what each imported name resolves to, not by the specifier: a binding declared in the config package, under any specifier that resolves to it, or a sentinel, an `export const X = service({...})` in a `service.generated.ts`. A type, a schema class, a namespace of another module and a side-effect import are refused at the import. The build plan's textual scan goes, so `build`, `build-all` and `build --with-deps` accept the same configs. | Extending the scan with the siblings' package names, which differ per tree (`@acme/*`, `@schemas/*`) and still admit a schema class; no rule, which lets a config pull in any code |
 | Configs are leaves. No module imports one, and a sentinel imports only the config package and, under typed handles (`docs/stack-model.md` section 4.3), its own service's `@envVars` type. So no import path leads from a sentinel back to a config, and two APIs that call each other import each other's sentinels without a module cycle. The build-order cycle that mutual `calls` forms is the build plan's to report (stack-model section 3.3). | Importing a sibling's config, which makes configs import configs and brings back the cycle the old rule guarded against |
 | Sentinels come before discovery. A sentinel is a function of its own service's `name` and `kind`, plus the `@envVars` type that loading the service adds, and never of another sentinel. The sweep that writes sentinels reads only those two properties, which must be literals. `build-all`, `build --with-deps` and a `build` whose config imports a sentinel run it before any config is read in full. It writes a sentinel that is missing or whose name or kind changed, and keeps the type arguments a build wrote. | Ordering discovery by the configs' imports, which reads each config twice and still fails on a sentinel no build has written; relying on committed sentinels, which leaves a new service unreferenceable until it is built once |
 | Under typed handles, a config that imports an API's sentinel type-depends on that API's `@envVars` class, so tsc checks the config with the callee's schema files in its program. That cost is tsc's: superschematic's read follows only the `service({...})` argument, and the type import is erased at run time. | A second, untyped handle per service for configs to import, which keeps the callee's schema out of the config's program but gives each service two handles and two spellings |
 
-Nothing here is built yet. The rule is reversible until the first release.
+`checkConfigImports` in `internal/loader/tsreader/config.go` is the rule,
+and `tsreader.ReadServiceIdentity` the read that evaluates only `name` and
+`kind`. `buildplan.EnsureSentinels` is the sweep: `build-all`,
+`build --with-deps` and `migrate` run it before discovery, and `build` runs
+it when the target's config imports anything but the config package. The
+acme-shop configs import their handles. `config_imports_test.go` pins each
+form the rule accepts or refuses. The build plan's tests discover a tree
+with no sentinels before and after the sweep, and two APIs that import
+each other's sentinels, which the build plan reports as a cycle of
+`calls`. A CLI test runs each build command on a tree whose imported
+sentinel was deleted.
+
+The rule is reversible until the first release.
 
 ## D38. The Rust server builds from the shared API output, and serves its OpenAPI document
 
