@@ -63,7 +63,11 @@ func openSchemaVersion(servicesRoot string, names naming.Naming, reg *registry.R
 		schemas:      map[string]*ir.Schema{},
 		configs:      map[string]*schemaconfig.SchemaConfig{},
 	}
-	if dirs := tsServiceDirectories(services); len(dirs) > 0 {
+	dirs, err := tsServiceDirectories(services)
+	if err != nil {
+		return nil, err
+	}
+	if len(dirs) > 0 {
 		v.programs = tsreader.NewProgramCache(dirs)
 	}
 	return v, nil
