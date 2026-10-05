@@ -2170,12 +2170,12 @@ times as UTC date-times; a tree is rows by kind.
   with their role and audit columns, ids in their canonical form.
 - **Resolutions.** A `merge` or a `rebase` takes `resolutions`, each
   `{ kind, entityKey, path }` with `take` (`base`, `ours` or `theirs`)
-  or a `value`. A value is held to the value class of the field its path
-  names (or, at path `""`, of each field of the row it gives) before the
-  engine merges, and once it has merged, each entity a value settled is
-  held, as the ref composes it, to its kind's type, as `save` holds a
-  row. A refusal is `invalid_argument` at `/resolutions/<i>/value`, and
-  the operation writes nothing.
+  or a `value`; a whole entity's conflict (path `""`) is settled with
+  `take`. A value is held to the value class of the field its path names
+  before the engine merges, and once it has merged, each entity a value
+  settled is held, as the ref composes it, to its kind's type, as `save`
+  holds a row. A refusal is `invalid_argument` at
+  `/resolutions/<i>/value`, and the operation writes nothing.
 - **Refs and commits.** Each is named by id, in either UUID form, and must
   be the instance's: another instance's, a discarded ref or one that does
   not exist is `invalid_argument` at the parameter. A primary line takes

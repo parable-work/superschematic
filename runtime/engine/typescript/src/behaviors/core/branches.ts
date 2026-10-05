@@ -849,10 +849,9 @@ interface ValueResolution {
 }
 
 // resolutionsOf reads a merge's or a rebase's resolutions as the engine
-// takes them. A value is held to the value class of the field it sets, or
-// of each field of a whole row (path ""); the row it leaves is held to its
-// kind's type once the engine has merged (checkResolved), so it returns the
-// resolutions that give one.
+// takes them. A value is held to the value class of the field it sets; the
+// row it leaves is held to its kind's type once the engine has merged
+// (checkResolved), so it returns the resolutions that give one.
 function resolutionsOf(context: InstanceContext<BranchesConfig>, operation: string, raw: unknown): { resolutions: Resolution[]; values: ValueResolution[] } {
   const issues: SchemaIssue[] = [];
   const resolutions: Resolution[] = [];
@@ -883,12 +882,10 @@ function resolutionsOf(context: InstanceContext<BranchesConfig>, operation: stri
     }
     const spec = context.config.kinds[kind];
     const value = resolution.value;
+    // A whole entity (path "") is settled with take, which the core holds
+    // to; a value sets one unit, a field or a key below one.
     const tokens = path === '' ? [] : path.slice(1).split('/').map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'));
-    if (path === '' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      for (const issue of classIssues(spec, value as Record<string, unknown>, `${at}/value`)) {
-        issues.push(issue);
-      }
-    } else if (tokens.length === 1 && hasOwn(spec.classes, tokens[0])) {
+    if (tokens.length === 1 && hasOwn(spec.classes, tokens[0])) {
       for (const issue of classIssues(spec, { [tokens[0]]: value }, `${at}/value`)) {
         issues.push({ ...issue, path: `${at}/value` });
       }
