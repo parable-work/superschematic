@@ -596,8 +596,12 @@ names `sqlite_version`, and D16's engine, whose own tables are `STRICT`,
 needs 3.37.0 already. A check that passes is kept, so it runs once: by
 client on a connection of the adapter's own, and by layout (its tables'
 names) in the caller's transaction, since a host such as `Branches` binds a
-new adapter over a new client for each call. A check that fails is not
-kept. Every language's SQLite adapter refuses the same.
+new adapter over a new client for each call. The second assumes one
+SQLite library serves every connection that uses a layout name in the
+process, as D16's engine does; another library without the JSON functions
+under the same names would fail at its first `json_each` statement, with
+SQLite's own error. A check that fails is not kept. Every language's SQLite
+adapter refuses the same.
 
 The adapter reaches SQLite through `SqliteClient`: `run`, `get` and `all`
 with positional parameters for numbered placeholders (`?1`), returning

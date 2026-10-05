@@ -134,7 +134,11 @@ const checkedClients = new WeakSet<SqliteClient>();
  * caller's transaction. A host such as D16's Branches binds a new adapter
  * over a new client for each call, all on one connection, so a check kept
  * by client would run on every call. What the check reads is the SQLite
- * library's, which the host's connection keeps.
+ * library's, so this assumes one SQLite library serves every connection
+ * that uses a layout name in this process, as D16's engine does. A second
+ * library without the JSON functions under the same names would pass
+ * unchecked and fail at its first json_each statement, with SQLite's own
+ * error.
  */
 const checkedLayouts = new Set<string>();
 
