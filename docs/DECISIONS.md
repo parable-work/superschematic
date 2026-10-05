@@ -2240,7 +2240,7 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 55 pairs for Postgres and 39 for SQLite, 9 of them
+Plan goldens cover 58 pairs for Postgres and 42 for SQLite, 10 of them
 rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
@@ -2259,8 +2259,11 @@ foreign key whose `onDelete` alone changes is replaced in `contract` with
 no hazard; an index is dropped with a plain `DROP INDEX` in a transaction;
 `Diff` refuses a `partitionBy` change on an existing table, an impossible
 cast, a primary key change and a change between a generated and a stored
-column; a change to a graph member's content set with no DDL change has no
-step, so no hazard; `--reader` services are read against both models;
+column; a column that joins or leaves a graph member's content while the
+column stays, as `@conflictUnit('excluded')` makes it, gets a step with no
+statements in `expand`, `changeGraphContent`, which carries the `history`
+hazard, and the runner logs a step with no statements like any other;
+`--reader` services are read against both models;
 `--from-ref` extracts the previous schemas root beside the checkout's, so
 the paths its `tsconfig` reaches resolve, and each version uses its own
 naming file; a service is a reader when its kind allows `@source`; a
@@ -2294,19 +2297,74 @@ a table that exists and `DROP COLUMN`, which rewrites the table, are
 dropped before it and a foreign key over it rebuilds the table; a dropped
 table is dropped with foreign keys off, since with them on `DROP TABLE`
 deletes its rows first, which a `RESTRICT` on the table itself refuses;
-a plan that drops two tables that reference each other fails on SQLite,
-since dropping the foreign key that closes the cycle needs a rebuild of a
-table the plan drops; a change between a list, a JSON value and text, all
-`TEXT`, is no step and converts no value; `migrate plan --dialect sqlite`
-refuses a service whose new version does not list `sqlite`, and builds
-the previous version's SQLite model without checking its list; and the
-SQLite convergence test compares a column's collation through an index
-it builds and rolls back, since no pragma reports it. D32 takes the
+tables a plan drops that reference each other are dropped in one step on
+SQLite, after the tables that reference them and before those they
+reference, since dropping the foreign key that closes the cycle needs a
+rebuild of a table the plan drops, and a `foreign_key_check` between two
+drops finds the rows of one referencing the other, while Postgres drops
+that foreign key first; a list, a JSON value and text are all `TEXT`, so
+the SQLite model records what a column holds as JSON (`holds`: `list` or
+`json`; Postgres models never set it); a JSON value that becomes text
+keeps its JSON text through a rebuild, as Postgres's cast keeps it, and
+one that becomes another scalar casts as text does, while every other
+change between a scalar, a list and a JSON value fails the plan, since no
+conversion keeps every value as Postgres would: text is not a JSON array,
+Postgres parses text as JSON where `json_quote` would wrap it, and
+Postgres converts no list; a list whose element type changes is still no
+step on SQLite; `migrate plan --dialect sqlite` refuses a service whose
+new version does not list `sqlite`, and a previous version, a service
+directory or a git ref, whose list lacks it, pointing to the model the
+database recorded or an empty database, while a `--from` model is
+checked by its own `dialect`; and the SQLite convergence test compares
+a column's collation through an index it builds and rolls back, since no
+pragma reports it. D32 takes the
 version graph to SQLite through its adapter's own tables, which write
 history without triggers, not through this dialect, so `@versioned` stays
 refused here. D30's deploy runs a plan's `expand` steps before the servers
 roll and its `contract` steps after (`docs/stack-model.md`, sections 5.3
 and 11.2). Each change that lands a piece updates this paragraph.
+
+### D27, amended: a plan between its phases
+
+D30 runs a plan's `expand` steps before the new servers roll out and its
+`contract` steps after. A rollout can fail between them, leaving the
+previous version's servers running on the expanded schema. The runner kept
+that plan in progress and refused every other plan until its contract ran,
+and it still recorded the previous model as applied, a schema the database
+no longer held. A deploy that kept the previous servers had no way forward
+but the drops those servers cannot survive.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A plan with contract steps carries the model the database holds between its phases: `expandedModel`, and its hash, `expanded`. It is the previous model with every expand step applied: the new version's tables, columns, indexes and objects, with what `contract` removes still there and what it tightens still loose. The planner builds it from the tables it already hands a dialect's rebuild between the phases. A plan without contract steps carries neither, since its expand steps end at `to`. | Computing it in the runner, which cannot read a schema; leaving the applied model at `from` until the plan ends |
+| When a plan's last expand step commits, the runner records `expandedModel` as the applied model, with the plan's contract pending (`plan_phase` `expanded`), so `status --model` prints the schema the database holds. | |
+| A new plan whose `from` is that model supersedes the pending contract while none of it has started: the runner says so, forgets the old plan and runs the new one. Once a contract step has started, the database no longer holds that model, and the old plan must finish. A deploy whose rollout failed plans again from the database's model, so the drops still wanted are in the new plan's contract, planned from what the database holds, and nothing of the old contract runs unless the new plan needs it. Taking the schema back to the previous version is a plan from that model too. The old plan's contract is refused afterwards: `--phase contract` runs only the plan in progress, so a stale contract job is refused even when the database is at the old plan's `from` again, as it is after a plan back from an expanded model that equals that `from`. | An `abandon` command, which a deploy would have to decide on its own to run; refusing every other plan until the contract runs, the rule before this amendment |
+| `expanded` and `expandedModel` are optional members of plan version 1. A runner that predates them ignores them and keeps the old rule, and this runner keeps the old rule for a plan without them. Such a plan's expand phase records `plan_phase` `expand`, which no plan supersedes, as every runner before this amendment did, so a plan from a model the database does not hold never runs. | Plan version 2, which every runner already built would refuse |
+| The tests check, on Postgres and on SQLite, that a plan's expand steps leave the same schema as the plan from an empty database to its `expandedModel`, and that a plan from `expandedModel` to the plan's `to` has no expand steps and the plan's contract steps. | Trusting the model the planner builds between the phases, which no apply would check |
+
+The rule is reversible until the first release.
+
+Status: built. `Diff` sets `expanded` and `expandedModel` on every plan with
+contract steps, for both dialects (`expandedModel` in
+`internal/sqlmigrate`); the runner records the model between the phases,
+supersedes a pending contract and refuses the superseded one. Rules settled
+as they were built: a column `contract` drops keeps its `NOT NULL` between
+the phases when it has a default or is generated, as `expand` leaves it,
+which a SQLite rebuild in `expand` now keeps too; a foreign key `contract`
+replaces is, between the phases, the previous one under the name `expand`
+gave it; extensions and pool schemas of both models are there; a view,
+trigger or function `contract` drops or replaces is the previous one with
+`expand`'s renames applied; a version graph keeps the previous model's
+schema epoch, and a member's content is the new model's for the columns
+the new table has and the previous model's for the columns `contract`
+drops, so the plan from the model between the phases has no content change
+left for `expand` and its drops keep their history hazards; that plan's
+hazards differ from the contract's only by a destructive hazard's rename
+hint, which names an add the plan from the model between the phases does
+not see; and the plan goldens record `expanded` and leave `expandedModel`
+out. Every Postgres and SQLite plan case with contract steps converges to
+its `expandedModel` after its expand steps, and the runner's vectors
+include a plan superseded after its expand phase.
 
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
