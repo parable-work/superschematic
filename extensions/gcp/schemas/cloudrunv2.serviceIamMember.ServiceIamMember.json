@@ -1,0 +1,50 @@
+{
+  "token": "gcp:cloudrunv2/serviceIamMember:ServiceIamMember",
+  "terraform": {
+    "type": "google_cloud_run_v2_service_iam_member"
+  },
+  "inputProperties": {
+    "condition": {
+      "$ref": "#/types/gcp:cloudrunv2/ServiceIamMemberCondition:ServiceIamMemberCondition"
+    },
+    "location": {
+      "type": "string"
+    },
+    "member": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "member",
+    "role"
+  ],
+  "types": {
+    "gcp:cloudrunv2/ServiceIamMemberCondition:ServiceIamMemberCondition": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression",
+        "title"
+      ]
+    }
+  }
+}

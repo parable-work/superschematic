@@ -1,0 +1,137 @@
+{
+  "token": "gcp:compute/regionNetworkEndpointGroup:RegionNetworkEndpointGroup",
+  "terraform": {
+    "type": "google_compute_region_network_endpoint_group",
+    "renames": {
+      "appEngine": "app_engine",
+      "appEngine.urlMask": "url_mask",
+      "cloudFunction": "cloud_function",
+      "cloudFunction.urlMask": "url_mask",
+      "cloudRun": "cloud_run",
+      "cloudRun.urlMask": "url_mask",
+      "deletionPolicy": "deletion_policy",
+      "networkEndpointType": "network_endpoint_type",
+      "pscData": "psc_data",
+      "pscData.producerPort": "producer_port",
+      "pscTargetService": "psc_target_service",
+      "serverlessDeployment": "serverless_deployment",
+      "serverlessDeployment.urlMask": "url_mask"
+    }
+  },
+  "inputProperties": {
+    "appEngine": {
+      "$ref": "#/types/gcp:compute/RegionNetworkEndpointGroupAppEngine:RegionNetworkEndpointGroupAppEngine"
+    },
+    "cloudFunction": {
+      "$ref": "#/types/gcp:compute/RegionNetworkEndpointGroupCloudFunction:RegionNetworkEndpointGroupCloudFunction"
+    },
+    "cloudRun": {
+      "$ref": "#/types/gcp:compute/RegionNetworkEndpointGroupCloudRun:RegionNetworkEndpointGroupCloudRun"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "network": {
+      "type": "string"
+    },
+    "networkEndpointType": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "pscData": {
+      "$ref": "#/types/gcp:compute/RegionNetworkEndpointGroupPscData:RegionNetworkEndpointGroupPscData"
+    },
+    "pscTargetService": {
+      "type": "string"
+    },
+    "region": {
+      "type": "string"
+    },
+    "serverlessDeployment": {
+      "$ref": "#/types/gcp:compute/RegionNetworkEndpointGroupServerlessDeployment:RegionNetworkEndpointGroupServerlessDeployment"
+    },
+    "subnetwork": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "region"
+  ],
+  "types": {
+    "gcp:compute/RegionNetworkEndpointGroupAppEngine:RegionNetworkEndpointGroupAppEngine": {
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "string"
+        },
+        "urlMask": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/RegionNetworkEndpointGroupCloudFunction:RegionNetworkEndpointGroupCloudFunction": {
+      "type": "object",
+      "properties": {
+        "function": {
+          "type": "string"
+        },
+        "urlMask": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/RegionNetworkEndpointGroupCloudRun:RegionNetworkEndpointGroupCloudRun": {
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "urlMask": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/RegionNetworkEndpointGroupPscData:RegionNetworkEndpointGroupPscData": {
+      "type": "object",
+      "properties": {
+        "producerPort": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/RegionNetworkEndpointGroupServerlessDeployment:RegionNetworkEndpointGroupServerlessDeployment": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "urlMask": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform"
+      ]
+    }
+  }
+}

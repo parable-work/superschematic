@@ -1,0 +1,246 @@
+{
+  "token": "gcp:compute/routerNat:RouterNat",
+  "terraform": {
+    "type": "google_compute_router_nat",
+    "renames": {
+      "autoNetworkTier": "auto_network_tier",
+      "deletionPolicy": "deletion_policy",
+      "drainNatIps": "drain_nat_ips",
+      "enableDynamicPortAllocation": "enable_dynamic_port_allocation",
+      "enableEndpointIndependentMapping": "enable_endpoint_independent_mapping",
+      "endpointTypes": "endpoint_types",
+      "icmpIdleTimeoutSec": "icmp_idle_timeout_sec",
+      "initialNatIps": "initial_nat_ips",
+      "logConfig": "log_config",
+      "maxPortsPerVm": "max_ports_per_vm",
+      "minPortsPerVm": "min_ports_per_vm",
+      "nat64Subnetworks": "nat64_subnetwork",
+      "natIpAllocateOption": "nat_ip_allocate_option",
+      "natIps": "nat_ips",
+      "rules.action.sourceNatActiveIps": "source_nat_active_ips",
+      "rules.action.sourceNatActiveRanges": "source_nat_active_ranges",
+      "rules.action.sourceNatDrainIps": "source_nat_drain_ips",
+      "rules.action.sourceNatDrainRanges": "source_nat_drain_ranges",
+      "rules.ruleNumber": "rule_number",
+      "sourceSubnetworkIpRangesToNat": "source_subnetwork_ip_ranges_to_nat",
+      "sourceSubnetworkIpRangesToNat64": "source_subnetwork_ip_ranges_to_nat64",
+      "subnetworks": "subnetwork",
+      "subnetworks.secondaryIpRangeNames": "secondary_ip_range_names",
+      "subnetworks.sourceIpRangesToNats": "source_ip_ranges_to_nat",
+      "tcpEstablishedIdleTimeoutSec": "tcp_established_idle_timeout_sec",
+      "tcpTimeWaitTimeoutSec": "tcp_time_wait_timeout_sec",
+      "tcpTransitoryIdleTimeoutSec": "tcp_transitory_idle_timeout_sec",
+      "udpIdleTimeoutSec": "udp_idle_timeout_sec"
+    }
+  },
+  "inputProperties": {
+    "autoNetworkTier": {
+      "type": "string"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "drainNatIps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "enableDynamicPortAllocation": {
+      "type": "boolean"
+    },
+    "enableEndpointIndependentMapping": {
+      "type": "boolean"
+    },
+    "endpointTypes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "icmpIdleTimeoutSec": {
+      "type": "integer"
+    },
+    "initialNatIps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "logConfig": {
+      "$ref": "#/types/gcp:compute/RouterNatLogConfig:RouterNatLogConfig"
+    },
+    "maxPortsPerVm": {
+      "type": "integer"
+    },
+    "minPortsPerVm": {
+      "type": "integer"
+    },
+    "name": {
+      "type": "string"
+    },
+    "nat64Subnetworks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/RouterNatNat64Subnetwork:RouterNatNat64Subnetwork"
+      }
+    },
+    "natIpAllocateOption": {
+      "type": "string"
+    },
+    "natIps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "project": {
+      "type": "string"
+    },
+    "region": {
+      "type": "string"
+    },
+    "router": {
+      "type": "string"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/RouterNatRule:RouterNatRule"
+      }
+    },
+    "sourceSubnetworkIpRangesToNat": {
+      "type": "string"
+    },
+    "sourceSubnetworkIpRangesToNat64": {
+      "type": "string"
+    },
+    "subnetworks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/RouterNatSubnetwork:RouterNatSubnetwork"
+      }
+    },
+    "tcpEstablishedIdleTimeoutSec": {
+      "type": "integer"
+    },
+    "tcpTimeWaitTimeoutSec": {
+      "type": "integer"
+    },
+    "tcpTransitoryIdleTimeoutSec": {
+      "type": "integer"
+    },
+    "type": {
+      "type": "string"
+    },
+    "udpIdleTimeoutSec": {
+      "type": "integer"
+    }
+  },
+  "requiredInputs": [
+    "router",
+    "sourceSubnetworkIpRangesToNat"
+  ],
+  "types": {
+    "gcp:compute/RouterNatLogConfig:RouterNatLogConfig": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean"
+        },
+        "filter": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enable",
+        "filter"
+      ]
+    },
+    "gcp:compute/RouterNatNat64Subnetwork:RouterNatNat64Subnetwork": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:compute/RouterNatRule:RouterNatRule": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/types/gcp:compute/RouterNatRuleAction:RouterNatRuleAction"
+        },
+        "description": {
+          "type": "string"
+        },
+        "match": {
+          "type": "string"
+        },
+        "ruleNumber": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "match",
+        "ruleNumber"
+      ]
+    },
+    "gcp:compute/RouterNatRuleAction:RouterNatRuleAction": {
+      "type": "object",
+      "properties": {
+        "sourceNatActiveIps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sourceNatActiveRanges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sourceNatDrainIps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sourceNatDrainRanges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/RouterNatSubnetwork:RouterNatSubnetwork": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "secondaryIpRangeNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sourceIpRangesToNats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "sourceIpRangesToNats"
+      ]
+    }
+  }
+}
