@@ -203,16 +203,6 @@ axum server crate `schemas-<name>-api` under `schemas/dist/api/<name>`. It
 needs `outputs.types` for Rust too: the crate depends on the types crate,
 and the build refuses the config without it.
 
-The Rust router does not yet enforce a route's auth or traffic controls.
-`@auth`, `@requirePermission`, `@requireOwnership`, an `Authenticated`
-set, `@rateLimit`, `@bodyLimit` and `@timeout` change nothing in the
-crate: every route `build_router` mounts answers any caller, whatever
-permission the schema lists, with no rate or time limit and only axum's
-default 2 MB cap on a JSON body. The Go and TypeScript servers enforce
-them. Until the Rust router does, check the caller in each implementation
-(`ctx.headers` carries the `authorization` header), or serve the router
-behind a layer or proxy that authenticates and bounds traffic.
-
 `build_router` mounts every operation except those declared
 `@manualRouteRegistration`, as the Go server's `RegisterRoutes` leaves
 them out. Such an operation has no method on its namespace's trait and no
@@ -230,7 +220,9 @@ an encrypted operation
 ([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads))
 unless it is `@manualRouteRegistration`. The service's own handler for
 such an operation receives the envelope as its body and decrypts it, as
-the Go server's `PayloadDecryptor` does.
+the Go server's `PayloadDecryptor` does. The router has no multipart step
+either, so the build refuses an operation that uploads files unless it is
+`@manualRouteRegistration`; the service's handler reads the multipart body.
 
 An `@hmacVerified` operation's route
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
@@ -268,4 +260,75 @@ wrap the route you add in `webhook_verified`:
 ```rust
 let router = build_router(implementations)
     .route("/api/webhooks/github/raw", webhook_verified(post(receive_raw), github_verifier));
+```
+
+A route that needs a caller (`@auth`, `@requirePermission`,
+`@requireOwnership` or an `Authenticated` set; see
+[Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires))
+asks `Implementations.authenticator` for one. The crate has that field
+when an operation needs a caller, so a service that leaves it out does not
+compile. An `Authenticator`, from `superschematic-http-runtime`, turns the
+request's head into a `Principal` (its `subject`, `permissions` and
+`claims`) or `None`:
+
+```rust
+struct Tokens {
+    keys: KeySet,
+}
+
+#[async_trait]
+impl Authenticator for Tokens {
+    async fn authenticate(&self, request: &Parts) -> Result<Option<Principal>, ApiError> {
+        let Some(token) = bearer_token(&request.headers) else {
+            return Ok(None);
+        };
+        Ok(self.keys.verify(token).map(|claims| Principal::new(claims.sub, claims.permissions)))
+    }
+}
+```
+
+The router answers 401 without a caller, and 403 when the caller holds
+none of the route's permissions, by the nesting the Go and TypeScript
+servers use. Override `permits` for a project with its own permission
+vocabulary, such as a root permission. An `Err` from `authenticate`
+answers with that error, for a failure that is not the caller's. The
+handler puts the caller on `ctx.principal`, where an `@requireOwnership`
+implementation checks that it owns the resource.
+
+`@rateLimit`, `@bodyLimit` and `@timeout` apply as in the Go server. The
+rate limit counts each client's requests to the route per minute, in
+process memory, and answers 429 with `Retry-After`. A client is the
+`ClientIp` a layer of yours puts on the request, or else the peer address,
+which axum records when the router is served with
+`into_make_service_with_connect_info::<SocketAddr>()`. The router reads no
+forwarding header: behind a proxy you trust, set `ClientIp` from that
+proxy's header. Without either, every client of a route shares one bucket.
+`@bodyLimit` answers 413 and replaces axum's default 2 MB limit on the
+route's body; a route without it keeps axum's default. `@timeout` answers
+504 and drops the handler's future.
+
+A route's steps run in the Go server's order: the webhook verifier, the
+rate limit, the body limit, the permission check, then the timeout around
+the handler. Each refusal is the router's error envelope,
+`{"error": {"code", "message"}}`, with the code `unauthorized`,
+`forbidden`, `payload_too_large`, `too_many_requests` or
+`gateway_timeout`.
+
+`build_router` applies none of this to a `@manualRouteRegistration`
+operation, since it does not mount one. Its doc lists each such
+operation's controls. Apply them to the route you add with
+`RouteControls`, with a clone of the authenticator:
+
+```rust
+let authenticator: Arc<dyn Authenticator> = Arc::new(Tokens { keys });
+let router = build_router(Implementations {
+    tenant: Arc::new(Tenants::new(pool)),
+    authenticator: Arc::clone(&authenticator),
+})
+.route(
+    "/api/tenant/custom-handler",
+    RouteControls::new()
+        .authorize(authenticator, &["tenants.admin"])
+        .apply(post(custom_handler)),
+);
 ```
