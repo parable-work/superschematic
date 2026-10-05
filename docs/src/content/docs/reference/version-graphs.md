@@ -1052,7 +1052,7 @@ is no Python ORM, so refs, commits and release pointers come back as the
 engine's `Ref`, `Commit` and `Release`.
 
 ```
-make versiongraph-scenarios-python   # every scenario and the SQLite adapter's tests on SQLite; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
+make versiongraph-scenarios-python   # every scenario, the SQLite adapter's tests and the SQLite vectors on SQLite; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
 ```
 
 The SQLite pass needs no database server. The Postgres pass needs

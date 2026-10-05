@@ -608,7 +608,8 @@ on, and refuses a SQLite older than 3.37.0, the first with `STRICT` tables,
 or one without `json_each` and `json_extract`. Its system clock is
 `time.time_ns()` in whole microseconds. Before Python 3.11 the sqlite3
 module's errors carry no result code, so `is_unique_violation` reads a
-taken name from SQLite's message ("UNIQUE constraint failed").
+taken name from SQLite's message ("UNIQUE constraint failed"). Its tests
+hold it to the vectors below (`python/tests/test_sqlite_vectors.py`).
 
 `testdata/sqlite` holds the vectors every language's SQLite adapter is
 held to, so a file one adapter writes reads the same in another's; its
@@ -773,7 +774,7 @@ UPDATE_SQLITE_VECTORS=1 bun test test/sqlite-vectors.test.ts  # in typescript/, 
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
 make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, and the SQLite vectors, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
-make versiongraph-scenarios-python  # every scenario through the Python engine and its SQLite adapter, then every scenario and canonical vector through its Postgres adapter
+make versiongraph-scenarios-python  # every scenario through the Python engine and its SQLite adapter, and the SQLite vectors, then every scenario and canonical vector through its Postgres adapter
 ```
 
 The scenarios, the adapter's tests and the canonical vectors' Postgres

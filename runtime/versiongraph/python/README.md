@@ -179,7 +179,10 @@ writes, `STRICT` tables and foreign keys, two graphs in one file, the name
 function, the clock, its ids, a second connection's wait for the write
 lock, savepoints and the caller's transaction, a number's digits end to
 end, every canonical vector as a round trip, and what the binding
-refuses.
+refuses. `tests/test_sqlite_vectors.py` holds the adapter to the shared
+SQLite vectors (`runtime/versiongraph/testdata/sqlite`): its layout is
+`layout.json`'s, the database the TypeScript adapter wrote reads back as
+`typescript.json` byte for byte, and one graph reads none of another's.
 
 The Postgres tests need `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and
 skip without it; `make versiongraph-scenarios-python` runs the SQLite pass
