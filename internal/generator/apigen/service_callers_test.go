@@ -173,3 +173,134 @@ func TestOpenAPIServiceCallersGolden(t *testing.T) {
 		t.Fatalf("OpenAPI document changed; run with -update and review the diff\ngot:\n%s", output.OpenAPISpecRaw)
 	}
 }
+
+// TestWriteAPIGoldenServiceCallers pins routes.go and interfaces.go of
+// fixture-service-auth-api: Config.ServiceAuthenticator and its Validate
+// check, the service step after the body limit on every route, and each
+// route with a service clause outside the protected group, with Require
+// before its end-user step or AllowOr around it. Regenerate with
+// go test ./internal/generator/apigen -run TestWriteAPIGoldenServiceCallers -update
+func TestWriteAPIGoldenServiceCallers(t *testing.T) {
+	output := generateServiceAuthFixtureAPI(t)
+	outDir := t.TempDir()
+	if err := apigen.WriteAPI(output, outDir); err != nil {
+		t.Fatalf("apigen.WriteAPI: %v", err)
+	}
+	checkGoldenFiles(t, outDir, filepath.Join("testdata", "golden", serviceAuthAPI), []string{"routes.go", "interfaces.go"})
+}
+
+// serviceAuthModuleTests are the tests TestServiceAuthRoutes and
+// TestServiceAuthPublicRoutes copy into the generated module, beside the
+// support file both share.
+const serviceAuthModuleTests = "testdata/service_auth"
+
+// copyServiceAuthTests copies support_test.go and test into apiDir.
+func copyServiceAuthTests(t *testing.T, apiDir, test string) {
+	t.Helper()
+	for _, name := range []string{"support_test.go", test} {
+		data, err := os.ReadFile(filepath.Join(serviceAuthModuleTests, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(apiDir, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// serviceAuthOperation returns the fixture's operation named name.
+func serviceAuthOperation(t *testing.T, schema *ir.Schema, name string) *ir.FieldDef {
+	t.Helper()
+	for _, set := range schema.OperationSets {
+		for _, op := range set.Operations {
+			if op.Name == name {
+				return op
+			}
+		}
+	}
+	t.Fatalf("%s has no operation %s", serviceAuthAPI, name)
+	return nil
+}
+
+// TestServiceAuthRoutes compiles fixture-service-auth-api as an API that is
+// not public, with a webhook verifier, a rate limit and a body limit added
+// to three of its routes, and runs testdata/service_auth/routes_test.go in
+// it: each rule's refusals and admissions with their codes, the forwarded
+// end user, Validate refusing a nil ServiceAuthenticator, and the service
+// step after the verifier, the rate limit and the body limit.
+func TestServiceAuthRoutes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, serviceAuthAPI))
+	if err != nil {
+		t.Fatalf("load %s: %v", serviceAuthAPI, err)
+	}
+	status := serviceAuthOperation(t, schema, "syncStatus")
+	status.Webhook, status.HMACVerifiedProvider = true, "stripe"
+	one := 1
+	serviceAuthOperation(t, schema, "reindexStock").Middleware = &ir.MiddlewareConfig{RateLimit: &one}
+	serviceAuthOperation(t, schema, "releaseReservation").Middleware = &ir.MiddlewareConfig{BodyLimit: &one}
+
+	apiDir := writeGoAPIModule(t, schema, serviceAuthAPI)
+	copyServiceAuthTests(t, apiDir, "routes_test.go")
+	runGoAPIModule(t, apiDir)
+}
+
+// TestServiceAuthPublicRoutes compiles fixture-service-auth-api as a public
+// API over fixture-db and runs testdata/service_auth/public_routes_test.go
+// in it: a route with a service clause runs the AuthMiddleware inside its
+// own chain, after the service step, and an @allowService route skips it
+// for a listed caller; a route without one keeps it on the protected group.
+func TestServiceAuthPublicRoutes(t *testing.T) {
+	apiDir := buildPublicAPIOver(t, sessionauth.Provider{}, serviceAuthAPI, nil)
+	copyServiceAuthTests(t, apiDir, "public_routes_test.go")
+	runGoAPIModule(t, apiDir)
+}
+
+// TestAManualRouteWithAServiceClauseSaysToApplyIt: RegisterRoutes does not
+// mount a @manualRouteRegistration operation, so its handler's comment says
+// the service applies the clause on the route it adds.
+func TestAManualRouteWithAServiceClauseSaysToApplyIt(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, serviceAuthAPI))
+	if err != nil {
+		t.Fatalf("load %s: %v", serviceAuthAPI, err)
+	}
+	serviceAuthOperation(t, schema, "reserveStock").ManualRouteRegistration = true
+	serviceAuthOperation(t, schema, "releaseReservation").ManualRouteRegistration = true
+	output, err := apigen.Generate(schema, apigen.Options{
+		Provider:    sessionauth.Provider{},
+		SchemaName:  serviceAuthAPI,
+		ModulePath:  "example.com/schemas/api/" + serviceAuthAPI,
+		TypesModule: "example.com/schemas/types/go/" + serviceAuthAPI,
+		Clock:       goModuleClock,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outDir := t.TempDir()
+	if err := apigen.WriteAPI(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := os.ReadFile(filepath.Join(outDir, "routes.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for handler, rule := range map[string]string{
+		"createStockReserveStockHandler":       "Require",
+		"createStockReleaseReservationHandler": "AllowOr",
+	} {
+		start := strings.Index(string(routes), "// "+handler+" creates a handler")
+		end := strings.Index(string(routes), "func "+handler+"(")
+		if start < 0 || end < start {
+			t.Fatalf("routes.go has no %s", handler)
+		}
+		want := "// Apply its service clause there too: serviceauth.Authenticate(cfg.ServiceAuthenticator),\n// then serviceauth." + rule + " with the end-user step.\n"
+		if !strings.Contains(string(routes)[start:end], want) {
+			t.Errorf("%s's comment lacks %q:\n%s", handler, want, string(routes)[start:end])
+		}
+	}
+	if strings.Contains(string(routes), `Path:    "/stock/reservations",`) {
+		t.Error("a manual route was mounted")
+	}
+}
