@@ -377,6 +377,10 @@ for (const driver of drivers) {
       assert.equal(vetoOf(() => soup.save(saved.ref, { step: { unset: [uuidV5(ROOT_NAMESPACE, 'missing')] } })), 'entity_not_found');
       assert.equal(vetoOf(() => soup.merge(saved.ref, saved.ref)), 'merge_into_itself');
       assert.equal(vetoOf(() => soup.invoke('rebase', { draft: soup.main().id, version: 1 })), 'no_parent');
+      // The primary line is not discarded: every draft branches from it.
+      const main = soup.main();
+      assert.equal(vetoOf(() => soup.invoke('discard', { ref: main.id, version: main.version })), 'primary_line');
+      assert.deepEqual(soup.main(), main);
       // A discarded ref is no ref of the instance any more, and frees its name.
       const discarded = soup.invoke<Ref>('discard', { ref: draft.id, version: saved.ref.version });
       assert.equal(discarded.discarded, true);

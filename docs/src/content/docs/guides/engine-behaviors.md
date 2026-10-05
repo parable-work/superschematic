@@ -718,7 +718,8 @@ call("released");                                           // { release, tree, 
   version graph's refusals are vetoes with its codes: `version_conflict`,
   `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`,
   `entity_not_found`, `invalid_tree`, `merge_into_itself`, `no_parent`,
-  `not_tagged` and `walk_ceiling`.
+  `not_tagged` and `walk_ceiling`. `discard` refuses the primary line
+  (`primary_line`), which every draft branches from and merges into.
 - **Rows.** A kind's rows carry fixed columns beside its type's fields:
   `id`, `entity_key`, `ref_id`, `root_id`, `deleted_on_ref`, `_version`,
   `created_at`, `created_by`, `updated_at` and `updated_by`, the author a

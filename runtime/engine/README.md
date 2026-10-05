@@ -2110,7 +2110,7 @@ primary line and drafts of it.
 | Operations | writing: `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `release`, `discard`; read-only: `refs`, `releases`, `compose`, `materialize`, `released`, `diff`, `history`; all of instance scope |
 | Storage | the SQLite adapter's layout (`sqliteLayout` of `@superschematic/versiongraph/sqlite`) under the behavior's names, `bhv_branches__ref` to `bhv_branches__member_history`, beside `roots` (each root's instance) and `actors` (each actor's subject) |
 | Schedule | `sweep`, every `sweep.intervalMs` on a schema whose config gives `sweep`, off on any other |
-| Vetoes | the version graph engine's codes: `version_conflict`, `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`, `entity_not_found`, `invalid_tree` (the core's findings in `details.findings`), `merge_into_itself`, `no_parent`, `not_tagged`, `walk_ceiling` |
+| Vetoes | the version graph engine's codes: `version_conflict`, `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`, `entity_not_found`, `invalid_tree` (the core's findings in `details.findings`), `merge_into_itself`, `no_parent`, `not_tagged`, `walk_ceiling`; and `primary_line`, a `discard` of the primary line |
 | Refusals at define | a kind whose type is no type of the document besides the instance type; a field whose JSON key is a role or audit column's; a field of a scalar no value class reads (`Geo.Location`); a parent that is no kind of the config, or whose key is not a field of the kind's type holding a UUID; an order that is not an integer field; a unit on a field the type lacks, a `keyed` or `jsonSchema` unit on a field that is not JSON, an excluded order or parent key; and what else the version graph's core refuses in the descriptor (`invalid_schema`) |
 | `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused. Added to a schema with instances, not removed from one |
 
@@ -2124,7 +2124,7 @@ primary line and drafts of it.
 | `rebase` | `draft`, `version`, `resolutions?` | `{ ref, commit, conflicts }` |
 | `revert` | `ref`, `version`, `toCommit` | `{ ref, commit }` |
 | `release` | `commit`, `version` (the release pointer's, 0 for the first) | `{ commit, version }` |
-| `discard` | `ref`, `version` | the ref, discarded |
+| `discard` | `ref`, `version` | the draft, discarded; the primary line is not (`primary_line`) |
 | `refs` | `limit?`, `cursor?` | the instance's live refs, the primary line first, a page at a time |
 | `releases` | `limit?`, `cursor?` | the release log: `{ version, commit, releasedAt, releasedBy }` per version of the pointer, oldest first |
 | `compose` | `ref` | `{ tree, contentHash, findings }` of the ref, uncommitted work included |

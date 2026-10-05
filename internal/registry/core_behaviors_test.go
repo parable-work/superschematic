@@ -170,7 +170,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{budget, []string{"over_limit", "not_leased", "scope_moved", "scope_reserved", "below_committed", "exceeds_reservation", "not_configured"}},
 		{blueprint, []string{"stamped", "no_dependencies", "not_constant", "no_revision", "unreadable", "invalid_steps"}},
 		{branches, []string{"version_conflict", "name_taken", "ref_sealed", "primary_merge_only", "nothing_to_commit", "entity_not_found", "invalid_tree",
-			"merge_into_itself", "no_parent", "not_tagged", "walk_ceiling"}},
+			"merge_into_itself", "no_parent", "not_tagged", "walk_ceiling", "primary_line"}},
 	} {
 		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
 			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)

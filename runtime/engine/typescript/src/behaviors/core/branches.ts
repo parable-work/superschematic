@@ -29,11 +29,14 @@ instance's is invalid_argument at the parameter that names it, as a
 proposal Revisions does not hold is. Who may call one is the access
 policy's call, asked write or read with the operation's name, and each
 writing one appends the instance's operation event. save holds each row's
-content to its kind's type with validate(type, value) before the engine
-sees it. The engine's refusals are vetoes with its stable codes (VETOES),
-released before the instance's first release is not_found, and refs and
-releases read the behavior's own tables, which the engine has no
-operation for.
+content to its kind's type with validate(type, value), and each value to
+its column's value class, before the engine sees it; a merge or a rebase
+holds each resolution's value to the same, and the row it leaves to the
+type. discard refuses the primary line (primary_line), which every draft
+branches from and merges into. The engine's refusals are vetoes with its
+stable codes (VETOES), released before the instance's first release is
+not_found, and refs and releases read the behavior's own tables, which
+the engine has no operation for.
 
 The graph's tables are the behavior's own: the SQLite adapter's fixed
 layout (sqliteLayout) under sql.table's names, which its migration
@@ -1122,6 +1125,14 @@ export const branches = defineBehavior<BranchesConfig>({
       const graph = ensureRoot(context);
       return guarded(context, 'discard', () => {
         const ref = ownRef(context, graph, 'discard', 'ref', params.ref);
+        // Every draft branches from the primary line and merges into it, and
+        // the instance gets no other.
+        if (refOf(graph, ref).parent === null) {
+          throw new BehaviorVetoError('Branches', 'discard', context.schema, context.id, {
+            reason: 'the primary line is not discarded: every draft branches from it and merges into it',
+            code: 'primary_line',
+          });
+        }
         graph.engine.discard(actorOf(context), ref, params.version as number);
         return refOf(graph, ref);
       });

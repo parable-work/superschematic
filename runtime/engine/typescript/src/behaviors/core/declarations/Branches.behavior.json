@@ -1394,18 +1394,18 @@
     },
     {
       "name": "discard",
-      "description": "Discards a ref at its version, which frees its name. The sweep deletes a discarded ref's rows once its grace has passed; its commits stay.",
+      "description": "Discards a draft at its version, which frees its name. The sweep deletes a discarded draft's rows once its grace has passed; its commits stay. The primary line is not discarded.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
           "ref": {
-            "description": "The ref, by id.",
+            "description": "The draft, by id.",
             "maxLength": 64,
             "minLength": 1,
             "type": "string"
           },
           "version": {
-            "description": "The ref's version.",
+            "description": "The draft's version.",
             "minimum": 1,
             "type": "integer"
           }
@@ -1418,7 +1418,7 @@
       },
       "resultSchema": {
         "additionalProperties": false,
-        "description": "The ref, discarded.",
+        "description": "The draft, discarded.",
         "properties": {
           "base": {
             "type": [
@@ -2121,6 +2121,10 @@
     {
       "code": "walk_ceiling",
       "description": "A read of a commit's tree that would walk more commits than the engine's ceiling."
+    },
+    {
+      "code": "primary_line",
+      "description": "discard of the instance's primary line, which its drafts branch from and merge into."
     }
   ]
 }
