@@ -7,6 +7,8 @@ export default defineConfig({
   authDb: ShopDb,
   outputs: {
     types: { [TargetLanguage.Go]: { enabled: true } },
-    api: { enabled: true, language: "GO" }
+    api: { enabled: true, language: "GO" },
+    // shop-orders calls shop-api, so its Go server's Deps holds this SDK.
+    sdk: { [TargetLanguage.Go]: { enabled: true } }
   }
 });
