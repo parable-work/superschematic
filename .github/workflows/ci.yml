@@ -18,23 +18,44 @@ name: ci
 # recorded deviation from superscalar (D9); superscalar only builds docs in
 # release.yml.
 #
+# Two tiers (D40). A pull request runs the quick tier: the lints, the drift
+# checks, `go test -short` (which skips compiling and running generated
+# modules), the runtimes' and the version graph's own test suites, and the
+# docs build. The full tier adds the Go tests without -short, the CLI smoke,
+# the acme job, examples/engine-notes and every version-graph scenario
+# through the Go, Rust, TypeScript and Python engines. It runs when
+# release.yml calls this workflow: before every release, on a dry run, and
+# twice a day as the release candidate on main (release-candidate.yml).
+# A step or job that belongs to the full tier carries
+# `if: github.event_name != 'pull_request'`; under workflow_call,
+# github.event_name is the caller's event, never pull_request.
+#
+# A pull request runs CI only when it targets main and is not a draft.
+# Merges to main run nothing here: the release candidate is main's full run.
+# On a draft every job skips and ci-pass reports under another name (see
+# that job). A stacked pull request runs nothing until it targets main; when
+# GitHub retargets it after its parent merges, push or close and reopen it to
+# start the run.
+#
 # superscalar has no release yet, so every job that links it checks the
 # pinned commit out under third_party/superscalar and builds the static
 # archive from source (scripts/superscalar-dep.sh). The checkout is cached on
 # the pin so the Rust build runs once per pin bump per runner OS.
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
+    # ready_for_review is added to the defaults: a draft runs nothing, so the
+    # draft -> ready transition has to start the run.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_call:
 
 # Least-privilege GITHUB_TOKEN: this workflow only reads the checkout.
 permissions:
   contents: read
 
-# Cancel superseded runs on the same PR branch (head_ref). Pushes to main and
-# workflow_call runs are keyed by SHA and never cancelled.
+# Cancel superseded runs on the same PR branch (head_ref). workflow_call runs
+# are keyed by SHA and never cancelled.
 concurrency:
   group: ci-${{ github.head_ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -43,7 +64,7 @@ jobs:
   dco:
     name: dco sign-off
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,6 +96,7 @@ jobs:
 
   scrub:
     name: scrub (no source-tree leftovers)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -89,6 +111,7 @@ jobs:
 
   go:
     name: go (build / vet / test / gofmt / lint / catalog / cli smoke)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -243,13 +266,16 @@ jobs:
           # once for all of them, where a directory per test compiled them
           # again for each and outran go test's ten-minute limit per package.
           CARGO_TARGET_DIR: ${{ runner.temp }}/generated-crates-target
+          # The quick tier: -short skips the tests that compile and run
+          # generated Go, TypeScript, Rust and Python modules.
+          GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go; do
             echo "==> $m"
             # Packages that run cargo queue on its lock of the shared target
             # directory, and the wait counts against each package's timeout.
-            (cd "$m" && go build ./... && go vet ./... && go test -count=1 -timeout 30m ./...)
+            (cd "$m" && go build ./... && go vet ./... && go test -count=1 -timeout 30m -short="$GO_TEST_SHORT" ./...)
           done
 
       - name: gofmt
@@ -279,6 +305,7 @@ jobs:
           make behaviors-check
 
       - name: CLI smoke (no extension builds DB, API and General fixtures)
+        if: github.event_name != 'pull_request'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -331,6 +358,8 @@ jobs:
 
   acme:
     name: acme (example extension builds without core edits)
+    # The full tier: every step builds the example end to end.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -435,6 +464,7 @@ jobs:
 
   typescript:
     name: typescript (authoring packages + schema and http runtimes + engine and its work-queue package)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -533,11 +563,13 @@ jobs:
         # from the installs above, linked into the example, and its test run
         # against a listening server under each runtime. A step of this job
         # rather than a job of its own: it needs only what this job installs,
-        # and takes seconds.
+        # and takes seconds. End to end, so the full tier.
+        if: github.event_name != 'pull_request'
         run: examples/engine-notes/scripts/check.sh
 
   python:
     name: python (schema runtime)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -605,6 +637,7 @@ jobs:
 
   rust:
     name: rust (http and schema runtime crates)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -648,6 +681,9 @@ jobs:
 
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)
+    # The scenarios through each language's engine are the full tier; a pull
+    # request runs the lints and each package's own tests.
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -711,20 +747,28 @@ jobs:
 
       - name: Scenarios (every scenario through the Go engine and the Postgres adapter)
         # Fails, rather than skips, without the database.
+        if: github.event_name != 'pull_request'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: make versiongraph-scenarios
 
-      - name: Rust engine and Postgres adapter (fmt / clippy / every scenario and canonical vector through the Rust engine, also with serde_json's preserve_order)
+      - name: Rust engine (fmt / clippy)
+        working-directory: runtime/versiongraph/rust-engine
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --no-default-features -- -D warnings
+
+      - name: Rust engine and Postgres adapter (every scenario and canonical vector through the Rust engine, also with serde_json's preserve_order)
         # make versiongraph-scenarios-rust fails, rather than skips, without
         # the database. The second run turns serde_json's preserve_order on,
         # as superscalar does, so the canonical rules' key sort is checked.
+        if: github.event_name != 'pull_request'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
-          (cd runtime/versiongraph/rust-engine && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo clippy --no-default-features -- -D warnings)
           make versiongraph-scenarios-rust
           (cd runtime/versiongraph/rust-engine && cargo test --tests --features serde_json/preserve_order)
 
@@ -754,16 +798,19 @@ jobs:
       - name: Scenarios through the TypeScript engine (every scenario on SQLite, then on Postgres with the canonical vectors against Postgres, the adapter, the sweeper and the facade)
         # The SQLite pass needs no database; the Postgres pass fails, rather
         # than skips, without one.
+        if: github.event_name != 'pull_request'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: make versiongraph-scenarios-ts
 
       - name: Setup Python
+        if: github.event_name != 'pull_request'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
+        if: github.event_name != 'pull_request'
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
@@ -771,6 +818,7 @@ jobs:
       - name: Scenarios through the Python engine (every scenario, the canonical vectors against Postgres, the adapter, the sweeper and the facade)
         # uv builds the package's PyO3 extension with maturin. Fails, rather
         # than skips, without the database.
+        if: github.event_name != 'pull_request'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: make versiongraph-scenarios-python
@@ -779,6 +827,7 @@ jobs:
     # Cheap PR gate: npm ci + astro build. superscalar only builds docs in
     # release.yml; this job is D9. It does not deploy.
     name: docs (Starlight build)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -803,9 +852,15 @@ jobs:
   ci-pass:
     # The only required status check on main (repository ruleset "main").
     # Runs even when a needed job fails so the check is always reported, and
-    # fails if any needed job failed or was cancelled. A skipped job (the dco
-    # job on pushes to main) does not fail it.
-    name: ci-pass
+    # fails if any needed job failed or was cancelled. A skipped job (dco
+    # outside a pull request, acme on one) does not fail it.
+    #
+    # On a draft every other job skips, and GitHub reports a skipped required
+    # check as passing. So a draft's run reports under another name: the
+    # required ci-pass stays "expected" on the draft's head until
+    # ready_for_review starts the real run, and a draft's empty run can never
+    # stand in for a green one.
+    name: ${{ github.event.pull_request.draft == true && 'ci-pass (draft -- CI skipped)' || 'ci-pass' }}
     if: always()
     needs:
       - dco
@@ -820,6 +875,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Say why a draft ran nothing
+        if: github.event.pull_request.draft == true
+        run: echo "::notice title=Draft::A draft pull request runs no CI. Mark it ready for review to start the run that reports ci-pass."
+
       - name: Fail if any needed job failed or was cancelled
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
