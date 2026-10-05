@@ -1,6 +1,13 @@
 {
   "name": "fixture-authdb-import",
   "kind": "API",
+  "authDb": "fixture-db",
+  "dependencies": [
+    {
+      "name": "fixture-db",
+      "kind": "DB"
+    }
+  ],
   "enums": {
     "AuthProbeStatus": {
       "name": "AuthProbeStatus",
