@@ -10,6 +10,10 @@ use crate::interfaces::{{ toPascalCase .Namespace }}Implementation;
 #[async_trait]
 impl {{ toPascalCase .Namespace }}Implementation for Implementation {
     async fn {{ .Endpoint.FunctionName }}(&self, _ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
+{{- if .Endpoint.RequireOwnership }}
+        // @requireOwnership: the router has established the caller
+        // (ctx.principal); check that it owns the resource (403 otherwise).
+{{- end }}
         Err(ApiError::not_implemented("{{ .Endpoint.FunctionName }} is not implemented"))
     }
 }
