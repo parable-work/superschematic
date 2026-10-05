@@ -189,13 +189,20 @@ versiongraph-scenarios-rust:
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
 	cd runtime/versiongraph/rust-engine && cargo test --tests -- --nocapture
 
-# Every version-graph scenario through the Python engine and its Postgres
-# adapter, and the package's other Postgres tests (every canonical vector's
-# rendering, the adapter, the sweeper, the facade), against the Postgres that
-# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+# Every version-graph scenario through the Python engine. First on SQLite
+# (D32): the SQLite adapter over the standard library's sqlite3, with the
+# adapter's own tests, which need no database server and run with or without
+# a Postgres URL (the URL is unset for them, so the Postgres tests skip here
+# and run once below). Then on Postgres: the Postgres adapter, with the
+# package's other Postgres tests (every canonical vector's rendering, the
+# adapter, the sweeper, the facade), against the Postgres that
+# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names; that pass fails
+# without it.
 versiongraph-scenarios-python:
+	cd runtime/versiongraph/python && \
+		env -u SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL uv run pytest -v -rs tests/test_scenarios.py tests/test_sqlite.py
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
-		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against (the SQLite pass above needs none)" >&2; exit 1; }
 	cd runtime/versiongraph/python && uv run pytest -v -rs tests/test_scenarios.py tests/test_canonical.py \
 		tests/test_adapter.py tests/test_sweeper.py tests/test_facade.py
 

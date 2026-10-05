@@ -758,9 +758,10 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
-      - name: Scenarios through the Python engine (every scenario, the canonical vectors against Postgres, the adapter, the sweeper and the facade)
-        # uv builds the package's PyO3 extension with maturin. Fails, rather
-        # than skips, without the database.
+      - name: Scenarios through the Python engine (every scenario on SQLite, then on Postgres with the canonical vectors against Postgres, the adapter, the sweeper and the facade)
+        # uv builds the package's PyO3 extension with maturin. The SQLite
+        # pass needs no database; the Postgres pass fails, rather than
+        # skips, without one.
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: make versiongraph-scenarios-python
