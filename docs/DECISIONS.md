@@ -2403,8 +2403,12 @@ statements as one batch.
 | The D1 driver refuses a step outside a transaction and a step with `foreignKeysOff`, which D1 cannot run. A plan written before this amendment may rebuild with `foreignKeysOff`; the SQLite file driver still runs it. | |
 | Every SQLite rebuild converges with enforcement on. The runner's tests run against a fake D1 REST server backed by SQLite with enforcement forced on and each request run in one transaction, and against a real D1 database when `SUPERSCHEMATIC_MIGRATE_TEST_D1_URL` and its token are set. Cloudflare documents a Worker's batch as a transaction but not a REST request's, so the driver is documented as unverified until that test has passed against D1. | Trusting the fake alone |
 
-Status: the SQLite rebuild is built (`internal/sqlmigrate`); the D1
-driver is another change. No plan sets `foreignKeysOff`, and every SQLite
+Status: the SQLite rebuild is built (`internal/sqlmigrate`), and so is
+the D1 driver (`runtime/migrate/go/d1`): the runner's suites, its compiler
+vectors and its CLI run on SQLite, Postgres and a fake D1
+(`internal/d1fake`), and `TestRealD1` runs against a real database when a
+URL and a token are set. The driver stays unverified until that test has
+passed against D1. No plan sets `foreignKeysOff`, and every SQLite
 plan case, fixture and runner vector converges with enforcement on
 throughout, its seeded rows surviving every step that is not
 `destructive`. Rules settled as it was built: rebuilt tables that
