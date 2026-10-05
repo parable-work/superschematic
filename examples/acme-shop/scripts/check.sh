@@ -21,7 +21,10 @@
 #   4. the Go app in go/ builds, vets and passes its tests, which call the
 #      generated Go server through the generated Go SDK, then run the
 #      TypeScript, Python and Rust clients against the same server and
-#      compare what they print;
+#      compare what they print; then run all four clients against
+#      shop-orders served by the generated Rust server (rust-server/,
+#      built with --api-language RUST into schemas/dist-rust) and check
+#      they print the same;
 #   5. the TypeScript app's tests call the generated TypeScript router
 #      through the generated TypeScript SDK;
 #   6. build-all with --cache skips every service on a second run and
@@ -150,15 +153,28 @@ PYTHONPATH="$ACME_PYTHONPATH" "$PYTHON" -B "$EXAMPLE_DIR/python/types_test.py"
 
 echo "==> Rust: the client builds against the generated SDK; the types tests pass"
 (cd "$EXAMPLE_DIR/rust" && cargo build --locked -q && cargo test --locked -q)
+RUST_CLIENT="${CARGO_TARGET_DIR:-$EXAMPLE_DIR/rust/target}/debug/acme-shop-orders-client"
 
-echo "==> the Go app: build, vet, test; every SDK calls the Go server"
+echo "==> Rust: shop-orders on the generated Rust server builds"
+# The same service with its API server in Rust, in an output root of its
+# own so the Go server's build under dist is untouched.
+rm -rf "$SCHEMAS/dist-rust"
+(cd "$EXAMPLE_DIR" &&
+  superschematic build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders >/dev/null)
+(cd "$EXAMPLE_DIR/rust-server" && cargo build --locked -q)
+RUST_SERVER="${CARGO_TARGET_DIR:-$EXAMPLE_DIR/rust-server/target}/debug/acme-shop-orders-server"
+
+echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server"
 (cd "$EXAMPLE_DIR/go" && GOFLAGS=-mod=mod go mod tidy >/dev/null && go build ./... && go vet ./...)
 (cd "$EXAMPLE_DIR/go" &&
   ACME_SHOP_CLIENTS=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
+    ACME_SHOP_RUST_CLIENT="$RUST_CLIENT" ACME_SHOP_RUST_SERVER="$RUST_SERVER" \
     go test -count=1 -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
 grep -E '^(--- |ok)' "$OUT/go-test.log"
-for language in typescript python rust; do
-  grep -q "^    --- PASS: TestEverySDKCallsTheGoServer/$language " "$OUT/go-test.log"
+for server in Go Rust; do
+  for language in typescript python rust; do
+    grep -q "^    --- PASS: TestEverySDKCallsThe${server}Server/$language " "$OUT/go-test.log"
+  done
 done
 
 echo "==> the TypeScript app's tests"

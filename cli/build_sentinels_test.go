@@ -144,3 +144,36 @@ func TestEveryBuildReadsAConfigWhoseSiblingHasNoSentinelYet(t *testing.T) {
 		})
 	}
 }
+
+// TestEveryBuildRefusesTheSameConfigImport: the import rule is in the static
+// read every command shares (D34), so build, build --with-deps and build-all
+// refuse a config that imports a schema class beside its sentinel, with one
+// message that names the import.
+func TestEveryBuildRefusesTheSameConfigImport(t *testing.T) {
+	const want = `schema.config.ts imports Tenant from "@schemas/fixture-db", which is a class, not a service sentinel`
+	for _, args := range [][]string{
+		{"build-all", "SERVICES"},
+		{"build", "--with-deps", "SERVICES/fixture-authdb-import"},
+		{"build", "SERVICES/fixture-authdb-import"},
+	} {
+		t.Run(strings.Join(args[:len(args)-1], " "), func(t *testing.T) {
+			servicesRoot := prepareTSServicesRoot(t, "fixture-db", "fixture-authdb-import")
+			configPath := filepath.Join(servicesRoot, "fixture-authdb-import", "schema.config.ts")
+			config, err := os.ReadFile(configPath)
+			require.NoError(t, err)
+			refused := strings.Replace(string(config), "import { FixtureDb } from", "import { FixtureDb, Tenant } from", 1)
+			require.NotEqual(t, string(config), refused)
+			require.NoError(t, os.WriteFile(configPath, []byte(refused), 0o644))
+
+			argv := append([]string(nil), args...)
+			argv[len(argv)-1] = strings.Replace(argv[len(argv)-1], "SERVICES", servicesRoot, 1)
+			root := New(Config{})
+			root.SetOut(new(bytes.Buffer))
+			root.SetErr(new(bytes.Buffer))
+			root.SetArgs(append(argv, "--out", t.TempDir()))
+			err = root.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), want)
+		})
+	}
+}

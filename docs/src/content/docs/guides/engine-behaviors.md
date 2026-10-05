@@ -694,7 +694,7 @@ Work happens on a draft and merges into the primary line:
 const call = (operation: string, params = {}) => engine.instances.invoke(me, "Recipe", id, operation, params);
 
 const [main] = call("refs").items;                          // the primary line, from the create
-const draft = call("branch", { fromRef: main.id, name: "spicier" });
+const draft = call("branch", { name: "spicier" });          // from the primary line; or { fromRef, name }
 const { ref } = call("save", {
   ref: draft.id, version: draft.version,
   edits: { step: { upsert: [{ instruction: "Add chili", position: 3 }] } },
@@ -737,9 +737,9 @@ call("released");                                           // { release, tree, 
   `invalid_argument` at `/resolutions/<i>/value` and writes nothing.
 - **Older instances.** `Branches` can be added to a schema with
   instances. One created before gets its primary line at its first write
-  after: an update that changes it, or another behavior's writing
-  operation. A `Branches` operation cannot be that write, since each
-  names a ref or a commit the instance does not have yet.
+  after, as its caller: a `branch` without `fromRef`, which then branches
+  from that line, an update that changes it, or another behavior's
+  writing operation.
 - **The sweep.** With `sweep`, a schedule runs on the schema as the
   runner's principal: it discards each draft with no write for
   `abandonAfter` through the instance's `discard`, with an event each,

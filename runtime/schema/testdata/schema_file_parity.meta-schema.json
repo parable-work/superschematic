@@ -1858,6 +1858,13 @@
           },
           "type": "array"
         },
+        "references": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        },
         "scalars": {
           "additionalProperties": {
             "$ref": "#/$defs/ScalarDef"
@@ -3306,6 +3313,13 @@
       "additionalProperties": false,
       "properties": {
         "kind": {
+          "enum": [
+            "API",
+            "Catalog",
+            "DB",
+            "General",
+            "Stack"
+          ],
           "type": "string"
         },
         "name": {

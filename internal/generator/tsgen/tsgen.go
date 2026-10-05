@@ -155,6 +155,10 @@ type ImportedTypeInfo struct {
 	ImportPackage string
 	IsEnum        bool
 	IsObject      bool
+	// HasValidators reports whether the dependency package generates the
+	// object type with its validators (a table, a view, an embedded struct
+	// or an input), which a nested field of it is validated with.
+	HasValidators bool
 }
 
 // TypeImport describes a type-only import required by imported aliases.

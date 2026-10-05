@@ -98,6 +98,7 @@ export interface Document {
   kind?: SchemaKind;
   name?: string;
   operationSets?: OperationSet[];
+  references?: ServiceRef[];
   scalars?: { [key: string]: ScalarDef };
   types?: { [key: string]: TypeDef };
   unions?: { [key: string]: UnionDef };
@@ -455,7 +456,7 @@ export interface ServerDecl {
 }
 
 export interface ServiceRef {
-  kind: string;
+  kind: 'API' | 'DB' | 'General' | 'Stack';
   name: string;
 }
 

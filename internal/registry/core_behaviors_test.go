@@ -124,6 +124,17 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("Branches.%s has scope %q, want instance", op.Name, op.Scope)
 		}
 		branchOps = append(branchOps, fmt.Sprintf("%s:%v", op.Name, op.Writes))
+		// branch takes no fromRef to branch from the primary line, which is
+		// how an instance older than its schema's Branches gets one.
+		if op.Name == "branch" {
+			var params struct {
+				Required   []string                   `json:"required"`
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			if err := json.Unmarshal(op.ParamsSchema, &params); err != nil || !slices.Equal(params.Required, []string{"name"}) || params.Properties["fromRef"] == nil {
+				t.Errorf("Branches.branch params = %s, want fromRef optional beside a required name", op.ParamsSchema)
+			}
+		}
 	}
 	if want := []string{"branch:true", "save:true", "commit:true", "seal:true", "merge:true", "rebase:true", "revert:true", "release:true", "discard:true",
 		"refs:false", "releases:false", "compose:false", "materialize:false", "released:false", "diff:false", "history:false"}; !slices.Equal(branchOps, want) {

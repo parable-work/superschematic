@@ -202,8 +202,12 @@ type validatorInputs struct {
 	types         []codegen.TypeInfo
 	localEnums    []codegen.EnumInfo
 	importedEnums []codegen.EnumInfo
-	enumLookup    codegen.EnumLookup
-	naming        naming.Naming
+	// importedObjects maps an object type a dependency declares, and
+	// generates with validators, to that dependency crate's validators
+	// module, which a nested field of the type is validated with.
+	importedObjects map[string]string
+	enumLookup      codegen.EnumLookup
+	naming          naming.Naming
 }
 
 // buildValidators builds the validators of every scalar the schema uses,
@@ -280,6 +284,11 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 			case !f.IsScalar && generated[f.Type]:
 				fv.Kind = fieldObject
 				fv.Nested = validatorFnName(f.Type)
+			case !f.IsScalar && in.importedObjects[f.Type] != "":
+				// A dependency's object type, validated by its own crate
+				// (D14, amended).
+				fv.Kind = fieldObject
+				fv.Nested = in.importedObjects[f.Type] + "::" + validatorFnName(f.Type)
 			case primitiveCheck(f) != "":
 				fv.Kind = fieldPrimitive
 				fv.Primitive = primitiveCheck(f)

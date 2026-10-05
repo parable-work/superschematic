@@ -1,0 +1,42 @@
+{
+  "package": "gcp",
+  "version": "9.37.1",
+  "sources": [
+    {
+      "name": "schema.json",
+      "url": "https://raw.githubusercontent.com/pulumi/pulumi-gcp/v9.37.1/provider/cmd/pulumi-resource-gcp/schema.json",
+      "sha256": "c11f00e5335450c36b83dd39b26cbffb5ab69bb190be57880980ffb98548caf2"
+    },
+    {
+      "name": "bridge-metadata.json",
+      "url": "https://raw.githubusercontent.com/pulumi/pulumi-gcp/v9.37.1/provider/cmd/pulumi-resource-gcp/bridge-metadata.json",
+      "sha256": "73a2a35523d7aa0f59d4603ebe857844f38b1d8854ac39ff7c46ef682eeee1de"
+    }
+  ],
+  "types": [
+    "gcp:certificatemanager/certificate:Certificate",
+    "gcp:certificatemanager/certificateMap:CertificateMap",
+    "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry",
+    "gcp:certificatemanager/dnsAuthorization:DnsAuthorization",
+    "gcp:cloudrunv2/service:Service",
+    "gcp:cloudrunv2/serviceIamMember:ServiceIamMember",
+    "gcp:compute/backendService:BackendService",
+    "gcp:compute/globalAddress:GlobalAddress",
+    "gcp:compute/globalForwardingRule:GlobalForwardingRule",
+    "gcp:compute/network:Network",
+    "gcp:compute/regionNetworkEndpointGroup:RegionNetworkEndpointGroup",
+    "gcp:compute/router:Router",
+    "gcp:compute/routerNat:RouterNat",
+    "gcp:compute/subnetwork:Subnetwork",
+    "gcp:compute/targetHttpsProxy:TargetHttpsProxy",
+    "gcp:compute/uRLMap:URLMap",
+    "gcp:dns/recordSet:RecordSet",
+    "gcp:projects/iAMMember:IAMMember",
+    "gcp:secretmanager/secret:Secret",
+    "gcp:secretmanager/secretIamMember:SecretIamMember",
+    "gcp:serviceaccount/account:Account",
+    "gcp:sql/database:Database",
+    "gcp:sql/databaseInstance:DatabaseInstance",
+    "gcp:sql/user:User"
+  ]
+}
