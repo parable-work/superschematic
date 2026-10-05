@@ -42,20 +42,29 @@ satisfies keys checked at once. Then `PRAGMA foreign_key_check` returns no
 rows, and the adapter binds over the database as over any other (on a
 connection of its own it turns foreign keys on).
 
+The layout needs SQLite 3.37.0 or later, which added `STRICT` tables. The
+adapter's statements need nothing later: `RETURNING` (3.35.0), and
+`json_each` and `json_extract`, which SQLite builds in from 3.38.0 and
+which 3.37 has in builds with JSON1. No statement uses `->` or `->>`.
+
 The script that wrote it is `writeDatabase` in
 `typescript/test/sqlite-vectors.ts`: `SyncEngine` over the adapter, with
 the scenario fixture's descriptor (`testdata/fixture/recipe.json`), at
 schema epoch 1 with a snapshot interval of 3, as the scenarios run. Its
 clock reads 2026-10-05T09:00:00Z first and moves 1.250005 seconds at each
-read, and its ids are version-4 UUIDs from a seeded generator in place of
-`crypto.randomUUID`, so a rerun writes the same file. Its actors are
-`Cook` and `Ann`, and both graphs' root is `Bread`.
+read; `createTables` takes the first read and stores no time, so the
+earliest stored time is 2026-10-05T09:00:01.250005Z. Its ids are version-4
+UUIDs from a seeded generator in place of `crypto.randomUUID`, so a rerun
+writes the same file. Its actors are `Cook` and `Ann`, and both graphs'
+root is `Bread`.
 
 - Graph `recipe`: a primary line, `main`. A change set, `first`, saves a
   row of every kind: a tasting of every value class (an integer wider than
-  a double, a number written `1e21`, text outside ASCII), a utensil whose
-  entity key the adapter generates, a note without its optional parent, a
-  step with the column its history excludes. It commits, merges into
+  a double, a number written `1e21`, text outside ASCII and outside the
+  Basic Multilingual Plane), a utensil whose entity key the adapter
+  generates, a note without its optional parent and one whose body holds
+  an apostrophe and a tab, a step with the column its history excludes.
+  It commits, merges into
   `main` as tagged commit 1, which the release points at, and is sealed. A
   second change set, `second`, updates a step, tombstones an ingredient and
   adds a step, commits, updates the step again with a partial row and
@@ -63,8 +72,75 @@ read, and its ids are version-4 UUIDs from a seeded generator in place of
   actor, commits without a message, and merges as tagged commit 2, which
   the release moves to. It then saves a partial row it does not commit. A
   draft, `scrap`, saves and is discarded.
-- Graph `menu`: a primary line, a change set, and a tagged merge, which
-  its release points at.
+- Graph `menu`, where the utensil kind gains a content column, `name`.
+  Its first writes run over a descriptor that is the fixture's less
+  `utensil.name`: a primary line, a change set, `today`, that saves a step
+  and a utensil, `Knife`, and commits, and a tagged merge, `lunch`, which
+  its release points at. The rest runs over the fixture's own descriptor:
+  a change set, `dinner`, names `Knife` and adds `Board`, commits, and
+  merges as tagged commit 2, `supper`; the release stays at `lunch`.
+
+Two of the script's writes are partial rows that only SQLite takes for
+this fixture (D32, amended: on an insert the SQLite adapter stores null
+for a column the row lacks, where Postgres applies the column's default or
+refuses a `NOT NULL` column without one). Postgres refuses the partial
+update of `Knead`, since the Postgres adapter writes a row as `INSERT ...
+ON CONFLICT DO UPDATE` and the proposed row is checked against
+`step.position`'s `NOT NULL` before the conflict is found, and the
+uncommitted partial tasting, since `tasting.taster` is `NOT NULL`. A
+replay of the script on Postgres gives those two rows in full.
+
+### A kind that gains a column
+
+The file is read with the fixture's descriptor, which declares
+`utensil.name`, so `menu`'s rows and images written before the gain lack
+it, as D32, amended, has a Postgres row added before an `ADD COLUMN`
+without a `DEFAULT`:
+
+- A live row reads with every column its kind declares: `today`'s
+  `Knife`, stored as `{}`, reads with `"name": null` from `rows`, and so
+  does it in `compose` of `today`.
+- An image reads as it was stored: the images of `Knife` taken before the
+  gain lack `name`, in `images` and in the trees `materialize` and
+  `released` read from them.
+- The core reads a content column a row lacks as null wherever it hashes,
+  so a tree hashes the same however it is read: `compose` of `today` and
+  `materialize` of its head give one hash. A commit recorded before the
+  gain keeps the hash it was recorded with, which `readCommit` returns,
+  and its tree hashes afresh under the fixture's descriptor:
+  `materialize` of `lunch`, and `released`, give another hash.
+
+## Stored forms
+
+What the adapter writes, beyond the table and column names and types the
+layout gives. Ids are UUIDs in canonical form (base62), and times in an
+`INTEGER` column are microseconds since the Unix epoch.
+
+- `ref`: `sealed_at`, `deleted_at` and `deleted_by` are `NULL` until a seal
+  or a discard sets them. A discard sets `deleted_at`, `deleted_by` and
+  `_version` only; every other change sets `updated_at` and `updated_by`.
+- `commit`: `message` is `NULL` for none, `sequence` `NULL` for an untagged
+  commit.
+- `member`: `tombstone` is 0 or 1, and `data` is a JSON object of every
+  column the kind declares but its role columns (id, entity key, ref,
+  root, tombstone, version), each value canonical: on an insert every such
+  column, `null` where the row lacks it; on an update the stored object
+  with the row's columns over it, and `null` for a column the kind
+  declares that the stored object lacks.
+- `ref_history`, `release_history` and `member_history`: `history_id` is a
+  new id, `recorded_at` the transaction's time, `operation` `INSERT` for a
+  row's first image (version 1), `DELETE` for a member row's removal, and
+  `UPDATE` for every other change, a ref's discard among them.
+
+Every `data` column is a JSON object written compactly with its members
+sorted by name, by code point, and strings escaped as canonical JSON
+escapes them (`runtime/versiongraph/README.md`, "Canonical rows"):
+
+| Table | `data` |
+|---|---|
+| `ref_history` | The ref after the change: `_version` (an integer), `base_commit_id`, `created_at`, `created_by`, `deleted_at`, `deleted_by`, `head_commit_id`, `id`, `name`, `parent_ref_id`, `root_id`, `sealed_at`, `updated_at`, `updated_by`. Every member is present; an id or a time it lacks is `null`, and a time is a canonical date-time (`2026-10-05T09:00:01.250005Z`). |
+| `release_history` | The release pointer after the change: `_version`, `commit_id`, `created_at`, `created_by`, `id`, `root_id`, `updated_at`, `updated_by`, as a ref's image writes them. |
+| `member_history` | The kind's canonical row after the change, role columns included under the descriptor's names (`recipe_id` is the fixture's root column, `root_id` under `Branches`), less the kind's `history.exclude` columns. A `DELETE` image is the row as it was, at its version plus 1, with the kind's `history.actor` column, when it has one, set to the delete's actor. |
 
 ## typescript.json
 
