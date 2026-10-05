@@ -100,8 +100,32 @@ to rewrite the TypeScript and Python scalar catalogs.
 
 ## Running the gates
 
-The Makefile mirrors `.github/workflows/ci.yml`. A pull request must pass all
-of them; run them locally before pushing.
+The Makefile mirrors `.github/workflows/ci.yml`, which runs in two tiers
+(`docs/DECISIONS.md`, D40):
+
+- A pull request runs the quick tier: the lints and drift checks, the Go
+  tests with `-short` (which skips every test that compiles and runs a
+  generated module), the runtimes' and the version graph's own test suites,
+  and the docs build.
+- The full tier adds the Go tests without `-short`, `make cli-smoke`, the
+  acme example (`examples/acme-schematic/scripts/smoke.sh`,
+  `check_second_decorator.sh` and `examples/acme-shop/scripts/check.sh`),
+  `examples/engine-notes/scripts/check.sh` and the version-graph scenarios
+  (`make versiongraph-scenarios`, `-ts`, `-rust` and `-python`). It runs
+  twice a day on `main` as the release candidate (`release-candidate.yml`),
+  and before every release. A red candidate opens an issue, "Release
+  candidate failing on main", which the next green one closes.
+
+A full-tier failure first shows on `main`, so before pushing, run the
+full-tier checks your change touches: `make go-test` for a generator change,
+an example's script for a change to that example.
+
+CI runs only on a pull request that targets `main` and is not a draft.
+Marking a draft ready for review starts its run. A stacked pull request runs
+nothing until it targets `main`; when GitHub retargets it after its parent
+merges, push to it, or close and reopen it, to start the run. A pull
+request merges with one approval and a green `ci-pass`; an approval from an
+agent or a bot with write access counts.
 
 | Target                | What it checks                                                      |
 | --------------------- | ------------------------------------------------------------------- |
@@ -214,7 +238,8 @@ builds on the checkout.
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
 (Settings -> Actions -> General) must permit; it is off by default on a new
-repository.
+repository, and the parable-work organization must allow it first (it does
+not yet).
 
 A release is three steps, each started by a person. For the first release,
 `v0.1.0-alpha.1`:
@@ -285,7 +310,9 @@ A dry run of the build on any branch: Actions -> release -> Run workflow with
 `dry_run` checked (or `gh workflow run release.yml --ref <branch> -f
 dry_run=true`). It runs the verify, build, build-migrate and assemble jobs
 and uploads the assembled release set as the `release-assets` workflow
-artifact; nothing is released, published or deployed.
+artifact; nothing is released, published or deployed. `release-candidate.yml`
+starts this dry run on `main` at 06:00 and 18:00 UTC, unless `main`'s head
+already passed one.
 
 ### Trusted publishing
 
