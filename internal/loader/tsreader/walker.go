@@ -253,7 +253,11 @@ func (w *walker) versionedConfigFromDecorator(d decoratorRef) (*ir.VersionedConf
 			if !ok {
 				return nil, errorAtNode(d.node, "@versioned retentionDays must be a number literal")
 			}
-			n := int(f)
+			days, ok := safeIntegerLiteral(f)
+			if !ok {
+				return nil, errorAtNode(d.node, "@versioned retentionDays must be an integer literal, got %s", formatLiteral(f))
+			}
+			n := int(days)
 			out.RetentionDays = &n
 		case "partitionBy":
 			s, ok := value.(string)
