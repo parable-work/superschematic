@@ -220,7 +220,7 @@ async fn run(file: &ParityFile, vector: &Vector) -> Want {
     } else {
         Want {
             status: status.as_u16(),
-            code: body["error"]["code"].as_str().map(ToString::to_string),
+            code: body["code"].as_str().map(ToString::to_string),
             caller: None,
             user: None,
             user_authenticated,

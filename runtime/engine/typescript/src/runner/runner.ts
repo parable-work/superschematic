@@ -27,6 +27,12 @@ schedule on the schema (discover); a function that throws or gives no
 valid interval fails the schedule on that schema as a failing run does,
 now and each time it comes due, with the backoff alone to space the
 retries, until a publish or a registration makes the runner look again.
+A function that returns null turns the schedule off on the schema (D32):
+the runner runs nothing there and drops what it kept for the schedule, so
+a publish whose config gives an interval again finds it as for the first
+time, due an interval later. A schedule's run writes its behavior's own
+tables in the run's transaction, which rolls back with the run when it
+throws.
 
 Both run as schema-level work (behaviors/execution.ts, WorkExecution)
 on a chain whose principal is the runner's and whose cause each event
@@ -120,14 +126,19 @@ export interface ScheduleStatus {
   schedule: string;
   namespace: string;
   schema: string;
-  /** retrying: its last run failed, or its interval could not be had; inactive: no live version composes it now. */
-  state: 'active' | 'retrying' | 'inactive';
-  /** Its interval on the schema; null for an inactive one and one whose everyMs function fails there. */
+  /**
+   * retrying: its last run failed, or its interval could not be had; off:
+   * its everyMs function returns null for the schema's config, so it runs
+   * nothing there until a publish gives it an interval; inactive: no live
+   * version composes it now.
+   */
+  state: 'active' | 'retrying' | 'off' | 'inactive';
+  /** Its interval on the schema; null for an inactive or off one and one whose everyMs function fails there. */
   everyMs: number | null;
-  /** When its last run committed; null before its first. */
+  /** When its last run committed; null before its first, and for an off one. */
   previous: number | null;
-  /** When it runs next. */
-  next: number;
+  /** When it runs next; null for an off one, which runs nothing. */
+  next: number | null;
   /** Failed runs since its last success. */
   failures: number;
   error: string | null;
@@ -184,8 +195,8 @@ interface ReactionUnit extends Unit {
 interface ScheduleUnit extends Unit {
   readonly name: string;
   readonly spec: BehaviorSchedule<unknown>;
-  /** Its interval on the schema, or why its everyMs function gives none. */
-  readonly every: { readonly everyMs: number } | { readonly error: unknown };
+  /** Its interval on the schema, that its everyMs function turns it off there, or why it gives none. */
+  readonly every: { readonly everyMs: number } | { readonly off: true } | { readonly error: unknown };
 }
 
 interface Discovery {
@@ -322,9 +333,14 @@ export class Runner {
       schedules.set(scheduleId(status), { ...status, state: 'inactive' });
     }
     for (const unit of discovery.schedules) {
+      const id = scheduleId({ ...unit, schedule: unit.name });
+      if ('off' in unit.every) {
+        schedules.set(id, offStatus(unit));
+        continue;
+      }
       const row = this.scheduleRow(unit);
       if (row) {
-        schedules.set(scheduleId({ ...unit, schedule: unit.name }), scheduleStatus(row, 'everyMs' in unit.every ? unit.every.everyMs : null));
+        schedules.set(id, scheduleStatus(row, 'everyMs' in unit.every ? unit.every.everyMs : null));
       }
     }
     const head = this.storage.get('SELECT MAX(cursor) AS head FROM engine_events');
@@ -587,11 +603,20 @@ export class Runner {
   }
 
   // schedule runs a schedule once if it is due. A schedule found for the
-  // first time is due an interval later.
+  // first time is due an interval later. One that is off on the schema
+  // runs nothing and keeps no row, so it is found anew once it is on.
   private schedule(unit: ScheduleUnit, totals: Totals): void {
     const now = this.clock();
     const row = this.scheduleRow(unit);
     const key = [unit.behavior, unit.name, unit.namespace, unit.schema];
+    if ('off' in unit.every) {
+      if (row) {
+        this.storage.transaction(() =>
+          this.storage.run('DELETE FROM engine_schedules WHERE behavior = ? AND schedule = ? AND namespace = ? AND schema = ?', key)
+        );
+      }
+      return;
+    }
     if (!('everyMs' in unit.every)) {
       this.failInterval(unit, row, now, unit.every.error, totals);
       return;
@@ -806,9 +831,14 @@ export class Runner {
 
 // intervalOf is a schedule's interval on one schema: its everyMs, or what
 // its everyMs function returns for the schema's config, held to the rule
-// registration holds a fixed one to. A function that throws, returns a
-// promise or returns anything else gives the error instead.
-function intervalOf(bound: BoundBehavior, name: string, spec: BehaviorSchedule<unknown>): { everyMs: number } | { error: unknown } {
+// registration holds a fixed one to, or off when the function returns
+// null. A function that throws, returns a promise or returns anything else
+// (undefined included) gives the error instead.
+function intervalOf(
+  bound: BoundBehavior,
+  name: string,
+  spec: BehaviorSchedule<unknown>
+): { everyMs: number } | { off: true } | { error: unknown } {
   const every = spec.everyMs;
   if (typeof every === 'number') {
     return { everyMs: every };
@@ -816,6 +846,9 @@ function intervalOf(bound: BoundBehavior, name: string, spec: BehaviorSchedule<u
   try {
     const value: unknown = every.call(spec, bound.config);
     synchronous(bound.behavior.name, `schedule ${name} everyMs`, value);
+    if (value === null) {
+      return { off: true };
+    }
     if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < MIN_SCHEDULE_MS) {
       return {
         error: new BehaviorError(
@@ -932,6 +965,23 @@ function scheduleStatus(row: Row, everyMs: number | null): ScheduleStatus {
     next: Number(row.next_run_at),
     failures,
     error: row.error === null ? null : String(row.error),
+  };
+}
+
+// offStatus is the status of a schedule its everyMs function turns off on
+// the schema: nothing kept, nothing due.
+function offStatus(unit: ScheduleUnit): ScheduleStatus {
+  return {
+    behavior: unit.behavior,
+    schedule: unit.name,
+    namespace: unit.namespace,
+    schema: unit.schema,
+    state: 'off',
+    everyMs: null,
+    previous: null,
+    next: null,
+    failures: 0,
+    error: null,
   };
 }
 

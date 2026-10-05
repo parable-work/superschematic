@@ -1,7 +1,58 @@
 {
   "dialect": "sqlite",
+  "expanded": "e411a1b050fe5f33ff8ccbc935b1cfeb9c83682e6dcd688792885df6011420f0",
+  "expandedModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "display_name",
+            "origin": "Account.displayName",
+            "type": "TEXT"
+          },
+          {
+            "name": "balance",
+            "origin": "Account.balance",
+            "type": "REAL"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Account.email",
+            "type": "TEXT"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "method": "BTREE",
+            "name": "idx_account_email"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
   "from": "e411a1b050fe5f33ff8ccbc935b1cfeb9c83682e6dcd688792885df6011420f0",
-  "hash": "4768fccd34d5f28caad8f81a55cee3f705b858d5b2f8b71db99db825c76fa0ca",
+  "hash": "0c8b7391047a79b74d1e96ecd215cc0c013abf079ae0ed5d0af88a8804d9e6ce",
   "service": "ledger-db",
   "steps": [
     {

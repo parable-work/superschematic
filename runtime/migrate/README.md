@@ -26,6 +26,8 @@ A plan is one JSON object. The compiler writes it in canonical form
 | `from` | string | The hash of the model the plan starts from; `""` means an empty database. |
 | `to` | string | The hash of the model the plan ends at. |
 | `toModel` | object | The model the plan ends at. Its hash is `to`. |
+| `expanded` | string | Present only when the plan has contract steps: the hash of the model the database holds between the phases, the previous model with every expand step applied. |
+| `expandedModel` | object | With `expanded`: that model. Its hash is `expanded`. |
 | `renames` | array of strings | The renames the plan was given, as written. Informational. |
 | `steps` | array of steps | Every `expand` step, then every `contract` step. |
 | `hash` | string | The plan's hash. |
@@ -38,7 +40,7 @@ A step:
 | `phase` | string | `expand` or `contract`. |
 | `op` | string | The operation, for people. The runner does not read it. |
 | `subject` | string | The object the step changes, as a path (`table/order/column/total`). |
-| `statements` | array of strings | Complete SQL statements without trailing semicolons. The runner runs each with one call, in order. A statement may contain semicolons inside a dollar-quoted body. |
+| `statements` | array of strings | Complete SQL statements without trailing semicolons. The runner runs each with one call, in order. A statement may contain semicolons inside a dollar-quoted body. The array may be empty: the step changes nothing and carries its hazards, and the runner logs it like any other. |
 | `transactional` | boolean | Whether the step runs in one transaction. |
 | `recovery` | array of strings | Absent unless `transactional` is false. Statements to run before a step that started and did not finish is run again. |
 | `foreignKeysOff` | boolean | SQLite only, absent when false. Run the step with foreign key enforcement off and check every foreign key before the commit. |
@@ -60,7 +62,10 @@ A hash is the lowercase hex SHA-256 of canonical JSON:
 - a plan's hash is taken over the plan object without its `hash` member.
 
 Before it runs anything, `apply` recomputes both and refuses a plan whose
-`hash` or `to` does not match, so an edited plan is never half-applied.
+`hash` or `to` does not match, so an edited plan is never half-applied. It
+refuses an `expanded` that is not the hash of `expandedModel`, one of the
+two without the other, and an `expandedModel` of another service or
+dialect.
 It also refuses steps it cannot run as written: an `index` that is not the
 step's position, an expand step after a contract step, a SQLite step that
 is not transactional, and `foreignKeysOff` on a Postgres step.
@@ -78,7 +83,7 @@ CREATE TABLE IF NOT EXISTS superschematic_schema_state (
   model_hash  TEXT NOT NULL,      -- '' while no plan has finished
   model       TEXT,               -- canonical JSON of the applied model
   plan_hash   TEXT,               -- the plan in progress, or NULL
-  plan_phase  TEXT,               -- 'expand' once its expand steps are done
+  plan_phase  TEXT,               -- 'expanded' or 'expand' once its expand steps are done
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()   -- TEXT on SQLite
 );
 
@@ -112,7 +117,8 @@ superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--d
 path selects SQLite. It must match the plan's dialect. `--phase` defaults
 to `all`.
 
-1. Read the plan and check its version, its `hash` and its `to`.
+1. Read the plan and check its version, its `hash`, its `to` and, when
+   it has one, its `expanded`.
 2. Take the lock. On Postgres, one connection holds
    `pg_advisory_lock(key)` for the whole run, where `key` is the first
    eight bytes, big-endian, of the SHA-256 of
@@ -129,13 +135,29 @@ to `all`.
    - the row's `plan_hash` is this plan: resume it;
    - no plan is in progress and the row's `model_hash` is the plan's `to`
      (and not its `from`): the plan has been applied; say so and exit 0;
-   - another plan is in progress: refuse, naming it and its phase;
+   - another plan is in progress with only its contract left, and it
+     recorded its expanded model (`plan_phase` is `expanded`), and the
+     row's `model_hash` is this plan's `from`: unless a contract step of
+     that plan has a log row, this plan supersedes that contract. Say so,
+     naming the old plan, clear `plan_hash` and `plan_phase`, and go on as
+     for a plan with none in progress. The old plan's contract never runs;
+     the new plan was planned from the schema the database holds, so
+     whatever of it is still wanted is in the new plan. Once a contract
+     step has started, the database no longer holds the expanded model:
+     refuse, and say to finish the old plan;
+   - another plan is in progress: refuse, naming it and its phase. A plan
+     whose `plan_phase` is `expand` has no expanded model recorded, so no
+     plan supersedes it;
    - the row's `model_hash` is not the plan's `from`: refuse, naming both,
      and say to plan again from the applied model
      (`superschematic-migrate status --model`);
    - the row's dialect is not the plan's: refuse.
-5. `--phase contract` on a plan whose expand steps have not all finished:
-   refuse.
+5. `--phase contract` on a plan that is not the plan in progress, or on
+   the plan in progress whose expand steps have not all finished: refuse.
+   Only the plan in progress has a contract to run. A plan a newer plan
+   superseded may start from the database's model again (when its expand
+   had nothing to do, its expanded model is its `from`), and running its
+   contract then would drop what the newer plan's servers use.
 6. Record the plan as in progress (`plan_hash`) if it is not, and delete
    the log rows an earlier application of the same plan left: a plan is a
    pure function of its two models, so a database taken from A to B, back
@@ -162,10 +184,15 @@ to `all`.
    - Any other error stops the run. The plan stays in progress; the next
      `apply` of the same plan resumes at that step. The error names the
      step's index, subject and the statement that failed.
-8. When the last expand step finishes and the plan has contract steps,
-   set `plan_phase` to `expand`. When the plan's last step finishes, set
-   `model_hash` to `to`, `model` to `toModel` and `dialect`, and clear
-   `plan_hash` and `plan_phase`.
+8. When the last expand step finishes and the plan has contract steps:
+   when the plan has `expanded`, set `plan_phase` to `expanded`,
+   `model_hash` to `expanded` and `model` to `expandedModel`, in the
+   transaction of that step: the database holds that schema until the
+   contract runs. A plan without `expanded` (written before it existed)
+   sets `plan_phase` to `expand` and leaves `model_hash` and `model` as
+   they were, as a runner that predates `expanded` does for every plan.
+   When the plan's last step finishes, set `model_hash` to `to`, `model`
+   to `toModel` and `dialect`, and clear `plan_hash` and `plan_phase`.
 
 ## `status`
 
@@ -176,7 +203,8 @@ superschematic-migrate status --service NAME [--model] [--database-url URL]
 Prints the applied model's hash, the plan in progress and its phase, and
 the steps logged for it. With `--model` it prints only the applied model's
 canonical JSON, which `superschematic migrate plan --from` takes, and fails
-when no model is applied. `status` only reads: it creates no table, and a
+when no model is applied. Between a plan's phases the applied model is the
+plan's `expandedModel`, the schema the database holds. `status` only reads: it creates no table, and a
 database the runner never touched has no state.
 
 ## `adopt`
@@ -236,6 +264,18 @@ superschematic-migrate apply --plan shop.plan.json --phase expand
 superschematic-migrate apply --plan shop.plan.json --phase contract
 ```
 
+A rollout that fails runs no contract step, and the previous servers keep
+running on the expanded schema, which the runner records as the applied
+model. The next deploy plans from that model, and its plan supersedes the
+pending contract: the drops it still wants are in its own contract, and a
+plan back to the previous version starts from that model too.
+
+```sh
+superschematic-migrate status --service shop --model > shop.model.json
+superschematic migrate plan schemas/services/shop-db --from shop.model.json --out next.plan.json
+superschematic-migrate apply --plan next.plan.json --phase expand
+```
+
 SQLite takes a path, a `sqlite:` URL (`sqlite:///var/lib/shop/shop.db` is
 `/var/lib/shop/shop.db`) or a `file:` URI with SQLite's URI parameters:
 
@@ -285,5 +325,5 @@ files. With `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` set to a Postgres
 whose role may create databases, the tests run against Postgres too; each
 creates and drops a database of its own. `TestCompilerVectors` applies
 every case under `testdata/plans` and skips while there is none.
-`go test -run TestFixturesAreSealed -seal` rewrites the `from`, `to` and
-`hash` of the hand-written plans after an edit.
+`go test -run TestFixturesAreSealed -seal` rewrites the `from`, `to`,
+`expanded` and `hash` of the hand-written plans after an edit.

@@ -402,6 +402,6 @@ export function columnsOf(engine: Engine): string[] {
 /** tablesOf lists the tables and indexes whose names start with prefix. */
 export function tablesOf(engine: Engine, prefix: string): string[] {
   return engine.storage
-    .all("SELECT name FROM sqlite_master WHERE name LIKE ? ESCAPE '\\' ORDER BY name", [`${prefix.replace(/_/g, '\\_')}%`])
+    .all("SELECT name FROM sqlite_master WHERE name LIKE ? ESCAPE '\\' ORDER BY name", [`${prefix.replace(/[\\%_]/g, '\\$&')}%`])
     .map((row) => String(row.name));
 }

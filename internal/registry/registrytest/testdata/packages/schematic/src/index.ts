@@ -20,4 +20,9 @@ export function meta(_args: Record<string, unknown>): ClassDecorator {
   return noopClassDecorator;
 }
 
+// pairsWith names, as a value, the class a type is sold with.
+export function pairsWith(_class: abstract new (...args: never[]) => unknown): ClassDecorator {
+  return noopClassDecorator;
+}
+
 export const audited: ClassDecorator & MethodDecorator = () => {};

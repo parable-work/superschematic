@@ -1,0 +1,27 @@
+{
+  "dialect": "postgres",
+  "from": "b59e39d63f60e1f77b23e3740d1d36efbee32fc45e30ed8473d9b6b8163334c9",
+  "hash": "f6997ed574b957cbf327efcc7ab554cebc46e434b791490f38332d4a97df4b56",
+  "service": "fixture-version-graph-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "history",
+          "id": "history:table/note",
+          "reason": "Note.body leaves the content of note in version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch rose from 1 to 2.",
+          "subject": "table/note"
+        }
+      ],
+      "index": 1,
+      "op": "changeGraphContent",
+      "phase": "expand",
+      "statements": [],
+      "subject": "table/note",
+      "transactional": true
+    }
+  ],
+  "to": "74ba04450c0d95c8454f08b5d7bfb2c5bab89b3e63333f8011fd20d56ee6b7a7",
+  "toModel": null,
+  "version": 1
+}

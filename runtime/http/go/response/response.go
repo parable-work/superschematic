@@ -100,6 +100,20 @@ func Error(w http.ResponseWriter, status int, message string, errorCode ...strin
 	writeProblemJSON(w, d, status)
 }
 
+// RequestError sends an RFC 9457 Problem Details error response carrying
+// the request's id (chi's RequestID), without logging: for a middleware that
+// logs the refusal its own way, such as the rate limit and the timeout.
+func RequestError(w http.ResponseWriter, r *http.Request, status int, message string, errorCode string) {
+	writeProblemJSON(w, problemDetail{
+		Type:      "about:blank",
+		Title:     http.StatusText(status),
+		Status:    status,
+		Detail:    message,
+		Code:      errorCode,
+		RequestID: chimiddleware.GetReqID(r.Context()),
+	}, status)
+}
+
 // LoggedError extracts the request-scoped logger from context, emits a
 // structured log line (Warn for 4xx, Error for 5xx), then writes an RFC 9457
 // Problem Details response including the requestId from context.

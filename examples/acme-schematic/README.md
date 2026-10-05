@@ -11,7 +11,7 @@ The extension adds one of each registration surface:
 | Surface | What acme adds | File |
 |---|---|---|
 | Kind | `Catalog`, with a `catalog` generator | `ext/kind.go` |
-| Decorators | `@shelf` (with an argument) and `@feedKey` (a marker) from `@acme/schema`, into the field's `extensions.acme` slot | `ext/decorator.go`, `packages/schema` |
+| Decorators | `@shelf` (with an argument) and `@feedKey` (a marker) from `@acme/schema`, into the field's `extensions.acme` slot; `@crossSell`, whose argument names a class, into the type's | `ext/decorator.go`, `ext/cross_sell.go`, `packages/schema` |
 | Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar that `shop-catalog` bounds with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
 | Document | `catalog.config.yaml` next to a Catalog schema, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
@@ -84,6 +84,7 @@ examples/acme-schematic/
     extension.go              Extension: Name, Register, Commands; [extension.acme] config
     kind.go                   Catalog kind + catalog generator
     decorator.go              @shelf, @feedKey + the field codec
+    cross_sell.go             @crossSell, a class as an argument, + the type codec
     scalars.go                the scalar catalog: the core scalars plus the Acme.Photo upload scalar
     document.go               catalog.config document + generator
     manifest.go               acmeManifest generator on every kind
@@ -98,7 +99,7 @@ examples/acme-schematic/
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
-  packages/schema/            @acme/schema, the authoring package @shelf, @feedKey and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
+  packages/schema/            @acme/schema, the authoring package @shelf, @feedKey, @crossSell and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
   packages/behaviors/         @acme/behaviors, acme.Rating's implementation for @superschematic/engine
     declarations/             acme.Rating.behavior.json, the copy `acme-schematic behaviors` writes
     src/rating.ts             the implementation; src/index.ts exports every behavior
@@ -112,7 +113,7 @@ examples/acme-schematic/
                               the Planogram version graph (Bay, Facing)
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
     services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
-    services/shop-catalog     Catalog: Product, Bundle with @shelf and @feedKey; Product.photo, an Acme.Photo upload; catalog.config.yaml
+    services/shop-catalog     Catalog: Product, Bundle with @shelf and @feedKey, Bundle with @crossSell; Product.photo, an Acme.Photo upload; catalog.config.yaml
     services/shop-storefront  API on the TypeScript server: carts, a public probe, a manual event stream
   storefront/                 app.ts implements the generated shop-storefront router; app.test.ts drives it
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
@@ -220,9 +221,9 @@ r.RegisterGenerator(registry.GeneratorSpec{
   output root in one `GenerateContext`, writes its files and calls
   `c.Done(key, dir)` so the build log and `Result.Outputs` list them.
 
-`generateCatalog` walks every type's fields, reads the `@shelf` payload
-and the `@feedKey` marker through the codec (next section), and writes
-`catalog.json`.
+`generateCatalog` walks every type's fields, reads the `@shelf` payload,
+the `@feedKey` marker and each type's `@crossSell` class through the codecs
+(next section), and writes `catalog.json`.
 
 The `acmeManifest` generator in `ext/manifest.go` is the other shape: a
 generator on kinds the extension did not define. It lists `Kinds: []string{"DB", "API", "General", "Catalog"}` and has no `OutputKey`, so it runs after
@@ -321,6 +322,56 @@ through the IR as YAML or JSON with the slot intact, and each twin loads
 back to the same types; the smoke and `TestFieldDirectivesSurviveTheDataFormWriters`
 check both. `format --to=ts` cannot write extension data yet
 (`docs/extension-model.md`, section 11).
+
+### A class as an argument: @crossSell
+
+`@crossSell` offers a type beside another class's listing. Its argument
+names that class as a value, the class itself and never its name in a
+string:
+
+```ts
+@crossSell({ with: Product })
+export abstract class Bundle {
+```
+
+The TypeScript half types `with` as a class, so tsc refuses a string:
+
+```ts
+export type SchemaClass = abstract new (...args: never[]) => unknown;
+
+export interface CrossSellArgs {
+  readonly with: SchemaClass;
+}
+```
+
+The argument evaluator reads a class like any other value, for any
+decorator, so nothing in the core names this one. It gives `Apply`
+the class reference `{"class": "Product"}`, the shape the data forms write,
+and `Args` holds `with` to that shape with `registry.ClassRefSchema`:
+
+```go
+var CrossSellArgs = json.RawMessage(`{
+	"type": "object",
+	"required": ["with"],
+	"additionalProperties": false,
+	"properties": {"with": ` + string(registry.ClassRefSchema) + `}
+}`)
+
+type CrossSell struct {
+	With registry.ClassRef `json:"with"`
+}
+```
+
+`Apply` decodes the argument with `registry.DecodeArgs`, as `@shelf`'s does,
+and stores it in the type's slot: `"extensions": {"acme": {"crossSell":
+{"with": {"class": "Product"}}}}` from the TypeScript form and the data forms
+alike. `registry.DecodeClassRef` reads a class reference that is the whole
+argument into its name. A class from another service's package would be
+recorded in the schema's imports under that package, as a field type from
+it is. A data form that names a class the schema neither declares nor
+imports fails to load, and the error names the class
+(`TestCrossSellOfAnUnknownClassIsRejected`). `CrossSellOf(td)` reads the
+class back, and `catalog.json` lists it under `crossSells`.
 
 ## A scalar catalog
 

@@ -24,7 +24,7 @@
 //!
 //! A webhook verifier (`@hmacVerified`) runs before all of them; the
 //! generated `webhook_verified` wraps a route [`RouteControls::apply`]
-//! returned. Each refusal is the error envelope of [`error_response`].
+//! returned. Each refusal is the problem of [`error_response`].
 
 use crate::{
     error_response, ApiError, Authenticator, Principal, RateLimiter, ServiceAuthenticator,
@@ -452,7 +452,7 @@ mod tests {
     }
 
     fn code(body: &Value) -> &str {
-        body["error"]["code"].as_str().unwrap_or_default()
+        body["code"].as_str().unwrap_or_default()
     }
 
     #[tokio::test]
@@ -468,11 +468,11 @@ mod tests {
             (status, code(&body)),
             (StatusCode::UNAUTHORIZED, "unauthorized")
         );
-        assert_eq!(body["error"]["message"], "Authentication required");
+        assert_eq!(body["detail"], "Authentication required");
 
         let (status, _, body) = send(&app, Some("ana:orders.write"), "").await;
         assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, "forbidden"));
-        assert_eq!(body["error"]["message"], "Insufficient permissions");
+        assert_eq!(body["detail"], "Insufficient permissions");
 
         let (status, _, body) = send(&app, Some("down"), "").await;
         assert_eq!(
@@ -690,7 +690,7 @@ mod tests {
         );
         let (status, _, body) = send(&app, None, "").await;
         assert_eq!(
-            (status, code(&body), body["error"]["message"].as_str()),
+            (status, code(&body), body["detail"].as_str()),
             (
                 StatusCode::UNAUTHORIZED,
                 "service_unauthorized",
@@ -859,6 +859,95 @@ mod tests {
             call(&app, Some("billing"), Some("ana")).await,
             answer(StatusCode::OK, "billing/ana")
         );
+    }
+
+    // A service refusal is the same problem as an end-user one: status,
+    // code and detail, and the request's id once request_ids names it.
+    #[tokio::test]
+    async fn a_service_refusal_is_a_problem_that_names_the_request() {
+        let log = Log::default();
+        let app = service_app(
+            RouteControls::new()
+                .require_service(services(&log), &["shop-orders"])
+                .authorize(tokens(&log), &[]),
+            &log,
+        )
+        .layer(from_fn(crate::request_ids));
+        let cases = [
+            (
+                None,
+                401,
+                "Unauthorized",
+                "service_unauthorized",
+                "Service credential required",
+            ),
+            (
+                Some("bad"),
+                401,
+                "Unauthorized",
+                "service_unauthorized",
+                "Invalid service credential",
+            ),
+            (
+                Some("billing"),
+                403,
+                "Forbidden",
+                "service_forbidden",
+                "Service not permitted",
+            ),
+            (
+                Some("stranger"),
+                403,
+                "Forbidden",
+                "service_forbidden",
+                "Service not permitted",
+            ),
+            (
+                Some("down"),
+                503,
+                "Service Unavailable",
+                "service_unavailable",
+                "Service credential could not be checked",
+            ),
+            (
+                Some("orders:shop-orders"),
+                401,
+                "Unauthorized",
+                "unauthorized",
+                "Authentication required",
+            ),
+        ];
+        for (service, status, title, code, detail) in cases {
+            let mut request = http::Request::post("/op").header("x-request-id", "req-7");
+            if let Some(token) = service {
+                request = request.header("service-authorization", format!("Bearer {token}"));
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status().as_u16(), status, "{service:?}");
+            let headers = response.headers();
+            assert_eq!(headers["content-type"], crate::PROBLEM_CONTENT_TYPE);
+            assert_eq!(headers["x-request-id"], "req-7");
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                body,
+                serde_json::json!({
+                    "type": "about:blank",
+                    "title": title,
+                    "status": status,
+                    "detail": detail,
+                    "code": code,
+                    "requestId": "req-7",
+                }),
+                "{service:?}"
+            );
+        }
     }
 
     // The service step runs after the rate limit and the body limit, and

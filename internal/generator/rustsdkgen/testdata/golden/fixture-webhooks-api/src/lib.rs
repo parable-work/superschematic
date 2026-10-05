@@ -11,7 +11,7 @@ pub mod sdk;
 pub use client::{
     ClientConfig, RefreshTokenCallback, RefreshTokenFuture, TokenProvider, TokenProviderFuture,
 };
-pub use errors::SDKError;
+pub use errors::{ApiProblem, SDKError};
 pub use runtime::{
     EncryptedPayloadEnvelope, EncryptedRequestOptions, MultipartBody, PublicEncryptionKey, RequestHook,
     RequestOptions, UploadFile,

@@ -81,11 +81,17 @@ var pgExactFloat = map[string]map[string]bool{
 
 func isPGFloat(base string) bool { return base == "REAL" || base == "DOUBLE PRECISION" }
 
-// convert classifies ALTER COLUMN ... TYPE from one type to another. A
+// convert classifies ALTER COLUMN ... TYPE from one column's type to
+// another's (pgConvert).
+func (postgresDialect) convert(from, to *Column) conversion {
+	return pgConvert(from.Type, to.Type)
+}
+
+// pgConvert classifies ALTER COLUMN ... TYPE from one type to another. A
 // cast the plan writes is explicit (USING col::type), so a value too long
 // for a VARCHAR is cut, not refused, and a value outside a number type's
 // range is refused.
-func (postgresDialect) convert(from, to string) conversion {
+func pgConvert(from, to string) conversion {
 	f, t := parsePGType(from), parsePGType(to)
 	if f.equal(t) {
 		return conversion{kind: convertSame}
