@@ -153,6 +153,109 @@ func TestTopologicalSortOrdersAuthDBBeforeDependent(t *testing.T) {
 	assert.Equal(t, []string{"api"}, serviceNames(phases[1]))
 }
 
+func apiCalling(name string, callees ...string) Service {
+	cfg := &schemaconfig.SchemaConfig{Name: name, Kind: ir.SchemaKindAPI}
+	for _, callee := range callees {
+		cfg.Calls = append(cfg.Calls, schemaconfig.ServiceDependency{Name: callee, Kind: ir.SchemaKindAPI})
+	}
+	return Service{Name: name, Dir: "/services/" + name, Config: cfg}
+}
+
+func TestTopologicalSortOrdersCalleeBeforeCaller(t *testing.T) {
+	// The caller sorts first by Dir; calls must still put the callee first,
+	// since the caller's generated code imports the callee's SDK.
+	sorted, err := TopologicalSort([]Service{apiCalling("orders", "shop"), apiCalling("shop")})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"shop", "orders"}, serviceNames(sorted))
+
+	closure, err := Closure(sorted, "orders")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"shop", "orders"}, serviceNames(closure))
+}
+
+func TestTopologicalSortNamesACycleOfCalls(t *testing.T) {
+	// "lead" reaches the cycle without being in it, so the message must
+	// start at the service the cycle returns to.
+	services := []Service{apiCalling("lead", "orders"), apiCalling("orders", "shop"), apiCalling("shop", "orders")}
+
+	_, err := TopologicalSort(services)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "circular dependency involving orders: orders calls shop, shop calls orders;")
+	assert.Contains(t, err.Error(), "section 3.3")
+	assert.NotContains(t, err.Error(), "lead")
+}
+
+func TestTopologicalSortNamesEachEdgeOfAMixedCycle(t *testing.T) {
+	db := Service{Name: "db", Config: &schemaconfig.SchemaConfig{Name: "db", Kind: ir.SchemaKindDB, Dependencies: []schemaconfig.ServiceDependency{{Name: "api", Kind: ir.SchemaKindAPI}}}}
+	api := Service{Name: "api", Config: &schemaconfig.SchemaConfig{
+		Name:         "api",
+		Kind:         ir.SchemaKindAPI,
+		AuthDB:       "db",
+		Dependencies: []schemaconfig.ServiceDependency{{Name: "db", Kind: ir.SchemaKindDB}},
+	}}
+
+	_, err := TopologicalSort([]Service{db, api})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "circular dependency involving db: db depends on api, api depends on and authenticates against db")
+	assert.NotContains(t, err.Error(), "section 3.3", "only a cycle of calls alone points at output ordering")
+}
+
+func TestValidateHandleKindsChecksEachHandleAgainstItsService(t *testing.T) {
+	services := func(mutate func(*schemaconfig.SchemaConfig)) []Service {
+		caller := apiCalling("orders", "shop")
+		caller.Config.AuthDB = "db"
+		caller.Config.AuthDBKind = ir.SchemaKindDB
+		caller.Config.Dependencies = []schemaconfig.ServiceDependency{{Name: "db", Kind: ir.SchemaKindDB}}
+		mutate(caller.Config)
+		return []Service{
+			caller,
+			apiCalling("shop"),
+			{Name: "db", Config: &schemaconfig.SchemaConfig{Name: "db", Kind: ir.SchemaKindDB}},
+		}
+	}
+	require.NoError(t, validateHandleKinds(services(func(*schemaconfig.SchemaConfig) {})))
+
+	err := validateHandleKinds(services(func(cfg *schemaconfig.SchemaConfig) {
+		cfg.Calls = []schemaconfig.ServiceDependency{{Name: "db", Kind: ir.SchemaKindAPI}}
+	}))
+	require.Error(t, err)
+	assert.Equal(t, "orders: calls names db with kind API, but db is kind DB", err.Error())
+
+	err = validateHandleKinds(services(func(cfg *schemaconfig.SchemaConfig) { cfg.AuthDBKind = ir.SchemaKindGeneral }))
+	require.Error(t, err)
+	assert.Equal(t, "orders: authDb names db with kind General, but db is kind DB", err.Error())
+
+	err = validateHandleKinds(services(func(cfg *schemaconfig.SchemaConfig) { cfg.Dependencies[0].Kind = ir.SchemaKindAPI }))
+	require.Error(t, err)
+	assert.Equal(t, "orders: dependencies names db with kind API, but db is kind DB", err.Error())
+
+	// A data-form authDb has no kind to check, and an undiscovered service
+	// is left to Closure.
+	require.NoError(t, validateHandleKinds(services(func(cfg *schemaconfig.SchemaConfig) { cfg.AuthDBKind = "" })))
+	require.NoError(t, validateHandleKinds(services(func(cfg *schemaconfig.SchemaConfig) {
+		cfg.Calls = []schemaconfig.ServiceDependency{{Name: "elsewhere", Kind: ir.SchemaKindAPI}}
+	})))
+}
+
+func TestDiscoverRefusesACallsHandleOfTheWrongKind(t *testing.T) {
+	root := t.TempDir()
+	servicesRoot := filepath.Join(root, "services")
+	writeFile(t, filepath.Join(servicesRoot, "orders", "schema.config.yaml"), `name: orders
+kind: API
+calls:
+  - { name: shop, kind: API }
+outputs: {}
+`)
+	writeFile(t, filepath.Join(servicesRoot, "shop", "schema.config.yaml"), `name: shop
+kind: General
+outputs: {}
+`)
+
+	_, err := Discover(servicesRoot, filepath.Join(root, "dist"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "orders: calls names shop with kind API, but shop is kind General")
+}
+
 func TestClosureKeepsDiscoverOrderAndDropsUnrelated(t *testing.T) {
 	general := func(name string, deps ...string) Service {
 		cfg := &schemaconfig.SchemaConfig{Name: name, Kind: ir.SchemaKindGeneral}

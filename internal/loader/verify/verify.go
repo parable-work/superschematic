@@ -2,7 +2,8 @@
 // Schema IR. It runs after every reader (TypeScript, JSON, YAML), before
 // generation, and owns the checks that are properties of the IR rather than
 // of any one authoring syntax: schema-kind / import-path compatibility,
-// cross-kind type-reference rules, full @source structural verification,
+// cross-kind type-reference rules, the classes decorator arguments name,
+// full @source structural verification,
 // trait shape checks, version graph declarations, projection view
 // declarations, the contexts that refuse an array of arrays, the arguments
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
@@ -188,6 +189,7 @@ func (r *Result) warnf(file string, format string, args ...any) {
 func Run(schema *ir.Schema, in Input) *Result {
 	r := &Result{}
 	checkImports(schema, in, r)
+	checkClassRefs(schema, r)
 	checkSourceProjections(schema, in, r)
 	checkTraits(schema, r)
 	checkVersioned(schema, r)
@@ -196,6 +198,8 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkArraysOfArrays(schema, r)
 	checkEncryptedArguments(schema, r)
 	checkEncryptedOperations(schema, r)
+	checkMiddleware(schema, r)
+	checkPublicRoutes(schema, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)
 	reg := in.registry()

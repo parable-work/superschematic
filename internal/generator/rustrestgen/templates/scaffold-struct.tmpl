@@ -1,14 +1,31 @@
-//! Implementation scaffold for {{ .Namespace }}.
-//! NOTE: Generated once and never overwritten.
+//! The {{ .Namespace }} operations of {{ .SchemaName }}.
+//! NOTE: Generated once and never overwritten. An operation added to the
+//! schema later is a method of {{ toPascalCase .Namespace }}Implementation this impl lacks:
+//! add it here and in a file of its own, as for the others.
 
 use async_trait::async_trait;
+{{- if .UsesTypes }}
+use {{ .CrateIdent }}::types;
+{{- end }}
+use {{ .CrateIdent }}::{ {{- toPascalCase .Namespace }}Implementation{{ range .ArgsNames }}, {{ . }}{{ end -}} };
 use {{ .RuntimeCrateIdent }}::{ApiError, RequestContext};
-use serde_json::Value;
 
+/// Implements {{ toPascalCase .Namespace }}Implementation; each method runs the function of
+/// the same name in this directory.
+#[derive(Debug, Default)]
 pub struct Implementation;
 
 impl Implementation {
     pub fn new() -> Self {
         Self
     }
+}
+
+#[async_trait]
+impl {{ toPascalCase .Namespace }}Implementation for Implementation {
+{{- range .Endpoints }}
+    async fn {{ .FunctionName }}(&self, ctx: RequestContext{{ if .HasArgs }}, args: {{ .ArgsName }}{{ end }}) -> Result<{{ .OutputRustType }}, ApiError> {
+        super::{{ .FunctionName }}::{{ .FunctionName }}(self, ctx{{ if .HasArgs }}, args{{ end }}).await
+    }
+{{- end }}
 }

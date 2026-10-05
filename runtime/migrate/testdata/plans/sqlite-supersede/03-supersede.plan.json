@@ -1,0 +1,135 @@
+{
+  "dialect": "sqlite",
+  "expanded": "9189138c1d7742e4442dfe0d8d442138ac22b56fa6e0a52e6daf921e163c1ee1",
+  "expandedModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "nickname",
+            "nullable": true,
+            "origin": "Account.nickname",
+            "type": "TEXT"
+          },
+          {
+            "name": "phone",
+            "nullable": true,
+            "origin": "Account.phone",
+            "type": "TEXT"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Account.email",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "from": "7584a2e9d13e75cf782edd24d87287027ab70b471281a892c7a7d4a1b0a997e3",
+  "hash": "91dcbdda655528e8d95f860977a16f8429154f9b9ab42f365b4dae657b175809",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"account\" ADD COLUMN \"phone\" TEXT"
+      ],
+      "subject": "table/account/column/phone",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/account/column/email",
+          "reason": "Dropping account.email deletes the values of Account.email. It may be a rename: account.phone is added with the same type, nullability and default. If it is, plan with --rename account.email=account.phone.",
+          "subject": "table/account/column/email"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/account/column/email",
+          "reason": "SQLite rewrites account to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/account/column/email"
+        }
+      ],
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"account\" DROP COLUMN \"email\""
+      ],
+      "subject": "table/account/column/email",
+      "transactional": true
+    }
+  ],
+  "to": "358e37b3bfe014e7a383cce2813c842dd630785321dc03adbcc1b59a5cc08b76",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "nickname",
+            "nullable": true,
+            "origin": "Account.nickname",
+            "type": "TEXT"
+          },
+          {
+            "name": "phone",
+            "nullable": true,
+            "origin": "Account.phone",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

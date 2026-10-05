@@ -74,6 +74,15 @@ type Plan struct {
 	// runner records it as the database's applied model.
 	ToModel json.RawMessage `json:"toModel"`
 
+	// Expanded is the hash of the model the database holds between the
+	// plan's phases: the previous model with every expand step applied.
+	// ExpandedModel is its canonical JSON. Both are set only when the plan
+	// has contract steps; the runner records ExpandedModel as applied when
+	// the last expand step commits, and a plan from Expanded supersedes the
+	// pending contract (D27, amended).
+	Expanded      string          `json:"expanded,omitempty"`
+	ExpandedModel json.RawMessage `json:"expandedModel,omitempty"`
+
 	// Renames are the renames the plan was given (--rename), as written.
 	Renames []string `json:"renames,omitempty"`
 

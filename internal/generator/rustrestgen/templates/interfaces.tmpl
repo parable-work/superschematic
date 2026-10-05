@@ -5,6 +5,9 @@
 //! service mounts them itself (see `build_router`).
 {{- end }}
 
+#![allow(unused_imports)]
+
+use crate::types;
 use async_trait::async_trait;
 {{- if .WebhookProviders }}
 use axum::extract::Request;
@@ -12,13 +15,38 @@ use axum::middleware::Next;
 use axum::response::Response;
 {{- end }}
 use {{ .RuntimeCrateIdent }}::{ {{- if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end -}} };
-use serde_json::Value;
-{{- if .WebhookProviders }}
 use std::collections::HashMap;
-{{- end }}
 use std::sync::Arc;
+{{- range .Endpoints }}
+{{- if .HasArgs }}
+
+/// The arguments of {{ .Namespace }}.{{ .Name }} (`{{ toUpper .Method }} {{ .Path }}`),
+/// decoded and checked by the router.
+#[derive(Debug, Clone)]
+pub struct {{ .ArgsName }} {
+{{- range .PathArgs }}
+    /// The `{{ .Name }}` path parameter.
+    pub {{ .Field }}: {{ .RustType }},
+{{- end }}
+{{- range .QueryArgs }}
+    /// The `{{ .Name }}` query parameter.
+    pub {{ .Field }}: {{ .RustType }},
+{{- end }}
+{{- with .Input }}
+    /// The request body.
+    pub input: {{ .RustType }},
+{{- end }}
+{{- range .BodyArgs }}
+    /// The `{{ .Name }}` field of the request body.{{ if .KeepNull }} `Some(Value::Null)` is a
+    /// null apart from an absent field.{{ end }}
+    pub {{ .Field }}: {{ .RustType }},
+{{- end }}
+}
+{{- end }}
+{{- end }}
 
 {{- range .Namespaces }}
+
 #[async_trait]
 pub trait {{ toPascalCase . }}Implementation: Send + Sync + 'static {
 {{- $namespace := . }}
@@ -27,11 +55,12 @@ pub trait {{ toPascalCase . }}Implementation: Send + Sync + 'static {
     {{- if .Description }}
     /// {{ index (splitLines .Description) 0 }}
     {{- end }}
-    async fn {{ .FunctionName }}(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
+    async fn {{ .FunctionName }}(&self, ctx: RequestContext{{ if .HasArgs }}, args: {{ .ArgsName }}{{ end }}) -> Result<{{ .OutputRustType }}, ApiError>;
 {{- end }}
 {{- end }}
 }
-{{ end }}
+{{- end }}
+
 {{- if .WebhookProviders }}
 
 /// Checks the signature of an @hmacVerified provider's requests before

@@ -72,13 +72,13 @@ index 7963414..4ba8a14 100644
 +	return f.Perishable, true, nil
 +}
 diff --git a/packages/schema/src/index.ts b/packages/schema/src/index.ts
-index b81ccd3..9b1597c 100644
+index cb1dbb0..1e19843 100644
 --- a/packages/schema/src/index.ts
 +++ b/packages/schema/src/index.ts
-@@ -31,3 +31,13 @@ export function shelf(_args: ShelfArgs): PropertyDecorator {
- // feedKey marks a field of a Catalog schema as part of the key acme's
- // supplier feed matches rows on. It takes no argument.
- export const feedKey: PropertyDecorator = () => {};
+@@ -46,3 +46,13 @@ export interface CrossSellArgs {
+ export function crossSell(_args: CrossSellArgs): ClassDecorator {
+   return () => {};
+ }
 +
 +// PerishableArgs is @perishable's argument: how long a field's values keep.
 +export interface PerishableArgs {
@@ -90,14 +90,14 @@ index b81ccd3..9b1597c 100644
 +  return () => {};
 +}
 diff --git a/schemas/services/shop-catalog/src/catalog.schema.ts b/schemas/services/shop-catalog/src/catalog.schema.ts
-index e5679ba..46f404c 100644
+index a53f9a6..93d78dc 100644
 --- a/schemas/services/shop-catalog/src/catalog.schema.ts
 +++ b/schemas/services/shop-catalog/src/catalog.schema.ts
 @@ -1,6 +1,6 @@
  import { Identity } from "superscalar";
  import { Validate } from "@superschematic/schema";
--import { Acme, feedKey, shelf } from "@acme/schema";
-+import { Acme, feedKey, perishable, shelf } from "@acme/schema";
+-import { Acme, crossSell, feedKey, shelf } from "@acme/schema";
++import { Acme, crossSell, feedKey, perishable, shelf } from "@acme/schema";
  
  // A Catalog schema's classes are embedded structs (KindSpec.StructRole).
  // @shelf and @feedKey come from @acme/schema and are only allowed in Catalog

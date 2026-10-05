@@ -112,9 +112,9 @@ func (d *differ) existing(c *change) bool {
 // it, for a dialect that rebuilds the table. Expand finds the previous
 // model's table as its renames leave it, since they run first, and leaves
 // the new table with what contract still removes or tightens: the columns
-// it drops (nullable), the constraints and indexes it drops, the
-// nullability and defaults it tightens. Contract finds that and leaves the
-// new model's table.
+// it drops, the constraints and indexes it drops, the nullability and
+// defaults it tightens. Contract finds that and leaves the new model's
+// table.
 func (d *differ) phaseTables(table string, phase Phase) (before, after *Table) {
 	tt := d.toTables[table]
 	ft := d.fromTables[d.renames.prevTable(table)]
@@ -186,7 +186,10 @@ func (d *differ) renamedFK(prevTable string, fk *ForeignKey) *ForeignKey {
 }
 
 // betweenPhases is the table between expand and contract: the new table
-// with what contract still drops or tightens put back.
+// with what contract still drops or tightens put back. A column contract
+// drops is nullable when expand drops its NOT NULL (dropColumn), and keeps
+// it when it has a default or is generated. A foreign key contract replaces
+// is the previous one under the name expand gave it.
 func (d *differ) betweenPhases(ft, tt *Table) *Table {
 	t := *tt
 	t.Columns = nil
@@ -218,7 +221,9 @@ func (d *differ) betweenPhases(ft, tt *Table) *Table {
 		switch ch.op {
 		case opDropColumn:
 			c := *ch.column
-			c.Nullable = true
+			if c.Default == "" && c.Generated == "" {
+				c.Nullable = true
+			}
 			t.Columns = append(t.Columns, &c)
 		case opDropUnique:
 			t.Uniques = append(t.Uniques, d.renamedConstraint(ft.Name, ch.constraint))
@@ -227,7 +232,9 @@ func (d *differ) betweenPhases(ft, tt *Table) *Table {
 		case opAddForeignKey:
 			contractFKs[ch.foreignKey.Name] = nil
 		case opReplaceFK:
-			contractFKs[ch.foreignKey.Name] = d.renamedFK(ft.Name, ch.oldFK)
+			old := d.renamedFK(ft.Name, ch.oldFK)
+			old.Name = ch.foreignKey.Name
+			contractFKs[ch.foreignKey.Name] = old
 		case opDropForeignKey:
 			contractFKs[ch.foreignKey.Name] = d.renamedFK(ft.Name, ch.foreignKey)
 		}

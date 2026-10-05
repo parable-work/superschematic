@@ -45,8 +45,10 @@ Version sites (relative to the repository root):
                                       the superschematic-versiongraph-python
                                       package and the superschematic-versiongraph
                                       core it builds on
-  runtime/http/rust/Cargo.toml        [package] version
+  runtime/http/rust/Cargo.toml        [package] version and the
+                                      superschematic-schema-runtime requirement
   runtime/http/rust/Cargo.lock        the superschematic-http-runtime package
+                                      and the schema runtime it builds on
   runtime/schema/rust/Cargo.toml      [package] version
   runtime/schema/rust/Cargo.lock      the superschematic-schema-runtime package
   runtime/versiongraph/rust/Cargo.toml
@@ -258,17 +260,26 @@ def sites():
             "semver",
         )
     )
+    # The http runtime depends on the schema runtime by path and by the
+    # release version, which cargo publish needs; its lockfile records the
+    # schema runtime's version too.
     out.append(
         (
             ROOT / "runtime" / "http" / "rust" / "Cargo.toml",
-            [(r'(\[package\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1)],
+            [
+                (r'(\[package\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1),
+                (r'(^superschematic-schema-runtime = \{ version = ")' + V + r'(")', 1),
+            ],
             "semver",
         )
     )
     out.append(
         (
             ROOT / "runtime" / "http" / "rust" / "Cargo.lock",
-            [(r'(\[\[package\]\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1)],
+            [
+                (r'(\[\[package\]\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1),
+                (r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1),
+            ],
             "semver",
         )
     )

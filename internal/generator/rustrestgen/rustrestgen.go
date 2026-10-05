@@ -4,6 +4,7 @@ package rustrestgen
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,10 +32,21 @@ type EndpointInfo struct {
 	Path         string
 	Method       string
 	Description  string
-	HasInput     bool
-	InputType    string
-	OutputType   string
-	PathParams   []string
+	// ArgsName is the operation's Args struct: its decoded path, query and
+	// body arguments and its input, one field each.
+	ArgsName  string
+	PathArgs  []ParamInfo
+	QueryArgs []ParamInfo
+	// BodyArgs are the undecorated scalar arguments of an operation that is
+	// not GET, read from the JSON body object; BodyRequired reports whether
+	// one is required, so a request without a body is refused.
+	BodyArgs     []ParamInfo
+	BodyRequired bool
+	// Input is the operation's input type, read from the body; nil without
+	// one.
+	Input *InputInfo
+	// OutputRustType is the Rust type of the operation's result.
+	OutputRustType string
 	// WebhookProvider is the @hmacVerified provider, or empty. build_router
 	// wraps the route in webhook_verified with that provider's verifier.
 	WebhookProvider string
@@ -53,6 +65,53 @@ type EndpointInfo struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
+}
+
+// HasArgs reports whether the implementation method takes an Args struct.
+func (e EndpointInfo) HasArgs() bool {
+	return e.Input != nil || len(e.PathArgs) > 0 || len(e.QueryArgs) > 0 || len(e.BodyArgs) > 0
+}
+
+// ReadsBody reports whether the handler reads the request body: for the
+// input, which the Go router reads on any method, or for scalar arguments.
+func (e EndpointInfo) ReadsBody() bool {
+	return e.Input != nil || len(e.BodyArgs) > 0
+}
+
+// DecodeParams are the parameters of the handler's decode function, one
+// per place it reads an argument from.
+func (e EndpointInfo) DecodeParams() []string {
+	var params []string
+	if len(e.PathArgs) > 0 {
+		params = append(params, "captures: &HashMap<String, String>")
+	}
+	if len(e.QueryArgs) > 0 {
+		params = append(params, "query: &QueryValues")
+	}
+	if e.ReadsBody() {
+		params = append(params, "body: Option<Value>")
+	}
+	return params
+}
+
+// DecodeCall is the argument list the handler passes its decode function.
+func (e EndpointInfo) DecodeCall() string {
+	var args []string
+	if len(e.PathArgs) > 0 {
+		args = append(args, "&path_params")
+	}
+	if len(e.QueryArgs) > 0 {
+		args = append(args, "&query")
+	}
+	if e.ReadsBody() {
+		args = append(args, "body")
+	}
+	return strings.Join(args, ", ")
+}
+
+// UsesTypes reports whether the method's signature names the types crate.
+func (e EndpointInfo) UsesTypes() bool {
+	return strings.Contains(e.OutputRustType, "types::")
 }
 
 // HasControls reports whether the route has a traffic control or needs a
@@ -104,6 +163,33 @@ type APIOutput struct {
 	// HasControls reports whether an endpoint, manual ones included, has
 	// RouteControls.
 	HasControls bool
+	// OpenAPIJSON is the service's OpenAPI document as apigen builds it
+	// for every server: written to openapi.json, embedded in src/openapi.rs
+	// and served at GET /api/openapi.json.
+	OpenAPIJSON string
+	// HasEnvConfig is true when the build writes src/config.rs, the env
+	// loader of the service's @envVars type; lib.rs then declares it.
+	HasEnvConfig bool
+	// TypesCrateIdent is TypesCrate as a Rust path segment; lib.rs
+	// re-exports the crate as `types`.
+	TypesCrateIdent string
+	// Patterns are the compiled patterns the parameter specs share.
+	Patterns []PatternStatic
+	// DependencyCrates are the dependency types crates whose validators
+	// the router calls, for an input or argument of a type a dependency
+	// declares.
+	DependencyCrates []DependencyCrate
+}
+
+// Specs are the ParamSpec statics of every mounted operation's arguments.
+func (o *APIOutput) Specs() []ParamInfo {
+	var specs []ParamInfo
+	for _, endpoint := range o.Endpoints {
+		specs = append(specs, endpoint.PathArgs...)
+		specs = append(specs, endpoint.QueryArgs...)
+		specs = append(specs, endpoint.BodyArgs...)
+	}
+	return specs
 }
 
 // NamespaceOutput contains data for generating namespace scaffold files.
@@ -111,7 +197,33 @@ type NamespaceOutput struct {
 	SchemaName        string
 	Namespace         string
 	CrateName         string
+	CrateIdent        string
 	RuntimeCrateIdent string
+	// Endpoints are the namespace's mounted operations, each a method of
+	// its trait and a file of its own.
+	Endpoints []EndpointInfo
+}
+
+// UsesTypes reports whether a method signature of the namespace names the
+// types crate.
+func (n NamespaceOutput) UsesTypes() bool {
+	for _, endpoint := range n.Endpoints {
+		if endpoint.UsesTypes() {
+			return true
+		}
+	}
+	return false
+}
+
+// ArgsNames are the Args structs the namespace's methods take.
+func (n NamespaceOutput) ArgsNames() []string {
+	var names []string
+	for _, endpoint := range n.Endpoints {
+		if endpoint.HasArgs() {
+			names = append(names, endpoint.ArgsName)
+		}
+	}
+	return names
 }
 
 // EndpointOutput contains data for generating endpoint scaffold files.
@@ -119,30 +231,32 @@ type EndpointOutput struct {
 	SchemaName        string
 	Namespace         string
 	CrateName         string
+	CrateIdent        string
 	RuntimeCrateIdent string
 	Endpoint          EndpointInfo
 }
 
 // Options configures Rust REST API generation.
 type Options struct {
-	SchemaName     string
-	IsPublic       bool
-	UpstreamSchema string
-	UpstreamIR     *ir.Schema
-	TypesCrate     string
-	TypesDir       string
-	OutputDir      string
-	Naming         naming.Naming
-	// AuthProvider is the auth provider apigen derives the endpoint auth
-	// data with. Required.
-	AuthProvider apigen.AuthProvider
+	SchemaName string
+	// Dependencies are the loaded dependency schemas, which declare the
+	// enums, scalars and types an argument, input or result may name.
+	Dependencies map[string]*ir.Schema
+	TypesCrate   string
+	TypesDir     string
+	OutputDir    string
+	Naming       naming.Naming
 	Clock        codegen.Clock
 }
 
-// Generate produces Rust REST API metadata from an IR schema. Handlers take
-// the request body and return the response as serde_json::Value, so a body
-// argument or response that is an array of arrays (T[][]) passes through as
-// nested JSON arrays; the implementation decodes it.
+// Generate produces Rust REST API metadata for a schema. Each mounted
+// operation's method takes an Args struct of its decoded arguments, typed
+// as the schema declares them, and returns its result type (D39). The
+// router decodes path, query and body arguments as the TypeScript router
+// does (the runtime crate's ParamSpec), and parses an input with its type's
+// generated parse_<type>, refusing a top-level key the type does not
+// declare; a refusal is a 400 problem that names the parameter, or the
+// input's field errors.
 //
 // An operation declared @manualRouteRegistration is left to the service, as
 // the Go server leaves it out of RegisterRoutes and the TypeScript server
@@ -163,34 +277,35 @@ type Options struct {
 // caller, and @timeout around the handler. They are the runtime crate's
 // RouteControls. The caller comes from Implementations.authenticator,
 // which the crate has when an operation needs one (D29).
-func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
-	generated, err := rustapigen.Generate(schema, rustapigen.Options{
-		SchemaName:     opts.SchemaName,
-		IsPublic:       opts.IsPublic,
-		UpstreamSchema: opts.UpstreamSchema,
-		UpstreamIR:     opts.UpstreamIR,
-		TypesCrate:     opts.TypesCrate,
-		TypesDir:       opts.TypesDir,
-		OutputDir:      opts.OutputDir,
-		Naming:         opts.Naming,
-		AuthProvider:   opts.AuthProvider,
-		Clock:          opts.Clock,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if generated == nil {
+//
+// The endpoints and the OpenAPI document come from api, the apigen output
+// generator.Run builds once for the Go and TypeScript servers and every
+// SDK, with the service's dependencies, naming, OpenAPI and tool hooks and
+// its authDb's auth model (D38). A nil api, or one without endpoints, is
+// no server.
+func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutput, error) {
+	if api == nil || len(api.Endpoints) == 0 {
 		return nil, nil
 	}
+	b := newBuilder(schema, opts)
 
 	output := &APIOutput{
-		APIOutputBase: generated.Base,
-		Endpoints:     make([]EndpointInfo, 0, len(generated.Endpoints)),
+		APIOutputBase: rustapigen.NewBase(rustapigen.BaseOptions{
+			SchemaName: opts.SchemaName,
+			TypesCrate: opts.TypesCrate,
+			TypesDir:   opts.TypesDir,
+			OutputDir:  opts.OutputDir,
+			Naming:     opts.Naming,
+			Clock:      opts.Clock,
+		}),
+		Endpoints:   make([]EndpointInfo, 0, len(api.Endpoints)),
+		OpenAPIJSON: api.OpenAPISpecRaw,
 	}
+	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
 
 	namespaceSet := make(map[string]struct{})
 	webhookProviders := make(map[string]struct{})
-	for _, endpoint := range generated.Endpoints {
+	for _, endpoint := range api.Endpoints {
 		// The Go router decrypts an encrypted operation's body with the
 		// configured PayloadDecryptor before it parses it. The Rust router
 		// has no such step and would hand the envelope to the implementation
@@ -219,25 +334,18 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 			fnName = "call"
 		}
 
-		pathParams := make([]string, 0, len(endpoint.PathParams))
-		for _, param := range endpoint.PathParams {
-			pathParams = append(pathParams, param.Name)
-		}
-
+		handlerName := rustutil.ToPascalCase(ns) + rustutil.ToPascalCase(fnName)
 		info := EndpointInfo{
 			Name:         endpoint.Name,
 			Namespace:    ns,
 			FunctionName: fnName,
-			HandlerName:  rustutil.ToPascalCase(ns) + rustutil.ToPascalCase(fnName),
+			HandlerName:  handlerName,
+			ArgsName:     handlerName + "Args",
 			// apigen {param} placeholders pass through: axum 0.8 uses
 			// {param} path captures natively (the 0.7-era :param panics).
 			Path:        endpoint.Path,
 			Method:      strings.ToLower(endpoint.Method),
 			Description: endpoint.Description,
-			HasInput:    endpoint.HasInput || len(endpoint.ScalarArgs) > 0,
-			InputType:   endpoint.InputType,
-			OutputType:  endpoint.OutputType,
-			PathParams:  pathParams,
 
 			WebhookProvider: endpoint.WebhookHMACProvider,
 
@@ -257,6 +365,11 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 			output.ManualEndpoints = append(output.ManualEndpoints, info)
 			continue
 		}
+		// A manual operation's route is the service's, which decodes its
+		// own arguments.
+		if err := b.params(endpoint, &info); err != nil {
+			return nil, err
+		}
 		namespaceSet[ns] = struct{}{}
 		output.Endpoints = append(output.Endpoints, info)
 	}
@@ -268,6 +381,8 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	sort.Strings(output.WebhookProviders)
 	sortEndpoints(output.Endpoints)
 	sortEndpoints(output.ManualEndpoints)
+	output.Patterns = b.patterns
+	output.DependencyCrates = b.dependencyCrates()
 
 	return output, nil
 }
@@ -308,6 +423,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "lib.tmpl", outputName: filepath.Join("src", "lib.rs")},
 		{templateName: "interfaces.tmpl", outputName: filepath.Join("src", "interfaces.rs")},
 		{templateName: "router.tmpl", outputName: filepath.Join("src", "router.rs")},
+		{templateName: "openapi.tmpl", outputName: filepath.Join("src", "openapi.rs")},
 	}
 
 	for _, file := range files {
@@ -316,32 +432,69 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		}
 	}
 
+	// The document every server's build writes; src/openapi.rs embeds it.
+	document := output.OpenAPIJSON
+	if document == "" {
+		document = "{}"
+	}
+	if !json.Valid([]byte(document)) {
+		return fmt.Errorf("openapi.json for %s is not valid JSON", output.SchemaName)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "openapi.json"), []byte(document), 0o644); err != nil {
+		return fmt.Errorf("write openapi.json: %w", err)
+	}
+
 	return nil
 }
 
-// WriteScaffolds writes implementation scaffold files and skips existing files.
+// WriteScaffolds writes implementation scaffold files and skips existing
+// files: a mod.rs that declares one module per namespace, and in each
+// namespace's directory (its snake_case name, a Rust module name) a mod.rs,
+// implementation.rs with the struct and its one impl of the namespace
+// trait, and a file per operation with the function that impl calls. The
+// files name the generated crate, not crate::, since they belong to the
+// service's own crate.
 func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldResult, error) {
-	return codegen.WriteScaffolds(codegen.ScaffoldConfig[EndpointInfo]{
+	moduleOf := func(namespace string) string { return rustutil.ToSnakeCase(namespace) }
+	namespaceByModule := make(map[string]string, len(output.Namespaces))
+	modules := make([]string, 0, len(output.Namespaces))
+	for _, namespace := range output.Namespaces {
+		namespaceByModule[moduleOf(namespace)] = namespace
+		modules = append(modules, moduleOf(namespace))
+	}
+	namespaceData := func(module string) NamespaceOutput {
+		namespace := namespaceByModule[module]
+		data := NamespaceOutput{
+			SchemaName:        output.SchemaName,
+			Namespace:         namespace,
+			CrateName:         output.CrateName,
+			CrateIdent:        strings.ReplaceAll(output.CrateName, "-", "_"),
+			RuntimeCrateIdent: output.RuntimeCrateIdent,
+		}
+		for _, endpoint := range output.Endpoints {
+			if endpoint.Namespace == namespace {
+				data.Endpoints = append(data.Endpoints, endpoint)
+			}
+		}
+		return data
+	}
+	result, err := codegen.WriteScaffolds(codegen.ScaffoldConfig[EndpointInfo]{
 		ScaffoldsDir: scaffoldsDir,
 		ReadmeData:   output,
-		Namespaces:   output.Namespaces,
+		Namespaces:   modules,
 		Endpoints:    output.Endpoints,
 		EndpointNamespace: func(endpoint EndpointInfo) string {
-			return endpoint.Namespace
+			return moduleOf(endpoint.Namespace)
 		},
-		NamespaceData: func(namespace string) any {
-			return NamespaceOutput{
-				SchemaName:        output.SchemaName,
-				Namespace:         namespace,
-				CrateName:         output.CrateName,
-				RuntimeCrateIdent: output.RuntimeCrateIdent,
-			}
+		NamespaceData: func(module string) any {
+			return namespaceData(module)
 		},
 		EndpointData: func(namespace string, endpoint EndpointInfo) any {
 			return EndpointOutput{
 				SchemaName:        output.SchemaName,
 				Namespace:         namespace,
 				CrateName:         output.CrateName,
+				CrateIdent:        strings.ReplaceAll(output.CrateName, "-", "_"),
 				RuntimeCrateIdent: output.RuntimeCrateIdent,
 				Endpoint:          endpoint,
 			}
@@ -352,6 +505,31 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 		ImplFileName: "implementation.rs",
 		GenerateFile: generateFile,
 	})
+	if err != nil {
+		return nil, err
+	}
+	record := func(generated bool, path string) {
+		if generated {
+			result.Generated = append(result.Generated, path)
+		} else {
+			result.Skipped = append(result.Skipped, path)
+		}
+	}
+	rootPath := filepath.Join(scaffoldsDir, "mod.rs")
+	generated, err := codegen.GenerateFileIfNotExists(generateFile, "scaffold-root.tmpl", rootPath, output)
+	if err != nil {
+		return nil, fmt.Errorf("generate scaffold %s: %w", rootPath, err)
+	}
+	record(generated, rootPath)
+	for _, module := range modules {
+		modPath := filepath.Join(scaffoldsDir, module, "mod.rs")
+		generated, err := codegen.GenerateFileIfNotExists(generateFile, "scaffold-mod.tmpl", modPath, namespaceData(module))
+		if err != nil {
+			return nil, fmt.Errorf("generate scaffold %s: %w", modPath, err)
+		}
+		record(generated, modPath)
+	}
+	return result, nil
 }
 
 func generateFile(templateName, outputPath string, data any) error {
@@ -363,6 +541,7 @@ func generateFile(templateName, outputPath string, data any) error {
 func templateFuncs() template.FuncMap {
 	return rustapigen.TemplateFuncs(template.FuncMap{
 		"isGetMethod": func(m string) bool { return strings.EqualFold(m, "get") },
+		"join":        strings.Join,
 		"toUpper":     strings.ToUpper,
 		"rustString":  rustString,
 	})
