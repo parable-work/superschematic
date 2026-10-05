@@ -75,6 +75,21 @@ export const vectorCases: VectorCase[] = [
     },
   },
   {
+    name: "typescript.sql begins with layout.json's statements",
+    run() {
+      const file = JSON.parse(readFileSync(layoutFile, "utf8")) as { statements: string[] };
+      const lines = readFileSync(sqlFile, "utf8").split("\n");
+      assert.deepEqual(
+        lines.slice(0, file.statements.length),
+        file.statements.map((statement) => statement + ";"),
+      );
+      assert.ok(
+        lines.slice(file.statements.length).every((line) => line === "" || line.startsWith("INSERT INTO ")),
+        "every other statement is an INSERT",
+      );
+    },
+  },
+  {
     name: "typescript.sql reads as typescript.json, through an adapter opened with each graph's name",
     run(binding) {
       inMemory(binding, (client) => {
