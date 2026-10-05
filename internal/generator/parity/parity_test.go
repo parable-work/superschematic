@@ -1493,6 +1493,23 @@ var vectors = []parityVector{
 			"spaced": {"pattern"}, "pair": {"pattern"}, "pairNames[0]": {"pattern"},
 		},
 	},
+	{
+		// \d, \w, \s and \b are ASCII classes, as Go's RE2 reads them: é
+		// is "\W", so "aéb" is a word character, another character and a
+		// word character. Python's re read é as "\w" until it matched with
+		// re.ASCII.
+		name:     "pattern_word_class_is_ascii",
+		typeName: "PatternMatrix",
+		payload:  `{"spaced": "a\u00e9b"}`,
+		want:     map[string][]string{},
+	},
+	{
+		// A scalar's own pattern reads \w as ASCII too: Network.Url's host
+		// is [\w\-\{\}]+, so a host with é is "pattern".
+		name:    "url_non_ascii_host",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "url": "https://caf\u00e9.test"}`,
+		want:    map[string][]string{"url": {"pattern"}},
+	},
 }
 
 // knownDivergences pins where a language's generated validator disagrees with

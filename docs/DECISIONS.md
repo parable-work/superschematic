@@ -986,6 +986,28 @@ Not changed: the Python types' `to_dict` and `to_json` write every field,
 one; the SDK does not send through them. The engine's `update` tool and
 `PATCH` route (D16) follow JSON merge patch, where null removes a member.
 
+### D14, amended: a pattern's `\d`, `\w` and `\b` are ASCII classes
+
+The engines the validators run read a pattern's class escapes
+differently. Go's RE2 reads `\d`, `\w`, `\s` and `\b` as ASCII. JavaScript
+with the `u` flag reads `\d`, `\w` and `\b` as ASCII and `\s` as Unicode
+whitespace. Python's `re` and the `regex` crate, which pydantic runs for a
+`Field(pattern=...)`, read all four as Unicode. So `^\w+$` refused `café` in
+the Go and TypeScript validators and took it in the Python ones, and
+`Network.Url`, whose host is `[\w\-\{\}]+`, took a host with `é` in Python
+only.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `\d`, `\w` and `\b` are ASCII classes, as RE2 reads them. Python matches every pattern with `re.ASCII`: the generated validator's field rules and scalar patterns, a scalar's pydantic `Field`, which takes the compiled pattern and runs it with Python's `re`, the Python SDK's input check and the Python runtime. The Rust validators translate the classes to ASCII ones (D31). | Unicode classes everywhere, which neither RE2 nor JavaScript offers for `\d` and `\w`; leaving Python apart |
+| `\s` is ASCII whitespace in Go, Rust and Python (where `re.ASCII` also counts `\v`), and Unicode whitespace in JavaScript. superscalar's catalog uses `\s` in `[\s\S]`, which every engine reads as any character, and between the fields of a PEM key, a cron expression and a time, and in a URI's `[^\s]+`, where the engines differ only on a non-ASCII space. TypeScript stays apart on it. | Translating `\s` in every TypeScript pattern now, in the generated validator, the runtime, the SDK and the API server |
+| `re.ASCII` also makes Python's `(?i)` fold ASCII letters only, where RE2 folds Unicode case. No pattern in the catalog, the fixtures or the examples uses `(?i)`. | |
+
+The parity matrix gains `pattern_word_class_is_ascii` (`^\w\W\w$` takes
+`aéb`) and `url_non_ascii_host` (`Network.Url` refuses a host with `é`).
+The four languages' generated validators and the three runtimes agree on
+both; the Python ones refused the first and took the second before.
+
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 
 A distribution built a server on the source tree that takes a schema while
