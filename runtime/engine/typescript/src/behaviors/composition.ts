@@ -25,9 +25,11 @@ the version: the field-type checks of document.ts cover it and the types
 it reaches, as they cover the types a behavior checks values against
 (checkedTypes). What it reads there must not depend on the other
 schemas: a version runs, and is checked against the next, with none in
-reach, so a define or publish parses each config without them too and
-refuses one whose reads differ, or that parses only with them
-(readsApart). An operation named like a built-in never gets here:
+reach, so a define or publish holds each config's reads with them to
+its reads without them, which the loader's composition gives, and
+refuses one whose reads differ (readsApart); a config parseConfig
+refuses without them the loader has refused already. An operation named
+like a built-in never gets here:
 registration refuses its declaration.
 
 configChanges is the behaviors' half of the compatibility rule: a new
@@ -124,10 +126,9 @@ export interface ComposeTarget {
  * compose checks every type's behaviors and binds the instance type's. It
  * returns the composition, or every issue it found. schemas, given when
  * the schema is defined or published, is what parseConfig reaches of the
- * namespace's other schemas (ConfigTarget.schemas); alone, when given with
+ * namespace's other schemas (ConfigTarget.schemas); alone, which goes with
  * it, is the same document composed with none in reach, whose reads each
- * behavior's must match (readsApart). Without alone, compose parses each
- * config without the schemas too.
+ * behavior's must match (readsApart).
  */
 export function compose(
   target: ComposeTarget,
@@ -179,7 +180,7 @@ export function compose(
       issues.push({ path: `${path}/config`, message: `type ${target.instanceType}: ${parsed.problem}` });
       return;
     }
-    const apart = schemas === undefined ? undefined : readsApart(behavior, ref.config, target, parsed.read, alone?.bound(behavior.name)?.read);
+    const apart = schemas === undefined ? undefined : readsApart(behavior, parsed.read, alone?.bound(behavior.name)?.read);
     if (apart !== undefined) {
       issues.push({ path: `${path}/config`, message: `type ${target.instanceType}: ${apart}` });
       return;
@@ -357,35 +358,29 @@ export function checkedTypes(before: ComposeTarget, after: ComposeTarget, regist
 
 // readsApart says why a config whose parseConfig read the types read with
 // the namespace's other schemas in reach (ConfigTarget.schemas) cannot
-// stand: parseConfig reads other types without them, or refuses it then.
-// A version runs, and is checked against the next, with no other schema in
-// reach, so the types its checks cover must be the ones a define or
-// publish saw. aloneRead is what the config read with none in reach, when
-// the caller composed the document so already; otherwise it is parsed
-// here. undefined when the config stands.
-function readsApart(
-  behavior: RegisteredBehavior,
-  raw: unknown,
-  target: ComposeTarget,
-  read: readonly string[],
-  aloneRead: readonly string[] | undefined
-): string | undefined {
-  let without = aloneRead;
-  if (without === undefined) {
-    const parsed = parseConfig(behavior, raw, target);
-    if ('problem' in parsed) {
-      return `behavior ${behavior.name} config: parseConfig accepts it only while other schemas are in reach (ConfigTarget.schemas), and a version runs with none: ${parsed.problem}`;
-    }
-    without = parsed.read;
+// stand: without them it read other types. A version runs, and is checked
+// against the next, with no other schema in reach, so the types its checks
+// cover must be the ones a define or publish saw. aloneRead is what the
+// config read with none in reach: the loader composes every document so
+// before a define or publish composes it with them (catalog.ts, load), so
+// its absence is a defect of the engine's. undefined when the config
+// stands.
+function readsApart(behavior: RegisteredBehavior, read: readonly string[], aloneRead: readonly string[] | undefined): string | undefined {
+  if (aloneRead === undefined) {
+    throw new Error(`behavior ${behavior.name}: no composition with no other schema in reach to hold its reads to`);
   }
-  const alone = without;
-  const differ = [...new Set([...read, ...alone])].filter((name) => read.includes(name) !== alone.includes(name)).sort();
-  if (differ.length === 0) {
+  const onlyWith = read.filter((name) => !aloneRead.includes(name)).sort();
+  const onlyWithout = aloneRead.filter((name) => !read.includes(name)).sort();
+  if (onlyWith.length === 0 && onlyWithout.length === 0) {
     return undefined;
   }
-  return `behavior ${behavior.name} config: parseConfig reads ${differ.join(', ')} through ConfigTarget.types only ${
-    read.includes(differ[0]) ? 'while' : 'when no'
-  } other schemas are in reach (ConfigTarget.schemas); what it reads there depends only on the config and the document, since a version runs and is checked against the next with no other schema in reach`;
+  const reads =
+    onlyWith.length === 0
+      ? `${onlyWithout.join(', ')} through ConfigTarget.types only when no other schemas are in reach (ConfigTarget.schemas)`
+      : `${onlyWith.join(', ')} through ConfigTarget.types only while other schemas are in reach (ConfigTarget.schemas)${
+          onlyWithout.length === 0 ? '' : `, and ${onlyWithout.join(', ')} only when none are`
+        }`;
+  return `behavior ${behavior.name} config: parseConfig reads ${reads}; what it reads there depends only on the config and the document, since a version runs and is checked against the next with no other schema in reach`;
 }
 
 /**

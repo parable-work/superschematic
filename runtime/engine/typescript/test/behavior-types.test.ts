@@ -250,6 +250,11 @@ for (const driver of drivers) {
       for (const [config, reads] of [
         [{ types: ['Spare'], withSchemas: ['Recipe'] }, "Recipe through ConfigTarget.types only while other schemas"],
         [{ withoutSchemas: ['Recipe', 'Step'] }, 'Recipe, Step through ConfigTarget.types only when no other schemas'],
+        // Reads that differ both ways name each side.
+        [
+          { withSchemas: ['Recipe'], withoutSchemas: ['Step'] },
+          'Recipe through ConfigTarget\\.types only while other schemas are in reach \\(ConfigTarget\\.schemas\\), and Step only when none are; ',
+        ],
       ] as const) {
         const refused = thrown(() => define(engine, kitchen(config)), SchemaDocumentError);
         assert.deepEqual(
