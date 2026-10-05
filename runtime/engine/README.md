@@ -540,8 +540,9 @@ A function that returns `null` turns the schedule off on that schema: a
 config without a sweep, say, runs no sweep (D32). Only `null` does; a
 function that returns nothing (`undefined`) is a failing interval as
 above, so a forgotten `return` is not mistaken for off. An off schedule
-runs nothing there, wakes the runner for nothing, and shows in the status
-as `off`; the runner drops the row it kept for it on the schema, so once
+runs nothing there and never wakes the runner, since it sets no timer,
+and shows in the status as `off`; the runner drops the row it kept for it
+on the schema, so once
 a publish gives a config the function returns an interval for, the
 runner finds the schedule as for the first time: it runs an interval
 later, with no `previous`.
@@ -554,7 +555,7 @@ later, with no `previous`.
 | --- | --- |
 | `running`, `principal`, `head` | whether it is started, the principal's subject, and the log's last cursor |
 | `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
-| `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying`, `off` (its function returns `null` for the schema's config) or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema; an `off` schedule has no `previous` and its `next` is `Infinity`, which JSON writes as null |
+| `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying`, `off` (its function returns `null` for the schema's config) or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema; an `off` schedule has no `previous` and its `next` is null |
 | `error` | the runner's own last error outside any reaction (a busy file, say), cleared by the next pass that works |
 
 The status is not served over HTTP or MCP: it spans every namespace and
@@ -860,7 +861,11 @@ operations: {
   published version is composed again to run it or to check a new
   version against it, since what it reads is the version's own document,
   which never changes. A read is recorded only while `parseConfig` runs;
-  `get` after it returns is a `BehaviorError`.
+  `get` after it returns is a `BehaviorError`. Which types a config reads
+  depends only on the config and the document, never on `target.schemas`:
+  a version runs, and is checked against the next, with no other schema
+  in reach, so define and publish parse each config without them too and
+  refuse one whose reads differ then, or that parses only with them.
 - **What a read holds.** A type `parseConfig` reads counts as reachable
   from the instance type for the version, and so do the types its fields
   reach. The document checks cover their fields as they cover the
@@ -1190,8 +1195,9 @@ referencing schema cannot delete an instance a hook must clear.
 
 An operation declared with `scope: "schema"` has no instance: it runs on
 the schema as a whole, from `schemaOperations`, with a `SchemaContext`:
-the behavior, its config, the call, `can`, `instances`, `schemas`, and
-`sql` that reads the behavior's tables and its columns across the schema
+the behavior, its config, the call, `can`, `validate` ("Other types"),
+`instances`, `schemas`, and `sql` that reads the behavior's tables and
+its columns across the schema
 (`sql.instances()`) and writes nothing. No instance guard runs and no
 event is appended for it; a writing one changes state only through the
 instance operations it invokes and the instances it creates, each with
@@ -1346,10 +1352,12 @@ gives, undefined when it removes the behavior), `before` (the version it
 replaces gave, undefined when that one did not compose it), `namespace`,
 `schema`, `version`, `now`, `sql` with writes on the behavior's own
 tables (no `sql.instances()`: the hook acts for no principal, and the
-relation asks the policy as one), and `eachInstance(visit)`, which
+relation asks the policy as one), `eachInstance(visit)`, which
 visits every instance of the
 schema in the namespace in creation order, read 500 at a time, each `{
-id, data }` with its own fields, deep-frozen. It has no principal and
+id, data }` with its own fields, deep-frozen, and `validate(type, value)`,
+which checks a value with the version being published ("Other types").
+It has no principal and
 asks no policy: the publish was allowed, and what the hook reads goes
 into the behavior's own storage, never back to the publisher. It holds
 the file's write lock until it returns, so a hook that visits every

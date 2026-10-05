@@ -23,7 +23,11 @@ time, it reaches the document's other types (ConfigTarget.types), and
 each type it reads there counts as reachable from the instance type for
 the version: the field-type checks of document.ts cover it and the types
 it reaches, as they cover the types a behavior checks values against
-(checkedTypes). An operation named like a built-in never gets here:
+(checkedTypes). What it reads there must not depend on the other
+schemas: a version runs, and is checked against the next, with none in
+reach, so a define or publish parses each config without them too and
+refuses one whose reads differ, or that parses only with them
+(readsApart). An operation named like a built-in never gets here:
 registration refuses its declaration.
 
 configChanges is the behaviors' half of the compatibility rule: a new
@@ -120,12 +124,16 @@ export interface ComposeTarget {
  * compose checks every type's behaviors and binds the instance type's. It
  * returns the composition, or every issue it found. schemas, given when
  * the schema is defined or published, is what parseConfig reaches of the
- * namespace's other schemas (ConfigTarget.schemas).
+ * namespace's other schemas (ConfigTarget.schemas); alone, when given with
+ * it, is the same document composed with none in reach, whose reads each
+ * behavior's must match (readsApart). Without alone, compose parses each
+ * config without the schemas too.
  */
 export function compose(
   target: ComposeTarget,
   registry: BehaviorRegistry,
-  schemas?: ConfigSchemas
+  schemas?: ConfigSchemas,
+  alone?: Composition
 ): { composition?: Composition; issues: SchemaIssue[] } {
   const issues: SchemaIssue[] = [];
   const types = target.document.types ?? {};
@@ -169,6 +177,11 @@ export function compose(
     const parsed = parseConfig(behavior, ref.config, target, schemas);
     if ('problem' in parsed) {
       issues.push({ path: `${path}/config`, message: `type ${target.instanceType}: ${parsed.problem}` });
+      return;
+    }
+    const apart = schemas === undefined ? undefined : readsApart(behavior, ref.config, target, parsed.read, alone?.bound(behavior.name)?.read);
+    if (apart !== undefined) {
+      issues.push({ path: `${path}/config`, message: `type ${target.instanceType}: ${apart}` });
       return;
     }
     const checked = checkedTypesOf(behavior, parsed.config);
@@ -340,6 +353,39 @@ export function checkedTypes(before: ComposeTarget, after: ComposeTarget, regist
     }
   }
   return [...carried].sort();
+}
+
+// readsApart says why a config whose parseConfig read the types read with
+// the namespace's other schemas in reach (ConfigTarget.schemas) cannot
+// stand: parseConfig reads other types without them, or refuses it then.
+// A version runs, and is checked against the next, with no other schema in
+// reach, so the types its checks cover must be the ones a define or
+// publish saw. aloneRead is what the config read with none in reach, when
+// the caller composed the document so already; otherwise it is parsed
+// here. undefined when the config stands.
+function readsApart(
+  behavior: RegisteredBehavior,
+  raw: unknown,
+  target: ComposeTarget,
+  read: readonly string[],
+  aloneRead: readonly string[] | undefined
+): string | undefined {
+  let without = aloneRead;
+  if (without === undefined) {
+    const parsed = parseConfig(behavior, raw, target);
+    if ('problem' in parsed) {
+      return `behavior ${behavior.name} config: parseConfig accepts it only while other schemas are in reach (ConfigTarget.schemas), and a version runs with none: ${parsed.problem}`;
+    }
+    without = parsed.read;
+  }
+  const alone = without;
+  const differ = [...new Set([...read, ...alone])].filter((name) => read.includes(name) !== alone.includes(name)).sort();
+  if (differ.length === 0) {
+    return undefined;
+  }
+  return `behavior ${behavior.name} config: parseConfig reads ${differ.join(', ')} through ConfigTarget.types only ${
+    read.includes(differ[0]) ? 'while' : 'when no'
+  } other schemas are in reach (ConfigTarget.schemas); what it reads there depends only on the config and the document, since a version runs and is checked against the next with no other schema in reach`;
 }
 
 /**
