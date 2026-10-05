@@ -42,6 +42,7 @@ beyond the standard library.
 
 import inspect
 import json
+import re
 import sqlite3
 import threading
 import time as _time
@@ -418,14 +419,16 @@ class SqliteAdapter:
 
     def create_tables(self, client: Client) -> None:
         """Creates the layout's tables and indexes where they are missing
-        (sqlite_layout), in one transaction of the client."""
+        (sqlite_layout), in one transaction of the client. Like every
+        transaction, it reads the clock once, as the TypeScript adapter's
+        createTables does, though it stores no time."""
         statements = sqlite_layout(self._config.table_name)
 
-        def run(conn: Conn) -> None:
+        def run(conn: Conn, now: int) -> None:
             for statement in statements:
                 conn.query(statement)
 
-        client.transact(run)
+        _transact(self._config, client, run)
 
     def storage(self, client: Client) -> Storage:
         """Binds the adapter to a client."""
@@ -440,12 +443,20 @@ class SqliteAdapter:
 _open: Dict[int, int] = {}
 
 
+_MAX_SAFE_INTEGER = (1 << 53) - 1
+"""The widest integer every language's adapter reads exactly: a JavaScript
+number holds every integer inside +/-(2^53-1), and the TypeScript adapter
+refuses any other. A time, a version and a sequence stay inside it."""
+
+
 def _read_clock(config: _Config) -> int:
     """Reads the clock once, refusing a time that is not a whole number of
-    microseconds."""
+    microseconds inside +/-(2^53-1), as the TypeScript adapter refuses one."""
     now = config.clock()
     if not isinstance(now, int) or isinstance(now, bool):
         raise TypeError(f"sqlite: the clock returned {now!r}, not a whole number of microseconds")
+    if not -_MAX_SAFE_INTEGER <= now <= _MAX_SAFE_INTEGER:
+        raise ValueError(f"sqlite: the clock returned {now} microseconds, outside +/-(2^53-1)")
     return now
 
 
@@ -461,33 +472,40 @@ def _refuse_awaitable(value: Any) -> None:
         raise TypeError("sqlite: a transaction is synchronous: its function returned an awaitable")
 
 
+def _transact(config: _Config, client: Client, fn: Callable[[Conn, int], T]) -> T:
+    """Runs fn in one transaction of the client at the transaction's time:
+    the outermost transaction on the client reads the clock once it has
+    begun, and one begun inside it takes its time."""
+
+    def run(conn: Conn) -> T:
+        key = id(client)
+        outer = _open.get(key)
+        if outer is not None:
+            out = fn(conn, outer)
+            _refuse_awaitable(out)
+            return out
+        # Read once the client has begun, so times order as the writes the
+        # file's write lock orders do.
+        now = _read_clock(config)
+        _open[key] = now
+        try:
+            out = fn(conn, now)
+            _refuse_awaitable(out)
+            return out
+        finally:
+            del _open[key]
+
+    return client.transact(run)
+
+
 class _SqliteStorage:
     def __init__(self, config: _Config, client: Client) -> None:
         self._config = config
         self._client = client
 
     def transact(self, fn: Callable[[Tx], T]) -> T:
-        config, client = self._config, self._client
-
-        def run(conn: Conn) -> T:
-            key = id(client)
-            outer = _open.get(key)
-            if outer is not None:
-                out = fn(_SqliteTx(config, conn, outer))
-                _refuse_awaitable(out)
-                return out
-            # Read once the client has begun, so times order as the writes
-            # the file's write lock orders do.
-            now = _read_clock(config)
-            _open[key] = now
-            try:
-                out = fn(_SqliteTx(config, conn, now))
-                _refuse_awaitable(out)
-                return out
-            finally:
-                del _open[key]
-
-        return client.transact(run)
+        config = self._config
+        return _transact(config, self._client, lambda conn, now: fn(_SqliteTx(config, conn, now)))
 
 
 def _new_id() -> str:
@@ -498,13 +516,18 @@ def _new_id() -> str:
 def micros_to_date_time(micros: int) -> str:
     """A time in microseconds since the Unix epoch as a canonical date-time:
     UTC with Z, its fraction of a second without trailing zeros and left out
-    when zero. A year outside 0000-9999 is refused."""
+    when zero. A year outside 0000-9999 is refused, and so is a time outside
+    +/-(2^53-1) microseconds (the years 1684 to 2255), which the TypeScript
+    adapter does not hold. The year is checked first, so each refusal names
+    its own bound."""
     if not isinstance(micros, int) or isinstance(micros, bool):
         raise TypeError(f"sqlite: {micros!r} is not a whole number of microseconds")
     days, of_day = divmod(micros, _MICROS_PER_DAY)
     year, month, day = _civil_from_days(days)
     if not 0 <= year <= 9999:
         raise ValueError(f"sqlite: {micros} microseconds falls outside the years 0000-9999")
+    if not -_MAX_SAFE_INTEGER <= micros <= _MAX_SAFE_INTEGER:
+        raise ValueError(f"sqlite: {micros} microseconds is outside +/-(2^53-1)")
     seconds, fraction = divmod(of_day, 1_000_000)
     out = "%04d-%02d-%02dT%02d:%02d:%02d" % (year, month, day, seconds // 3600, seconds // 60 % 60, seconds % 60)
     if fraction:
@@ -527,13 +550,22 @@ def _optional_text(value: Value, column: str) -> Optional[str]:
 
 
 def _int(value: Any, column: str) -> int:
+    """An integer column's value, refused outside +/-(2^53-1), as the
+    TypeScript adapter refuses one a number does not hold exactly."""
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"sqlite: column {column} is {value!r}, not an integer")
+    if not -_MAX_SAFE_INTEGER <= value <= _MAX_SAFE_INTEGER:
+        raise ValueError(f"sqlite: column {column} is {value}, outside +/-(2^53-1)")
     return value
 
 
 def _optional_int(value: Value, column: str) -> Optional[int]:
     return None if value is None else _int(value, column)
+
+
+# SQLite's words for a unique index's refusal, after the prefix _context gives
+# an error that escapes the adapter.
+_unique_message = re.compile(r"(?:sqlite: .+?: )?UNIQUE constraint failed")
 
 
 def is_unique_violation(error: BaseException) -> bool:
@@ -542,13 +574,15 @@ def is_unique_violation(error: BaseException) -> bool:
     SQLite's extended result code as ``sqlite_errorcode``, and an error that
     carries one is read by it alone. Before 3.11 they carry no code, and an
     ``sqlite3.IntegrityError`` whose message begins "UNIQUE constraint
-    failed", as SQLite words the refusal, is one; that message cannot tell a
-    unique index from a primary key (SQLITE_CONSTRAINT_PRIMARYKEY), which the
-    adapter's inserts never repeat, since each takes a new random id."""
+    failed", as SQLite words the refusal, after the "sqlite: <what>: " the
+    adapter puts before the message of an error that escapes it, is one.
+    That message cannot tell a unique index from a primary key
+    (SQLITE_CONSTRAINT_PRIMARYKEY), which the adapter's inserts never
+    repeat, since each takes a new random id."""
     code = getattr(error, "sqlite_errorcode", None)
     if isinstance(code, int) and not isinstance(code, bool):
         return code == SQLITE_CONSTRAINT_UNIQUE
-    return isinstance(error, sqlite3.IntegrityError) and str(error).startswith("UNIQUE constraint failed")
+    return isinstance(error, sqlite3.IntegrityError) and _unique_message.match(str(error)) is not None
 
 
 @contextmanager
@@ -1383,7 +1417,7 @@ class _Sqlite3Client:
             raise RuntimeError(
                 f"sqlite: this Python's SQLite is {version}; the adapter needs "
                 f"{'.'.join(str(n) for n in MIN_SQLITE_VERSION)} or newer, the first with the STRICT tables its "
-                "layout declares (sqlite3.sqlite_version is the library Python was built with)"
+                "layout declares (sqlite3.sqlite_version is the SQLite library this Python loaded)"
             )
         # From Python 3.12 a connection's autocommit, unless it is
         # LEGACY_TRANSACTION_CONTROL (-1), decides its transactions, and

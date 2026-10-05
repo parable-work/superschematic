@@ -120,10 +120,15 @@ engine = Engine(descriptor, adapter.storage(client), schema_epoch=1, snapshot_ev
   `table_name` names each table and index from its local name
   (`default_table_name`, `graph_` before it, when absent), and `clock`
   gives a transaction's time in whole microseconds since the Unix epoch
-  (the system clock, `time.time_ns() // 1000`, when absent). A transaction
-  reads it once, after it takes the write lock; one begun inside it takes
-  its time. `sqlite_layout(table_name)` lists the layout's statements for
-  a caller that runs its own migrations, and `create_tables` runs them.
+  (the system clock, `time.time_ns() // 1000`, when absent), inside
+  +/-(2^53-1). A transaction reads it once, when it begins: on a
+  connection of its own once `BEGIN IMMEDIATE` holds the write lock, and
+  inside a transaction the caller holds once its savepoint is set; one
+  begun inside another takes the outer one's time. A stored integer outside
+  +/-(2^53-1), which the TypeScript adapter does not read, is refused.
+  `sqlite_layout(table_name)` lists the layout's statements for a caller
+  that runs its own migrations, and `create_tables` runs them, reading the
+  clock once as every transaction does.
 - `sqlite_client(connection)` binds an open `sqlite3.Connection`, which
   must be opened with `isolation_level=None` (or `autocommit=True` from
   Python 3.12) so the module never begins a transaction on its own: the

@@ -49,6 +49,7 @@ GRAPH = "recipe"
 COOK = "Cook"
 BREAD = "Bread"
 DAY = 86_400_000_000
+MAX_SAFE = (1 << 53) - 1
 
 # Each kind's columns' value classes, as the fixture declares them.
 COLUMNS: Dict[str, Dict[str, str]] = {k["kind"]: k["columns"] for k in json.loads(DESCRIPTOR)["kinds"]}
@@ -1047,6 +1048,100 @@ def test_a_transaction_that_raises_rolls_back_and_one_inside_another_is_a_savepo
     assert names() == ["after", "kept"]
 
 
+def test_a_nested_transaction_that_returns_an_awaitable_is_refused_and_rolls_back_alone(setup: Callable[..., Setup]) -> None:
+    s = setup()
+
+    async def later() -> None:
+        return None
+
+    def awaits(tx: Tx) -> Any:
+        tx.create_ref(NewRef(BREAD, None, None, "awaited", COOK))
+        return later()
+
+    def outer(tx: Tx) -> None:
+        tx.create_ref(NewRef(BREAD, None, None, "outer", COOK))
+        with pytest.raises(TypeError, match="its function returned an awaitable"):
+            s.storage.transact(awaits)
+
+    s.storage.transact(outer)
+    assert [row[0] for row in s.connection.execute('SELECT name FROM "graph_ref" ORDER BY name')] == ["outer"]
+
+
+def test_a_failed_savepoint_is_rolled_back_to_and_released(setup: Callable[..., Setup]) -> None:
+    """A transaction begun inside another that raises rolls back to its
+    savepoint and releases it, so the outer transaction holds no savepoint
+    of it afterwards and goes on to commit."""
+    s = setup()
+
+    def failing(tx: Tx) -> None:
+        tx.create_ref(NewRef(BREAD, None, None, "inner", COOK))
+        raise RuntimeError("inner fails")
+
+    def outer(tx: Tx) -> None:
+        tx.create_ref(NewRef(BREAD, None, None, "outer", COOK))
+        with pytest.raises(RuntimeError, match="inner fails"):
+            s.storage.transact(failing)
+        with pytest.raises(sqlite3.OperationalError, match="no such savepoint"):
+            s.connection.execute("RELEASE superschematic_versiongraph_0")
+
+    s.storage.transact(outer)
+    assert [row[0] for row in s.connection.execute('SELECT name FROM "graph_ref" ORDER BY name')] == ["outer"]
+    assert s.connection.in_transaction is False
+
+
+def test_the_default_clock_is_the_system_clock_in_microseconds(open_db: Callable[..., sqlite3.Connection]) -> None:
+    connection = open_db()
+    client = sqlite_client(connection)
+    adapter = SqliteAdapter(DESCRIPTOR, graph=GRAPH)
+    adapter.create_tables(client)
+    before = time.time_ns() // 1000
+    ref = adapter.storage(client).transact(lambda tx: tx.create_ref(NewRef(BREAD, None, None, "main", COOK)))
+    after = time.time_ns() // 1000
+    stored = count(connection, 'SELECT created_at FROM "graph_ref" WHERE id = ?1', ref.id)
+    assert before - 2_000_000 <= stored <= after + 2_000_000, (before, stored, after)
+
+
+def test_a_name_with_a_double_quote_is_quoted_by_doubling_it(setup: Callable[..., Setup]) -> None:
+    """The name function may give a name holding a double quote: every
+    statement quotes it with the quote doubled, so the layout and every
+    write and read name the table it gives."""
+
+    def table_name(name: str) -> str:
+        return f'vg"{name}'
+
+    s = setup(table_name=table_name)
+    names = [row[0] for row in s.connection.execute("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")]
+    assert names == sorted(table_name(t) for t in SQLITE_TABLES)
+    assert all('"vg""' in statement for statement in sqlite_layout(table_name))
+    main = s.engine.create_primary(COOK, BREAD, "main")
+    draft = s.engine.branch(COOK, main.id, "draft")
+    s.engine.save(COOK, draft.id, draft.version, {"step": KindEdits(upsert=[step_row("Mix", "Mix")])})
+    assert count(s.connection, 'SELECT count(*) FROM "vg""member"') == 1
+    assert len(s.engine.compose(draft.id).tree["step"]) == 1
+
+
+def test_an_error_that_escapes_the_adapter_names_what_it_was_doing(setup: Callable[..., Setup]) -> None:
+    """An error the adapter does not turn into an engine error keeps its
+    class and gains "sqlite: <what>: " before its message, once: a value
+    its column's class refuses names the column, and a refusal of SQLite's
+    names the write."""
+    s = setup()
+    ref, commit = s.storage.transact(ref_and_commit)
+    with pytest.raises(CanonicalError) as refused:
+        s.storage.transact(
+            lambda tx: tx.upsert_row("step", RowWrite(ref.id, BREAD, '{"entity_key":"Mix","position":"one"}', False, COOK))
+        )
+    assert str(refused.value).startswith('sqlite: column position: canonical: integer: "one"'), str(refused.value)
+    assert str(refused.value).count("sqlite: ") == 1
+    with pytest.raises(sqlite3.IntegrityError) as foreign:
+        s.storage.transact(lambda tx: tx.insert_patches(commit, [Patch("", "step", "Mix", "Row", 1, "MOVE")]))
+    assert str(foreign.value).startswith("sqlite: write patches: CHECK constraint failed"), str(foreign.value)
+    # The engine's own errors keep their messages.
+    with pytest.raises(NotFoundError) as missing:
+        s.storage.transact(lambda tx: tx.read_ref("Missing"))
+    assert not str(missing.value).startswith("sqlite: ")
+
+
 def test_in_the_callers_transaction_the_adapters_is_a_savepoint_and_the_callers_rollback_undoes_its_writes(
     setup: Callable[..., Setup],
 ) -> None:
@@ -1143,11 +1238,52 @@ def test_a_commits_time_is_a_canonical_date_time(setup: Callable[..., Setup]) ->
     now[0] = 1_800_000_000_000_001
     assert commit().created_at == "2027-01-15T08:00:00.000001Z"
     assert micros_to_date_time(-1) == "1969-12-31T23:59:59.999999Z"
-    assert micros_to_date_time(-62_167_219_200_000_000) == "0000-01-01T00:00:00Z"
+
+
+def test_a_time_outside_the_years_0000_to_9999_or_outside_2_to_the_53_microseconds_is_refused(
+    setup: Callable[..., Setup],
+) -> None:
+    """A time is refused outside the years 0000-9999 and outside
+    +/-(2^53-1) microseconds, the integers the TypeScript adapter reads
+    exactly: from the clock when a transaction begins, and from a stored
+    integer column when it is read."""
+    # The years first, so a time past each bound names its own.
     with pytest.raises(ValueError, match="outside the years 0000-9999"):
         micros_to_date_time(-62_167_219_200_000_001)
     with pytest.raises(ValueError, match="outside the years 0000-9999"):
         micros_to_date_time(253_402_300_800_000_000)
+    for micros in (MAX_SAFE + 1, -MAX_SAFE - 1):
+        with pytest.raises(ValueError, match=re.escape("outside +/-(2^53-1)")):
+            micros_to_date_time(micros)
+    assert micros_to_date_time(MAX_SAFE) == "2255-06-05T23:47:34.740991Z"
+    assert micros_to_date_time(-MAX_SAFE) == "1684-07-28T00:12:25.259009Z"
+    # A clock outside the range is refused when a transaction begins, and
+    # nothing is written; one at its bounds is taken.
+    now = [MAX_SAFE]
+    s = setup(clock=lambda: now[0])
+    now[0] = MAX_SAFE + 1
+    with pytest.raises(ValueError, match=re.escape("the clock returned 9007199254740992 microseconds, outside +/-(2^53-1)")):
+        s.storage.transact(lambda tx: tx.create_ref(NewRef(BREAD, None, None, "main", COOK)))
+    assert count(s.connection, 'SELECT count(*) FROM "graph_ref"') == 0
+    for bound in (MAX_SAFE, -MAX_SAFE):
+        now[0] = bound
+        ref = s.storage.transact(lambda tx: tx.create_ref(NewRef(BREAD, None, None, f"at {bound}", COOK)))
+        assert s.storage.transact(lambda tx: tx.read_ref(ref.id)).name == f"at {bound}"
+    # A stored integer outside the range is refused on read: a commit's time,
+    # a ref's seal and a version.
+    now[0] = 1_800_000_000_000_000
+    ref, commit = s.storage.transact(ref_and_commit)
+    for sql, read, column in (
+        ('UPDATE "graph_commit" SET created_at = ?1 WHERE id = ?2', lambda tx: tx.read_commit(commit), "created_at"),
+        ('UPDATE "graph_ref" SET sealed_at = ?1 WHERE id = ?2', lambda tx: tx.read_ref(ref.id), "sealed_at"),
+        ('UPDATE "graph_ref" SET _version = ?1 WHERE id = ?2', lambda tx: tx.read_ref(ref.id), "_version"),
+    ):
+        for value in (MAX_SAFE + 1, -MAX_SAFE - 1):
+            s.connection.execute(sql, [value, commit if "commit" in sql else ref.id])
+            with pytest.raises(ValueError, match=re.escape(f"column {column} is {value}, outside +/-(2^53-1)")):
+                s.storage.transact(read)
+        s.connection.execute(sql, [MAX_SAFE if column != "_version" else 1, commit if "commit" in sql else ref.id])
+        s.storage.transact(read)
 
 
 def test_every_id_the_adapter_writes_is_a_version_4_uuid_in_its_canonical_form(setup: Callable[..., Setup]) -> None:
@@ -1349,6 +1485,26 @@ def test_is_unique_violation_reads_the_code_and_before_python_3_11_the_message()
         error = sqlite3.IntegrityError("UNIQUE constraint failed: t.a")
         error.sqlite_errorcode = code  # type: ignore[attr-defined]
         assert is_unique_violation(error) is unique, code
+    # After the prefix the adapter puts on an error that escapes it.
+    assert is_unique_violation(sqlite3.IntegrityError("sqlite: write patches: UNIQUE constraint failed: graph_patch.commit_id"))
+    assert not is_unique_violation(sqlite3.IntegrityError("sqlite: write patches: FOREIGN KEY constraint failed"))
+    assert not is_unique_violation(sqlite3.IntegrityError("sqlite: write patches: CHECK constraint failed: operation"))
+
+
+def test_a_unique_violation_that_escapes_the_adapter_is_one_with_its_prefix(setup: Callable[..., Setup]) -> None:
+    """A unique index's refusal the adapter does not turn into an engine
+    error escapes with what the adapter was doing before SQLite's message,
+    and is_unique_violation still reads it as one, by the error's code from
+    Python 3.11 and by the words after the prefix before."""
+    s = setup()
+    _, commit = s.storage.transact(ref_and_commit)
+    patch = Patch("", "step", "Mix", "Row", 1, "ADD")
+    s.storage.transact(lambda tx: tx.insert_patches(commit, [patch]))
+    with pytest.raises(sqlite3.IntegrityError) as escaped:
+        s.storage.transact(lambda tx: tx.insert_patches(commit, [patch]))
+    assert str(escaped.value).startswith("sqlite: write patches: UNIQUE constraint failed: "), str(escaped.value)
+    assert is_unique_violation(escaped.value)
+    assert_sqlite_error(escaped.value, SQLITE_CONSTRAINT_UNIQUE)
 
 
 def test_the_binding_refuses_a_sqlite_older_than_the_layout_needs(
@@ -1366,7 +1522,7 @@ def test_the_binding_refuses_a_sqlite_older_than_the_layout_needs(
 
 
 def test_this_pythons_sqlite_runs_the_adapter() -> None:
-    """The SQLite this Python was built with is one the adapter runs on, so
+    """The SQLite library this Python loaded is one the adapter runs on, so
     every test here runs on it rather than being refused."""
     assert tuple(int(n) for n in sqlite3.sqlite_version.split(".")) >= MIN_SQLITE_VERSION, sqlite3.sqlite_version
 
