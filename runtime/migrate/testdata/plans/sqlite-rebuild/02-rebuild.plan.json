@@ -83,16 +83,15 @@
     "version": 1
   },
   "from": "295de4e412d1254794d91926feb77450972604e2271c35d8bc0b72a1fa2e637a",
-  "hash": "d9aaec4126e3f7b54c0fb5f2206f39a299b072a08348821c333c7fac6d69052a",
+  "hash": "4de03ef86554ce800808cc0a8cd38c130e9af3bca98f305e033e93ba55dd840d",
   "service": "ledger-db",
   "steps": [
     {
-      "foreignKeysOff": true,
       "hazards": [
         {
           "class": "blocking",
           "id": "blocking:table/account",
-          "reason": "Copying account holds the database's write lock for time that grows with the table.",
+          "reason": "Copying account and entry holds the database's write lock for time that grows with the tables.",
           "subject": "table/account"
         },
         {
@@ -110,7 +109,7 @@
         {
           "class": "copy-table",
           "id": "copy-table:table/account",
-          "reason": "SQLite's ALTER TABLE cannot drop NOT NULL from name, so the step rebuilds account: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "reason": "SQLite's ALTER TABLE cannot drop NOT NULL from name, so the step rebuilds account with the tables that reference it, directly or through another table: entry. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
           "subject": "table/account"
         }
       ],
@@ -118,17 +117,21 @@
       "op": "copyTable",
       "phase": "expand",
       "statements": [
+        "PRAGMA defer_foreign_keys = ON",
         "CREATE TABLE \"_new_account\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_entry\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"account_id\" TEXT NOT NULL,\n  \"memo\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"account_id\") REFERENCES \"_new_account\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_account\" (\"id\", \"name\")\nSELECT \"id\", \"name\"\nFROM \"account\"",
+        "INSERT INTO \"_new_entry\" (\"id\", \"account_id\", \"memo\")\nSELECT \"id\", \"account_id\", \"memo\"\nFROM \"entry\"",
+        "DROP TABLE \"entry\"",
         "DROP TABLE \"account\"",
         "ALTER TABLE \"_new_account\" RENAME TO \"account\"",
+        "ALTER TABLE \"_new_entry\" RENAME TO \"entry\"",
         "CREATE UNIQUE INDEX \"account_name_key\" ON \"account\" (\"name\")"
       ],
       "subject": "table/account",
       "transactional": true
     },
     {
-      "foreignKeysOff": true,
       "hazards": [
         {
           "class": "blocking",
@@ -145,7 +148,7 @@
         {
           "class": "copy-table",
           "id": "copy-table:table/entry",
-          "reason": "SQLite's ALTER TABLE cannot make memo NOT NULL, so the step rebuilds entry: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "reason": "SQLite's ALTER TABLE cannot make memo NOT NULL, so the step rebuilds entry: it copies the rows into a new table, drops the old one and renames the new one.",
           "subject": "table/entry"
         }
       ],
@@ -153,6 +156,7 @@
       "op": "copyTable",
       "phase": "contract",
       "statements": [
+        "PRAGMA defer_foreign_keys = ON",
         "CREATE TABLE \"_new_entry\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"account_id\" TEXT NOT NULL,\n  \"memo\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"account_id\") REFERENCES \"account\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_entry\" (\"id\", \"account_id\", \"memo\")\nSELECT \"id\", \"account_id\", \"memo\"\nFROM \"entry\"",
         "DROP TABLE \"entry\"",

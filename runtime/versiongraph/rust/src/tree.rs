@@ -26,13 +26,35 @@ pub struct Row {
 }
 
 impl Row {
-    /// The row's content columns, the projection every comparison uses.
+    /// The row's content columns, the projection every comparison, merge,
+    /// diff and hash uses: each content column the row carries, and each one
+    /// the descriptor declares that the row lacks, as null. A history image
+    /// taken before its kind gained a column lacks it, where a live row
+    /// reads it as null; both hold the same content.
     pub fn content(&self, kind: &Kind) -> BTreeMap<String, Value> {
-        self.value
+        let mut content: BTreeMap<String, Value> = self
+            .value
             .iter()
             .filter(|(column, _)| kind.is_content(column))
             .map(|(column, value)| (column.clone(), value.clone()))
-            .collect()
+            .collect();
+        for column in kind.content_columns() {
+            content.entry(column.clone()).or_insert(Value::Null);
+        }
+        content
+    }
+
+    /// The row as an engine writes it back: as given, with each content
+    /// column the descriptor declares that the row lacks set to null. A
+    /// storage adapter keeps a stored value for a column a write lacks, so a
+    /// row a diff or a merge returns carries every content column, or an
+    /// engine that writes one over a row holding a value would keep it.
+    pub fn filled(&self, kind: &Kind) -> Map<String, Value> {
+        let mut value = self.value.clone();
+        for column in kind.content_columns() {
+            value.entry(column.clone()).or_insert(Value::Null);
+        }
+        value
     }
 
     /// The author column's value, when the kind has one and it is not null.
@@ -209,14 +231,29 @@ pub fn sort_rows(rows: &mut [&Row]) {
     rows.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.key.cmp(&b.key)));
 }
 
-/// Write rows back out as a tree with every kind of the descriptor present.
+/// Write rows back out as a tree with every kind of the descriptor present,
+/// each row as it was given.
 pub fn render(graph: &Graph, kinds: Vec<Vec<&Row>>) -> Value {
+    render_with(graph, kinds, |row, _| row.value.clone())
+}
+
+/// Write rows back out as [`render`] does, each row [`Row::filled`]: the
+/// tree of rows an engine writes back.
+pub fn render_filled(graph: &Graph, kinds: Vec<Vec<&Row>>) -> Value {
+    render_with(graph, kinds, Row::filled)
+}
+
+fn render_with(
+    graph: &Graph,
+    kinds: Vec<Vec<&Row>>,
+    row_value: impl Fn(&Row, &Kind) -> Map<String, Value>,
+) -> Value {
     let mut out = Map::new();
     for (kind, mut rows) in graph.kinds.iter().zip(kinds) {
         sort_rows(&mut rows);
         let rows = rows
             .into_iter()
-            .map(|row| Value::Object(row.value.clone()))
+            .map(|row| Value::Object(row_value(row, kind)))
             .collect();
         out.insert(kind.name.clone(), Value::Array(rows));
     }

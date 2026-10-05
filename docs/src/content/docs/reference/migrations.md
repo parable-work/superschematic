@@ -227,7 +227,7 @@ Each step lists the hazard classes it falls in.
 | `blocking` | holds a lock that blocks writes, or reads, for time that grows with the table | a type change that rewrites the table, a column added with a volatile default or as a stored generated column, an index built without `CONCURRENTLY`, seeding a history table |
 | `compat` | breaks a server built from the previous version, which may still be running | a rename, a retype, a required column without a default, a new unique constraint over columns it writes |
 | `data-dependent` | fails at apply when existing rows violate it | `SET NOT NULL`, a unique constraint, validating a foreign key, a narrowing cast, a required column without a default on a table with rows |
-| `copy-table` | rebuilds the table by copying it | SQLite only: a change its `ALTER TABLE` cannot make |
+| `copy-table` | rebuilds the table by copying it, with the tables that reference it | SQLite only: a change its `ALTER TABLE` cannot make |
 | `api-breaking` | drops, renames or retypes a column a deployed reader reads, or changes the columns a projection view publishes | [Readers](#readers) |
 | `history` | changes the shape of rows a history table keeps | retyping a column of a versioned table; changing a version graph member's content columns |
 
@@ -360,6 +360,11 @@ SQLite stores each type as the type its values need:
 | `JSONB`, `JSON`, and every list (`T[]`) | `TEXT` that holds JSON |
 | `BYTEA` | `BLOB` |
 
+A list's JSON array holds each element as JSON holds its type: text,
+dates, times and UUIDs as strings, numbers as numbers, a boolean as `true`
+or `false`, and a JSON value as itself. A list of lists is `JSONB` on
+Postgres, so it holds one JSON value here too.
+
 A default writes the form the schema runtime reads:
 
 | Postgres default | SQLite default |
@@ -381,8 +386,9 @@ nor a foreign key, so renaming one is no step. SQLite keeps no comments.
 ### Steps
 
 Every SQLite step runs in a transaction, which the runner opens with
-`BEGIN IMMEDIATE`. SQLite changes a table in place only where its
-`ALTER TABLE` can:
+`BEGIN IMMEDIATE`, and with foreign keys on ([Foreign keys stay
+on](#foreign-keys-stay-on)). SQLite changes a table in place only where
+its `ALTER TABLE` can:
 
 | Change | Step |
 | --- | --- |
@@ -391,44 +397,114 @@ Every SQLite step runs in a transaction, which the runner opens with
 | a column dropped | `DROP COLUMN` (`blocking`: SQLite rewrites the table). Its indexes are dropped before it, and a foreign key over it makes its table's rebuild drop it instead |
 | an index or a unique field added or dropped | `CREATE INDEX`, `CREATE UNIQUE INDEX`, `DROP INDEX`; building an index on a table the previous version has is `blocking` |
 | an index or a unique field renamed | the index dropped and built again under its new name (`blocking`): SQLite cannot rename an index |
-| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops |
+| a table dropped | `DROP TABLE`, after every table that references it. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops. That step, and one that drops a table that references itself, starts with `PRAGMA defer_foreign_keys = ON` |
 
-Every other change to a table rebuilds it: a type, a nullability, a
-default, a foreign key added over a column the table has, changed or
-dropped, and a column `ADD COLUMN` cannot add. The rebuild is SQLite's
-copy-table procedure, in one step:
+Every other change to a table rebuilds it: a type, a list's element, a
+nullability, a default, a foreign key added over a column the table has,
+changed or dropped, and a column `ADD COLUMN` cannot add. The rebuild is
+SQLite's copy-table procedure, run for the table and every table that
+references it, directly or through another table, in one step:
 
-1. create the table as the phase leaves it under a temporary name
-   (`_new_order`), with its primary key and foreign keys;
-2. copy the rows, mapping each column to its name after the renames, filling
-   the columns the table gains from their defaults, and casting a column
-   whose type changes;
-3. drop the old table;
-4. rename the new one;
-5. create its unique indexes and indexes again.
+1. `PRAGMA defer_foreign_keys = ON`, which defers the foreign key checks
+   to the step's commit;
+2. create each table as the phase leaves it under a temporary name
+   (`_new_order`), with its primary key and foreign keys, which name the
+   other new tables;
+3. copy the rows, referenced tables first, mapping each column to its
+   name after the renames, filling the columns a table gains from their
+   defaults, casting a column whose type changes, and converting each
+   element of a list whose element changes ([A list's
+   element](#a-lists-element));
+4. drop the old tables, referencing tables first;
+5. rename each new table, which rewrites the foreign keys that name it;
+6. create the unique indexes and indexes again.
 
-Every change the phase makes to a table shares one rebuild: a table is
-rebuilt at most once in `expand` and once in `contract`, and the rebuild
-also adds the columns and indexes the phase adds to it. Renames of the
-table and its columns run before it, in place. The rebuild is `copy-table`
-and `blocking`, and carries the hazards of every change it makes.
-
-The step runs with foreign keys off (`foreignKeysOff` in the plan). With
-them on, dropping the old table would delete its rows first and run the
-`ON DELETE` actions of the tables that reference it: a `CASCADE` would
-delete their rows and a `RESTRICT` would fail. SQLite turns them off only
-outside a transaction, so the runner does that around the step, runs
-`PRAGMA foreign_key_check` before the commit, and fails the step on any
-violation. The tables that reference the rebuilt one name it, and the name
-resolves again once the new table takes it. A table renamed with `RENAME
-TO` keeps the references to it too: SQLite rewrites the foreign keys of
-the tables that reference it.
+A table that references the rebuilt one and does not change is copied as
+it is. Every change the phase makes to the tables of a rebuild shares it:
+a table is copied at most once in `expand` and once in `contract`, the
+rebuild also adds the columns and indexes the phase adds, and it drops a
+table that `contract` drops instead of copying it. Rebuilt tables that
+reference one another share one step. Renames of the tables and their
+columns run before it, in place. The rebuild is `copy-table` and
+`blocking`, whose reasons name every table it copies, and carries the
+hazards of every change it makes.
 
 SQLite's `CAST` never fails: text that is not a number becomes `0`, and a
 fraction is cut toward zero as an `INTEGER`. So a type change that cannot
 keep every value is `destructive`, not `data-dependent`. A `NOT NULL` a
 rebuild adds, a required column without a default, and a unique index
 fail on the rows that break them, as on Postgres (`data-dependent`).
+
+### Foreign keys stay on
+
+Every SQLite step runs with foreign key enforcement on, so one plan serves
+a SQLite file and Cloudflare D1. D1 keeps enforcement on: no query can
+turn it off. A step never turns it off, and the plan carries no
+`foreignKeysOff`; a plan from an earlier compiler may, and the runner
+still applies it to a SQLite file. A table renamed with `RENAME TO` keeps
+the references to it: SQLite rewrites the foreign keys of the tables that
+reference it.
+
+With enforcement on, `DROP TABLE` deletes the table's rows first, which
+runs the `ON DELETE` actions of the tables that reference them: a
+`CASCADE` would delete their rows and a `SET NULL` would clear their keys.
+So a rebuild copies those tables too, and drops the old ones before the
+table they reference: no action reaches a row the plan keeps. Renaming the
+old table out of the way first does not work: SQLite rewrites the foreign
+keys that reference it to follow it, even under `legacy_alter_table`, and
+its drop then runs their actions.
+
+The other checks wait for the commit. SQLite checks a `NO ACTION` key
+there, and, while the checks are deferred, a `RESTRICT` key too: it runs
+no `RESTRICT` action until then. By the commit the step has dropped every
+old row a key protects. So a table that references itself, and tables that
+reference one another, rebuild and drop with their rows, whatever their
+keys' actions and whether or not their keys are `NOT NULL`. Without the
+deferral, dropping a row a `RESTRICT` key protects would fail at once.
+
+### A list's element
+
+A list is `TEXT` whatever its element, so the model also records what each
+element holds (`"element"`): `TEXT`, `INTEGER`, `REAL` or `NUMERIC` as
+SQLite stores the element's type, `BOOLEAN`, `JSON` for a JSON value, or
+`BLOB` for bytes. A change of it rebuilds the table, and the copy converts
+each element of the array, in order. For a list of text that becomes a
+list of integers, the plan writes this on one line:
+
+```sql
+CASE WHEN "product"."items" IS NOT NULL THEN (
+  SELECT json_group_array(CAST("_element"."value" AS INTEGER) ORDER BY "_element"."key")
+  FROM json_each("product"."items") AS "_element"
+) END
+```
+
+A `NULL` list stays `NULL`, and an empty list stays `[]`.
+
+| Element change | Each element | Hazard |
+| --- | --- | --- |
+| text to `INTEGER`, `REAL` or `NUMERIC` | cast: text that is not a number becomes `0`, and a fraction is cut toward zero as an `INTEGER` | `destructive` |
+| a number to text | cast to its text | |
+| `INTEGER` or `NUMERIC` to `REAL` | cast: an integer past 2^53 is rounded | `destructive` |
+| `REAL` or `NUMERIC` to `INTEGER` | cast: a fraction is cut toward zero | `destructive` |
+| `INTEGER` or `REAL` to `NUMERIC` | cast | |
+| a boolean to a number | `1` or `0` | |
+| a boolean to text | the text `true` or `false` | |
+| a number or text to a boolean | `true` where SQLite reads a number other than `0`, else `false`, so text such as `'true'` becomes `false` | `destructive` |
+| between types SQLite stores alike: `UUID`, `TEXT`, `VARCHAR(n)`, dates and times; `SMALLINT`, `INTEGER` and `BIGINT` | nothing: no step, as for the same change of a column | |
+| to or from a JSON value or bytes | the plan fails, naming the column | |
+
+Each rebuild is also `compat`, `copy-table` and `blocking`, as any type
+change on SQLite is. Postgres plans the same change as `ALTER COLUMN ...
+TYPE T[] USING col::T[]`, which fails on text that is not a number
+(`data-dependent`). SQLite's `CAST` never fails, so where a cast cannot
+keep every element the change is `destructive` instead, and the hazard
+says what it loses. An element change to or from a JSON value or bytes
+fails the plan: SQLite's `CAST` keeps a nested JSON value as JSON, where
+Postgres's cast to text gives its text, and SQLite's JSON holds no bytes.
+Change such a list by hand and adopt the new model.
+
+A list of lists is a JSON value on both dialects, `JSONB` on Postgres, so
+a change of its inner element is no step on either.
 
 ### Refusals
 
@@ -460,8 +536,10 @@ the feature and the dialect:
   text as JSON where wrapping it in a JSON string would keep another
   value, and Postgres converts no list to or from anything else. Change
   the column by hand and adopt the new model.
-- A list whose element type changes is the same `TEXT` holding a JSON
-  array, so it is no step, and its elements keep their JSON types.
+- A list's element type is kept only as far as JSON tells types apart:
+  `UUID[]`, `TEXT[]` and `DATE[]` are arrays of strings, and
+  `SMALLINT[]` and `BIGINT[]` arrays of numbers, so a change between
+  them is no step ([A list's element](#a-lists-element)).
 
 ## The runner
 
@@ -469,34 +547,70 @@ the feature and the dialect:
 `github.com/parable-work/superschematic/runtime/migrate/go`, which holds the
 database drivers, so a migration job needs the plan and that binary, not the
 compiler. It never computes a plan. It needs no cgo, so one static binary
-serves a container job:
+serves a container job.
+
+Each release attaches it for linux and darwin on x64 and arm64, as
+`superschematic-migrate_<version>_<platform>.tar.gz` (`linux-x64`,
+`linux-arm64`, `darwin-x64`, `darwin-arm64`). The release's `SHA256SUMS`
+lists each archive, and each has a build provenance attestation:
+
+```
+gh release download v0.1.0-alpha.1 --repo parable-work/superschematic \
+  --pattern 'superschematic-migrate_0.1.0-alpha.1_linux-x64.tar.gz' --pattern SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify superschematic-migrate_0.1.0-alpha.1_linux-x64.tar.gz --repo parable-work/superschematic
+```
+
+Or install it with Go:
 
 ```
 CGO_ENABLED=0 go install github.com/parable-work/superschematic/runtime/migrate/go/cmd/superschematic-migrate@latest
 ```
 
-`runtime/migrate/README.md` has a Dockerfile for a Cloud Run job.
+`superschematic-migrate version` prints its version. A release publishes no
+container image of the runner. `runtime/migrate/README.md` has a Dockerfile
+for a Cloud Run job.
 
 ```
 superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
 superschematic-migrate status --service NAME [--model] [--database-url URL]
 superschematic-migrate adopt --model model.json [--database-url URL]
+superschematic-migrate version
 ```
 
 `--database-url` defaults to `$DATABASE_URL`. A `postgres://` or
 `postgresql://` URL selects Postgres; a `sqlite:` URL, a `file:` URI or a
-path selects SQLite. It must match the plan's dialect. Exit codes: 0 done, 1
+path selects SQLite; a `d1://<account id>/<database id>` URL selects a
+Cloudflare D1 database, reached through Cloudflare's REST API with a token
+that may edit it in `$CLOUDFLARE_API_TOKEN`. SQLite and D1 run `sqlite`
+plans. The URL must match the plan's dialect. Exit codes: 0 done, 1
 refused or failed, 2 usage.
+
+In CI, a step that migrates a D1 database sets both variables:
+
+```yaml
+- name: Migrate the shop database
+  env:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    DATABASE_URL: d1://${{ vars.CLOUDFLARE_ACCOUNT_ID }}/${{ vars.SHOP_D1_DATABASE_ID }}
+  run: superschematic-migrate apply --plan plan.json
+```
+
+The D1 driver is unverified until its test against a real D1 database
+(`TestRealD1` in the runner's module) has passed: Cloudflare documents a
+Worker's batch as a transaction, not a REST request's, and the runner's
+tests run against a fake of the API.
 
 ### State
 
-The runner keeps two tables in the connection's current schema, and creates
+The runner keeps its tables in the connection's current schema, and creates
 them when they are missing:
 
 | Table | Holds |
 | --- | --- |
 | `superschematic_schema_state` | a row per service: the dialect, the applied model's hash and the model itself as canonical JSON, and the plan in progress with its finished phase: `expanded` when the applied model is the plan's `expandedModel`, `expand` for a plan without one |
 | `superschematic_migrations` | a row per step run: the plan's hash, the step's index, phase and subject, the SHA-256 of its SQL, and when it started and finished |
+| `superschematic_lock` | D1 only: a row per service, the lease of the runner that holds it and when it expires |
 
 The names are fixed.
 
@@ -506,15 +620,27 @@ The names are fixed.
 plan has one, its `expanded` hash before it runs anything, so an edited
 plan is never half-applied. It then takes a
 lock: on Postgres a session-level advisory lock keyed by the service, held
-for the whole run; on SQLite `BEGIN IMMEDIATE` per step. A second runner
-waits.
+for the whole run; on SQLite `BEGIN IMMEDIATE` per step; on D1 a lease in
+`superschematic_lock`, held for the whole run. A second runner waits.
+
+D1 has no `BEGIN` or `COMMIT`: one REST request runs its statements as one
+batch. So a step, its log row and any change of state are one request,
+led by `PRAGMA defer_foreign_keys = ON`, since D1 keeps foreign keys on,
+and by the renewal of the lease. A runner takes the lease with one
+conditional write; it lasts 2 minutes past its last renewal, and a runner
+that dies leaves it to expire and the next one to take it over. A batch
+whose renewal finds the lease taken over fails whole. The D1 driver
+refuses, before anything runs, a step outside a transaction and a step
+with `foreignKeysOff`, which plans written before SQLite rebuilds kept
+foreign keys on may carry; apply such a plan to a SQLite file.
 
 Each step runs in order. A step in a transaction commits with its log row,
 so it runs once. A step outside one logs its start, runs each statement on
 its own, and logs its end. Each step sets `lock_timeout` to 5 seconds, and a
 lock timeout rolls the step back and retries it after 1, 2, 4, 8 and 16
 seconds. Any other error stops the run with the step's index, subject and
-failing statement. The plan stays in progress, and the next `apply` of the
+failing statement; on D1, with D1's message, and the statement only when
+D1 names it. The plan stays in progress, and the next `apply` of the
 same plan resumes at that step, running a non-transactional step's recovery
 first. Running a finished plan again does nothing.
 
@@ -586,5 +712,9 @@ adopt.
 - SQLite refuses `@versioned`, `@optimistic`, `@searchField`, projections,
   `GIN` and `GIST` indexes, and `LTREE` and the PostGIS types
   ([Refusals](#refusals)).
+- A SQLite rebuild copies every table that references the rebuilt one,
+  directly or through another table, so rebuilding a table many others
+  reference holds the database's write lock while it copies them all
+  ([Steps](#steps)).
 - The engine's own storage is the engine's: it creates its tables and runs
   its behaviors' migrations, and no plan covers them.

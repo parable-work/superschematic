@@ -96,8 +96,8 @@ func sqliteRefusals(out *sqlgen.DDLOutput, types map[string]string) error {
 }
 
 // sqliteTable stores a table the Postgres model built in SQLite's types and
-// default forms, and records what a column that holds JSON holds. It
-// refuses a column whose type SQLite has no storage for.
+// default forms, and records what a column that holds JSON holds, with a
+// list's element. It refuses a column whose type SQLite has no storage for.
 func sqliteTable(t *Table) error {
 	t.Comment = ""
 	var errs []error
@@ -114,7 +114,7 @@ func sqliteTable(t *Table) error {
 			errs = append(errs, fmt.Errorf("sqlmigrate: column %s.%s%s: %w", t.Name, col.Name, originNote(col), err))
 			continue
 		}
-		col.Type, col.Default, col.Holds = sqlite, def, sqliteHolds(pg)
+		col.Type, col.Default, col.Holds, col.Element = sqlite, def, sqliteHolds(pg), sqliteElement(pg)
 	}
 	return errors.Join(errs...)
 }

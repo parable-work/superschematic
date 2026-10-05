@@ -1237,10 +1237,15 @@ registry, not `tsc`, decides which keys are valid (section 7.2). The data
 forms need no such escape: `schema.config.json` and `schema.config.yaml`
 carry the key as it is (section 5).
 
-`build` decides before loading whether a target's kind sets
-`ImportsSiblingSentinels`. For a TypeScript config it scans the file for
-`SchemaKind.<Kind>` or the quoted kind name, so it does not need a compiler
-program.
+A `schema.config.ts` may import other services' sentinels for its
+handles, and nothing else beyond the config package (D34). `build` decides
+before loading whether to write the sibling sentinels first: when the
+target's kind sets `ImportsSiblingSentinels`, or when its config imports
+anything but the config package. For a TypeScript config it scans the
+file for `SchemaKind.<Kind>` or the quoted kind name, and for its import
+specifiers, so it does not need a compiler program. `build-all`,
+`build --with-deps` and `migrate` write every sentinel before discovery,
+reading only each config's `name` and `kind`.
 
 ## 7. Dispatch
 
@@ -1301,7 +1306,8 @@ generator reads its own section with `registry.DecodeOutput(outputs, key,
 
 ### 7.3 build-all
 
-`build-all` discovers the services under the services root with the
+`build-all` writes every service's sentinel (`buildplan.EnsureSentinels`,
+section 6.3), then discovers the services under the services root with the
 command's registry (`buildplan.DiscoverWith`), so an extension kind in a
 sibling config is known at discovery. Each service's expected output
 directories come from the `Dirs` of its present documents and of the

@@ -39,8 +39,13 @@ type schemaVersion struct {
 }
 
 func openSchemaVersion(servicesRoot string, names naming.Naming, reg *registry.Registry) (*schemaVersion, error) {
-	// Discovery computes each service's output directories under an output
-	// root; migrate writes nothing there.
+	// A config may import a sibling's sentinel (D34), so the sentinels are
+	// written first; a --from-ref version may predate one. Discovery
+	// computes each service's output directories under an output root;
+	// migrate writes nothing there.
+	if err := buildplan.EnsureSentinels(servicesRoot, reg, nil); err != nil {
+		return nil, err
+	}
 	services, err := buildplan.DiscoverWith(servicesRoot, filepath.Join(filepath.Dir(servicesRoot), "dist"), reg)
 	if err != nil {
 		return nil, err

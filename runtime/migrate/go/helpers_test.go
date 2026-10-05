@@ -15,6 +15,7 @@ import (
 	"time"
 
 	migrate "github.com/parable-work/superschematic/runtime/migrate/go"
+	"github.com/parable-work/superschematic/runtime/migrate/go/d1"
 	"github.com/parable-work/superschematic/runtime/migrate/go/internal/testdb"
 	"github.com/parable-work/superschematic/runtime/migrate/go/postgres"
 	"github.com/parable-work/superschematic/runtime/migrate/go/sqlite"
@@ -173,19 +174,57 @@ func edited(t testing.TB, dialect migrate.Dialect, name string, edit func(plan m
 // steps returns a plan document's steps for editing.
 func steps(plan map[string]any) []any { return plan["steps"].([]any) }
 
-// forEachDialect runs test once per dialect, on SQLite always and on
-// Postgres when testdb.EnvURL is set.
-func forEachDialect(t *testing.T, test func(t *testing.T, dialect migrate.Dialect)) {
-	for _, dialect := range testdb.Dialects {
-		t.Run(string(dialect), func(t *testing.T) { test(t, dialect) })
+// forEachBackend runs test once per backend: on SQLite and a fake D1
+// always, and on Postgres when testdb.EnvURL is set.
+func forEachBackend(t *testing.T, test func(t *testing.T, db testdb.Backend)) {
+	for _, db := range testdb.Backends {
+		t.Run(string(db), func(t *testing.T) { test(t, db) })
+	}
+}
+
+// evolveFixture names the fixture a test applies as the chain's second
+// plan. D1 cannot run 02-evolve, whose rebuild turns foreign keys off, so on
+// D1 it is evolve-fk-on: the same models, with the rebuild D27's amendment
+// makes, of customer together with order, which references it.
+func evolveFixture(db testdb.Backend) string {
+	if db == testdb.D1 {
+		return "evolve-fk-on"
+	}
+	return "02-evolve"
+}
+
+// skipForeignKeysOff skips a test on D1 when one of plans has a step that
+// turns foreign keys off, which the D1 driver refuses. Such plans predate
+// D27's amendment, and the planner's change that stops writing them lands
+// on its own.
+func skipForeignKeysOff(t *testing.T, db testdb.Backend, plans ...*migrate.Plan) {
+	t.Helper()
+	if db != testdb.D1 {
+		return
+	}
+	for _, p := range plans {
+		for _, step := range p.Steps {
+			if step.ForeignKeysOff {
+				t.Skipf("step %d of plan %s turns foreign keys off, which D1 cannot run; plans written before D27's amendment rebuild this way", step.Index, p.Hash)
+			}
+		}
 	}
 }
 
 // openDriver opens a driver on url for the test. timeout is the lock or
-// busy timeout; zero is the driver's default.
+// busy timeout; zero is the driver's default. A D1 driver reaches the fake
+// server testdb started for url.
 func openDriver(t testing.TB, url string, timeout time.Duration) migrate.Driver {
 	t.Helper()
 	ctx := context.Background()
+	if d1.IsURL(url) {
+		d, err := d1.Open(ctx, url, testdb.D1Options(t, url))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = d.Close(ctx) })
+		return d
+	}
 	if migrate.URLDialect(url) == migrate.Postgres {
 		d, err := postgres.Open(ctx, url, postgres.Options{LockTimeout: timeout})
 		if err != nil {

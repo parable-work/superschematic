@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
@@ -40,10 +41,11 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	dir := filepath.Join(typesRoot, "fixture-version-graph-db")
 
 	paths := testpaths.Local(t)
-	root := testpaths.RepoRoot(t)
+	createSQL := filepath.Join(dir, "create.sql")
+	pgtest.WriteCreateSQL(t, filepath.Join(testpaths.RepoRoot(t), "runtime", "versiongraph", "testdata", "fixture", "create.sql"), createSQL)
 	source := strings.NewReplacer(
 		"PG_MODULE", filepath.Join(paths.VersionGraphTypeScript, "node_modules", "pg", "lib", "index.js"),
-		"CREATE_SQL", filepath.Join(root, "runtime", "versiongraph", "testdata", "fixture", "create.sql"),
+		"CREATE_SQL", createSQL,
 	).Replace(versionGraphFacadeTest)
 	if err := os.WriteFile(filepath.Join(dir, "graph_facade.test.ts"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
@@ -159,11 +161,6 @@ let roots = 0;
 
 beforeAll(async () => {
   await admin.connect();
-  try {
-    await admin.query("CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public");
-  } catch (err) {
-    if ((err as { code?: string }).code !== "23505") throw err;
-  }
   await admin.query("CREATE SCHEMA " + schema);
   pool = new pg.Pool({ connectionString: dsn, options: "-c search_path=" + schema + ",public" });
   await pool.query(readFileSync("CREATE_SQL", "utf8"));

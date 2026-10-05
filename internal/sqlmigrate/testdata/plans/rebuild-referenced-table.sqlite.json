@@ -1,0 +1,128 @@
+{
+  "dialect": "sqlite",
+  "expanded": "d5a8fed238db559ff108f68397626543e441646f3a4321c8e7827c3c2a25597e",
+  "from": "6d1853da11cdb1f0ecb8cb550fb4f314c2013842583052684213e6778b228310",
+  "hash": "3cee283e6ba8be103556a65dd3717144f70d2a4181a3e975a9052f123be6bb36",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Copying customer, invoice, order, order_label, order_line, review, review_reply and visit holds the database's write lock for time that grows with the tables.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "SQLite's ALTER TABLE cannot drop NOT NULL from created_at, so the step rebuilds customer with the tables that reference it, directly or through another table: invoice, order, order_label, order_line, review, review_reply and visit. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_customer\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"email\" TEXT COLLATE NOCASE NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),\n  \"referrer_id\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_invoice\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE NO ACTION\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_review\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"body\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_review_reply\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"review_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"review_id\") REFERENCES \"_new_review\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_visit\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE SET NULL\n)",
+        "INSERT INTO \"_new_customer\" (\"id\", \"name\", \"email\", \"created_at\", \"referrer_id\")\nSELECT \"id\", \"name\", \"email\", \"created_at\", \"referrer_id\"\nFROM \"customer\"",
+        "INSERT INTO \"_new_invoice\" (\"id\", \"customer_id\")\nSELECT \"id\", \"customer_id\"\nFROM \"invoice\"",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"order_id\"\nFROM \"order_line\"",
+        "INSERT INTO \"_new_review\" (\"id\", \"customer_id\", \"body\")\nSELECT \"id\", \"customer_id\", \"body\"\nFROM \"review\"",
+        "INSERT INTO \"_new_review_reply\" (\"id\", \"review_id\")\nSELECT \"id\", \"review_id\"\nFROM \"review_reply\"",
+        "INSERT INTO \"_new_visit\" (\"id\", \"customer_id\")\nSELECT \"id\", \"customer_id\"\nFROM \"visit\"",
+        "DROP TABLE \"invoice\"",
+        "DROP TABLE \"order_label\"",
+        "DROP TABLE \"order_line\"",
+        "DROP TABLE \"order\"",
+        "DROP TABLE \"review_reply\"",
+        "DROP TABLE \"review\"",
+        "DROP TABLE \"visit\"",
+        "DROP TABLE \"customer\"",
+        "ALTER TABLE \"_new_customer\" RENAME TO \"customer\"",
+        "ALTER TABLE \"_new_invoice\" RENAME TO \"invoice\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\"",
+        "ALTER TABLE \"_new_review\" RENAME TO \"review\"",
+        "ALTER TABLE \"_new_review_reply\" RENAME TO \"review_reply\"",
+        "ALTER TABLE \"_new_visit\" RENAME TO \"visit\"",
+        "CREATE UNIQUE INDEX \"customer_email_key\" ON \"customer\" (\"email\")",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Copying customer, invoice, order, order_label, order_line, review, review_reply and visit holds the database's write lock for time that grows with the tables.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "SQLite's ALTER TABLE cannot drop the default of created_at, so the step rebuilds customer with the tables that reference it, directly or through another table: invoice, order, order_label, order_line, review, review_reply and visit. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 2,
+      "op": "copyTable",
+      "phase": "contract",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_customer\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"email\" TEXT COLLATE NOCASE NOT NULL,\n  \"created_at\" TEXT,\n  \"referrer_id\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_invoice\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE NO ACTION\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_review\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"body\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_review_reply\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"review_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"review_id\") REFERENCES \"_new_review\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_visit\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE SET NULL\n)",
+        "INSERT INTO \"_new_customer\" (\"id\", \"name\", \"email\", \"created_at\", \"referrer_id\")\nSELECT \"id\", \"name\", \"email\", \"created_at\", \"referrer_id\"\nFROM \"customer\"",
+        "INSERT INTO \"_new_invoice\" (\"id\", \"customer_id\")\nSELECT \"id\", \"customer_id\"\nFROM \"invoice\"",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"order_id\"\nFROM \"order_line\"",
+        "INSERT INTO \"_new_review\" (\"id\", \"customer_id\", \"body\")\nSELECT \"id\", \"customer_id\", \"body\"\nFROM \"review\"",
+        "INSERT INTO \"_new_review_reply\" (\"id\", \"review_id\")\nSELECT \"id\", \"review_id\"\nFROM \"review_reply\"",
+        "INSERT INTO \"_new_visit\" (\"id\", \"customer_id\")\nSELECT \"id\", \"customer_id\"\nFROM \"visit\"",
+        "DROP TABLE \"invoice\"",
+        "DROP TABLE \"order_label\"",
+        "DROP TABLE \"order_line\"",
+        "DROP TABLE \"order\"",
+        "DROP TABLE \"review_reply\"",
+        "DROP TABLE \"review\"",
+        "DROP TABLE \"visit\"",
+        "DROP TABLE \"customer\"",
+        "ALTER TABLE \"_new_customer\" RENAME TO \"customer\"",
+        "ALTER TABLE \"_new_invoice\" RENAME TO \"invoice\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\"",
+        "ALTER TABLE \"_new_review\" RENAME TO \"review\"",
+        "ALTER TABLE \"_new_review_reply\" RENAME TO \"review_reply\"",
+        "ALTER TABLE \"_new_visit\" RENAME TO \"visit\"",
+        "CREATE UNIQUE INDEX \"customer_email_key\" ON \"customer\" (\"email\")",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    }
+  ],
+  "to": "ebb838fb87939cb1d36f6a35d7040bd4be3ef08ff8e649b60a675eba27587333",
+  "toModel": null,
+  "version": 1
+}

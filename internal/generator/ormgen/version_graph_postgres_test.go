@@ -12,6 +12,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
@@ -92,6 +93,8 @@ func generateVersionGraphModule(t *testing.T) string {
 	if err := sqlgen.WriteDDL(ddl, filepath.Join(ormDir, "testdata")); err != nil {
 		t.Fatalf("write ddl: %v", err)
 	}
+	createSQL := filepath.Join(ormDir, "testdata", "create.sql")
+	pgtest.WriteCreateSQL(t, createSQL, createSQL)
 	return ormDir
 }
 

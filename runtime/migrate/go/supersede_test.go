@@ -28,15 +28,23 @@ func refused(t *testing.T, r *migrate.Runner, p *migrate.Plan, phase migrate.Pha
 }
 
 // fromCreate reads a fixture outside the chain that starts from 01's model.
-func fromCreate(t *testing.T, dialect migrate.Dialect) *migrate.Plan {
+// On D1, whose driver refuses fk-violation's step before it reads the state,
+// it is 03-audit edited to start there.
+func fromCreate(t *testing.T, db testdb.Backend) *migrate.Plan {
 	t.Helper()
-	name := "unique-index"
-	if dialect == migrate.SQLite {
-		name = "fk-violation"
+	dialect := db.Dialect()
+	create := plan(t, dialect, "01-create")
+	var p *migrate.Plan
+	switch db {
+	case testdb.Postgres:
+		p = plan(t, dialect, "unique-index")
+	case testdb.D1:
+		p = edited(t, dialect, "03-audit", func(p map[string]any) { p["from"] = create.To })
+	default:
+		p = plan(t, dialect, "fk-violation")
 	}
-	p := plan(t, dialect, name)
-	if p.From != plan(t, dialect, "01-create").To {
-		t.Fatalf("%s does not start from 01's model", name)
+	if p.From != create.To {
+		t.Fatalf("plan %s does not start from 01's model", p.Hash)
 	}
 	return p
 }
@@ -48,14 +56,15 @@ func fromCreate(t *testing.T, dialect migrate.Dialect) *migrate.Plan {
 // is refused while the database holds the expanded model, and so is a plan
 // from it once the old contract has started.
 func TestSupersede(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		create, evolve, supersede := plan(t, dialect, "01-create"), plan(t, dialect, "02-evolve"), plan(t, dialect, "supersede-02")
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		create, evolve, supersede := plan(t, dialect, "01-create"), plan(t, dialect, evolveFixture(db)), plan(t, dialect, "supersede-02")
 		if evolve.Expanded == "" || supersede.From != evolve.Expanded {
 			t.Fatal("supersede-02 does not start from 02-evolve's expanded model")
 		}
 
 		t.Run("a plan from the expanded model", func(t *testing.T) {
-			url := testdb.New(t, dialect)
+			url := testdb.New(t, db)
 			r := newRunner(t, url)
 			apply(t, r, create, migrate.All)
 			seed(t, url)
@@ -63,7 +72,7 @@ func TestSupersede(t *testing.T) {
 
 			// The database is at the expanded model, so a plan from the
 			// model 02 started from is refused.
-			refused(t, r, fromCreate(t, dialect), migrate.All, "has plan "+evolve.Hash+" in progress", "expand steps are done")
+			refused(t, r, fromCreate(t, db), migrate.All, "has plan "+evolve.Hash+" in progress", "expand steps are done")
 
 			result := apply(t, r, supersede, migrate.All)
 			if result.Superseded != evolve.Hash || !result.Finished || !equalInts(result.Ran, ints(1, len(supersede.Steps))) {
@@ -93,7 +102,7 @@ func TestSupersede(t *testing.T) {
 		})
 
 		t.Run("contract after expand", func(t *testing.T) {
-			url := testdb.New(t, dialect)
+			url := testdb.New(t, db)
 			r := newRunner(t, url)
 			apply(t, r, create, migrate.All)
 			apply(t, r, evolve, migrate.Expand)
@@ -121,7 +130,7 @@ func TestSupersede(t *testing.T) {
 			if err := dec.Decode(&createModel); err != nil {
 				t.Fatal(err)
 			}
-			contractOnly := edited(t, dialect, "02-evolve", func(p map[string]any) {
+			contractOnly := edited(t, dialect, evolveFixture(db), func(p map[string]any) {
 				var kept []any
 				for _, s := range steps(p) {
 					if step := s.(map[string]any); step["phase"] == "contract" {
@@ -140,7 +149,7 @@ func TestSupersede(t *testing.T) {
 				t.Fatal("the edited plans do not start and end at 01's model")
 			}
 
-			url := testdb.New(t, dialect)
+			url := testdb.New(t, db)
 			r := newRunner(t, url)
 			apply(t, r, create, migrate.All)
 			apply(t, r, contractOnly, migrate.Expand)
@@ -157,12 +166,12 @@ func TestSupersede(t *testing.T) {
 		})
 
 		t.Run("a contract that has started", func(t *testing.T) {
-			url := testdb.New(t, dialect)
+			url := testdb.New(t, db)
 			r := newRunner(t, url)
 			apply(t, r, create, migrate.All)
 			// 02 with a last contract step that fails: its other contract
 			// steps run, and the plan stays in progress.
-			failing := edited(t, dialect, "02-evolve", func(p map[string]any) {
+			failing := edited(t, dialect, evolveFixture(db), func(p map[string]any) {
 				p["steps"] = append(steps(p), map[string]any{
 					"index": len(steps(p)) + 1, "phase": "contract", "op": "dropTable", "subject": "table/missing",
 					"statements": []any{"DROP TABLE missing"}, "transactional": true,
@@ -188,11 +197,12 @@ func TestSupersede(t *testing.T) {
 // steps leave the applied model at its from, and every other plan is
 // refused until its contract runs.
 func TestAPlanWithoutExpanded(t *testing.T) {
-	forEachDialect(t, func(t *testing.T, dialect migrate.Dialect) {
-		url := testdb.New(t, dialect)
+	forEachBackend(t, func(t *testing.T, db testdb.Backend) {
+		dialect := db.Dialect()
+		url := testdb.New(t, db)
 		r := newRunner(t, url)
 		create := plan(t, dialect, "01-create")
-		old := edited(t, dialect, "02-evolve", func(p map[string]any) {
+		old := edited(t, dialect, evolveFixture(db), func(p map[string]any) {
 			delete(p, "expanded")
 			delete(p, "expandedModel")
 		})
@@ -207,7 +217,7 @@ func TestAPlanWithoutExpanded(t *testing.T) {
 		}
 		// The applied model is the plan's from, which the database no
 		// longer holds: a plan from it is refused, not run.
-		refused(t, r, fromCreate(t, dialect), migrate.All, "has plan "+old.Hash+" in progress", "expand steps are done")
+		refused(t, r, fromCreate(t, db), migrate.All, "has plan "+old.Hash+" in progress", "expand steps are done")
 		refused(t, r, plan(t, dialect, "supersede-02"), migrate.All, "has plan "+old.Hash+" in progress")
 
 		result := apply(t, r, old, migrate.Contract)

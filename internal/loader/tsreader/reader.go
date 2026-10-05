@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/profile"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -71,10 +72,32 @@ func LoadService(servicePath string) (*ir.Schema, *verify.Input, error) {
 
 // ReadServiceConfig statically reads just the service configuration from a
 // TypeScript-form service directory: program construction plus the
-// defineConfig read, with no diagnostics gating and no schema walk. Sentinel
-// emission uses it to learn a sibling service's name and kind without paying
-// for (or being blocked by) the sibling's full load.
+// defineConfig read, with no diagnostics gating and no schema walk. Build-plan
+// discovery uses it to read every service's config without paying for (or
+// being blocked by) a full load.
 func ReadServiceConfig(servicePath string, reg *registry.Registry) (*SchemaConfig, error) {
+	return withConfigWalker(servicePath, reg, func(w *walker, sp *serviceProgram) (*SchemaConfig, error) {
+		return readConfig(w, sp.servicePath, sp.configFile)
+	})
+}
+
+// ReadServiceIdentity reads only the name and kind of a TypeScript-form
+// service config, the two facts a sentinel is made of. It evaluates no other
+// key, so it reads a config that imports a sibling's sentinel before that
+// sentinel exists: the sentinel sweep uses it, and runs before discovery
+// (D34).
+func ReadServiceIdentity(servicePath string, reg *registry.Registry) (*SchemaConfig, error) {
+	return withConfigWalker(servicePath, reg, func(w *walker, sp *serviceProgram) (*SchemaConfig, error) {
+		if sp.configFile == nil {
+			return schemaconfig.ReadFile(sp.servicePath, w.reg)
+		}
+		return readConfigIdentityTS(w, sp.configFile)
+	})
+}
+
+// withConfigWalker builds the service's program and a walker over it that
+// carries no schema, and passes both to read.
+func withConfigWalker(servicePath string, reg *registry.Registry, read func(*walker, *serviceProgram) (*SchemaConfig, error)) (*SchemaConfig, error) {
 	if reg == nil {
 		reg = coreRegistry()
 	}
@@ -91,7 +114,7 @@ func ReadServiceConfig(servicePath string, reg *registry.Registry) (*SchemaConfi
 		servicePath: sp.servicePath,
 		reg:         reg,
 	}
-	return readConfig(bootstrap, sp.servicePath, sp.configFile)
+	return read(bootstrap, sp)
 }
 
 // LoadServiceWithConfig is LoadService plus the statically-read service

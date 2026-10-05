@@ -1,0 +1,211 @@
+{
+  "name": "merge_conflict_on_an_absent_column_reports_null",
+  "op": "merge",
+  "input": {
+    "base": {
+      "step": [
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "id": "00000000-0000-4000-8000-00000000d001",
+          "position": 10,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "title": "Chop",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a002",
+          "extras": {
+            "heat": "low"
+          },
+          "id": "00000000-0000-4000-8000-00000000d002",
+          "inputs": null,
+          "note": null,
+          "position": 10,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "title": "Simmer",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        }
+      ]
+    },
+    "descriptor": {
+      "commitTable": "recipe_commit",
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "extras": "json",
+            "id": "uuid",
+            "inputs": "json",
+            "note": "string",
+            "position": "integer",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "title": "string",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "updated_at"
+          ],
+          "history": {
+            "actor": "updated_by",
+            "exclude": []
+          },
+          "historyTable": "step_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "ref": "ref",
+          "root": "recipe_id",
+          "table": "step",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "extras": "keyed",
+            "inputs": "jsonSchema"
+          },
+          "version": "_version"
+        }
+      ],
+      "patchTable": "recipe_patch",
+      "refTable": "recipe_ref",
+      "releaseTable": "recipe_release",
+      "root": {
+        "key": "id",
+        "table": "recipe"
+      },
+      "snapshotTable": "recipe_snapshot_entry",
+      "version": 3
+    },
+    "ours": {
+      "step": [
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "extras": null,
+          "id": "00000000-0000-4000-8000-00000000d011",
+          "inputs": null,
+          "note": "Chop finely",
+          "position": 10,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0002",
+          "title": "Chop",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a002",
+          "id": "00000000-0000-4000-8000-00000000d012",
+          "position": 10,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0002",
+          "title": "Simmer",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        }
+      ]
+    },
+    "theirs": {
+      "step": [
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "extras": null,
+          "id": "00000000-0000-4000-8000-00000000d021",
+          "inputs": null,
+          "note": "Chop roughly",
+          "position": 10,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0003",
+          "title": "Chop",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e002"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a002",
+          "extras": {
+            "heat": "high"
+          },
+          "id": "00000000-0000-4000-8000-00000000d022",
+          "inputs": null,
+          "note": null,
+          "position": 10,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0003",
+          "title": "Simmer",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e002"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "conflicts": [
+      {
+        "base": null,
+        "entityKey": "00000000-0000-4000-8000-00000000a001",
+        "kind": "step",
+        "ours": "Chop finely",
+        "oursAuthor": "00000000-0000-4000-8000-00000000e001",
+        "path": "/note",
+        "theirs": "Chop roughly",
+        "theirsAuthor": "00000000-0000-4000-8000-00000000e002"
+      },
+      {
+        "base": {
+          "heat": "low"
+        },
+        "entityKey": "00000000-0000-4000-8000-00000000a002",
+        "kind": "step",
+        "ours": null,
+        "oursAuthor": "00000000-0000-4000-8000-00000000e001",
+        "path": "/extras",
+        "theirs": {
+          "heat": "high"
+        },
+        "theirsAuthor": "00000000-0000-4000-8000-00000000e002"
+      }
+    ],
+    "entities": [
+      {
+        "entityKey": "00000000-0000-4000-8000-00000000a001",
+        "kind": "step",
+        "side": "conflict"
+      },
+      {
+        "entityKey": "00000000-0000-4000-8000-00000000a002",
+        "kind": "step",
+        "side": "conflict"
+      }
+    ],
+    "merged": {
+      "step": []
+    }
+  }
+}

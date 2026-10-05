@@ -133,6 +133,10 @@ The database tests (the generated ORM and history triggers, the
 version-graph shell, the projection migrations) skip unless `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` and
 `SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` name a Postgres whose role may
 create schemas, databases and roles; each test creates and drops its own.
+The test packages share that database in parallel, and an extension belongs
+to the whole database, so a test that applies a generated `create.sql` in a
+schema of its own applies the copy `internal/pgtest` prepares, which creates
+the extensions in `public` under an advisory lock first.
 The canonical-row vectors' check against Postgres
 (`runtime/versiongraph/go/canonical`) skips unless
 `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names one; it only reads.
@@ -245,14 +249,20 @@ A release is three steps, each started by a person. For the first release,
    `runtime/http/go/v0.1.0-alpha.1`,
    `runtime/versiongraph/go/v0.1.0-alpha.1` and
    `runtime/migrate/go/v0.1.0-alpha.1` on the same commit. `release.yml` runs
-   the full CI, builds the CLI for linux and darwin on x64 and arm64 (each on
-   a runner of that os/arch, linked against the superscalar archive built
-   from the pinned checkout), refuses a set not built from the tag's commit,
-   writes `SHA256SUMS`, packs the npm tarballs and the PyPI sdist and wheel,
-   creates the GitHub release with build provenance, an SBOM and notes
-   generated from the pull requests merged since the previous tag, and, when
-   `RELEASE_PUBLISH_ENABLED` is `true`, publishes to npm, PyPI and
-   crates.io. Do not create any of the tags by hand.
+   the full CI and builds the CLI for linux and darwin on x64 and arm64, each
+   on a runner of that os/arch, linked against the superscalar archive built
+   from the pinned checkout. It cross-compiles the migration runner,
+   `superschematic-migrate`, for the same four on one runner, since it needs
+   no cgo, and stamps the version its `version` command prints with
+   `-X main.version`. It refuses a set not built from the tag's commit,
+   writes `SHA256SUMS` over both binaries' archives
+   (`superschematic_<version>_<platform>.tar.gz` and
+   `superschematic-migrate_<version>_<platform>.tar.gz`), and packs the npm
+   tarballs and the PyPI sdist and wheel. It creates the GitHub release with
+   build provenance, an SBOM and notes generated from the pull requests
+   merged since the previous tag, and, when `RELEASE_PUBLISH_ENABLED` is
+   `true`, publishes to npm, PyPI and crates.io. Do not create any of the
+   tags by hand.
 
 After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
 (and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@`,
@@ -273,9 +283,9 @@ forms. The GitHub release is marked as a pre-release, npm publishes under the
 
 A dry run of the build on any branch: Actions -> release -> Run workflow with
 `dry_run` checked (or `gh workflow run release.yml --ref <branch> -f
-dry_run=true`). It runs the verify, build and assemble jobs and uploads the
-assembled release set as the `release-assets` workflow artifact; nothing is
-released, published or deployed.
+dry_run=true`). It runs the verify, build, build-migrate and assemble jobs
+and uploads the assembled release set as the `release-assets` workflow
+artifact; nothing is released, published or deployed.
 
 ### Trusted publishing
 

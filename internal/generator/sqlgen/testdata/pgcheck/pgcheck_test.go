@@ -16,7 +16,9 @@
 // create.sql and drop.sql. TestListDefaultsOnPostgres (list_defaults_test.go)
 // checks the defaults of required temporal, list and JSONB columns.
 // TestPruneHistoryDropOnPostgres (prune_history_test.go) checks that drop.sql
-// drops the prune functions create.sql makes.
+// drops the prune functions create.sql makes. TestConcurrentCreateOnPostgres
+// (concurrent_create_test.go) applies create.sql from several connections
+// at once.
 package pgcheck
 
 import (

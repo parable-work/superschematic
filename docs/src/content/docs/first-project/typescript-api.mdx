@@ -34,8 +34,10 @@ handlers and say who the caller is.
 `language: "TYPESCRIPT"` generates the router package instead of a Go
 module. The router validates requests with the TypeScript types, so
 `types` lists TypeScript.
-`service({ name: "shop-common", kind: SchemaKind.General })` is
-the handle `shop-common`'s build wrote to its `src/service.generated.ts`.
+`ShopCommon` is the handle `shop-common`'s build wrote to its
+`src/service.generated.ts`, imported from `@acme/shop-common` as a schema
+imports types. A config imports nothing else but
+`@superschematic/schema-config`.
 
 ## Build
 

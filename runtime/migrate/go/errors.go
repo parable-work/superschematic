@@ -46,3 +46,17 @@ func (e *StepError) Error() string {
 }
 
 func (e *StepError) Unwrap() error { return e.Err }
+
+// StatementError is a failure a driver traces to one statement of a
+// transaction. A driver that sends a transaction's statements together at
+// its commit learns of a failure only then; when the database names the
+// statement that failed, the driver returns a StatementError, and the
+// step's error names that statement.
+type StatementError struct {
+	Statement string
+	Err       error
+}
+
+func (e *StatementError) Error() string { return e.Err.Error() }
+
+func (e *StatementError) Unwrap() error { return e.Err }

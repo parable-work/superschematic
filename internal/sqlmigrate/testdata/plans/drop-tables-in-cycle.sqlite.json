@@ -2,11 +2,10 @@
   "dialect": "sqlite",
   "expanded": "b95fe7e4245fbcc1514d94b1bd5ba709633840723c02b6577ee74c1ae248dbf3",
   "from": "b95fe7e4245fbcc1514d94b1bd5ba709633840723c02b6577ee74c1ae248dbf3",
-  "hash": "8fc74b1cb9b2e5114f726c7e217f56b335a5d34ca9bbb144d61502bb4c1ba45e",
+  "hash": "6c0a12e68285864ae14d1f2bc9534228586c2d59ec35805c855d552093241b72",
   "service": "shop-db",
   "steps": [
     {
-      "foreignKeysOff": true,
       "hazards": [
         {
           "class": "destructive",
@@ -25,6 +24,7 @@
       "op": "dropTable",
       "phase": "contract",
       "statements": [
+        "PRAGMA defer_foreign_keys = ON",
         "DROP TABLE \"supplier\"",
         "DROP TABLE \"warehouse\""
       ],

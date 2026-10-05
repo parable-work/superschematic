@@ -1,0 +1,77 @@
+{
+  "name": "content_hash_absent_role_and_excluded_columns_count_as_nothing",
+  "op": "content_hash",
+  "input": {
+    "descriptor": {
+      "commitTable": "recipe_commit",
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "extras": "json",
+            "id": "uuid",
+            "inputs": "json",
+            "note": "string",
+            "position": "integer",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "title": "string",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "updated_at"
+          ],
+          "history": {
+            "actor": "updated_by",
+            "exclude": []
+          },
+          "historyTable": "step_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "ref": "ref",
+          "root": "recipe_id",
+          "table": "step",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "extras": "keyed",
+            "inputs": "jsonSchema"
+          },
+          "version": "_version"
+        }
+      ],
+      "patchTable": "recipe_patch",
+      "refTable": "recipe_ref",
+      "releaseTable": "recipe_release",
+      "root": {
+        "key": "id",
+        "table": "recipe"
+      },
+      "snapshotTable": "recipe_snapshot_entry",
+      "version": 3
+    },
+    "tree": {
+      "step": [
+        {
+          "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "extras": null,
+          "inputs": null,
+          "note": null,
+          "position": 10,
+          "title": "Chop"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "contentHash": "8ee9db305b6392c0520046d0a8eaf2f4f8741cda474c0d47a9b1f5350afa3719"
+  }
+}

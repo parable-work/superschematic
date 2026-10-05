@@ -7,7 +7,9 @@ import (
 
 // Driver is one database connection as the runner uses it. Package postgres
 // and package sqlite implement it over one dedicated connection, so every
-// statement of a run, and the session settings it makes, share it.
+// statement of a run, and the session settings it makes, share it. Package
+// d1 implements it over Cloudflare's REST API, where a transaction is one
+// request.
 type Driver interface {
 	// Dialect is the database the driver talks to.
 	Dialect() Dialect
@@ -19,6 +21,12 @@ type Driver interface {
 	// Transact runs fn in one transaction, which waits at most the
 	// driver's lock timeout for each lock. It commits when fn returns nil
 	// and rolls back otherwise, returning fn's error.
+	//
+	// A driver may hold a transaction's writes until the commit and send
+	// them together, as the D1 driver does. Its Exec then fails only at the
+	// commit, and its Query sees none of the transaction's writes, so a
+	// caller reads before it writes. Such a driver returns a
+	// *StatementError from the commit when it knows which statement failed.
 	Transact(ctx context.Context, opts TxOptions, fn func(ctx context.Context, conn Conn) error) error
 	// Session runs fn outside a transaction, so each statement commits on
 	// its own, under the driver's lock timeout. A driver that runs every
@@ -51,9 +59,18 @@ type Conn interface {
 	Query(ctx context.Context, sql string, args []any, row func(scan func(dest ...any) error) error) error
 }
 
-// URLDialect returns the dialect a database URL selects: a postgres:// or
-// postgresql:// URL selects Postgres; a sqlite: URL, a file: URI or a path
-// selects SQLite.
+// StepChecker is a Driver that cannot run every step a plan of its dialect
+// may hold. Apply calls CheckStep for each step of a plan before it takes
+// the lock, and refuses the plan, running nothing, when one returns an
+// error. The error names the step and says why.
+type StepChecker interface {
+	CheckStep(step *Step) error
+}
+
+// URLDialect returns the dialect of the plans a database URL's database
+// runs: a postgres:// or postgresql:// URL selects Postgres; a d1:// URL
+// selects a D1 database, which runs SQLite plans; a sqlite: URL, a file:
+// URI or a path selects SQLite.
 func URLDialect(url string) Dialect {
 	lower := strings.ToLower(url)
 	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {

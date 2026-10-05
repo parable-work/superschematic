@@ -94,6 +94,7 @@
         },
         {
           "default": "'[]'",
+          "element": "TEXT",
           "holds": "list",
           "name": "tags",
           "origin": "Sample.tags",

@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
@@ -57,6 +58,8 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if err := sqlgen.WriteDDL(ddl, filepath.Join(root, "sql")); err != nil {
 		t.Fatalf("write the DDL: %v", err)
 	}
+	createSQL := filepath.Join(root, "sql", "create.sql")
+	pgtest.WriteCreateSQL(t, createSQL, createSQL)
 	outDir := filepath.Join(root, output.CrateName)
 	paths := testpaths.Local(t)
 	if err := SetLocalPaths(output, paths, outDir); err != nil {
@@ -92,7 +95,7 @@ tokio-postgres = "0.7.18"
 	cmd.Dir = outDir
 	cmd.Env = append(os.Environ(),
 		"CARGO_TARGET_DIR="+filepath.Join(root, "target"),
-		"FACADE_DDL="+filepath.Join(root, "sql", "create.sql"),
+		"FACADE_DDL="+createSQL,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -159,7 +162,6 @@ async fn graph(name: &str) -> (RecipeGraph, tokio_postgres::Client, IdentityUUID
         }
     };
     let admin = connect(None).await;
-    let _ = admin.batch_execute("CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public").await;
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_nanos();
     let schema = format!("vg_rust_facade_{name}_{nanos}_{}", std::process::id());
     admin.batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}")).await.expect("create the schema");

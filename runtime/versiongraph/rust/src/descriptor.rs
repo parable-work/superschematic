@@ -251,6 +251,8 @@ pub struct Kind {
     units: BTreeMap<String, Unit>,
     excluded: BTreeSet<String>,
     columns: BTreeMap<String, ValueClass>,
+    /// The content columns the descriptor declares, in column order.
+    content: Vec<String>,
 }
 
 impl Kind {
@@ -258,6 +260,14 @@ impl Kind {
     /// not excluded. Only content is compared, merged, diffed and hashed.
     pub fn is_content(&self, column: &str) -> bool {
         !self.is_role(column) && !self.excluded.contains(column)
+    }
+
+    /// The content columns the descriptor declares: its `columns` less the
+    /// role and excluded ones. A row that lacks one holds it as null
+    /// wherever content is compared, merged, diffed or hashed, as a row
+    /// written before its kind gained the column reads it on Postgres.
+    pub fn content_columns(&self) -> &[String] {
+        &self.content
     }
 
     fn is_role(&self, column: &str) -> bool {
@@ -444,7 +454,7 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
     };
     let excluded: BTreeSet<String> = raw.excluded.into_iter().collect();
     let history = raw.history;
-    let kind = Kind {
+    let mut kind = Kind {
         name,
         key: raw.key,
         id: raw.id,
@@ -459,7 +469,14 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
         units: raw.units,
         excluded,
         columns: raw.columns,
+        content: Vec::new(),
     };
+    kind.content = kind
+        .columns
+        .keys()
+        .filter(|column| kind.is_content(column))
+        .cloned()
+        .collect();
     let structural = kind
         .parent
         .as_ref()
