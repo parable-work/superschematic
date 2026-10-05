@@ -27,11 +27,13 @@ mountOperation once per @rest operation with the operation's spec and a
 handler that forwards decoded arguments to the service's implementation; the
 adapter owns the request pipeline:
 
-  request id -> @hmacVerified -> [hono/timeout: hono/body-limit (a
-  declared Content-Length over the cap answers 413 here) ->
+  request id -> @hmacVerified -> [hono/timeout: hono/body-limit ->
   hono/bearer-auth -> @rateLimit -> permission gate -> path/query
-  decoding -> JSON parse (a streamed body over the cap answers 413 here)
-  -> strict input parser -> implementation] -> envelope
+  decoding -> JSON parse -> strict input parser -> implementation]
+  -> envelope
+
+hono/body-limit answers 413 to a declared Content-Length over the cap, and
+reads a body without one up front, answering 413 once it passes the cap.
 
 and turns every failure into the problem envelope. Operations marked
 @manualRouteRegistration are mounted through mountManualOperation: the
