@@ -72,9 +72,10 @@ for (const driver of drivers) {
       const seen = engine.events.read(alice, { schema: 'Recipe', instanceId: 'soup' }).events.length;
       clock.now += 20_000;
       assert.equal(engine.runner.runDue().scheduled, 1);
+      // Refs made in one millisecond list in the order of their ids.
       assert.deepEqual(
-        soup.refs().map((ref) => ref.name),
-        ['main', 'kept', 'busy']
+        soup.refs().map((ref) => ref.name).sort(),
+        ['busy', 'kept', 'main']
       );
       const events = engine.events.read(alice, { schema: 'Recipe', instanceId: 'soup' }).events.slice(seen);
       assert.deepEqual(

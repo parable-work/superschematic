@@ -673,7 +673,7 @@ for (const driver of drivers) {
       for (const table of ['ref', 'commit', 'release', 'member', 'roots']) {
         assert.deepEqual(all(`SELECT COUNT(*) AS n FROM bhv_branches__${table} WHERE root_id = ?`, [root]), [{ n: 0 }], table);
       }
-      assert.deepEqual(stew.refs().map((ref) => ref.name), ['main', 'first', 'draft']);
+      assert.deepEqual(stew.refs().map((ref) => ref.name).sort(), ['draft', 'first', 'main']);
     });
 
     test('a new version may add a kind, change fields as the compatibility rule allows and a retention; it may not remove a kind, change a parent, an order, a singleton or a unit, or drop Branches', () => {
