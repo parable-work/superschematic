@@ -238,17 +238,11 @@ the environments, a class each. A sketch over acme-shop:
 
 ```ts
 // schemas/services/shop-stack/schema.config.ts
-import { ShopApi } from "@acme/shop-api";
-import { ShopDb } from "@acme/shop-db";
-import { ShopOrders } from "@acme/shop-orders";
 import { defineConfig, SchemaKind } from "@superschematic/schema-config";
 
 export default defineConfig({
   name: "shop-stack",
   kind: SchemaKind.Stack,
-  // Every service the stack reaches, until the build plan counts the
-  // handles a schema names (section 12).
-  dependencies: [ShopDb, ShopApi, ShopOrders],
   outputs: {},
 });
 ```

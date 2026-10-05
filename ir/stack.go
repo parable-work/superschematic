@@ -299,3 +299,53 @@ func StackOf(schema *Schema) *Stack {
 	stack.Environments = environments
 	return stack
 }
+
+// StackReferences returns every service handle the declarations of a Stack
+// schema's classes hold: `@stack`'s deploy and its exposed handles,
+// `@server`'s serves, `@database`'s hosts and each settings element's `of`,
+// in declaration order and with repeats. They are the schema's references
+// (Schema.References, D41). The TypeScript form records them from the
+// decorators' arguments; the data forms write the declarations as these
+// typed fields, so the loader adds them from here in every form.
+func StackReferences(schema *Schema) []ServiceRef {
+	if schema == nil {
+		return nil
+	}
+	names := make([]string, 0, len(schema.Types))
+	for name := range schema.Types {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var refs []ServiceRef
+	deployable := func(ref DeployableRef) {
+		if ref.Service != nil {
+			refs = append(refs, *ref.Service)
+		}
+	}
+	for _, name := range names {
+		td := schema.Types[name]
+		if td == nil {
+			continue
+		}
+		if td.Stack != nil {
+			refs = append(refs, td.Stack.Deploy...)
+			for _, exposed := range td.Stack.Expose {
+				deployable(exposed)
+			}
+		}
+		if td.Server != nil {
+			refs = append(refs, td.Server.Serves...)
+		}
+		if td.Database != nil {
+			refs = append(refs, td.Database.Hosts...)
+		}
+		if td.Environment != nil {
+			for _, settings := range td.Environment.Settings {
+				if settings != nil {
+					deployable(settings.Of)
+				}
+			}
+		}
+	}
+	return refs
+}

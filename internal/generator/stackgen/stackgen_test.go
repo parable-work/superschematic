@@ -370,14 +370,41 @@ func TestTheLoaderRefusesABadStack(t *testing.T) {
 	})
 }
 
-// TestAStacksCacheKeyFollowsTheServicesItReaches: build-all keys each
-// service's cached output on its inputs and its dependencies' keys, so a
-// change to a service the stack reaches rebuilds the stack. The stack's
-// config lists those services in dependencies until the build plan counts
-// the handles a schema names (docs/stack-model.md, section 12).
+// TestAStacksReferencesAreTheServicesItNames: the handles a stack's
+// declarations hold are its references in both forms (D41): the TypeScript
+// form records them from the decorators' arguments, and the loader adds
+// them from the typed fields the YAML form writes. The stack's config names
+// none of them.
+func TestAStacksReferencesAreTheServicesItNames(t *testing.T) {
+	reg := assemble(t)
+	want := []ir.ServiceRef{
+		{Name: "shop-api", Kind: ir.SchemaKindAPI},
+		{Name: "shop-db", Kind: ir.SchemaKindDB},
+		{Name: "shop-orders", Kind: ir.SchemaKindAPI},
+	}
+	for _, dir := range []string{filepath.Join(servicesRoot, "shop-stack"), yamlStack} {
+		schema, cfg := load(t, reg, dir)
+		if !reflect.DeepEqual(schema.References, want) {
+			t.Errorf("%s: References = %+v, want %+v", dir, schema.References, want)
+		}
+		if len(cfg.Dependencies) != 0 {
+			t.Errorf("%s: the config declares dependencies %+v", dir, cfg.Dependencies)
+		}
+	}
+}
+
+// TestAStacksCacheKeyFollowsTheServicesItReaches: build-all keys a stack's
+// cached output on the services its schema references and on every service
+// their configs reach, from the depfile the stack's build writes (D41), so
+// a change to any of them rebuilds the stack. None orders the build.
 func TestAStacksCacheKeyFollowsTheServicesItReaches(t *testing.T) {
 	reg := assemble(t)
 	services := copyServices(t)
+	schemasRoot := filepath.Dir(services)
+	stack, _ := load(t, reg, filepath.Join(services, "shop-stack"))
+	if err := buildcache.WriteSchemaReferences(schemasRoot, stack.Name, stack.References, stack.IdentitySentinels); err != nil {
+		t.Fatal(err)
+	}
 	hashes := func() map[string]string {
 		t.Helper()
 		discovered, err := buildplan.DiscoverWith(services, t.TempDir(), reg)
@@ -388,7 +415,7 @@ func TestAStacksCacheKeyFollowsTheServicesItReaches(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hashes, err := buildcache.ComputeInputHashes(sorted, filepath.Dir(filepath.Dir(services)), reg.Naming())
+		hashes, err := buildcache.ComputeInputHashes(sorted, filepath.Dir(schemasRoot), reg.Naming())
 		if err != nil {
 			t.Fatal(err)
 		}

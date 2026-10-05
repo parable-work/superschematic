@@ -3154,3 +3154,25 @@ undeclared keys. A Go caller sending an undeclared key now gets a 400
 where it was ignored.
 
 The rule is reversible until the first release.
+
+### D41, amended: a stack's typed declarations give its references in every form
+
+The Stack kind writes `@stack`, `@server`, `@database` and `@environment`
+in the data forms as typed `TypeDef` fields (`Stack`, `Server`,
+`Database`, `Environment`), not as decorator arguments, so a YAML stack's
+handles never passed through D41's recording. The TypeScript form recorded
+them; the YAML form would have had to restate each one in `references`.
+Until D41 merged, a stack's config also listed every service the stack
+reaches in `dependencies`, so that a change to one rebuilt the stack.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The loader adds the handles a Stack schema's declarations hold to its references, in every form, once the schema verifies: `@stack`'s `deploy` and exposed handles, `@server`'s `serves`, `@database`'s `hosts` and each settings element's `of` (`ir.StackReferences`). A data-form stack states no `references` list, and a stack's config lists no `dependencies`: the cache key follows the references and the services their configs reach. | A `references` list in every data-form stack, which restates each handle the declarations already hold; keeping the config's `dependencies`, which also orders every reached service before the stack, an order the stack's build does not need |
+
+`runVerify` in `internal/loader/loader.go` adds them.
+`TestAStacksReferencesAreTheServicesItNames` loads the stack in TypeScript
+and YAML with no `dependencies` and gets the same three references, and
+`TestAStacksCacheKeyFollowsTheServicesItReaches` changes each service the
+stack reaches after the stack's depfile is written, as a build writes it.
+The stackgen fixtures and the sketch in section 4.1 of
+`docs/stack-model.md` no longer list `dependencies`.
