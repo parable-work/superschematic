@@ -308,7 +308,11 @@ A [version graph](/superschematic/reference/version-graphs/)'s tables are
 ordinary tables after the loader adds them, and migrate as any other. A
 change to a member's content columns is `history`: commits made before it
 hash and merge rows of the old shape. The hazard says whether the graph's
-`schemaEpoch` rose.
+`schemaEpoch` rose. A column can join or leave the content while the
+column stays, as `@conflictUnit('excluded')` added or taken off it does.
+That changes no table, so it gets a step of its own in `expand`,
+`changeGraphContent`, with no statements: the step carries the hazard,
+which names the columns, and the runner logs it like any other.
 
 ## SQLite
 
@@ -335,8 +339,12 @@ With `sqlite` listed, the build also writes
 `<out>/sql/<service>/sqlite/create.sql`: the SQLite plan from an empty
 database, its steps' statements as one script. `migrate plan --dialect
 sqlite` plans the service's SQLite database, and refuses a service that
-does not list `sqlite`. The Postgres DDL is the same whether `sqlite` is
-listed or not.
+does not list `sqlite`. It refuses a previous version, a service
+directory (`--from <service-dir>`) or a git ref (`--from-ref`), that
+does not list `sqlite` either: no build of it wrote a SQLite database.
+Plan from the model the database recorded (`--from <model.json>`), which
+is checked by its own `dialect`, or from an empty database. The Postgres
+DDL is the same whether `sqlite` is listed or not.
 
 ### Types and defaults
 
@@ -383,7 +391,7 @@ Every SQLite step runs in a transaction, which the runner opens with
 | a column dropped | `DROP COLUMN` (`blocking`: SQLite rewrites the table). Its indexes are dropped before it, and a foreign key over it makes its table's rebuild drop it instead |
 | an index or a unique field added or dropped | `CREATE INDEX`, `CREATE UNIQUE INDEX`, `DROP INDEX`; building an index on a table the previous version has is `blocking` |
 | an index or a unique field renamed | the index dropped and built again under its new name (`blocking`): SQLite cannot rename an index |
-| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs |
+| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops |
 
 Every other change to a table rebuilds it: a type, a nullability, a
 default, a foreign key added over a column the table has, changed or
@@ -437,17 +445,23 @@ the feature and the dialect:
 - the types SQLite has no storage for: `LTREE` and the PostGIS types
   (`POINT`, `GEOGRAPHY`, `GEOMETRY`).
 
-A plan that drops two tables that reference each other fails too: SQLite
-can drop the foreign key that closes the cycle only by rebuilding a table
-the plan drops. Drop one of the relations in a version of its own first.
-
 ### What SQLite does not keep
 
 - `VARCHAR(n)` and `NUMERIC(p, s)` are `TEXT` and `NUMERIC`: SQLite does
   not enforce the length, the precision or the scale, so a change of
   them is no step.
-- A list, a JSON value and text are all `TEXT`, so a field that changes
-  between them is no step either, and the plan converts no value.
+- A list, a JSON value and text are all `TEXT`. The model records what a
+  column holds as JSON (`"holds": "list"` or `"json"`), so a field that
+  changes between them is not lost. A JSON value that becomes text keeps
+  its JSON text, as Postgres's cast keeps it, through a rebuild that casts
+  nothing; one that becomes another scalar casts as text does. Every other
+  change between a scalar, a list and a JSON value fails the plan, naming
+  the column and both kinds: text is not a JSON array, Postgres parses
+  text as JSON where wrapping it in a JSON string would keep another
+  value, and Postgres converts no list to or from anything else. Change
+  the column by hand and adopt the new model.
+- A list whose element type changes is the same `TEXT` holding a JSON
+  array, so it is no step, and its elements keep their JSON types.
 
 ## The runner
 

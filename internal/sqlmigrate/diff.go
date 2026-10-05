@@ -149,6 +149,7 @@ func (d *differ) diff() error {
 	if err := d.diffTables(); err != nil {
 		return err
 	}
+	d.diffGraphs()
 	d.diffFunctions()
 	d.diffTriggers()
 	d.diffViews(d.groupAlterations())
@@ -350,11 +351,12 @@ func (d *differ) diffColumns(ft, tt *Table) error {
 			generated = append(generated, genPair{fc, tc})
 			continue
 		}
-		conv := d.dialect.convert(fc.Type, tc.Type)
+		conv := d.dialect.convert(fc, tc)
 		switch conv.kind {
 		case convertImpossible:
+			before, after := typeNames(fc, tc)
 			return fmt.Errorf("sqlmigrate: column %s.%s%s changes from %s to %s, which %s cannot convert; change the column by hand and adopt the new model",
-				tt.Name, tc.Name, originNote(tc), fc.Type, tc.Type, d.dialect.name())
+				tt.Name, tc.Name, originNote(tc), before, after, d.dialect.name())
 		case convertSame:
 			d.diffDefault(tt, fc, tc)
 		default:
@@ -405,7 +407,7 @@ func (d *differ) diffColumns(ft, tt *Table) error {
 
 // sameShape reports whether two columns differ only by name.
 func sameShape(a, b *Column) bool {
-	return a.Type == b.Type && a.Nullable == b.Nullable && a.Default == b.Default && a.Generated == b.Generated
+	return a.Type == b.Type && a.Holds == b.Holds && a.Nullable == b.Nullable && a.Default == b.Default && a.Generated == b.Generated
 }
 
 func (d *differ) addColumn(ft, tt *Table, tc *Column) {
@@ -695,48 +697,160 @@ func (d *differ) dropTables(tables []*Table) {
 	for i, ft := range order {
 		position[ft.Name] = i
 	}
+	// A table that references one dropped before it, in a reference cycle,
+	// loses that foreign key first. A dialect that cannot drop the foreign
+	// key in place (SQLite, which would rebuild a table the plan drops)
+	// drops the tables of each cycle together instead, in one step.
+	var cycleFKs []*change
+	together := false
 	for i, ft := range order {
-		// A table that references one dropped before it, in a reference
-		// cycle, loses that foreign key first.
 		for _, fk := range ft.ForeignKeys {
 			if j, ok := position[fk.RefTable]; ok && j < i {
-				d.add(&change{
+				c := &change{
 					op: opDropForeignKey, phase: Contract, subject: constraintSubject(ft.Name, fk.Name),
 					table: ft.Name, foreignKey: fk,
-				})
+				}
+				cycleFKs = append(cycleFKs, c)
+				together = together || !d.dialect.canAlter(c)
 			}
 		}
+	}
+	if together {
+		for i, unit := range dropUnits(tables, d.dropped) {
+			c := d.add(&change{
+				op: opDropTable, phase: Contract, subject: tableSubject(unit[0].Name),
+				table: unit[0].Name, tableDef: unit[0], dropsWith: unit[1:], order: i,
+			})
+			for _, ft := range unit {
+				member := &change{phase: Contract, subject: tableSubject(ft.Name)}
+				d.dropTableHazards(member, ft, created)
+				c.hazards = append(c.hazards, member.hazards...)
+			}
+		}
+		return
+	}
+	for _, c := range cycleFKs {
+		d.add(c)
+	}
+	for i, ft := range order {
 		c := d.add(&change{
 			op: opDropTable, phase: Contract, subject: tableSubject(ft.Name),
 			table: ft.Name, tableDef: ft, order: i,
 		})
-		reason := fmt.Sprintf("Dropping table %s deletes its rows (%s).", ft.Name, ft.Origin)
-		switch ft.Kind {
-		case TableHistory:
-			reason = fmt.Sprintf("Dropping %s deletes every recorded version of %s.", ft.Name, ft.Origin)
-		case TableJoin:
-			reason = fmt.Sprintf("Dropping join table %s deletes the links of %s.", ft.Name, ft.Origin)
+		d.dropTableHazards(c, ft, created)
+	}
+}
+
+// dropTableHazards adds the hazards of dropping table ft to c: destructive,
+// with a note when a table the plan creates may be ft renamed, and
+// api-breaking for its readers.
+func (d *differ) dropTableHazards(c *change, ft *Table, created []*Table) {
+	reason := fmt.Sprintf("Dropping table %s deletes its rows (%s).", ft.Name, ft.Origin)
+	switch ft.Kind {
+	case TableHistory:
+		reason = fmt.Sprintf("Dropping %s deletes every recorded version of %s.", ft.Name, ft.Origin)
+	case TableJoin:
+		reason = fmt.Sprintf("Dropping join table %s deletes the links of %s.", ft.Name, ft.Origin)
+	}
+	if ft.Kind == TableEntity {
+		var same []*Table
+		for _, tt := range created {
+			if sameColumns(ft, tt) {
+				same = append(same, tt)
+			}
 		}
-		if ft.Kind == TableEntity {
-			var same []*Table
-			for _, tt := range created {
-				if sameColumns(ft, tt) {
-					same = append(same, tt)
+		if len(same) == 1 {
+			reason += fmt.Sprintf(" It may be a rename: table %s has the same columns. If it is, plan with --rename %s=%s.",
+				same[0].Name, ft.Name, same[0].Name)
+		}
+	}
+	c.addHazard(HazardDestructive, "", reason)
+	d.breaksReaders(c, ft.Name, "", "drops its table")
+}
+
+// dropUnits groups the dropped tables for a dialect that drops a reference
+// cycle's tables together: the tables of each cycle, which reach one
+// another through their references, share a unit, and every other table is
+// a unit of its own. Each unit comes before the units it references, by
+// its first table's name among equals, and holds its tables in name order.
+// With foreign keys off, as a dropped table's step runs, nothing checks a
+// reference until the step's end, when every table that references a
+// dropped one is gone too.
+func dropUnits(tables []*Table, dropped map[string]bool) [][]*Table {
+	sort.Slice(tables, func(i, j int) bool { return tables[i].Name < tables[j].Name })
+	byName := map[string]*Table{}
+	for _, t := range tables {
+		byName[t.Name] = t
+	}
+	reach := map[string]map[string]bool{} // table -> the tables its references reach
+	for _, t := range tables {
+		seen := map[string]bool{}
+		stack := refsOf(t, dropped)
+		for len(stack) > 0 {
+			name := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if !seen[name] {
+				seen[name] = true
+				stack = append(stack, refsOf(byName[name], dropped)...)
+			}
+		}
+		reach[t.Name] = seen
+	}
+
+	unitOf := map[string]int{}
+	var units [][]*Table
+	for _, t := range tables {
+		if _, ok := unitOf[t.Name]; ok {
+			continue
+		}
+		unitOf[t.Name] = len(units)
+		unit := []*Table{t}
+		for _, other := range tables {
+			if other != t && reach[t.Name][other.Name] && reach[other.Name][t.Name] {
+				unitOf[other.Name] = len(units)
+				unit = append(unit, other)
+			}
+		}
+		units = append(units, unit)
+	}
+
+	// The units and their references form no cycle, so one is always free:
+	// no unit not yet placed references it.
+	references := make([]map[int]bool, len(units))
+	referencedBy := make([]int, len(units))
+	for i, unit := range units {
+		references[i] = map[int]bool{}
+		for _, t := range unit {
+			for _, ref := range refsOf(t, dropped) {
+				if j := unitOf[ref]; j != i && !references[i][j] {
+					references[i][j] = true
+					referencedBy[j]++
 				}
 			}
-			if len(same) == 1 {
-				reason += fmt.Sprintf(" It may be a rename: table %s has the same columns. If it is, plan with --rename %s=%s.",
-					same[0].Name, ft.Name, same[0].Name)
-			}
 		}
-		c.addHazard(HazardDestructive, "", reason)
-		d.breaksReaders(c, ft.Name, "", "drops its table")
 	}
+	var out [][]*Table
+	placed := make([]bool, len(units))
+	for len(out) < len(units) {
+		for i, unit := range units {
+			if placed[i] || referencedBy[i] > 0 {
+				continue
+			}
+			placed[i] = true
+			out = append(out, unit)
+			for j := range references[i] {
+				referencedBy[j]--
+			}
+			break
+		}
+	}
+	return out
 }
 
 // dropOrder sorts tables so that each comes before the tables it
 // references, by name among equals. A reference cycle is broken in name
-// order; dropTables drops the foreign keys that point back first.
+// order; dropTables drops the foreign keys that point back first, or, for
+// a dialect that cannot, drops by dropUnits instead.
 func dropOrder(tables []*Table, dropped map[string]bool) []*Table {
 	sort.Slice(tables, func(i, j int) bool { return tables[i].Name < tables[j].Name })
 	referencedBy := map[string]int{} // dropped table -> dropped tables that reference it, not yet placed

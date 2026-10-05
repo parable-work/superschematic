@@ -2204,7 +2204,7 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 55 pairs for Postgres and 39 for SQLite, 9 of them
+Plan goldens cover 57 pairs for Postgres and 41 for SQLite, 10 of them
 rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
@@ -2223,8 +2223,11 @@ foreign key whose `onDelete` alone changes is replaced in `contract` with
 no hazard; an index is dropped with a plain `DROP INDEX` in a transaction;
 `Diff` refuses a `partitionBy` change on an existing table, an impossible
 cast, a primary key change and a change between a generated and a stored
-column; a change to a graph member's content set with no DDL change has no
-step, so no hazard; `--reader` services are read against both models;
+column; a column that joins or leaves a graph member's content while the
+column stays, as `@conflictUnit('excluded')` makes it, gets a step with no
+statements in `expand`, `changeGraphContent`, which carries the `history`
+hazard, and the runner logs a step with no statements like any other;
+`--reader` services are read against both models;
 `--from-ref` extracts the previous schemas root beside the checkout's, so
 the paths its `tsconfig` reaches resolve, and each version uses its own
 naming file; a service is a reader when its kind allows `@source`; a
@@ -2258,14 +2261,27 @@ a table that exists and `DROP COLUMN`, which rewrites the table, are
 dropped before it and a foreign key over it rebuilds the table; a dropped
 table is dropped with foreign keys off, since with them on `DROP TABLE`
 deletes its rows first, which a `RESTRICT` on the table itself refuses;
-a plan that drops two tables that reference each other fails on SQLite,
-since dropping the foreign key that closes the cycle needs a rebuild of a
-table the plan drops; a change between a list, a JSON value and text, all
-`TEXT`, is no step and converts no value; `migrate plan --dialect sqlite`
-refuses a service whose new version does not list `sqlite`, and builds
-the previous version's SQLite model without checking its list; and the
-SQLite convergence test compares a column's collation through an index
-it builds and rolls back, since no pragma reports it. D32 takes the
+tables a plan drops that reference each other are dropped in one step on
+SQLite, after the tables that reference them and before those they
+reference, since dropping the foreign key that closes the cycle needs a
+rebuild of a table the plan drops, and a `foreign_key_check` between two
+drops finds the rows of one referencing the other, while Postgres drops
+that foreign key first; a list, a JSON value and text are all `TEXT`, so
+the SQLite model records what a column holds as JSON (`holds`: `list` or
+`json`; Postgres models never set it); a JSON value that becomes text
+keeps its JSON text through a rebuild, as Postgres's cast keeps it, and
+one that becomes another scalar casts as text does, while every other
+change between a scalar, a list and a JSON value fails the plan, since no
+conversion keeps every value as Postgres would: text is not a JSON array,
+Postgres parses text as JSON where `json_quote` would wrap it, and
+Postgres converts no list; a list whose element type changes is still no
+step on SQLite; `migrate plan --dialect sqlite` refuses a service whose
+new version does not list `sqlite`, and a previous version, a service
+directory or a git ref, whose list lacks it, pointing to the model the
+database recorded or an empty database, while a `--from` model is
+checked by its own `dialect`; and the SQLite convergence test compares
+a column's collation through an index it builds and rolls back, since no
+pragma reports it. D32 takes the
 version graph to SQLite through its adapter's own tables, which write
 history without triggers, not through this dialect, so `@versioned` stays
 refused here. D30's deploy runs a plan's `expand` steps before the servers

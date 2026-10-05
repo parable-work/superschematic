@@ -207,7 +207,10 @@ elsewhere; it counts on both sides.
 `--dialect sqlite` plans the service's SQLite database, with the copy-table
 rebuild where SQLite's `ALTER TABLE` falls short
 ([SQLite](/superschematic/reference/migrations/#sqlite)). The service's
-`outputs.sql.dialects` must list `sqlite`.
+`outputs.sql.dialects` must list `sqlite`, and so must the previous
+version's when it is a service directory or a git ref. A database whose
+previous version was not built for SQLite plans from the model it
+recorded (`--from <model.json>`).
 
 `--format` prints the plan to stdout; notes, such as planning from an empty
 database, go to stderr. With `--fail-on`, the command prints the plan,

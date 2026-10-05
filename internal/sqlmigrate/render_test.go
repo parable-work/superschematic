@@ -24,8 +24,8 @@ var (
 // both phases and the model between them, renames, hazards with and
 // without a reader, a step outside a transaction with its recovery, a step
 // of several statements, a statement over several lines with semicolons in
-// its body, a SQLite rebuild with foreign keys off, and a plan with no
-// steps.
+// its body, a step with no statements, a SQLite rebuild with foreign keys
+// off, and a plan with no steps.
 func renderPlans() map[string]*Plan {
 	return map[string]*Plan{
 		"expand-contract": {
@@ -72,7 +72,16 @@ func renderPlans() map[string]*Plan {
 					Transactional: true,
 				},
 				{
-					Index: 5, Phase: Contract, Op: "setNotNull", Subject: "table/order/column/note",
+					Index: 5, Phase: Expand, Op: "changeGraphContent", Subject: "table/step",
+					Statements:    []string{},
+					Transactional: true,
+					Hazards: []*Hazard{{
+						ID: "history:table/step", Class: HazardHistory, Subject: "table/step",
+						Reason: "Step.scratch joins the content of step in version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch stays 1.",
+					}},
+				},
+				{
+					Index: 6, Phase: Contract, Op: "setNotNull", Subject: "table/order/column/note",
 					Statements: []string{
 						`ALTER TABLE "order" VALIDATE CONSTRAINT "order_note_not_null"`,
 						`ALTER TABLE "order" ALTER COLUMN "note" SET NOT NULL`,
@@ -85,7 +94,7 @@ func renderPlans() map[string]*Plan {
 					}},
 				},
 				{
-					Index: 6, Phase: Contract, Op: "dropColumn", Subject: "table/order/column/total",
+					Index: 7, Phase: Contract, Op: "dropColumn", Subject: "table/order/column/total",
 					Statements:    []string{`ALTER TABLE "order" DROP COLUMN "total"`},
 					Transactional: true,
 					Hazards: []*Hazard{
@@ -156,12 +165,14 @@ func TestPlanSQLEndsEveryStatement(t *testing.T) {
 	}
 	assert.Contains(t, sql, "-- Step 3, expand, createIndex table/order/index/order_note_idx\n-- not in a transaction")
 	assert.Contains(t, sql, "-- hazard api-breaking:table/order/column/total@shop-api/OrderView.total\n")
+	assert.Contains(t, sql, "-- hazard history:table/step\n-- no SQL: the database does not change, and the runner logs the step\n")
 }
 
 func TestPlanMarkdownHazardTable(t *testing.T) {
 	md := renderPlans()["expand-contract"].Markdown()
 	assert.Contains(t, md, "| api-breaking | `table/order/column/total` | `shop-api/OrderView.total` | shop-api reads order.total through OrderView.total \\| a pipe stays in its cell. | `api-breaking:table/order/column/total@shop-api/OrderView.total` |\n")
-	assert.Contains(t, md, "6 steps (4 expand, 2 contract), 4 hazards (1 destructive, 1 compat, 1 data-dependent, 1 api-breaking).")
+	assert.Contains(t, md, "7 steps (5 expand, 2 contract), 5 hazards (1 destructive, 1 compat, 1 data-dependent, 1 api-breaking, 1 history).")
+	assert.Contains(t, md, "**5. changeGraphContent** `table/step`. Hazards: history. No SQL: the database does not change.\n")
 }
 
 func TestPlanUnallowed(t *testing.T) {
@@ -184,6 +195,7 @@ func TestPlanUnallowed(t *testing.T) {
 	}, ids(plan.Unallowed([]HazardClass{HazardDestructive, HazardCompat}, []string{"compat:table/order", "compat:table/elsewhere"})))
 	assert.Equal(t, []string{
 		"compat:table/order",
+		"history:table/step",
 		"data-dependent:table/order/column/note",
 		"destructive:table/order/column/total",
 		"api-breaking:table/order/column/total@shop-api/OrderView.total",

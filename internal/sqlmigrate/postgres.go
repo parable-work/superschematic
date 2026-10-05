@@ -113,6 +113,8 @@ func (p postgresDialect) render(c *change) (rendered, error) {
 		return one(stepFor(c, append([]string{"DROP VIEW " + qualifiedView(c.oldView)}, createViewSQL(c.view)...)...)), nil
 	case opCommentOnTable:
 		return one(stepFor(c, "COMMENT ON TABLE "+q(c.table)+" IS "+literal(c.tableDef.Comment))), nil
+	case opGraphContent:
+		return noSQL(c), nil
 	case opSetNotNull:
 		return p.setNotNull(c), nil
 	case opDropView:
