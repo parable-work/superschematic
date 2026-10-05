@@ -112,6 +112,15 @@ func (r *Runner) Apply(ctx context.Context, plan *Plan, phase Phase) (*Result, e
 			return nil
 		}
 		if phase == Contract {
+			// Only the plan in progress has a contract to run. A plan that
+			// is not, such as one a newer plan superseded, may start from
+			// the database's model again when its expand had nothing to
+			// do, and running its contract then would drop what the
+			// servers that superseded it still use.
+			if !resume {
+				return refusef("plan %s is not in progress for service %s: --phase contract runs the contract of the plan in progress once its expand phase has run; apply this plan with --phase expand first, or with --phase all",
+					plan.Hash, plan.Service)
+			}
 			if err := expandFinished(ctx, conn, plan, resume); err != nil {
 				return err
 			}

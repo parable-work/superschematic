@@ -1,7 +1,9 @@
 package migrate_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -104,6 +106,54 @@ func TestSupersede(t *testing.T) {
 			}
 			// The plan from the expanded model is now from the wrong model.
 			refused(t, r, supersede, migrate.All, "the plan starts from model "+evolve.Expanded, "service shop is at model "+evolve.To)
+		})
+
+		t.Run("a superseded plan whose expand had nothing to do", func(t *testing.T) {
+			// A plan with only contract steps: between its phases the
+			// database is still at its from. A plan back to that model
+			// supersedes it and leaves the database at the old plan's from
+			// again, so only the rule that --phase contract runs the plan in
+			// progress keeps a stale contract job from dropping what the
+			// servers use.
+			var createModel any
+			dec := json.NewDecoder(bytes.NewReader(create.ToModel))
+			dec.UseNumber()
+			if err := dec.Decode(&createModel); err != nil {
+				t.Fatal(err)
+			}
+			contractOnly := edited(t, dialect, "02-evolve", func(p map[string]any) {
+				var kept []any
+				for _, s := range steps(p) {
+					if step := s.(map[string]any); step["phase"] == "contract" {
+						step["index"] = len(kept) + 1
+						kept = append(kept, step)
+					}
+				}
+				p["steps"] = kept
+				p["expandedModel"] = createModel
+			})
+			back := edited(t, dialect, "01-create", func(p map[string]any) {
+				p["from"] = create.To
+				p["steps"] = []any{}
+			})
+			if contractOnly.Expanded != create.To || back.From != create.To || back.To != create.To {
+				t.Fatal("the edited plans do not start and end at 01's model")
+			}
+
+			url := testdb.New(t, dialect)
+			r := newRunner(t, url)
+			apply(t, r, create, migrate.All)
+			apply(t, r, contractOnly, migrate.Expand)
+			if st := status(t, r, "shop"); st.PlanHash != contractOnly.Hash || st.ModelHash != create.To {
+				t.Fatalf("status after an expand with no steps: %+v", st)
+			}
+			if result := apply(t, r, back, migrate.All); result.Superseded != contractOnly.Hash {
+				t.Fatalf("the plan back to 01's model: %+v", result)
+			}
+			refused(t, r, contractOnly, migrate.Contract, "is not in progress", "--phase expand first")
+			if st := status(t, r, "shop"); st.ModelHash != create.To || st.PlanHash != "" {
+				t.Fatalf("a refused contract changed the state: %+v", st)
+			}
 		})
 
 		t.Run("a contract that has started", func(t *testing.T) {

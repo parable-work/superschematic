@@ -519,8 +519,10 @@ same plan resumes at that step, running a non-transactional step's recovery
 first. Running a finished plan again does nothing.
 
 `--phase expand` runs the expand steps before a rollout and `--phase
-contract` the rest after it; `--phase contract` is refused until expand has
-finished. When the last expand step finishes, the plan's `expandedModel`
+contract` the rest after it. `--phase contract` runs only the plan in
+progress, once its expand has finished: a plan that is not in progress, such
+as one a newer plan superseded, is refused, even when the database is at its
+`from` again. When the last expand step finishes, the plan's `expandedModel`
 becomes the applied model, in the transaction of that step. When the plan's
 last step finishes, the plan's model becomes the applied model.
 

@@ -374,7 +374,7 @@ func TestRefusals(t *testing.T) {
 			url := testdb.New(t, dialect)
 			r := newRunner(t, url)
 			apply(t, r, create, migrate.All)
-			refused(t, r, evolve, migrate.Contract, "expand step 1 has not run", "--phase expand first")
+			refused(t, r, evolve, migrate.Contract, "is not in progress", "--phase expand first")
 			if st := status(t, r, "shop"); st.PlanHash != "" {
 				t.Fatalf("a refused contract recorded the plan: %+v", st)
 			}

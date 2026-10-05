@@ -152,8 +152,12 @@ to `all`.
      and say to plan again from the applied model
      (`superschematic-migrate status --model`);
    - the row's dialect is not the plan's: refuse.
-5. `--phase contract` on a plan whose expand steps have not all finished:
-   refuse.
+5. `--phase contract` on a plan that is not the plan in progress, or on
+   the plan in progress whose expand steps have not all finished: refuse.
+   Only the plan in progress has a contract to run. A plan a newer plan
+   superseded may start from the database's model again (when its expand
+   had nothing to do, its expanded model is its `from`), and running its
+   contract then would drop what the newer plan's servers use.
 6. Record the plan as in progress (`plan_hash`) if it is not, and delete
    the log rows an earlier application of the same plan left: a plan is a
    pure function of its two models, so a database taken from A to B, back
