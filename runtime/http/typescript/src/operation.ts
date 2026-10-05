@@ -77,11 +77,16 @@ export interface RequestContext {
   readonly path: string;
   readonly headers: Headers;
   readonly raw: Request;
-  /** Bearer token extracted by hono/bearer-auth; absent when the request carried none. */
-  readonly bearerToken?: string;
+  /** Bearer token extracted by hono/bearer-auth; absent when the request carried none. The adapter sets it before the permission gate. */
+  bearerToken?: string;
   /** Aborts when the caller goes away, or when the operation's @timeout elapses. */
   readonly signal: AbortSignal;
-  /** The client IP as the Go runtime reports it (X-Forwarded-For, X-Real-IP, then the socket); absent when unknown. */
+  /** The transport's peer address; absent when the runtime reports none. The default @rateLimit key. */
+  readonly remoteAddress?: string;
+  /**
+   * The client IP as a proxy reports it: X-Forwarded-For's first hop, X-Real-IP, then the peer address; absent when
+   * unknown. The headers are the client's to write unless a proxy in front of the service sets them.
+   */
   readonly clientIp?: string;
   /** Path captures by wire name, each percent-decoded once. */
   readonly pathParams: Readonly<Record<string, string>>;

@@ -11,8 +11,8 @@ Everything here is schema-agnostic. The generated package owns the operation
 table (paths, parameter specs, strict body parsers, auth requirements); this
 module owns how those specs are applied to one request, and the service
 caller's verifier and credential sources (D37), which import nothing from
-node: so they run on Workers too. ./hono.ts binds it to
-Hono; nothing in this file imports a framework.
+node: so they run on Workers too. ./hono.ts binds it to Hono; nothing in
+this file imports a framework.
 */
 
 export { ErrorCode, HttpProblem, problemBody, problemResponse, statusText } from './problem.js';
@@ -33,7 +33,7 @@ export {
   unauthorized,
   unprocessableEntity,
 } from './problem.js';
-export { MemoryRateLimitStore, clientIpKey, clientIpOf } from './ratelimit.js';
+export { MemoryRateLimitStore, clientIpKey, clientIpOf, remoteAddressKey } from './ratelimit.js';
 export type { RateLimitDecision, RateLimitOptions, RateLimitStore } from './ratelimit.js';
 export { OperationResult, envelope, envelopeResponse, requestIdOf } from './envelope.js';
 export type { Envelope, EnvelopeMeta } from './envelope.js';

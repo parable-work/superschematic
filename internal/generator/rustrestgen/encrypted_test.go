@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
@@ -36,11 +35,10 @@ func secretAPI(setEncrypted, opEncrypted, argEncrypted, manual bool) *ir.Schema 
 }
 
 func generateSecretAPI(schema *ir.Schema) (*APIOutput, error) {
-	return Generate(schema, Options{
-		AuthProvider: sessionauth.Provider{},
-		SchemaName:   "secret-api",
-		TypesCrate:   "schemas-secret-api-types",
-		Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	return generateFrom(schema, apiSource{}, Options{
+		SchemaName: "secret-api",
+		TypesCrate: "schemas-secret-api-types",
+		Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 }
 
@@ -103,14 +101,10 @@ func TestFixtureAPIIsRefusedForItsEncryptedMutations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture-db: %v", err)
 	}
-	_, err = Generate(apiSchema, Options{
-		AuthProvider:   sessionauth.Provider{},
-		SchemaName:     "fixture-api",
-		IsPublic:       true,
-		UpstreamSchema: "fixture-db",
-		UpstreamIR:     dbSchema,
-		TypesCrate:     "schemas-fixture-api-types",
-		Clock:          codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	_, err = generateFrom(apiSchema, apiSource{public: true, upstream: "fixture-db", upstreamIR: dbSchema}, Options{
+		SchemaName: "fixture-api",
+		TypesCrate: "schemas-fixture-api-types",
+		Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err == nil || !strings.Contains(err.Error(), "operation tenant.createTenant is encrypted") {
 		t.Fatalf("Generate = %v, want the refusal of tenant.createTenant", err)

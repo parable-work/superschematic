@@ -1,6 +1,12 @@
 {
   "name": "fixture-json-config",
   "kind": "General",
+  "dependencies": [
+    {
+      "name": "fixture-db",
+      "kind": "DB"
+    }
+  ],
   "types": {
     "LabelShape": {
       "name": "LabelShape",

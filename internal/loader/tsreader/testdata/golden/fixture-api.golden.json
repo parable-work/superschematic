@@ -1,6 +1,7 @@
 {
   "name": "fixture-api",
   "kind": "API",
+  "authDb": "fixture-db",
   "scalars": {
     "Generic.JSON": {
       "name": "Generic.JSON",

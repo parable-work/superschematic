@@ -150,6 +150,20 @@ although the row says `String`:
   scalar core the value's JSON text. A scalar that also has a pattern or a
   length (`Geo.Location`) keeps the `String` checks.
 
+The TypeScript catalog also exports `BUILTIN_SCALAR_VALUE_CLASSES`, keyed
+as `BUILTIN_SCALARS` is: the value class (D19) the graph descriptor gives
+a single field of each builtin scalar, the class of one value of it in a
+column of its own (`string`, `integer`, `number`, `boolean`, `uuid`,
+`dateTime`, `date`, `time`, `duration` or `json`). The tool computes it
+with `graphdesc.ScalarClass` over each scalar as the loader hydrates it
+from the core catalog, so a TypeScript reader such as the engine
+classifies a field of a builtin scalar by the compiler's rule. A scalar
+stored as a SQL type no class reads (`Embedding.Vector`, `Geo.Location`)
+has no entry. The tool's Go test holds every entry to the class
+`graphdesc.ValueClass` gives a field of the scalar in a schema loaded
+through the loader. The Python catalog holds no scalar rows, so it has
+nothing to carry a class on.
+
 ## Local development
 
 `scripts/superscalar-dep.sh` (repository root) checks superscalar out under

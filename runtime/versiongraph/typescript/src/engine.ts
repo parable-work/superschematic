@@ -412,7 +412,7 @@ export class Engine {
   readonly #storage: Storage;
 
   /**
-   * Returns the engine of the graph descriptor describes (version 2, as
+   * Returns the engine of the graph descriptor describes (version 3, as
    * JSON text or an object), over storage. Without options.core it
    * instantiates the wasm build shipped with the package. The core checks
    * the descriptor.
@@ -643,7 +643,7 @@ export class SyncEngine {
   readonly #storage: SyncStorage;
 
   /**
-   * Returns the engine of the graph descriptor describes (version 2, as
+   * Returns the engine of the graph descriptor describes (version 3, as
    * JSON text or an object), over storage, on a core already instantiated
    * (initSync instantiates one synchronously). options.core is not read.
    * The core checks the descriptor.

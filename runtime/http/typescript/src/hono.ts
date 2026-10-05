@@ -2,7 +2,6 @@ import type { Context, Env, Hono, MiddlewareHandler } from 'hono';
 import { bearerAuth } from 'hono/bearer-auth';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
-import { timeout } from 'hono/timeout';
 import { authorize, type Authenticator, type PermissionMatcher } from './auth.js';
 import { OperationResult, envelopeResponse, requestIdOf } from './envelope.js';
 import type { OperationSpec, RequestContext } from './operation.js';
@@ -20,44 +19,42 @@ import {
   tooManyRequests,
   unauthorized,
 } from './problem.js';
-import { MemoryRateLimitStore, clientIpKey, clientIpOf, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
+import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
 import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
 
 /*
 The Hono binding of the http runtime. A generated router calls
 mountOperation once per @rest operation with the operation's spec and a
 handler that forwards decoded arguments to the service's implementation; the
-adapter owns the request pipeline:
+adapter owns the request pipeline, in the Go router's order (D36):
 
-  request id -> @hmacVerified -> [hono/timeout: hono/body-limit ->
-  hono/bearer-auth -> @rateLimit -> service step -> permission gate ->
+  request id -> @hmacVerified -> @rateLimit -> hono/body-limit ->
+  service step -> hono/bearer-auth + permission gate -> [@timeout:
   path/query decoding -> JSON parse -> strict input parser ->
   implementation] -> envelope
 
-and turns every failure into the problem envelope. hono/body-limit answers
-413 to a declared Content-Length over the cap, and reads a body without one
-up front, answering 413 once it passes the cap. Operations marked
-@manualRouteRegistration are mounted through mountManualOperation: the
-webhook verifier, rate limit, timeout and gate still run, then the service's
-own handler receives the Hono context (a streaming response cannot be
-expressed as a JSON result).
+and turns every failure into the problem envelope. The cheap refusals come
+first: a request without a valid signature costs nothing else, one over the
+rate limit is not read, and one over the body cap is not authenticated.
+hono/body-limit answers 413 to a declared Content-Length over the cap, and
+reads a body without one up front, answering 413 once it passes the cap.
+Operations marked @manualRouteRegistration are mounted through
+mountManualOperation: the webhook verifier, rate limit, body limit (when
+declared), service step, gate and timeout still run, then the service's own
+handler receives the Hono context (a streaming response cannot be expressed
+as a JSON result).
 
-An @hmacVerified operation is mounted with its provider's WebhookVerifier,
-which runs before every other step, as the Go router runs the provider's
-WebhookVerifier: a request without a valid signature costs nothing else.
+The service step (D37) runs before the end-user step: with a service
+authenticator it verifies Service-Authorization on every route and puts the
+caller on ctx.serviceCaller, then applies the operation's @requireService
+or @allowService clause. A listed caller on an @allowService route stands
+in for the end user, so the route skips hono/bearer-auth and the permission
+gate.
 
-The service step (D37) runs right before the permission gate: with a
-service authenticator it verifies Service-Authorization on every route and
-puts the caller on ctx.serviceCaller, then applies the operation's
-@requireService or @allowService clause. A listed caller on an
-@allowService route skips the end-user step, so a malformed Authorization
-header that hono/bearer-auth refuses is refused at the end-user step, not
-ahead of the service step.
-
-@rateLimit stays in this package (Go uses httprate). @timeout and the body
-cap are hono/timeout and hono/body-limit; Bearer extraction is
-hono/bearer-auth. The timeout answers 504 when the operation has not
-produced a response in time, and AbortSignal.timeout still aborts
+@rateLimit stays in this package (Go uses httprate); the body cap is
+hono/body-limit, and Bearer extraction hono/bearer-auth. The timeout covers
+the decoding and the implementation, as the Go router's covers its handler:
+it answers 504 when they have not produced a response in time, and aborts
 ctx.signal so an implementation that honours it stops early.
 
 Streaming, multipart and file uploads are not modelled by this adapter; an
@@ -66,10 +63,6 @@ operation that needs them is a manual route.
 
 /** Default JSON body cap for operations without @bodyLimit: 1 MiB. The Go router has no default; only @bodyLimit caps its routes. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
-
-const extractedBearer = new WeakMap<Request, string>();
-/** hono/bearer-auth's refusal of a malformed Authorization header, raised at the end-user step. */
-const bearerRefusals = new WeakMap<Request, unknown>();
 
 export interface RouterRuntimeOptions {
   /** Establishes the caller on routes that require one. Absent means every such route answers 401. */
@@ -98,7 +91,7 @@ export interface RouterRuntimeOptions {
   /**
    * How @rateLimit buckets are kept and keyed. Absent means an in-memory
    * store shared by every operation mounted with these options, keyed by
-   * client IP.
+   * the transport's peer address (remoteAddressKey).
    */
   rateLimit?: RateLimitOptions;
 }
@@ -173,7 +166,10 @@ interface NodeSocketBindingsLike {
 /**
  * Builds the RequestContext for a Hono request against one operation. With
  * a timeout the context's signal also aborts when it elapses, so the
- * implementation sees one signal for "stop now" whatever the reason.
+ * implementation sees one signal for "stop now" whatever the reason. `raw`
+ * is the Hono request when it is read: the route builds the context before
+ * the body limit, and the webhook verifier and hono/body-limit each hand
+ * the route a fresh copy of the request.
  */
 export function requestContextOf<E extends Env>(c: Context<E>, operation: OperationSpec, abort?: AbortSignal): RequestContext {
   const raw = c.req.raw;
@@ -183,18 +179,20 @@ export function requestContextOf<E extends Env>(c: Context<E>, operation: Operat
     if (value !== undefined) pathParams[name] = value;
   }
   const bindings = (c.env ?? {}) as NodeSocketBindingsLike;
-  const clientIp = clientIpOf(raw.headers, bindings.incoming?.socket?.remoteAddress);
-  const bearerToken = extractedBearer.get(raw);
+  const remoteAddress = bindings.incoming?.socket?.remoteAddress?.trim() || undefined;
+  const clientIp = clientIpOf(raw.headers, remoteAddress);
   return {
     requestId: requestIdOf(raw),
     operation,
     method: raw.method,
     path: url.pathname,
     headers: raw.headers,
-    raw,
+    get raw() {
+      return c.req.raw;
+    },
     signal: abort ? AbortSignal.any([raw.signal, abort]) : raw.signal,
+    ...(remoteAddress !== undefined ? { remoteAddress } : {}),
     ...(clientIp !== undefined ? { clientIp } : {}),
-    ...(bearerToken !== undefined ? { bearerToken } : {}),
     pathParams,
     query: url.searchParams,
     principal: null,
@@ -217,7 +215,7 @@ function rateLimitStoreOf(options: RouterRuntimeOptions): RateLimitStore {
 
 /** Takes one token for the request, or throws the 429 problem. */
 async function admit(ctx: RequestContext, limitPerMinute: number, options: RouterRuntimeOptions): Promise<void> {
-  const keyOf = options.rateLimit?.keyOf ?? clientIpKey;
+  const keyOf = options.rateLimit?.keyOf ?? remoteAddressKey;
   const now = options.rateLimit?.now ?? Date.now;
   const key = `${ctx.operation.name}:${keyOf(ctx)}`;
   const decision = await rateLimitStoreOf(options).take(key, limitPerMinute, now());
@@ -234,47 +232,47 @@ function directivesOf(spec: OperationSpec, mount: MountOptions): { rateLimitPerM
   };
 }
 
-/** Aborts ctx.signal when hono/timeout wins the race; Hono's timer does not abort the handler. */
-function deadlineOf(timeoutSeconds: number | undefined): { signal: AbortSignal; abort: () => void; clear: () => void } | undefined {
-  if (!timeoutSeconds) return undefined;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
-  return {
-    signal: controller.signal,
-    abort: () => controller.abort(),
-    clear: () => clearTimeout(timer),
-  };
+/**
+ * Runs `work` under the route's @timeout: past it, aborts `deadline` (and so
+ * ctx.signal) and throws the 504 problem. The work itself cannot be
+ * stopped; an implementation that honours ctx.signal stops early.
+ */
+async function withTimeout(timeoutSeconds: number | undefined, deadline: AbortController, work: () => Promise<Response>): Promise<Response> {
+  if (!timeoutSeconds) return work();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const elapsed = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      deadline.abort();
+      reject(gatewayTimeout());
+    }, timeoutSeconds * 1000);
+  });
+  try {
+    return await Promise.race([work(), elapsed]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-function timeoutMiddleware(timeoutSeconds: number): MiddlewareHandler {
-  return timeout(timeoutSeconds * 1000, c => {
-    return new HTTPException(504, { res: problemResponse(gatewayTimeout(), requestIdOf(c.req.raw)) });
-  });
-}
+/** The Bearer scheme, which hono/bearer-auth parses (and answers 400 when malformed). */
+const BEARER_SCHEME = /^bearer(?:\s|$)/iu;
 
 /**
- * Extracts a Bearer token with hono/bearer-auth when the header is present.
- * Missing Authorization is left to authenticate + authorize (401), so a
- * custom Authenticator that does not use Bearer still works. A malformed
- * header is refused at the end-user step (establishCaller), which a service
- * admitted to an @allowService route skips.
+ * Reads a Bearer token with hono/bearer-auth into ctx.bearerToken. A request
+ * without an Authorization header, or with another scheme (Basic, an API
+ * key scheme), goes on to authenticate + authorize untouched, so an
+ * Authenticator that does not use Bearer still sees it.
  */
-function bearerMiddleware(): MiddlewareHandler {
+function bearerMiddleware(contextOf: () => RequestContext): MiddlewareHandler {
   const parse = bearerAuth({
-    verifyToken: async (token, c) => {
-      extractedBearer.set(c.req.raw, token);
+    verifyToken: async token => {
+      contextOf().bearerToken = token;
       return true;
     },
   });
   return async (c, next) => {
-    if (c.req.header('authorization')) {
-      try {
-        await parse(c, async () => {});
-      } catch (error) {
-        bearerRefusals.set(c.req.raw, error);
-      }
-    }
-    return next();
+    const header = c.req.header('authorization');
+    if (!header || !BEARER_SCHEME.test(header.trim())) return next();
+    return parse(c, next);
   };
 }
 
@@ -317,8 +315,6 @@ async function establishServiceCaller(ctx: RequestContext, options: RouterRuntim
 async function establishCaller(ctx: RequestContext, options: RouterRuntimeOptions): Promise<void> {
   const { auth } = ctx.operation;
   if (auth.public || !auth.required) return;
-  const refusal = bearerRefusals.get(ctx.raw);
-  if (refusal !== undefined) throw refusal;
   ctx.principal = options.authenticate ? await options.authenticate(ctx) : null;
   authorize(ctx.principal, auth, options.permissionMatcher);
 }
@@ -460,18 +456,80 @@ function webhookMiddleware(verifier: WebhookVerifier): MiddlewareHandler {
   };
 }
 
-function routeMiddleware(
+/** The steps of one mount, after its overrides; undefined skips a step. */
+interface RouteSteps {
+  readonly webhookVerifier: WebhookVerifier | undefined;
+  readonly rateLimitPerMinute: number | undefined;
+  readonly bodyLimitBytes: number | undefined;
+  readonly timeoutSeconds: number | undefined;
+}
+
+/**
+ * Runs one route: the webhook verifier, the rate limit, the body limit, the
+ * service step and the permission gate, in the Go router's order, then
+ * `work` (decoding and the implementation, or a manual handler) under the
+ * timeout. Every refusal is the problem envelope. One RequestContext serves
+ * every step, so the callers the steps establish reach the implementation.
+ */
+async function runRoute<E extends Env>(
+  c: Context<E>,
   spec: OperationSpec,
-  timeoutSeconds: number | undefined,
-  bodyLimitBytes: number | undefined,
-  webhookVerifier: WebhookVerifier | undefined
-): MiddlewareHandler[] {
+  options: RouterRuntimeOptions,
+  steps: RouteSteps,
+  work: (ctx: RequestContext) => Promise<Response>
+): Promise<Response> {
+  const deadline = new AbortController();
+  let built: RequestContext | undefined;
+  // Built by the first step that needs it, after the verifier has handed
+  // the route its copy of the request.
+  const contextOf = (): RequestContext => (built ??= requestContextOf(c, spec, steps.timeoutSeconds ? deadline.signal : undefined));
+  const refusing =
+    (step: (ctx: RequestContext) => Promise<void>): MiddlewareHandler =>
+    async (_c, next) => {
+      const ctx = contextOf();
+      try {
+        await step(ctx);
+      } catch (error) {
+        return failureResponse(error, ctx, options);
+      }
+      await next();
+    };
   const middleware: MiddlewareHandler[] = [];
-  if (webhookVerifier) middleware.push(webhookMiddleware(webhookVerifier));
-  if (timeoutSeconds) middleware.push(timeoutMiddleware(timeoutSeconds));
-  if (bodyLimitBytes !== undefined) middleware.push(jsonBodyLimit(bodyLimitBytes));
-  if (!spec.auth.public && spec.auth.required) middleware.push(bearerMiddleware());
-  return middleware;
+  if (steps.webhookVerifier) middleware.push(webhookMiddleware(steps.webhookVerifier));
+  const { rateLimitPerMinute } = steps;
+  if (rateLimitPerMinute) middleware.push(refusing(ctx => admit(ctx, rateLimitPerMinute, options)));
+  if (steps.bodyLimitBytes !== undefined) middleware.push(jsonBodyLimit(steps.bodyLimitBytes));
+  // A service caller that stands in for the end user skips the end-user step: no Bearer parse, no gate.
+  let standsIn = false;
+  if (options.authenticateService || spec.service) {
+    middleware.push(
+      refusing(async ctx => {
+        standsIn = await establishServiceCaller(ctx, options);
+      })
+    );
+  }
+  if (!spec.auth.public && spec.auth.required) {
+    const bearer = bearerMiddleware(contextOf);
+    middleware.push(async (current, next) => (standsIn ? next() : bearer(current, next)));
+    middleware.push(
+      refusing(async ctx => {
+        if (!standsIn) await establishCaller(ctx, options);
+      })
+    );
+  }
+  try {
+    return await through(c, middleware, async () => {
+      const ctx = contextOf();
+      try {
+        return await withTimeout(steps.timeoutSeconds, deadline, () => work(ctx));
+      } catch (error) {
+        return failureResponse(error, ctx, options);
+      }
+    });
+  } catch (error) {
+    deadline.abort();
+    return failureResponse(error, contextOf(), options);
+  }
 }
 
 /**
@@ -488,41 +546,24 @@ export function mountOperation<E extends Env>(
 ): void {
   const limitBytes = mount.bodyLimitBytes ?? spec.bodyLimitBytes ?? options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
-  const middleware = routeMiddleware(spec, timeoutSeconds, hasBody(spec) ? limitBytes : undefined, webhookVerifierOf(spec, mount));
-  app.on(spec.method, honoPath(mount.path ?? spec.path), async c => {
-    const deadline = deadlineOf(timeoutSeconds);
-    try {
-      const response = await through(c, middleware, async () => {
-        const ctx = requestContextOf(c, spec, deadline?.signal);
-        try {
-          if (rateLimitPerMinute) await admit(ctx, rateLimitPerMinute, options);
-          if (!(await establishServiceCaller(ctx, options))) await establishCaller(ctx, options);
-          const decoded = await decode(ctx, spec);
-          return successResponse(await handler(ctx, decoded), ctx.requestId, spec);
-        } catch (error) {
-          return failureResponse(error, ctx, options);
-        }
-      });
-      if (deadline?.signal.aborted) {
-        return problemResponse(gatewayTimeout(), requestIdOf(c.req.raw));
-      }
-      return response;
-    } catch (error) {
-      deadline?.abort();
-      return failureResponse(error, requestContextOf(c, spec, deadline?.signal), options);
-    } finally {
-      deadline?.clear();
-    }
-  });
+  const steps: RouteSteps = {
+    webhookVerifier: webhookVerifierOf(spec, mount),
+    rateLimitPerMinute,
+    bodyLimitBytes: hasBody(spec) ? limitBytes : undefined,
+    timeoutSeconds,
+  };
+  app.on(spec.method, honoPath(mount.path ?? spec.path), c =>
+    runRoute(c, spec, options, steps, async ctx => successResponse(await handler(ctx, await decode(ctx, spec)), ctx.requestId, spec))
+  );
 }
 
 /**
  * Mounts a @manualRouteRegistration operation: the webhook verifier, rate
- * limit, timeout, service step and auth gate run, then the service's handler
- * owns the request and response.
- * A timeout covers the handler's return of a Response; a streaming body it
- * has started is not cut. Without a handler the route answers 501 so a
- * forgotten hook is visible, not a 404.
+ * limit, body limit (when the spec or the mount declares one), service step
+ * and auth gate run, then the service's handler owns the request and
+ * response, under the timeout. A timeout covers the handler's return of a
+ * Response; a streaming body it has started is not cut. Without a handler
+ * the route answers 501 so a forgotten hook is visible, not a 404.
  */
 export function mountManualOperation<E extends Env>(
   app: Hono<E>,
@@ -531,35 +572,20 @@ export function mountManualOperation<E extends Env>(
   options: RouterRuntimeOptions = {},
   mount: MountOptions = {}
 ): void {
-  const limitBytes = mount.bodyLimitBytes ?? spec.bodyLimitBytes;
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
-  const middleware = routeMiddleware(spec, timeoutSeconds, limitBytes, webhookVerifierOf(spec, mount));
-  app.on(spec.method, honoPath(mount.path ?? spec.path), async c => {
-    const deadline = deadlineOf(timeoutSeconds);
-    try {
-      const response = await through(c, middleware, async () => {
-        const ctx = requestContextOf(c, spec, deadline?.signal);
-        try {
-          if (rateLimitPerMinute) await admit(ctx, rateLimitPerMinute, options);
-          if (!(await establishServiceCaller(ctx, options))) await establishCaller(ctx, options);
-          if (!handler) throw notImplemented(`${spec.name} has no manual route handler`);
-          refuseUndecodablePath(ctx);
-          return handler(c, ctx);
-        } catch (error) {
-          return failureResponse(error, ctx, options);
-        }
-      });
-      if (deadline?.signal.aborted) {
-        return problemResponse(gatewayTimeout(), requestIdOf(c.req.raw));
-      }
-      return response;
-    } catch (error) {
-      deadline?.abort();
-      return failureResponse(error, requestContextOf(c, spec, deadline?.signal), options);
-    } finally {
-      deadline?.clear();
-    }
-  });
+  const steps: RouteSteps = {
+    webhookVerifier: webhookVerifierOf(spec, mount),
+    rateLimitPerMinute,
+    bodyLimitBytes: mount.bodyLimitBytes ?? spec.bodyLimitBytes,
+    timeoutSeconds,
+  };
+  app.on(spec.method, honoPath(mount.path ?? spec.path), c =>
+    runRoute(c, spec, options, steps, async ctx => {
+      if (!handler) throw notImplemented(`${spec.name} has no manual route handler`);
+      refuseUndecodablePath(ctx);
+      return handler(c, ctx);
+    })
+  );
 }
 
 /** A notFound handler for the application root: the problem envelope with code not_found. */

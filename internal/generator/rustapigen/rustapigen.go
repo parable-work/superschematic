@@ -3,17 +3,14 @@
 package rustapigen
 
 import (
-	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
-	ir "github.com/parable-work/superschematic/ir"
 )
 
 // APIOutputBase contains shared Rust API output metadata.
@@ -32,31 +29,22 @@ type APIOutputBase struct {
 	Timestamp         string
 }
 
-// GenerateOutput contains shared generation output and extracted endpoints.
-type GenerateOutput struct {
-	Base      APIOutputBase
-	Endpoints []apigen.EndpointInfo
-}
-
-// Options configures shared Rust API endpoint extraction.
-type Options struct {
-	SchemaName     string
-	IsPublic       bool
-	UpstreamSchema string
-	UpstreamIR     *ir.Schema
-	TypesCrate     string
-	TypesDir       string
-	OutputDir      string
-	RuntimeCrate   string
-	Naming         naming.Naming
-	// AuthProvider is the auth provider apigen derives the endpoint auth
-	// data with. Required.
-	AuthProvider apigen.AuthProvider
+// BaseOptions names a Rust API crate and the crates it depends on.
+type BaseOptions struct {
+	SchemaName   string
+	TypesCrate   string
+	TypesDir     string
+	OutputDir    string
+	RuntimeCrate string
+	Naming       naming.Naming
 	Clock        codegen.Clock
 }
 
-// Generate runs common Rust API generation setup and endpoint extraction.
-func Generate(schema *ir.Schema, opts Options) (*GenerateOutput, error) {
+// NewBase returns the crate metadata every Rust API crate shares: its name,
+// the types crate and the http runtime crate it depends on, and the stamp.
+// The endpoints come from the shared apigen output (generator.Run's
+// APIOutput), as for the Go and TypeScript servers and every SDK.
+func NewBase(opts BaseOptions) APIOutputBase {
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
@@ -64,40 +52,20 @@ func Generate(schema *ir.Schema, opts Options) (*GenerateOutput, error) {
 	if strings.TrimSpace(opts.RuntimeCrate) == "" {
 		opts.RuntimeCrate = opts.Naming.HTTPRuntimeRustCrate
 	}
-
-	apiOutput, err := apigen.Generate(schema, apigen.Options{
-		SchemaName:     opts.SchemaName,
-		IsPublic:       opts.IsPublic,
-		UpstreamSchema: opts.UpstreamSchema,
-		UpstreamIR:     opts.UpstreamIR,
-		Provider:       opts.AuthProvider,
-		Clock:          opts.Clock,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("extract endpoints: %w", err)
-	}
-	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
-		return nil, nil
-	}
-
 	typesCrate := strings.TrimSpace(opts.TypesCrate)
 	if typesCrate == "" {
 		typesCrate = opts.Naming.RustTypesCrate(opts.SchemaName)
 	}
-
-	return &GenerateOutput{
-		Base: APIOutputBase{
-			SchemaName:        opts.SchemaName,
-			CrateName:         opts.Naming.RustAPICrate(opts.SchemaName),
-			TypesCrate:        typesCrate,
-			TypesDir:          opts.TypesDir,
-			TypesDepPath:      ResolveTypesDependencyPath(opts.OutputDir, opts.TypesDir),
-			RuntimeCrate:      opts.RuntimeCrate,
-			RuntimeCrateIdent: strings.ReplaceAll(opts.RuntimeCrate, "-", "_"),
-			Timestamp:         opts.Clock.RFC3339(),
-		},
-		Endpoints: apiOutput.Endpoints,
-	}, nil
+	return APIOutputBase{
+		SchemaName:        opts.SchemaName,
+		CrateName:         opts.Naming.RustAPICrate(opts.SchemaName),
+		TypesCrate:        typesCrate,
+		TypesDir:          opts.TypesDir,
+		TypesDepPath:      ResolveTypesDependencyPath(opts.OutputDir, opts.TypesDir),
+		RuntimeCrate:      opts.RuntimeCrate,
+		RuntimeCrateIdent: strings.ReplaceAll(opts.RuntimeCrate, "-", "_"),
+		Timestamp:         opts.Clock.RFC3339(),
+	}
 }
 
 // ResolveTypesDependencyPath resolves the Rust types crate dependency path.

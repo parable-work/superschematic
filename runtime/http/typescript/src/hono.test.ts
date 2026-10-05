@@ -6,10 +6,12 @@ import {
   HttpProblem,
   MemoryRateLimitStore,
   OperationResult,
+  clientIpKey,
   serviceAuthenticator,
   signedTokenSource,
   type OperationSpec,
   type Principal,
+  type RateLimitOptions,
   type RateLimitStore,
   type RequestContext,
   type ServiceAuthConfig,
@@ -217,6 +219,28 @@ describe('mountOperation', () => {
     expect(await malformed.json()).toMatchObject({ status: 400, type: 'about:blank' });
   });
 
+  test('an Authorization header of another scheme reaches authenticate', async () => {
+    const id = '00000000-0000-4000-8000-000000000001';
+    const app = new Hono();
+    const seen: Array<string | null> = [];
+    mountOperation(app, getOrder, async ctx => ({ who: ctx.principal?.subject, token: ctx.bearerToken ?? null }), {
+      authenticate: async ctx => {
+        const header = ctx.headers.get('authorization');
+        seen.push(header);
+        return header === 'ApiKey k-reader' ? principals.reader : null;
+      },
+    });
+    app.onError(errorHandler());
+    const keyed = await app.request(`/api/orders/${id}`, { headers: { authorization: 'ApiKey k-reader' } });
+    expect(keyed.status).toBe(200);
+    expect((await keyed.json()).data).toEqual({ who: 'u1', token: null });
+    expect((await app.request(`/api/orders/${id}`, { headers: { authorization: 'Basic dXNlcjpwdw==' } })).status).toBe(401);
+    expect(seen).toEqual(['ApiKey k-reader', 'Basic dXNlcjpwdw==']);
+    // A Bearer header is still parsed, case-insensitively, and a malformed one refused.
+    expect((await app.request(`/api/orders/${id}`, { headers: { authorization: 'bearer not a token' } })).status).toBe(400);
+    expect(seen).toHaveLength(2);
+  });
+
   test('maps thrown problems, mapped failures and unknown failures', async () => {
     const app = build(a => {
       const boom: OperationSpec = { ...health, name: 'boom', path: '/api/boom' };
@@ -413,7 +437,7 @@ describe('application root handlers', () => {
 describe('@rateLimit', () => {
   const limited: OperationSpec = { ...health, name: 'limited', path: '/api/limited', rateLimitPerMinute: 2 };
 
-  function limitedApp(rateLimit?: { store?: RateLimitStore; keyOf?: (ctx: { principal: Principal | null }) => string; now?: () => number }) {
+  function limitedApp(rateLimit?: RateLimitOptions) {
     const app = new Hono();
     const options = { rateLimit };
     mountOperation(app, limited, async () => ({ ok: true }), options);
@@ -421,7 +445,7 @@ describe('@rateLimit', () => {
     return app;
   }
 
-  test('refuses the request past the per-minute budget with 429 and Retry-After, per client IP', async () => {
+  test('refuses the request past the per-minute budget with 429 and Retry-After; X-Forwarded-For chooses no bucket', async () => {
     const app = limitedApp();
     const from = (ip: string) => app.request('/api/limited', { headers: { 'x-forwarded-for': `${ip}, 10.0.0.1` } });
     expect((await from('203.0.113.7')).status).toBe(200);
@@ -431,6 +455,26 @@ describe('@rateLimit', () => {
     expect(refused.headers.get('content-type')).toBe('application/problem+json');
     expect(refused.headers.get('retry-after')).toMatch(/^[1-9]\d*$/u);
     expect(await refused.json()).toMatchObject({ status: 429, code: 'too_many_requests', title: 'Too Many Requests', details: { retryAfterSeconds: expect.any(Number) } });
+    // The key is the peer address, which app.request does not report: a
+    // client that names another hop still draws from the same bucket.
+    expect((await from('203.0.113.8')).status).toBe(429);
+  });
+
+  test('the key is the transport peer address by default', async () => {
+    const app = limitedApp();
+    const from = (peer: string) => app.request('/api/limited', { headers: { 'x-forwarded-for': '203.0.113.7' } }, { incoming: { socket: { remoteAddress: peer } } });
+    expect((await from('198.51.100.1')).status).toBe(200);
+    expect((await from('198.51.100.1')).status).toBe(200);
+    expect((await from('198.51.100.1')).status).toBe(429);
+    expect((await from('198.51.100.2')).status).toBe(200);
+  });
+
+  test('behind a proxy the service trusts, clientIpKey keys by the client IP it reports', async () => {
+    const app = limitedApp({ keyOf: clientIpKey });
+    const from = (ip: string) => app.request('/api/limited', { headers: { 'x-forwarded-for': `${ip}, 10.0.0.1` } });
+    expect((await from('203.0.113.7')).status).toBe(200);
+    expect((await from('203.0.113.7')).status).toBe(200);
+    expect((await from('203.0.113.7')).status).toBe(429);
     expect((await from('203.0.113.8')).status).toBe(200);
   });
 
@@ -471,6 +515,32 @@ describe('@rateLimit', () => {
     const app = new Hono();
     mountOperation(app, limited, async () => ({ ok: true }), {}, { rateLimitPerMinute: 0 });
     for (let i = 0; i < 5; i += 1) expect((await app.request('/api/limited')).status).toBe(200);
+  });
+});
+
+describe('the order of the refusals', () => {
+  // The Go router's order: the rate limit, then the body limit, then the
+  // permission gate, so neither of the first two costs an authentication.
+  test('the rate limit comes before the body limit, and both before the gate', async () => {
+    const app = new Hono();
+    const calls: string[] = [];
+    const spec: OperationSpec = { ...createOrder, name: 'ordered', path: '/api/ordered', rateLimitPerMinute: 2 };
+    mountOperation(app, spec, async () => ({ ok: true }), {
+      authenticate: async ctx => {
+        calls.push('authenticate');
+        return principals[ctx.headers.get('x-user') ?? ''] ?? null;
+      },
+    });
+    const send = (body: string, user?: string) =>
+      app.request('/api/ordered', { method: 'POST', headers: { 'content-type': 'application/json', ...(user ? { 'x-user': user } : {}) }, body });
+    const oversize = JSON.stringify({ name: 'x'.repeat(100) });
+    expect((await send(oversize)).status).toBe(413);
+    expect(calls).toEqual([]);
+    expect((await send(JSON.stringify({ name: 'ok' }))).status).toBe(401);
+    expect(calls).toEqual(['authenticate']);
+    const limited = await send(oversize, 'writer');
+    expect(limited.status).toBe(429);
+    expect(calls).toEqual(['authenticate']);
   });
 });
 
@@ -525,10 +595,12 @@ describe('@timeout', () => {
     expect((await unbounded.json()).data).toEqual({ done: true });
   });
 
-  test('covers the gate and a manual route handler too', async () => {
+  // The timeout wraps the handler, as the Go router's does: the gate runs
+  // before it, so a slow authenticate is not cut.
+  test('covers the handler and a manual route handler, not the gate', async () => {
     const app = new Hono();
     const gated = { ...slow, name: 'gated', path: '/api/gated', auth: { public: false, required: true, permissions: [] } };
-    mountOperation(app, gated, async () => ({ ok: true }), {
+    mountOperation(app, gated, async ctx => ({ caller: ctx.principal?.subject }), {
       authenticate: async () => {
         await new Promise(resolve => setTimeout(resolve, 200));
         return { subject: 'late', permissions: [] };
@@ -538,7 +610,9 @@ describe('@timeout', () => {
       await new Promise(resolve => setTimeout(resolve, 200));
       return c.text('late');
     });
-    expect((await app.request('/api/gated')).status).toBe(504);
+    const gatedResponse = await app.request('/api/gated');
+    expect(gatedResponse.status).toBe(200);
+    expect((await gatedResponse.json()).data).toEqual({ caller: 'late' });
     expect((await app.request('/api/slow-manual')).status).toBe(504);
   });
 });
@@ -604,9 +678,12 @@ describe('@hmacVerified', () => {
     expect((await post(app, '/api/webhooks/shop', body, { 'x-shop-signature': signatureOf(body), 'x-user': 'writer' })).status).toBe(429);
     await unsigned(body, { 'x-user': 'writer' });
 
+    // Then the Go router's order: the rate limit, the body limit, the gate.
+    // A request over the body limit has taken the minute's token.
     const fresh = webhookApp();
     expect((await post(fresh, '/api/webhooks/shop', large, { 'x-shop-signature': signatureOf(large), 'x-user': 'writer' })).status).toBe(413);
-    const anonymous = await post(fresh, '/api/webhooks/shop', body, { 'x-shop-signature': signatureOf(body) });
+    expect((await post(fresh, '/api/webhooks/shop', body, { 'x-shop-signature': signatureOf(body), 'x-user': 'writer' })).status).toBe(429);
+    const anonymous = await post(webhookApp(), '/api/webhooks/shop', body, { 'x-shop-signature': signatureOf(body) });
     expect(anonymous.status).toBe(401);
     expect(await anonymous.json()).toMatchObject({ code: 'unauthorized' });
   });
@@ -816,19 +893,21 @@ describe('service callers (D37)', () => {
       if (c.req.header('x-signature') !== 'ok') throw new HttpProblem(401, 'The webhook signature does not match', { code: 'invalid_signature' });
       await next();
     };
-    const limited: OperationSpec = { ...createOrder, name: 'limitedReserve', path: '/api/limited-reserve', rateLimitPerMinute: 1, webhookProvider: 'shop' };
+    const limited: OperationSpec = { ...createOrder, name: 'limitedReserve', path: '/api/limited-reserve', rateLimitPerMinute: 2, webhookProvider: 'shop' };
     mountOperation(app, limited, async () => null, options, { webhookVerifier: verifier });
     const post = (body: string, headers: Record<string, string> = {}) =>
       app.request('/api/limited-reserve', { method: 'POST', headers: { 'x-real-ip': '198.51.100.20', 'service-authorization': 'Bearer x.y.z', ...headers }, body });
 
+    // A refused signature takes no rate-limit token and reaches no other step.
     expect(await (await post('{"name":"a"}')).json()).toMatchObject({ code: 'invalid_signature' });
     expect(order).toEqual(['verifier']);
+    // Over the body cap: the rate limit takes a token, the body limit refuses, the service step does not run.
     const large = JSON.stringify({ name: 'x'.repeat(100) });
     expect((await post(large, { 'x-signature': 'ok', 'content-length': String(large.length) })).status).toBe(413);
     expect(order).toEqual(['verifier', 'verifier']);
     expect(await (await post('{"name":"a"}', { 'x-signature': 'ok' })).json()).toMatchObject({ code: 'service_unauthorized' });
     expect(order).toEqual(['verifier', 'verifier', 'verifier', 'service']);
-    // The refused request took the rate limit's one token: the limit ran first.
+    // Both tokens are gone: the rate limit refuses before the service step.
     expect((await post('{"name":"a"}', { 'x-signature': 'ok' })).status).toBe(429);
     expect(order).toEqual(['verifier', 'verifier', 'verifier', 'service', 'verifier']);
   });

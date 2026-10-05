@@ -511,7 +511,14 @@ read-only relation the engine names (`sql.instances()`) and a migration
 can index; creates instances wherever it may invoke a writing operation
 (`instances.create`), with their behaviors' create parameters, so a
 parent's children commit with it, linked and blocked; and runs
-schedules at an interval its schema's config can set. The README's
+schedules at an interval its schema's config can set, or turn off. A
+behavior that keeps values of the schema's other types in its own
+tables reads those types' fields in `parseConfig` (`target.types`),
+which holds them to the schema's checks and its compatibility rule, and
+checks a value against one with `validate(type, value)`. A schedule's
+run may write the behavior's own tables directly, but only what no
+operation returns, history nothing pins say; a change a read shows goes
+through an operation it invokes. The README's
 [behaviors](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#behaviors)
 section has the whole interface.
 
