@@ -49,6 +49,13 @@ type Options struct {
 	// set it; nil (a single build) makes Run log the check it skipped.
 	DependencyConfig func(name string) (*schemaconfig.SchemaConfig, bool)
 
+	// LoadDependencyConfig reads the config of a service by name, from where
+	// LoadDependency loads the service. Every build sets it, a single build
+	// included: the Stack kind's generator reads the outputs of each service
+	// a stack reaches from it, the API's language and the database's
+	// dialects (docs/stack-model.md, section 6.10).
+	LoadDependencyConfig func(name string) (*schemaconfig.SchemaConfig, error)
+
 	// Clock stamps generated file headers. Defaults to the wall clock.
 	Clock codegen.Clock
 

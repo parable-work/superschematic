@@ -28,6 +28,10 @@
         "typescript": "^5.9.3",
       },
     },
+    "stack": {
+      "name": "@superschematic/stack",
+      "version": "0.0.0",
+    },
   },
   "packages": {
     "@superschematic/api": ["@superschematic/api@workspace:api"],
@@ -37,6 +41,8 @@
     "@superschematic/schema": ["@superschematic/schema@workspace:schema"],
 
     "@superschematic/schema-config": ["@superschematic/schema-config@workspace:schema-config"],
+
+    "@superschematic/stack": ["@superschematic/stack@workspace:stack"],
 
     "@types/json-schema": ["@types/json-schema@7.0.15", "", {}, "sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA=="],
 

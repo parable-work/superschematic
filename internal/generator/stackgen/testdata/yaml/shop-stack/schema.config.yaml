@@ -1,0 +1,7 @@
+name: shop-stack
+kind: Stack
+dependencies:
+  - { name: shop-db, kind: DB }
+  - { name: shop-api, kind: API }
+  - { name: shop-orders, kind: API }
+outputs: {}

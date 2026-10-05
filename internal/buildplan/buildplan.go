@@ -196,6 +196,17 @@ func configPath(serviceDir string) string {
 	return ""
 }
 
+// ReadConfig reads the config of the service in serviceDir in whichever form
+// it has, as discovery reads every service's. A single build reads the
+// configs of the services a stack reaches with it.
+func ReadConfig(serviceDir string, reg *registry.Registry) (*schemaconfig.SchemaConfig, error) {
+	path := configPath(serviceDir)
+	if path == "" {
+		return nil, fmt.Errorf("%s has no schema.config.ts, schema.config.json or schema.config.yaml", serviceDir)
+	}
+	return readConfig(serviceDir, path, reg)
+}
+
 func readConfig(serviceDir string, configPath string, reg *registry.Registry) (*schemaconfig.SchemaConfig, error) {
 	if filepath.Base(configPath) == "schema.config.ts" {
 		// The static read applies the config import rule (D34): the config

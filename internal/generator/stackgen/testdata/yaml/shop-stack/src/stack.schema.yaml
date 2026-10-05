@@ -1,0 +1,56 @@
+# The stack of ../../../services/shop-stack in the YAML data form: each class
+# is a type, its decorator the type's declaration, a handle {name, kind}
+# and a declared deployable's class its name.
+kind: Stack
+types:
+  Shop:
+    name: Shop
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: shop-api, kind: API }
+        - { name: shop-orders, kind: API }
+      expose:
+        - service: { name: shop-api, kind: API }
+  Orders:
+    name: Orders
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: shop-orders, kind: API }
+  Staging:
+    name: Staging
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-staging, region: us-east1 }
+      domain: staging.acme.dev
+      dns: { platform: fake.dns, values: { zone: acme.dev } }
+      settings:
+        - of: { deployable: Orders }
+          env: { FULFILLMENT_REGION: { value: us } }
+  Production:
+    name: Production
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-prod, region: us-east1, production: true }
+      domain: acme.dev
+      settings:
+        - of: { service: { name: shop-db, kind: DB } }
+          values: { tier: large, highAvailability: true }
+        - of: { service: { name: shop-api, kind: API } }
+          values: { minInstances: 1 }
+          env: { LOG_LEVEL: { value: warn } }
+        - of: { service: { name: shop-orders, kind: API } }
+          env: { FULFILLMENT_REGION: { value: us } }
+  Preview:
+    name: Preview
+    role: EmbeddedStruct
+    extends: Staging
+    rawHeritage: { extends: Staging }
+    environment:
+      parameters: [pr]
+      settings:
+        - of: { service: { name: shop-api, kind: API } }
+          env: { PREVIEW_ID: { parameter: pr } }

@@ -3,7 +3,9 @@ package generator
 import (
 	"encoding/json"
 
+	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // sqlOutputSchema is the JSON Schema of outputs.sql. registry.ParseOutputs
@@ -114,6 +116,19 @@ func RegisterCore(reg *registry.Registry) error {
 				return r.measure("output.env-config", func() error {
 					return r.generateEnvConfig(envLoaderLanguage(c.Outputs))
 				})
+			},
+		},
+		{
+			// The Stack kind's one output: each environment of the stack,
+			// resolved, at stack/<stack>/<environment>/environment.json
+			// (docs/stack-model.md, section 5.1).
+			Name:  stackgen.Name,
+			Kinds: []string{string(ir.SchemaKindStack)},
+			Dirs: func(c registry.GenerateContext) []string {
+				return []string{stackgen.OutDir(c.Options.OutputRoot, c.Config.Name)}
+			},
+			Generate: func(c registry.GenerateContext) error {
+				return run{c}.measure("output.stack", func() error { return stackgen.Generate(c) })
 			},
 		},
 	}

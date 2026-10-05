@@ -1652,6 +1652,77 @@
       ],
       "type": "object"
     },
+    "DNSPlacement": {
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "type": "string"
+        },
+        "values": {
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "type": "object"
+    },
+    "DatabaseDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "hosts": {
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hosts"
+      ],
+      "type": "object"
+    },
+    "DeployableRef": {
+      "additionalProperties": false,
+      "properties": {
+        "deployable": {
+          "default": "",
+          "type": "string"
+        },
+        "service": {
+          "$ref": "#/$defs/ServiceRef"
+        }
+      },
+      "type": "object"
+    },
+    "DeployableSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EnvValue"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "of": {
+          "$ref": "#/$defs/DeployableRef"
+        },
+        "platform": {
+          "default": "",
+          "type": "string"
+        },
+        "values": {
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "of"
+      ],
+      "type": "object"
+    },
     "Document": {
       "additionalProperties": false,
       "properties": {
@@ -1692,7 +1763,8 @@
           "enum": [
             "API",
             "DB",
-            "General"
+            "General",
+            "Stack"
           ],
           "type": "string"
         },
@@ -1819,6 +1891,65 @@
       "required": [
         "name"
       ],
+      "type": "object"
+    },
+    "EnvValue": {
+      "additionalProperties": false,
+      "properties": {
+        "parameter": {
+          "default": "",
+          "type": "string"
+        },
+        "value": {
+          "default": null,
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "EnvironmentDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "dns": {
+          "$ref": "#/$defs/DNSPlacement"
+        },
+        "domain": {
+          "default": "",
+          "type": "string"
+        },
+        "parameters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "settings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DeployableSettings"
+          },
+          "type": "array"
+        },
+        "target": {
+          "default": "",
+          "type": "string"
+        },
+        "values": {
+          "default": {},
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "FieldDef": {
@@ -3004,6 +3135,37 @@
       ],
       "type": "object"
     },
+    "ServerDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "serves": {
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "serves"
+      ],
+      "type": "object"
+    },
+    "ServiceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
     "SourceRef": {
       "additionalProperties": false,
       "properties": {
@@ -3028,6 +3190,26 @@
       "required": [
         "target"
       ],
+      "type": "object"
+    },
+    "StackDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "deploy": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        },
+        "expose": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DeployableRef"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "TraitConfigSchema": {
@@ -3073,6 +3255,9 @@
           "default": "",
           "type": "string"
         },
+        "database": {
+          "$ref": "#/$defs/DatabaseDecl"
+        },
         "denyUnknownFields": {
           "default": false,
           "type": "boolean"
@@ -3084,6 +3269,9 @@
         "envVars": {
           "default": false,
           "type": "boolean"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentDecl"
         },
         "extends": {
           "default": "",
@@ -3159,8 +3347,14 @@
           ],
           "type": "string"
         },
+        "server": {
+          "$ref": "#/$defs/ServerDecl"
+        },
         "source": {
           "$ref": "#/$defs/SourceRef"
+        },
+        "stack": {
+          "$ref": "#/$defs/StackDecl"
         },
         "strictJSON": {
           "default": false,

@@ -39,6 +39,10 @@ type buildServiceOptions struct {
 	// build --with-deps set it, a single build leaves it nil.
 	DependencyConfig func(name string) (*schemaconfig.SchemaConfig, bool)
 
+	// LoadDependencyConfig is generator.Options.LoadDependencyConfig: every
+	// build sets it.
+	LoadDependencyConfig func(name string) (*schemaconfig.SchemaConfig, error)
+
 	// APILanguage, when set, replaces the loaded config's
 	// outputs.api.language (build --api-language).
 	APILanguage string
@@ -142,7 +146,8 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 			Naming:         opts.Naming,
 			Registry:       opts.Registry,
 
-			DependencyConfig: opts.DependencyConfig,
+			DependencyConfig:     opts.DependencyConfig,
+			LoadDependencyConfig: opts.LoadDependencyConfig,
 		})
 		return err
 	}); err != nil {

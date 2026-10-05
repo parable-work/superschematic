@@ -548,6 +548,13 @@ func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTask
 			dep, ok := ctx.serviceByName[name]
 			return dep.Config, ok
 		},
+		LoadDependencyConfig: func(name string) (*schemaconfig.SchemaConfig, error) {
+			dep, ok := ctx.serviceByName[name]
+			if !ok {
+				return nil, fmt.Errorf("schema service %s not found", name)
+			}
+			return dep.Config, nil
+		},
 		Log:         cmd.OutOrStdout(),
 		Profile:     prof,
 		SkipFormat:  ctx.skipFormat,

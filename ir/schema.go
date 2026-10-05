@@ -15,6 +15,11 @@ const (
 
 	// SchemaKindGeneral represents a general-purpose schema that generates types only.
 	SchemaKindGeneral SchemaKind = "General"
+
+	// SchemaKindStack represents a stack: what runs where, over the services
+	// it references (docs/stack-model.md, section 4.1). Its schema declares
+	// a [Stack]; it generates each environment's environment.json.
+	SchemaKindStack SchemaKind = "Stack"
 )
 
 // String returns the string representation of a SchemaKind.
