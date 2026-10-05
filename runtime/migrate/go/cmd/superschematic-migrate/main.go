@@ -5,6 +5,7 @@
 //	superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
 //	superschematic-migrate status --service NAME [--model] [--database-url URL]
 //	superschematic-migrate adopt --model model.json [--database-url URL]
+//	superschematic-migrate version
 //
 // Exit codes: 0 done, 1 refused or failed, 2 usage.
 package main
@@ -17,6 +18,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,6 +39,7 @@ const usage = `usage:
   superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
   superschematic-migrate status --service NAME [--model] [--database-url URL]
   superschematic-migrate adopt --model model.json [--database-url URL]
+  superschematic-migrate version
 
 --database-url defaults to $DATABASE_URL. A postgres:// or postgresql://
 URL selects Postgres; a sqlite: URL, a file: URI or a path selects SQLite.
@@ -78,6 +82,10 @@ func runWith(ctx context.Context, args []string, o options) int {
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(o.stdout, usage)
 		return exitOK
+	case "version", "-version", "--version":
+		info, _ := debug.ReadBuildInfo()
+		_, _ = fmt.Fprintf(o.stdout, "%s %s\n", programName, binaryVersion(version, info))
+		return exitOK
 	default:
 		err = usageErrorf("unknown command %q", args[0])
 	}
@@ -94,6 +102,22 @@ func runWith(ctx context.Context, args []string, o options) int {
 		_, _ = fmt.Fprintf(o.stderr, "%s: %v\n", programName, err)
 		return exitFailed
 	}
+}
+
+// version is the release version. A release build stamps it with
+// -ldflags "-X main.version=X.Y.Z".
+var version string
+
+// binaryVersion returns the version the binary reports: the stamped one,
+// else the module version go install recorded, else (devel).
+func binaryVersion(stamped string, info *debug.BuildInfo) string {
+	if stamped != "" {
+		return stamped
+	}
+	if info != nil && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return strings.TrimPrefix(info.Main.Version, "v")
+	}
+	return "(devel)"
 }
 
 type usageError struct{ msg string }
