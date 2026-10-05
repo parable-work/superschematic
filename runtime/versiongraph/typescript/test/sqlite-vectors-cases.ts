@@ -29,6 +29,13 @@ export interface VectorCase {
 
 const core = initSync();
 
+/** The descriptor's kinds: each one's name, its role columns and its columns' value classes. */
+const kinds = (
+  JSON.parse(descriptor) as {
+    kinds: { kind: string; key: string; id: string; ref: string; root: string; tombstone: string; version: string; columns: Record<string, string> }[];
+  }
+).kinds;
+
 /** Opens an in-memory database through binding, runs fn on it, and closes it however fn ends. */
 function inMemory<T>(binding: Binding, fn: (client: SqliteClient) => T): T {
   const db = binding.open(":memory:");
@@ -112,8 +119,8 @@ export const vectorCases: VectorCase[] = [
             storage.transact((tx) => {
               for (const ref of other.refs) {
                 assert.equal(codeOf(() => tx.readRef(ref.id)), "not_found", `${g.graph} reads ${other.graph}'s ref ${ref.id}`);
-                for (const kind of ["cover", "ingredient", "note", "step", "tasting", "utensil"]) {
-                  assert.deepEqual(tx.rows(kind, ref.id), [], `${g.graph} reads ${other.graph}'s ${kind} rows`);
+                for (const k of kinds) {
+                  assert.deepEqual(tx.rows(k.kind, ref.id), [], `${g.graph} reads ${other.graph}'s ${k.kind} rows`);
                 }
               }
               for (const commit of other.commits) {
@@ -162,8 +169,8 @@ export const vectorCases: VectorCase[] = [
           `SELECT 1 FROM ${t("release_history")} AS a JOIN ${t("release_history")} AS b ON a.id = b.id AND a._version = 1 AND b._version = 2 ` +
             `AND json_extract(a.data, '$.commit_id') <> json_extract(b.data, '$.commit_id')`,
         );
-        for (const kind of ["cover", "ingredient", "note", "step", "tasting", "utensil"]) {
-          holds(`a ${kind} row`, `SELECT 1 FROM ${t("member")} WHERE kind = '${kind}'`);
+        for (const k of kinds) {
+          holds(`a ${k.kind} row`, `SELECT 1 FROM ${t("member")} WHERE kind = '${k.kind}'`);
         }
         holds("a tombstone", `SELECT 1 FROM ${t("member")} WHERE tombstone = 1`);
         for (const op of ["INSERT", "UPDATE", "DELETE"]) {
@@ -180,16 +187,15 @@ export const vectorCases: VectorCase[] = [
             `WHERE h.kind = 'step' AND json_type(m.data, '$.scratch') = 'text' AND json_type(h.data, '$.scratch') IS NULL`,
         );
         const tastings = client.all(`SELECT data FROM ${t("member")} WHERE kind = 'tasting'`).map((r) => r["data"] as string);
-        const classes = (JSON.parse(descriptor) as { kinds: { kind: string; columns: Record<string, string> }[] }).kinds.find(
-          (k) => k.kind === "tasting",
-        )!.columns;
-        for (const column of Object.keys(classes).filter((c) => !["_version", "deleted_on_ref", "entity_key", "id", "recipe_id", "ref_id"].includes(c))) {
+        const tasting = kinds.find((k) => k.kind === "tasting")!;
+        const roles = new Set([tasting.key, tasting.id, tasting.ref, tasting.root, tasting.tombstone, tasting.version]);
+        for (const column of Object.keys(tasting.columns).filter((c) => !roles.has(c))) {
           assert.ok(
             tastings.some((data) => {
               const value = memberOf(data, column);
               return value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0);
             }),
-            `a tasting holds a ${classes[column]} value in ${column}`,
+            `a tasting holds a ${tasting.columns[column]} value in ${column}`,
           );
         }
       });
