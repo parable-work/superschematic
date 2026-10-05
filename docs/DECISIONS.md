@@ -2770,3 +2770,34 @@ an `@envVars` class through `generator.Run` and loads its config. The
 share and no longer extracts endpoints.
 
 The rule is reversible until the first release.
+
+## D35. The servers agree on a route's traffic controls
+
+An audit of the traffic controls (D29) found the Go and TypeScript servers
+disagreeing where nothing said so. A `@rateLimit`, `@bodyLimit` or
+`@timeout` of 0 built: the Go router then answered 429 or 504 to every
+request, and the TypeScript and Rust routers dropped the directive. A
+fraction was truncated, so `@timeout({ seconds: 0.5 })` was 0. The
+TypeScript router keyed its rate limit by the first `X-Forwarded-For` hop,
+so a client chose its own bucket by sending the header; the Go router keys
+by chi's client IP, which the service sets from a proxy it trusts, or by
+the socket. Its pipeline ran the body limit before the rate limit and the
+gate, and its timeout covered `authenticate` too; the Go router runs the
+rate limit, the body limit and the permission check, then the timeout
+around the handler. A non-Bearer `Authorization` header (`ApiKey …`)
+answered 400 from hono/bearer-auth before a custom `authenticate` saw it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `@rateLimit`, `@bodyLimit` or `@timeout` value is a whole number of at least 1. The TypeScript reader refuses another when it reads the decorator; the verify pass refuses a value below 1 in a schema authored as IR. The Rust generator's reading of a value below 1 as no directive (D29) stays as a guard. | Reading 0 as no directive, which the TypeScript and Rust servers did, leaving the Go server's reading unexplained |
+| The TypeScript runtime keys a rate limit by the transport's peer address (`remoteAddressKey`), as the Go and Rust runtimes fall back to the socket. `RequestContext.remoteAddress` carries it; `clientIp` stays the forwarded client IP for a service that wants it, and `clientIpKey` keys by it behind a proxy the service trusts (`rateLimit: { keyOf: clientIpKey }`). | Keeping `X-Forwarded-For` as the default, which lets a client pick its bucket when no proxy sets the header |
+| The TypeScript route runs the Go router's order: the webhook verifier, the rate limit, the body limit, the bearer parse and the permission gate, then decoding and the implementation under the timeout. One `RequestContext` serves every step; its `raw` reads the Hono request when read, since the verifier and hono/body-limit each hand the route a fresh copy. The timeout is the runtime's own race, not hono/timeout, and still aborts `ctx.signal`. | Leaving the order as it was, with a refused body costing no rate-limit token but an authentication's cost charged to every route with a timeout |
+| hono/bearer-auth parses only a Bearer `Authorization` header (case-insensitively), and a malformed one still answers 400. Any other scheme reaches `authenticate` untouched, and `ctx.bearerToken` is set by the parse before the gate. | Parsing every `Authorization` header, which refuses an API-key scheme before the service's authenticator sees it |
+
+`runtime/http/typescript/src/hono.test.ts` checks the order of the
+refusals, the peer-address key and `clientIpKey`, the timeout around the
+handler and not the gate, and an `ApiKey` header reaching `authenticate`;
+`internal/registry` and `internal/loader/verify` test the refusal of a
+value below 1. The engine serves its routes through the same pipeline.
+
+The rule is reversible until the first release.

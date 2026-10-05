@@ -168,7 +168,12 @@ Three decorators bound a route's use. On a class they apply to every route
 of the set; on a method, to that route.
 
 - `@rateLimit({ requestsPerMinute })` counts a client's requests to the
-  route, by IP address, and answers 429 past the limit for the minute.
+  route, by IP address, and answers 429 past the limit for the minute. The
+  address is the connection's peer, not a forwarding header a client could
+  write; behind a proxy you trust, each server takes the client IP from it
+  as you tell it to (Go: chi's `ClientIPFromXFF` or `ClientIPFromHeader`
+  middleware; TypeScript: `rateLimit: { keyOf: clientIpKey }`; Rust: a
+  `ClientIp` request extension).
 - `@bodyLimit({ megabytes })` answers 413 to a larger body before reading
   it.
 - `@timeout({ seconds })` cancels the request's context when the time runs
@@ -190,8 +195,9 @@ decryptor, which in a deployment calls a key service. On such a route
 
 <Snippet file="go/orders_test.go" symbol="TestTrafficControls" />
 
-The TypeScript and Rust servers apply the same three and the permission
-check, the Rust server in the order above
+Each value is a whole number of at least 1; the build refuses 0, a
+negative number or a fraction. The TypeScript and Rust servers apply the
+same three and the permission check, in the same order
 ([TypeScript](/superschematic/install/typescript/#serve-a-generated-api),
 [Rust](/superschematic/install/rust/#serve-a-generated-api)).
 
