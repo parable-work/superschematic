@@ -74,9 +74,9 @@ func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 	n.AuthProvider = sessionauth.Name
 	core := generator.CoreRegistry(n)
 	for dir, want := range map[string]string{
-		"testdata/stock-json": `src/item.schema.json: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
-		"testdata/stock-yaml": `src/item.schema.yaml: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
-		"testdata/stock":      `src/item.schema.ts:4:11: type Item: behavior "acme.Stock" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
+		"testdata/stock-json": `src/item.schema.json: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
+		"testdata/stock-yaml": `src/item.schema.yaml: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
+		"testdata/stock":      `src/item.schema.ts:4:11: type Item: behavior "acme.Stock" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
 	} {
 		_, err := loader.LoadService(dir, loader.WithRegistry(core))
 		if err == nil || !strings.Contains(err.Error(), want) {

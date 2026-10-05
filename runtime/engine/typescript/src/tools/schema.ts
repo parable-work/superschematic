@@ -179,6 +179,16 @@ export class FieldSchemas {
     return { type: 'object', description: `${typeName} object`, additionalProperties: false, properties, required };
   }
 
+  /**
+   * scalarType is the JSON type of a value of a scalar the document
+   * declares or the catalog holds, as a field of it is written: its
+   * json_schema type mapping, or the one its primitive gives, `any` for
+   * every JSON type; undefined for a name that is no scalar.
+   */
+  scalarType(typeName: string): string | undefined {
+    return refKind(this.document, typeName) === 'scalar' ? this.scalar(typeName)?.type : undefined;
+  }
+
   /** field is the schema of one field's value; toolsutil.FieldToJSONSchemaProperty. */
   field(field: FieldDef, stack: ReadonlySet<string>): Property {
     const typeName = field.typeRef.name;

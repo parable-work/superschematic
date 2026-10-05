@@ -548,16 +548,26 @@ class TypeReader {
 }
 
 // configTypeOf is a type as parseConfig reads it: its fields' JSON keys,
-// type names, kinds, list depths and whether each is optional, leaving out
-// a field the document checks refuse (fieldTypeIssue).
+// type names, kinds, list depths and whether each is optional, and a
+// scalar's JSON type, leaving out a field the document checks refuse
+// (fieldTypeIssue).
 function configTypeOf(document: Document, name: string): ConfigType {
   const fields: ConfigTypeField[] = [];
+  const schemas = new FieldSchemas(document);
   for (const field of ((document.types ?? {})[name] as TypeDef).fields ?? []) {
     const kind = refKind(document, field.typeRef.name);
     if (field.typeRef.isMap || kind === 'union' || kind === 'unknown') {
       continue;
     }
-    fields.push({ key: jsonKey(field), type: field.typeRef.name, kind, depth: arrayDepth(field.typeRef) as 0 | 1 | 2, optional: !field.required });
+    const jsonType = kind === 'scalar' ? schemas.scalarType(field.typeRef.name) : undefined;
+    fields.push({
+      key: jsonKey(field),
+      type: field.typeRef.name,
+      kind,
+      ...(jsonType === undefined ? {} : { jsonType }),
+      depth: arrayDepth(field.typeRef) as 0 | 1 | 2,
+      optional: !field.required,
+    });
   }
   return deepFreeze({ name, fields });
 }

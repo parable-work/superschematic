@@ -2,6 +2,7 @@ package registry
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
@@ -109,6 +110,25 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
 		}
 	}
+	// Branches makes each instance a version graph's root: no field, no
+	// requirement, and sixteen operations, all of instance scope, of which
+	// the nine that write the graph write and the seven that read it read.
+	branches, _ := reg.Behavior("Branches")
+	if branches.Package != EnginePackage || !branches.ConfigRequired() || len(branches.Requires) != 0 || len(branches.Fields) != 0 ||
+		len(branches.PreconditionSchema) != 0 || len(branches.CreateParamsSchema) != 0 {
+		t.Errorf("Branches = %+v, want the engine's, a config, and no requirement, field or parameter", branches)
+	}
+	var branchOps []string
+	for _, op := range branches.Operations {
+		if op.Scope != "" {
+			t.Errorf("Branches.%s has scope %q, want instance", op.Name, op.Scope)
+		}
+		branchOps = append(branchOps, fmt.Sprintf("%s:%v", op.Name, op.Writes))
+	}
+	if want := []string{"branch:true", "save:true", "commit:true", "seal:true", "merge:true", "rebase:true", "revert:true", "release:true", "discard:true",
+		"refs:false", "releases:false", "compose:false", "materialize:false", "released:false", "diff:false", "history:false"}; !slices.Equal(branchOps, want) {
+		t.Errorf("Branches operations = %v, want %v", branchOps, want)
+	}
 	// Every work-queue operation writes but countClaimable and checkReserve,
 	// which read; claimNext, countClaimable and expireHolder are schema-level.
 	reads := []string{"countClaimable", "checkReserve"}
@@ -149,6 +169,8 @@ func TestCoreBehaviors(t *testing.T) {
 		{presence, []string{"no_principal", "not_principal", "principal_fixed"}},
 		{budget, []string{"over_limit", "not_leased", "scope_moved", "scope_reserved", "below_committed", "exceeds_reservation", "not_configured"}},
 		{blueprint, []string{"stamped", "no_dependencies", "not_constant", "no_revision", "unreadable", "invalid_steps"}},
+		{branches, []string{"version_conflict", "name_taken", "ref_sealed", "primary_merge_only", "nothing_to_commit", "entity_not_found", "invalid_tree",
+			"merge_into_itself", "no_parent", "not_tagged", "walk_ceiling", "primary_line"}},
 	} {
 		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
 			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
@@ -274,6 +296,26 @@ func TestCoreBehaviors(t *testing.T) {
 		{variants, `{"field": "result", "by": "kind", "types": {"verify": ["VerifyResult"]}}`, "behavior Variants config: "},
 		{variants, `{"field": "", "by": "kind", "types": {"verify": "VerifyResult"}}`, "behavior Variants config: "},
 		{variants, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult"}, "otherwise": "AnyResult"}`, "behavior Variants config: "},
+		{branches, `{"kinds": {"step": {"type": "Step"}}}`, ""},
+		{branches, `{"kinds": {"step": {"type": "Step", "order": "position", "units": {"timings": "keyed", "notes": "excluded"}, "retentionDays": 365},
+			"ingredient": {"type": "Ingredient", "parent": {"key": "stepKey", "of": "step"}}, "cover": {"type": "Cover", "singleton": true}},
+			"primary": "trunk", "snapshotEvery": 16, "sweep": {"intervalMs": 60000, "discardGrace": 86400000, "pruneBatch": 500, "abandonAfter": 604800000}}`, ""},
+		{branches, ``, "behavior Branches config: "},
+		{branches, `{"kinds": {}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"Step": {"type": "Step"}}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step_row": {"type": "Step"}}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {}}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": ""}}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step", "parent": {"key": "stepKey"}}}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step", "units": {"timings": "merged"}}}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step", "retentionDays": 0}}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step", "author": "editor"}}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step"}}, "primary": ""}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step"}}, "snapshotEvery": 0}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {"intervalMs": 500}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {"intervalMs": 60000, "abandonAfter": 0}}`, "behavior Branches config: "},
+		{branches, `{"kinds": {"step": {"type": "Step"}}, "schemaEpoch": 1}`, "behavior Branches config: "},
 		{lease, ``, ""},
 		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "sweepMs": 2000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
 			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},

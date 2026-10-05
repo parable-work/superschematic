@@ -132,9 +132,25 @@ export { page, pageRequest } from './behaviors/paging.js';
 export type { Page } from './behaviors/paging.js';
 
 // The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
-export { MAX_ROLLUP_READ, isTerminalState, stateOutcome } from './behaviors/core/index.js';
+export {
+  ACTOR_NAMESPACE,
+  DEFAULT_PRIMARY,
+  MAX_ROLLUP_READ,
+  ROLE_COLUMNS,
+  ROOT_NAMESPACE,
+  isTerminalState,
+  stateOutcome,
+  uuidV5,
+} from './behaviors/core/index.js';
 export type {
   BlockerRecord,
+  BranchCommit,
+  BranchRef,
+  BranchRelease,
+  BranchesConfig,
+  BranchesKind,
+  BranchesSweep,
+  BranchesUnit,
   CommentRecord,
   ConstantsConfig,
   DependenciesConfig,
