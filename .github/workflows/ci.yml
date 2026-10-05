@@ -195,12 +195,26 @@ jobs:
             "postgres:${POSTGRES_VERSION}-alpine"
           # Over TCP: the image's first-start server listens only on its
           # socket and restarts once initialised.
+          ready=""
           for _ in $(seq 1 60); do
-            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then ready=1; break; fi
             sleep 1
           done
-          docker logs superschematic-pg
-          exit 1
+          if [ -z "$ready" ]; then
+            docker logs superschematic-pg
+            exit 1
+          fi
+          # The tests share this database, each in its own schema, and run
+          # in parallel. Two that apply a create.sql at once race on its
+          # CREATE EXTENSION IF NOT EXISTS (a unique violation on
+          # pg_extension_name_index), and one that drops its schema would
+          # drop an extension created there with it. Created once in public,
+          # which every test's search_path ends with, the generated
+          # statements are no-ops.
+          docker exec superschematic-pg psql --host 127.0.0.1 --username postgres --set ON_ERROR_STOP=1 \
+            --command "CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public" \
+            --command "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public" \
+            --command "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"
 
       - name: Build, vet, test every module
         env:
