@@ -10,4 +10,4 @@ pub mod router;
 
 pub use interfaces::*;
 pub use router::{build_router, build_router_with, {{ if .WebhookProviders }}webhook_verified, {{ end }}RouterState};
-pub use {{ .RuntimeCrateIdent }}::RouterOptions;
+pub use {{ .RuntimeCrateIdent }}::{request_ids, RouterOptions};

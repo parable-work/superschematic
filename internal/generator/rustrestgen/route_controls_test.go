@@ -239,6 +239,15 @@ async fn get(router: &Router, uri: &str, token: Option<&str>) -> Sent {
     send(router, "GET", uri, token, Body::empty(), None).await
 }
 
+/// A refusal is an RFC 9457 problem with the code and detail, naming the
+/// request it refuses.
+fn assert_problem(body: &Value, code: &str, detail: &str) {
+    assert_eq!(body["type"], "about:blank", "{body}");
+    assert_eq!(body["code"], code, "{body}");
+    assert_eq!(body["detail"], detail, "{body}");
+    assert!(body["requestId"].as_str().is_some_and(|id| !id.is_empty()), "{body}");
+}
+
 fn count(log: &Log, entry: &str) -> usize {
     log.lock().unwrap().iter().filter(|logged| *logged == entry).count()
 }
@@ -249,7 +258,7 @@ async fn an_auth_route_answers_401_without_a_caller() {
     let router = router(&log);
     let sent = get(&router, "/api/auth/me", None).await;
     assert_eq!(sent.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(sent.body, json!({"error": {"code": "unauthorized", "message": "Authentication required"}}));
+    assert_problem(&sent.body, "unauthorized", "Authentication required");
 
     let sent = get(&router, "/api/auth/me", Some("ana")).await;
     assert_eq!(sent.status, StatusCode::OK);
@@ -264,7 +273,7 @@ async fn a_permission_route_answers_403_to_a_caller_without_one_of_its_permissio
 
     let sent = get(&router, "/api/tenants/t1", Some("ana:tenants.write")).await;
     assert_eq!(sent.status, StatusCode::FORBIDDEN);
-    assert_eq!(sent.body, json!({"error": {"code": "forbidden", "message": "Insufficient permissions"}}));
+    assert_problem(&sent.body, "forbidden", "Insufficient permissions");
 
     // tenants covers tenants.read.
     let sent = get(&router, "/api/tenants/t1", Some("ana:tenants")).await;
@@ -297,7 +306,7 @@ async fn require_ownership_needs_a_caller_and_leaves_ownership_to_the_implementa
     assert_eq!(patch(None).await.status, StatusCode::UNAUTHORIZED);
     let sent = patch(Some("t2:tenants.write")).await;
     assert_eq!(sent.status, StatusCode::FORBIDDEN);
-    assert_eq!(sent.body["error"]["message"], "The caller does not own this tenant");
+    assert_eq!(sent.body["detail"], "The caller does not own this tenant");
     assert_eq!(patch(Some("t1:tenants.write")).await.status, StatusCode::OK);
 }
 
@@ -313,7 +322,7 @@ async fn past_the_rate_limit_a_client_gets_429_with_retry_after() {
     }
     let sent = list([198, 51, 100, 1]).await;
     assert_eq!(sent.status, StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(sent.body, json!({"error": {"code": "too_many_requests", "message": "Too Many Requests"}}));
+    assert_problem(&sent.body, "too_many_requests", "Too Many Requests");
     let retry_after: u64 = sent.retry_after.expect("Retry-After").parse().unwrap();
     assert!((1..=60).contains(&retry_after), "{retry_after}");
     // The refused request cost no authentication.
@@ -331,7 +340,7 @@ async fn a_body_over_the_limit_answers_413_before_the_permission_check() {
     let over = format!(r#"{{"name":"{}","slug":"big"}}"#, "x".repeat(1024 * 1024));
     let sent = send(&router, "POST", "/api/tenants", None, Body::from(over.clone()), None).await;
     assert_eq!(sent.status, StatusCode::PAYLOAD_TOO_LARGE);
-    assert_eq!(sent.body["error"]["code"], "payload_too_large");
+    assert_eq!(sent.body["code"], "payload_too_large");
     let sent = send(&router, "POST", "/api/tenants", Some("ana:tenants.write"), Body::from(over), None).await;
     assert_eq!(sent.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(count(&log, "authenticate"), 0);
@@ -365,7 +374,7 @@ async fn a_route_past_its_timeout_answers_504() {
     let router = router(&log);
     let sent = get(&router, "/api/tenants/slow", Some("ana:tenants.read")).await;
     assert_eq!(sent.status, StatusCode::GATEWAY_TIMEOUT);
-    assert_eq!(sent.body, json!({"error": {"code": "gateway_timeout", "message": "Gateway Timeout"}}));
+    assert_problem(&sent.body, "gateway_timeout", "Gateway Timeout");
     assert_eq!(count(&log, "get_tenant slow"), 1);
     assert_eq!(get(&router, "/api/tenants/t1", Some("ana:tenants.read")).await.status, StatusCode::OK);
 }

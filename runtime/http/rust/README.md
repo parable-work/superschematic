@@ -6,8 +6,16 @@ This crate provides:
 
 - Request context structure used by generated handlers, with the caller
   (`principal`) on a route that needs one
-- Structured API error type and helpers
-- Error-to-HTTP response mapping helpers for Axum
+- `ApiError` and `error_response`: a refusal as an RFC 9457 problem
+  (`application/problem+json`), with `details` and `errors` members
+- `request_ids`: the middleware the generated router runs around every
+  route, which settles the request's id (`X-Request-ID` or a fresh UUID),
+  echoes it in `x-request-id`, adds it to a problem body and marks every
+  response `no-store`
+- `json_body` and `query_map`: a request's body as JSON whatever its
+  `Content-Type`, and its query, with a failure as an `ApiError`
+- `RouterOptions`, `openapi_router`: the OpenAPI document and its RapiDoc
+  page a generated router serves
 - `Authenticator` and `Principal`: how a service tells the router who the
   caller is, and the dotted-path permission rule (`has_any_permission`)
 - `RouteControls`: a route's `@rateLimit`, `@bodyLimit`, permission check

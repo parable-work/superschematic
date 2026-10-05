@@ -2,14 +2,16 @@
 #![allow(unused_imports)]
 
 use crate::interfaces::Implementations;
-use axum::extract::rejection::PathRejection;
+use axum::body::Bytes;
+use axum::extract::rejection::{BytesRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use superschematic_http_runtime::{
-    error_response, openapi_router, path_is_percent_encoded, request_id_from_headers,
-    wrap_envelope, ApiError, RequestContext, RouterOptions,
+    error_response, json_body, openapi_router, path_is_percent_encoded, query_map,
+    request_id_from_headers, request_ids, wrap_envelope, ApiError, RequestContext, RouterOptions,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -38,6 +40,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/grids/{id}/labels", put(handle_grid_replace_labels));
     router
         .with_state(state)
+        .layer(axum::middleware::from_fn(request_ids))
         .merge(openapi_router(crate::openapi::OPENAPI_JSON, "fixture-nested-arrays-api", &options))
 }
 
@@ -67,19 +70,33 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 async fn handle_grid_save_grid(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is null.
+    let payload = match json_body(body) {
+        Ok(payload) => payload,
+        Err(err) => return error_response(err),
+    };
     let mut ctx = RequestContext::new(method_from_str("post"), "/api/grids".to_string());
     ctx.headers = headers_to_map(&headers);
+    for (key, value) in query {
+        ctx.query_params.insert(key, value);
+    }
     let result = state
         .implementations
         .grid
         .save_grid(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_grid_get_grid(
@@ -87,20 +104,25 @@ async fn handle_grid_get_grid(
     headers: HeaderMap,
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
     // axum decodes each capture once, but keeps an escape it cannot decode
     // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
-    // both answer the error envelope here.
+    // both answer a problem here.
     let path_params = match path_params {
         Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
         _ => {
-            return Err(error_response(ApiError::bad_request(
+            return error_response(ApiError::bad_request(
                 "The request path is not valid percent-encoding",
-            )))
+            ))
         }
     };
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let payload = Value::Null;
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/grids/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
     for (key, value) in path_params {
@@ -109,15 +131,14 @@ async fn handle_grid_get_grid(
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
-    let payload = Value::Null;
     let result = state
         .implementations
         .grid
         .get_grid(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_grid_grid_labels(
@@ -125,20 +146,25 @@ async fn handle_grid_grid_labels(
     headers: HeaderMap,
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
     // axum decodes each capture once, but keeps an escape it cannot decode
     // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
-    // both answer the error envelope here.
+    // both answer a problem here.
     let path_params = match path_params {
         Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
         _ => {
-            return Err(error_response(ApiError::bad_request(
+            return error_response(ApiError::bad_request(
                 "The request path is not valid percent-encoding",
-            )))
+            ))
         }
     };
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let payload = Value::Null;
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/grids/{id}/labels".to_string());
     ctx.headers = headers_to_map(&headers);
     for (key, value) in path_params {
@@ -147,15 +173,14 @@ async fn handle_grid_grid_labels(
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
-    let payload = Value::Null;
     let result = state
         .implementations
         .grid
         .grid_labels(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }
 async fn handle_grid_replace_labels(
@@ -163,24 +188,38 @@ async fn handle_grid_replace_labels(
     headers: HeaderMap,
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    query: Result<Query<HashMap<String, String>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
     let request_id = request_id_from_headers(&headers);
     // axum decodes each capture once, but keeps an escape it cannot decode
     // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
-    // both answer the error envelope here.
+    // both answer a problem here.
     let path_params = match path_params {
         Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
         _ => {
-            return Err(error_response(ApiError::bad_request(
+            return error_response(ApiError::bad_request(
                 "The request path is not valid percent-encoding",
-            )))
+            ))
         }
+    };
+    let query = match query_map(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is null.
+    let payload = match json_body(body) {
+        Ok(payload) => payload,
+        Err(err) => return error_response(err),
     };
     let mut ctx = RequestContext::new(method_from_str("put"), "/api/grids/{id}/labels".to_string());
     ctx.headers = headers_to_map(&headers);
     for (key, value) in path_params {
         ctx.path_params.insert(key, value);
+    }
+    for (key, value) in query {
+        ctx.query_params.insert(key, value);
     }
     let result = state
         .implementations
@@ -188,7 +227,7 @@ async fn handle_grid_replace_labels(
         .replace_labels(ctx, payload)
         .await;
     match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
+        Ok(body) => Json(wrap_envelope(body, request_id.as_deref())).into_response(),
+        Err(err) => error_response(err),
     }
 }

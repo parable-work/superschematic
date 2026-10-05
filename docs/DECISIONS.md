@@ -2688,6 +2688,34 @@ byte for byte.
 
 The rule is reversible until the first release.
 
+### D29, amended: the Rust router refuses with RFC 9457 problems and names each request
+
+D29 kept the Rust router's error envelope, `{"error": {"code",
+"message"}}`, for its refusals and left the switch to the problem body
+the Go and TypeScript servers write as a change of its own. The SDKs read
+a problem's `detail` and `code`; reading the envelope, the TypeScript SDK
+reported `[object Object]` and the Go and Python SDKs a generic message.
+The router also answered axum's own plain-text rejections for a body that
+was not JSON or had no JSON `Content-Type`, put no request id on a
+response but in a success's body, and dropped a non-`GET` route's query.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every refusal and every `ApiError` an implementation returns is an RFC 9457 problem, `application/problem+json`, as the TypeScript runtime writes it: `type` `about:blank`, `title` (the status's Go reason phrase), `status`, `detail` (the error's message), `code`, `requestId`, and `details` and `errors` when the error carries them. `ApiError` gains those two members (`with_details`, `with_errors`) and the TypeScript runtime's codes (`conflict`, `unprocessable_entity`, `service_unavailable`, `method_not_allowed`). | Keeping the envelope, which no SDK reads |
+| A middleware around every generated route (`request_ids`) settles the request's id before the webhook verifier and the controls run: the caller's `X-Request-ID` when it is non-empty, at most 128 characters and free of control characters, else a UUID v4, as the TypeScript runtime keeps it. It writes the id to the request, so the handler's `meta.requestId` is the same id, and on the way out sets `x-request-id` and `cache-control: no-store`, adds `requestId` to a problem body, and turns an empty error response (axum's 405) into the problem of its status. A refusal anywhere in the route, D29's controls included, names its request without passing the id along. | Passing the id to every place that refuses, which a service's own layer could not do |
+| A handler reads its body as JSON whatever its `Content-Type`, an empty body as `null`, as the Go and TypeScript servers read it; a body that is not JSON is a 400 problem, and one axum could not read is a problem of its status. Every route reads its query, so a non-`GET` route's `@query` parameters reach the implementation. | axum's `Json` extractor, which refuses a body without `Content-Type: application/json` and an empty body with plain text |
+| A `@manualRouteRegistration` route the service adds after `build_router` wraps itself in `request_ids`, as `build_router`'s doc says. | Mounting manual routes, which D26 and D29 left to the service |
+
+The generated crate's `tests/problems.rs` (in
+`TestNestedArraysAPICrateBuildsAndRoutes`) checks the id on a success and
+a refusal, a generated id, a body without `Content-Type`, an empty body,
+a body that is not JSON, an implementation's error with `details`, a
+405, and a `POST`'s query; the D29 and D26 crate tests check their
+refusals as problems. The runtime crate's tests run with and without
+serde_json's `arbitrary_precision` and `preserve_order`.
+
+The rule is reversible until the first release.
+
 ## D34. A schema config imports a sibling's sentinel
 
 A `schema.config.ts` names other services in `authDb` and `dependencies`,
