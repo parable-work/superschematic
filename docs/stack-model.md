@@ -1090,10 +1090,13 @@ export class StockMutations {
   `@publicRoute` operation opens its route even in a set with a service
   clause.
 
-The IR records the effective rule on `FieldDef.ServiceCallers` and
-`OperationSet.ServiceCallers`, a `ServiceCallers{Mode, From}` where `Mode`
-is `require` or `allow` and `From` holds the API service names. The
-generators read it through `EndpointInfo`, as they read `RequiresAuth`.
+The IR records each declaration where it is written, on
+`FieldDef.ServiceCallers` and `OperationSet.ServiceCallers`, a
+`ServiceCallers{Mode, From}` where `Mode` is `require` or `allow` and
+`From` holds the API service names, as it records the middleware trio, so
+the data forms round-trip. `ir.EffectiveServiceCallers(set, op)` gives the
+rule that applies, and the generators read that through `EndpointInfo`,
+as they read `RequiresAuth`.
 
 Resolution adds a check to those of section 5.2. Every `calls` edge from a
 server C to an API A must reach at least one operation of A that C may
@@ -1208,8 +1211,11 @@ When an operation has a service clause and the server has no service
 authenticator, the Go server's `Config.Validate` refuses to start it, the
 Rust crate does not compile, as D29 makes it for an end-user
 authenticator, and the TypeScript router answers the route with 401, as it
-does without `authenticate`. A server with no service clause may still
-be given one, so its routes can tell a delegated call from a direct one.
+does without `authenticate`. The TypeScript router takes a service
+authenticator whether or not an operation has a clause, so its routes can
+tell a delegated call from a direct one. The Go and Rust servers have the
+service step only when an operation has a clause, and then on every
+route, so their output for any other schema is unchanged.
 
 End-user auth providers do not change. No auth snippet is added; a
 provider never sees the service header and the service authenticator never
@@ -1305,6 +1311,11 @@ left alone.
   rather than in it. The Workers platform (section 6.8) decides whether the
   TypeScript service authenticator reads it there, or whether Workers
   callers sign key-pair tokens like the generic connector's.
+- The cluster's certificate authority. A Kubernetes API server serves its
+  keys over TLS signed by the cluster's own CA, which the runtimes' default
+  HTTP clients do not trust. Until the Kubernetes platform lands, a
+  deployment passes a key fetcher or HTTP client that trusts it; the
+  platform may add a CA to the callee config instead.
 
 ## 10. Validation and simulation
 
