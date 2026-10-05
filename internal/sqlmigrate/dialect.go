@@ -37,11 +37,14 @@ type dialect interface {
 	model(schema *ir.Schema, opts sqlgen.Options) (*Model, error)
 
 	// convert classifies changing a column from one type to another, both
-	// in the dialect's spelling.
-	convert(from, to string) conversion
+	// in the dialect's spelling, with what each holds (Column.Holds).
+	convert(from, to *Column) conversion
 
 	// canAlter reports whether the dialect changes a table that already
-	// exists by c in place. It is only asked about changes to such a table.
+	// exists by c in place. It is only asked about changes to such a table,
+	// including dropping the foreign key that closes a reference cycle
+	// among the tables the plan drops: a dialect that cannot drops the
+	// cycle's tables in one step instead.
 	canAlter(c *change) bool
 
 	// render turns one change into its steps, in order. Every step has its
@@ -69,6 +72,13 @@ type rendered struct {
 // one is a change rendered as a single step.
 func one(step *Step) rendered {
 	return rendered{steps: []*Step{step}}
+}
+
+// noSQL is a change that changes nothing in the database, rendered as a
+// step with no statements, in every dialect: the step carries the change's
+// hazards, and the runner logs it like any other.
+func noSQL(c *change) rendered {
+	return one(&Step{Op: string(c.op), Subject: c.subject, Statements: []string{}, Transactional: true})
 }
 
 // conversionKind classifies a column type change (D27).

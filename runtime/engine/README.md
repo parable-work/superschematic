@@ -14,7 +14,11 @@ describe and tools documents, the MCP endpoint
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
 reach other instances, `Search`, full-text search, `Reactions`, which
 the runner runs, and `Constants` and `Variants`, which judge the fields a
-write stores. Not built yet: the vectors D16 lists beside search. The
+write stores. The plug-in interface has what D32 gives a behavior that
+keeps values of other types in its own tables: the schema's other types
+in `parseConfig`, `validate(type, value)` in its contexts, and schedules
+a schema turns off and whose runs write the behavior's own tables. Not
+built yet: the vectors D16 lists beside search, and D32's `Branches`. The
 work-queue behaviors are a package of their own,
 `@superschematic/engine-workqueue` (`runtime/engine-workqueue/README.md`),
 which a deployment registers with the engine.
@@ -232,10 +236,12 @@ deployment's binary, the core's by default. The engine then requires:
   behavior) and no `operationSets` (every schema has `create`, `get`,
   `list`, `update` and `delete`, and behaviors add their own);
 - an instance type: the type named like the schema, or its only type;
-- field types the schema runtime validates: a builtin primitive, a
-  scalar, or an enum or type of the document, alone, as a list or as a
-  list of lists. A union or a map is refused, since the runtime checks
-  neither;
+- field types the schema runtime validates, in the instance type and the
+  types it reaches, and in the types a behavior checks values against or
+  reads through `ConfigTarget.types` ("Other types" under "Behaviors"): a
+  builtin primitive, a scalar, or an enum or type of the document, alone,
+  as a list or as a list of lists. A union or a map is refused, since the
+  runtime checks neither;
 - behaviors on the instance type that this engine has implementations
   for, composed as the compiler's loader requires (see "Behaviors").
 
@@ -268,18 +274,22 @@ types, enums and scalars its fields reach.
 | a required field made optional | an optional field made required, or a new required field |
 | a dropped pattern | a new or changed pattern |
 | descriptions, comments, defaults, UI metadata | another type, or another list depth (`T`, `T[]`, `T[][]`) |
-| any change to a type, enum or scalar no field and no behavior's `checkedTypes` reaches | a scalar that accepts less: a primitive or JSON type change, a narrower bound, a new or changed pattern, new reserved words, a new custom validator |
+| any change to a type, enum or scalar no field, no behavior's `checkedTypes` and no type a behavior read through `ConfigTarget.types` reaches | a scalar that accepts less: a primitive or JSON type change, a narrower bound, a new or changed pattern, new reserved words, a new custom validator |
 | | another instance type |
 | a behavior's config changed as its implementation allows | any other config change |
 | a behavior added or removed while the schema has no instances, or with its implementation's consent | a behavior added or removed while it has instances, otherwise |
 
-The walk starts at the instance type and at each type a behavior's
+The walk starts at the instance type, at each type a behavior's
 `validate` checks values against under both versions' configs
-(`checkedTypes`, "Validating fields" under "Behaviors"): a stored
-instance holds values the live version checked against it, a `Variants`
-result say, so such a type is held as a type a field reaches. A refused
-version throws `IncompatibleChangeError`, whose `changes` name each
-change and whose message says to use a new schema name.
+(`checkedTypes`, "Validating fields" under "Behaviors"), and at each type
+a behavior's `parseConfig` read through `ConfigTarget.types` under the
+live version, whether or not the new version reads it ("Other types"
+under "Behaviors"): a stored instance, or a behavior's own tables, hold
+values the live version checked against it, a `Variants` result or a
+row of a kind say, so such a type is held as a type a field reaches. A
+type only the new version reads held no value yet and changes freely. A
+refused version throws `IncompatibleChangeError`, whose `changes` name
+each change and whose message says to use a new schema name.
 
 ### Validation
 
@@ -507,9 +517,9 @@ runs it an interval later; a run and the next run's time commit in one
 transaction. Missed ticks are not replayed: a schedule that came due
 while the runner was stopped runs once when it starts, then an interval
 after, and its context's `previous` is when its last run committed. A
-run that throws rolls back and is retried with the backoff, never later
-than its next tick, and a schedule never halts: the next run redoes the
-work a sweep missed, and there is no order to keep.
+run that throws rolls back, its writes with it, and is retried with the
+backoff, never later than its next tick, and a schedule never halts: the
+next run redoes the work a sweep missed, and there is no order to keep.
 
 A schedule's interval is fixed (`everyMs: 60_000`) or follows the config
 of each schema that composes the behavior (`everyMs: (config) =>
@@ -526,6 +536,16 @@ tried again after the backoff (with no interval to cap it), until a
 publish gives a config it accepts. The runner, and the schedule on other
 schemas, go on.
 
+A function that returns `null` turns the schedule off on that schema: a
+config without a sweep, say, runs no sweep (D32). Only `null` does; a
+function that returns nothing (`undefined`) is a failing interval as
+above, so a forgotten `return` is not mistaken for off. An off schedule
+runs nothing there, wakes the runner for nothing, and shows in the status
+as `off`; the runner drops the row it kept for it on the schema, so once
+a publish gives a config the function returns an interval for, the
+runner finds the schedule as for the first time: it runs an interval
+later, with no `previous`.
+
 ### Status
 
 `status()` lists every subscription and schedule:
@@ -534,7 +554,7 @@ schemas, go on.
 | --- | --- |
 | `running`, `principal`, `head` | whether it is started, the principal's subject, and the log's last cursor |
 | `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
-| `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying` or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema |
+| `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying`, `off` (its function returns `null` for the schema's config) or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema; an `off` schedule has no `previous` and its `next` is `Infinity`, which JSON writes as null |
 | `error` | the runner's own last error outside any reaction (a busy file, say), cleared by the next pass that works |
 
 The status is not served over HTTP or MCP: it spans every namespace and
@@ -645,7 +665,7 @@ function is synchronous (D16): one that returns a promise is a
 | Member | What it is |
 | --- | --- |
 | `declaration` | the declaration the compiler registers, as its JSON file holds it |
-| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), the document's other `types`, every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
+| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), the document's other `types` (their `names`, and `get(name)`, each one's fields, which holds the type to the version's checks: "Other types"), every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
 | `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
@@ -661,7 +681,7 @@ function is synchronous (D16): one that returns a promise is a
 | `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"), as a guard does; the view is the referencing instance's, and the request carries no precondition |
 | `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference. Its context's `writing` says the referencing instance's own write made the change |
 | `reactions` | `{ react(context, event), watches?(config, schema) }`: reactions to committed events, which the runner runs after the commit ("Reactions and schedules") |
-| `schedules` | named timed work, `{ <name>: { everyMs, run(context) } }`, which the runner runs on each schema that composes the behavior; `everyMs` is a number or a function of the schema's config ("Schedules" under "The runner") |
+| `schedules` | named timed work, `{ <name>: { everyMs, run(context) } }`, which the runner runs on each schema that composes the behavior; `everyMs` is a number or a function of the schema's config, which returns `null` to turn the schedule off on that schema ("Schedules" under "The runner"); `run`'s SQL writes the behavior's own tables, where the write changes nothing an operation returns ("Reactions and schedules") |
 
 Registration (`openEngine({ behaviors })` or `engine.behaviors.register`)
 refuses, naming every problem, an implementation whose `operations` or
@@ -803,6 +823,68 @@ validate(context, request) {
 `schemas.validate` checks a value against the version's own rules and
 asks no `validate`: it has no instance before an update.
 
+### Other types
+
+A behavior may keep values of the schema's other types in its own
+tables, rows of a graph's kinds say (D32), so it needs what each type
+holds when its config is parsed, and a way to check a value against one
+when it writes.
+
+```ts
+parseConfig(config, target) {
+  const type = target.types.get(config.type);           // a type besides the instance type, or undefined
+  if (type === undefined) {
+    throw new BehaviorConfigError(`${config.type} is not a type of ${target.schema} (its types: ${target.types.names.join(', ')})`);
+  }
+  return { type: type.name, keys: type.fields.map((field) => field.key) };
+},
+operations: {
+  save(context, params) {
+    const issues = context.validate(context.config.type, params.row);  // [] when the row holds
+    // ...
+  },
+},
+```
+
+- **Reading.** `target.types.names` lists the document's types besides
+  the instance type, sorted; listing them reads none. `target.types.get(name)`
+  returns one, deep-frozen, as `{ name, fields }`, each field `{ key,
+  type, kind, depth, optional }`: its JSON key (`jsonTag`, else its name),
+  its type's name as the document writes it, whether that is a
+  `primitive`, a `scalar`, an `enum` or a `type`, its list depth (0, 1 or
+  2) and whether an object may leave it out. It returns `undefined` for
+  the instance type and for a name that is no type of the document. A
+  field the document checks refuse (a map, a union, a type the document
+  lacks) is left out, since the version is refused at it. `types` is
+  there whenever `parseConfig` runs: at define and publish, and when a
+  published version is composed again to run it or to check a new
+  version against it, since what it reads is the version's own document,
+  which never changes. A read is recorded only while `parseConfig` runs;
+  `get` after it returns is a `BehaviorError`.
+- **What a read holds.** A type `parseConfig` reads counts as reachable
+  from the instance type for the version, and so do the types its fields
+  reach. The document checks cover their fields as they cover the
+  instance type's ("Schemas"): a map, a union and a type the document
+  lacks are refused at define and publish. And the compatibility rule
+  holds a new version to them while the live version reads them ("The
+  compatibility rule"). A type nothing reads, no field reaches and no
+  `checkedTypes` names stays free to change.
+- **Checking.** Every context but `validate`'s has `validate(type, value)`:
+  a view, a context, an operation's, a schema-level operation's, the
+  runner's and `afterConfigChange`'s (which checks with the version being
+  published). It holds a value to a type with the version's validator, as
+  a nested value of the type is held in an instance: a JSON object, each
+  field's value, and no key the type does not declare, at any depth. It
+  returns every issue, `{ path, rule, message }` with a path into the
+  value (`steps[0].name`, `''` for the value itself), as
+  `validateUpdate()` does, and `[]` when the value holds. The type is one
+  the version's checks cover besides the instance type: one its fields
+  reach, one a behavior's `checkedTypes` names, or one a behavior's
+  `parseConfig` read, and the types those reach; any other name is a
+  `BehaviorError`, since the version holds no other to the compatibility
+  rule. `validate`'s own context keeps `checkType`, held to its
+  `checkedTypes`.
+
 ### Vetoes and preconditions
 
 A refusal a client branches on carries a code (D16, amended). A guard
@@ -883,6 +965,8 @@ a field reader's) has:
 - `instances` and `schemas`: other instances and other schemas' configs,
   read as the principal ("Other instances"), and `instances.invoke` and
   `instances.invokeSchema` of read-only operations;
+- `validate(type, value)`: a value checked against another type of the
+  schema with the version's validator ("Other types");
 - `references.list()`: the references the behavior recorded from the
   instance ("References").
 
@@ -1156,19 +1240,33 @@ runner's work wrote it. A schedule's `run(context)` runs once an
 interval on each schema that composes the behavior, in each namespace.
 Their context is a schema-level one (`WorkContext`): the behavior, the
 schema's config, namespace, schema and version, the runner's principal,
-`now`, `can()`, `instances` and `schemas`, whose `invoke` and
-`invokeSchema` run writing operations and whose `create` creates, and
+`now`, `can()`, `validate()`, `instances` and `schemas`, whose `invoke`
+and `invokeSchema` run writing operations and whose `create` creates, and
 `sql` reading the behavior's own tables and its columns across the
-schema (`sql.instances()`). They change state only through the
-operations they invoke and the instances they create, whose events
-record the cause. A schedule's `everyMs` may be a function of the
-schema's config ("Schedules" under "The runner"). A reaction's context adds
+schema (`sql.instances()`). They change what an operation shows only
+through the operations they invoke and the instances they create, whose
+events record the cause. A schedule's `everyMs` may be a function of the
+schema's config, and `null` from it turns the schedule off there
+("Schedules" under "The runner"). A reaction's context adds
 `before(event)`: the event's instance as the log had it just before the
 event, its behaviors' fields included, `undefined` for its create, which
 is all a delete leaves of it; it asks `read` on the event's schema. A
 schedule's adds `schedule`, its name, and `previous`, when its last run
 committed. Each is synchronous and runs in its own transaction with the
 runner's record of it, and a throw rolls both back ("The runner").
+
+A schedule's `sql` also writes the behavior's own tables (`sql.run`, on
+`sql.table(name)`), in the run's transaction, as the runner's principal,
+so a run that throws leaves none of its writes (D32). The relation over
+the instances stays read-only, as in every context, and a reaction's
+`sql` writes nothing. A schedule writes its tables directly only where
+the write changes nothing an operation returns: history no commit or
+snapshot pins, rows of what no operation can read any more (a discarded
+draft's), and data that only makes a read cheaper, a snapshot say. A
+change an operation shows, such as discarding an idle draft, still goes
+through the operation the run invokes on each instance, so its guards
+run and it appends its event. The engine cannot tell one write from the
+other: keeping to the rule is the behavior's part.
 
 ### Storage
 
@@ -1270,7 +1368,8 @@ an operation of the same name. They also refuse a behavior with no
 implementation registered, one on a type other than the instance type
 (only it has instances), a type its `checkedTypes` names that is not one
 of the document's besides the instance type, and a field the schema
-runtime cannot check in a type it names or one that type reaches. A live version whose behavior has no
+runtime cannot check in a type it names or reads through
+`ConfigTarget.types`, or one that type reaches. A live version whose behavior has no
 implementation in this engine, as after a restart without it, makes
 every call on the schema `unavailable` until one registers.
 

@@ -17,13 +17,17 @@ import (
 // vectorsDir holds the plans the compiler writes for the runner (D27,
 // "Testing"): one directory per case, each with NN-<name>.plan.json files
 // applied in name order on a fresh database, the first from an empty one.
+// A plan starts from the model the plan before it ends at or, superseding
+// that plan's contract, from the model it holds between its phases; then
+// only the earlier plan's expand steps run (D27, amended).
 var vectorsDir = filepath.Join("..", "testdata", "plans")
 
 // TestCompilerVectors applies every case of the compiler's plan vectors on
 // the dialect its plans name: the chain ends at the last plan's to, a second
-// run of each plan does nothing, a failure injected after any step resumes
-// to the same catalog, two runners at once serialize, and the first plan is
-// refused on a database at another model.
+// run of each plan does nothing, a plan from the model the one before it
+// holds between its phases supersedes that plan's contract, a failure
+// injected after any step resumes to the same catalog, two runners at once
+// serialize, and the first plan is refused on a database at another model.
 func TestCompilerVectors(t *testing.T) {
 	entries, err := os.ReadDir(vectorsDir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -52,6 +56,7 @@ func TestCompilerVectors(t *testing.T) {
 
 func compilerVector(t *testing.T, paths []string) {
 	var chain []*migrate.Plan
+	var phases []migrate.Phase // the phases each plan of the chain runs
 	for i, path := range paths {
 		doc, err := os.ReadFile(path)
 		if err != nil {
@@ -67,11 +72,15 @@ func compilerVector(t *testing.T, paths []string) {
 			if p.Dialect != chain[0].Dialect || p.Service != chain[0].Service {
 				t.Fatalf("%s is for %s %s; the case's first plan for %s %s", path, p.Dialect, p.Service, chain[0].Dialect, chain[0].Service)
 			}
+			if expanded := chain[i-1].Expanded; expanded != "" && p.From == expanded {
+				from, phases[i-1] = expanded, migrate.Expand
+			}
 		}
 		if p.From != from {
 			t.Fatalf("%s starts from %q, want %q", path, p.From, from)
 		}
 		chain = append(chain, p)
+		phases = append(phases, migrate.All)
 	}
 	dialect := chain[0].Dialect
 	last := chain[len(chain)-1]
@@ -79,8 +88,30 @@ func compilerVector(t *testing.T, paths []string) {
 	t.Run("applies", func(t *testing.T) {
 		url := testdb.New(t, dialect)
 		r := newRunner(t, url)
-		for _, p := range chain {
-			if result := apply(t, r, p, migrate.All); !result.Finished || len(result.Ran) != len(p.Steps) {
+		for i, p := range chain {
+			result := apply(t, r, p, phases[i])
+			superseded := ""
+			if i > 0 && phases[i-1] == migrate.Expand {
+				superseded = chain[i-1].Hash
+			}
+			if result.Superseded != superseded {
+				t.Fatalf("plan %s superseded %q, want %q", p.Hash, result.Superseded, superseded)
+			}
+			if phases[i] == migrate.Expand {
+				// Expand only: the database holds the plan's expanded
+				// model, and a second run of expand does nothing.
+				if !result.ExpandDone || result.Finished || len(result.Ran) != len(stepsIn(p, migrate.Expand)) {
+					t.Fatalf("plan %s, expand: %+v", p.Hash, result)
+				}
+				if st := status(t, r, p.Service); st.ModelHash != p.Expanded || st.PlanPhase != migrate.PlanPhaseExpanded {
+					t.Fatalf("status between the phases of plan %s: %+v", p.Hash, st)
+				}
+				if again := apply(t, r, p, migrate.Expand); len(again.Ran) != 0 || again.Finished {
+					t.Fatalf("plan %s, expand again: %+v", p.Hash, again)
+				}
+				continue
+			}
+			if !result.Finished || len(result.Ran) != len(p.Steps) {
 				t.Fatalf("plan %s: %+v", p.Hash, result)
 			}
 			if again := apply(t, r, p, migrate.All); !again.AlreadyApplied || len(again.Ran) != 0 {
@@ -93,29 +124,33 @@ func compilerVector(t *testing.T, paths []string) {
 	})
 
 	t.Run("resumes after a failure", func(t *testing.T) {
-		resumeAfterEveryStep(t, dialect, chain)
+		resumeAfterEveryStep(t, dialect, chain, phases)
 	})
 
 	t.Run("two runners serialize", func(t *testing.T) {
 		url := testdb.New(t, dialect)
 		first, second := newRunner(t, url), newRunner(t, url)
-		for _, p := range chain {
+		for i, p := range chain {
 			var wg sync.WaitGroup
 			errs := make([]error, 2)
-			for i, r := range []*migrate.Runner{first, second} {
+			for j, r := range []*migrate.Runner{first, second} {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					_, errs[i] = r.Apply(context.Background(), p, migrate.All)
+					_, errs[j] = r.Apply(context.Background(), p, phases[i])
 				}()
 			}
 			wg.Wait()
 			if err := errors.Join(errs...); err != nil {
 				t.Fatalf("plan %s: %v", p.Hash, err)
 			}
+			steps := len(p.Steps)
+			if phases[i] == migrate.Expand {
+				steps = len(stepsIn(p, migrate.Expand))
+			}
 			logged := testdb.Strings(t, url, `SELECT count(*) FROM superschematic_migrations WHERE plan_hash = $1`, p.Hash)
-			if logged[0] != fmt.Sprint(len(p.Steps)) {
-				t.Fatalf("plan %s: %s log rows for %d steps", p.Hash, logged[0], len(p.Steps))
+			if logged[0] != fmt.Sprint(steps) {
+				t.Fatalf("plan %s: %s log rows for %d steps", p.Hash, logged[0], steps)
 			}
 		}
 		if st := status(t, first, last.Service); st.ModelHash != last.To {
@@ -139,4 +174,15 @@ func compilerVector(t *testing.T, paths []string) {
 			}
 		}
 	})
+}
+
+// stepsIn returns the plan's steps of phase.
+func stepsIn(p *migrate.Plan, phase migrate.Phase) []*migrate.Step {
+	var out []*migrate.Step
+	for _, step := range p.Steps {
+		if step.Phase == phase {
+			out = append(out, step)
+		}
+	}
+	return out
 }

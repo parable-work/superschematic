@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"reflect"
 	"strconv"
+	"strings"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // serviceHandle is the evaluated value of a @superschematic/schema-config service({...})
@@ -31,16 +34,18 @@ const maxEvalDepth = 16
 
 // evaluateExpression statically evaluates a decorator or config argument.
 // Only literals are supported: strings, numbers, booleans, null, arrays,
-// object literals, enum member references, and service sentinel constants
-// (identifiers whose initializer is a service({...}) call). Anything computed
-// is rejected -- the execution path is the backstop for runtime
-// values.
+// object literals, enum member references, service sentinel constants
+// (identifiers whose initializer is a service({...}) call) and, in a
+// decorator argument, classes named as values. Anything computed is
+// rejected -- the execution path is the backstop for runtime values.
 //
 // Results are Go values: string, float64, bool, nil, []any, map[string]any,
 // and serviceHandle. Only the null literal evaluates to nil: [] and {}
 // evaluate to an empty, non-nil []any and map[string]any, so they marshal
 // as the empty list and object the data forms write for the same argument
-// (extension-model.md, sections 2 and 4).
+// (extension-model.md, sections 2 and 4). A class evaluates to the
+// map[string]any {"class": name}, the class reference the data forms write
+// (ir.ClassRef).
 func (w *walker) evaluateExpression(node *astNode) (any, *SchemaError) {
 	return w.evaluateExpressionDepth(node, 0)
 }
@@ -120,6 +125,12 @@ func (w *walker) evaluateExpressionDepth(node *astNode, depth int) (any, *Schema
 				out[key] = v
 			}
 		}
+		// The data forms write a class reference as {"class": name}, and
+		// the shape is reserved in a decorator argument, so TypeScript
+		// names the class itself rather than spelling the reference.
+		if ref, ok := ir.AsClassRef(out); ok && w.schema != nil {
+			return nil, errorAtNode(node, "write the class itself, not { class: %q }: an object whose only key is class is a class reference", ref.Class)
+		}
 		return out, nil
 
 	case kindAsExpression:
@@ -164,8 +175,8 @@ func (w *walker) evaluatePropertyName(name *astNode, depth int) (string, *Schema
 }
 
 // evaluateReference evaluates an identifier or property access: enum members
-// resolve to their literal value; const variables resolve through their
-// initializer (service sentinels).
+// resolve to their literal value; classes to a class reference; const
+// variables resolve through their initializer (service sentinels).
 func (w *walker) evaluateReference(node *astNode, depth int) (any, *SchemaError) {
 	target := node
 	if node.Kind == kindPropertyAccessExpression {
@@ -185,6 +196,10 @@ func (w *walker) evaluateReference(node *astNode, depth int) (any, *SchemaError)
 		return nil, errorAtNode(node, "enum member %q has no literal value", sym.Name)
 	}
 
+	if sym.Flags&symbolFlagsClass != 0 {
+		return w.evaluateClass(node)
+	}
+
 	if decl := sym.ValueDeclaration; decl != nil && decl.Kind == kindVariableDeclaration {
 		init := decl.AsVariableDeclaration().Initializer
 		if init == nil {
@@ -194,6 +209,37 @@ func (w *walker) evaluateReference(node *astNode, depth int) (any, *SchemaError)
 	}
 
 	return nil, errorAtNode(node, "%q does not statically evaluate to a literal", sym.Name)
+}
+
+// evaluateClass evaluates an identifier or property access naming a class
+// (of: Backend) to a class reference, {"class": <declared name>}: the shape
+// the data forms write for it, so Apply sees the same value from every form.
+// A class declared in another service's package is recorded as an import of
+// that package, as a field type from it is, and is named without its
+// service. Whether the schema declares or imports the class is a
+// verification rule (verify.checkClassRefs), so it holds for the data forms
+// too; here the compiler has already resolved the name.
+func (w *walker) evaluateClass(node *astNode) (any, *SchemaError) {
+	if w.schema == nil {
+		return nil, errorAtNode(node, "a class is not a schema.config value")
+	}
+	id, ok := w.classIdentity(node)
+	if !ok {
+		return nil, errorAtNode(node, "cannot resolve %q to a class declaration", w.nodeText(node))
+	}
+	declFile := getSourceFileOfNode(id.decl)
+	if declFile == nil || !strings.HasPrefix(declFile.FileName(), w.servicePath+"/") {
+		if id.pkg == "" {
+			return nil, errorAtNode(node, "class %q is declared outside the service and outside any named package", id.name)
+		}
+		if w.isAuthoring(id) {
+			return nil, errorAtNode(node, "class %q from %s is not a schema class", id.name, w.reg.Naming().Specifier(id.pkg))
+		}
+		if !w.suppressRecording {
+			w.recordImportSymbol(id.pkg, id.name)
+		}
+	}
+	return map[string]any{"class": id.name}, nil
 }
 
 // evaluateCall evaluates the one call form the static walk understands: the

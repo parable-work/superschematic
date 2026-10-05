@@ -53,7 +53,7 @@
       {"entity_key": "Bake", "instruction": "Bake"}
     ]}}},
     {"op": "materialize", "commit": "d6", "walkCeiling": 1, "expect": {"contentHashOf": "d6"}},
-    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_patch WHERE commit_id IN ($1::uuid, $2::uuid, $3::uuid)"}, "args": [{"commit": "d1"}, {"commit": "d2"}, {"commit": "d3"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_patch WHERE commit_id IN ($1::uuid, $2::uuid, $3::uuid)", "sqlite": "DELETE FROM graph_patch WHERE commit_id IN (?1, ?2, ?3)"}, "args": [{"commit": "d1"}, {"commit": "d2"}, {"commit": "d3"}]},
     {"op": "materialize", "commit": "d2", "expect": {"tree": {}}},
     {"op": "materialize", "commit": "d3", "expect": {"contentHashOf": "d3", "tree": {"step": [
       {"entity_key": "Mix", "instruction": "Mix well"},
@@ -72,7 +72,7 @@
       {"kind": "step", "entityKey": "Mix", "entityVersion": 1},
       {"kind": "step", "entityKey": "Rest", "entityVersion": 1}
     ]}},
-    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid"}, "args": [{"commit": "m1"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid", "sqlite": "DELETE FROM graph_snapshot_entry WHERE commit_id = ?1"}, "args": [{"commit": "m1"}]},
     {"op": "snapshot", "commit": "m1", "expect": {"snapshot": []}},
     {"op": "release", "root": "Bread", "commit": "m1", "expect": {"release": {"commit": "m1", "version": 1}}},
     {"op": "snapshot", "commit": "m1", "expect": {"snapshot": [

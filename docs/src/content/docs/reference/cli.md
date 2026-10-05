@@ -82,7 +82,7 @@ standalone loader the build writes. With none of the three the build logs
 `- env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, outputs.types.rust for the Rust one, or outputs.types.typescript for the TypeScript one`.
 
 `--with-deps` also builds every service the target transitively depends
-on (declared `dependencies` plus `authDb`), dependencies first. The
+on (declared `dependencies`, `authDb` and `calls`), dependencies first. The
 closure is resolved from the sibling services under the target's parent
 directory with the discovery, ordering and schema catalog `build-all`
 uses; siblings outside the closure are not built. It writes no
@@ -109,7 +109,7 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--emit-ir` | false | print the Schema IR as JSON to stdout; do not generate code |
-| `--with-deps` | false | also build the target's transitive dependencies (declared dependencies plus `authDb`), dependencies first |
+| `--with-deps` | false | also build the target's transitive dependencies (declared dependencies, `authDb` and `calls`), dependencies first |
 | `--out` | `<service-dir>/../../dist` | output root for generated artifacts |
 | `--profile` | false | emit build phase timings to stderr |
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
@@ -119,8 +119,14 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 ## `build-all <services-root>`
 
 Discover every schema service under `<services-root>` and build them in
-one process, in dependency order. A service's `authDb` counts as a
-dependency for ordering. A service whose API server, SDK or DB kind needs
+one process, in dependency order. A service's `authDb`, and each API it
+`calls`, count as dependencies for ordering. Discovery fails, before any
+service is built, on a handle whose kind is not the kind of the service it
+names (`shop-orders: calls names shop-db with kind API, but shop-db is kind DB`),
+and on a cycle, which it names edge by edge
+(`circular dependency involving shop-api: shop-api calls shop-orders, shop-orders calls shop-api`).
+Two APIs cannot call each other yet. `build --with-deps` runs the same
+discovery. A service whose API server, SDK or DB kind needs
 a types language its config does not enable fails discovery, before any
 service is built. A service whose type library imports a
 dependency that does not generate types in that language fails, as with
@@ -207,7 +213,16 @@ elsewhere; it counts on both sides.
 `--dialect sqlite` plans the service's SQLite database, with the copy-table
 rebuild where SQLite's `ALTER TABLE` falls short
 ([SQLite](/superschematic/reference/migrations/#sqlite)). The service's
-`outputs.sql.dialects` must list `sqlite`.
+`outputs.sql.dialects` must list `sqlite`, and so must the previous
+version's when it is a service directory or a git ref. A database whose
+previous version was not built for SQLite plans from the model it
+recorded (`--from <model.json>`).
+
+After a rollout that failed between a plan's phases, the database holds
+the model between them. Plan from that model (`--from <model.json>`, as
+`superschematic-migrate status --model` prints it): the new plan supersedes
+the pending contract
+([A failed rollout](/superschematic/reference/migrations/#a-failed-rollout)).
 
 `--format` prints the plan to stdout; notes, such as planning from an empty
 database, go to stderr. With `--fail-on`, the command prints the plan,

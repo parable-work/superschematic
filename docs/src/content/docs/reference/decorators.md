@@ -69,6 +69,6 @@ as their support lands in every generator.
 
 | Name | What it does | Covered in |
 | --- | --- | --- |
-| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
-| `service({ name, kind })` | a handle to another service, for `authDb` and `dependencies` | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
+| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
+| `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and `calls`; its type carries the kind (`ServiceHandle<"API">`), and an API's generated handle also carries its `@envVars` class | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
 | `@envVars` | on a class of a General schema: its fields are the service's environment variables, with a generated loader and `values-schema.json` | [Modeling types](/superschematic/guides/modeling-types/#environment-variables) |

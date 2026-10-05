@@ -1,14 +1,27 @@
 # Rust REST implementation scaffolds for `{{ .SchemaName }}`
 
-These files are starter implementations for generated Rust REST handlers.
+Starter implementations of the generated `{{ .CrateName }}` server's
+namespace traits. Mount this directory as a module of the service's crate,
+which depends on `{{ .CrateName }}`, `{{ .RuntimeCrate }}`, `async-trait`
+and `serde_json`:
 
-- One directory is created per namespace.
-- `implementation.rs` provides the namespace implementation struct.
-- One file is generated per endpoint method.
-- Existing files are never overwritten.
+```rust
+#[path = "<this directory>/mod.rs"]
+mod implementations;
+```
+
+- `mod.rs` declares one module per namespace.
+- In each namespace directory, `implementation.rs` holds the
+  `Implementation` struct and its one impl of the namespace trait, which
+  hands each method to the function of the same name in its own file.
+- An operation declared `@manualRouteRegistration` has no file: the
+  service mounts its route itself (see `build_router`).
+- Existing files are never overwritten. An operation added to the schema
+  later needs its method in `implementation.rs`, a line in `mod.rs` and a
+  file of its own, which the compiler points at.
 
 Regenerate safely:
 
 ```bash
-superschematic build schemas/{{ .SchemaName }}/schema.json
+superschematic build schemas/services/{{ .SchemaName }}
 ```

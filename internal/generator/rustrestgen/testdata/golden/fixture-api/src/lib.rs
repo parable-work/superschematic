@@ -2,7 +2,9 @@
 //! Regenerate via: superschematic build schemas/fixture-api/schema.json
 
 pub mod interfaces;
+pub mod openapi;
 pub mod router;
 
 pub use interfaces::*;
-pub use router::{build_router, RouterState};
+pub use router::{build_router, build_router_with, RouterState};
+pub use superschematic_http_runtime::{request_ids, RouterOptions};
