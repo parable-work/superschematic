@@ -181,6 +181,17 @@ per-request tokens and a one-shot refresh on 401. Each namespace is a
 field of the SDK struct: `ProductQueries` and `ProductMutations` both live
 on `sdk.product`, so a call is `sdk.product.get_product(id, None).await`.
 
+`service_credential: Some(ServiceCredential::new(source))` is the calling
+service's own credential
+([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+`source(fresh)` returns it, and the SDK sends `Bearer <token>` in
+`Service-Authorization`, or in each of `headers`, on every request. A 401
+whose code is `service_unauthorized` calls `source(true)` once and retries,
+without the end-user refresh. A server forwards its own caller per call
+with `RequestOptions::forward(ctx.bearer_token())`: the call sends that
+token as `Authorization`, or none for `None`, instead of the configured
+one, and does not refresh it.
+
 An operation without an input type takes its arguments as one input
 struct, `<Operation>Input`, whose fields are sent under the arguments'
 names as the schema spells them (`shadeByName`, not `shade_by_name`). On
