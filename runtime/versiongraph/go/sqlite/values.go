@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,7 +179,10 @@ func writeObject(members map[string]string) string {
 	return buf.String()
 }
 
-// readObject reads a JSON object column, each member as its JSON text.
+// readObject reads a JSON object column, each member as its JSON text
+// written again as rewrite writes it, as the TypeScript adapter reads a
+// live row's members, so a column another writer stored reads the same
+// through either adapter. A name the object repeats takes its last value.
 func readObject(text, column string) (map[string]string, error) {
 	var members map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(text), &members); err != nil || members == nil {
@@ -185,13 +190,97 @@ func readObject(text, column string) (map[string]string, error) {
 	}
 	out := make(map[string]string, len(members))
 	for name, value := range members {
-		var compact bytes.Buffer
-		if err := json.Compact(&compact, value); err != nil {
+		written, err := rewrite(value)
+		if err != nil {
 			return nil, fmt.Errorf("column %s: %w", column, err)
 		}
-		out[name] = compact.String()
+		out[name] = written
 	}
 	return out, nil
+}
+
+// rewrite writes one JSON value again as the TypeScript adapter's parseJson
+// and stringifyJson do: no whitespace, every string as jsonString writes it
+// (so "\/" reads as "/" and "\u00e9" as "é"), every number as its text,
+// and an object's members in the order they come, a repeated name's last
+// value at its first place.
+func rewrite(value []byte) (string, error) {
+	d := json.NewDecoder(bytes.NewReader(value))
+	d.UseNumber()
+	var buf strings.Builder
+	if err := rewriteValue(d, &buf); err != nil {
+		return "", err
+	}
+	if _, err := d.Token(); !errors.Is(err, io.EOF) {
+		return "", errors.New("more than one JSON value")
+	}
+	return buf.String(), nil
+}
+
+func rewriteValue(d *json.Decoder, buf *strings.Builder) error {
+	token, err := d.Token()
+	if err != nil {
+		return err
+	}
+	switch v := token.(type) {
+	case nil:
+		buf.WriteString("null")
+	case bool:
+		buf.WriteString(strconv.FormatBool(v))
+	case string:
+		buf.WriteString(jsonString(v))
+	case json.Number:
+		buf.WriteString(v.String())
+	case json.Delim:
+		switch v {
+		case '[':
+			buf.WriteByte('[')
+			for i := 0; d.More(); i++ {
+				if i > 0 {
+					buf.WriteByte(',')
+				}
+				if err := rewriteValue(d, buf); err != nil {
+					return err
+				}
+			}
+			if _, err := d.Token(); err != nil {
+				return err
+			}
+			buf.WriteByte(']')
+		case '{':
+			var names []string
+			members := map[string]string{}
+			for d.More() {
+				name, err := d.Token()
+				if err != nil {
+					return err
+				}
+				var member strings.Builder
+				if err := rewriteValue(d, &member); err != nil {
+					return err
+				}
+				key := name.(string)
+				if _, seen := members[key]; !seen {
+					names = append(names, key)
+				}
+				members[key] = member.String()
+			}
+			if _, err := d.Token(); err != nil {
+				return err
+			}
+			buf.WriteByte('{')
+			for i, name := range names {
+				if i > 0 {
+					buf.WriteByte(',')
+				}
+				buf.WriteString(jsonString(name))
+				buf.WriteByte(':')
+				buf.WriteString(members[name])
+			}
+			buf.WriteByte('}')
+		}
+	}
+	return nil
 }
 
 // canonicalOf is the canonical JSON text of a value of a class.
