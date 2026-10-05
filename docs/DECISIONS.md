@@ -2830,15 +2830,20 @@ initializer, so `build` loads `fixture-authdb-import`, whose config imports
 
 `checkConfigImports` in `internal/loader/tsreader/config.go` is the rule,
 and `tsreader.ReadServiceIdentity` the read that evaluates only `name` and
-`kind`. `buildplan.EnsureSentinels` is the sweep: `build-all`,
+`kind`. Beside the forms above, it refuses a default import, since a
+sentinel is a named export, and a type-only import of anything but the
+config package, since a handle is a value. Each refusal names the import
+and what it resolves to (a class, an enum, a type, a function, a namespace
+of another module). `buildplan.EnsureSentinels` is the sweep: `build-all`,
 `build --with-deps` and `migrate` run it before discovery, and `build` runs
 it when the target's config imports anything but the config package. The
 acme-shop configs import their handles. `config_imports_test.go` pins each
-form the rule accepts or refuses. The build plan's tests discover a tree
-with no sentinels before and after the sweep, and two APIs that import
-each other's sentinels, which the build plan reports as a cycle of
-`calls`. A CLI test runs each build command on a tree whose imported
-sentinel was deleted.
+form the rule accepts or refuses, with its message. The build plan's tests
+discover a tree with no sentinels before and after the sweep, and two APIs
+that import each other's sentinels, which the build plan reports as a
+cycle of `calls`. CLI tests run each build command on a tree whose
+imported sentinel was deleted, and on a config that imports a schema class
+beside its sentinel, which all three refuse with one message.
 
 The rule is reversible until the first release.
 

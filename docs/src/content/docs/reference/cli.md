@@ -37,6 +37,16 @@ directory two levels above the service directory (`<schemas-root>/dist`
 for services under `<schemas-root>/services/`). Names come from
 `<schemas-root>/superschematic.toml` or `--naming`.
 
+A config may import a sibling's sentinel (`import { ShopDb } from
+"@acme/shop-db"`). When the target's config imports anything but
+`@superschematic/schema-config`, or its kind's schema files import
+sentinels, `build` first writes every sibling's sentinel that is missing
+or stale, as `build-all` does. `--with-deps` always does. A config that
+imports anything else (a class, a type, another module's namespace, a
+default export or a module for its side effects) fails to load with a
+message naming the import, in every build command:
+`schema.config.ts imports Product from "@acme/shop-db", which is a class, not a service sentinel; a config imports only @superschematic/schema-config and other services' sentinels (D34)`.
+
 A type that composes a behavior (`behaviors` in the data forms) loads,
 and `--emit-ir` prints it, but no generator renders behaviors yet: the
 build fails and names the first generator that would run, the type and the

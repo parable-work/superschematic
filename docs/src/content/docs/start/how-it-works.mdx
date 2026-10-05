@@ -115,7 +115,8 @@ In a TypeScript config each is a handle: the sentinel the named service's
 build writes, imported from its package (`import { ShopDb } from
 "@acme/shop-db"`), or `service({ name, kind })`, which the JSON and YAML
 forms write as `{ name, kind }`. A config imports nothing else but
-`@superschematic/schema-config`, and a handle's kind must be the kind of
+`@superschematic/schema-config`: a class, a type or a module's namespace
+fails to load, in every build command. A handle's kind must be the kind of
 the service it names. `build-all` builds every service in dependency
 order. `build --with-deps` builds one service and what it depends on.
 Both check each handle's kind first.
