@@ -121,6 +121,38 @@ export async function init(source?: WasmSource, options: InitOptions = {}): Prom
   const instance = await instantiate(
     source ?? new URL("./superschematic_versiongraph.wasm", import.meta.url),
   );
+  return coreOf(instance, options);
+}
+
+/**
+ * Instantiates the core synchronously, for a caller that cannot await, such
+ * as a behavior of D16's engine (D32). source is the module's bytes or a
+ * compiled WebAssembly.Module. With no source, under bun and Node, it reads
+ * the wasm file shipped next to this module; elsewhere it throws, and the
+ * caller passes the module or calls init. A browser may refuse to compile a
+ * large module synchronously on its main thread.
+ */
+export function initSync(
+  source?: ArrayBuffer | ArrayBufferView | WebAssembly.Module,
+  options: InitOptions = {},
+): VersionGraph {
+  let module: WebAssembly.Module;
+  if (source instanceof WebAssembly.Module) {
+    module = source;
+  } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
+    module = new WebAssembly.Module(source as BufferSource);
+  } else if (source === undefined) {
+    module = new WebAssembly.Module(readBundledSync() as BufferSource);
+  } else {
+    throw new TypeError(
+      "versiongraph: initSync takes the wasm module's bytes or a compiled WebAssembly.Module; init loads a URL or a Response",
+    );
+  }
+  // The core imports nothing.
+  return coreOf(new WebAssembly.Instance(module, {}), options);
+}
+
+function coreOf(instance: WebAssembly.Instance, options: InitOptions): VersionGraph {
   for (const name of EXPORTS) {
     if (!(name in instance.exports)) {
       throw new Error(`versiongraph: the wasm module does not export ${name}`);
@@ -172,6 +204,21 @@ async function readFileUrl(url: string): Promise<Uint8Array> {
     readFile(path: URL): Promise<Uint8Array>;
   };
   return fs.readFile(new URL(url));
+}
+
+// initSync's default source: the wasm file next to this module, read with
+// the node:fs that process.getBuiltinModule returns under bun and Node, so
+// the module keeps no imports and no bundler resolves node:fs.
+function readBundledSync(): Uint8Array {
+  const url = new URL("./superschematic_versiongraph.wasm", import.meta.url);
+  const runtime = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
+  const fs = runtime?.getBuiltinModule?.("node:fs") as { readFileSync(path: URL): Uint8Array } | undefined;
+  if (fs === undefined || url.protocol !== "file:") {
+    throw new Error(
+      `versiongraph: initSync has no source and cannot read ${url.href} synchronously here; pass the module's bytes or a WebAssembly.Module, or call init`,
+    );
+  }
+  return fs.readFileSync(url);
 }
 
 const encoder = new TextEncoder();

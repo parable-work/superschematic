@@ -378,7 +378,17 @@ past retention, and writes missing snapshots. The Go engine is package `engine`,
 over the interface in package `storage`; package `postgres` is its Postgres
 adapter, which builds its statements from the descriptor and needs each
 kind's `root`. The TypeScript engine, storage interface and Postgres
-adapter are `typescript/src/engine.ts`, `storage.ts` and `postgres.ts`. The
+adapter are `typescript/src/engine.ts`, `storage.ts` and `postgres.ts`.
+The TypeScript engine's operations are written once, as generators that
+yield each storage call, and two drivers run them (D32): `Engine` awaits
+each call over `Storage` and `Tx`, whose methods return promises, and
+`SyncEngine` makes each call over `SyncStorage` and `SyncTx`, which have
+the same methods returning their values, for a database whose driver
+blocks, as SQLite's does under D16's engine. Either driver throws a failed
+call's error back into the operation, so the operation handles it the same
+way under both (a sweep's discard of a ref that moved, say). A `SyncEngine`
+returns each operation's value, throws its error, and has no `runSweeper`;
+`initSync` instantiates the core it runs on without awaiting. The
 Rust engine is the crate in `rust-engine/`, over its `Storage` and `Tx`
 traits, with its Postgres adapter in module `postgres` and the canonical
 rules in module `canonical`. The Python engine, storage protocol and
@@ -536,7 +546,7 @@ cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
-make versiongraph-scenarios-ts  # every scenario through the TypeScript engine and its Postgres adapter
+make versiongraph-scenarios-ts  # every scenario through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
 make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
 ```

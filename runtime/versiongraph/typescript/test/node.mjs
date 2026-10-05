@@ -1,9 +1,10 @@
-// Under Node: import the built package and let init load its bundled wasm
-// file by default (a file: URL, which Node's fetch does not read). The
-// vectors run once, under bun (test/vectors.test.ts); this checks only that
-// the package loads and runs in Node, and that none of its entries, the
-// Postgres adapter's included, loads the pg driver: a resolve hook refuses
-// it, so an import of pg anywhere in the package's graph fails the script.
+// Under Node: import the built package and let init, and initSync, load its
+// bundled wasm file by default (a file: URL, which Node's fetch does not
+// read). The vectors run once, under bun (test/vectors.test.ts); this checks
+// only that the package loads and runs in Node, and that none of its
+// entries, the Postgres adapter's included, loads the pg driver: a resolve
+// hook refuses it, so an import of pg anywhere in the package's graph fails
+// the script.
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 
@@ -17,8 +18,8 @@ registerHooks({
 });
 await assert.rejects(import("pg"), /the package imported pg/);
 
-const { init, VersionGraphError } = await import("../dist/index.js");
-const { Engine } = await import("../dist/engine.js");
+const { init, initSync, VersionGraphError } = await import("../dist/index.js");
+const { Engine, SyncEngine } = await import("../dist/engine.js");
 const { PostgresAdapter, pgPool } = await import("../dist/postgres.js");
 const { VersionGraphFacade } = await import("../dist/facade.js");
 assert.equal(typeof VersionGraphFacade, "function");
@@ -61,4 +62,14 @@ assert.throws(
 const adapter = new PostgresAdapter({ ...descriptor, kinds: [{ ...descriptor.kinds[0], root: "ref", table: "step" }] });
 const engine = new Engine(graph, descriptor, adapter.storage(pgPool({ connect: () => Promise.reject(new Error("no database")) })));
 await assert.rejects(engine.compose("1"), /no database/);
+// initSync reads the bundled file with Node's node:fs, and a SyncEngine
+// builds over its core.
+const syncGraph = initSync();
+assert.deepEqual(syncGraph.validate({ descriptor, tree }), { findings: [] });
+const syncEngine = new SyncEngine(syncGraph, descriptor, {
+  transact: () => {
+    throw new Error("no database");
+  },
+});
+assert.throws(() => syncEngine.compose("1"), /no database/);
 console.log("node: @superschematic/versiongraph loads and runs, and no entry loads pg");

@@ -601,7 +601,7 @@ point of its own, so the core's entry loads in a browser without them:
 
 | Entry | Holds |
 | --- | --- |
-| `@superschematic/versiongraph/engine` | `Engine`, the storage interface (`Storage`, `Tx`), the named errors and `errorCode`, and the canonical rules (`canonicalRow`, `canonicalValue`) with the exact JSON codec they read with. |
+| `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, and the canonical rules (`canonicalRow`, `canonicalValue`) with the exact JSON codec they read with. |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
@@ -644,6 +644,28 @@ and a pass under way when it aborts finishes first, where Go's
 classes with the stable `code` the scenario files name
 (`VersionConflictError` is a `NotFoundError`, as in Go); `errorCode(err)`
 returns it, or the core's code for an input the core refused.
+
+`SyncEngine` runs the same operations, written once, over synchronous
+storage, for a database whose driver blocks, as SQLite's does in bun and
+Node: `SyncStorage.transact<T>(fn: (tx: SyncTx) => T): T`, and `SyncTx` has
+every method of `Tx` returning its value (`undefined` for the three with
+none, so an async method does not type-check). Each operation returns its
+value or throws, with `Engine`'s arguments, rules and errors, and a
+`SyncTx` method or a `transact` that returns a promise ends it with a
+`TypeError`. A `SyncEngine` is built over a core already instantiated,
+which `initSync` from `@superschematic/versiongraph` instantiates without
+awaiting: from the module's bytes or a compiled `WebAssembly.Module`, or,
+given neither under bun and Node, from the wasm file the package ships. A
+`SyncEngine` has no `runSweeper`, since a loop that waits between passes
+would block its thread, so its host schedules `sweep`.
+
+```ts
+import { initSync } from "@superschematic/versiongraph";
+import { SyncEngine } from "@superschematic/versiongraph/engine";
+
+const engine = new SyncEngine(initSync(), descriptor, storage, { schemaEpoch: 1, snapshotEvery: 32 });
+const main = engine.createPrimary(actor, root, "main");
+```
 
 When a schema declares a graph, tsgen writes a typed facade per graph into
 the TypeScript types package, `versiongraph/<name>.ts`, exported as
