@@ -1,15 +1,23 @@
-//! {{ .Endpoint.FunctionName }} scaffold.
+//! {{ .Endpoint.Namespace }}.{{ .Endpoint.Name }}: `{{ toUpper .Endpoint.Method }} {{ .Endpoint.Path }}`.
 //! NOTE: Generated once and never overwritten.
 
-use async_trait::async_trait;
 use {{ .RuntimeCrateIdent }}::{ApiError, RequestContext};
 use serde_json::Value;
 
-use crate::interfaces::{{ toPascalCase .Namespace }}Implementation;
+use super::Implementation;
 
-#[async_trait]
-impl {{ toPascalCase .Namespace }}Implementation for Implementation {
-    async fn {{ .Endpoint.FunctionName }}(&self, _ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
-        Err(ApiError::not_implemented("{{ .Endpoint.FunctionName }} is not implemented"))
-    }
+{{- if .Endpoint.Description }}
+
+/// {{ index (splitLines .Endpoint.Description) 0 }}
+{{- end }}
+pub(super) async fn {{ .Endpoint.FunctionName }}(
+    _implementation: &Implementation,
+    _ctx: RequestContext,
+    _payload: Value,
+) -> Result<Value, ApiError> {
+{{- if .Endpoint.RequireOwnership }}
+    // @requireOwnership: the router has established the caller
+    // (ctx.principal); check that it owns the resource (403 otherwise).
+{{- end }}
+    Err(ApiError::not_implemented("{{ .Endpoint.FunctionName }} is not implemented"))
 }

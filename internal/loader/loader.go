@@ -198,7 +198,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		}); err != nil {
 			return nil, nil, err
 		}
-		schema = ir.NewSchema(cfg.Name, cfg.Kind)
+		schema = cfg.NewSchema()
 		vin.Dependencies = make(map[string]ir.SchemaKind, len(cfg.Dependencies))
 		for _, dep := range cfg.Dependencies {
 			vin.Dependencies[dep.Name] = dep.Kind
@@ -310,6 +310,14 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 		}
 	}
 	return schema, nil
+}
+
+// HydrateScalars fills every ScalarDef schema holds from catalog, as a
+// load does (hydrateScalarsFromRegistry). The scalar catalog tool reads the
+// builtin scalars through it, so what it records of each one is what a
+// compiled schema's ScalarDef of it gives.
+func HydrateScalars(schema *ir.Schema, catalog registry.ScalarCatalog) error {
+	return hydrateScalarsFromRegistry(schema, catalog)
 }
 
 // hydrateScalarsFromRegistry fills every ScalarDef the schema references

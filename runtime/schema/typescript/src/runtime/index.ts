@@ -1,6 +1,6 @@
 export { parseSchema, parseSchemaJson } from './json/reader';
 export { parseSchemaIR, parseSchemaIRJson } from './ir/reader';
-export { BUILTIN_SCALARS } from './builtin-scalars.generated';
+export { BUILTIN_SCALARS, BUILTIN_SCALAR_VALUE_CLASSES } from './builtin-scalars.generated';
 export { writeSchemaJson, writeScalarsJson, DEFAULT_META_SCHEMA_URL } from './json/writer';
 export type { WriteSchemaJsonOptions } from './json/writer';
 export {

@@ -93,12 +93,24 @@ var sqliteOnlyCases = []planCase{
 			fieldNamed(s, "Buyer", "createdAt").Required = false
 		},
 		renames: []Rename{{From: "customer", To: "buyer"}}},
+	// A JSON field becomes text: each value keeps its JSON text, as
+	// Postgres's cast keeps it, through a rebuild that casts nothing.
+	{name: "rebuild-json-to-text",
+		before: func(s *ir.Schema) { addField(s, "Order", &ir.FieldDef{Name: "details", TypeRef: jsonRef(s)}) },
+		after:  func(s *ir.Schema) { addField(s, "Order", &ir.FieldDef{Name: "details", TypeRef: stringRef}) }},
 	// A foreign key added over a column a table has, and a relation added
 	// as a column with its foreign key, in one plan.
 	{name: "rebuild-foreign-keys", after: func(s *ir.Schema) {
 		fieldNamed(s, "Customer", "referrerId").Relation = &ir.RelationDef{Type: "Customer", OnDelete: "SET NULL"}
 		addField(s, "OrderLine", &ir.FieldDef{Name: "product", TypeRef: ir.TypeRef{Name: "Product"}, Relation: &ir.RelationDef{Type: "Product", OnDelete: "SET NULL"}})
 	}},
+}
+
+// jsonRef declares a JSON scalar in s, which sqlgen stores as JSONB, and
+// returns a reference to it.
+func jsonRef(s *ir.Schema) ir.TypeRef {
+	s.Scalars["T.JSON"] = &ir.ScalarDef{Name: "T.JSON", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "JSONB"}}
+	return ir.TypeRef{Name: "T.JSON"}
 }
 
 // sqlitePlanCases are the SQLite plan goldens: the plan cases SQLite

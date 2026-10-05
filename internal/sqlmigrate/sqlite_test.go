@@ -2,6 +2,7 @@ package sqlmigrate
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -173,6 +174,7 @@ func TestSQLiteHazardClasses(t *testing.T) {
 
 		{plan: "add-table", op: "createTable", phase: Expand},
 		{plan: "drop-table", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
+		{plan: "drop-tables-in-cycle", op: "dropTable", phase: Contract, want: []HazardClass{destructive}, reason: "Dropping table warehouse"},
 		{plan: "rename-table", op: "renameTable", phase: Expand, want: []HazardClass{compat}},
 
 		{plan: "add-index", op: "createIndex", phase: Expand, want: []HazardClass{blockingClass}},
@@ -193,6 +195,8 @@ func TestSQLiteHazardClasses(t *testing.T) {
 		{plan: "rebuild-retype", op: "copyTable", phase: Expand,
 			want: []HazardClass{destructive, blockingClass, compat, copyTable}, reason: "change the type of quantity"},
 		{plan: "rebuild-collation", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, compat, copyTable}},
+		{plan: "rebuild-json-to-text", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, compat, copyTable},
+			reason: "Order.details changes from a JSON value (TEXT) to a scalar (TEXT)"},
 		{plan: "rebuild-set-default", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable},
 			reason: "change the default of referrer_id"},
 		{plan: "rebuild-drop-default", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, copyTable},
@@ -369,10 +373,89 @@ func TestSQLiteConvert(t *testing.T) {
 		{"BLOB", "REAL", convertImpossible, false},
 	}
 	for _, tc := range tests {
-		got := sqliteDialect{}.convert(tc.from, tc.to)
+		got := sqliteConvert(tc.from, tc.to)
 		if got.kind != tc.kind || got.lossy != tc.lossy {
 			t.Errorf("convert(%s, %s) = %+v, want kind %d lossy %t", tc.from, tc.to, got, tc.kind, tc.lossy)
 		}
+	}
+}
+
+// TestSQLiteKindChanges: a list, a JSON value and text are all TEXT in
+// SQLite, and the model tells them apart by what a column holds. A JSON
+// value becomes a scalar as its text does, through a rebuild; every other
+// change between them is refused, naming the column and both kinds.
+func TestSQLiteKindChanges(t *testing.T) {
+	model := func(typ, holds string) *Model {
+		return &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{{
+			Name: "sample", Kind: TableEntity,
+			Columns: []*Column{
+				{Name: "id", Type: "TEXT"},
+				{Name: "v", Origin: "Sample.v", Type: typ, Nullable: true, Holds: holds},
+			},
+			PrimaryKey: &Constraint{Name: "sample_pkey", Columns: []string{"id"}},
+		}}}
+	}
+	const (
+		scalar = ""
+		list   = holdsList
+		json   = holdsJSON
+	)
+	tests := []struct {
+		fromType, fromHolds, toType, toHolds string
+		// want is the refusal, or, for a change the plan makes, the
+		// rebuild's copy of v and its hazard classes.
+		want string
+	}{
+		{"TEXT", scalar, "TEXT", list, "changes from a scalar (TEXT) to a list (TEXT holding a JSON array)"},
+		{"INTEGER", scalar, "TEXT", list, "changes from a scalar (INTEGER) to a list (TEXT holding a JSON array)"},
+		{"TEXT", list, "TEXT", scalar, "changes from a list (TEXT holding a JSON array) to a scalar (TEXT)"},
+		{"TEXT", scalar, "TEXT", json, "changes from a scalar (TEXT) to a JSON value (TEXT)"},
+		{"INTEGER", scalar, "TEXT", json, "changes from a scalar (INTEGER) to a JSON value (TEXT)"},
+		{"TEXT", list, "TEXT", json, "changes from a list (TEXT holding a JSON array) to a JSON value (TEXT)"},
+		{"TEXT", json, "TEXT", list, "changes from a JSON value (TEXT) to a list (TEXT holding a JSON array)"},
+		{"TEXT", json, "TEXT", scalar, `"v" [blocking compat copy-table]`},
+		{"TEXT", json, "TEXT COLLATE NOCASE", scalar, `"v" [blocking compat copy-table]`},
+		{"TEXT", json, "INTEGER", scalar, `CAST("v" AS INTEGER) [destructive blocking compat copy-table]`},
+	}
+	for _, tc := range tests {
+		name := fmt.Sprintf("%s %s to %s %s", tc.fromType, tc.fromHolds, tc.toType, tc.toHolds)
+		plan, err := Diff(model(tc.fromType, tc.fromHolds), model(tc.toType, tc.toHolds), Options{})
+		if strings.HasPrefix(tc.want, "changes") {
+			want := "sqlmigrate: column sample.v (Sample.v) " + tc.want + ", which sqlite cannot convert; change the column by hand and adopt the new model"
+			if err == nil || err.Error() != want {
+				t.Errorf("%s: Diff = %v, want %s", name, err, want)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(plan.Steps) != 1 || plan.Steps[0].Op != "copyTable" {
+			t.Errorf("%s: steps %+v, want one rebuild", name, plan.Steps)
+			continue
+		}
+		var classes []string
+		for _, h := range plan.Steps[0].Hazards {
+			classes = append(classes, string(h.Class))
+		}
+		got := strings.TrimPrefix(plan.Steps[0].Statements[1], `INSERT INTO "_new_sample" ("id", "v")`+"\n"+`SELECT "id", `)
+		got = strings.TrimSuffix(got, "\n"+`FROM "sample"`) + " [" + strings.Join(classes, " ") + "]"
+		if got != tc.want {
+			t.Errorf("%s: %s, want %s", name, got, tc.want)
+		}
+	}
+
+	// The model of a schema tells the kinds apart: a field that becomes a
+	// list is refused.
+	pc := forSQLite(planCase{after: func(s *ir.Schema) {
+		fieldNamed(s, "Order", "note").TypeRef = ir.TypeRef{Name: "string", IsArray: true}
+	}})
+	from, to := pc.models(t)
+	_, err := Diff(from, to, Options{})
+	want := "column order.note (Order.note) changes from a scalar (TEXT) to a list (TEXT holding a JSON array), which sqlite cannot convert"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Diff = %v, want %s", err, want)
 	}
 }
 
@@ -401,20 +484,49 @@ func TestSQLiteAddable(t *testing.T) {
 	}
 }
 
-// TestSQLiteDropCycle: SQLite cannot drop two tables that reference each
-// other, and the plan says so.
+// TestSQLiteDropCycle: SQLite drops the tables of a reference cycle in one
+// step, with foreign keys off, after the tables that reference them and
+// before the tables they reference, each table with its own hazard. A
+// table that is in the cycle only through another (z) is in the step too.
 func TestSQLiteDropCycle(t *testing.T) {
-	table := func(name, ref string) *Table {
-		return &Table{
-			Name: name, Kind: TableEntity,
-			Columns:     []*Column{{Name: "id", Type: "TEXT"}, {Name: ref + "_id", Type: "TEXT", Nullable: true}},
-			PrimaryKey:  &Constraint{Name: name + "_pkey", Columns: []string{"id"}},
-			ForeignKeys: []*ForeignKey{{Name: "fk_" + name + "_" + ref + "_id", Columns: []string{ref + "_id"}, RefTable: ref, RefColumns: []string{"id"}, OnDelete: "CASCADE"}},
+	table := func(name string, refs ...string) *Table {
+		tb := &Table{
+			Name: name, Kind: TableEntity, Origin: strings.ToUpper(name),
+			Columns:    []*Column{{Name: "id", Type: "TEXT"}},
+			PrimaryKey: &Constraint{Name: name + "_pkey", Columns: []string{"id"}},
 		}
+		for _, ref := range refs {
+			tb.Columns = append(tb.Columns, &Column{Name: ref + "_id", Type: "TEXT", Nullable: true})
+			tb.ForeignKeys = append(tb.ForeignKeys, &ForeignKey{
+				Name: "fk_" + name + "_" + ref + "_id", Columns: []string{ref + "_id"}, RefTable: ref, RefColumns: []string{"id"}, OnDelete: "CASCADE",
+			})
+		}
+		return tb
 	}
-	from := &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{table("a", "b"), table("b", "a")}}
-	_, err := Diff(from, &Model{Version: ModelVersion, Dialect: SQLite, Service: "s"}, Options{})
-	if err == nil || !strings.Contains(err.Error(), "the sqlite dialect cannot drop foreign key fk_b_a_id to break the cycle") {
-		t.Fatalf("Diff = %v, want the cycle refused", err)
+	// a and b reference each other, and a reaches b through z too; c
+	// references b, and a references d.
+	from := &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{
+		table("a", "b", "z", "d"), table("b", "a"), table("c", "b"), table("d"), table("z", "b"),
+	}}
+	plan, err := Diff(from, &Model{Version: ModelVersion, Dialect: SQLite, Service: "s"}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, step := range plan.Steps {
+		var ids []string
+		for _, h := range step.Hazards {
+			ids = append(ids, h.ID)
+		}
+		got = append(got, fmt.Sprintf("%s %s %t: %s [%s]", step.Op, step.Subject, step.ForeignKeysOff,
+			strings.Join(step.Statements, "; "), strings.Join(ids, " ")))
+	}
+	want := []string{
+		`dropTable table/c true: DROP TABLE "c" [destructive:table/c]`,
+		`dropTable table/a true: DROP TABLE "a"; DROP TABLE "b"; DROP TABLE "z" [destructive:table/a destructive:table/b destructive:table/z]`,
+		`dropTable table/d true: DROP TABLE "d" [destructive:table/d]`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("steps:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

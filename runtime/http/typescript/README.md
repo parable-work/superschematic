@@ -45,11 +45,15 @@ Two entry points:
   `max`) in the detail's `errors`. The 400 detail carries the failing
   `path`. A list-of-lists result is sent with every nullish list as `[]`.
 - `@superschematic/http-runtime/hono`, the Hono adapter. `mountOperation`
-  runs the pipeline for one operation: request id, `@rateLimit`,
-  `hono/timeout`, `hono/bearer-auth` and the permission gate, parameter
-  decoding, `hono/body-limit` and JSON parsing, the generated strict body
-  parser, the implementation, and the envelope. It maps every failure to the
-  problem envelope. `mountManualOperation` gates a `@manualRouteRegistration`
+  runs the pipeline for one operation, in the Go router's order: request
+  id, the webhook verifier, `@rateLimit`, `hono/body-limit`,
+  `hono/bearer-auth` and the permission gate, then under `@timeout`
+  parameter decoding, JSON parsing, the generated strict body parser and
+  the implementation, and the envelope. It maps every failure to the
+  problem envelope. `@rateLimit` keys a client by the transport's peer
+  address (`remoteAddressKey`); behind a proxy you trust, pass
+  `rateLimit: { keyOf: clientIpKey }` to key by the client IP it reports in
+  `X-Forwarded-For`, which a client could otherwise write itself. `mountManualOperation` gates a `@manualRouteRegistration`
   operation and hands the Hono context to the service's own handler (a
   streaming response, say). An `@hmacVerified` operation's spec names its
   `webhookProvider`, and both mount it only with a `webhookVerifier`, Hono
@@ -69,8 +73,9 @@ runtime applies that requirement. It does not decide who the caller is.
 
 - The router takes an `Authenticator`, `(ctx) => Promise<Principal | null>`.
   The Hono adapter extracts a Bearer token into `ctx.bearerToken`; an
-  authenticator can read it, a header such as `X-API-Key`, or anything else
-  on the request. No authenticator means every route that needs a caller
+  authenticator can read it, a header such as `X-API-Key`, an
+  `Authorization` header of another scheme, or anything else on the
+  request. No authenticator means every route that needs a caller
   answers 401.
 - `hasAnyPermission` is the default matcher, with the Go `session`
   runtime's rule: permissions are dotted paths, a granted permission covers
