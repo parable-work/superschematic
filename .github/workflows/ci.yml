@@ -1,8 +1,10 @@
 name: ci
 
-# Gates for the superschematic repository: DCO sign-off, five Go modules (the
-# compiler, the IR, the schema and http runtimes and the migration runner:
-# build, vet, test with the database tests against a Postgres container,
+# Gates for the superschematic repository: DCO sign-off, seven Go modules (the
+# compiler, the IR, the schema and http runtimes, the migration runner, the
+# gcp target extension and the Pulumi provisioner extension: build, vet, test
+# with the database tests against a Postgres container and the provisioner's
+# against the pulumi CLI,
 # gofmt, golangci-lint, scalar catalog, schema-file types and core behavior
 # declarations drift, CLI smoke over the fixture corpus), the acme example
 # extension (smoke plus the no-core-edits check), the TypeScript authoring
@@ -239,6 +241,14 @@ jobs:
             --command "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public" \
             --command "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"
 
+      - name: Install the pulumi CLI
+        # extensions/pulumi drives it, and its integration test runs it
+        # against a file:// backend with the random provider, which needs no
+        # cloud credentials. The action only installs the CLI here.
+        uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+        with:
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+
       - name: Build, vet, test every module
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
@@ -248,6 +258,9 @@ jobs:
           # set up, so a skip is a broken gate and must fail
           # (testpaths.RequireOrSkipTS).
           SUPERSCHEMATIC_REQUIRE_TS_CHECKS: "1"
+          # The pulumi CLI is installed above, so the provisioner's
+          # integration test must run, not skip.
+          SUPERSCHEMATIC_REQUIRE_PULUMI: "1"
           # The database tests run against the container above; each creates
           # and drops its own schema, database or role.
           SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
@@ -271,7 +284,7 @@ jobs:
           GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
-          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp; do
+          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/pulumi; do
             echo "==> $m"
             # Packages that run cargo queue on its lock of the shared target
             # directory, and the wait counts against each package's timeout.
@@ -377,6 +390,15 @@ jobs:
         with:
           version: v${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: extensions/gcp
+          install-mode: none
+
+      - name: golangci-lint (extensions/pulumi)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: extensions/pulumi
           install-mode: none
 
   acme:

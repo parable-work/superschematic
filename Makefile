@@ -19,7 +19,7 @@ export GOTOOLCHAIN := go$(GO_VERSION)
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages.
 export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp extensions/pulumi
 BIN := bin/superschematic
 
 # build-all keys its cache on a hash of this binary. -trimpath drops the
@@ -78,7 +78,7 @@ go-lint:
 # Schema and TypeScript types. Review the diff by eye. Each package's tests
 # run from the Go module that holds it.
 go-goldens: schema-file-types
-	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | xargs -n1 dirname | sort -u); do \
+	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | grep -v '^./third_party/' | xargs -n1 dirname | sort -u); do \
 		p=./$${p#./}; m=$$p; while [ ! -f $$m/go.mod ]; do m=$$(dirname $$m); done; \
 		(cd $$m && go test -count=1 .$${p#$$m} -update) || exit 1; done
 

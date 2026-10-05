@@ -1,0 +1,75 @@
+# Rendered by superschematic from the resource graph of environment PreProd of
+# stack EdgeCases. Do not edit: change the stack and render it again.
+
+name: edge-cases
+runtime: yaml
+description: Environment PreProd of stack EdgeCases
+config:
+  region:
+    type: string
+resources:
+  # phase infrastructure; owners api
+  api-account:
+    name: api.account
+    type: gcp:serviceaccount/account:Account
+    properties:
+      accountId: api
+      project: acme-cases
+    options:
+      version: 9.37.1
+  # phase exposure; owners api
+  api-cert:
+    name: api.cert
+    type: gcp:certificatemanager/dnsAuthorization:DnsAuthorization
+    properties:
+      domain: api.cases.example.test
+      name: api
+    options:
+      version: 9.37.1
+  # phase rollout; owners api
+  api-service:
+    name: api.service
+    type: gcp:cloudrunv2/service:Service
+    properties:
+      deletionProtection: false
+      description: costs $$5, reads $${HOME} and $$$$
+      labels:
+        empty: ""
+        has-colon: 'a: b'
+        has-hash: '# not a comment'
+        looks-like-bool: "true"
+        looks-like-number: "0123"
+      location: ${region}
+      name: api-${region}
+      template:
+        containers:
+          - args:
+              - --flag
+              - |-
+                multi
+                line
+            envs:
+              - name: SELF
+                value: https://api-${region}.${api-cert.domain}
+              - name: UNSET
+                value: null
+            image: us-east1-docker.pkg.dev/acme-cases/shop/api
+        cpuFraction: 0.25
+        maxInstanceRequestConcurrency: 80
+        scaling:
+          maxInstanceCount: 1000000
+          minInstanceCount: 0
+        serviceAccount: ${api-account.email}
+        timeout: 300s
+    options:
+      dependsOn:
+        - ${api-account}
+      version: 9.37.1
+outputs:
+  api.account.email: ${api-account.email}
+  api.account.id: ${api-account.id}
+  api.cert.dnsResourceRecords[0].data: ${api-cert.dnsResourceRecords[0].data}
+  api.cert.domain: ${api-cert.domain}
+  api.cert.id: ${api-cert.id}
+  api.service.id: ${api-service.id}
+  api.service.uri: ${api-service.uri}
