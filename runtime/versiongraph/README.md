@@ -33,9 +33,10 @@ package's tests run every core vector, and package `canonical`, the Rust
 engine's module `canonical` and the Python package's module `canonical`
 run every canonical vector. The scenarios are the engines' contract: the
 Go, TypeScript, Rust and Python engines run every one through their
-Postgres adapters, and the TypeScript engine runs every one through its
-SQLite adapter too. The SQLite vectors are the SQLite adapters' contract,
-which the TypeScript package's tests check. The package's
+Postgres adapters, and the TypeScript and Rust engines run every one
+through their SQLite adapters too. The SQLite vectors are the SQLite
+adapters' contract, which the TypeScript package's and the Rust engine's
+tests check. The package's
 types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
@@ -628,7 +629,10 @@ crate's `rusqlite` feature. It begins with `BEGIN IMMEDIATE` on a connection
 in autocommit mode and with a savepoint inside a transaction the caller
 holds on it, and reads its clock, in microseconds, once per transaction it
 begins. It refuses a SQLite older than 3.38.0, from which `json_each` and
-`json_extract` are SQLite's own.
+`json_extract` are SQLite's own. Its tests hold it to the vectors: its
+layout's statements are `layout.json`'s, and `typescript.sql` reads back
+through it and the Rust engine as `typescript.json`, with nothing of one
+graph read through another's.
 
 ## Scenarios
 
@@ -767,7 +771,7 @@ UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review t
 UPDATE_SQLITE_VECTORS=1 bun test test/sqlite-vectors.test.ts  # in typescript/, after bun run build: rewrite testdata/sqlite; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
 make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, and the SQLite vectors, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
-make versiongraph-scenarios-rust  # every scenario through the Rust engine and its SQLite adapter, with the adapter's tests; then every scenario and canonical vector through its Postgres adapter
+make versiongraph-scenarios-rust  # every scenario through the Rust engine and its SQLite adapter, with the adapter's tests and the SQLite vectors; then every scenario and canonical vector through its Postgres adapter
 make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
 ```
 

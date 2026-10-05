@@ -188,9 +188,10 @@ versiongraph-scenarios-ts:
 
 # Every version-graph scenario through the Rust engine. First on SQLite
 # (D32): the SQLite adapter over rusqlite (the rusqlite feature), with the
-# adapter's own tests and every canonical vector as a round trip, which need
-# no database server and run with or without a Postgres URL (the URL is unset
-# for them, so the Postgres tests skip here and run below). Then on Postgres:
+# adapter's own tests, every canonical vector as a round trip and the SQLite
+# vectors, which need no database server and run with or without a Postgres
+# URL (the URL is unset for them, so the Postgres tests skip here and run
+# below). Then on Postgres:
 # the Postgres adapter, and the crate's other Postgres tests (every canonical
 # vector's rendering, the adapter, the sweeper), against the Postgres that
 # SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names; that pass fails

@@ -4,8 +4,10 @@
 //! tables and foreign keys, two graphs in one file, the name function, the
 //! clock, its ids, the write lock a second connection waits on, a dropped
 //! transaction, the caller's transaction, the canonical vectors as a round
-//! trip, and the rusqlite binding. The Rust port of the TypeScript package's
-//! test/sqlite-cases.ts. Every case runs on SQLite through rusqlite and
+//! trip, and the rusqlite binding: the Rust port of the TypeScript package's
+//! test/sqlite-cases.ts. Then the shared SQLite vectors (testdata/sqlite):
+//! the layout, and a database the TypeScript adapter wrote, read back
+//! through this adapter. Every case runs on SQLite through rusqlite and
 //! needs no server.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,7 +29,7 @@ use superschematic_versiongraph_engine::storage::{
     NewCommit, NewRef, Patch, Pin, RefUpdate, ReleaseWrite, RowWrite, SnapshotEntry, Storage, Tx,
 };
 use superschematic_versiongraph_engine::{
-    CommitOptions, Edits, Engine, Error, KindEdits, Options, Ref, SweepOptions,
+    Commit, CommitOptions, Edits, Engine, Error, KindEdits, Options, Ref, SweepOptions, TreeResult,
 };
 
 const GRAPH: &str = "recipe";
@@ -2418,5 +2420,296 @@ async fn the_binding_returns_rows_by_position_and_sqlites_extended_result_code()
     assert!(
         matches!(&version[..], [row] if matches!(&row[..], [SqlValue::Text(_)])),
         "{version:?}"
+    );
+}
+
+/// The layout's statements under the default names equal layout.json's,
+/// string for string.
+#[test]
+fn the_layout_is_the_shared_vectors_layout() {
+    #[derive(Deserialize)]
+    struct Layout {
+        statements: Vec<String>,
+    }
+    let text =
+        std::fs::read_to_string(testdata().join("sqlite/layout.json")).expect("read layout.json");
+    let want: Layout = serde_json::from_str(&text).expect("layout.json");
+    let got = sqlite::layout(&sqlite::default_table_name).expect("the layout");
+    assert_eq!(got, want.statements);
+}
+
+/// A database the TypeScript adapter wrote, loaded with foreign keys off.
+async fn typescript_database() -> Arc<Rusqlite> {
+    let sql = std::fs::read_to_string(testdata().join("sqlite/typescript.sql"))
+        .expect("read typescript.sql");
+    let connection = memory();
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("foreign keys off");
+    for statement in sql.lines().filter(|line| !line.is_empty()) {
+        connection
+            .execute_batch(statement)
+            .unwrap_or_else(|e| panic!("load {statement}: {e}"));
+    }
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON")
+        .expect("foreign keys on");
+    let broken: Vec<String> = connection
+        .prepare("PRAGMA foreign_key_check")
+        .expect("prepare")
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("check")
+        .collect::<Result<_, _>>()
+        .expect("read");
+    assert!(broken.is_empty(), "foreign keys broken in {broken:?}");
+    Arc::new(Rusqlite::new(connection))
+}
+
+fn ref_json(r: &Ref) -> Value {
+    json!({"id": r.id, "root": r.root, "parent": r.parent, "base": r.base, "head": r.head, "name": r.name,
+           "sealed": r.sealed, "discarded": r.discarded, "version": r.version})
+}
+
+fn commit_json(c: &Commit) -> Value {
+    json!({"id": c.id, "root": c.root, "ref": c.ref_id, "parent": c.parent, "message": c.message,
+           "schemaEpoch": c.schema_epoch, "contentHash": c.content_hash, "sequence": c.sequence,
+           "createdAt": c.created_at, "createdBy": c.created_by, "snapshot": c.snapshot})
+}
+
+fn tree_json(t: &TreeResult) -> Value {
+    json!({"tree": t.tree, "contentHash": t.content_hash, "findings": t.findings})
+}
+
+/// An engine read as the vectors write it: its value, or its error's code.
+fn read_json<T>(result: Result<T, Error>, json: impl Fn(&T) -> Value) -> Value {
+    match result {
+        Ok(value) => json(&value),
+        Err(error) => json!({"error": error.code().unwrap_or_else(|| panic!("{error}"))}),
+    }
+}
+
+/// Compares what a read returned with the vectors, naming the read.
+fn same(failures: &mut Vec<String>, what: &str, got: Value, want: &Value) {
+    if got != *want {
+        failures.push(format!("{what}:\n  got  {got}\n  want {want}"));
+    }
+}
+
+/// Every read typescript.json lists, through this adapter and the engine over
+/// it, over the database the TypeScript adapter wrote, returns what it lists;
+/// and through each graph's adapter nothing of another graph reads.
+#[tokio::test]
+async fn a_database_the_typescript_adapter_wrote_reads_back_as_the_shared_vectors_say() {
+    let text = std::fs::read_to_string(testdata().join("sqlite/typescript.json"))
+        .expect("read typescript.json");
+    let vectors: Value = serde_json::from_str(&text).expect("typescript.json");
+    let client = typescript_database().await;
+    let kinds: Vec<String> = descriptor_value()["kinds"]
+        .as_array()
+        .expect("kinds")
+        .iter()
+        .map(|k| k["kind"].as_str().expect("a kind").to_owned())
+        .collect();
+    let graphs = vectors["graphs"].as_array().expect("graphs");
+    assert!(graphs.len() >= 2, "the vectors hold two graphs");
+    let mut failures = Vec::new();
+    for g in graphs {
+        let name = g["graph"].as_str().expect("a graph's name");
+        for list in ["refs", "commits", "roots", "images"] {
+            let entries = g[list].as_array().expect("a list");
+            assert!(!entries.is_empty(), "graph {name} lists {list}");
+        }
+        let storage = graph_over(
+            &client,
+            &descriptor(),
+            sqlite::Options {
+                graph: name.to_owned(),
+                ..sqlite::Options::default()
+            },
+        )
+        .await;
+        let engine = engine_over(&descriptor(), storage.clone());
+        for r in g["refs"].as_array().expect("refs") {
+            let id = r["id"].as_str().expect("an id");
+            let at = format!("{name} ref {id}");
+            let read = transact!(storage, |tx| tx.read_ref(id).await);
+            same(
+                &mut failures,
+                &format!("{at} readRef"),
+                read_json(read, ref_json),
+                &r["readRef"],
+            );
+            for kind in &kinds {
+                let mut rows = transact!(storage, |tx| tx.rows(kind, id).await).expect("rows");
+                rows.sort_by(|a, b| a["entity_key"].as_str().cmp(&b["entity_key"].as_str()));
+                same(
+                    &mut failures,
+                    &format!("{at} rows {kind}"),
+                    Value::Array(rows),
+                    &r["rows"][kind],
+                );
+            }
+            same(
+                &mut failures,
+                &format!("{at} compose"),
+                read_json(engine.compose(id).await, tree_json),
+                &r["compose"],
+            );
+            let history = engine.history(id).await;
+            same(
+                &mut failures,
+                &format!("{at} history"),
+                read_json(history, |h| {
+                    Value::Array(h.iter().map(commit_json).collect())
+                }),
+                &r["history"],
+            );
+        }
+        for c in g["commits"].as_array().expect("commits") {
+            let id = c["id"].as_str().expect("an id");
+            let at = format!("{name} commit {id}");
+            let read = transact!(storage, |tx| tx.read_commit(id).await);
+            same(
+                &mut failures,
+                &format!("{at} readCommit"),
+                read_json(read, commit_json),
+                &c["readCommit"],
+            );
+            same(
+                &mut failures,
+                &format!("{at} materialize"),
+                read_json(engine.materialize(id).await, tree_json),
+                &c["materialize"],
+            );
+            let mut patches =
+                transact!(storage, |tx| tx.patches(&[id.to_owned()]).await).expect("patches");
+            patches.sort_by(|a, b| (&a.kind, &a.entity_key).cmp(&(&b.kind, &b.entity_key)));
+            let patches: Vec<Value> = patches
+                .iter()
+                .map(|p| json!({"commit": p.commit, "kind": p.kind, "entityKey": p.entity_key, "entityId": p.entity_id, "entityVersion": p.entity_version, "operation": p.operation}))
+                .collect();
+            same(
+                &mut failures,
+                &format!("{at} patches"),
+                Value::Array(patches),
+                &c["patches"],
+            );
+            let mut entries = transact!(storage, |tx| tx.snapshot(id).await).expect("snapshot");
+            entries.sort_by(|a, b| (&a.kind, &a.entity_key).cmp(&(&b.kind, &b.entity_key)));
+            let entries: Vec<Value> = entries
+                .iter()
+                .map(|e| json!({"kind": e.kind, "entityKey": e.entity_key, "entityId": e.entity_id, "entityVersion": e.entity_version}))
+                .collect();
+            same(
+                &mut failures,
+                &format!("{at} snapshot"),
+                Value::Array(entries),
+                &c["snapshot"],
+            );
+        }
+        for root in g["roots"].as_array().expect("roots") {
+            let id = root["root"].as_str().expect("a root");
+            let released = engine.released(id).await;
+            let got = read_json(released, |r| {
+                json!({"release": {"id": r.release.id, "root": r.release.root, "commit": r.release.commit, "version": r.release.version},
+                       "tree": r.tree.tree, "contentHash": r.tree.content_hash, "findings": r.tree.findings})
+            });
+            same(
+                &mut failures,
+                &format!("{name} root {id} released"),
+                got,
+                &root["released"],
+            );
+        }
+        for image in g["images"].as_array().expect("images") {
+            let (kind, id) = (
+                image["kind"].as_str().expect("a kind"),
+                image["id"].as_str().expect("an id"),
+            );
+            let pin = Pin {
+                id: id.to_owned(),
+                version: image["version"].as_i64().expect("a version"),
+            };
+            let got = transact!(storage, |tx| tx.images(kind, &[pin]).await).expect("images");
+            same(
+                &mut failures,
+                &format!("{name} image {kind} {id}"),
+                Value::Array(got),
+                &json!([image["image"]]),
+            );
+        }
+        // Nothing of another graph reads through this graph's adapter.
+        for other in graphs.iter().filter(|o| o["graph"] != g["graph"]) {
+            let theirs = other["graph"].as_str().expect("a graph's name");
+            for r in other["refs"].as_array().expect("refs") {
+                let id = r["id"].as_str().expect("an id");
+                let at = format!("{theirs} ref {id} through {name}");
+                let read = transact!(storage, |tx| tx.read_ref(id).await);
+                same(
+                    &mut failures,
+                    &format!("{at} readRef"),
+                    read_json(read, ref_json),
+                    &json!({"error": "not_found"}),
+                );
+                same(
+                    &mut failures,
+                    &format!("{at} compose"),
+                    read_json(engine.compose(id).await, tree_json),
+                    &json!({"error": "not_found"}),
+                );
+                for kind in &kinds {
+                    let rows = transact!(storage, |tx| tx.rows(kind, id).await).expect("rows");
+                    same(
+                        &mut failures,
+                        &format!("{at} rows {kind}"),
+                        Value::Array(rows),
+                        &json!([]),
+                    );
+                }
+            }
+            for c in other["commits"].as_array().expect("commits") {
+                let id = c["id"].as_str().expect("an id");
+                let at = format!("{theirs} commit {id} through {name}");
+                let read = transact!(storage, |tx| tx.read_commit(id).await);
+                same(
+                    &mut failures,
+                    &format!("{at} readCommit"),
+                    read_json(read, commit_json),
+                    &json!({"error": "not_found"}),
+                );
+                same(
+                    &mut failures,
+                    &format!("{at} materialize"),
+                    read_json(engine.materialize(id).await, tree_json),
+                    &json!({"error": "not_found"}),
+                );
+                let patches =
+                    transact!(storage, |tx| tx.patches(&[id.to_owned()]).await).expect("patches");
+                assert!(patches.is_empty(), "{at} patches: {patches:?}");
+                let entries = transact!(storage, |tx| tx.snapshot(id).await).expect("snapshot");
+                assert!(entries.is_empty(), "{at} snapshot: {entries:?}");
+            }
+            for image in other["images"].as_array().expect("images") {
+                let (kind, id) = (
+                    image["kind"].as_str().expect("a kind"),
+                    image["id"].as_str().expect("an id"),
+                );
+                let pin = Pin {
+                    id: id.to_owned(),
+                    version: image["version"].as_i64().expect("a version"),
+                };
+                let got = transact!(storage, |tx| tx.images(kind, &[pin]).await).expect("images");
+                assert!(
+                    got.is_empty(),
+                    "{theirs} image {kind} {id} through {name}: {got:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} reads differ:\n{}",
+        failures.len(),
+        failures.join("\n")
     );
 }

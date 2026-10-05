@@ -107,13 +107,18 @@ rolls back with the caller's transaction. A transaction an operation
 dropped is rolled back at once. rusqlite's calls are synchronous, so each
 statement blocks the executor while SQLite runs it. `storage` and
 `create_tables` refuse a SQLite older than 3.38.0, and `storage` turns the
-connection's foreign keys on and refuses one where they stay off.
+connection's foreign keys on and refuses one where they stay off. Its tests
+hold it to the SQLite vectors (`../testdata/sqlite`): its layout under the
+default names is `layout.json`, and the database the TypeScript adapter
+wrote, `typescript.sql`, reads back through it and the engine as
+`typescript.json`.
 
 ## Test
 
 ```
-cargo test --features rusqlite               # the rules, the vectors, the SQLite adapter's tests and every
-                                             # scenario on SQLite, and every Postgres test that has a database
+cargo test --features rusqlite               # the rules, the vectors, the SQLite adapter's tests, the SQLite
+                                             # vectors and every scenario on SQLite, and every Postgres test
+                                             # that has a database
 make versiongraph-scenarios-rust             # from the repository root: every scenario and the SQLite adapter's
                                              # tests on SQLite, then every scenario, canonical vector rendering,
                                              # adapter and sweeper test against Postgres
