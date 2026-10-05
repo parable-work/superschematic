@@ -89,7 +89,46 @@ func TestBuildCommand_EmitsSentinel(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(tsreaderTestdata, "fixture-db", "src", "service.generated.ts"))
 	require.NoError(t, err)
-	assert.Equal(t, sentinel.Content("fixture-db", ir.SchemaKindDB, naming.Default()), string(data))
+	assert.Equal(t, sentinel.Content("fixture-db", ir.SchemaKindDB, naming.Default(), nil), string(data))
+}
+
+// TestBuildCommand_TypesAnAPISentinelWithItsEnvVarsClass: an API's build
+// knows its @envVars class, so the sentinel it writes is the typed handle
+// (docs/stack-model.md, section 4.3).
+func TestBuildCommand_TypesAnAPISentinelWithItsEnvVarsClass(t *testing.T) {
+	// The service sits beside the tsreader fixtures for their tsconfig base.
+	dir, err := os.MkdirTemp(tsreaderTestdata, "fixture-envvars-api-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	for rel, content := range map[string]string{
+		"package.json":  `{ "name": "@schemas/fixture-envvars-api", "private": true }`,
+		"tsconfig.json": `{ "extends": "../../tsconfig.base.json", "include": ["schema.config.ts", "src/**/*.ts"] }`,
+		"schema.config.ts": `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+
+export default defineConfig({ name: "fixture-envvars-api", kind: SchemaKind.API, outputs: {} });
+`,
+		"src/config.schema.ts": `import { envVars } from "@superschematic/schema-config";
+
+@envVars
+export abstract class FixtureEnvvarsApiConfig {
+  LOG_LEVEL: string;
+}
+`,
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+
+	root := New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetArgs([]string{"build", dir, "--out", t.TempDir()})
+	require.NoError(t, root.Execute())
+
+	data, err := os.ReadFile(filepath.Join(dir, "src", "service.generated.ts"))
+	require.NoError(t, err)
+	want := sentinel.Content("fixture-envvars-api", ir.SchemaKindAPI, naming.Default(), &sentinel.ConfigType{Name: "FixtureEnvvarsApiConfig", Module: "./config.schema"})
+	assert.Equal(t, want, string(data))
 }
 
 func TestBuildCommand_NoSentinelWithoutTSConfig(t *testing.T) {

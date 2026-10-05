@@ -289,6 +289,17 @@ func ValueClass(schema *ir.Schema, fd *ir.FieldDef) (string, error) {
 	return valueClass(schema, fd, sqlutil.ScalarSQLTypes(schema))
 }
 
+// ScalarClass is the value class ValueClass gives a single field of the
+// named scalar or builtin primitive, one that is not a list, a map or a
+// @jsonField: the class of one value of it in a column of its own. It is
+// "" when no rule reads the SQL type the scalar is stored as, where
+// ValueClass fails. The scalar catalog the schema runtime ships records it
+// for each builtin scalar (internal/tools/scalarcatalog).
+func ScalarClass(schema *ir.Schema, name string) (string, error) {
+	_, class, err := elementClass(schema, name, sqlutil.ScalarSQLTypes(schema))
+	return class, err
+}
+
 // valueClass is ValueClass with the schema's scalar SQL types. A to-one
 // relation holds the target's key and has its class. Any other field's
 // column type is sqlutil.ColumnType's. A map's column must be JSONB, and
@@ -314,7 +325,7 @@ func valueClass(schema *ir.Schema, fd *ir.FieldDef, sqlTypes map[string]string) 
 		}
 		return ClassJSON, nil
 	}
-	holds, err := jsonOf(schema, ref.Name)
+	holds, class, err := elementClass(schema, ref.Name, sqlTypes)
 	if err != nil {
 		return "", err
 	}
@@ -322,12 +333,22 @@ func valueClass(schema *ir.Schema, fd *ir.FieldDef, sqlTypes map[string]string) 
 	if inJSONB && holds == ClassJSON {
 		return ClassJSON + lists, nil
 	}
-	class := classOf(holds, sqlutil.ElementType(ref.Name, sqlTypes))
 	if class == "" {
 		return "", fmt.Errorf("%s holds a JSON %s but is stored as %s, which no value class reads",
 			ref.Name, jsonNoun(holds), column)
 	}
 	return class + lists, nil
+}
+
+// elementClass is what one value of the named type holds in the schema
+// runtime's JSON (jsonOf) and the class whose rule reads it stored in a
+// column of its own, as its own SQL type (classOf), "" when no rule does.
+func elementClass(schema *ir.Schema, name string, sqlTypes map[string]string) (holds, class string, err error) {
+	holds, err = jsonOf(schema, name)
+	if err != nil {
+		return "", "", err
+	}
+	return holds, classOf(holds, sqlutil.ElementType(name, sqlTypes)), nil
 }
 
 // jsonOf is what the schema runtime's JSON for one value of the named type

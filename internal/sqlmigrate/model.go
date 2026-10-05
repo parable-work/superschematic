@@ -127,7 +127,19 @@ type Column struct {
 	// Generated is the expression of a stored generated column; empty
 	// means the column is not generated.
 	Generated string `json:"generated,omitempty"`
+
+	// Holds says what a SQLite column holds as JSON TEXT: "list" for a
+	// list field's JSON array, "json" for a JSON value. It is empty for
+	// every other column, and for every column of a Postgres model, whose
+	// types tell a list and JSON from text.
+	Holds string `json:"holds,omitempty"`
 }
+
+// What a SQLite column holds as JSON TEXT (Column.Holds).
+const (
+	holdsList = "list"
+	holdsJSON = "json"
+)
 
 // Constraint is a primary key or a unique constraint: its name, as the
 // database gives it, and its columns.

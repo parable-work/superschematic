@@ -12,17 +12,22 @@ var phaseNotes = map[Phase]string{
 }
 
 // SQL renders the plan as one SQL script for a reader: a header comment
-// with the service, dialect, hashes and renames, then each step's
+// with the service, dialect, hashes (expanded, the model between the
+// phases, when the plan has one) and renames, then each step's
 // statements, each ending with a semicolon, under a comment naming its
 // index, phase, operation, subject and hazard ids. A step that runs
 // outside a transaction says so, with its recovery statements commented
-// out. The script is for review: the runner applies the plan JSON, which
-// carries what the script cannot, such as each step's transaction.
+// out, and a step with no statements says it has none. The script is for
+// review: the runner applies the plan JSON, which carries what the script
+// cannot, such as each step's transaction.
 func (p *Plan) SQL() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "-- Migration plan for %s (%s)\n", p.Service, p.Dialect)
 	fmt.Fprintf(&b, "-- from:    %s\n", hashOrEmpty(p.From))
 	fmt.Fprintf(&b, "-- to:      %s\n", p.To)
+	if p.Expanded != "" {
+		fmt.Fprintf(&b, "-- between: %s (expanded: the model between the phases)\n", p.Expanded)
+	}
 	if p.Hash != "" {
 		fmt.Fprintf(&b, "-- plan:    %s\n", p.Hash)
 	}
@@ -50,6 +55,9 @@ func (p *Plan) SQL() string {
 				b.WriteString(commentLines("recovery: "+statement+";", "--   "))
 			}
 		}
+		if len(step.Statements) == 0 {
+			b.WriteString("-- no SQL: the database does not change, and the runner logs the step\n")
+		}
 		for _, statement := range step.Statements {
 			b.WriteString(statement)
 			b.WriteString(";\n")
@@ -58,10 +66,12 @@ func (p *Plan) SQL() string {
 	return b.String()
 }
 
-// Markdown renders the plan for a pull request: a summary line, a table of
-// the hazards (class, subject, reader, reason, id), then the expand and
+// Markdown renders the plan for a pull request: a summary line, the
+// hashes (expanded, the model between the phases, when the plan has one),
+// a table of the hazards (class, subject, reader, reason, id), then the
+// expand and
 // contract steps, each with its SQL in a fenced block. A plan with no
-// steps says so.
+// steps says so, and so does a step with no SQL.
 func (p *Plan) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Migration plan for `%s` (%s)\n\n", p.Service, p.Dialect)
@@ -76,6 +86,9 @@ func (p *Plan) Markdown() string {
 		fmt.Fprintf(&b, "- From: `%s`\n", p.From)
 	}
 	fmt.Fprintf(&b, "- To: `%s`\n", p.To)
+	if p.Expanded != "" {
+		fmt.Fprintf(&b, "- Between the phases (expanded): `%s`\n", p.Expanded)
+	}
 	if p.Hash != "" {
 		fmt.Fprintf(&b, "- Plan: `%s`\n", p.Hash)
 	}
@@ -129,6 +142,10 @@ func (p *Plan) Markdown() string {
 			}
 			if step.ForeignKeysOff {
 				b.WriteString(" Runs with foreign keys off, checked before its commit.")
+			}
+			if len(step.Statements) == 0 {
+				b.WriteString(" No SQL: the database does not change.\n")
+				continue
 			}
 			b.WriteString("\n\n```sql\n")
 			for _, statement := range step.Statements {

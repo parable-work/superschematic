@@ -45,6 +45,16 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 
 	// Type declarations.
 	marker(TargetType, "trait", []string{pkgSchema})
+	// The argument evaluator reads a class named as a value, local or
+	// imported, as a class reference ({"class": name}, ClassRef) for every
+	// decorator with an Apply, and records an import for a class from another
+	// service's package. @source, @versionGraph and @graphMember stay markers
+	// the walker reads, because each would lose a diagnostic or change the IR
+	// as an Apply; the reasons follow each registration.
+	//
+	// @source(Product) is projected from the class's declaration, whose
+	// flattened fields Apply cannot reach, and a cross-service target is
+	// compile-time lineage that must not be recorded as an import.
 	specs = append(specs, DecoratorSpec{
 		Name: "source", Packages: []string{pkgAPI, pkgSchema}, Target: TargetType,
 		Kinds: []string{string(ir.SchemaKindAPI), string(ir.SchemaKindGeneral)},
@@ -55,9 +65,11 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// move them after field resolution and lose that diagnostic.
 	marker(TargetType, "envVars", []string{pkgSchemaConfig})
 	marker(TargetType, "versioned", []string{pkgDB})
-	// @versionGraph and @graphMember name schema classes as values (graph,
-	// parent.of), which the argument evaluator does not read, so the walker
-	// reads them itself beside @versioned.
+	// @versionGraph names no class; it is read beside @versioned, for the same
+	// reason. @graphMember is too, and also reports each bad property at its
+	// value (an ArgError points only at a whole argument), counts its repeats
+	// on one type, and resolves graph and parent.of without recording an
+	// import, since both must name classes of this schema.
 	marker(TargetType, "versionGraph", []string{pkgDB})
 	marker(TargetType, "graphMember", []string{pkgDB})
 	flag(TargetType, "optimistic", []string{pkgDB}, func(n Node) { n.Type.Optimistic = true })
