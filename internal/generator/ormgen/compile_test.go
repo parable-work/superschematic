@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -449,7 +450,7 @@ import (
 	types "example.com/schemas/types/go/fixture-db"
 )
 
-const strategyADDLSQL = ` + "`" + string(createSQL) + "`" + `
+const strategyADDLSQL = ` + "`" + string(pgtest.CreateSQL(createSQL)) + "`" + `
 
 func TestStrategyACompositeHistoryAsOf(t *testing.T) {
 	db, pool := openStrategyADatabase(t)
