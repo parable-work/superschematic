@@ -91,7 +91,7 @@ class TenantView(BaseModel):
             errors.add_field_error("id", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
         # Validate name
@@ -295,7 +295,7 @@ class CreateTenantInput(BaseModel):
                 errors.add_field_error("slug", "maxLength", "must be at most 255 characters")
             if len(str(self.slug)) < 1:
                 errors.add_field_error("slug", "minLength", "must be at least 1 characters")
-            if re.search(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", str(self.slug)) is None:
+            if re.search(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", str(self.slug), re.ASCII) is None:
                 errors.add_field_error("slug", "pattern", "invalid format")
 
         return errors

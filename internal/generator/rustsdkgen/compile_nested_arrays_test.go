@@ -22,7 +22,9 @@ import (
 // JSON arrays, an input type with lists of lists passes the SDK's schema
 // validation, and an input that breaks a list bound or a nested object's
 // rule is refused before the request; and with pathParamsSDKTest: each path
-// value is sent as one segment, encoded once. The types crate resolves
+// value is sent as one segment, encoded once; and with
+// problemDetailsSDKTest: an error response's problem, request id and
+// Retry-After reach SDKError::Api. The types crate resolves
 // superscalar from the checkout scripts/superscalar-dep.sh stands up.
 // CARGO_TARGET_DIR is honored when set.
 func TestNestedArraysSDKCrateBuildsAndRuns(t *testing.T) {
@@ -59,6 +61,7 @@ tokio = { version = "1", features = ["macros", "rt"] }
 	crate := strings.ReplaceAll(sdkOutput.CrateName, "-", "_")
 	writeFile(t, filepath.Join(sdkDir, "tests", "nested_arrays.rs"), strings.ReplaceAll(nestedArraysSDKTest, "SDK_CRATE", crate))
 	writeFile(t, filepath.Join(sdkDir, "tests", "path_params.rs"), strings.ReplaceAll(pathParamsSDKTest, "SDK_CRATE", crate))
+	writeFile(t, filepath.Join(sdkDir, "tests", "problem_details.rs"), strings.ReplaceAll(problemDetailsSDKTest, "SDK_CRATE", crate))
 
 	cargoClippyAndTest(t, cargoPath, sdkDir)
 }

@@ -312,6 +312,14 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	return schema, nil
 }
 
+// HydrateScalars fills every ScalarDef schema holds from catalog, as a
+// load does (hydrateScalarsFromRegistry). The scalar catalog tool reads the
+// builtin scalars through it, so what it records of each one is what a
+// compiled schema's ScalarDef of it gives.
+func HydrateScalars(schema *ir.Schema, catalog registry.ScalarCatalog) error {
+	return hydrateScalarsFromRegistry(schema, catalog)
+}
+
 // hydrateScalarsFromRegistry fills every ScalarDef the schema references
 // from the scalar catalog: description, primitive, constraints, custom
 // hooks, upload metadata (from an UploadCatalog) and the per-language type

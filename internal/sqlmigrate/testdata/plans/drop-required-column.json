@@ -1,7 +1,8 @@
 {
   "dialect": "postgres",
+  "expanded": "0a2c6219d40b43f9ced8597a19a47a2ec2444be1c9720408532891380def375d",
   "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
-  "hash": "219dc04ee73a4f0787c4328ac80037dba081efb3859fe34de3c8d2bf409b91dd",
+  "hash": "8275218b7a41ff0a7784543b3f5db6e4596f4a27423d578c5aba9763690006da",
   "service": "shop-db",
   "steps": [
     {

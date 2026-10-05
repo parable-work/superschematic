@@ -49,7 +49,7 @@ type reference struct {
 // fields: the declared dependencies, the authDb, then the calls. A service
 // named by two fields appears once for each.
 func (s Service) references() []reference {
-	refs := make([]reference, 0, len(s.Config.Dependencies)+1+len(s.Config.Calls))
+	refs := make([]reference, 0, len(s.Config.Dependencies))
 	for _, dep := range s.Config.Dependencies {
 		refs = append(refs, reference{name: dep.Name, field: "dependencies", kind: dep.Kind})
 	}

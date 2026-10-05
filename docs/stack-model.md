@@ -2,9 +2,10 @@
 
 This is the design of the stack model: how a schema tree declares what
 runs where, how superschematic resolves the wiring between the services in
-it, and how it deploys them. Nothing in it is built yet. D30 in
-`docs/DECISIONS.md` records the decisions; this document is the design they
-point at.
+it, and how it deploys them. The Stack IR, the resource graph, the
+registry specs and the resolver are built (section 12); the rest is design.
+D30 in `docs/DECISIONS.md` records the decisions; this document is the
+design they point at.
 
 Cite sections by number, as source comments cite `docs/extension-model.md`.
 Add a section at the end of its group rather than renumbering.
@@ -394,12 +395,13 @@ supplies it at run time.
 
 ## 6. Plug-in interfaces
 
-Four registrations keep platforms and tools independent of each other and
+Five registrations keep platforms and tools independent of each other and
 of the core:
 
 - a deployable is placed on a **platform**;
 - an edge between two placed deployables is realized by a **connector**;
 - a **target** names a platform for each deployable kind;
+- a **DNS platform** holds an environment's domain records (section 6.9);
 - a **provisioner** turns the resulting resource graph into running
   resources.
 
@@ -407,20 +409,35 @@ of the core:
 
 A platform realizes one deployable kind on one runtime: Cloud Run servers,
 Cloud SQL databases, local processes, a local Postgres container. It
-registers:
+registers a `PlatformSpec`:
 
-- the deployable kind, and what it accepts: server languages, SQL dialects;
-- the JSON Schema of its settings (`minInstances`, `tier`);
-- how it names and addresses a deployable in an environment, including
-  under a parameter;
-- `Lower(deployable, environment)`, a pure function that returns resources.
+- `Kind`, the deployable kind, and what it accepts: `Languages` for a
+  server platform, spelt as `outputs.api.language` spells them (`GO`,
+  `TYPESCRIPT`, `RUST`), or `Dialects` for a database platform
+  (`postgres`, `sqlite`), in order of preference;
+- `Settings`, the JSON Schema of its settings (`minInstances`, `tier`);
+- `NameOf` and `AddressOf`, how it names and addresses a deployable in an
+  environment. Under a parameter the name references the parameter
+  (`{"$concat": ["shop-api-", {"$parameter": "pr"}]}`), and an address
+  usually references an output of one of the deployable's nodes;
+- `Lower`, a pure function from the environment and the resolved
+  deployable, bindings included, to the deployable's resources and, for an
+  exposed server, the DNS records it needs (section 6.9).
+
+A resource a platform leaves without a phase gets the default of its
+producer: rollout for a server's own resources, infrastructure for a
+database's.
 
 ### 6.2 Connector
 
 A connector realizes one edge kind between two platforms: Cloud Run to
-Cloud SQL over sql, Cloud Run to Cloud Run over http. It returns the
-resources the edge needs (an IAM grant, a Cloud SQL connection on the
-service) and the value of the derived binding.
+Cloud SQL over sql, Cloud Run to Cloud Run over http. It registers a
+`ConnectorSpec` with the edge kind, its `From` and `To` platforms and a
+pure `Connect`, which returns the resources the edge needs (an IAM grant, a
+Cloud SQL connection on the service) and the value of the derived binding.
+One connector serves an edge kind between two platforms; a second is
+refused. An http edge between two APIs one server serves runs from the
+server to itself, and its connector derives the server's own address.
 
 A generic connector covers a pair of platforms on different providers that
 no specific connector serves, such as a Cloudflare Worker calling a Cloud
@@ -439,13 +456,18 @@ mix with.
 
 ### 6.3 Target
 
-A target is a named bundle of:
+A target is a named bundle, registered as a `TargetSpec`, of:
 
 - a platform for each deployable kind;
 - the schema of its environment values (`project` and `region` for
   `gcp`);
 - its default DNS platform (section 6.9);
-- policy rules over the resource graph.
+- the provisioner that applies its environments, whose state backend its
+  bootstrap creates (section 6.5);
+- the schema of the properties of each resource type its platforms,
+  connectors and DNS platform emit (section 6.4);
+- policy rules over the resource graph, each a named check over the
+  resolved environment.
 
 `gcp` is Cloud Run, Cloud SQL, Secret Manager, Cloud Build with Artifact
 Registry, and a load balancer. `local` is processes, a Postgres container
@@ -468,6 +490,16 @@ The resource graph is the contract between platforms and connectors on one
 side and provisioners on the other. A node has an id, a resource type,
 properties and dependencies. A property may reference another node's output
 or a parameter.
+
+In `environment.json` a reference is an object with one reserved key:
+`{"$output": {"resource": "shop-api.service", "name": "uri"}}`,
+`{"$parameter": "pr"}`, or `{"$concat": [...]}` for strings and references
+joined. A node also records its phase (infrastructure, rollout or
+exposure), whether it is `inherited` from the parent environment
+(section 5.4), and its `owners`: the deployables, edges or DNS that
+produced it. Two producers that return the same node share it, and two that
+return different nodes under one id fail. A node's `dependsOn` holds the
+dependencies its producer named and every node its properties reference.
 
 Resource types and properties use Pulumi package schemas as their
 vocabulary (`gcp:cloudrunv2/service:Service`,
@@ -527,6 +559,13 @@ A provisioner takes a resource graph to running resources and back:
 - `Outputs` reads the applied graph's outputs. They feed the bindings
   (section 6.6) and the deploy manifest (section 11.2).
 
+A provisioner registers a `ProvisionerSpec` that holds an implementation of
+the `Provisioner` interface: `Render(graph, dir)`, then `Plan`, `Apply`,
+`Destroy` and `Outputs`, each with a request that carries the resolved
+environment, the parameter values of the run and the rendered program's
+directory. `Apply` applies one step of the deploy order, so the deploy runs
+image builds and migrations between steps.
+
 Pulumi is the first provisioner:
 
 - **Driven from Go.** superschematic drives Pulumi through the Automation
@@ -560,17 +599,39 @@ name such a program, and the provisioner applies it after the stack.
 
 ### 6.7 Registry surface
 
-There are four specs, registered like the others in section 3 of
-`docs/extension-model.md`:
+There are five specs, registered like the others in section 3 of
+`docs/extension-model.md`. The core registers none of them.
 
-- `RegisterPlatform(PlatformSpec)`;
-- `RegisterConnector(ConnectorSpec)`;
-- `RegisterTarget(TargetSpec)`;
-- `RegisterProvisioner(ProvisionerSpec)`.
+- `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
+  unknown deployable kind, a server platform without languages or a
+  database platform without dialects (or either with the other's list), an
+  unknown or repeated language or dialect, a settings schema that does not
+  compile, and a missing `NameOf`, `AddressOf` or `Lower`.
+- `RegisterConnector(ConnectorSpec)` refuses a malformed or repeated name,
+  an unknown edge kind, a missing platform or `Connect`, and a second
+  connector for one edge kind between the same two platforms.
+- `RegisterTarget(TargetSpec)` refuses a malformed or repeated name, an
+  unknown deployable kind, a values or resource type schema that does not
+  compile, a resource type another target registered with a different
+  schema, and a policy rule without a name or a check, or with a repeated
+  name.
+- `RegisterDNSPlatform(DNSPlatformSpec)` refuses a malformed or repeated
+  name, the reserved name `manual`, a values schema that does not compile
+  and a missing `Lower`.
+- `RegisterProvisioner(ProvisionerSpec)` refuses a malformed or repeated
+  name and a missing implementation.
 
-Each rejects a duplicate key and is checked when the registry is assembled.
-The acceptance test is D10's: a test extension adds a platform, a connector
-and a provisioner with no core edit.
+A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
+`Finalize` checks that each connector joins registered platforms of the
+kinds its edge joins. It checks that each platform a target names is
+registered and of the kind it places, and that a DNS platform or
+provisioner the target names is registered; a target may name neither.
+
+The acceptance test is D10's. `stack/stacktest` imports only the public
+`registry`, `stack` and `ir` packages, registers a fake target with its
+platforms, connectors, DNS platform and provisioner, and resolves a stack
+over the acme-shop services. Its golden `environment.json` files are under
+`stack/stacktest/testdata/golden`.
 
 ### 6.8 Targets after Cloud Run
 
@@ -578,7 +639,7 @@ and a provisioner with no core edit.
 | --- | --- | --- | --- |
 | GKE | Kubernetes servers; Cloud SQL databases | GKE to Cloud SQL through Workload Identity and the Cloud SQL proxy; server to server through a Service and a NetworkPolicy derived from the edge | only the Cloud SQL connector; the Kubernetes server platform is shared |
 | Hosted Kubernetes (EKS, AKS, DOKS and others) | Kubernetes servers; the cloud's managed Postgres, or an in-cluster operator | a database connector per cloud; the shared Kubernetes connector between servers | the database platform and its connector |
-| Cloudflare | Workers for TypeScript servers (the generated TypeScript server uses Hono, which runs on Workers); D1 for SQLite-dialect databases | Hyperdrive to a Postgres database on another target; service bindings between Workers | everything, but through the same four specs |
+| Cloudflare | Workers for TypeScript servers (the generated TypeScript server uses Hono, which runs on Workers); D1 for SQLite-dialect databases | Hyperdrive to a Postgres database on another target; service bindings between Workers | everything, but through the same specs |
 
 Resolution refuses a Go or Rust server on Workers, by the languages the
 platform declares (section 5.2).
@@ -595,6 +656,11 @@ of each exposed server, and the records its certificate needs for
 validation. The DNS platform lowers them to its provider's resources, in the
 same provisioner run as the rest of the environment.
 
+A DNS platform registers a `DNSPlatformSpec`: the JSON Schema of an
+environment's values for it (a zone) and a pure `Lower` from the records
+to resources. It is a spec of its own, not a `PlatformSpec`, because it
+lowers records rather than a deployable.
+
 v1 has two DNS platforms:
 
 - **Cloud DNS**, the gcp target's default. It writes into the managed zone
@@ -609,6 +675,66 @@ gets `manual`, and `stack plan` prints the records to create.
 Being a platform kind makes DNS the first mix of providers in v1, before
 compute can mix (section 6.3). DNS records are not edges, so this needs no
 connector.
+
+### 6.10 How resolution drives the specs
+
+`stack.Resolve` (`internal/stack`) is a pure function of the registry, a
+stack, the facts of the services it references and one environment. The
+facts come through a plain struct, `stack.Service`: name, kind, `authDb`,
+`dependencies`, `calls`, the API language, the SQL dialects and the
+`@envVars` fields with their `Secret`, `Default` and `InheritedFrom`. It
+works in stages and stops at the end of the first stage that fails, so
+every model check reports before anything is connected or lowered:
+
+1. It merges the environment's `extends` chain: values and settings merge
+   key by key, the parent first, and parameters add up.
+2. It collects the services the stack reaches, makes the default
+   deployables (section 3.2), places each deployable on its settings
+   platform or its target's, and checks that the platform runs its
+   language or dialect and accepts its settings.
+3. It asks each platform for the deployable's name and address, derives
+   the edges and finds their connectors, numbers each server's rollout
+   wave from its calls, and binds every config field.
+4. It calls each edge's `Connect` in edge order. When every one succeeds,
+   it calls each deployable's `Lower` in name order, then the DNS
+   platform's `Lower`, and merges their nodes. Every value a platform,
+   connector or DNS platform returns is read through its JSON form, so
+   what resolution accepts is what `environment.json` reads back.
+5. It runs the graph checks of validation level 3: every dependency and
+   referenced output names a node, every referenced parameter is
+   declared, there is no cycle, every node's properties validate against
+   the schema a registered target holds for its type, and every inherited
+   node is a node of the same type in the parent environment, which it
+   resolves for the check.
+6. It orders the deploy (section 5.3). A node lands in its phase, or in a
+   later step when one of its dependencies does. A server's own rollout
+   nodes must land in its wave, and a database's nodes in infrastructure,
+   before its migration. Migrate steps name the databases and hold no
+   node, so the migration runner slots in there. No step applies an
+   inherited node: the parent environment owns it.
+7. It runs the target's policy rules.
+
+Each failure carries a code, and `internal/stack/errors.go` lists them
+all. The checks of section 5.2 have one each: `unbound-field`,
+`unknown-env-key`, `secret-literal`, `kind-mismatch`, `unrealizable`,
+`no-connector`, `expose-not-server` and `policy`. Malformed declarations,
+unknown names and values that fail a schema have their own codes. So do
+three failures section 5.2 does not list:
+
+- an API with several DB dependencies and no `authDb`
+  (`ambiguous-database`);
+- a cycle of calls between servers, which no callee-first order serves
+  (`call-cycle`);
+- a config field that two types declare for one server, or that a derived
+  field takes (`field-collision`).
+
+Errors from a platform, connector or DNS platform are `lowering`, and the
+graph checks are `graph`.
+
+`stack.Write` puts the result at
+`<output-root>/stack/<stack>/<environment>/environment.json`. Fields come
+in the order the IR declares them and map keys are sorted, so a wiring
+change reads as a diff.
 
 ## 7. The gcp target
 
@@ -864,10 +990,10 @@ plug into it; they add no commands of their own.
    applied model.
 
 A rollout that fails runs no `contract` step, so the previous version's
-servers keep working on the expanded schema. The runner then holds that
-plan's `contract` as pending and refuses a new plan for the database until
-it runs; setting it aside for a rollback that keeps the previous servers is
-open.
+servers keep working on the expanded schema. The runner records that
+schema as the database's model, and the manifest records it too. The next
+deploy plans from it: its plan supersedes the pending `contract`, and any
+drop still wanted is in its own `contract` (D27, amended).
 
 The manifest is the migration baseline, the record of what is running, and
 the starting point for a rollback.
@@ -894,12 +1020,18 @@ registrations.
 
 1. **IR.** The IR records the config's `authDb`, `dependencies` and
    `calls` (`ir.Schema`'s `AuthDB`, `Dependencies` and `Calls`), so
-   generators and the resolver read every reference from it. The Stack IR
-   types are still to add.
+   generators and the resolver read every reference from it.
+   Landed: the Stack IR types, the stack (`ir/stack.go`), the resolved
+   environment (`ir/stack_environment.go`) and the resource graph
+   (`ir/resource_graph.go`).
 2. **Loader:**
-   - Class values in the arguments of any registered decorator. Today the
-     walker special-cases the decorators that take classes
-     (`internal/registry/core_decorators.go:58`).
+   - Landed: class values in the arguments of any registered decorator.
+     The argument evaluator reads a class, local or imported from another
+     service's package, as the class reference `{"class": name}`, and the
+     data forms write the same object (extension-model.md section 3.4), so
+     `settings: [{ of: Backend }]` needs no walker code of its own.
+     `@source`, `@versionGraph` and `@graphMember` stay walker-read;
+     `internal/registry/core_decorators.go` says why.
    - `ServiceHandle` typed by kind and config type
      (`ServiceHandle<"API", ShopApiConfig>`,
      `packages/schema-config/src/index.ts:31`), written by the sentinel
@@ -923,7 +1055,10 @@ registrations.
 6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
    and TypeScript HTTP runtimes, and a service credential source in the
    SDKs.
-7. **Registry.** The four specs of section 6.7.
+7. **Registry.** The specs of section 6.7, and the resolver that drives
+   them (section 6.10). Landed: `internal/registry/stack.go`, the resolver
+   in `internal/stack` with its public face in `stack`, and the acceptance
+   extension `stack/stacktest`.
 8. **CLI.** The `stack` command group.
 
 ## 13. Module layout
@@ -971,7 +1106,7 @@ model, or retired, when it lands.
    nothing in `examples/acme-shop` writes a connection string, a URL or a
    port by hand.
 2. **Model, resolver and seams.** The Stack kind, environments,
-   `environment.json`, the four registry specs, and levels 1 to 3 in CI.
+   `environment.json`, the registry specs, and levels 1 to 3 in CI.
    Done when a test extension adds a platform and a provisioner with no
    core edit.
 3. **GCP and Pulumi.** Bootstrap, the gcp platforms and connectors, the

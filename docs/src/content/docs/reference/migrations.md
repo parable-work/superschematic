@@ -1,6 +1,6 @@
 ---
 title: Schema migrations
-description: Plan the change of a DB service's database between two versions of its schema with migrate plan; the two phases, the hazard classes, readers and renames, versioned tables and version graphs, SQLite and its copy-table rebuild, the superschematic-migrate runner and its state, and the limits.
+description: Plan the change of a DB service's database between two versions of its schema with migrate plan; the two phases and the model between them, the hazard classes, readers and renames, versioned tables and version graphs, SQLite and its copy-table rebuild, the superschematic-migrate runner and its state, and the limits.
 sidebar:
   order: 9
 ---
@@ -85,8 +85,10 @@ and to `--out` as JSON.
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file of the new version |
 
 `--format sql` prints one script for review: a header with the service, the
-dialect, the two model hashes and the renames, then each step's statements
-under a comment naming its index, phase, operation, subject and hazard ids.
+dialect, the two model hashes, the hash of the model between the phases
+when the plan has one ([Between the phases](#between-the-phases)) and the
+renames, then each step's statements under a comment naming its index,
+phase, operation, subject and hazard ids.
 `--format markdown` prints a summary line, a table of the hazards and the
 steps of each phase with their SQL, for a pull request comment. `--format
 json` prints what `--out` writes.
@@ -196,6 +198,25 @@ A step outside a transaction carries recovery statements, such as dropping
 the invalid index a failed concurrent build leaves, which the runner runs
 before it tries the step again.
 
+### Between the phases
+
+A plan with contract steps carries the model the database holds between
+its phases: `expandedModel`, and its hash, `expanded`. It is the previous
+model with every expand step applied: the new version's tables, columns,
+indexes, functions, triggers and views, with what `contract` drops still
+there and what it tightens still loose. A column `contract` drops keeps its
+`NOT NULL` when it has a default, as `expand` leaves it. The extensions and
+pool schemas of both versions are there, since a plan drops neither. A
+version graph keeps the previous version's schema epoch, and a member's
+content is the new version's for every column the new table has and the
+previous version's for the columns `contract` drops. A plan without
+contract steps carries neither member, since its expand steps end at `to`.
+
+The runner records that model when the expand steps finish, so a rollout
+that fails leaves the database at a model a new plan can start from
+([A failed rollout](#a-failed-rollout)). A plan from it to the new version
+has no expand steps and the plan's contract steps.
+
 ## Hazards
 
 Each step lists the hazard classes it falls in.
@@ -287,7 +308,11 @@ A [version graph](/superschematic/reference/version-graphs/)'s tables are
 ordinary tables after the loader adds them, and migrate as any other. A
 change to a member's content columns is `history`: commits made before it
 hash and merge rows of the old shape. The hazard says whether the graph's
-`schemaEpoch` rose.
+`schemaEpoch` rose. A column can join or leave the content while the
+column stays, as `@conflictUnit('excluded')` added or taken off it does.
+That changes no table, so it gets a step of its own in `expand`,
+`changeGraphContent`, with no statements: the step carries the hazard,
+which names the columns, and the runner logs it like any other.
 
 ## SQLite
 
@@ -314,8 +339,12 @@ With `sqlite` listed, the build also writes
 `<out>/sql/<service>/sqlite/create.sql`: the SQLite plan from an empty
 database, its steps' statements as one script. `migrate plan --dialect
 sqlite` plans the service's SQLite database, and refuses a service that
-does not list `sqlite`. The Postgres DDL is the same whether `sqlite` is
-listed or not.
+does not list `sqlite`. It refuses a previous version, a service
+directory (`--from <service-dir>`) or a git ref (`--from-ref`), that
+does not list `sqlite` either: no build of it wrote a SQLite database.
+Plan from the model the database recorded (`--from <model.json>`), which
+is checked by its own `dialect`, or from an empty database. The Postgres
+DDL is the same whether `sqlite` is listed or not.
 
 ### Types and defaults
 
@@ -362,7 +391,7 @@ Every SQLite step runs in a transaction, which the runner opens with
 | a column dropped | `DROP COLUMN` (`blocking`: SQLite rewrites the table). Its indexes are dropped before it, and a foreign key over it makes its table's rebuild drop it instead |
 | an index or a unique field added or dropped | `CREATE INDEX`, `CREATE UNIQUE INDEX`, `DROP INDEX`; building an index on a table the previous version has is `blocking` |
 | an index or a unique field renamed | the index dropped and built again under its new name (`blocking`): SQLite cannot rename an index |
-| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs |
+| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops |
 
 Every other change to a table rebuilds it: a type, a nullability, a
 default, a foreign key added over a column the table has, changed or
@@ -416,17 +445,23 @@ the feature and the dialect:
 - the types SQLite has no storage for: `LTREE` and the PostGIS types
   (`POINT`, `GEOGRAPHY`, `GEOMETRY`).
 
-A plan that drops two tables that reference each other fails too: SQLite
-can drop the foreign key that closes the cycle only by rebuilding a table
-the plan drops. Drop one of the relations in a version of its own first.
-
 ### What SQLite does not keep
 
 - `VARCHAR(n)` and `NUMERIC(p, s)` are `TEXT` and `NUMERIC`: SQLite does
   not enforce the length, the precision or the scale, so a change of
   them is no step.
-- A list, a JSON value and text are all `TEXT`, so a field that changes
-  between them is no step either, and the plan converts no value.
+- A list, a JSON value and text are all `TEXT`. The model records what a
+  column holds as JSON (`"holds": "list"` or `"json"`), so a field that
+  changes between them is not lost. A JSON value that becomes text keeps
+  its JSON text, as Postgres's cast keeps it, through a rebuild that casts
+  nothing; one that becomes another scalar casts as text does. Every other
+  change between a scalar, a list and a JSON value fails the plan, naming
+  the column and both kinds: text is not a JSON array, Postgres parses
+  text as JSON where wrapping it in a JSON string would keep another
+  value, and Postgres converts no list to or from anything else. Change
+  the column by hand and adopt the new model.
+- A list whose element type changes is the same `TEXT` holding a JSON
+  array, so it is no step, and its elements keep their JSON types.
 
 ## The runner
 
@@ -460,15 +495,16 @@ them when they are missing:
 
 | Table | Holds |
 | --- | --- |
-| `superschematic_schema_state` | a row per service: the dialect, the applied model's hash and the model itself as canonical JSON, and the plan in progress with its finished phase |
+| `superschematic_schema_state` | a row per service: the dialect, the applied model's hash and the model itself as canonical JSON, and the plan in progress with its finished phase: `expanded` when the applied model is the plan's `expandedModel`, `expand` for a plan without one |
 | `superschematic_migrations` | a row per step run: the plan's hash, the step's index, phase and subject, the SHA-256 of its SQL, and when it started and finished |
 
 The names are fixed.
 
 ### `apply`
 
-`apply` checks the plan's version, its hash and its `to` hash before it
-runs anything, so an edited plan is never half-applied. It then takes a
+`apply` checks the plan's version, its hash, its `to` hash and, when the
+plan has one, its `expanded` hash before it runs anything, so an edited
+plan is never half-applied. It then takes a
 lock: on Postgres a session-level advisory lock keyed by the service, held
 for the whole run; on SQLite `BEGIN IMMEDIATE` per step. A second runner
 waits.
@@ -483,9 +519,12 @@ same plan resumes at that step, running a non-transactional step's recovery
 first. Running a finished plan again does nothing.
 
 `--phase expand` runs the expand steps before a rollout and `--phase
-contract` the rest after it; `--phase contract` is refused until expand has
-finished. When the plan's last step finishes, the plan's model becomes the
-applied model.
+contract` the rest after it. `--phase contract` runs only the plan in
+progress, once its expand has finished: a plan that is not in progress, such
+as one a newer plan superseded, is refused, even when the database is at its
+`from` again. When the last expand step finishes, the plan's `expandedModel`
+becomes the applied model, in the transaction of that step. When the plan's
+last step finishes, the plan's model becomes the applied model.
 
 ### The baseline check
 
@@ -493,14 +532,41 @@ The runner refuses a plan whose `from` is not the database's applied model,
 naming both, unless the database is part-way through that same plan. Plan
 again from what the database recorded: `superschematic-migrate status
 --model` prints it, and `migrate plan --from` takes it. A new plan is also
-refused while another plan is in progress, so contract steps are never
-skipped.
+refused while another plan is in progress, unless it supersedes that plan's
+pending contract ([A failed rollout](#a-failed-rollout)).
+
+### A failed rollout
+
+A rollout that fails runs no contract step, and the previous version's
+servers keep running on the expanded schema. The runner has recorded that
+schema as the applied model, so `status --model` prints it. The next deploy
+plans from it, and its plan supersedes the pending contract: the runner
+names the plan it supersedes, forgets it and runs the new one. The drops
+the new version still wants are in the new plan's own contract, planned
+from what the database holds, and nothing of the old contract runs unless
+the new plan has it. A plan back to the previous version starts from that
+model too.
+
+```
+superschematic-migrate status --service shop-db --model > applied-model.json
+superschematic migrate plan ./schemas/services/shop-db --from applied-model.json --out plan.json
+superschematic-migrate apply --plan plan.json --phase expand
+```
+
+The superseded plan's contract is refused afterwards: it is no longer in
+progress, and the database is not at its `from`. A plan whose contract has
+started is never superseded, since the database no longer holds its
+expanded model; finish it first. A plan written before plans carried
+`expanded`, or applied by a runner that predates it, keeps the earlier
+rule: its expand steps leave the applied model at its `from`, and every
+other plan is refused until its contract runs.
 
 ### `status` and `adopt`
 
 `status` prints the applied model's hash, the plan in progress and its
 phase, and the steps logged for it. With `--model` it prints only the
-applied model's canonical JSON.
+applied model's canonical JSON; between a plan's phases that is the plan's
+`expandedModel`.
 
 `adopt` records a model as applied without running anything, for a database
 built from `create.sql` or changed by hand. The model's `service` and

@@ -84,11 +84,10 @@ export function assignKey(storage: Storage, name: string, now: number): string {
   if (known !== undefined) {
     return known;
   }
-  const base =
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '') || 'b';
+  // Each run of other characters is one '_', so at most one leads and one
+  // trails; slicing them off avoids a backtracking trim.
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const base = slug.slice(slug.startsWith('_') ? 1 : 0, slug.endsWith('_') ? -1 : undefined) || 'b';
   let key = base;
   for (let n = 2; storage.get('SELECT 1 AS taken FROM engine_behaviors WHERE key = ?', [key]); n += 1) {
     key = `${base}_${n}`;

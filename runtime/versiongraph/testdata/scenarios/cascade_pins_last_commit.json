@@ -49,7 +49,8 @@
       {"kind": "step", "entityKey": "Bake", "operation": "DELETE", "entityVersion": 1}
     ]}},
     {"op": "sql",
-      "statement": {"postgres": "SELECT p.entity_kind, p.entity_version::text AS entity_version, (p.entity_id = c.entity_id)::text AS last_committed_row, (p.entity_id = i.id)::text AS own_row FROM recipe_patch p JOIN recipe_patch c ON c.commit_id = $2::uuid AND c.entity_kind = p.entity_kind AND c.entity_key = p.entity_key LEFT JOIN ingredient i ON i.ref_id = $3::uuid AND i.entity_key = p.entity_key WHERE p.commit_id = $1::uuid AND p.entity_kind = 'ingredient'"},
+      "statement": {"postgres": "SELECT p.entity_kind, p.entity_version::text AS entity_version, (p.entity_id = c.entity_id)::text AS last_committed_row, (p.entity_id = i.id)::text AS own_row FROM recipe_patch p JOIN recipe_patch c ON c.commit_id = $2::uuid AND c.entity_kind = p.entity_kind AND c.entity_key = p.entity_key LEFT JOIN ingredient i ON i.ref_id = $3::uuid AND i.entity_key = p.entity_key WHERE p.commit_id = $1::uuid AND p.entity_kind = 'ingredient'",
+        "sqlite": "SELECT p.entity_kind, CAST(p.entity_version AS TEXT) AS entity_version, CASE p.entity_id = c.entity_id WHEN 1 THEN 'true' WHEN 0 THEN 'false' END AS last_committed_row, CASE p.entity_id = i.id WHEN 1 THEN 'true' WHEN 0 THEN 'false' END AS own_row FROM graph_patch p JOIN graph_patch c ON c.commit_id = ?2 AND c.entity_kind = p.entity_kind AND c.entity_key = p.entity_key LEFT JOIN graph_member i ON i.kind = 'ingredient' AND i.ref_id = ?3 AND i.entity_key = p.entity_key WHERE p.commit_id = ?1 AND p.entity_kind = 'ingredient'"},
       "args": [{"commit": "nbCommit"}, {"commit": "c1"}, {"ref": "nb"}],
       "expect": {"rows": [
         {"entity_kind": "ingredient", "entity_version": "1", "last_committed_row": "true", "own_row": "false"}
