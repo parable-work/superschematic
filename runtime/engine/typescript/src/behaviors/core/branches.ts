@@ -80,6 +80,7 @@ import { BUILTIN_SCALARS, BUILTIN_SCALAR_VALUE_CLASSES } from '@superschematic/s
 import { initSync, VersionGraphError, type VersionGraph } from '@superschematic/versiongraph';
 import {
   CanonicalError,
+  canonicalValue,
   EngineError as GraphError,
   InvalidTreeError,
   NotFoundError,
@@ -726,9 +727,35 @@ function conflictsOf(graph: Store, conflicts: readonly Conflict[]): Array<Record
 function pointer(base: string, path: string): string {
   let out = base;
   for (const match of path.matchAll(/([^.[\]]+)|\[(\d+)\]/g)) {
-    out += `/${(match[1] ?? match[2]).replace(/~/g, '~0').replace(/\//g, '~1')}`;
+    out += `/${token(match[1] ?? match[2])}`;
   }
   return out;
+}
+
+// token escapes one reference token of a JSON pointer.
+function token(key: string): string {
+  return key.replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+// classIssues holds each field's value to its column's value class, as
+// the adapter canonicalizes it, so a value no class rule reads is refused
+// at its field rather than when the engine writes it.
+function classIssues(kind: BranchesKind, content: Readonly<Record<string, unknown>>, at: string): SchemaIssue[] {
+  const issues: SchemaIssue[] = [];
+  for (const field of kind.fields) {
+    if (!hasOwn(content, field) || content[field] === null || content[field] === undefined) {
+      continue;
+    }
+    try {
+      canonicalValue(kind.classes[field], JSON.stringify(content[field]));
+    } catch (error) {
+      if (!(error instanceof CanonicalError)) {
+        throw error;
+      }
+      issues.push({ path: `${at}/${token(field)}`, message: `is no ${kind.classes[field]} value: ${error.detail}` });
+    }
+  }
+  return issues;
 }
 
 // editsOf checks a save's edits and returns them as the engine takes them:
@@ -750,8 +777,14 @@ function editsOf(context: InstanceContext<BranchesConfig>, raw: FrozenJSON): Edi
     (given.upsert ?? []).forEach((value, index) => {
       const rowAt = `${at}/upsert/${index}`;
       const { entity_key: key, ...content } = value as Record<string, unknown>;
-      for (const issue of context.validate(kind.type, content) as ValidationIssue[]) {
+      const refused = context.validate(kind.type, content) as ValidationIssue[];
+      for (const issue of refused) {
         issues.push({ path: pointer(rowAt, issue.path), message: issue.message });
+      }
+      // A value the type accepts may still be one its column's class
+      // refuses (1.5 of a scalar whose JSON type is integer).
+      if (refused.length === 0) {
+        issues.push(...classIssues(kind, content, rowAt));
       }
       const row: Record<string, unknown> = {};
       if (key !== undefined && key !== null) {
@@ -783,10 +816,23 @@ function editsOf(context: InstanceContext<BranchesConfig>, raw: FrozenJSON): Edi
   return edits;
 }
 
-// resolutionsOf reads a merge's or a rebase's resolutions as the engine takes them.
-function resolutionsOf(context: InstanceContext<BranchesConfig>, operation: string, raw: unknown): Resolution[] {
+/** A resolution that gives a value, which the merged row is held to its kind's type for. */
+interface ValueResolution {
+  /** Its index in the resolutions. */
+  readonly index: number;
+  readonly kind: string;
+  readonly entityKey: string;
+}
+
+// resolutionsOf reads a merge's or a rebase's resolutions as the engine
+// takes them. A value is held to the value class of the field it sets, or
+// of each field of a whole row (path ""); the row it leaves is held to its
+// kind's type once the engine has merged (checkResolved), so it returns the
+// resolutions that give one.
+function resolutionsOf(context: InstanceContext<BranchesConfig>, operation: string, raw: unknown): { resolutions: Resolution[]; values: ValueResolution[] } {
   const issues: SchemaIssue[] = [];
-  const out: Resolution[] = [];
+  const resolutions: Resolution[] = [];
+  const values: ValueResolution[] = [];
   ((raw as Array<Record<string, unknown>> | undefined) ?? []).forEach((resolution, index) => {
     const at = `/resolutions/${index}`;
     const kind = String(resolution.kind);
@@ -807,16 +853,60 @@ function resolutionsOf(context: InstanceContext<BranchesConfig>, operation: stri
       issues.push({ path: at, message: 'a resolution gives take or value, one of them' });
       return;
     }
-    out.push(
-      takes
-        ? { kind, entityKey, path, take: resolution.take as 'base' | 'ours' | 'theirs' }
-        : { kind, entityKey, path, value: JSON.stringify(resolution.value) }
-    );
+    if (takes) {
+      resolutions.push({ kind, entityKey, path, take: resolution.take as 'base' | 'ours' | 'theirs' });
+      return;
+    }
+    const spec = context.config.kinds[kind];
+    const value = resolution.value;
+    const tokens = path === '' ? [] : path.slice(1).split('/').map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'));
+    if (path === '' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      for (const issue of classIssues(spec, value as Record<string, unknown>, `${at}/value`)) {
+        issues.push(issue);
+      }
+    } else if (tokens.length === 1 && hasOwn(spec.classes, tokens[0])) {
+      for (const issue of classIssues(spec, { [tokens[0]]: value }, `${at}/value`)) {
+        issues.push({ ...issue, path: `${at}/value` });
+      }
+    }
+    resolutions.push({ kind, entityKey, path, value: JSON.stringify(value) });
+    values.push({ index, kind, entityKey });
   });
   if (issues.length > 0) {
     throw new OperationParamsError('Branches', operation, issues);
   }
-  return out;
+  return { resolutions, values };
+}
+
+// checkResolved holds each entity a value resolution settled, as the ref
+// now composes it, to its kind's type, as save holds a row: a resolution
+// whose value leaves a row its type refuses is refused at its value, and
+// the operation, with what it wrote, rolls back.
+function checkResolved(context: InstanceContext<BranchesConfig>, graph: Graph, operation: string, ref: string, values: readonly ValueResolution[]): void {
+  if (values.length === 0) {
+    return;
+  }
+  const { tree } = graph.engine.compose(ref);
+  const issues: SchemaIssue[] = [];
+  for (const value of values) {
+    const kind = context.config.kinds[value.kind];
+    const text = (tree[value.kind] ?? []).find((row) => (JSON.parse(row) as Record<string, unknown>).entity_key === value.entityKey);
+    if (text === undefined) {
+      // The resolution deleted the entity.
+      continue;
+    }
+    const row = JSON.parse(text) as Record<string, unknown>;
+    const content = Object.fromEntries(kind.fields.map((field) => [field, row[field]]));
+    for (const issue of context.validate(kind.type, content) as ValidationIssue[]) {
+      issues.push({
+        path: `/resolutions/${value.index}/value`,
+        message: `${value.kind} ${value.entityKey}${issue.path === '' ? '' : ` ${issue.path}`}: ${issue.message}`,
+      });
+    }
+  }
+  if (issues.length > 0) {
+    throw new OperationParamsError('Branches', operation, issues);
+  }
 }
 
 // commitOptions reads a commit's message and tag from the parameters.
@@ -987,8 +1077,11 @@ export const branches = defineBehavior<BranchesConfig>({
       return guarded(context, 'merge', () => {
         const source = ownRef(context, graph, 'merge', 'source', params.source);
         const target = ownRef(context, graph, 'merge', 'target', params.target);
-        const resolutions = resolutionsOf(context, 'merge', params.resolutions);
+        const { resolutions, values } = resolutionsOf(context, 'merge', params.resolutions);
         const result = graph.engine.merge(actorOf(context), source, target, params.targetVersion as number, resolutions, commitOptions(params));
+        if (result.conflicts.length === 0) {
+          checkResolved(context, graph, 'merge', result.ref.id, values);
+        }
         return { ref: refOf(graph, result.ref.id), commit: commitsOf(graph, [result.commit])[0], conflicts: conflictsOf(graph, result.conflicts) };
       });
     },
@@ -997,8 +1090,11 @@ export const branches = defineBehavior<BranchesConfig>({
       const graph = ensureRoot(context);
       return guarded(context, 'rebase', () => {
         const draft = ownRef(context, graph, 'rebase', 'draft', params.draft);
-        const resolutions = resolutionsOf(context, 'rebase', params.resolutions);
+        const { resolutions, values } = resolutionsOf(context, 'rebase', params.resolutions);
         const result = graph.engine.rebase(actorOf(context), draft, params.version as number, resolutions);
+        if (result.conflicts.length === 0) {
+          checkResolved(context, graph, 'rebase', result.ref.id, values);
+        }
         return { ref: refOf(graph, result.ref.id), commit: commitsOf(graph, [result.commit])[0], conflicts: conflictsOf(graph, result.conflicts) };
       });
     },

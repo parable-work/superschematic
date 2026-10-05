@@ -284,6 +284,84 @@ for (const driver of drivers) {
       assert.equal(vetoOf(() => soup.save(sealed.ref, { step: { upsert: [boil] } })), 'ref_sealed');
     });
 
+    test("save holds each field's value to its column's value class, which a value the type accepts can still miss", () => {
+      const handle = openBranches(driver);
+      const document = recipeDocument();
+      document.scalars = { Grams: { name: 'Grams', languagePrimitive: 'number', typeMappings: { json_schema: 'integer' } } };
+      document.types.Cover.fields.push({ name: 'weight', typeRef: { name: 'Grams' } });
+      publish(handle.engine, document);
+      handle.engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
+      const soup = new Calls(handle.engine, 'soup');
+      const draft = soup.branch('edit');
+      assert.deepEqual(paramsOf(() => soup.save(draft, { cover: { upsert: [{ photoUrl: 'a.jpg', weight: 1.5 }] } })), [
+        ['/edits/cover/upsert/0/weight', 'is no integer value: the number 1.5 is not an integer'],
+      ]);
+      assert.equal(soup.save(draft, { cover: { upsert: [{ photoUrl: 'a.jpg', weight: 2 }] } }).saved.cover[0].weight, 2);
+    });
+
+    test("a merge's or a rebase's resolution value is held to its field's class, and the row it leaves to its kind's type; a refused one writes nothing", () => {
+      const { soup } = opened();
+      soup.change('base', { step: { upsert: [boil] } });
+      const step = soup.compose(soup.main()).tree.step[0].entity_key as string;
+      soup.change('ingredient', { ingredient: { upsert: [{ stepKey: step, quantity: '1 l', unit: 'g' }] } });
+      const key = soup.compose(soup.main()).tree.ingredient[0].entity_key as string;
+      const ours = soup.branch('ours');
+      const theirs = soup.branch('theirs');
+      const oursSaved = soup.save(ours, {
+        step: { upsert: [{ entity_key: step, instruction: 'Boil it', position: 1 }] },
+        ingredient: { upsert: [{ entity_key: key, stepKey: step, quantity: '1 l', unit: 'cup' }] },
+      });
+      const oursCommitted = soup.commit(oursSaved.ref).ref;
+      const theirsSaved = soup.save(theirs, {
+        step: { upsert: [{ entity_key: step, instruction: 'Boil slowly', position: 1 }] },
+        ingredient: { upsert: [{ entity_key: key, stepKey: step, quantity: '1 l' }] },
+      });
+      const theirsCommitted = soup.commit(theirsSaved.ref).ref;
+      soup.merge(oursCommitted, soup.main());
+      const main = soup.main();
+      const before = soup.compose(main).contentHash;
+      const resolve = (resolutions: unknown[]) => () => soup.merge(theirsCommitted, soup.main(), { resolutions });
+      const unit = { kind: 'ingredient', entityKey: key, path: '/unit', take: 'theirs' };
+      // A value its field's class refuses, before the engine merges.
+      assert.deepEqual(paramsOf(resolve([{ kind: 'step', entityKey: step, path: '/position', value: 1.5 }, unit])), [
+        ['/resolutions/0/value', 'is no integer value: the number 1.5 is not an integer'],
+      ]);
+      // A value that leaves the row one its type refuses, once the engine has merged.
+      const refused = paramsOf(resolve([{ kind: 'step', entityKey: step, path: '/instruction', value: null }, unit]));
+      assert.deepEqual(refused.map(([path]) => path), ['/resolutions/0/value']);
+      assert.match(refused[0][1], new RegExp(`^step ${step} instruction: `));
+      assert.deepEqual([soup.main().version, soup.main().head, soup.compose(soup.main()).contentHash], [main.version, main.head, before]);
+      // The same merge with values its type accepts commits.
+      const merged = soup.merge(theirsCommitted, soup.main(), {
+        resolutions: [{ kind: 'step', entityKey: step, path: '/instruction', value: 'Boil, then simmer' }, { ...unit, take: 'ours' }],
+      });
+      assert.deepEqual([merged.conflicts, contentOf(soup.compose(soup.main()).tree, 'step', ['instruction'])], [[], [{ instruction: 'Boil, then simmer' }]]);
+      // A rebase is held to the same: an enum member the type lacks is refused.
+      const draft = soup.refs().find((ref) => ref.name === 'theirs') as Ref;
+      const enumRefused = paramsOf(() =>
+        soup.invoke('rebase', {
+          draft: draft.id,
+          version: draft.version,
+          resolutions: [
+            { kind: 'step', entityKey: step, path: '/instruction', take: 'ours' },
+            { kind: 'ingredient', entityKey: key, path: '/unit', value: 'spoon' },
+          ],
+        })
+      );
+      assert.deepEqual(enumRefused.map(([path]) => path), ['/resolutions/1/value']);
+      assert.match(enumRefused[0][1], new RegExp(`^ingredient ${key} unit: `));
+      assert.equal((soup.refs().find((ref) => ref.name === 'theirs') as Ref).version, draft.version);
+      const rebased = soup.invoke<{ conflicts: unknown[]; ref: Ref }>('rebase', {
+        draft: draft.id,
+        version: draft.version,
+        resolutions: [
+          { kind: 'step', entityKey: step, path: '/instruction', take: 'ours' },
+          { kind: 'ingredient', entityKey: key, path: '/unit', value: 'g' },
+        ],
+      });
+      assert.deepEqual(rebased.conflicts, []);
+    });
+
     test("the engine's refusals are vetoes with its codes", () => {
       const { soup } = opened();
       const draft = soup.branch('edit');
