@@ -5,7 +5,7 @@ import "testing"
 // TestServiceCredentialAndForwarding runs serviceCredentialSDKTest in the
 // generated SDK (D37): every request carries the service credential in each
 // configured header; a 401 with the code service_unauthorized, in an RFC
-// 9457 problem or the Rust envelope, asks the source for a fresh token once
+// 9457 problem or the legacy {"error": {...}} envelope, asks the source for a fresh token once
 // and never runs the end-user refresh; any other 401 refreshes the end user
 // and never asks for a fresh service token; a call spends at most one of
 // each. A server forwards its end user through AuthConfig.GetToken, which
@@ -38,7 +38,7 @@ const (
 	ok                 = "{\"data\":[],\"meta\":{\"requestId\":\"req-1\"}}"
 	serviceRefusal     = "{\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"Invalid service credential\",\"code\":\"service_unauthorized\"}"
 	userRefusal        = "{\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"Authentication required\",\"code\":\"unauthorized\"}"
-	rustServiceRefusal = "{\"error\":{\"code\":\"service_unauthorized\",\"message\":\"Invalid service credential\"}}"
+	legacyServiceRefusal = "{\"error\":{\"code\":\"service_unauthorized\",\"message\":\"Invalid service credential\"}}"
 )
 
 type reply struct {
@@ -174,7 +174,7 @@ func TestTheServiceCredentialIsSentInEachConfiguredHeader(t *testing.T) {
 }
 
 func TestAServiceRefusalAsksForAFreshTokenOnce(t *testing.T) {
-	for _, body := range []string{serviceRefusal, rustServiceRefusal} {
+	for _, body := range []string{serviceRefusal, legacyServiceRefusal} {
 		t.Run(body, func(t *testing.T) {
 			s, url := serve(t, reply{401, body}, reply{200, ok})
 			src, user := &source{}, &refresher{}

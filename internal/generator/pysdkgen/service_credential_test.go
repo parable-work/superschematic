@@ -13,7 +13,7 @@ import (
 // fixture-nested-arrays-api, with grid.cell added, and runs
 // serviceCredentialProbe against a local HTTP server (D37): every request
 // carries the service credential in each configured header; a 401 with the
-// code service_unauthorized, in an RFC 9457 problem or the Rust envelope,
+// code service_unauthorized, in an RFC 9457 problem or the legacy envelope,
 // asks the source for a fresh token once and never runs the end-user
 // refresh; any other 401 refreshes the end user and never asks for a fresh
 // service token; a call spends at most one of each. The Python SDK has no
@@ -55,7 +55,7 @@ grid_id = "0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40"
 OK = (200, {"data": "a", "meta": {"requestId": "req-1"}})
 SERVICE_REFUSAL = (401, {"title": "Unauthorized", "status": 401, "detail": "Invalid service credential", "code": "service_unauthorized"})
 USER_REFUSAL = (401, {"title": "Unauthorized", "status": 401, "detail": "Authentication required", "code": "unauthorized"})
-RUST_SERVICE_REFUSAL = (401, {"error": {"code": "service_unauthorized", "message": "Invalid service credential"}})
+LEGACY_SERVICE_REFUSAL = (401, {"error": {"code": "service_unauthorized", "message": "Invalid service credential"}})
 
 replies = []
 requests = []
@@ -136,7 +136,7 @@ assert header("Service-Authorization") == ["Bearer service-1"], requests
 assert header("X-Serverless-Authorization") == ["Bearer service-1"], requests
 
 # A service refusal asks for a fresh token once and does not refresh the user.
-for refusal in (SERVICE_REFUSAL, RUST_SERVICE_REFUSAL):
+for refusal in (SERVICE_REFUSAL, LEGACY_SERVICE_REFUSAL):
     fixture = Fixture([refusal, OK])
     assert fixture.call() == "a"
     assert fixture.fresh == [False, True], (refusal, fixture.fresh)

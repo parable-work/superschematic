@@ -567,7 +567,7 @@ fn bearer_value(header: &str, token: &str) -> Result<HeaderValue, SDKError> {
 }
 
 /// The problem code of an error body: `code` of an RFC 9457 problem, or
-/// `error.code` of the Rust server's envelope.
+/// `error.code` of the legacy `{"error": {...}}` envelope.
 fn problem_code(body: &str) -> Option<String> {
     let value: Value = serde_json::from_str(body).ok()?;
     value

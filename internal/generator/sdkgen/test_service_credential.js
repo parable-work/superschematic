@@ -42,8 +42,9 @@ const userRefusal = {
   detail: "Authentication required",
   code: "unauthorized",
 };
-// The Rust server's error envelope (D29).
-const rustServiceRefusal = {
+// The legacy error envelope, which the Rust server answered before D29 was
+// amended.
+const legacyServiceRefusal = {
   error: { code: "service_unauthorized", message: "Invalid service credential" },
 };
 
@@ -129,9 +130,9 @@ describe("service credential", () => {
     expect(requests[1].Authorization).toBe("Bearer alice");
   });
 
-  test("the Rust envelope's error.code is read too", async () => {
+  test("the legacy envelope's error.code is read too", async () => {
     const { client, tokenCalls, refreshCalls } = clientWith(
-      [{ status: 401, body: rustServiceRefusal }, ok],
+      [{ status: 401, body: legacyServiceRefusal }, ok],
       { auth: { token: "alice" } }
     );
     await expect(client.get("/v1/x")).resolves.toEqual({ ok: true });

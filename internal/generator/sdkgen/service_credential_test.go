@@ -17,7 +17,7 @@ import (
 // on the HttpClient of fixture-api's SDK, which has end-user auth (D37):
 // every request carries the service credential in each configured header;
 // a 401 with the code service_unauthorized, in an RFC 9457 problem or the
-// Rust envelope, asks the source for a fresh token once and never refreshes
+// legacy {"error": {...}} envelope, asks the source for a fresh token once and never refreshes
 // the end user; any other 401 refreshes the end user and never asks for a
 // fresh service token; a call spends at most one of each. A forwarded end
 // user replaces the configured token and is never refreshed.

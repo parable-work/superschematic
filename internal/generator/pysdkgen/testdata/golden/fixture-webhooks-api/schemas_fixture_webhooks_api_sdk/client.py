@@ -655,8 +655,8 @@ class SyncHTTPClient:
     def _problem_code(payload: Any) -> str | None:
         """The problem code of an error body.
 
-        ``code`` of an RFC 9457 problem, or ``error.code`` of the Rust
-        server's envelope.
+        ``code`` of an RFC 9457 problem, or ``error.code`` of the legacy
+        ``{"error": {...}}`` envelope.
         """
         if not isinstance(payload, dict):
             return None

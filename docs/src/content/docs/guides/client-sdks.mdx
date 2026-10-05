@@ -149,8 +149,9 @@ Each SDK's config takes a source, a function from a `fresh` flag to a
 token, and the headers to send it in: `Service-Authorization` unless you
 list others, such as `X-Serverless-Authorization` too for a Cloud Run
 callee whose invoker check is on. The SDK sends `Bearer <token>` in each on
-every request, whatever the API's operations need. A 401 whose problem `code` is `service_unauthorized`
-(`error.code` from a Rust server) asks the source for a fresh token once and
+every request, whatever the API's operations need. A 401 whose problem
+`code` is `service_unauthorized` (or whose `error.code` is, in the older
+`{"error": {...}}` envelope) asks the source for a fresh token once and
 retries, without the end-user refresh; any other 401 runs the end-user
 refresh and never asks the source. One call spends at most one of each.
 

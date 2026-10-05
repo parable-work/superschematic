@@ -756,7 +756,7 @@ func decodeError(statusCode int, body []byte, headers http.Header) error {
 }
 
 // problemCode returns the code of an error body: code of an RFC 9457
-// problem, or error.code of the Rust server's envelope.
+// problem, or error.code of the legacy {"error": {...}} envelope.
 func problemCode(body []byte) string {
 	var payload map[string]any
 	if len(body) == 0 || json.Unmarshal(body, &payload) != nil {

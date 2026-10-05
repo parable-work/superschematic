@@ -4,7 +4,7 @@ package rustsdkgen
 // fixture-nested-arrays-api SDK crate, which
 // TestNestedArraysSDKCrateBuildsAndRuns builds (D37): every request carries
 // the service credential in each configured header; a 401 with the code
-// service_unauthorized, in an RFC 9457 problem or the Rust envelope, asks
+// service_unauthorized, in an RFC 9457 problem or the legacy envelope, asks
 // the source for a fresh token once and never runs the end-user refresh;
 // any other 401 refreshes the end user and never asks for a fresh service
 // token; a call spends at most one of each. RequestOptions::forward sends
@@ -25,7 +25,7 @@ use SDK_CRATE::{
 const GRID_ID: &str = "0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40";
 const SERVICE_REFUSAL: &str = r#"{"title":"Unauthorized","status":401,"detail":"Invalid service credential","code":"service_unauthorized"}"#;
 const USER_REFUSAL: &str = r#"{"title":"Unauthorized","status":401,"detail":"Authentication required","code":"unauthorized"}"#;
-const RUST_SERVICE_REFUSAL: &str = r#"{"error":{"code":"service_unauthorized","message":"Invalid service credential"}}"#;
+const LEGACY_SERVICE_REFUSAL: &str = r#"{"error":{"code":"service_unauthorized","message":"Invalid service credential"}}"#;
 
 /// A request's headers, names lowercased.
 type Headers = Vec<(String, String)>;
@@ -180,7 +180,7 @@ async fn each_configured_header_carries_it() {
 
 #[tokio::test]
 async fn a_service_refusal_asks_for_a_fresh_token_once() {
-    for body in [SERVICE_REFUSAL, RUST_SERVICE_REFUSAL] {
+    for body in [SERVICE_REFUSAL, LEGACY_SERVICE_REFUSAL] {
         let (base_url, requests) = serve(vec![(401, body), (200, "")]);
         let fixture = fixture(base_url, Vec::new(), true);
         fixture.call(None).await.unwrap();

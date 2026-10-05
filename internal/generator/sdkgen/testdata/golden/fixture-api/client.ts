@@ -580,7 +580,7 @@ export class HttpClient {
 
   /**
    * The problem code of an error body: `code` of an RFC 9457 problem, or
-   * `error.code` of the Rust server's envelope.
+   * `error.code` of the legacy `{ error: { code, message } }` envelope.
    */
   private problemCode(body: unknown): string | undefined {
     if (typeof body !== 'object' || body === null) {
