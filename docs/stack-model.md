@@ -194,10 +194,27 @@ connecting with `os.Getenv("DATABASE_URL")` is the code this replaces.
 
 ### 4.1 The Stack kind
 
-A stack is a service of a new core kind, `Stack`, whose decorators come from
-`@superschematic/stack`. Its schema files declare the stack, any deployables
-that differ from the defaults, and the environments. A sketch over
-acme-shop:
+A stack is a service of the core kind `Stack`, whose decorators come from
+`@superschematic/stack`. The stack takes its service's name. Its schema
+files declare the stack, any deployables that differ from the defaults, and
+the environments, a class each. A sketch over acme-shop:
+
+```ts
+// schemas/services/shop-stack/schema.config.ts
+import { ShopApi } from "@acme/shop-api";
+import { ShopDb } from "@acme/shop-db";
+import { ShopOrders } from "@acme/shop-orders";
+import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+
+export default defineConfig({
+  name: "shop-stack",
+  kind: SchemaKind.Stack,
+  // Every service the stack reaches, until the build plan counts the
+  // handles a schema names (section 12).
+  dependencies: [ShopDb, ShopApi, ShopOrders],
+  outputs: {},
+});
+```
 
 ```ts
 // schemas/services/shop-stack/src/stack.schema.ts
@@ -234,34 +251,89 @@ export abstract class Staging {}
 })
 export abstract class Production {}
 
-@environment({ parameters: ["pr"] })
+@environment({
+  parameters: ["pr"],
+  settings: [{ of: Backend, env: { PREVIEW_ID: { parameter: "pr" } } }],
+})
 export abstract class Preview extends Staging {}
 ```
 
-- **`deploy`** names the entry points. Everything they reach through
-  `authDb`, DB dependencies and `calls` joins the stack, so `shop-db` needs
-  no mention.
-- **`expose`** names what is reachable from outside the environment.
-  Everything else is internal, and reachable only along its edges.
+- **`@stack`** declares the stack, once per schema. **`deploy`** names
+  the entry points, API and DB services. Everything they reach through
+  `authDb`, DB dependencies and `calls` joins the stack, so `shop-db`
+  needs no mention.
+- **`expose`** names what is reachable from outside the environment, an
+  API's handle or an `@server` class. Everything else is internal, and
+  reachable only along its edges.
 - **`@server`** declares a deployable only to change a default. Here it
   runs both APIs in one process in place of their two default servers. Its
   edges are its APIs' edges: shop-db through `authDb`, and shop-api
-  through shop-orders' `calls` (section 3.3).
-- **`target`** picks a target (section 6.3). `gcp` holds that target's
-  values, checked against the schema the target registers.
+  through shop-orders' `calls` (section 3.3). **`@database`** (`hosts`)
+  puts several DB schemas on one database in the same way.
+- **`target`** picks a target (section 6.3). The target's values sit under
+  its name, `gcp` here, and are checked against the schema the target
+  registers. An environment that inherits its target names it again to
+  change one of them.
 - **`domain`** is where exposed servers are reached, and **`dns`** places
-  its records on a DNS platform (section 6.9). Production omits `dns` and
-  gets the target's default, Cloud DNS.
-- **`settings`** sets values per deployable. `of` is a service handle or a
-  declared deployable's class. The loader checks each key against the
-  platform's settings schema, and `env` keys against the server's
-  `@envVars` fields. tsc checks the same in the editor (section 4.3).
+  its records on a DNS platform (section 6.9), named as its one key.
+  Production omits `dns` and gets the target's default, Cloud DNS.
+- **`settings`** sets values per deployable. `of` is a service handle or
+  an `@server` or `@database` class. `platform` places the deployable on
+  another platform than the target's, and every key but `of`, `platform`
+  and `env` is a platform setting, which the loader checks against that
+  platform's settings schema. `env` binds the server's `@envVars` fields,
+  each to a literal or to `{ parameter }`, a parameter of the environment
+  that the deploy run supplies. tsc checks the same in the editor
+  (section 4.3).
 - **`Preview extends Staging`** inherits Staging's values, and `parameters`
-  makes it a family of environments, one per value (section 5.4).
+  makes it a family of environments, one per value (section 5.4). An
+  `@environment` class extends only another `@environment` class.
 
-Every declaration has the JSON and YAML data forms every schema has.
-Handles are written as `{name, kind}` and classes by name, as other
-references are.
+Every class of the schema carries one of the four decorators and holds no
+fields. The kind's verification checks that, and that each class a
+declaration names is an `@server` or `@database` class of the schema, so
+the data forms are held to it too. Each decorator writes a declaration on
+its class's `TypeDef` (`Stack`, `Server`, `Database` or `Environment`),
+and `ir.StackOf` assembles them into the `ir.Stack` the resolver reads,
+its deployables and environments in name order.
+
+Every declaration has the JSON and YAML data forms every schema has. A
+class is a type, and its declaration the key the decorator writes. A
+handle is written `{name, kind}`, and a settings `of` or an `expose` entry
+`{service: {name, kind}}` or `{deployable: Backend}`. The target's values
+are `values`, the DNS platform `{platform, values}`, an env value `{value}`
+or `{parameter}`, and the parent the type's `extends`:
+
+```yaml
+types:
+  Production:
+    name: Production
+    role: EmbeddedStruct
+    environment:
+      target: gcp
+      values: { project: acme-prod, region: us-east1 }
+      domain: acme.dev
+      settings:
+        - of: { service: { name: shop-db, kind: DB } }
+          values: { tier: db-custom-2-7680, highAvailability: true }
+        - of: { deployable: Backend }
+          values: { minInstances: 1 }
+          env: { LOG_LEVEL: { value: warn } }
+```
+
+A stack is named by no other service, so it has no sentinel, and its
+schema files import its siblings' sentinels, which `build` writes first.
+Its one generator, `stack` (`internal/generator/stackgen`), loads each
+service the stack reaches, resolves every environment (section 6.10) and
+writes each to `<output-root>/stack/<stack>/<environment>/environment.json`.
+A resolve check fails the build and names the stack, the environment and
+each problem with its code. The output is keyed by the service's name, so
+build-all cleans, stores and restores it from the config alone.
+
+`internal/generator/stackgen/testdata` holds the stack `stack/stacktest`
+builds by hand, on its fake target, written in TypeScript and in YAML over
+services shaped like acme-shop's. Its `environment.json` goldens are
+stacktest's.
 
 ### 4.2 Secrets
 
@@ -318,7 +390,9 @@ tsc checks what the loader checks, so a mistake shows in the editor where
 it is typed. The loader stays the source of truth and runs every check
 again; the types are the early warning. Nothing here changes how
 superschematic reads a schema, because the walker evaluates decorator
-arguments as data either way.
+arguments as data either way. The TypeScript form's load reports tsc's
+diagnostics too, so a settings value tsc refuses also fails `build` at the
+line that holds it.
 
 - **Handles carry their kind and config type.** `ServiceHandle<K, C>` in
   `@superschematic/schema-config` has two phantom type parameters, the
@@ -346,17 +420,35 @@ arguments as data either way.
   }
   ```
 
-- **`@environment` infers each settings element.** Its signature uses a
-  `const` type parameter over the `settings` tuple and maps each element by
-  its `of`. The handle's kind picks the settings type from the chosen
-  target's entry, and `env` is typed from the handle's config type: the
-  keys are its fields, `Secret<T>` fields are left out so a literal for
-  one fails, and `Default<T, V>` is unwrapped to `T`. The wrappers in
-  `packages/schema/src/wrappers.ts` gain a phantom base type so a mapped
-  type can unwrap them.
+  `target` takes a key of `Targets`, so a target no installed package
+  augments is refused, and the values under the target's name take its
+  `values` type.
+- **`@environment` infers each settings element.** Its signature has two
+  `const` type parameters: the target, inferred from `target` alone, and
+  the `settings` tuple. Each element is checked by its `of`:
+  - an API handle takes the target's `server` settings, and an `env`
+    typed from the handle's config type;
+  - a DB handle takes the target's `database` settings and no `env`;
+  - an `@server` or `@database` class takes either kind's settings and an
+    `env` of any field, since tsc cannot see what a declared deployable
+    serves;
+  - an element that names a `platform`, which may be another target's,
+    takes any settings key, and so does every element of an environment
+    that names no target. Such an environment sets no target values.
 
-`@ts-expect-error` fixtures under the authoring packages pin the behavior,
-and run with tsc in `make ts`.
+  A key an element does not take is refused, as `env` keys are. The keys
+  of `env` are the config's fields, `Secret<T>` fields left out so a
+  literal for one fails, and each takes its field's type unwrapped, or
+  `{ parameter }`. `Default<T, V>`, `Validate<T, C>` and the other wrappers
+  in `packages/schema/src/wrappers.ts` share a phantom base,
+  `Wrapped<T>`, through which a mapped type takes T back, and `Nullable`
+  is dropped. A string enum field also takes its values as strings
+  (`LOG_LEVEL: "warn"`).
+
+`@ts-expect-error` fixtures pin the behavior:
+`packages/schema-config/src/service-handle.typecheck.ts` for handles, and
+`packages/stack/test/environment.typecheck.ts`, which augments `Targets`
+with a target of its own, for the rest. `make ts` runs tsc over both.
 
 Not taken:
 
@@ -1408,7 +1500,10 @@ registrations.
    generators and the resolver read every reference from it.
    Landed: the Stack IR types, the stack (`ir/stack.go`), the resolved
    environment (`ir/stack_environment.go`) and the resource graph
-   (`ir/resource_graph.go`).
+   (`ir/resource_graph.go`). A Stack schema's class carries its
+   declaration on its `TypeDef` (`Stack`, `Server`, `Database` or
+   `Environment`), which the data forms write, and `ir.StackOf`
+   assembles a schema's declarations into its stack (section 4.1).
    Operations and operation sets gain `ServiceCallers` (section 9.3).
 2. **Loader:**
    - Landed: class values in the arguments of any registered decorator.
@@ -1429,6 +1524,13 @@ registrations.
      (`validateHandleKinds` in `internal/buildplan/buildplan.go`).
    - Build-order edges from the handles a schema references, so a stack does
      not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
+     Until then a stack's config lists every service the stack reaches,
+     those reached through `calls` included: build-all keys a service's
+     cached output on its dependencies' keys and its `authDb`'s, not on
+     its `calls`, and the stack's build reads them all
+     (`TestAStacksCacheKeyFollowsTheServicesItReaches` in
+     `internal/generator/stackgen`). The edges replace the list, and the
+     stack's key then follows the handles its schema names.
 3. **envgen.** The derived binding fields of section 3.4. Landed: the
    contract of the values connectors derive, with its environment
    variable encoding (`ir/derived_value.go`), and the resolver's check of
@@ -1450,7 +1552,14 @@ registrations.
 7. **Registry.** The specs of section 6.7, and the resolver that drives
    them (section 6.10). Landed: `internal/registry/stack.go`, the resolver
    in `internal/stack` with its public face in `stack`, and the acceptance
-   extension `stack/stacktest`.
+   extension `stack/stacktest`. Landed too: the core `Stack` kind with
+   `@stack`, `@server`, `@database` and `@environment`
+   (`internal/registry/core_stack.go`, authored from
+   `@superschematic/stack`), and its generator, `stack`
+   (`internal/generator/stackgen`). Its `Service` reads a service's
+   `stack.Service` from the service's IR and its config's outputs, and
+   `registry.Options.LoadDependencyConfig`, which every build sets, gives
+   it each config.
 8. **CLI.** The `stack` command group.
 
 ## 13. Module layout
