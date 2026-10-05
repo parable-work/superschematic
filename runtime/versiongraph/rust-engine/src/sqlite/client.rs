@@ -197,7 +197,8 @@ mod rusqlite_binding {
         /// The bound connection, once no operation holds it: for a caller's
         /// own statements, and for a transaction the caller holds around
         /// engine operations, each of which then runs as a savepoint inside
-        /// it. The binding's transactions take turns with it.
+        /// it. The binding's transactions take turns with it, so drop it
+        /// before an engine operation over this binding, which waits for it.
         pub async fn connection(&self) -> impl DerefMut<Target = rusqlite::Connection> + '_ {
             MutexGuard::map(self.session.lock().await, |session| {
                 // A transaction a dropped operation left, which its drop
