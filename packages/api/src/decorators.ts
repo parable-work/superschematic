@@ -17,16 +17,16 @@ export type HmacVerifiedConfig = {
 };
 
 /**
- * A service handle: the sentinel an API service exports from its
+ * An API service's handle: the sentinel an API service exports from its
  * src/service.generated.ts, built by service() in
- * @superschematic/schema-config. Every ServiceHandle is one. The shape is
- * restated here because the authoring packages do not depend on one
- * another.
+ * @superschematic/schema-config. Every ServiceHandle<"API"> is one, and a
+ * handle of another kind is not. The shape is restated here because the
+ * authoring packages do not depend on one another.
  */
 export type ServiceHandleRef = {
   readonly __brand: "ServiceHandle";
   readonly name: string;
-  readonly kind: string;
+  readonly kind: "API";
 };
 
 /** The services an operation's service clause admits. */

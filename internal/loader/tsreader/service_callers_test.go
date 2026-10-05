@@ -65,10 +65,12 @@ func TestServiceCallersEffectiveRule(t *testing.T) {
 // TestServiceCallersRefusals pins the text and location of each refusal of
 // section 9.3 of docs/stack-model.md: at the method's own decorator, at the
 // method when its set's clause reaches it, at the second clause on one
-// operation or set, and at the config for a handle that is not an API.
+// operation or set, and at the config for a handle that is not an API. The
+// type checker refuses such a handle first (TestServiceCallersFromTakesAPIs),
+// so the case here casts it past the checker.
 func TestServiceCallersRefusals(t *testing.T) {
 	dir := decoratorTestService(t, "API", map[string]string{"src/a.schema.ts": `import { SchemaKind, service } from "@superschematic/schema-config";
-import { HttpMethod, allowService, auth, hmacVerified, publicRoute, requireService, rest, webhook } from "@superschematic/api";
+import { HttpMethod, allowService, auth, hmacVerified, mcp, publicRoute, requireService, rest, webhook } from "@superschematic/api";
 const Orders = service({ name: "orders-api", kind: SchemaKind.API });
 const OrdersDb = service({ name: "orders-db", kind: SchemaKind.DB });
 export class ThingOperations {
@@ -102,7 +104,7 @@ export class ThingOperations {
   e(): string {
     throw new Error("schema declaration only");
   }
-  @requireService({ from: [Orders, OrdersDb] })
+  @requireService({ from: [Orders, OrdersDb as never] })
   @rest(HttpMethod.POST, "f")
   f(): string {
     throw new Error("schema declaration only");
@@ -137,6 +139,32 @@ export class TwiceOperations {
     throw new Error("schema declaration only");
   }
 }
+@requireService()
+export class ToolOperations {
+  @mcp({ handle: "k" })
+  @rest(HttpMethod.GET, "k")
+  k(): string {
+    throw new Error("schema declaration only");
+  }
+  @requireService({ from: [Orders] })
+  @mcp({ handle: "l" })
+  @rest(HttpMethod.GET, "l")
+  l(): string {
+    throw new Error("schema declaration only");
+  }
+  @mcp({ hidden: true, reason: "Only services call it." })
+  @rest(HttpMethod.GET, "m")
+  m(): string {
+    throw new Error("schema declaration only");
+  }
+  @auth
+  @allowService()
+  @mcp({ handle: "n" })
+  @rest(HttpMethod.GET, "n")
+  n(): string {
+    throw new Error("schema declaration only");
+  }
+}
 `})
 	_, _, err := LoadService(dir)
 	if err == nil {
@@ -152,6 +180,8 @@ export class TwiceOperations {
 		"a.schema.ts:44:3: the set's @allowService on g needs a user clause: @auth, an Authenticated set, @requirePermission or @requireOwnership; an operation only services call is @requireService",
 		"a.schema.ts:56:3: the set's @requireService contradicts @webhook on i: a third party calls it, and holds no service credential",
 		"a.schema.ts:63:1: @allowService contradicts @requireService on the same operation set: declare one of them",
+		"a.schema.ts:73:3: the set's @requireService contradicts @mcp on k: no end user's agent can call the tool it publishes; hide it with @mcp({ hidden: true, reason })",
+		"a.schema.ts:78:3: @requireService contradicts @mcp on l: no end user's agent can call the tool it publishes; hide it with @mcp({ hidden: true, reason })",
 	}
 	for _, line := range want {
 		if !strings.Contains(err.Error(), line) {
@@ -162,8 +192,31 @@ export class TwiceOperations {
 		t.Errorf("got %d diagnostics, want %d:\n%s", got, len(want), err)
 	}
 	// h is @publicRoute in a set with @allowService: it takes no clause, so
-	// nothing refuses it.
-	if strings.Contains(err.Error(), " on h") {
-		t.Errorf("the @publicRoute operation h was refused:\n%s", err)
+	// nothing refuses it. m hides its tool, and n's @allowService admits an
+	// end user, whose agent may call its tool.
+	for _, op := range []string{" on h", " on m", " on n"} {
+		if strings.Contains(err.Error(), op) {
+			t.Errorf("%s was refused:\n%s", op, err)
+		}
+	}
+}
+
+// TestServiceCallersFromTakesAPIs: from takes API service handles, so the
+// type checker refuses a handle of another kind before the walk reads it.
+func TestServiceCallersFromTakesAPIs(t *testing.T) {
+	dir := decoratorTestService(t, "API", map[string]string{"src/a.schema.ts": `import { SchemaKind, service } from "@superschematic/schema-config";
+import { HttpMethod, requireService, rest } from "@superschematic/api";
+const OrdersDb = service({ name: "orders-db", kind: SchemaKind.DB });
+export class ThingOperations {
+  @requireService({ from: [OrdersDb] })
+  @rest(HttpMethod.POST, "a")
+  a(): string {
+    throw new Error("schema declaration only");
+  }
+}
+`})
+	_, _, err := LoadService(dir)
+	if want := `a.schema.ts:5:28: Type 'ServiceHandle<"DB", unknown>' is not assignable to type 'ServiceHandleRef'.`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("LoadService error = %v, want one containing %q", err, want)
 	}
 }

@@ -1,11 +1,12 @@
 // Type test, checked by `bun run typecheck` (tsconfig.test.json) and never
-// run: @requireService and @allowService take a list of service handles, as
-// service() in @superschematic/schema-config builds them, on a class or a
-// method, and nothing else in from.
+// run: @requireService and @allowService take a list of API service
+// handles, as service() in @superschematic/schema-config builds them, on a
+// class or a method, and nothing else in from.
 import { allowService, auth, requireService } from "@superschematic/api";
 import { SchemaKind, service } from "@superschematic/schema-config";
 
 const ShopOrders = service({ name: "shop-orders", kind: SchemaKind.API });
+const ShopDb = service({ name: "shop-db", kind: SchemaKind.DB });
 
 @requireService({ from: [ShopOrders] })
 export class Checked {
@@ -26,6 +27,10 @@ export class Checked {
   // @ts-expect-error a plain object, not a handle
   @allowService({ from: [{ name: "shop-orders", kind: "API" }] })
   byObject(): void {}
+
+  // @ts-expect-error a DB service's handle: only an API service's server calls
+  @requireService({ from: [ShopDb] })
+  fromADatabase(): void {}
 
   // @ts-expect-error an unknown key
   @requireService({ services: [ShopOrders] })

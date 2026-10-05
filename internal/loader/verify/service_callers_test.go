@@ -27,6 +27,9 @@ func TestServiceCallersRefusedInIR(t *testing.T) {
 				{Name: "hook", ServiceCallers: allow, Auth: true, Webhook: true},
 				{Name: "signed", ServiceCallers: require, HMACVerifiedProvider: "stripe"},
 				{Name: "odd", ServiceCallers: &ir.ServiceCallers{Mode: "sometimes"}},
+				{Name: "tool", ServiceCallers: require, MCP: &ir.OperationMCP{Handle: "tool"}},
+				{Name: "hiddenTool", ServiceCallers: require, MCP: &ir.OperationMCP{Hidden: true, HiddenReason: "Services only."}},
+				{Name: "userTool", ServiceCallers: allow, Auth: true, MCP: &ir.OperationMCP{Handle: "user_tool"}},
 			},
 		},
 		{
@@ -42,7 +45,10 @@ func TestServiceCallersRefusedInIR(t *testing.T) {
 		{
 			Name:           "HookOperations",
 			ServiceCallers: require,
-			Operations:     []*ir.FieldDef{{Name: "receive", Webhook: true}},
+			Operations: []*ir.FieldDef{
+				{Name: "receive", Webhook: true},
+				{Name: "inheritedTool", MCP: &ir.OperationMCP{Handle: "inherited_tool"}},
+			},
 		},
 		{
 			Name:           "OddOperations",
@@ -62,8 +68,10 @@ func TestServiceCallersRefusedInIR(t *testing.T) {
 		"StockOperations.hook: @allowService contradicts @webhook: a third party calls it, and holds no service credential",
 		"StockOperations.signed: @requireService contradicts @hmacVerified: a third party calls it, and holds no service credential",
 		`StockOperations.odd: service clause mode "sometimes" is not require or allow`,
+		"StockOperations.tool: @requireService contradicts @mcp: no end user's agent can call the tool it publishes; hide it with @mcp({ hidden: true, reason })",
 		"LedgerQueries.anyone: the set's @allowService needs a user clause: @auth, an Authenticated set, @requirePermission or @requireOwnership; an operation only services call is @requireService",
 		"HookOperations.receive: the set's @requireService contradicts @webhook: a third party calls it, and holds no service credential",
+		"HookOperations.inheritedTool: the set's @requireService contradicts @mcp: no end user's agent can call the tool it publishes; hide it with @mcp({ hidden: true, reason })",
 		`OddOperations: service clause mode "never" is not require or allow`,
 	}
 	if !slices.Equal(got, want) {

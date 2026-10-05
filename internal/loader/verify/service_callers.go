@@ -16,8 +16,8 @@ type ServiceClauseConflict struct {
 	// FromSet reports that the clause is the operation set's.
 	FromSet bool
 	// With is the decorator the clause contradicts on the operation:
-	// "@publicRoute", "@webhook" or "@hmacVerified". It is empty for an
-	// @allowService without a user clause.
+	// "@publicRoute", "@webhook", "@hmacVerified" or "@mcp". It is empty for
+	// an @allowService without a user clause.
 	With string
 	// Reason says why the schema cannot mean both.
 	Reason string
@@ -50,6 +50,10 @@ func (c ServiceClauseConflict) String() string {
 //   - either clause, its own or its set's, on a @webhook or @hmacVerified
 //     operation: a third party calls it, and a third party holds no service
 //     credential;
+//   - @requireService, its own or its set's, on an operation whose @mcp
+//     publishes a tool. The tool documents leave such an operation out,
+//     since no end user's agent can call it, so the record must say so with
+//     @mcp({ hidden: true, reason }) rather than be dropped;
 //   - @allowService, its own or its set's, on an operation without a user
 //     clause (@auth, an Authenticated set, @requirePermission or
 //     @requireOwnership). An operation only services call is
@@ -76,6 +80,8 @@ func ServiceCallersConflict(set *ir.OperationSet, op *ir.FieldDef) (ServiceClaus
 		c.With, c.Reason = "@webhook", thirdParty
 	case op.HMACVerifiedProvider != "":
 		c.With, c.Reason = "@hmacVerified", thirdParty
+	case clause.Mode == ir.ServiceCallersRequire && op.MCP != nil && !op.MCP.Hidden:
+		c.With, c.Reason = "@mcp", "no end user's agent can call the tool it publishes; hide it with @mcp({ hidden: true, reason })"
 	case clause.Mode == ir.ServiceCallersAllow && !op.HasUserClause():
 		c.Reason = "@auth, an Authenticated set, @requirePermission or @requireOwnership; an operation only services call is @requireService"
 	default:
