@@ -314,11 +314,18 @@ jobs:
         # work-queue package ship their compiled dist; the version-graph
         # package ships its compiled dist and the core's wasm module; the
         # schema IR ships its declarations and the schema-file JSON Schema.
-        # The engine builds after the schema and http runtimes, whose dist/
-        # its link script copies, and the work-queue package after the
-        # engine, which its link script links. npm pack writes
-        # superschematic-<name>-<version>.tgz for a scoped
+        # The engine builds after the schema and http runtimes and the
+        # version graph, whose dist/ its link script copies, and the
+        # work-queue package after the engine, which its link script links.
+        # The engine depends on @superschematic/versiongraph through a file:
+        # path into the checkout, which an install from the tarball cannot
+        # follow, so once it is built its spec becomes the release's
+        # version, the version the version graph is published at beside it;
+        # no tarball may carry a file:, link: or workspace: spec. npm pack
+        # writes superschematic-<name>-<version>.tgz for a scoped
         # @superschematic/<name>.
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p release-assets/npm
@@ -329,10 +336,13 @@ jobs:
           (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
-          (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
+          (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build \
+            && npm pkg set "dependencies.@superschematic/versiongraph=$VERSION" \
+            && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
           test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 10
+          python3 scripts/npm_local_specs.py release-assets/npm/*.tgz
 
       - name: Build the PyPI sdist and wheel
         working-directory: runtime/schema/python
@@ -484,9 +494,10 @@ jobs:
         # @superschematic/schema first, since the other authoring packages
         # name it in their docs, @superschematic/schema-ir before the schema
         # runtime, which a consumer installs next to it, the engine after
-        # both, which it needs next to it, and the engine's work-queue
-        # package last, after the engine, its peer; none of the ten depends
-        # on another at install time.
+        # both, which it needs next to it, and after the version graph,
+        # which it depends on at the release's version, and the engine's
+        # work-queue package last, after the engine, its peer; no other
+        # package of the ten depends on another at install time.
         env:
           DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
