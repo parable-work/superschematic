@@ -191,11 +191,12 @@ versiongraph-scenarios-ts:
 # adapter's own tests, every canonical vector as a round trip and the SQLite
 # vectors, which need no database server and run with or without a Postgres
 # URL (the URL is unset for them, so the Postgres tests skip here and run
-# below). Then on Postgres:
-# the Postgres adapter, and the crate's other Postgres tests (every canonical
-# vector's rendering, the adapter, the sweeper), against the Postgres that
+# below). Then on Postgres: the Postgres adapter, and the crate's other
+# Postgres tests (every canonical vector's rendering, the adapter, the
+# sweeper), against the Postgres that
 # SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names; that pass fails
-# without it.
+# without it. It runs every test target with the feature on, so the SQLite
+# tests run again there, and one build serves both passes.
 versiongraph-scenarios-rust:
 	cd runtime/versiongraph/rust-engine && env -u SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL \
 		cargo test --features rusqlite --test scenarios --test sqlite -- --nocapture

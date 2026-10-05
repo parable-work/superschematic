@@ -183,9 +183,16 @@ mod rusqlite_binding {
         Savepoint,
     }
 
+    /// How many prepared statements the binding keeps on its connection:
+    /// room for every statement the adapter runs (about 35 under one name
+    /// function), where rusqlite keeps 16 unless told otherwise.
+    const STATEMENT_CACHE: usize = 64;
+
     impl Rusqlite {
-        /// Binds an open connection.
+        /// Binds an open connection, keeping up to 64 of the adapter's
+        /// prepared statements on it.
         pub fn new(connection: rusqlite::Connection) -> Self {
+            connection.set_prepared_statement_cache_capacity(STATEMENT_CACHE);
             Rusqlite {
                 session: Mutex::new(Session {
                     connection,

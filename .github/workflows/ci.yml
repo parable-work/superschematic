@@ -753,6 +753,12 @@ jobs:
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features rusqlite -- -D warnings
 
+      - name: Rust engine (its own tests, the SQLite adapter's and the SQLite vectors, and every scenario on SQLite)
+        # The quick tier: no database URL, so the Postgres tests skip; the
+        # full tier's step below runs them, and every scenario on Postgres.
+        working-directory: runtime/versiongraph/rust-engine
+        run: cargo test --features rusqlite
+
       - name: Rust engine and its Postgres and SQLite adapters (every scenario on SQLite and on Postgres and every canonical vector through the Rust engine, also with serde_json's preserve_order)
         # The SQLite pass of make versiongraph-scenarios-rust needs no
         # database; its Postgres pass fails, rather than skips, without one.
