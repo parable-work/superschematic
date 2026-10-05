@@ -2240,8 +2240,8 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 58 pairs for Postgres and 42 for SQLite, 10 of them
-rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
+Plan goldens cover 58 pairs for Postgres and 49 for SQLite, 17 of them
+SQLite's own: rebuilds and changes of a list's element; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
 failure at every step, and serializes two runners. Rules settled as they
@@ -2310,8 +2310,23 @@ one that becomes another scalar casts as text does, while every other
 change between a scalar, a list and a JSON value fails the plan, since no
 conversion keeps every value as Postgres would: text is not a JSON array,
 Postgres parses text as JSON where `json_quote` would wrap it, and
-Postgres converts no list; a list whose element type changes is still no
-step on SQLite; `migrate plan --dialect sqlite` refuses a service whose
+Postgres converts no list; the SQLite model records a list's element too
+(`element`: `TEXT`, `INTEGER`, `REAL` or `NUMERIC` as SQLite stores the
+element's type, `BOOLEAN` for JSON's `true` and `false`, `JSON` for a
+JSON value, `BLOB` for bytes), and a change of it rebuilds the table,
+whose copy converts each element in order with `json_each` and
+`json_group_array`, a `NULL` list staying `NULL`; a cast between `TEXT`,
+`INTEGER`, `REAL` and `NUMERIC` is lossy where the same cast of a column
+is, a boolean becomes `1` or `0` or the text `true` or `false`, and any
+other element becomes a boolean by SQLite's truth test, which is lossy,
+so each lossy change is `destructive` with what it loses in its reason,
+never `data-dependent` as Postgres's `USING col::T[]` is for text to a
+number; a change between elements SQLite stores alike, such as `UUID` to
+text, is no step, as the same change of a column is; a change to or from
+a JSON value or bytes fails the plan, since SQLite's `CAST` keeps a
+nested JSON value as JSON and its JSON holds no bytes; a list of lists is
+a JSON value on both dialects, so a change of its inner element is no
+step on either; `migrate plan --dialect sqlite` refuses a service whose
 new version does not list `sqlite`, and a previous version, a service
 directory or a git ref, whose list lacks it, pointing to the model the
 database recorded or an empty database, while a `--from` model is

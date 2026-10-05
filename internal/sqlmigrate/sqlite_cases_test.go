@@ -104,6 +104,56 @@ var sqliteOnlyCases = []planCase{
 		fieldNamed(s, "Customer", "referrerId").Relation = &ir.RelationDef{Type: "Customer", OnDelete: "SET NULL"}
 		addField(s, "OrderLine", &ir.FieldDef{Name: "product", TypeRef: ir.TypeRef{Name: "Product"}, Relation: &ir.RelationDef{Type: "Product", OnDelete: "SET NULL"}})
 	}},
+
+	// A list's element changes: the rebuild converts each element in
+	// order, and a NULL list and an empty one stay as they are.
+	{name: "list-element-text-to-integer", before: productItems(stringRef), after: productItems(int64Ref),
+		lists: lists(
+			[2]string{`'["7","-2","1.9","x",""]'`, `'[7,-2,1,0,0]'`},
+			[2]string{`'["10","9","8","7","6","5","4","3","2","1","0","11"]'`, `'[10,9,8,7,6,5,4,3,2,1,0,11]'`},
+		)},
+	{name: "list-element-integer-to-text", before: productItems(int64Ref), after: productItems(stringRef),
+		lists: lists([2]string{`'[7,-2,0,9007199254740993]'`, `'["7","-2","0","9007199254740993"]'`})},
+	{name: "list-element-integer-to-real", before: productItems(int64Ref), after: productItems(numberRef),
+		lists: lists([2]string{`'[7,-2,9007199254740993]'`, `'[7.0,-2.0,9007199254740992.0]'`})},
+	// Into a boolean list, as JSON's true and false, and out of one.
+	{name: "list-element-integer-to-boolean", before: productItems(int64Ref), after: productItems(booleanRef),
+		lists: lists([2]string{`'[1,0,7,-2]'`, `'[true,false,true,true]'`})},
+	{name: "list-element-boolean-to-text", before: productItems(booleanRef), after: productItems(stringRef),
+		lists: lists([2]string{`'[true,false,true]'`, `'["true","false","true"]'`})},
+	// UUIDs and text are both strings in the JSON array: no step.
+	{name: "list-element-uuid-to-text", before: productItems(uuidRef), after: productItems(stringRef),
+		lists: lists([2]string{`'["0b6a2c1e-5d3f-4a7b-9c8d-1e2f3a4b5c6d"]'`, `'["0b6a2c1e-5d3f-4a7b-9c8d-1e2f3a4b5c6d"]'`})},
+	// An element change beside a drop in contract: the model between the
+	// phases holds the converted list.
+	{name: "list-element-and-drop-column", before: productItems(stringRef),
+		after: andThen(productItems(int64Ref), func(s *ir.Schema) { dropField(s, "Product", "price") }),
+		lists: lists([2]string{`'["7","x"]'`, `'[7,0]'`})},
+}
+
+var (
+	numberRef  = ir.TypeRef{Name: "number"}
+	booleanRef = ir.TypeRef{Name: "boolean"}
+)
+
+// productItems gives Product an optional list, items, of element ref.
+func productItems(ref ir.TypeRef) func(*ir.Schema) {
+	return func(s *ir.Schema) {
+		ref.IsArray = true
+		addField(s, "Product", &ir.FieldDef{Name: "items", TypeRef: ref})
+	}
+}
+
+// listRows are rows a SQLite case seeds into product besides seedRows' one
+// row per table, each a literal of its list in items before the plan and
+// the JSON text the list holds after it. A check compares the text, so
+// each element's place and JSON type count.
+type listRows [][2]string
+
+// lists is the rows given, then an empty list and a NULL one, which every
+// plan keeps.
+func lists(rows ...[2]string) listRows {
+	return append(rows, [2]string{"'[]'", "'[]'"}, [2]string{"NULL", "NULL"})
 }
 
 // jsonRef declares a JSON scalar in s, which sqlgen stores as JSONB, and

@@ -360,6 +360,11 @@ SQLite stores each type as the type its values need:
 | `JSONB`, `JSON`, and every list (`T[]`) | `TEXT` that holds JSON |
 | `BYTEA` | `BLOB` |
 
+A list's JSON array holds each element as JSON holds its type: text,
+dates, times and UUIDs as strings, numbers as numbers, a boolean as `true`
+or `false`, and a JSON value as itself. A list of lists is `JSONB` on
+Postgres, so it holds one JSON value here too.
+
 A default writes the form the schema runtime reads:
 
 | Postgres default | SQLite default |
@@ -393,16 +398,17 @@ Every SQLite step runs in a transaction, which the runner opens with
 | an index or a unique field renamed | the index dropped and built again under its new name (`blocking`): SQLite cannot rename an index |
 | a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops |
 
-Every other change to a table rebuilds it: a type, a nullability, a
-default, a foreign key added over a column the table has, changed or
-dropped, and a column `ADD COLUMN` cannot add. The rebuild is SQLite's
-copy-table procedure, in one step:
+Every other change to a table rebuilds it: a type, a list's element, a
+nullability, a default, a foreign key added over a column the table has,
+changed or dropped, and a column `ADD COLUMN` cannot add. The rebuild is
+SQLite's copy-table procedure, in one step:
 
 1. create the table as the phase leaves it under a temporary name
    (`_new_order`), with its primary key and foreign keys;
 2. copy the rows, mapping each column to its name after the renames, filling
-   the columns the table gains from their defaults, and casting a column
-   whose type changes;
+   the columns the table gains from their defaults, casting a column
+   whose type changes, and converting each element of a list whose
+   element changes ([A list's element](#a-lists-element));
 3. drop the old table;
 4. rename the new one;
 5. create its unique indexes and indexes again.
@@ -429,6 +435,50 @@ fraction is cut toward zero as an `INTEGER`. So a type change that cannot
 keep every value is `destructive`, not `data-dependent`. A `NOT NULL` a
 rebuild adds, a required column without a default, and a unique index
 fail on the rows that break them, as on Postgres (`data-dependent`).
+
+### A list's element
+
+A list is `TEXT` whatever its element, so the model also records what each
+element holds (`"element"`): `TEXT`, `INTEGER`, `REAL` or `NUMERIC` as
+SQLite stores the element's type, `BOOLEAN`, `JSON` for a JSON value, or
+`BLOB` for bytes. A change of it rebuilds the table, and the copy converts
+each element of the array, in order. For a list of text that becomes a
+list of integers, the plan writes this on one line:
+
+```sql
+CASE WHEN "product"."items" IS NOT NULL THEN (
+  SELECT json_group_array(CAST("_element"."value" AS INTEGER) ORDER BY "_element"."key")
+  FROM json_each("product"."items") AS "_element"
+) END
+```
+
+A `NULL` list stays `NULL`, and an empty list stays `[]`.
+
+| Element change | Each element | Hazard |
+| --- | --- | --- |
+| text to `INTEGER`, `REAL` or `NUMERIC` | cast: text that is not a number becomes `0`, and a fraction is cut toward zero as an `INTEGER` | `destructive` |
+| a number to text | cast to its text | |
+| `INTEGER` or `NUMERIC` to `REAL` | cast: an integer past 2^53 is rounded | `destructive` |
+| `REAL` or `NUMERIC` to `INTEGER` | cast: a fraction is cut toward zero | `destructive` |
+| `INTEGER` or `REAL` to `NUMERIC` | cast | |
+| a boolean to a number | `1` or `0` | |
+| a boolean to text | the text `true` or `false` | |
+| a number or text to a boolean | `true` where SQLite reads a number other than `0`, else `false`, so text such as `'true'` becomes `false` | `destructive` |
+| between types SQLite stores alike: `UUID`, `TEXT`, `VARCHAR(n)`, dates and times; `SMALLINT`, `INTEGER` and `BIGINT` | nothing: no step, as for the same change of a column | |
+| to or from a JSON value or bytes | the plan fails, naming the column | |
+
+Each rebuild is also `compat`, `copy-table` and `blocking`, as any type
+change on SQLite is. Postgres plans the same change as `ALTER COLUMN ...
+TYPE T[] USING col::T[]`, which fails on text that is not a number
+(`data-dependent`). SQLite's `CAST` never fails, so where a cast cannot
+keep every element the change is `destructive` instead, and the hazard
+says what it loses. An element change to or from a JSON value or bytes
+fails the plan: SQLite's `CAST` keeps a nested JSON value as JSON, where
+Postgres's cast to text gives its text, and SQLite's JSON holds no bytes.
+Change such a list by hand and adopt the new model.
+
+A list of lists is a JSON value on both dialects, `JSONB` on Postgres, so
+a change of its inner element is no step on either.
 
 ### Refusals
 
@@ -460,8 +510,10 @@ the feature and the dialect:
   text as JSON where wrapping it in a JSON string would keep another
   value, and Postgres converts no list to or from anything else. Change
   the column by hand and adopt the new model.
-- A list whose element type changes is the same `TEXT` holding a JSON
-  array, so it is no step, and its elements keep their JSON types.
+- A list's element type is kept only as far as JSON tells types apart:
+  `UUID[]`, `TEXT[]` and `DATE[]` are arrays of strings, and
+  `SMALLINT[]` and `BIGINT[]` arrays of numbers, so a change between
+  them is no step ([A list's element](#a-lists-element)).
 
 ## The runner
 

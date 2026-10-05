@@ -213,6 +213,22 @@ func TestSQLiteHazardClasses(t *testing.T) {
 		{plan: "rebuild-renamed-referenced-table", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable}},
 		{plan: "rebuild-foreign-keys", op: "addColumn", phase: Expand},
 		{plan: "rebuild-foreign-keys", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, dataDependent, copyTable}},
+
+		{plan: "list-element-text-to-integer", op: "copyTable", phase: Expand,
+			want:   []HazardClass{destructive, blockingClass, compat, copyTable},
+			reason: "text that is not a number becomes 0 and a fraction is cut toward zero"},
+		{plan: "list-element-integer-to-text", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, compat, copyTable},
+			reason: "cannot convert the elements of items"},
+		{plan: "list-element-integer-to-real", op: "copyTable", phase: Expand,
+			want: []HazardClass{destructive, blockingClass, compat, copyTable}, reason: "an integer past 2^53 is rounded"},
+		{plan: "list-element-integer-to-boolean", op: "copyTable", phase: Expand,
+			want: []HazardClass{destructive, blockingClass, compat, copyTable}, reason: "every number other than 0 becomes true"},
+		{plan: "list-element-boolean-to-text", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, compat, copyTable},
+			reason: "Product.items changes from a list of BOOLEAN to a list of TEXT"},
+		{plan: "list-element-and-drop-column", op: "copyTable", phase: Expand,
+			want:   []HazardClass{destructive, blockingClass, compat, copyTable},
+			reason: "cannot drop NOT NULL from price and convert the elements of items"},
+		{plan: "list-element-and-drop-column", op: "dropColumn", phase: Contract, want: []HazardClass{destructive, blockingClass}},
 	})
 }
 
@@ -456,6 +472,185 @@ func TestSQLiteKindChanges(t *testing.T) {
 	want := "column order.note (Order.note) changes from a scalar (TEXT) to a list (TEXT holding a JSON array), which sqlite cannot convert"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("Diff = %v, want %s", err, want)
+	}
+}
+
+// TestSQLiteElement: the model records what each element of a list's JSON
+// array holds, and nothing for a column that is not a list. A list of
+// lists is JSONB, which holds a JSON value, not a list.
+func TestSQLiteElement(t *testing.T) {
+	tests := map[string]string{
+		"TEXT[]": "TEXT", "UUID[]": "TEXT", "VARCHAR(80)[]": "TEXT", "CITEXT[]": "TEXT", "DATE[]": "TEXT",
+		"TIMESTAMPTZ[]": "TEXT", "INET[]": "TEXT", "SMALLINT[]": "INTEGER", "BIGINT[]": "INTEGER",
+		"BOOLEAN[]": "BOOLEAN", "DOUBLE PRECISION[]": "REAL", "NUMERIC(12,2)[]": "NUMERIC",
+		"JSONB[]": "JSON", "BYTEA[]": "BLOB",
+		"TEXT": "", "BIGINT": "", "BOOLEAN": "", "JSONB": "",
+	}
+	for pg, want := range tests {
+		if got := sqliteElement(pg); got != want {
+			t.Errorf("sqliteElement(%s) = %q, want %q", pg, got, want)
+		}
+	}
+}
+
+// TestSQLiteListConvert classifies a list's element changes as the same
+// cast of a column is classified: SQLite's CAST never fails, so a change
+// that cannot keep every element is lossy and says what it loses, never
+// one that may fail.
+func TestSQLiteListConvert(t *testing.T) {
+	tests := []struct {
+		from, to string
+		kind     conversionKind
+		lossy    bool
+	}{
+		{"TEXT", "TEXT", convertSame, false},
+		{"", "INTEGER", convertSame, false},
+		{"INTEGER", "", convertSame, false},
+		{"TEXT", "INTEGER", convertRewrite, true},
+		{"TEXT", "REAL", convertRewrite, true},
+		{"TEXT", "NUMERIC", convertRewrite, true},
+		{"TEXT", "BOOLEAN", convertRewrite, true},
+		{"INTEGER", "TEXT", convertRewrite, false},
+		{"REAL", "TEXT", convertRewrite, false},
+		{"NUMERIC", "TEXT", convertRewrite, false},
+		{"INTEGER", "REAL", convertRewrite, true},
+		{"INTEGER", "NUMERIC", convertRewrite, false},
+		{"REAL", "INTEGER", convertRewrite, true},
+		{"REAL", "NUMERIC", convertRewrite, false},
+		{"NUMERIC", "INTEGER", convertRewrite, true},
+		{"NUMERIC", "REAL", convertRewrite, true},
+		{"INTEGER", "BOOLEAN", convertRewrite, true},
+		{"REAL", "BOOLEAN", convertRewrite, true},
+		{"BOOLEAN", "TEXT", convertRewrite, false},
+		{"BOOLEAN", "INTEGER", convertRewrite, false},
+		{"BOOLEAN", "REAL", convertRewrite, false},
+		{"BOOLEAN", "NUMERIC", convertRewrite, false},
+		{"JSON", "TEXT", convertImpossible, false},
+		{"TEXT", "JSON", convertImpossible, false},
+		{"BOOLEAN", "JSON", convertImpossible, false},
+		{"BLOB", "TEXT", convertImpossible, false},
+		{"TEXT", "BLOB", convertImpossible, false},
+		{"JSON", "BLOB", convertImpossible, false},
+	}
+	for _, tc := range tests {
+		got := sqliteListConvert(tc.from, tc.to)
+		if got.kind != tc.kind || got.lossy != tc.lossy {
+			t.Errorf("sqliteListConvert(%s, %s) = %+v, want kind %d lossy %t", tc.from, tc.to, got, tc.kind, tc.lossy)
+		}
+		if got.lossy != (got.loss != "") || strings.Contains(got.loss, ":  ") || strings.HasSuffix(got.loss, ": .") {
+			t.Errorf("sqliteListConvert(%s, %s) loses %q", tc.from, tc.to, got.loss)
+		}
+	}
+}
+
+// TestSQLiteListElementChanges: a list whose element changes is rebuilt,
+// and the copy converts each element of its JSON array, in order, keeping
+// a NULL list NULL; the step carries the conversion's hazards. A change to
+// or from a JSON value or bytes is refused, naming the column and both
+// elements. A list whose element stays, or that a model does not record,
+// has no step.
+func TestSQLiteListElementChanges(t *testing.T) {
+	model := func(element string) *Model {
+		return &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{{
+			Name: "sample", Kind: TableEntity,
+			Columns: []*Column{
+				{Name: "id", Type: "TEXT"},
+				{Name: "v", Origin: "Sample.v", Type: "TEXT", Nullable: true, Holds: holdsList, Element: element},
+			},
+			PrimaryKey: &Constraint{Name: "sample_pkey", Columns: []string{"id"}},
+		}}}
+	}
+	const e = `"_element"."value"`
+	list := func(element string) string {
+		return `CASE WHEN "sample"."v" IS NOT NULL THEN (SELECT json_group_array(` + element +
+			` ORDER BY "_element"."key") FROM json_each("sample"."v") AS "_element") END`
+	}
+	truth := "CASE WHEN " + e + " THEN 'true' WHEN NOT " + e + " THEN 'false' END"
+	const (
+		lossy = " [destructive blocking compat copy-table]"
+		kept  = " [blocking compat copy-table]"
+	)
+	tests := []struct {
+		from, to string
+		// want is the refusal, or the rebuild's copy of v and its hazard
+		// classes.
+		want string
+	}{
+		{"TEXT", "INTEGER", list("CAST("+e+" AS INTEGER)") + lossy},
+		{"TEXT", "REAL", list("CAST("+e+" AS REAL)") + lossy},
+		{"TEXT", "NUMERIC", list("CAST("+e+" AS NUMERIC)") + lossy},
+		{"INTEGER", "TEXT", list("CAST("+e+" AS TEXT)") + kept},
+		{"REAL", "TEXT", list("CAST("+e+" AS TEXT)") + kept},
+		{"INTEGER", "REAL", list("CAST("+e+" AS REAL)") + lossy},
+		{"INTEGER", "NUMERIC", list("CAST("+e+" AS NUMERIC)") + kept},
+		{"REAL", "INTEGER", list("CAST("+e+" AS INTEGER)") + lossy},
+		{"NUMERIC", "REAL", list("CAST("+e+" AS REAL)") + lossy},
+		{"INTEGER", "BOOLEAN", list("json("+truth+")") + lossy},
+		{"TEXT", "BOOLEAN", list("json("+truth+")") + lossy},
+		{"BOOLEAN", "INTEGER", list("CAST("+e+" AS INTEGER)") + kept},
+		{"BOOLEAN", "REAL", list("CAST("+e+" AS REAL)") + kept},
+		{"BOOLEAN", "TEXT", list(truth) + kept},
+		{"JSON", "TEXT", "changes from a list of JSON to a list of TEXT"},
+		{"TEXT", "JSON", "changes from a list of TEXT to a list of JSON"},
+		{"BLOB", "TEXT", "changes from a list of BLOB to a list of TEXT"},
+		{"INTEGER", "BLOB", "changes from a list of INTEGER to a list of BLOB"},
+	}
+	for _, tc := range tests {
+		name := tc.from + " to " + tc.to
+		plan, err := Diff(model(tc.from), model(tc.to), Options{})
+		if strings.HasPrefix(tc.want, "changes") {
+			want := "sqlmigrate: column sample.v (Sample.v) " + tc.want + ", which sqlite cannot convert; change the column by hand and adopt the new model"
+			if err == nil || err.Error() != want {
+				t.Errorf("%s: Diff = %v, want %s", name, err, want)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(plan.Steps) != 1 || plan.Steps[0].Op != "copyTable" {
+			t.Errorf("%s: steps %+v, want one rebuild", name, plan.Steps)
+			continue
+		}
+		step := plan.Steps[0]
+		var classes []string
+		for _, h := range step.Hazards {
+			classes = append(classes, string(h.Class))
+			if h.Class == HazardCopyTable && !strings.Contains(h.Reason, "cannot convert the elements of v,") {
+				t.Errorf("%s: copy-table reason %q", name, h.Reason)
+			}
+		}
+		got := strings.TrimPrefix(step.Statements[1], `INSERT INTO "_new_sample" ("id", "v")`+"\n"+`SELECT "id", `)
+		got = strings.TrimSuffix(got, "\n"+`FROM "sample"`) + " [" + strings.Join(classes, " ") + "]"
+		if got != tc.want {
+			t.Errorf("%s:\n%s\nwant\n%s", name, got, tc.want)
+		}
+	}
+
+	for _, pair := range [][2]string{{"TEXT", "TEXT"}, {"", "INTEGER"}, {"BOOLEAN", ""}} {
+		plan, err := Diff(model(pair[0]), model(pair[1]), Options{})
+		if err != nil || len(plan.Steps) != 0 {
+			t.Errorf("%q to %q: %v, %d steps; want no step", pair[0], pair[1], err, len(plan.Steps))
+		}
+	}
+
+	// The destructive hazard says what the conversion loses.
+	for pair, want := range map[[2]string]string{
+		{"TEXT", "INTEGER"}: "Sample.v changes from a list of TEXT to a list of INTEGER: SQLite converts each element with a cast that never fails, " +
+			"so the conversion does not keep every element: text that is not a number becomes 0 and a fraction is cut toward zero.",
+		{"TEXT", "BOOLEAN"}: "Sample.v changes from a list of TEXT to a list of BOOLEAN: SQLite converts each element with a cast that never fails, " +
+			"so the conversion does not keep every element: text is true only where it reads as a number other than 0, so 'true' becomes false.",
+		{"NUMERIC", "INTEGER"}: "Sample.v changes from a list of NUMERIC to a list of INTEGER: SQLite converts each element with a cast that never fails, " +
+			"so the conversion does not keep every element: a fraction is cut toward zero.",
+	} {
+		plan, err := Diff(model(pair[0]), model(pair[1]), Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h := plan.Steps[0].Hazards[0]; h.Class != HazardDestructive || h.Reason != want {
+			t.Errorf("%s to %s: %s hazard %q, want destructive %q", pair[0], pair[1], h.Class, h.Reason, want)
+		}
 	}
 }
 

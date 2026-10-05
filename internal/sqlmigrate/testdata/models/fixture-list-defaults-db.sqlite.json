@@ -30,6 +30,7 @@
         },
         {
           "default": "'[]'",
+          "element": "TEXT",
           "holds": "list",
           "name": "retasted_at",
           "origin": "Tasting.retastedAt",
@@ -37,6 +38,7 @@
         },
         {
           "default": "'[]'",
+          "element": "TEXT",
           "holds": "list",
           "name": "retasted_on",
           "origin": "Tasting.retastedOn",
@@ -44,6 +46,7 @@
         },
         {
           "default": "'[]'",
+          "element": "TEXT",
           "holds": "list",
           "name": "repoured_at",
           "origin": "Tasting.repouredAt",
@@ -51,6 +54,7 @@
         },
         {
           "default": "'[]'",
+          "element": "TEXT",
           "holds": "list",
           "name": "restocked_at",
           "origin": "Tasting.restockedAt",

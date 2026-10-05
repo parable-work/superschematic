@@ -241,7 +241,8 @@ const sqliteTempPrefix = "_new_"
 // foreign keys off: create the table as after under a temporary name, copy
 // the rows, drop the old table, rename the new one, and create its unique
 // indexes and indexes. A column the new table adds is left out of the copy,
-// so its default fills it; a column whose affinity changes is cast. With
+// so its default fills it; a column whose affinity changes is cast, and a
+// list whose element changes has each element converted. With
 // foreign keys off, dropping the old table runs no ON DELETE action on the
 // tables that reference it, and those references resolve again once the
 // new table takes the name; the runner checks every foreign key before the
@@ -255,7 +256,12 @@ func (d sqliteDialect) rebuild(before, after *Table, changes []*change) (rendere
 			continue
 		}
 		value := qs(col.Name)
-		if sqliteAffinity(prev.Type) != sqliteAffinity(col.Type) {
+		switch {
+		case prev.Holds == holdsList && col.Holds == holdsList:
+			if sqliteListConvert(prev.Element, col.Element).kind != convertSame {
+				value = sqliteListValue(before.Name, col.Name, prev.Element, col.Element)
+			}
+		case sqliteAffinity(prev.Type) != sqliteAffinity(col.Type):
 			value = "CAST(" + value + " AS " + sqliteAffinity(col.Type) + ")"
 		}
 		columns = append(columns, qs(col.Name))
@@ -297,6 +303,40 @@ func (d sqliteDialect) rebuild(before, after *Table, changes []*change) (rendere
 	return one(step), nil
 }
 
+// sqliteElementAlias names json_each's rows in a list's conversion. A
+// table the compiler names never starts with an underscore, so the alias
+// never hides the table the rebuild copies.
+const sqliteElementAlias = `"_element"`
+
+// sqliteListValue is what a rebuild copies into a list column whose
+// element changes: a new JSON array of the column's elements, each
+// converted (sqliteElementValue), in the order the array keeps them. A NULL
+// list stays NULL, and an empty one stays []. The list is named with its
+// table, which no column of json_each can hide. An aggregate's ORDER BY
+// needs SQLite 3.44 or later, which the runner's driver has.
+func sqliteListValue(table, column, from, to string) string {
+	list := qs(table) + "." + qs(column)
+	element := sqliteElementValue(sqliteElementAlias+`."value"`, from, to)
+	return "CASE WHEN " + list + " IS NOT NULL THEN (SELECT json_group_array(" + element +
+		" ORDER BY " + sqliteElementAlias + `."key") FROM json_each(` + list + ") AS " + sqliteElementAlias + ") END"
+}
+
+// sqliteElementValue converts one element of a list, as json_each reads
+// it: a JSON boolean as 1 or 0. A cast converts between TEXT, INTEGER, REAL
+// and NUMERIC, and a boolean to a number. SQLite's truth test makes an
+// element true or false: text for a boolean that becomes text, and JSON
+// for an element that becomes a boolean. A null element stays null.
+func sqliteElementValue(element, from, to string) string {
+	truth := "CASE WHEN " + element + " THEN 'true' WHEN NOT " + element + " THEN 'false' END"
+	switch {
+	case to == elementBoolean:
+		return "json(" + truth + ")"
+	case from == elementBoolean && to == sqliteText:
+		return truth
+	}
+	return "CAST(" + element + " AS " + to + ")"
+}
+
 // sqliteCannot says what SQLite's ALTER TABLE cannot do that c does.
 func sqliteCannot(c *change) string {
 	switch c.op {
@@ -320,11 +360,22 @@ func sqliteCannot(c *change) string {
 	case opDropDefault:
 		return "drop the default of " + c.column.Name
 	case opAlterColumnType:
-		var names []string
+		// A list stays TEXT; its elements change.
+		var retyped, converted, what []string
 		for _, r := range c.alter.retypes {
-			names = append(names, r.after.Name)
+			if r.before.Holds == holdsList && r.after.Holds == holdsList {
+				converted = append(converted, r.after.Name)
+			} else {
+				retyped = append(retyped, r.after.Name)
+			}
 		}
-		return "change the type of " + joinAnd(names)
+		if len(retyped) > 0 {
+			what = append(what, "change the type of "+joinAnd(retyped))
+		}
+		if len(converted) > 0 {
+			what = append(what, "convert the elements of "+joinAnd(converted))
+		}
+		return strings.Join(what, " and ")
 	case opAddForeignKey:
 		return "add foreign key " + c.foreignKey.Name
 	case opReplaceFK:
