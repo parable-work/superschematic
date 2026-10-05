@@ -6,11 +6,14 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
 use axum::routing::{delete, get, patch, post, put};
+use axum::Extension;
 use axum::{Json, Router};
 use superschematic_http_runtime::{
     error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
     RequestContext,
 };
+use superschematic_http_runtime::Principal;
+use superschematic_http_runtime::RouteControls;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,14 +28,38 @@ pub struct RouterState {
 /// returned router:
 ///
 /// - `POST /api/tenant/custom-handler` (tenant.customHandler)
+///
+/// A route's controls run in the order the Go server runs them: the rate
+/// limit, the body limit, the permission check of a route that needs a
+/// caller, then the timeout around the handler.
 pub fn build_router(implementations: Implementations) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
-    router = router.route("/api/auth/me", get(handle_session_current_tenant));
-    router = router.route("/api/tenants", get(handle_tenant_list_tenants));
-    router = router.route("/api/tenants", post(handle_tenant_create_tenant));
-    router = router.route("/api/tenants/{id}", get(handle_tenant_get_tenant));
-    router = router.route("/api/tenants/{id}", patch(handle_tenant_update_secret));
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .apply(get(handle_session_current_tenant));
+    router = router.route("/api/auth/me", route);
+    let route = RouteControls::new()
+        .rate_limit(60)
+        .body_limit_megabytes(1)
+        .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.read"])
+        .apply(get(handle_tenant_list_tenants));
+    router = router.route("/api/tenants", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.write"])
+        .apply(post(handle_tenant_create_tenant));
+    router = router.route("/api/tenants", route);
+    let route = RouteControls::new()
+        .rate_limit(60)
+        .body_limit_megabytes(1)
+        .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.read"])
+        .timeout_seconds(5)
+        .apply(get(handle_tenant_get_tenant));
+    router = router.route("/api/tenants/{id}", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.write"])
+        .apply(patch(handle_tenant_update_secret));
+    router = router.route("/api/tenants/{id}", route);
     router.with_state(state)
 }
 
@@ -62,11 +89,13 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 async fn handle_session_current_tenant(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let request_id = request_id_from_headers(&headers);
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/auth/me".to_string());
     ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
@@ -84,11 +113,13 @@ async fn handle_session_current_tenant(
 async fn handle_tenant_list_tenants(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let request_id = request_id_from_headers(&headers);
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/tenants".to_string());
     ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
@@ -106,11 +137,13 @@ async fn handle_tenant_list_tenants(
 async fn handle_tenant_create_tenant(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let request_id = request_id_from_headers(&headers);
     let mut ctx = RequestContext::new(method_from_str("post"), "/api/tenants".to_string());
     ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
     let result = state
         .implementations
         .tenant
@@ -124,6 +157,7 @@ async fn handle_tenant_create_tenant(
 async fn handle_tenant_get_tenant(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
     Query(query): Query<HashMap<String, String>>,
@@ -142,6 +176,7 @@ async fn handle_tenant_get_tenant(
     };
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/tenants/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
     for (key, value) in path_params {
         ctx.path_params.insert(key, value);
     }
@@ -162,6 +197,7 @@ async fn handle_tenant_get_tenant(
 async fn handle_tenant_update_secret(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
     Json(payload): Json<Value>,
@@ -180,6 +216,7 @@ async fn handle_tenant_update_secret(
     };
     let mut ctx = RequestContext::new(method_from_str("patch"), "/api/tenants/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
     for (key, value) in path_params {
         ctx.path_params.insert(key, value);
     }

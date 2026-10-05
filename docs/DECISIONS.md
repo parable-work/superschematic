@@ -986,6 +986,28 @@ Not changed: the Python types' `to_dict` and `to_json` write every field,
 one; the SDK does not send through them. The engine's `update` tool and
 `PATCH` route (D16) follow JSON merge patch, where null removes a member.
 
+### D14, amended: a pattern's `\d`, `\w` and `\b` are ASCII classes
+
+The engines the validators run read a pattern's class escapes
+differently. Go's RE2 reads `\d`, `\w`, `\s` and `\b` as ASCII. JavaScript
+with the `u` flag reads `\d`, `\w` and `\b` as ASCII and `\s` as Unicode
+whitespace. Python's `re` and the `regex` crate, which pydantic runs for a
+`Field(pattern=...)`, read all four as Unicode. So `^\w+$` refused `café` in
+the Go and TypeScript validators and took it in the Python ones, and
+`Network.Url`, whose host is `[\w\-\{\}]+`, took a host with `é` in Python
+only.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `\d`, `\w` and `\b` are ASCII classes, as RE2 reads them. Python matches every pattern with `re.ASCII`: the generated validator's field rules and scalar patterns, a scalar's pydantic `Field`, which takes the compiled pattern and runs it with Python's `re`, the Python SDK's input check and the Python runtime. The Rust validators translate the classes to ASCII ones (D31). | Unicode classes everywhere, which neither RE2 nor JavaScript offers for `\d` and `\w`; leaving Python apart |
+| `\s` is ASCII whitespace in Go, Rust and Python (where `re.ASCII` also counts `\v`), and Unicode whitespace in JavaScript. superscalar's catalog uses `\s` in `[\s\S]`, which every engine reads as any character, and between the fields of a PEM key, a cron expression and a time, and in a URI's `[^\s]+`, where the engines differ only on a non-ASCII space. TypeScript stays apart on it. | Translating `\s` in every TypeScript pattern now, in the generated validator, the runtime, the SDK and the API server |
+| `re.ASCII` also makes Python's `(?i)` fold ASCII letters only, where RE2 folds Unicode case. No pattern in the catalog, the fixtures or the examples uses `(?i)`. | |
+
+The parity matrix gains `pattern_word_class_is_ascii` (`^\w\W\w$` takes
+`aéb`) and `url_non_ascii_host` (`Network.Url` refuses a host with `é`).
+The four languages' generated validators and the three runtimes agree on
+both; the Python ones refused the first and took the second before.
+
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 
 A distribution built a server on the source tree that takes a schema while
@@ -1934,6 +1956,20 @@ overlapping route.
 
 The rule is reversible until the first release.
 
+### D20, amended: an encrypted operation cannot upload files
+
+An encrypted operation whose input type has a file-upload field built.
+Every SDK sends a file upload as multipart before the step that would
+encrypt the body, so the files and the other arguments travelled in clear,
+and the Go server's payload decryptor, which reads a JSON envelope,
+answered 400. No server could serve it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| apigen refuses an operation that is encrypted (an `Encrypted` set, `@encrypted`, or an `EncryptedField<T>` result or argument) and uploads files, naming the operation and its first file field. Every server and SDK generator builds from apigen's endpoints, so none of them sees such an operation. | Encrypting a multipart body, which needs a second envelope format in every SDK and a multipart decryption step in the Go server |
+
+The rule is reversible until the first release.
+
 ## D22. A TypeScript env loader in the TypeScript types package
 
 An `@envVars` class got a loader in Go or Rust and none in TypeScript, so a
@@ -2534,5 +2570,47 @@ and both renderings of the store. `fixture-db` has no Session table, so
 the `fixture-api-session` golden is unchanged. For a Session table
 without `deletedAt` the store now passes `nil` find options and is
 otherwise unchanged.
+
+The rule is reversible until the first release.
+
+## D29. The Rust server enforces a route's auth and traffic controls
+
+The Rust server's generator read none of `@auth`, `@requirePermission`,
+`@requireOwnership`, an `Authenticated` set, `@rateLimit`, `@bodyLimit` or
+`@timeout`, and its runtime crate had no code for any of them.
+`build_router` mounted each operation as a handler that forwarded the body
+to the implementation, so a route that the Go and TypeScript servers guard
+answered any caller, with no rate, size or time limit, and nothing said
+so. After D26 the webhook verifier was the only step before the handler.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The caller comes from `Implementations.authenticator`, an `Arc<dyn Authenticator>`. The crate has the field when an operation, a manual one included, needs a caller, as D26 made `webhook_verifiers` a field. A service that leaves it out does not compile. `build_router` keeps its signature, and a schema without such an operation generates the same crate. | A `RouterOptions` passed to a new `build_router_with`, the shape of D15's `buildRouter` options, where a forgotten authenticator answers 401 at runtime instead of failing to compile. `build_router(implementations, options)`, which changes every crate's callers, as D26 declined to do for a `Result`. A `Principal` that the service's own tower layer puts in the request's extensions, which needs no API but runs before the verifier, the rate limit and the body limit, on every route. |
+| `Authenticator` and `Principal` live in the runtime crate. `authenticate(&Parts)` returns `Result<Option<Principal>, ApiError>`: `None` is 401, and an `Err` answers with that error, for a failure that is not the caller's. The provided method `permits(held, required)` is D15's `PermissionMatcher`. It defaults to `has_any_permission` (dotted-path coverage, no root permission), and the router calls it only for a route that lists permissions. `Principal` has TypeScript's `subject`, `permissions` and `claims`, and its `Debug` leaves out the claims' values. The handler puts the caller on `RequestContext.principal`. | A separate matcher field, which every service would fill in. An authenticator that returns a bool, which cannot pass the implementation a caller or report a failing identity service. |
+| `@requireOwnership` requires a caller, as in Go and TypeScript. Whether the caller owns the resource is the implementation's check, made with `ctx.principal`, and its scaffold says so. | A router hook that decides ownership, which neither other server has. |
+| The runtime crate's `RouteControls` applies a route's controls with `route_layer`, in the Go router's order: the rate limit, the body limit, the permission check, then the timeout around the handler and its extractors. `webhook_verified` wraps the result, so the verifier still runs first. | The TypeScript runtime's order, in which the body limit runs before the rate limit and the timeout also covers authentication. |
+| `@rateLimit` is a token bucket per route, kept in process memory, that refills continuously, as the TypeScript store does. It answers 429 with the seconds until the next token in `Retry-After`. It keys a client by the `ClientIp` the service's layer puts on the request, or else by the peer address axum records when the router is served with connect info, as the Go runtime keys by chi's client IP or `RemoteAddr`. Without either, a route's clients share one bucket. | Reading `X-Forwarded-For`, as the TypeScript runtime does, which lets a client choose its bucket. A pluggable store and per-route overrides like TypeScript's `RouterOptions`; nothing needs them yet, and they can arrive with an options struct. |
+| `@bodyLimit` counts mebibytes, as Go and TypeScript do. It answers 413 before reading a body whose `Content-Length` is over the limit, and stops reading any other body once it passes the limit. On its route it replaces axum's default 2 MB limit on the body extractor, which still applies to a route without `@bodyLimit`. | TypeScript's 1 MiB default for every route with a body, which Go does not have and which would change every crate. |
+| `@timeout` runs the handler under `tokio::time::timeout`, answers 504, and drops the handler's future. | |
+| A refusal is the Rust router's error envelope, `{"error": {"code", "message"}}`, with the codes the TypeScript runtime uses: `unauthorized`, `forbidden`, `payload_too_large`, `too_many_requests` and `gateway_timeout`. | The RFC 9457 problem body of Go and TypeScript. The SDKs read it, and none of them reads the Rust envelope. But switching changes every refusal of the Rust router, not just these, so it is its own change. |
+| `build_router` does not mount a `@manualRouteRegistration` operation (D20 amended), so it applies no control to one. Its doc lists each such operation's `RouteControls` call. The service applies it to the route it adds, with its own clone of the authenticator. | Requiring an authenticator only when a mounted operation needs a caller, which would give manual operations a different rule from D26's verifiers. |
+| A `@rateLimit`, `@bodyLimit` or `@timeout` below 1 adds no control, as in the TypeScript server. | Go's reading of zero, which answers 429 or 504 to every request. |
+
+`@publicRoute` adds nothing in the Rust server: a route that needs no
+caller is already open. The router follows apigen's `RequiresAuth`, as the
+Go router, the OpenAPI document and the SDKs do. A route that also
+declares `@auth` or a permission, or sits in an `Authenticated` set, still
+needs a caller. The TypeScript server opens such a route, a difference
+that predates this entry.
+
+`runtime/http/rust/src/controls.rs` tests each refusal, the order and the
+lifted body limit. `internal/generator/rustrestgen/route_controls_test.go`
+runs cargo test on fixture-api's crate and checks the 401, 403, 413, 429
+and 504 envelopes, `Retry-After`, a service's own `permits`, ownership left
+to the implementation, the order of the refusals, and a manual route's
+controls. The D26 test also checks that the verifier runs before the rate
+limit and the permission check. Output for a schema without these
+decorators (fixture-multiword-api, fixture-nested-arrays-api) is unchanged
+byte for byte.
 
 The rule is reversible until the first release.

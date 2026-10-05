@@ -12,11 +12,20 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
 use axum::routing::{delete, get, patch, post, put};
+{{- if .HasAuth }}
+use axum::Extension;
+{{- end }}
 use axum::{Json, Router};
 use {{ .RuntimeCrateIdent }}::{
     error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
     RequestContext,
 };
+{{- if .HasAuth }}
+use {{ .RuntimeCrateIdent }}::Principal;
+{{- end }}
+{{- if .HasControls }}
+use {{ .RuntimeCrateIdent }}::RouteControls;
+{{- end }}
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,15 +40,25 @@ pub struct RouterState {
 /// returned router:
 ///
 {{- range .ManualEndpoints }}
-/// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }}){{ if .WebhookProvider }}, @hmacVerified:
+/// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }}){{ if .HasControls }}: apply its controls,
+///   `RouteControls::new(){{ range .ControlCalls "authenticator" }}{{ . }}{{ end }}.apply(route)`
+{{- end }}{{ if .WebhookProvider }}{{ if .HasControls }}, then{{ else }}, @hmacVerified:{{ end }}
 ///   wrap its route in `webhook_verified` with the {{ .WebhookProvider }} verifier
 {{- end }}
 {{- end }}
 {{- end }}
-{{- if .WebhookProviders }}
+{{- if or .WebhookProviders .HasControls }}
 {{- if not .ManualEndpoints }}
 /// Mounts every operation.
 {{- end }}
+{{- end }}
+{{- if .HasControls }}
+///
+/// A route's controls run in the order the Go server runs them: the rate
+/// limit, the body limit, the permission check of a route that needs a
+/// caller, then the timeout around the handler.
+{{- end }}
+{{- if .WebhookProviders }}
 ///
 /// An @hmacVerified operation's route runs its provider's verifier first.
 ///
@@ -57,16 +76,25 @@ pub fn build_router(implementations: Implementations) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
 {{- range .Endpoints }}
+{{- $route := printf "%s(handle_%s_%s)" .Method (toSnakeCase .Namespace) .FunctionName }}
+{{- if .HasControls }}
+    let route = RouteControls::new()
+{{- range .ControlCalls "Arc::clone(&state.implementations.authenticator)" }}
+        {{ . }}
+{{- end }}
+        .apply({{ $route }});
+{{- $route = "route" }}
+{{- end }}
 {{- if .WebhookProvider }}
     router = router.route(
         "{{ .Path }}",
         webhook_verified(
-            {{ .Method }}(handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}),
+            {{ $route }},
             Arc::clone(&state.implementations.webhook_verifiers[{{ rustString .WebhookProvider }}]),
         ),
     );
 {{- else }}
-    router = router.route("{{ .Path }}", {{ .Method }}(handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}));
+    router = router.route("{{ .Path }}", {{ $route }});
 {{- end }}
 {{- end }}
     router.with_state(state)
@@ -115,6 +143,9 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
+{{- if .RequiresAuth }}
+    Extension(principal): Extension<Principal>,
+{{- end }}
 {{- if .PathParams }}
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
@@ -141,6 +172,9 @@ async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
 {{- end }}
     let mut ctx = RequestContext::new(method_from_str("{{ .Method }}"), "{{ .Path }}".to_string());
     ctx.headers = headers_to_map(&headers);
+{{- if .RequiresAuth }}
+    ctx.principal = Some(principal);
+{{- end }}
 {{- if .PathParams }}
     for (key, value) in path_params {
         ctx.path_params.insert(key, value);
