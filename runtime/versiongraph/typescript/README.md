@@ -91,10 +91,12 @@ package, type-checks the tests against the built `dist/`, runs every vector
 in `runtime/versiongraph/testdata/vectors` through the package API
 (`test/vectors.test.ts`), checks each way of loading the module
 (`test/load.test.ts`), runs every canonical vector
-(`test/canonical.test.ts`), and loads every entry under Node with the `pg`
-driver refused (`test/node.mjs`). With the variable set it also runs every
-scenario in `runtime/versiongraph/testdata/scenarios` through the engine
-and the adapter (`test/scenarios.test.ts`), checks each canonical vector's
+(`test/canonical.test.ts`), reads every scenario file and checks the
+scenario format's rules (`test/scenarios.test.ts`), and loads every entry
+under Node with the `pg` driver refused (`test/node.mjs`). With the
+variable set it also runs every scenario in
+`runtime/versiongraph/testdata/scenarios` through the engine and the
+adapter (`test/scenarios.test.ts`), checks each canonical vector's
 rendering against Postgres, and runs the adapter's
 (`test/adapter.test.ts`), the sweeper's (`test/sweeper.test.ts`) and the
 facade's (`test/facade.test.ts`) own tests; without it they skip.

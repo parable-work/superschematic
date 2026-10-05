@@ -1,8 +1,8 @@
 {
   "name": "reads_refuse",
   "description": "Materialize stops at the walk ceiling, refuses a commit from a newer schema epoch and a commit whose pinned row version history no longer holds; reads of what does not exist are not found.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "mix", "as": "mix"},
     {"op": "save", "ref": "mix", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},
@@ -23,7 +23,7 @@
     {"op": "history", "ref": "id:Missing", "expect": {"error": "not_found"}},
     {"op": "branch", "from": "id:Missing", "name": "nowhere", "expect": {"error": "not_found"}},
     {"op": "revert", "ref": "whisk", "toCommit": "id:Missing", "expect": {"error": "not_found"}},
-    {"op": "sql", "statement": "DELETE FROM utensil_history WHERE id IN (SELECT id FROM utensil WHERE entity_key = $1::uuid AND ref_id = $2::uuid)", "args": [{"uuid": "Whisk"}, {"ref": "main"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM utensil_history WHERE id IN (SELECT id FROM utensil WHERE entity_key = $1::uuid AND ref_id = $2::uuid)"}, "args": [{"uuid": "Whisk"}, {"ref": "main"}]},
     {"op": "materialize", "commit": "c2", "expect": {"error": "history_missing"}},
     {"op": "materialize", "commit": "c1", "expect": {"contentHashOf": "c1"}},
     {"op": "branch", "from": "main", "name": "draft", "as": "draft", "expect": {"ref": {"base": "c2"}}},

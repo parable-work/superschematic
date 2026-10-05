@@ -1,8 +1,8 @@
 {
   "name": "snapshots",
   "description": "The fixture's graph snapshots every third commit on a chain (snapshotEvery 3), and every tagged commit: a snapshot is the commit's full pin set. Materialize stops at the nearest snapshot: it reads a commit three past the first snapshot under a walk ceiling of three, and still reads it once the patches before the snapshot are gone. Release snapshots a tagged commit that has lost its snapshot.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "draft", "as": "d"},
     {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},
@@ -53,7 +53,7 @@
       {"entity_key": "Bake", "instruction": "Bake"}
     ]}}},
     {"op": "materialize", "commit": "d6", "walkCeiling": 1, "expect": {"contentHashOf": "d6"}},
-    {"op": "sql", "statement": "DELETE FROM recipe_patch WHERE commit_id IN ($1::uuid, $2::uuid, $3::uuid)", "args": [{"commit": "d1"}, {"commit": "d2"}, {"commit": "d3"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_patch WHERE commit_id IN ($1::uuid, $2::uuid, $3::uuid)"}, "args": [{"commit": "d1"}, {"commit": "d2"}, {"commit": "d3"}]},
     {"op": "materialize", "commit": "d2", "expect": {"tree": {}}},
     {"op": "materialize", "commit": "d3", "expect": {"contentHashOf": "d3", "tree": {"step": [
       {"entity_key": "Mix", "instruction": "Mix well"},
@@ -72,7 +72,7 @@
       {"kind": "step", "entityKey": "Mix", "entityVersion": 1},
       {"kind": "step", "entityKey": "Rest", "entityVersion": 1}
     ]}},
-    {"op": "sql", "statement": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid", "args": [{"commit": "m1"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid"}, "args": [{"commit": "m1"}]},
     {"op": "snapshot", "commit": "m1", "expect": {"snapshot": []}},
     {"op": "release", "root": "Bread", "commit": "m1", "expect": {"release": {"commit": "m1", "version": 1}}},
     {"op": "snapshot", "commit": "m1", "expect": {"snapshot": [

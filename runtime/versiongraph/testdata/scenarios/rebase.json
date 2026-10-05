@@ -1,8 +1,8 @@
 {
   "name": "rebase",
   "description": "Rebase moves a change set onto its parent's newer head: the parent's head is merged in against the change set's base, with its composed tree, uncommitted work included, as ours. A clean rebase keeps only the change set's own changes as rows, moves its base and commits on it after its previous head; a conflicting one writes nothing until a resolution settles it; one already on the parent's head writes nothing.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "seed", "as": "seed"},
     {"op": "save", "ref": "seed", "edits": {

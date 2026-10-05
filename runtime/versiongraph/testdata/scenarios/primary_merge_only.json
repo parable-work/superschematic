@@ -1,8 +1,8 @@
 {
   "name": "primary_merge_only",
   "description": "A primary line takes writes only from Merge: Save, Commit, Seal and Revert on it fail, a merge commits in the same transaction with its message and tag, and the line's live rows always compose to its head.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "save", "ref": "main", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}},
       "expect": {"error": "primary_merge_only"}},

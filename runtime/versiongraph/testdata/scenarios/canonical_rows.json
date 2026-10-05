@@ -1,8 +1,8 @@
 {
   "name": "canonical_rows",
   "description": "A tasting holds a value of every class a descriptor names. It reads back, live and from history, as the canonical row it was written as, and a row written in the schema runtime's other forms reads back canonical too.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "tastings", "as": "d"},
     {"op": "save", "ref": "d", "edits": {"tasting": {"upsert": [

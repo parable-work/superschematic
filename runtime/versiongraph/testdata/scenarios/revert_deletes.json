@@ -1,8 +1,8 @@
 {
   "name": "revert_deletes",
   "description": "A utensil keyed by a plain UUID is added, overridden on a change set and merged; a revert to a tree without it, made on a change set and merged, writes the row that deletes it on the line.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "mix", "as": "mix"},
     {"op": "save", "ref": "mix", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},

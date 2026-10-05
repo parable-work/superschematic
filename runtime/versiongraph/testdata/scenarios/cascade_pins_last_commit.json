@@ -1,8 +1,8 @@
 {
   "name": "cascade_pins_last_commit",
   "description": "A change set edits an ingredient twice, then deletes its step. Composing the change set drops the ingredient with its step, while the change set still holds a live row of it. The commit's DELETE of the ingredient pins the ingredient's last committed row, the one main's merge wrote, not the change set's live row; the step's DELETE pins the change set's own row that deletes it.",
+  "roots": ["Bread"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "branch", "from": "main", "name": "seed", "as": "seed"},
     {"op": "save", "ref": "seed", "edits": {
@@ -49,7 +49,7 @@
       {"kind": "step", "entityKey": "Bake", "operation": "DELETE", "entityVersion": 1}
     ]}},
     {"op": "sql",
-      "statement": "SELECT p.entity_kind, p.entity_version::text AS entity_version, (p.entity_id = c.entity_id)::text AS last_committed_row, (p.entity_id = i.id)::text AS own_row FROM recipe_patch p JOIN recipe_patch c ON c.commit_id = $2::uuid AND c.entity_kind = p.entity_kind AND c.entity_key = p.entity_key LEFT JOIN ingredient i ON i.ref_id = $3::uuid AND i.entity_key = p.entity_key WHERE p.commit_id = $1::uuid AND p.entity_kind = 'ingredient'",
+      "statement": {"postgres": "SELECT p.entity_kind, p.entity_version::text AS entity_version, (p.entity_id = c.entity_id)::text AS last_committed_row, (p.entity_id = i.id)::text AS own_row FROM recipe_patch p JOIN recipe_patch c ON c.commit_id = $2::uuid AND c.entity_kind = p.entity_kind AND c.entity_key = p.entity_key LEFT JOIN ingredient i ON i.ref_id = $3::uuid AND i.entity_key = p.entity_key WHERE p.commit_id = $1::uuid AND p.entity_kind = 'ingredient'"},
       "args": [{"commit": "nbCommit"}, {"commit": "c1"}, {"ref": "nb"}],
       "expect": {"rows": [
         {"entity_kind": "ingredient", "entity_version": "1", "last_committed_row": "true", "own_row": "false"}
