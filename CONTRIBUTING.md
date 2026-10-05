@@ -90,7 +90,12 @@ the pinned commit under `third_party/superscalar` (gitignored), builds its Go
 static archive and TypeScript binding, and prints the `CGO_LDFLAGS` value.
 It then runs `scripts/versiongraph-archive.sh`, which builds the
 version-graph core's static archive and stages it under
-`runtime/versiongraph/go/lib`, where that binding links it. The Makefile
+`runtime/versiongraph/go/lib`, where that binding links it. Both scripts
+build with `RUST_VERSION`, not the toolchain superscalar's checkout pins:
+Go binaries link the two archives together, and archives that two Rust
+releases built do not link into one binary (both define
+`rust_eh_personality`). The superscalar build records its commit and
+toolchain, so either changing rebuilds it. The Makefile
 exports both link directories for every Go target; outside make, run
 `eval "$(scripts/superscalar-dep.sh --export)"` first. Bump a tool version in
 `tools.env` only; workflows read that file and never inline a version. Bump
