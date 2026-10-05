@@ -353,12 +353,12 @@ func (o *APIOutput) HasConstants() bool {
 	return o.IsPublic && o.UUIDTypeExpr != ""
 }
 
-// HasBodyArgs reports whether a route decodes body arguments or a list
-// argument of a GET operation, so routes.go imports the HTTP runtime's
-// bodyargs package.
+// HasBodyArgs reports whether a route decodes body arguments, a list
+// argument of a GET operation or an input type, so routes.go imports the
+// HTTP runtime's bodyargs package.
 func (o *APIOutput) HasBodyArgs() bool {
 	for _, endpoint := range o.Endpoints {
-		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 {
+		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 || endpoint.HasInput {
 			return true
 		}
 	}

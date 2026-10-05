@@ -8,6 +8,7 @@ import {
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { RecipePatch, RecipeCommit } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
@@ -139,12 +140,15 @@ function parseRecipePatchInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseRecipePatch ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseRecipePatch ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseRecipePatch ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseRecipePatch ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -156,8 +160,14 @@ function parseRecipePatchInput(
       (fieldName) => !RecipePatchKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseRecipePatch ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseRecipePatch ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -165,8 +175,10 @@ function parseRecipePatchInput(
   const typedCandidate = candidate as unknown as RecipePatch;
   const validationResult = validateRecipePatch(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseRecipePatch ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseRecipePatch ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

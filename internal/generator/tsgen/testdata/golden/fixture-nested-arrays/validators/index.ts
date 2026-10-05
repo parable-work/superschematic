@@ -15,3 +15,4 @@ export {
 export * from './enums';
 
 export * from './types';
+export { ParseError } from './errors';

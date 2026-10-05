@@ -258,7 +258,7 @@ fails is a 400 problem whose `details` name it: `location` (`path`,
 server.
 
 An input is parsed by its type's `parse_<type>` with undeclared top-level
-keys refused, as the TypeScript server refuses them. A body the type
+keys refused, as the Go and TypeScript servers refuse them. A body the type
 refuses is a 400 problem, "Request body does not match the declared
 input", whose `details.reason` says why and whose top-level `errors`
 holds each field's errors by path, the member the Go server writes and
