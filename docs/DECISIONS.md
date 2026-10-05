@@ -2691,7 +2691,31 @@ Phases 1, 2 and 3 do not depend on each other; phase 4 needs all three,
 and phase 5 needs phase 4.
 
 Status: phases 1 to 5 are built, `Branches` last
-(`runtime/engine/README.md`, "Branches"); the Later row is not.
+(`runtime/engine/README.md`, "Branches"), and so is the Later row. Go
+(package `sqlite` of the Go module, over a `database/sql` seam), Python
+(`superschematic_versiongraph.sqlite`, over the standard library's
+`sqlite3`) and Rust (module `sqlite` of the engine crate, over `rusqlite`
+behind its `rusqlite` feature) each have a SQLite adapter with the
+TypeScript one's layout, stored forms and rules. Every scenario runs on
+SQLite in all four languages, with no server.
+
+Rules settled as the Later row was built:
+
+- **Shared vectors.** Under `runtime/versiongraph/testdata/sqlite` there are:
+  - `layout.json`, the layout's statements;
+  - `typescript.sql`, a database the TypeScript adapter wrote;
+  - `typescript.json`, what it reads back as.
+
+  The TypeScript adapter writes all three. Every adapter's layout equals `layout.json` and reads `typescript.sql` as `typescript.json`. Run with the vectors' seeded ids and fixed clock, every adapter also writes `typescript.sql` byte for byte. That requires each to draw a row's id before a generated entity key, and to read the clock once in creating the tables. So a file one language writes reads the same in every other.
+- **The minimum SQLite.** Every adapter refuses a SQLite older than 3.37.0, for `STRICT`, or one where `json_each` and `json_extract` do not work, which a probe checks. Those functions are built in only from 3.38.0, and a later build can still leave them out.
+- **The time range.** Every adapter refuses a clock or a stored time outside ±(2^53−1) microseconds, the range TypeScript holds exactly.
+- **Transactions per language.** On a connection of its own, an adapter begins with `BEGIN IMMEDIATE`. A transaction inside a caller's transaction is a savepoint, as each language's Postgres binding has one, and only TypeScript's has D16's mode with no transaction control at all.
+- **Per-language settlements:**
+  - Go reads SQLite's extended result code from a driver error's `Code()`, or from a classifier the caller gives; its tests use `modernc.org/sqlite`.
+  - Python recognizes a unique violation by its message before 3.11, and runs on 3.9.
+  - Rust's binding holds its connection behind a mutex and blocks the executor while a statement runs.
+- **A canonical bug found on the way.** Python's canonical rule read a date-time in year 0's first two months as the next day. The canonical vectors now hold every language to it.
+- **CI.** A pull request runs every language's SQLite tests, which need no database.
 
 ### D32, amended: Branches as it was built
 
