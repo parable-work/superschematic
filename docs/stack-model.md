@@ -102,17 +102,21 @@ needs, and the implementation belongs to the API (section 8.5):
 
 ```ts
 // schemas/services/shop-orders/schema.config.ts
+import { ShopApi } from "@acme/shop-api";
+import { ShopDb } from "@acme/shop-db";
+import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+
 export default defineConfig({
   name: "shop-orders",
   kind: SchemaKind.API,
-  authDb: service({ name: "shop-db", kind: SchemaKind.DB }),
-  calls: [service({ name: "shop-api", kind: SchemaKind.API })],
+  authDb: ShopDb,
+  calls: [ShopApi],
   outputs: { /* ... */ },
 });
 ```
 
-It is written once, as a handle in the form `authDb` already takes (open
-question 7 in section 15). The config field, the SDK client in the
+It is written once, as a handle: the callee's imported sentinel, or
+`service({ name, kind })` (D34). The config field, the SDK client in the
 implementation's `Deps`, the URL, the invoker grant and the network rule
 all follow from it. A call between two APIs that one server serves stays an
 HTTP call to the server's own address.
@@ -992,15 +996,12 @@ model, or retired, when it lands.
    each pinned type's Terraform name and property renames recorded beside
    it from v1, and a round-trip test with the first Terraform-family
    provisioner (section 6.4).
-7. **References in `schema.config.ts`.** A config names another service
-   as `service({ name, kind })`, because `checkConfigPurity`
-   (`internal/buildplan/buildplan.go:161`) lets it import only
-   `@superschematic/schema-config`. So `authDb`, `dependencies` and `calls`
-   are handles the loader checks, not imported references. The rule's
-   comment gives its reason: a platform model imports configs as identity
-   references and runs them. superschematic reads configs statically, so
-   letting a config import a sibling's generated sentinel may now be safe.
-   That is a core change of its own, for every config reference.
+7. **References in `schema.config.ts`.** Settled: a config may import a
+   sibling's sentinel (`import { ShopDb } from "@acme/shop-db"`) wherever
+   a handle goes, and `service({ name, kind })` stays as the data form and
+   the fallback spelling. The import rule moves into the static read every
+   command shares, and the sentinel sweep, which reads only `name` and
+   `kind`, runs before build-plan discovery (D34).
 
 ## 16. What the source tree taught
 
