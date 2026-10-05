@@ -752,6 +752,11 @@ parameters, and `exec`), whose errors carry SQLite's extended result code
 in `code`. Python's SQLite adapter is in
 [Use the engine from Python](#use-the-engine-from-python); Go's and Rust's
 are still to come.
+The vectors in
+[`runtime/versiongraph/testdata/sqlite`](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/testdata/sqlite)
+hold every language's adapter to this one: the layout's statements, a
+database the TypeScript adapter wrote, as SQL text, and what it reads back
+as, so a file one language's adapter writes reads the same in another's.
 
 When a schema declares a graph, tsgen writes a typed facade per graph into
 the TypeScript types package, `versiongraph/<name>.ts`, exported as
@@ -789,7 +794,7 @@ no TypeScript ORM, so refs, commits and release pointers come back as the
 engine's `Ref`, `Commit` and `Release`.
 
 ```
-make versiongraph-scenarios-ts   # every scenario on SQLite and the SQLite adapter's tests; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests; a gained column end to end on each backend
+make versiongraph-scenarios-ts   # every scenario on SQLite, the SQLite adapter's tests and the SQLite vectors; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests; a gained column end to end on each backend
 ```
 
 The SQLite pass needs no database server. The Postgres pass needs

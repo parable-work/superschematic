@@ -5,8 +5,9 @@
 // Postgres and SQLite adapters' included, loads the pg driver or a SQLite
 // module: a resolve hook refuses them, so an import of one anywhere in the
 // package's graph fails the script. Then it runs the SQLite adapter's own
-// tests (test/sqlite-cases.ts, which Node loads by stripping its types)
-// through node:sqlite.
+// tests (test/sqlite-cases.ts, which Node loads by stripping its types) and
+// the shared SQLite vectors' checks (test/sqlite-vectors-cases.ts) through
+// node:sqlite.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { registerHooks } from "node:module";
@@ -107,3 +108,15 @@ for (const c of cases) {
   }
 }
 console.log(`node: ${cases.length} SQLite adapter cases pass through ${binding.name}`);
+
+// The shared SQLite vectors' checks, through node:sqlite.
+const { vectorCases } = await import("./sqlite-vectors-cases.ts");
+for (const c of vectorCases) {
+  try {
+    c.run(binding);
+  } catch (err) {
+    console.error(`node: ${binding.name}: ${c.name}`);
+    throw err;
+  }
+}
+console.log(`node: ${vectorCases.length} SQLite vector checks pass through ${binding.name}`);
