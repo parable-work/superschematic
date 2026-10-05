@@ -1090,8 +1090,9 @@ event stream, MCP tools, the reach and publish hook of the first
 amendment below, the runner of the second, create parameters and the
 validation hook of the last two. The core declares `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`
-(full-text, on FTS5), `Reactions`, `Constants` and `Variants`, and the
-engine registers them when it opens, which meets D10's done criterion
+(full-text, on FTS5), `Reactions`, `Constants`, `Variants` and `Branches`
+(a version graph on each instance, D32), and the engine registers them
+when it opens, which meets D10's done criterion
 (`make cli-smoke`, `test/core-behaviors.test.ts`, acme's
 `scripts/smoke.sh`). The core also
 declares the work-queue behaviors `Lease`, `Assignment`, `Queue`,
@@ -2608,8 +2609,20 @@ and each changes a D16 rule.
 Phases 1, 2 and 3 do not depend on each other; phase 4 needs all three,
 and phase 5 needs phase 4.
 
-The table's steps 1 to 5 are built, `Branches` last
-(`runtime/engine/README.md`, "Branches"), and its Later row is not.
+Status: phases 1 to 5 are built, `Branches` last
+(`runtime/engine/README.md`, "Branches"); the Later row is not.
+
+### D32, amended: Branches as it was built
+
+Building `Branches` settled four points that the entry above left open
+or put otherwise.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each field `ConfigTarget.types` gives for a scalar carries `jsonType`, the JSON type of the scalar's values as the describe document writes a field of it: what the value-class rule needs for a scalar the document defines, which "What D16 gains" did not list. That type comes from the scalar's `json_schema` mapping or its primitive and can say less than its validator holds, so `save` and a resolution's value are also held to each column's value class, as the adapter canonicalizes it: 1.5 of a scalar whose JSON type is `integer` passes the validator and is refused there, at its field. | Reading the document's scalar definitions in `parseConfig`, which has no handle on the document |
+| A scalar the document declares under a builtin's name takes the scalar catalog's class, where the `Branches` row gives it the class its JSON type gives. The engine validates such a scalar with the catalog's row, whatever the document declares, as the Go loader fills it in, and `format --to=json` declares every catalog scalar a schema uses, so the row as written would class every catalog scalar by its JSON type. | The document's JSON type, which gives `Identity.UUID` the class `string` |
+| `configChange` decides per kind: removing a kind, or changing its type, parent, order, singleton or a field's unit, is refused. `primary`, `snapshotEvery`, `sweep` and a retention may change, and a unit may be given a field the old type lacked, of which no stored row holds a value. | Refusing every change but a kind's fields and a retention, which freezes the sweep and the primary line's name for good |
+| `discard` refuses an instance's primary line, with the veto `primary_line`: the instance gets no other, so once discarded it would have no live ref to branch from. | Discarding it as the version graph engine allows |
 
 ## D33. The session store reports a revoked session's `DeletedAt`
 

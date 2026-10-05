@@ -2112,7 +2112,7 @@ primary line and drafts of it.
 | Schedule | `sweep`, every `sweep.intervalMs` on a schema whose config gives `sweep`, off on any other |
 | Vetoes | the version graph engine's codes: `version_conflict`, `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`, `entity_not_found`, `invalid_tree` (the core's findings in `details.findings`), `merge_into_itself`, `no_parent`, `not_tagged`, `walk_ceiling`; and `primary_line`, a `discard` of the primary line |
 | Refusals at define | a kind whose type is no type of the document besides the instance type; a field whose JSON key is a role or audit column's; a field of a scalar no value class reads (`Geo.Location`); a parent that is no kind of the config, or whose key is not a field of the kind's type holding a UUID; an order that is not an integer field; a unit on a field the type lacks, a `keyed` or `jsonSchema` unit on a field that is not JSON, an excluded order or parent key; and what else the version graph's core refuses in the descriptor (`invalid_schema`) |
-| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused. Added to a schema with instances, not removed from one |
+| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change, and a unit be given a field the old type lacked; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused. Added to a schema with instances, not removed from one. A field a version adds changes the hash an earlier commit's tree reads with ("A field a version adds") |
 
 | Operation | Takes | Returns |
 | --- | --- | --- |
@@ -2160,11 +2160,22 @@ times as UTC date-times; a tree is rows by kind.
 - **Rows.** `save` holds each upsert row's content, the row less
   `entity_key`, to its kind's type with `validate(type, value)` before
   the engine sees it: a JSON object, each field's value, no key the type
-  does not declare. Its issues refuse the save (`invalid_argument`, each
-  at a JSON pointer such as `/edits/step/upsert/0/position`). A row is an
-  entity's whole content: a field it leaves out is stored null, and an
+  does not declare. It then holds each value to its column's value class,
+  as the adapter canonicalizes it, which a value the type accepts can
+  still miss: 1.5 of a document scalar whose JSON type is `integer`.
+  Either refuses the save (`invalid_argument`, each issue at a JSON
+  pointer such as `/edits/step/upsert/0/position`). A row is an entity's
+  whole content: a field it leaves out is stored null, and an
   `entity_key` replaces that entity on the draft. A read returns rows
   with their role and audit columns, ids in their canonical form.
+- **Resolutions.** A `merge` or a `rebase` takes `resolutions`, each
+  `{ kind, entityKey, path }` with `take` (`base`, `ours` or `theirs`)
+  or a `value`. A value is held to the value class of the field its path
+  names (or, at path `""`, of each field of the row it gives) before the
+  engine merges, and once it has merged, each entity a value settled is
+  held, as the ref composes it, to its kind's type, as `save` holds a
+  row. A refusal is `invalid_argument` at `/resolutions/<i>/value`, and
+  the operation writes nothing.
 - **Refs and commits.** Each is named by id, in either UUID form, and must
   be the instance's: another instance's, a discarded ref or one that does
   not exist is `invalid_argument` at the parameter. A primary line takes
@@ -2189,9 +2200,12 @@ times as UTC date-times; a tree is rows by kind.
   commit records schema epoch 0, which every version keeps.
 - **The primary line.** `initialize` creates it, named `primary`, as the
   creator. An instance created before its schema composed `Branches`
-  gets it at its first write, a `Branches` writing operation, an update,
+  gets it at its first write after: an update that changes the instance,
   or another behavior's writing operation, in that write's transaction,
-  as its caller.
+  as its caller. A `Branches` operation cannot be that write: each names
+  a ref or a commit of the instance, which it has none of until then, so
+  the operation is refused and rolls the line it would have made back.
+  `discard` refuses the primary line (`primary_line`).
 - **The sweep.** On a schema whose config gives `sweep`, each run, as the
   runner's principal, invokes `discard` on each instance for each draft
   with no write for `abandonAfter`, so each runs its guards and appends
@@ -2202,6 +2216,13 @@ times as UTC date-times; a tree is rows by kind.
   past its `retentionDays`, at most `pruneBatch` images a kind, keeping
   every image a commit or a snapshot pins, and writes every snapshot the
   graph's rules call for and it lacks.
+- **A field a version adds.** Every stored row reads a field a new
+  version adds to its kind's type as null, as a Postgres row reads a
+  column added after it was written. A commit's tree then hashes with
+  the new column in it, so `materialize` of a commit made before returns
+  another `contentHash` than the one the commit stored, which `history`
+  and a commit's own record still return. A commit compares trees, not
+  stored hashes, so `nothing_to_commit` holds as before.
 - **Deleting.** Deleting an instance deletes its graph: its refs,
   commits, patches, snapshots, rows, release pointer and their history.
 - **The core.** `@superschematic/engine` depends on

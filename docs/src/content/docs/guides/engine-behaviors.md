@@ -725,14 +725,21 @@ call("released");                                           // { release, tree, 
   `created_at`, `created_by`, `updated_at` and `updated_by`, the author a
   conflict names. A type with a field of one of those names is refused.
   A saved row is an entity's whole content, with `entity_key` to replace
-  one, and it is held to its kind's type as a field of that type is; a
-  refused row is `invalid_argument` at its field. A read returns each
-  author as the caller's subject.
+  one, and it is held to its kind's type as a field of that type is, and
+  each value to its column's value class; a refused row is
+  `invalid_argument` at its field. A read returns each author as the
+  caller's subject.
 - **Conflicts.** A merge or a rebase whose sides changed a unit
   differently returns the conflicts, each side's value and author, and
-  writes nothing; `resolutions` settle them by unit path.
+  writes nothing; `resolutions` settle them by unit path, taking a side
+  or giving a value. A value is held to its field's class, and the row it
+  leaves to its kind's type, as a saved row is; a refused one is
+  `invalid_argument` at `/resolutions/<i>/value` and writes nothing.
 - **Older instances.** `Branches` can be added to a schema with
-  instances. One created before gets its primary line at its first write.
+  instances. One created before gets its primary line at its first write
+  after: an update that changes it, or another behavior's writing
+  operation. A `Branches` operation cannot be that write, since each
+  names a ref or a commit the instance does not have yet.
 - **The sweep.** With `sweep`, a schedule runs on the schema as the
   runner's principal: it discards each draft with no write for
   `abandonAfter` through the instance's `discard`, with an event each,
@@ -743,7 +750,10 @@ call("released");                                           // { release, tree, 
   as the compatibility rule allows a field to change, and change a
   retention, `primary`, `snapshotEvery` and `sweep`; removing a kind or
   changing a kind's type, parent, order, singleton or a field's unit is
-  refused, and so is a version without `Branches`.
+  refused, and so is a version without `Branches`. Every stored row reads
+  a field a version adds as null, so `materialize` of a commit made
+  before returns another `contentHash` than the one the commit stored and
+  `history` returns; `nothing_to_commit`, which compares trees, holds.
 - **Deleting.** Deleting an instance deletes its graph.
 - **Lease.** A type cannot compose `Branches` with `Lease`, whose
   `release` operation shares a name.

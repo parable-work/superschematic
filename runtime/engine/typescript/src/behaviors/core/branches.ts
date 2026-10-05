@@ -55,10 +55,11 @@ schema that composes Branches is composed.
 
 initialize creates an instance's primary line, named by primary (main by
 default). An instance created before its schema composed Branches gets
-its primary line at its first write, in that write's transaction: a
-Branches operation that writes, or an update or a writing operation of
-another behavior, through afterChange. Deleting an instance deletes its
-graph.
+its primary line at its first write, in that write's transaction, through
+afterChange: an update that changes it or a writing operation of another
+behavior. A Branches operation records the root first too, but each
+names a ref or a commit the instance has none of yet, so it is refused
+and rolls the line back. Deleting an instance deletes its graph.
 
 With sweep in the config, the sweep schedule runs on the schema: each run
 discards the drafts idle past abandonAfter by invoking discard on each
