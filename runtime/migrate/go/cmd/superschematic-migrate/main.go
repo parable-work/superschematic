@@ -7,6 +7,7 @@
 //	superschematic-migrate adopt --model model.json [--database-url URL]
 //	superschematic-migrate version
 //
+// A d1:// database URL reads the API token from CLOUDFLARE_API_TOKEN.
 // Exit codes: 0 done, 1 refused or failed, 2 usage.
 package main
 
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	migrate "github.com/parable-work/superschematic/runtime/migrate/go"
+	"github.com/parable-work/superschematic/runtime/migrate/go/d1"
 	"github.com/parable-work/superschematic/runtime/migrate/go/postgres"
 	"github.com/parable-work/superschematic/runtime/migrate/go/sqlite"
 )
@@ -42,7 +44,10 @@ const usage = `usage:
   superschematic-migrate version
 
 --database-url defaults to $DATABASE_URL. A postgres:// or postgresql://
-URL selects Postgres; a sqlite: URL, a file: URI or a path selects SQLite.
+URL selects Postgres; a sqlite: URL, a file: URI or a path selects SQLite;
+a d1://<account id>/<database id> URL selects a Cloudflare D1 database,
+reached with the API token in $CLOUDFLARE_API_TOKEN. SQLite and D1 run
+sqlite plans.
 `
 
 func main() {
@@ -59,6 +64,9 @@ type options struct {
 	// waits and sleep replace the runner's retry pauses in tests.
 	waits []time.Duration
 	sleep func(context.Context, time.Duration) error
+	// d1 are the D1 driver's options but the token, which comes from
+	// CLOUDFLARE_API_TOKEN. Tests point them at a fake server.
+	d1 d1.Options
 }
 
 // run runs one command and returns its exit code.
@@ -160,9 +168,20 @@ func databaseURL(flagValue string, o options) (string, error) {
 }
 
 // openDriver connects to the database url names.
-func openDriver(ctx context.Context, url string) (migrate.Driver, func(), error) {
-	switch migrate.URLDialect(url) {
-	case migrate.Postgres:
+func openDriver(ctx context.Context, url string, o options) (migrate.Driver, func(), error) {
+	switch {
+	case d1.IsURL(url):
+		opts := o.d1
+		opts.Token = o.getenv(d1.TokenEnv)
+		if opts.Token == "" {
+			return nil, nil, usageErrorf("a d1:// database needs a Cloudflare API token: set %s", d1.TokenEnv)
+		}
+		d, err := d1.Open(ctx, url, opts)
+		if err != nil {
+			return nil, nil, err
+		}
+		return d, func() { _ = d.Close(context.WithoutCancel(ctx)) }, nil
+	case migrate.URLDialect(url) == migrate.Postgres:
 		d, err := postgres.Open(ctx, url, postgres.Options{})
 		if err != nil {
 			return nil, nil, err
@@ -211,7 +230,7 @@ func apply(ctx context.Context, args []string, o options) error {
 	if dialect := migrate.URLDialect(url); dialect != plan.Dialect {
 		return fmt.Errorf("%s: the plan is for %s and the database URL selects %s", *planPath, plan.Dialect, dialect)
 	}
-	driver, closeDriver, err := openDriver(ctx, url)
+	driver, closeDriver, err := openDriver(ctx, url, o)
 	if err != nil {
 		return err
 	}
@@ -234,7 +253,7 @@ func status(ctx context.Context, args []string, o options) error {
 	if err != nil {
 		return err
 	}
-	driver, closeDriver, err := openDriver(ctx, url)
+	driver, closeDriver, err := openDriver(ctx, url, o)
 	if err != nil {
 		return err
 	}
@@ -311,7 +330,7 @@ func adopt(ctx context.Context, args []string, o options) error {
 	if dialect := migrate.URLDialect(url); dialect != model.Dialect {
 		return fmt.Errorf("%s: the model is for %s and the database URL selects %s", *modelPath, model.Dialect, dialect)
 	}
-	driver, closeDriver, err := openDriver(ctx, url)
+	driver, closeDriver, err := openDriver(ctx, url, o)
 	if err != nil {
 		return err
 	}
