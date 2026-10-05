@@ -3,6 +3,7 @@ package rustgen
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -29,6 +30,10 @@ type resolvedImports struct {
 	// fields typed by a dependency enum (e.g. a union discriminator) can be
 	// rendered as Rust variant expressions.
 	enums []codegen.EnumInfo
+
+	// objectValidators maps each imported object type its dependency crate
+	// generates with validators to that crate's validators module.
+	objectValidators map[string]string
 }
 
 // DependencyServiceName extracts the service name from a schema import
@@ -46,7 +51,7 @@ func DependencyServiceName(pkg string) string {
 // aliases re-exported from types.rs; scalars are skipped because their
 // aliases are regenerated locally.
 func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
-	result := &resolvedImports{enumNames: map[string]bool{}}
+	result := &resolvedImports{enumNames: map[string]bool{}, objectValidators: map[string]string{}}
 	if len(schema.Imports) == 0 {
 		return result, nil
 	}
@@ -115,6 +120,11 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 					continue
 				}
 				doc = codegen.DocText(typeDef.Description, typeDef.Comment)
+				// The dependency crate generates validators for the roles
+				// it emits as structs, and for its inputs.
+				if slices.Contains(localObjectRoles, typeDef.Role) || typeDef.Role == ir.RoleAPIInput {
+					result.objectValidators[symbol] = rustutil.CrateNameToModulePath(crateName) + "::validators"
+				}
 			default:
 				return nil, fmt.Errorf("rustgen: imported symbol %q not found in dependency schema %q", symbol, depName)
 			}

@@ -1,0 +1,72 @@
+{
+  "token": "gcp:compute/targetHttpsProxy:TargetHttpsProxy",
+  "terraform": {
+    "type": "google_compute_target_https_proxy",
+    "renames": {
+      "certificateManagerCertificates": "certificate_manager_certificates",
+      "certificateMap": "certificate_map",
+      "deletionPolicy": "deletion_policy",
+      "httpKeepAliveTimeoutSec": "http_keep_alive_timeout_sec",
+      "proxyBind": "proxy_bind",
+      "quicOverride": "quic_override",
+      "serverTlsPolicy": "server_tls_policy",
+      "sslCertificates": "ssl_certificates",
+      "sslPolicy": "ssl_policy",
+      "tlsEarlyData": "tls_early_data",
+      "urlMap": "url_map"
+    }
+  },
+  "inputProperties": {
+    "certificateManagerCertificates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "certificateMap": {
+      "type": "string"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "httpKeepAliveTimeoutSec": {
+      "type": "integer"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "proxyBind": {
+      "type": "boolean"
+    },
+    "quicOverride": {
+      "type": "string"
+    },
+    "serverTlsPolicy": {
+      "type": "string"
+    },
+    "sslCertificates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sslPolicy": {
+      "type": "string"
+    },
+    "tlsEarlyData": {
+      "type": "string"
+    },
+    "urlMap": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "urlMap"
+  ]
+}

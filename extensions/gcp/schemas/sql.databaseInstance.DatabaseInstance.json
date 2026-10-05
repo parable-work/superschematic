@@ -1,0 +1,1014 @@
+{
+  "token": "gcp:sql/databaseInstance:DatabaseInstance",
+  "terraform": {
+    "type": "google_sql_database_instance",
+    "renames": {
+      "backupdrBackup": "backupdr_backup",
+      "clone.allocatedIpRange": "allocated_ip_range",
+      "clone.databaseNames": "database_names",
+      "clone.pointInTime": "point_in_time",
+      "clone.preferredZone": "preferred_zone",
+      "clone.sourceInstanceDeletionTime": "source_instance_deletion_time",
+      "clone.sourceInstanceName": "source_instance_name",
+      "clone.sourceProject": "source_project",
+      "databaseVersion": "database_version",
+      "deletionPolicy": "deletion_policy",
+      "deletionProtection": "deletion_protection",
+      "encryptionKeyName": "encryption_key_name",
+      "enforceNewSqlNetworkArchitecture": "enforce_new_sql_network_architecture",
+      "finalBackupDescription": "final_backup_description",
+      "includeReplicasForMajorVersionUpgrade": "include_replicas_for_major_version_upgrade",
+      "instanceType": "instance_type",
+      "maintenanceVersion": "maintenance_version",
+      "masterInstanceName": "master_instance_name",
+      "nodeCount": "node_count",
+      "pointInTimeRestoreContext": "point_in_time_restore_context",
+      "pointInTimeRestoreContext.allocatedIpRange": "allocated_ip_range",
+      "pointInTimeRestoreContext.pointInTime": "point_in_time",
+      "pointInTimeRestoreContext.preferredZone": "preferred_zone",
+      "pointInTimeRestoreContext.targetInstance": "target_instance",
+      "replicaConfiguration": "replica_configuration",
+      "replicaConfiguration.caCertificate": "ca_certificate",
+      "replicaConfiguration.cascadableReplica": "cascadable_replica",
+      "replicaConfiguration.clientCertificate": "client_certificate",
+      "replicaConfiguration.clientKey": "client_key",
+      "replicaConfiguration.connectRetryInterval": "connect_retry_interval",
+      "replicaConfiguration.dumpFilePath": "dump_file_path",
+      "replicaConfiguration.failoverTarget": "failover_target",
+      "replicaConfiguration.masterHeartbeatPeriod": "master_heartbeat_period",
+      "replicaConfiguration.sslCipher": "ssl_cipher",
+      "replicaConfiguration.verifyServerCertificate": "verify_server_certificate",
+      "replicaNames": "replica_names",
+      "replicationCluster": "replication_cluster",
+      "replicationCluster.drReplica": "dr_replica",
+      "replicationCluster.failoverDrReplicaName": "failover_dr_replica_name",
+      "replicationCluster.psaWriteEndpoint": "psa_write_endpoint",
+      "restoreBackupContext": "restore_backup_context",
+      "restoreBackupContext.backupRunId": "backup_run_id",
+      "restoreBackupContext.instanceId": "instance_id",
+      "rootPassword": "root_password",
+      "rootPasswordWo": "root_password_wo",
+      "rootPasswordWoVersion": "root_password_wo_version",
+      "settings.activationPolicy": "activation_policy",
+      "settings.activeDirectoryConfig": "active_directory_config",
+      "settings.activeDirectoryConfig.adminCredentialSecretName": "admin_credential_secret_name",
+      "settings.activeDirectoryConfig.dnsServers": "dns_servers",
+      "settings.activeDirectoryConfig.organizationalUnit": "organizational_unit",
+      "settings.advancedMachineFeatures": "advanced_machine_features",
+      "settings.advancedMachineFeatures.threadsPerCore": "threads_per_core",
+      "settings.autoUpgradeEnabled": "auto_upgrade_enabled",
+      "settings.availabilityType": "availability_type",
+      "settings.backupConfiguration": "backup_configuration",
+      "settings.backupConfiguration.backupRetentionSettings": "backup_retention_settings",
+      "settings.backupConfiguration.backupRetentionSettings.retainedBackups": "retained_backups",
+      "settings.backupConfiguration.backupRetentionSettings.retentionUnit": "retention_unit",
+      "settings.backupConfiguration.backupTier": "backup_tier",
+      "settings.backupConfiguration.binaryLogEnabled": "binary_log_enabled",
+      "settings.backupConfiguration.pointInTimeRecoveryEnabled": "point_in_time_recovery_enabled",
+      "settings.backupConfiguration.startTime": "start_time",
+      "settings.backupConfiguration.transactionLogRetentionDays": "transaction_log_retention_days",
+      "settings.connectionPoolConfigs": "connection_pool_config",
+      "settings.connectionPoolConfigs.connectionPoolingEnabled": "connection_pooling_enabled",
+      "settings.connectorEnforcement": "connector_enforcement",
+      "settings.dataApiAccess": "data_api_access",
+      "settings.dataCacheConfig": "data_cache_config",
+      "settings.dataCacheConfig.dataCacheEnabled": "data_cache_enabled",
+      "settings.dataDiskProvisionedIops": "data_disk_provisioned_iops",
+      "settings.dataDiskProvisionedThroughput": "data_disk_provisioned_throughput",
+      "settings.databaseFlags": "database_flags",
+      "settings.deletionProtectionEnabled": "deletion_protection_enabled",
+      "settings.denyMaintenancePeriod": "deny_maintenance_period",
+      "settings.denyMaintenancePeriod.endDate": "end_date",
+      "settings.denyMaintenancePeriod.startDate": "start_date",
+      "settings.diskAutoresize": "disk_autoresize",
+      "settings.diskAutoresizeLimit": "disk_autoresize_limit",
+      "settings.diskSize": "disk_size",
+      "settings.diskType": "disk_type",
+      "settings.effectiveAvailabilityType": "effective_availability_type",
+      "settings.enableDataplexIntegration": "enable_dataplex_integration",
+      "settings.enableGoogleMlIntegration": "enable_google_ml_integration",
+      "settings.entraidConfig": "entraid_config",
+      "settings.entraidConfig.applicationId": "application_id",
+      "settings.entraidConfig.tenantId": "tenant_id",
+      "settings.finalBackupConfig": "final_backup_config",
+      "settings.finalBackupConfig.retentionDays": "retention_days",
+      "settings.insightsConfig": "insights_config",
+      "settings.insightsConfig.enhancedQueryInsightsEnabled": "enhanced_query_insights_enabled",
+      "settings.insightsConfig.queryInsightsEnabled": "query_insights_enabled",
+      "settings.insightsConfig.queryPlansPerMinute": "query_plans_per_minute",
+      "settings.insightsConfig.queryStringLength": "query_string_length",
+      "settings.insightsConfig.recordApplicationTags": "record_application_tags",
+      "settings.insightsConfig.recordClientAddress": "record_client_address",
+      "settings.ipConfiguration": "ip_configuration",
+      "settings.ipConfiguration.allocatedIpRange": "allocated_ip_range",
+      "settings.ipConfiguration.authorizedNetworks": "authorized_networks",
+      "settings.ipConfiguration.authorizedNetworks.expirationTime": "expiration_time",
+      "settings.ipConfiguration.customSubjectAlternativeNames": "custom_subject_alternative_names",
+      "settings.ipConfiguration.enablePrivatePathForGoogleCloudServices": "enable_private_path_for_google_cloud_services",
+      "settings.ipConfiguration.ipv4Enabled": "ipv4_enabled",
+      "settings.ipConfiguration.privateNetwork": "private_network",
+      "settings.ipConfiguration.pscConfigs": "psc_config",
+      "settings.ipConfiguration.pscConfigs.allowedConsumerProjects": "allowed_consumer_projects",
+      "settings.ipConfiguration.pscConfigs.networkAttachmentUri": "network_attachment_uri",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnectionPolicyEnabled": "psc_auto_connection_policy_enabled",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections": "psc_auto_connections",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections.consumerNetwork": "consumer_network",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections.consumerNetworkStatus": "consumer_network_status",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections.consumerServiceProjectId": "consumer_service_project_id",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections.instanceAutoDnsStatus": "instance_auto_dns_status",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections.ipAddress": "ip_address",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections.serviceConnectionPolicy": "service_connection_policy",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections.serviceConnectionPolicyCreationResult": "service_connection_policy_creation_result",
+      "settings.ipConfiguration.pscConfigs.pscAutoConnections.writeEndpointAutoDnsStatus": "write_endpoint_auto_dns_status",
+      "settings.ipConfiguration.pscConfigs.pscAutoDnsEnabled": "psc_auto_dns_enabled",
+      "settings.ipConfiguration.pscConfigs.pscEnabled": "psc_enabled",
+      "settings.ipConfiguration.pscConfigs.pscWriteEndpointDnsEnabled": "psc_write_endpoint_dns_enabled",
+      "settings.ipConfiguration.serverCaMode": "server_ca_mode",
+      "settings.ipConfiguration.serverCaPool": "server_ca_pool",
+      "settings.ipConfiguration.serverCertificateRotationMode": "server_certificate_rotation_mode",
+      "settings.ipConfiguration.sslMode": "ssl_mode",
+      "settings.locationPreference": "location_preference",
+      "settings.locationPreference.followGaeApplication": "follow_gae_application",
+      "settings.locationPreference.secondaryZone": "secondary_zone",
+      "settings.maintenanceWindow": "maintenance_window",
+      "settings.maintenanceWindow.updateTrack": "update_track",
+      "settings.passwordValidationPolicy": "password_validation_policy",
+      "settings.passwordValidationPolicy.disallowUsernameSubstring": "disallow_username_substring",
+      "settings.passwordValidationPolicy.enablePasswordPolicy": "enable_password_policy",
+      "settings.passwordValidationPolicy.minLength": "min_length",
+      "settings.passwordValidationPolicy.passwordChangeInterval": "password_change_interval",
+      "settings.passwordValidationPolicy.reuseInterval": "reuse_interval",
+      "settings.performanceCaptureConfig": "performance_capture_config",
+      "settings.performanceCaptureConfig.cpuUtilizationThresholdPercent": "cpu_utilization_threshold_percent",
+      "settings.performanceCaptureConfig.historyListLengthThresholdCount": "history_list_length_threshold_count",
+      "settings.performanceCaptureConfig.memoryUsageThresholdPercent": "memory_usage_threshold_percent",
+      "settings.performanceCaptureConfig.probeThreshold": "probe_threshold",
+      "settings.performanceCaptureConfig.probingIntervalSeconds": "probing_interval_seconds",
+      "settings.performanceCaptureConfig.runningThreadsThreshold": "running_threads_threshold",
+      "settings.performanceCaptureConfig.secondsBehindSourceThreshold": "seconds_behind_source_threshold",
+      "settings.performanceCaptureConfig.semaphoreWaitThresholdCount": "semaphore_wait_threshold_count",
+      "settings.performanceCaptureConfig.transactionDurationThreshold": "transaction_duration_threshold",
+      "settings.performanceCaptureConfig.transactionKillExcludedUserHosts": "transaction_kill_excluded_user_hosts",
+      "settings.performanceCaptureConfig.transactionKillThresholdSeconds": "transaction_kill_threshold_seconds",
+      "settings.performanceCaptureConfig.transactionKillType": "transaction_kill_type",
+      "settings.performanceCaptureConfig.transactionLockWaitThresholdCount": "transaction_lock_wait_threshold_count",
+      "settings.pricingPlan": "pricing_plan",
+      "settings.readPoolAutoScaleConfig": "read_pool_auto_scale_config",
+      "settings.readPoolAutoScaleConfig.disableScaleIn": "disable_scale_in",
+      "settings.readPoolAutoScaleConfig.maxNodeCount": "max_node_count",
+      "settings.readPoolAutoScaleConfig.minNodeCount": "min_node_count",
+      "settings.readPoolAutoScaleConfig.scaleInCooldownSeconds": "scale_in_cooldown_seconds",
+      "settings.readPoolAutoScaleConfig.scaleOutCooldownSeconds": "scale_out_cooldown_seconds",
+      "settings.readPoolAutoScaleConfig.targetMetrics": "target_metrics",
+      "settings.readPoolAutoScaleConfig.targetMetrics.targetValue": "target_value",
+      "settings.replicationLagMaxSeconds": "replication_lag_max_seconds",
+      "settings.retainBackupsOnDelete": "retain_backups_on_delete",
+      "settings.sqlServerAuditConfig": "sql_server_audit_config",
+      "settings.sqlServerAuditConfig.retentionInterval": "retention_interval",
+      "settings.sqlServerAuditConfig.uploadInterval": "upload_interval",
+      "settings.timeZone": "time_zone",
+      "settings.userLabels": "user_labels",
+      "switchTransactionLogsToCloudStorageEnabled": "switch_transaction_logs_to_cloud_storage_enabled"
+    }
+  },
+  "inputProperties": {
+    "backupdrBackup": {
+      "type": "string"
+    },
+    "clone": {
+      "$ref": "#/types/gcp:sql/DatabaseInstanceClone:DatabaseInstanceClone"
+    },
+    "databaseVersion": {
+      "type": "string"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "deletionProtection": {
+      "type": "boolean"
+    },
+    "encryptionKeyName": {
+      "type": "string"
+    },
+    "enforceNewSqlNetworkArchitecture": {
+      "type": "boolean"
+    },
+    "finalBackupDescription": {
+      "type": "string"
+    },
+    "includeReplicasForMajorVersionUpgrade": {
+      "type": "boolean"
+    },
+    "instanceType": {
+      "type": "string"
+    },
+    "maintenanceVersion": {
+      "type": "string"
+    },
+    "masterInstanceName": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "nodeCount": {
+      "type": "integer"
+    },
+    "pointInTimeRestoreContext": {
+      "$ref": "#/types/gcp:sql/DatabaseInstancePointInTimeRestoreContext:DatabaseInstancePointInTimeRestoreContext"
+    },
+    "project": {
+      "type": "string"
+    },
+    "region": {
+      "type": "string"
+    },
+    "replicaConfiguration": {
+      "$ref": "#/types/gcp:sql/DatabaseInstanceReplicaConfiguration:DatabaseInstanceReplicaConfiguration"
+    },
+    "replicaNames": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replicationCluster": {
+      "$ref": "#/types/gcp:sql/DatabaseInstanceReplicationCluster:DatabaseInstanceReplicationCluster"
+    },
+    "restoreBackupContext": {
+      "$ref": "#/types/gcp:sql/DatabaseInstanceRestoreBackupContext:DatabaseInstanceRestoreBackupContext"
+    },
+    "rootPassword": {
+      "type": "string"
+    },
+    "rootPasswordWo": {
+      "type": "string"
+    },
+    "rootPasswordWoVersion": {
+      "type": "string"
+    },
+    "settings": {
+      "$ref": "#/types/gcp:sql/DatabaseInstanceSettings:DatabaseInstanceSettings"
+    },
+    "switchTransactionLogsToCloudStorageEnabled": {
+      "type": "boolean"
+    }
+  },
+  "requiredInputs": [
+    "databaseVersion"
+  ],
+  "types": {
+    "gcp:sql/DatabaseInstanceClone:DatabaseInstanceClone": {
+      "type": "object",
+      "properties": {
+        "allocatedIpRange": {
+          "type": "string"
+        },
+        "databaseNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pointInTime": {
+          "type": "string"
+        },
+        "preferredZone": {
+          "type": "string"
+        },
+        "sourceInstanceDeletionTime": {
+          "type": "string"
+        },
+        "sourceInstanceName": {
+          "type": "string"
+        },
+        "sourceProject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceInstanceName"
+      ]
+    },
+    "gcp:sql/DatabaseInstancePointInTimeRestoreContext:DatabaseInstancePointInTimeRestoreContext": {
+      "type": "object",
+      "properties": {
+        "allocatedIpRange": {
+          "type": "string"
+        },
+        "datasource": {
+          "type": "string"
+        },
+        "pointInTime": {
+          "type": "string"
+        },
+        "preferredZone": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "targetInstance": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "datasource"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceReplicaConfiguration:DatabaseInstanceReplicaConfiguration": {
+      "type": "object",
+      "properties": {
+        "caCertificate": {
+          "type": "string"
+        },
+        "cascadableReplica": {
+          "type": "boolean"
+        },
+        "clientCertificate": {
+          "type": "string"
+        },
+        "clientKey": {
+          "type": "string"
+        },
+        "connectRetryInterval": {
+          "type": "integer"
+        },
+        "dumpFilePath": {
+          "type": "string"
+        },
+        "failoverTarget": {
+          "type": "boolean"
+        },
+        "masterHeartbeatPeriod": {
+          "type": "integer"
+        },
+        "password": {
+          "type": "string"
+        },
+        "sslCipher": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "verifyServerCertificate": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceReplicationCluster:DatabaseInstanceReplicationCluster": {
+      "type": "object",
+      "properties": {
+        "drReplica": {
+          "type": "boolean"
+        },
+        "failoverDrReplicaName": {
+          "type": "string"
+        },
+        "psaWriteEndpoint": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceRestoreBackupContext:DatabaseInstanceRestoreBackupContext": {
+      "type": "object",
+      "properties": {
+        "backupRunId": {
+          "type": "integer"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "backupRunId"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettings:DatabaseInstanceSettings": {
+      "type": "object",
+      "properties": {
+        "activationPolicy": {
+          "type": "string"
+        },
+        "activeDirectoryConfig": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsActiveDirectoryConfig:DatabaseInstanceSettingsActiveDirectoryConfig"
+        },
+        "advancedMachineFeatures": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsAdvancedMachineFeatures:DatabaseInstanceSettingsAdvancedMachineFeatures"
+        },
+        "autoUpgradeEnabled": {
+          "type": "boolean"
+        },
+        "availabilityType": {
+          "type": "string"
+        },
+        "backupConfiguration": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsBackupConfiguration:DatabaseInstanceSettingsBackupConfiguration"
+        },
+        "collation": {
+          "type": "string"
+        },
+        "connectionPoolConfigs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsConnectionPoolConfig:DatabaseInstanceSettingsConnectionPoolConfig"
+          }
+        },
+        "connectorEnforcement": {
+          "type": "string"
+        },
+        "dataApiAccess": {
+          "type": "string"
+        },
+        "dataCacheConfig": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsDataCacheConfig:DatabaseInstanceSettingsDataCacheConfig"
+        },
+        "dataDiskProvisionedIops": {
+          "type": "integer"
+        },
+        "dataDiskProvisionedThroughput": {
+          "type": "integer"
+        },
+        "databaseFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsDatabaseFlag:DatabaseInstanceSettingsDatabaseFlag"
+          }
+        },
+        "deletionProtectionEnabled": {
+          "type": "boolean"
+        },
+        "denyMaintenancePeriod": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsDenyMaintenancePeriod:DatabaseInstanceSettingsDenyMaintenancePeriod"
+        },
+        "diskAutoresize": {
+          "type": "boolean"
+        },
+        "diskAutoresizeLimit": {
+          "type": "integer"
+        },
+        "diskSize": {
+          "type": "integer"
+        },
+        "diskType": {
+          "type": "string"
+        },
+        "edition": {
+          "type": "string"
+        },
+        "effectiveAvailabilityType": {
+          "type": "string"
+        },
+        "enableDataplexIntegration": {
+          "type": "boolean"
+        },
+        "enableGoogleMlIntegration": {
+          "type": "boolean"
+        },
+        "entraidConfig": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsEntraidConfig:DatabaseInstanceSettingsEntraidConfig"
+        },
+        "finalBackupConfig": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsFinalBackupConfig:DatabaseInstanceSettingsFinalBackupConfig"
+        },
+        "insightsConfig": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsInsightsConfig:DatabaseInstanceSettingsInsightsConfig"
+        },
+        "ipConfiguration": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsIpConfiguration:DatabaseInstanceSettingsIpConfiguration"
+        },
+        "locationPreference": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsLocationPreference:DatabaseInstanceSettingsLocationPreference"
+        },
+        "maintenanceWindow": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsMaintenanceWindow:DatabaseInstanceSettingsMaintenanceWindow"
+        },
+        "passwordValidationPolicy": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsPasswordValidationPolicy:DatabaseInstanceSettingsPasswordValidationPolicy"
+        },
+        "performanceCaptureConfig": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsPerformanceCaptureConfig:DatabaseInstanceSettingsPerformanceCaptureConfig"
+        },
+        "pricingPlan": {
+          "type": "string"
+        },
+        "readPoolAutoScaleConfig": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsReadPoolAutoScaleConfig:DatabaseInstanceSettingsReadPoolAutoScaleConfig"
+        },
+        "replicationLagMaxSeconds": {
+          "type": "integer"
+        },
+        "retainBackupsOnDelete": {
+          "type": "boolean"
+        },
+        "sqlServerAuditConfig": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsSqlServerAuditConfig:DatabaseInstanceSettingsSqlServerAuditConfig"
+        },
+        "tier": {
+          "type": "string"
+        },
+        "timeZone": {
+          "type": "string"
+        },
+        "userLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tier"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsActiveDirectoryConfig:DatabaseInstanceSettingsActiveDirectoryConfig": {
+      "type": "object",
+      "properties": {
+        "adminCredentialSecretName": {
+          "type": "string"
+        },
+        "dnsServers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "domain": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "organizationalUnit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsAdvancedMachineFeatures:DatabaseInstanceSettingsAdvancedMachineFeatures": {
+      "type": "object",
+      "properties": {
+        "threadsPerCore": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsBackupConfiguration:DatabaseInstanceSettingsBackupConfiguration": {
+      "type": "object",
+      "properties": {
+        "backupRetentionSettings": {
+          "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsBackupConfigurationBackupRetentionSettings:DatabaseInstanceSettingsBackupConfigurationBackupRetentionSettings"
+        },
+        "backupTier": {
+          "type": "string"
+        },
+        "binaryLogEnabled": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "location": {
+          "type": "string"
+        },
+        "pointInTimeRecoveryEnabled": {
+          "type": "boolean"
+        },
+        "startTime": {
+          "type": "string"
+        },
+        "transactionLogRetentionDays": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsBackupConfigurationBackupRetentionSettings:DatabaseInstanceSettingsBackupConfigurationBackupRetentionSettings": {
+      "type": "object",
+      "properties": {
+        "retainedBackups": {
+          "type": "integer"
+        },
+        "retentionUnit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "retainedBackups"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsConnectionPoolConfig:DatabaseInstanceSettingsConnectionPoolConfig": {
+      "type": "object",
+      "properties": {
+        "connectionPoolingEnabled": {
+          "type": "boolean"
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsConnectionPoolConfigFlag:DatabaseInstanceSettingsConnectionPoolConfigFlag"
+          }
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsConnectionPoolConfigFlag:DatabaseInstanceSettingsConnectionPoolConfigFlag": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsDataCacheConfig:DatabaseInstanceSettingsDataCacheConfig": {
+      "type": "object",
+      "properties": {
+        "dataCacheEnabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsDatabaseFlag:DatabaseInstanceSettingsDatabaseFlag": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsDenyMaintenancePeriod:DatabaseInstanceSettingsDenyMaintenancePeriod": {
+      "type": "object",
+      "properties": {
+        "endDate": {
+          "type": "string"
+        },
+        "startDate": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "endDate",
+        "startDate",
+        "time"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsEntraidConfig:DatabaseInstanceSettingsEntraidConfig": {
+      "type": "object",
+      "properties": {
+        "applicationId": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsFinalBackupConfig:DatabaseInstanceSettingsFinalBackupConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "retentionDays": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsInsightsConfig:DatabaseInstanceSettingsInsightsConfig": {
+      "type": "object",
+      "properties": {
+        "enhancedQueryInsightsEnabled": {
+          "type": "boolean"
+        },
+        "queryInsightsEnabled": {
+          "type": "boolean"
+        },
+        "queryPlansPerMinute": {
+          "type": "integer"
+        },
+        "queryStringLength": {
+          "type": "integer"
+        },
+        "recordApplicationTags": {
+          "type": "boolean"
+        },
+        "recordClientAddress": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsIpConfiguration:DatabaseInstanceSettingsIpConfiguration": {
+      "type": "object",
+      "properties": {
+        "allocatedIpRange": {
+          "type": "string"
+        },
+        "authorizedNetworks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsIpConfigurationAuthorizedNetwork:DatabaseInstanceSettingsIpConfigurationAuthorizedNetwork"
+          }
+        },
+        "customSubjectAlternativeNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enablePrivatePathForGoogleCloudServices": {
+          "type": "boolean"
+        },
+        "ipv4Enabled": {
+          "type": "boolean"
+        },
+        "privateNetwork": {
+          "type": "string"
+        },
+        "pscConfigs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsIpConfigurationPscConfig:DatabaseInstanceSettingsIpConfigurationPscConfig"
+          }
+        },
+        "serverCaMode": {
+          "type": "string"
+        },
+        "serverCaPool": {
+          "type": "string"
+        },
+        "serverCertificateRotationMode": {
+          "type": "string"
+        },
+        "sslMode": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsIpConfigurationAuthorizedNetwork:DatabaseInstanceSettingsIpConfigurationAuthorizedNetwork": {
+      "type": "object",
+      "properties": {
+        "expirationTime": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsIpConfigurationPscConfig:DatabaseInstanceSettingsIpConfigurationPscConfig": {
+      "type": "object",
+      "properties": {
+        "allowedConsumerProjects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "networkAttachmentUri": {
+          "type": "string"
+        },
+        "pscAutoConnectionPolicyEnabled": {
+          "type": "boolean"
+        },
+        "pscAutoConnections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsIpConfigurationPscConfigPscAutoConnection:DatabaseInstanceSettingsIpConfigurationPscConfigPscAutoConnection"
+          }
+        },
+        "pscAutoDnsEnabled": {
+          "type": "boolean"
+        },
+        "pscEnabled": {
+          "type": "boolean"
+        },
+        "pscWriteEndpointDnsEnabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsIpConfigurationPscConfigPscAutoConnection:DatabaseInstanceSettingsIpConfigurationPscConfigPscAutoConnection": {
+      "type": "object",
+      "properties": {
+        "consumerNetwork": {
+          "type": "string"
+        },
+        "consumerNetworkStatus": {
+          "type": "string"
+        },
+        "consumerServiceProjectId": {
+          "type": "string"
+        },
+        "instanceAutoDnsStatus": {
+          "type": "string"
+        },
+        "ipAddress": {
+          "type": "string"
+        },
+        "serviceConnectionPolicy": {
+          "type": "string"
+        },
+        "serviceConnectionPolicyCreationResult": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "writeEndpointAutoDnsStatus": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "consumerNetwork"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsLocationPreference:DatabaseInstanceSettingsLocationPreference": {
+      "type": "object",
+      "properties": {
+        "followGaeApplication": {
+          "type": "string"
+        },
+        "secondaryZone": {
+          "type": "string"
+        },
+        "zone": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsMaintenanceWindow:DatabaseInstanceSettingsMaintenanceWindow": {
+      "type": "object",
+      "properties": {
+        "day": {
+          "type": "integer"
+        },
+        "hour": {
+          "type": "integer"
+        },
+        "updateTrack": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsPasswordValidationPolicy:DatabaseInstanceSettingsPasswordValidationPolicy": {
+      "type": "object",
+      "properties": {
+        "complexity": {
+          "type": "string"
+        },
+        "disallowUsernameSubstring": {
+          "type": "boolean"
+        },
+        "enablePasswordPolicy": {
+          "type": "boolean"
+        },
+        "minLength": {
+          "type": "integer"
+        },
+        "passwordChangeInterval": {
+          "type": "string"
+        },
+        "reuseInterval": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enablePasswordPolicy"
+      ]
+    },
+    "gcp:sql/DatabaseInstanceSettingsPerformanceCaptureConfig:DatabaseInstanceSettingsPerformanceCaptureConfig": {
+      "type": "object",
+      "properties": {
+        "cpuUtilizationThresholdPercent": {
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "historyListLengthThresholdCount": {
+          "type": "integer"
+        },
+        "memoryUsageThresholdPercent": {
+          "type": "integer"
+        },
+        "probeThreshold": {
+          "type": "integer"
+        },
+        "probingIntervalSeconds": {
+          "type": "integer"
+        },
+        "runningThreadsThreshold": {
+          "type": "integer"
+        },
+        "secondsBehindSourceThreshold": {
+          "type": "integer"
+        },
+        "semaphoreWaitThresholdCount": {
+          "type": "integer"
+        },
+        "transactionDurationThreshold": {
+          "type": "integer"
+        },
+        "transactionKillExcludedUserHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "transactionKillThresholdSeconds": {
+          "type": "integer"
+        },
+        "transactionKillType": {
+          "type": "string"
+        },
+        "transactionLockWaitThresholdCount": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsReadPoolAutoScaleConfig:DatabaseInstanceSettingsReadPoolAutoScaleConfig": {
+      "type": "object",
+      "properties": {
+        "disableScaleIn": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxNodeCount": {
+          "type": "integer"
+        },
+        "minNodeCount": {
+          "type": "integer"
+        },
+        "scaleInCooldownSeconds": {
+          "type": "integer"
+        },
+        "scaleOutCooldownSeconds": {
+          "type": "integer"
+        },
+        "targetMetrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:sql/DatabaseInstanceSettingsReadPoolAutoScaleConfigTargetMetric:DatabaseInstanceSettingsReadPoolAutoScaleConfigTargetMetric"
+          }
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsReadPoolAutoScaleConfigTargetMetric:DatabaseInstanceSettingsReadPoolAutoScaleConfigTargetMetric": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "targetValue": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:sql/DatabaseInstanceSettingsSqlServerAuditConfig:DatabaseInstanceSettingsSqlServerAuditConfig": {
+      "type": "object",
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "retentionInterval": {
+          "type": "string"
+        },
+        "uploadInterval": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
