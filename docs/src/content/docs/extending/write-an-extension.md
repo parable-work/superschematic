@@ -241,6 +241,64 @@ bare (acme's `@feedKey`) and the data forms write `"feedKey": true` under
 YAML and between the two; the TypeScript writer cannot render extension
 data yet.
 
+### A class as an argument
+
+An argument can name a class as a value: the class itself, never its name
+in a string. Acme's `@crossSell` offers a type beside another class's
+listing:
+
+```ts
+export type SchemaClass = abstract new (...args: never[]) => unknown;
+
+export function crossSell(_args: { readonly with: SchemaClass }): ClassDecorator {
+  return () => {};
+}
+
+@crossSell({ with: Product })
+export abstract class Bundle {
+  code: Identity.Slug;
+}
+```
+
+The loader reads a class in any decorator's argument, so this takes no
+core edit. `Apply` gets the class reference `{"class": "Product"}`, which
+holds the class's declared name, and the data forms write the same object:
+
+```yaml
+extensions:
+  acme:
+    crossSell: { with: { class: Product } }
+```
+
+The Go half uses two registry names:
+
+```go
+var CrossSellArgs = json.RawMessage(`{
+	"type": "object",
+	"required": ["with"],
+	"additionalProperties": false,
+	"properties": {"with": ` + string(registry.ClassRefSchema) + `}
+}`)
+
+type CrossSell struct {
+	With registry.ClassRef `json:"with"`
+}
+```
+
+- `registry.ClassRefSchema` is the JSON Schema of a class reference. Use it
+  where your `Args` takes a class, so a string there fails in both forms.
+- `registry.ClassRef` is the Go type, for the struct `registry.DecodeArgs`
+  fills and for your codec.
+- A third, `registry.DecodeClassRef(v)`, reads one class reference, such as
+  a whole argument (`@pairsWith(Accessory)`), into the class's name.
+
+A class from another service's package is recorded in the schema's
+imports under that package, as a field type from it is, so the schema
+config must declare that service as a dependency. A class the schema
+neither declares nor imports fails the load, in every form, and the error
+names it. An object whose only key is `class` is always read as a class
+reference, so don't give other data that shape.
+
 ## A scalar catalog
 
 The loader hydrates every scalar a schema names from the registry's scalar

@@ -786,9 +786,13 @@ registrations.
 1. **IR.** `authDb` and `dependencies` move into the IR (`ir/schema.go`
    records only `Imports` today), and the Stack IR types are added.
 2. **Loader:**
-   - Class values in the arguments of any registered decorator. Today the
-     walker special-cases the decorators that take classes
-     (`internal/registry/core_decorators.go:58`).
+   - Landed: class values in the arguments of any registered decorator.
+     The argument evaluator reads a class, local or imported from another
+     service's package, as the class reference `{"class": name}`, and the
+     data forms write the same object (extension-model.md section 3.4), so
+     `settings: [{ of: Backend }]` needs no walker code of its own.
+     `@source`, `@versionGraph` and `@graphMember` stay walker-read;
+     `internal/registry/core_decorators.go` says why.
    - `ServiceHandle` typed by kind and config type
      (`ServiceHandle<"API", ShopApiConfig>`,
      `packages/schema-config/src/index.ts:31`), written by the sentinel
