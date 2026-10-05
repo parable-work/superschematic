@@ -38,6 +38,52 @@ type EndpointInfo struct {
 	// WebhookProvider is the @hmacVerified provider, or empty. build_router
 	// wraps the route in webhook_verified with that provider's verifier.
 	WebhookProvider string
+	// RequiresAuth marks a route that needs a caller (@auth,
+	// @requirePermission, @requireOwnership, an Authenticated set), which
+	// Implementations.authenticator establishes. RequiredPerms is its
+	// @requirePermission list, of which the caller must hold one.
+	// RequireOwnership leaves the ownership check to the implementation.
+	RequiresAuth     bool
+	RequiredPerms    []string
+	RequireOwnership bool
+	// RateLimit, BodyLimit and Timeout are the route's @rateLimit requests
+	// per minute, @bodyLimit megabytes and @timeout seconds; 0 without the
+	// directive. A value below 1 is no directive, as in the TypeScript
+	// server.
+	RateLimit int
+	BodyLimit int
+	Timeout   int
+}
+
+// HasControls reports whether the route has a traffic control or needs a
+// caller: build_router applies RouteControls to it.
+func (e EndpointInfo) HasControls() bool {
+	return e.RequiresAuth || e.RateLimit > 0 || e.BodyLimit > 0 || e.Timeout > 0
+}
+
+// ControlCalls are the RouteControls builder calls of the route, in the
+// order a request meets them: the rate limit, the body limit, the
+// permission check, then the timeout around the handler. authenticator is
+// the Rust expression of the Arc<dyn Authenticator> the check uses.
+func (e EndpointInfo) ControlCalls(authenticator string) []string {
+	var calls []string
+	if e.RateLimit > 0 {
+		calls = append(calls, fmt.Sprintf(".rate_limit(%d)", e.RateLimit))
+	}
+	if e.BodyLimit > 0 {
+		calls = append(calls, fmt.Sprintf(".body_limit_megabytes(%d)", e.BodyLimit))
+	}
+	if e.RequiresAuth {
+		perms := make([]string, len(e.RequiredPerms))
+		for i, perm := range e.RequiredPerms {
+			perms[i] = rustString(perm)
+		}
+		calls = append(calls, fmt.Sprintf(".authorize(%s, &[%s])", authenticator, strings.Join(perms, ", ")))
+	}
+	if e.Timeout > 0 {
+		calls = append(calls, fmt.Sprintf(".timeout_seconds(%d)", e.Timeout))
+	}
+	return calls
 }
 
 // APIOutput contains generated Rust REST API metadata.
@@ -52,6 +98,12 @@ type APIOutput struct {
 	// manual ones included, sorted: Implementations.webhook_verifiers needs a
 	// verifier for each, as the Go server's WebhookVerifiers map does.
 	WebhookProviders []string
+	// HasAuth reports whether an endpoint, manual ones included, needs a
+	// caller: Implementations then has an authenticator.
+	HasAuth bool
+	// HasControls reports whether an endpoint, manual ones included, has
+	// RouteControls.
+	HasControls bool
 }
 
 // NamespaceOutput contains data for generating namespace scaffold files.
@@ -97,13 +149,20 @@ type Options struct {
 // out of its implementation interfaces: the router does not mount it, its
 // namespace trait has no method for it, and it gets no scaffold. The service
 // adds its route to the router build_router returns. The router has no step
-// that decrypts a request body, so an encrypted operation that is not
+// that decrypts a request body and none that reads a multipart one, so an
+// encrypted operation or a file upload that is not
 // @manualRouteRegistration is refused.
 //
 // An @hmacVerified operation's route runs its provider's WebhookVerifier
 // before the handler, as the Go router runs the provider's WebhookVerifier
 // before its other middleware, and build_router panics when
 // Implementations.webhook_verifiers lacks a provider's verifier.
+//
+// A route's other controls follow the verifier, in the Go router's order:
+// @rateLimit, @bodyLimit, the permission check of a route that needs a
+// caller, and @timeout around the handler. They are the runtime crate's
+// RouteControls. The caller comes from Implementations.authenticator,
+// which the crate has when an operation needs one (D29).
 func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	generated, err := rustapigen.Generate(schema, rustapigen.Options{
 		SchemaName:     opts.SchemaName,
@@ -141,6 +200,12 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		if endpoint.Encrypted && !endpoint.ManualRouteRegistration {
 			return nil, fmt.Errorf("rustrestgen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result or argument); the Rust router has no decryption step, declare it @manualRouteRegistration and add its route in the service, which decrypts the payload", endpoint.Namespace, endpoint.Name)
 		}
+		// The Go router reads a file upload's multipart body. The Rust
+		// router's handlers take JSON, so axum would answer every upload
+		// 415; the service mounts the route and reads the multipart body.
+		if endpoint.HasFileUpload && !endpoint.ManualRouteRegistration {
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s uploads files; the Rust router has no multipart step, declare it @manualRouteRegistration and add its route in the service, which reads the multipart body", endpoint.Namespace, endpoint.Name)
+		}
 		ns := endpoint.Namespace
 		if ns == "" {
 			ns = "root"
@@ -175,10 +240,19 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 			PathParams:  pathParams,
 
 			WebhookProvider: endpoint.WebhookHMACProvider,
+
+			RequiresAuth:     endpoint.RequiresAuth,
+			RequiredPerms:    endpoint.RequiredPerms,
+			RequireOwnership: endpoint.RequireOwnership,
+			RateLimit:        positive(endpoint.RateLimit),
+			BodyLimit:        positive(endpoint.BodyLimit),
+			Timeout:          positive(endpoint.Timeout),
 		}
 		if info.WebhookProvider != "" {
 			webhookProviders[info.WebhookProvider] = struct{}{}
 		}
+		output.HasAuth = output.HasAuth || info.RequiresAuth
+		output.HasControls = output.HasControls || info.HasControls()
 		if endpoint.ManualRouteRegistration {
 			output.ManualEndpoints = append(output.ManualEndpoints, info)
 			continue
@@ -196,6 +270,15 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	sortEndpoints(output.ManualEndpoints)
 
 	return output, nil
+}
+
+// positive is the value of a directive, or 0 without one or for a value
+// below 1.
+func positive(value *int) int {
+	if value == nil || *value < 1 {
+		return 0
+	}
+	return *value
 }
 
 // sortEndpoints orders endpoints by namespace, then path, then method.

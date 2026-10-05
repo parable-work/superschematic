@@ -91,7 +91,7 @@ class FixtureConfig(BaseModel):
 
             if len(str(self.database_url)) > 2048:
                 errors.add_field_error("database_url", "maxLength", "must be at most 2048 characters")
-            if re.search(r"^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$", str(self.database_url)) is None:
+            if re.search(r"^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$", str(self.database_url), re.ASCII) is None:
                 errors.add_field_error("database_url", "pattern", "invalid format")
 
         # Validate JWT_SECRET

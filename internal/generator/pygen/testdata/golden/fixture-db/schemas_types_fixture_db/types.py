@@ -372,7 +372,7 @@ class Tenant(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -402,7 +402,7 @@ class Tenant(BaseModel):
                 errors.add_field_error("slug", "maxLength", "must be at most 255 characters")
             if len(str(self.slug)) < 1:
                 errors.add_field_error("slug", "minLength", "must be at least 1 characters")
-            if re.search(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", str(self.slug)) is None:
+            if re.search(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", str(self.slug), re.ASCII) is None:
                 errors.add_field_error("slug", "pattern", "invalid format")
 
         # Validate email
@@ -410,7 +410,7 @@ class Tenant(BaseModel):
             errors.add_field_error("email", "required", "required field")
         else:
 
-            if re.search(r"@", str(self.email)) is None:
+            if re.search(r"@", str(self.email), re.ASCII) is None:
                 errors.add_field_error("email", "pattern", "invalid format")
 
         # Validate status
@@ -649,7 +649,7 @@ class TenantUser(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -686,7 +686,7 @@ class TenantUser(BaseModel):
         # Validate deletedBy
         if self.deleted_by is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.deleted_by)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.deleted_by), re.ASCII) is None:
                 errors.add_field_error("deleted_by", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
