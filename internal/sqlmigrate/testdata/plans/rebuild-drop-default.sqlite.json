@@ -1,7 +1,8 @@
 {
   "dialect": "sqlite",
+  "expanded": "e1af392a2995841f576a639028e2a0c2e30aebc20a53a86c733907e49225af74",
   "from": "e1af392a2995841f576a639028e2a0c2e30aebc20a53a86c733907e49225af74",
-  "hash": "65ecedba846e141207ad5932163c7352542ddf14dc1d0fce8518a37d8e570448",
+  "hash": "52319beb67c7f24c2fc858ad571098cbc7eacf19d4e53e9e37cf42d279f32c02",
   "service": "shop-db",
   "steps": [
     {

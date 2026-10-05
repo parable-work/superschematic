@@ -138,3 +138,13 @@ type Import struct {
 	// Types lists the imported symbol names. Never empty, never "*".
 	Types []string `json:"types" yaml:"types"`
 }
+
+// ServiceRef names another service by name and kind: a service handle of
+// the config, as service({ name, kind }) or an imported sentinel writes it.
+type ServiceRef struct {
+	// Name is the service name.
+	Name string `json:"name" yaml:"name"`
+
+	// Kind is the kind the reference gives the service.
+	Kind SchemaKind `json:"kind" yaml:"kind"`
+}

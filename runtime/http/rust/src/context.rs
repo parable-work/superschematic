@@ -1,3 +1,4 @@
+use crate::Principal;
 use http::Method;
 use std::collections::HashMap;
 
@@ -13,6 +14,11 @@ pub struct RequestContext {
     pub path_params: HashMap<String, String>,
     pub query_params: HashMap<String, String>,
     pub headers: HashMap<String, String>,
+    /// The caller the route's `Authenticator` established, on a route that
+    /// needs one (`@auth`, `@requirePermission`, `@requireOwnership`, an
+    /// `Authenticated` set); `None` elsewhere. An `@requireOwnership`
+    /// implementation checks that this caller owns the resource.
+    pub principal: Option<Principal>,
 }
 
 impl RequestContext {
@@ -23,6 +29,7 @@ impl RequestContext {
             path_params: HashMap::new(),
             query_params: HashMap::new(),
             headers: HashMap::new(),
+            principal: None,
         }
     }
 

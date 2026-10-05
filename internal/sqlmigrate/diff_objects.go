@@ -448,3 +448,56 @@ func (d *differ) sameView(fv, tv *View) bool {
 	}
 	return renameInView(fv.Definition[0], d.renames) == tv.Definition[0]
 }
+
+// diffGraphs reports each version graph member whose content columns
+// change while the columns stay, as a column does when
+// @conflictUnit('excluded') is added or taken off it. The change has no
+// SQL: its step carries the history hazard a column change carries
+// (D27). A column the plan adds, drops, renames or retypes carries that
+// hazard on its own step, so only the columns both models have count.
+func (d *differ) diffGraphs() {
+	for _, tg := range d.to.Graphs {
+		for _, member := range tg.Members {
+			tt := d.toTables[member.Table]
+			ft := d.fromTables[d.renames.prevTable(member.Table)]
+			fromGraph, fromContent := graphOf(d.from, ft)
+			if tt == nil || fromGraph == nil {
+				continue
+			}
+			_, toContent := graphOf(d.to, tt)
+			var joins, leaves []string
+			for _, tc := range tt.Columns {
+				fc := columnNamed(ft, d.renames.prevColumn(tt.Name, tc.Name))
+				switch {
+				case fc == nil || fromContent[fc.Name] == toContent[tc.Name]:
+				case toContent[tc.Name]:
+					joins = append(joins, fieldOf(tt, tc))
+				default:
+					leaves = append(leaves, fieldOf(tt, tc))
+				}
+			}
+			if len(joins) == 0 && len(leaves) == 0 {
+				continue
+			}
+			var moves []string
+			if len(joins) > 0 {
+				moves = append(moves, joinAnd(joins)+" "+verb(len(joins), "joins", "join"))
+			}
+			if len(leaves) > 0 {
+				moves = append(moves, joinAnd(leaves)+" "+verb(len(leaves), "leaves", "leave"))
+			}
+			c := d.add(&change{op: opGraphContent, phase: Expand, subject: tableSubject(tt.Name)})
+			c.addHazard(HazardHistory, "", fmt.Sprintf(
+				"%s the content of %s in version graph %s: commits made before this change hash and merge rows of the old shape. %s",
+				strings.Join(moves, " and "), tt.Name, tg.Name, epochNote(fromGraph, tg)))
+		}
+	}
+}
+
+// verb is one when its subject counts one thing, else many.
+func verb(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}

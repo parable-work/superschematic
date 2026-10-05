@@ -110,16 +110,24 @@ func (d *differ) graphContent(c *change, ft *Table, before *Column, tt *Table, a
 	if graph == nil {
 		graph = fromGraph
 	}
-	epoch := fmt.Sprintf("The graph's schemaEpoch stays %d.", graph.SchemaEpoch)
-	if fromGraph != nil && toGraph != nil && toGraph.SchemaEpoch != fromGraph.SchemaEpoch {
-		epoch = fmt.Sprintf("The graph's schemaEpoch rose from %d to %d.", fromGraph.SchemaEpoch, toGraph.SchemaEpoch)
-		if toGraph.SchemaEpoch < fromGraph.SchemaEpoch {
-			epoch = fmt.Sprintf("The graph's schemaEpoch fell from %d to %d.", fromGraph.SchemaEpoch, toGraph.SchemaEpoch)
-		}
-	}
 	c.addHazard(HazardHistory, "", fmt.Sprintf(
 		"%s is content of version graph %s: commits made before this change hash and merge rows of the old shape. %s",
-		field, graph.Name, epoch))
+		field, graph.Name, epochNote(fromGraph, toGraph)))
+}
+
+// epochNote says whether a version graph's schemaEpoch rose between the
+// two models. One of the graphs is nil when the table is a member in one
+// model only.
+func epochNote(from, to *Graph) string {
+	switch {
+	case from == nil:
+		return fmt.Sprintf("The graph's schemaEpoch stays %d.", to.SchemaEpoch)
+	case to == nil || to.SchemaEpoch == from.SchemaEpoch:
+		return fmt.Sprintf("The graph's schemaEpoch stays %d.", from.SchemaEpoch)
+	case to.SchemaEpoch > from.SchemaEpoch:
+		return fmt.Sprintf("The graph's schemaEpoch rose from %d to %d.", from.SchemaEpoch, to.SchemaEpoch)
+	}
+	return fmt.Sprintf("The graph's schemaEpoch fell from %d to %d.", from.SchemaEpoch, to.SchemaEpoch)
 }
 
 // graphOf returns the version graph t is a member of in m, with t's
@@ -146,24 +154,45 @@ func graphOf(m *Model, t *Table) (*Graph, map[string]bool) {
 func (d *differ) retypeHazards(c *change, prevTable string, r *retype) {
 	ft, tt := d.fromTables[prevTable], d.toTables[r.table]
 	field := fieldOf(tt, r.after)
-	change := fmt.Sprintf("%s changes from %s to %s", field, r.before.Type, r.after.Type)
+	before, after := typeNames(r.before, r.after)
+	change := fmt.Sprintf("%s changes from %s to %s", field, before, after)
 	c.addHazard(HazardCompat, "", fmt.Sprintf(
-		"%s: servers built from the previous version still read and write %s.", change, r.before.Type))
+		"%s: servers built from the previous version still read and write %s.", change, before))
 	if r.conv.lossy {
 		c.addHazard(HazardDestructive, "", fmt.Sprintf(
-			"%s: the cast truncates or rounds values %s cannot hold exactly.", change, r.after.Type))
+			"%s: the cast truncates or rounds values %s cannot hold exactly.", change, after))
 	}
 	if r.conv.kind == convertMayFail {
 		c.addHazard(HazardDataDependent, "", fmt.Sprintf(
-			"%s: the cast fails on a value %s cannot hold.", change, r.after.Type))
+			"%s: the cast fails on a value %s cannot hold.", change, after))
 	}
 	if ft.History != "" && tt.History != "" {
 		c.addHazard(HazardHistory, "", fmt.Sprintf(
 			"%s is versioned: images recorded before this change keep %s as %s, which the history readers read as %s.",
-			tt.Name, field, r.before.Type, r.after.Type))
+			tt.Name, field, before, after))
 	}
 	d.graphContent(c, ft, r.before, tt, r.after)
-	d.breaksReaders(c, prevTable, r.before.Name, "changes its type to "+r.after.Type)
+	d.breaksReaders(c, prevTable, r.before.Name, "changes its type to "+after)
+}
+
+// typeNames names the types of a column before and after a change, in a
+// reason or an error. Where what the column holds changes (Column.Holds),
+// each name says whether the column is a scalar, a list or a JSON value,
+// since a SQLite type alone does not.
+func typeNames(before, after *Column) (string, string) {
+	if before.Holds == after.Holds {
+		return before.Type, after.Type
+	}
+	name := func(c *Column) string {
+		switch c.Holds {
+		case holdsList:
+			return "a list (" + c.Type + " holding a JSON array)"
+		case holdsJSON:
+			return "a JSON value (" + c.Type + ")"
+		}
+		return "a scalar (" + c.Type + ")"
+	}
+	return name(before), name(after)
 }
 
 // viewHazard adds an api-breaking hazard for a projection view whose

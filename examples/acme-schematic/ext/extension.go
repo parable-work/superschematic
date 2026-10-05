@@ -4,7 +4,8 @@
 //   - a schema kind, Catalog, with its own generator (kind.go);
 //   - two field decorators from @acme/schema, @shelf and the @feedKey
 //     marker, that write into the open extensions slot of a field
-//     (decorator.go);
+//     (decorator.go), and a type decorator, @crossSell, whose argument names
+//     a class (cross_sell.go);
 //   - a scalar catalog: the core scalars plus Acme.Photo, a file-upload
 //     scalar the Catalog service bounds with uploadMaxBytes (scalars.go);
 //   - a sidecar document, catalog.config.yaml, with a generator (document.go);
@@ -82,6 +83,9 @@ func (Extension) Register(r *registry.Registry) error {
 		return err
 	}
 	if err := registerDecorator(r); err != nil {
+		return err
+	}
+	if err := registerCrossSell(r); err != nil {
 		return err
 	}
 	if err := registerScalars(r); err != nil {

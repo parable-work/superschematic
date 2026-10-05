@@ -100,7 +100,7 @@ GenericInt64 = Annotated[
 ]
 
 # Identity.UUID - UUID v4 with automatic base62 encoding for client-facing APIs
-_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$")
+_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII)
 
 def _validate_identity_uuid_pattern(v: Any) -> Any:
     """Validate Identity.UUID against its pattern."""
@@ -116,7 +116,7 @@ IdentityUUID = Annotated[
     str,
     Field(
         description="UUID v4 with automatic base62 encoding for client-facing APIs",
-        pattern=r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+        pattern=re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII),
     ),
     BeforeValidator(_custom_parse_identity_uuid),
     AfterValidator(_validate_identity_uuid_pattern),

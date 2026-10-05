@@ -5,14 +5,16 @@ version-graph core (`runtime/versiongraph/rust`) built for
 `wasm32-unknown-unknown`, with typed `compose`, `merge`, `diff`,
 `contentHash` and `validate` over its JSON contract
 (`runtime/versiongraph/README.md`); the engine, which runs every graph
-operation over a storage adapter; the engine's Postgres adapter; and the
-base of the facade tsgen generates per graph (D19 in `docs/DECISIONS.md`).
+operation over a storage adapter; the engine's Postgres and SQLite
+adapters; and the base of the facade tsgen generates per graph (D19 and
+D32 in `docs/DECISIONS.md`).
 
 | Entry | Holds |
 | --- | --- |
 | `@superschematic/versiongraph` | The core: `init` and `initSync`, the operations, `VersionGraphError` and the contract's types. Runs in the browser, bun and Node, has no dependencies, and drives the module through its C ABI exports (`vg_alloc`, `vg_<op>`, `vg_free`, `vg_dealloc`) with no generated glue. |
 | `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, the canonical rules (`canonicalValue`, `canonicalRow`) and the exact JSON codec they read with (`parseJson`, `stringifyJson`, `JsonNumber`). |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
+| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout` and `sqliteTables`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
 ## The core
@@ -117,6 +119,60 @@ savepoints of a transaction the caller holds. `pg` is an optional peer
 dependency: the bindings call the methods they need on what they are
 given, so no entry imports it, and the core loads without it.
 
+## The SQLite adapter
+
+```ts
+import { DatabaseSync } from "node:sqlite";
+import { initSync } from "@superschematic/versiongraph";
+import { SyncEngine } from "@superschematic/versiongraph/engine";
+import { SqliteAdapter, nodeSqlite } from "@superschematic/versiongraph/sqlite";
+
+const client = nodeSqlite(new DatabaseSync("recipes.sqlite"));
+const adapter = new SqliteAdapter(descriptor, { graph: "recipe" });
+adapter.createTables(client);
+const engine = new SyncEngine(initSync(), descriptor, adapter.storage(client), { schemaEpoch: 1, snapshotEvery: 64 });
+const main = engine.createPrimary(actor, root, "main");
+```
+
+`SqliteAdapter` is `SyncStorage` and `SyncTx` over one fixed layout of nine
+`STRICT` tables (`ref`, `ref_history`, `commit`, `patch`,
+`snapshot_entry`, `release`, `release_history`, `member` and
+`member_history`), the same for every graph (D32). Every row carries the
+graph's name, `options.graph`, so one file holds several graphs, and
+`options.tableName` names each table and index from its local name
+(`graph_` before it by default), so a D16 behavior can pass its
+`sql.table`. It reads from the descriptor only its kinds' role columns,
+value classes and `history`, and returns each row with every column its
+kind declares, `null` where the stored row lacks one. `createTables` creates the layout where it is
+missing, and `sqliteLayout(tableName)` returns its statements, one each,
+with no trigger and no transaction control, for a caller that runs its own
+migrations. `runtime/versiongraph/README.md` ("SQLite") holds the layout
+and its rules.
+
+The adapter does what Postgres's history triggers do, in the statements of
+the transaction that changes a row: it sets `_version`, writes each
+insert's and update's image at its new version and a delete's at the old
+version plus 1, naming the delete's actor, and leaves the kind's excluded
+columns out. A transaction reads its time once, from `options.clock`
+(microseconds since the Unix epoch; the system clock by default), and the
+adapter generates every id, a version-4 UUID in its canonical form. On a
+connection of its own it turns foreign keys on when it is bound, begins
+each transaction with `BEGIN IMMEDIATE`, and runs one begun inside another
+as a savepoint; with `options.callerTransaction` it runs in the
+transaction its caller holds and issues no transaction control, as a D16
+behavior's `sql` requires. A taken name is the live-name index's
+`SQLITE_CONSTRAINT_UNIQUE`, and `lockRef`, `nextSequence` and `sweepLock`
+lean on SQLite's one writer.
+
+`SqliteClient` is the shape of D16's `SqlDriver`: `run`, `get` and `all`
+with positional parameters for numbered placeholders (`?1`), plain rows,
+`undefined` for no row, and an error whose `code` is SQLite's extended
+result code; `exec`, which only a connection of the adapter's own needs, is
+for transaction control. `nodeSqlite(db)` and `bunSqlite(db)` bind an open
+`DatabaseSync` and an open `bun:sqlite` `Database`. They call only the
+methods they need on what they are given, so no entry imports a SQLite
+module.
+
 ## Development
 
 ```
@@ -124,7 +180,7 @@ cd runtime/versiongraph/typescript
 bun install --frozen-lockfile
 bun run test     # cargo build for wasm32, tsc into dist/, the tests, the Node check
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... bun test test   # with the Postgres tests
-make versiongraph-scenarios-ts   # from the repository root: the Postgres tests, failing without the variable
+make versiongraph-scenarios-ts   # from the repository root: the SQLite pass, then the Postgres tests, failing without the variable
 ```
 
 The build needs cargo with the `wasm32-unknown-unknown` target
@@ -133,17 +189,25 @@ package, type-checks the tests against the built `dist/`, runs every vector
 in `runtime/versiongraph/testdata/vectors` through the package API
 (`test/vectors.test.ts`), checks each way of loading the module
 (`test/load.test.ts`), runs every canonical vector
-(`test/canonical.test.ts`), checks `initSync`'s sources and `SyncEngine`'s
+(`test/canonical.test.ts`), reads every scenario file and checks the
+scenario format's rules (`test/scenarios.test.ts`), runs every scenario on
+SQLite through `SyncEngine` and the SQLite adapter, in memory, once through
+`bun:sqlite` and once through `node:sqlite` in a transaction the runner
+holds with every statement held to D16's rules for a behavior's SQL
+(`test/scenarios.test.ts`), runs the SQLite adapter's own tests through
+both bindings (`test/sqlite.test.ts`, over the cases in
+`test/sqlite-cases.ts`), checks `initSync`'s sources and `SyncEngine`'s
 driver (`test/sync.test.ts`), and loads every entry under Node with the
-`pg` driver refused (`test/node.mjs`). With the variable set it also runs
-every scenario in `runtime/versiongraph/testdata/scenarios` through the
-engine and the adapter (`test/scenarios.test.ts`), replaying each operation
-through a `SyncEngine` that must make the recorded storage calls, in the
-recorded order, and return the `Engine`'s result or error
-(`test/replay.ts`); checks each canonical vector's rendering against
-Postgres; and runs the adapter's (`test/adapter.test.ts`), the sweeper's
-(`test/sweeper.test.ts`) and the facade's (`test/facade.test.ts`) own
-tests. Without it they skip.
+`pg` driver and the SQLite modules refused, then runs the SQLite adapter's
+tests through `node:sqlite` (`test/node.mjs`). With the variable set it
+also runs every scenario in
+`runtime/versiongraph/testdata/scenarios` through the engine and the
+adapter (`test/scenarios.test.ts`), replaying each operation through a
+`SyncEngine` that must make the recorded storage calls, in the recorded
+order, and return the `Engine`'s result or error (`test/replay.ts`);
+checks each canonical vector's rendering against Postgres; and runs the
+adapter's (`test/adapter.test.ts`), the sweeper's (`test/sweeper.test.ts`)
+and the facade's (`test/facade.test.ts`) own tests. Without it they skip.
 
 The reference page is "Version graphs" in the docs site
 (`docs/src/content/docs/reference/version-graphs.md`).

@@ -19,11 +19,14 @@ import (
 // that they converge (D27, Testing): for each plan case (A, B), create.sql
 // of A, then rows seeded into it, then the plan from A to B, leaves the
 // same catalog as create.sql of B, and the seeded rows are still there
-// unless a step deleted them; for every fixture, the plan from an empty
-// database leaves the same catalog as its create.sql, and the primary key
-// and unique constraints have the names the model gives them; and the
-// runner's vectors, applied in order, leave the catalog of their last
-// version's create.sql.
+// unless a step deleted them; for each plan case with contract steps,
+// create.sql of A, the rows and the plan's expand steps leave the catalog
+// of the plan from an empty database to the plan's expandedModel (D27,
+// amended); for every fixture, the plan from an empty database leaves the
+// same catalog as its create.sql, and the primary key and unique
+// constraints have the names the model gives them; and the runner's
+// vectors, applied in order, a plan the next one supersedes up to its
+// contract, leave the catalog of their last version's create.sql.
 //
 // The checks live in testdata/pgconverge, a module of its own, so the
 // Postgres driver stays out of this module. Set
@@ -40,7 +43,10 @@ func TestConvergenceOnPostgres(t *testing.T) {
 			t.Logf("%s: not applied: %s", pc.name, pc.noConverge)
 			continue
 		}
-		writePlanCase(t, filepath.Join(cases, pc.name), pc)
+		if plan := writePlanCase(t, filepath.Join(cases, pc.name), pc); plan.Expanded != "" {
+			fromSchema, _, fromOpts, _ := pc.versions(t)
+			writeExpandedCase(t, filepath.Join(cases, "expanded-"+pc.name), pc, plan, createSQL(t, fromSchema, fromOpts), postgresSeeds)
+		}
 	}
 	for _, dir := range modelFixtures {
 		schema, err := loader.LoadService(dir)
@@ -56,8 +62,8 @@ func TestConvergenceOnPostgres(t *testing.T) {
 			continue
 		}
 		dir := filepath.Join(cases, "vectors-"+name)
-		for i, plan := range run.plans {
-			writeJSON(t, filepath.Join(dir, fmt.Sprintf("plan-%02d.json", i+1)), plan)
+		for i := range run.plans {
+			writeJSON(t, filepath.Join(dir, fmt.Sprintf("plan-%02d.json", i+1)), run.applied(i))
 		}
 		writeFile(t, filepath.Join(dir, "to.sql"), []byte(createSQL(t, run.schema, sqlgen.Options{SchemaName: "ledger-db"})))
 	}
@@ -121,19 +127,19 @@ func writeJSON(t *testing.T, path string, v any) {
 
 // writePlanCase writes one plan case for pgconverge: both create.sql files,
 // the plan, and, unless the plan fails on any row, rows to seed and the
-// checks that they survive.
-func writePlanCase(t *testing.T, dir string, pc planCase) {
+// checks that they survive. It returns the plan.
+func writePlanCase(t *testing.T, dir string, pc planCase) *Plan {
 	fromSchema, toSchema, fromOpts, toOpts := pc.versions(t)
 	plan := pc.plan(t)
 	writeJSON(t, filepath.Join(dir, "plan.json"), plan)
 	writeFile(t, filepath.Join(dir, "to.sql"), []byte(createSQL(t, toSchema, toOpts)))
 	if pc.fromEmpty {
-		return
+		return plan
 	}
 	writeFile(t, filepath.Join(dir, "from.sql"), []byte(createSQL(t, fromSchema, fromOpts)))
 	if pc.noSeed != "" {
 		t.Logf("%s: no rows seeded: %s", pc.name, pc.noSeed)
-		return
+		return plan
 	}
 	from, to := pc.models(t)
 	r, err := resolveRenames(from, to, pc.renames)
@@ -144,6 +150,7 @@ func writePlanCase(t *testing.T, dir string, pc planCase) {
 	t.Logf("%s: %d rows seeded, %d checks", pc.name, strings.Count(seed, "INSERT"), len(checks))
 	writeFile(t, filepath.Join(dir, "seed.sql"), []byte(seed))
 	writeJSON(t, filepath.Join(dir, "checks.json"), checks)
+	return plan
 }
 
 // writeEmptyCase writes the plan from an empty database to a schema's

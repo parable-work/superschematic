@@ -115,7 +115,14 @@ func TestCommands(t *testing.T) {
 			invoke(t, env, "apply", "--plan", fixturePath(dialect, "02-evolve"), "--phase", "expand").
 				expect(t, exitOK, "expand is done")
 			invoke(t, env, "status", "--service", "shop").
-				expect(t, exitOK, "applied model:    "+create.To, "plan in progress: "+evolve.Hash+" (expand done; contract pending)", "steps logged:", "1 expand table/order/column/note: started ")
+				expect(t, exitOK, "applied model:    "+evolve.Expanded, "plan in progress: "+evolve.Hash+" (expand done; contract pending; ",
+					"steps logged:", "1 expand table/order/column/note: started ")
+			// Between the phases the applied model is the plan's expanded
+			// model, which a plan from it starts from.
+			between := invoke(t, env, "status", "--service", "shop", "--model").expect(t, exitOK)
+			if between.stdout != string(evolve.BetweenPhases().Canonical)+"\n" {
+				t.Fatalf("status --model between the phases printed %q, want the plan's expanded model", between.stdout)
+			}
 
 			modelFile := filepath.Join(t.TempDir(), "model.json")
 			if err := os.WriteFile(modelFile, create.ToModel, 0o644); err != nil {

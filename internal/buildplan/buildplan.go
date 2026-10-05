@@ -34,7 +34,7 @@ type Service struct {
 // its ORM and types packages, so the authDb is a build-order edge even when
 // the config does not also declare it as a dependency.
 func (s Service) dependencyNames() []string {
-	names := make([]string, 0, len(s.Config.Dependencies)+1)
+	names := make([]string, 0, len(s.Config.Dependencies))
 	for _, dep := range s.Config.Dependencies {
 		names = append(names, dep.Name)
 	}

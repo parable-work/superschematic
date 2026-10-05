@@ -17,9 +17,12 @@ the new version:
 
 The walk also starts at each type a behavior's validate checks values
 against under both versions (checkedTypes, behaviors/composition.ts), a
-Variants type say: a stored instance holds values the live version
-checked against it, so it is held to the rule as a type a field reaches.
-Other types, enums and scalars no field reaches are free to change.
+Variants type say, and at each type a behavior's parseConfig read
+through ConfigTarget.types under the live version (readTypes), whether
+or not the new version reads it too: a stored instance, or a behavior's
+own tables, hold values the live version checked against it, so it is
+held to the rule as a type a field reaches. Other types, enums and
+scalars no field reaches are free to change.
 Scalars are compared as the schema runtime reads them to validate: a
 scalar the builtin catalog holds is the catalog's, whatever the document
 declares for it (runtimeDocument), and any other is the document's.
@@ -34,8 +37,10 @@ import { arrayDepth, jsonKey, refKind, runtimeDocument, scalarKey, type SchemaMo
 /**
  * incompatibleChanges lists every change from before to after that the
  * rule refuses; empty means compatible. checked names the types besides
- * the instance type a behavior checks values against under both versions,
- * which the walk starts from too.
+ * the instance type that hold values the live version checked (a type a
+ * behavior checks values against under both versions, one a behavior of
+ * the live version read through ConfigTarget.types), which the walk
+ * starts from too.
  */
 export function incompatibleChanges(before: SchemaModel, after: SchemaModel, checked: readonly string[] = []): SchemaChange[] {
   const changes: SchemaChange[] = [];

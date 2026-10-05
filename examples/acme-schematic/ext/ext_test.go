@@ -209,6 +209,16 @@ func TestCatalogServiceLoadsAndGenerates(t *testing.T) {
 			t.Fatalf("IsFeedKey(%s.%s) = %v, %v; want %v", c.typeName, c.fieldName, got, err, c.want)
 		}
 	}
+	// @crossSell names a class as a value; the IR holds {"class": "Product"}.
+	if got := string(schema.Types["Bundle"].Extensions[ext.Name]); got != `{"crossSell":{"with":{"class":"Product"}}}` {
+		t.Fatalf("Bundle extensions.acme = %s, want the @crossSell class reference", got)
+	}
+	if with, ok, err := ext.CrossSellOf(schema.Types["Bundle"]); err != nil || !ok || with != "Product" {
+		t.Fatalf("CrossSellOf(Bundle) = %q, %v, %v; want Product", with, ok, err)
+	}
+	if _, ok, _ := ext.CrossSellOf(schema.Types["Product"]); ok {
+		t.Fatal("Product carries a @crossSell it never declared")
+	}
 
 	// Acme.Photo comes from the acme scalar catalog with its upload
 	// metadata, so Validate<Acme.Photo, { uploadMaxBytes }> passes the
@@ -259,6 +269,9 @@ func TestCatalogServiceLoadsAndGenerates(t *testing.T) {
 	if len(catalog.FeedKeys) != 2 || strings.Join(catalog.FeedKeys["Product"], ",") != "sku" || strings.Join(catalog.FeedKeys["Bundle"], ",") != "code" {
 		t.Fatalf("catalog.json feedKeys = %v, want Product sku and Bundle code", catalog.FeedKeys)
 	}
+	if len(catalog.CrossSells) != 1 || catalog.CrossSells["Bundle"] != "Product" {
+		t.Fatalf("catalog.json crossSells = %v, want Bundle beside Product", catalog.CrossSells)
+	}
 	var config ext.CatalogConfig
 	readJSON(t, filepath.Join(ext.CatalogDir(out, "shop-catalog"), "config.json"), &config)
 	if config != doc {
@@ -274,8 +287,9 @@ func TestCatalogServiceLoadsAndGenerates(t *testing.T) {
 // TestFieldDirectivesSurviveTheDataFormWriters: format writes the Catalog
 // service's TypeScript file through the IR as YAML and as JSON, and each
 // twin, loaded as its own service, gives the TypeScript load's types, with
-// @feedKey and @shelf in every field's extensions.acme slot. Only the file
-// that owns each type differs.
+// @feedKey and @shelf in every field's extensions.acme slot and @crossSell's
+// class, written {"class": "Product"}, in Bundle's. Only the file that owns
+// each type differs.
 func TestFieldDirectivesSurviveTheDataFormWriters(t *testing.T) {
 	reg, names := assemble(t)
 	servicePath := filepath.Join(schemasRoot, "services", "shop-catalog")
@@ -324,6 +338,9 @@ func TestFieldDirectivesSurviveTheDataFormWriters(t *testing.T) {
 			}
 			if key, err := ext.IsFeedKey(field(t, fromData, "Product", "sku")); err != nil || !key {
 				t.Fatalf("%s twin: IsFeedKey(Product.sku) = %v, %v; want true", format, key, err)
+			}
+			if with, ok, err := ext.CrossSellOf(fromData.Types["Bundle"]); err != nil || !ok || with != "Product" {
+				t.Fatalf("%s twin: CrossSellOf(Bundle) = %q, %v, %v; want Product", format, with, ok, err)
 			}
 		})
 	}
@@ -378,6 +395,43 @@ func TestShelfOnNonCatalogSchemaIsRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "shelf") {
 		t.Fatalf("err = %v, want it to name the decorator", err)
+	}
+}
+
+// TestCrossSellOfAnUnknownClassIsRejected: the data forms write
+// @crossSell's class by name, and the loader fails a name the schema neither
+// declares nor imports, naming it. The TypeScript form cannot reach this:
+// the compiler resolves the class.
+func TestCrossSellOfAnUnknownClassIsRejected(t *testing.T) {
+	reg, names := assemble(t)
+	service := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(service, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"schema.config.json": `{"name": "shop-catalog", "kind": "Catalog", "outputs": {}}`,
+		"src/catalog.schema.yaml": `types:
+  Bundle:
+    name: Bundle
+    role: EmbeddedStruct
+    extensions:
+      acme:
+        crossSell: { with: { class: Product } }
+    fields:
+      - name: code
+        typeRef: { name: string }
+        required: true
+`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(service, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := loader.LoadService(service, loader.WithRegistry(reg), loader.WithNaming(names))
+	want := `type "Bundle": @crossSell names class "Product", which this schema neither declares nor imports`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want it to contain %q", err, want)
 	}
 }
 

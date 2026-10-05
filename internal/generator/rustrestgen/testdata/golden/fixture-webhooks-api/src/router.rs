@@ -10,11 +10,14 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
 use axum::routing::{delete, get, patch, post, put};
+use axum::Extension;
 use axum::{Json, Router};
 use superschematic_http_runtime::{
     error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
     RequestContext,
 };
+use superschematic_http_runtime::Principal;
+use superschematic_http_runtime::RouteControls;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,6 +34,10 @@ pub struct RouterState {
 /// - `POST /api/webhooks/github/raw` (webhook.receiveRawGithubEvent), @hmacVerified:
 ///   wrap its route in `webhook_verified` with the github verifier
 ///
+/// A route's controls run in the order the Go server runs them: the rate
+/// limit, the body limit, the permission check of a route that needs a
+/// caller, then the timeout around the handler.
+///
 /// An @hmacVerified operation's route runs its provider's verifier first.
 ///
 /// # Panics
@@ -44,17 +51,23 @@ pub fn build_router(implementations: Implementations) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     router = router.route("/api/events/{id}", get(handle_event_get_event));
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&state.implementations.authenticator), &["webhooks.receive"])
+        .apply(post(handle_webhook_receive_github_event));
     router = router.route(
         "/api/webhooks/github",
         webhook_verified(
-            post(handle_webhook_receive_github_event),
+            route,
             Arc::clone(&state.implementations.webhook_verifiers["github"]),
         ),
     );
+    let route = RouteControls::new()
+        .rate_limit(1)
+        .apply(post(handle_webhook_receive_stripe_event));
     router = router.route(
         "/api/webhooks/stripe",
         webhook_verified(
-            post(handle_webhook_receive_stripe_event),
+            route,
             Arc::clone(&state.implementations.webhook_verifiers["stripe"]),
         ),
     );
@@ -138,11 +151,13 @@ async fn handle_event_get_event(
 async fn handle_webhook_receive_github_event(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let request_id = request_id_from_headers(&headers);
     let mut ctx = RequestContext::new(method_from_str("post"), "/api/webhooks/github".to_string());
     ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
     let result = state
         .implementations
         .webhook

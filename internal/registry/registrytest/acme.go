@@ -42,8 +42,9 @@ type FieldExt struct {
 
 // TypeExt is what acme stores on a type.
 type TypeExt struct {
-	Tagged bool           `json:"tagged,omitempty"`
-	Meta   map[string]any `json:"meta,omitempty"`
+	Tagged    bool               `json:"tagged,omitempty"`
+	Meta      map[string]any     `json:"meta,omitempty"`
+	PairsWith *registry.ClassRef `json:"pairsWith,omitempty"`
 }
 
 // OpExt is what acme stores on an operation set or an operation.
@@ -76,7 +77,7 @@ func OutDir(outputRoot, service string) string {
 	return filepath.Join(outputRoot, "catalog", service)
 }
 
-// Register adds the Catalog kind, the four decorators, the catalogConfig
+// Register adds the Catalog kind, the five decorators, the catalogConfig
 // document, the catalog generator and the two behaviors.
 func (Acme) Register(r *registry.Registry) error {
 	pkgs := []string{Package}
@@ -113,6 +114,19 @@ func (Acme) Register(r *registry.Registry) error {
 					return err
 				}
 				return ir.UpdateExtension(n.Type, "acme", func(t *TypeExt) { t.Meta = m })
+			},
+		}),
+		// @pairsWith(Accessory) takes a class as its argument: any kind,
+		// a class the schema declares or imports from another service.
+		r.RegisterDecorator(registry.DecoratorSpec{
+			Name: "pairsWith", Extension: "acme", Packages: pkgs, Target: registry.TargetType,
+			Args: registry.ClassRefSchema,
+			Apply: func(n registry.Node, args []any, _ registry.Site) error {
+				name, err := registry.DecodeClassRef(args[0])
+				if err != nil {
+					return err
+				}
+				return ir.UpdateExtension(n.Type, "acme", func(t *TypeExt) { t.PairsWith = &registry.ClassRef{Class: name} })
 			},
 		}),
 		r.RegisterDecorator(registry.DecoratorSpec{
