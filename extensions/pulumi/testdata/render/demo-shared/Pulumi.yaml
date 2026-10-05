@@ -1,0 +1,18 @@
+# Rendered by superschematic from the resource graph of environment Shared of
+# stack Demo. Do not edit: change the stack and render it again.
+
+name: demo
+runtime: yaml
+description: Environment Shared of stack Demo
+resources:
+  # phase infrastructure; owners shared
+  shared-pet:
+    name: shared.pet
+    type: random:index/randomPet:RandomPet
+    properties:
+      length: 2
+      prefix: demo
+    options:
+      version: 4.21.2
+outputs:
+  shared.pet.id: ${shared-pet.id}

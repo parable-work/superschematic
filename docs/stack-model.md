@@ -740,19 +740,22 @@ Not taken:
 
 A provisioner takes a resource graph to running resources and back:
 
-- `Render(graph, dir)` writes the tool's program where a person can read
-  it;
+- `Render(environment, dir)` writes the tool's program for the
+  environment's resource graph where a person can read it;
 - `Plan`, `Apply` and `Destroy` run with credentials, against a state
   backend the target's bootstrap created;
 - `Outputs` reads the applied graph's outputs. They feed the bindings
   (section 6.6) and the deploy manifest (section 11.2).
 
 A provisioner registers a `ProvisionerSpec` that holds an implementation of
-the `Provisioner` interface: `Render(graph, dir)`, then `Plan`, `Apply`,
-`Destroy` and `Outputs`, each with a request that carries the resolved
-environment, the parameter values of the run and the rendered program's
-directory. `Apply` applies one step of the deploy order, so the deploy runs
-image builds and migrations between steps.
+the `Provisioner` interface: `Render(environment, dir)`, then `Plan`,
+`Apply`, `Destroy` and `Outputs`. Each run takes a request that carries the
+resolved environment, the parameter values of the run, the rendered
+program's directory and the state backend: its URL and its secrets
+provider. `Apply` applies one step of the deploy order, so the deploy runs
+image builds and migrations between steps. `Render` takes the whole
+environment, not only its graph, because the program exports every output
+the environment references, a deployable's address included.
 
 Pulumi is the first provisioner:
 
@@ -767,6 +770,51 @@ Pulumi is the first provisioner:
   secrets provider, both created by bootstrap, so no Pulumi Cloud account is
   needed.
 
+`extensions/pulumi` builds it. The program, `Pulumi.yaml`:
+
+- belongs to a project named after the stack (`shop`). Each run of an
+  environment is a stack of it: `staging`, or `preview.pr-123` for a member
+  of a parameterized environment;
+- declares each parameter as a string of the project's config, which the
+  run sets, so one program serves every member and no value reaches the
+  file;
+- keys each node by its ID, with every character other than a letter, a
+  digit, `_` and `-` turned into `-`, and names it by the ID, so state is
+  keyed on the ID. An output reads `${shop-api-service.uri}`, and may be a
+  property path (`dnsResourceRecords[0].data`). Literal strings escape `$`;
+- gives a node the `version` option for the plugin version the
+  distribution pins for its package (`gcp`), which is the version of the
+  provider schema the target checks properties against (section 6.4);
+- reads an inherited node through a stack reference to the parent
+  environment's stack;
+- exports every node's `id` and every output the environment references,
+  each as `<node>.<output>`.
+
+The driver opens a local workspace over the rendered directory, with the
+request's backend and secrets provider: `gs://` and `gcpkms://` for the gcp
+target, `file://` and a passphrase in tests. It refuses a directory whose
+program is not the one the environment renders, and it fails with a clear
+error when the `pulumi` CLI is not on PATH.
+
+- `Plan` previews the whole program and maps each step to a change: create,
+  update, replace or delete.
+- `Apply` runs `up` with the step's nodes as targets. A targeted update
+  deletes any resource the program dropped that depends on a target, so
+  those resources are targets too. The last step that holds nodes runs `up`
+  over the whole program, which deletes whatever else the graph dropped.
+- A member first checks that the parent's stack exports every output it
+  reads. A stack reference would read a missing one as null.
+- `Destroy` deletes the resources and removes the stack.
+- `Outputs` leaves out secret outputs, and the unknowns of a step not yet
+  applied.
+
+The CLI keeps each stack's settings file beside the program. A fresh
+checkout has none, so the driver writes the request's secrets provider into
+it. Its integration test runs every operation against a `file://` backend
+with the `random` provider, which needs no credentials. CI installs the CLI
+at `PULUMI_VERSION` in `tools.env`, the version of the Go SDK the module
+requires.
+
 Later provisioners are registrations: OpenTofu over the same graph, or
 Kubernetes manifests that a GitOps controller applies, for Kubernetes
 targets.
@@ -776,14 +824,37 @@ targets.
 After apply, the provisioner's outputs become a generated, typed binding
 for code outside the stack. It is a Go package, with TypeScript later, that
 has one value per environment and one field per deployable
-(`staging.ShopApi.URL`, `staging.ShopApi.ServiceAccount`). Hand-written
-Pulumi programs read it over Pulumi stack references; scripts and CI read
-it over the outputs file.
+(`shopstack.Staging.ShopAPI.Address`,
+`shopstack.Staging.ShopAPI.Account.Email`). Hand-written Pulumi programs
+read it over Pulumi stack references; scripts and CI read it over the
+outputs file.
+
+`extensions/pulumi/bindings` is the generator. It reads each environment's
+`environment.json` and its outputs file, `outputs.json`, which holds what
+`Outputs` read for one run by node ID and output name. It writes two
+packages:
+
+- **The values** (`shopstack`). `Environment` has a field per deployable,
+  and a value per applied environment (`Staging`). A deployable's field
+  holds its name and address in the environment, and a field per node it
+  owns with that node's outputs. A node an edge owns sits with the edge's
+  server; DNS records sit in a field of their own. An output is a string, a
+  bool, a float64 or `any`, typed by the values the outputs files hold. A
+  parameterized environment has no value: each member is a run of its own.
+- **The stack references** (`shopstackpulumi`). The same types over Pulumi
+  outputs, and a function per environment that reads one over a stack
+  reference to its stack. A member's function takes the parameter values:
+  `shopstackpulumi.Preview(ctx, "123")`.
+
+Generate the binding again after an apply. Its goldens and a compile test
+that builds a program against both packages are in the generator's
+`testdata`.
 
 The binding is the escape hatch. A resource the vocabulary lacks is written
 by hand, in a program of its own, and references the stack's resources
 through the binding rather than through a copied name. An environment can
-name such a program, and the provisioner applies it after the stack.
+name such a program, and the provisioner applies it after the stack. That
+last part is not built: the Stack IR has no field for the program yet.
 
 ### 6.7 Registry surface
 
@@ -1722,7 +1793,9 @@ registrations.
   pinned provider schemas with the tool that keeps them current (sections
   6.4 and 7). Bootstrap is to come.
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
-  binding generator.
+  binding generator (sections 6.5 and 6.6). Built: it registers provisioner
+  `pulumi`, its `bindings` package is the generator, and it joins
+  `make test` and CI.
 - **`extensions/cloudflare`**: the Cloudflare DNS platform in v1, and
   Workers and D1 later.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.

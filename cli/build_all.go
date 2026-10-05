@@ -271,7 +271,10 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		serviceByName[service.Name] = service
 	}
 	if !flags.isolatedTS {
-		tsServiceDirs := tsServiceDirectories(services)
+		tsServiceDirs, err := tsServiceDirectories(services)
+		if err != nil {
+			return err
+		}
 		if len(tsServiceDirs) > 0 {
 			tsProgramCache = tsreader.NewProgramCache(tsServiceDirs)
 			defer tsProgramCache.Close()
@@ -710,15 +713,22 @@ func buildAllTaskLoadOptions(ctx buildAllTaskContext) []loader.Option {
 	return loadOpts
 }
 
-func tsServiceDirectories(services []buildplan.Service) []string {
+// tsServiceDirectories lists the services the shared TypeScript program
+// covers: every one whose load runs the TypeScript frontend, which includes
+// a service with a data-form config and src/*.schema.ts files.
+func tsServiceDirectories(services []buildplan.Service) ([]string, error) {
 	var dirs []string
 	for _, service := range services {
-		if filepath.Base(service.ConfigPath) == "schema.config.ts" {
+		ts, err := loader.HasTSFrontend(service.Dir)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", service.Name, err)
+		}
+		if ts {
 			dirs = append(dirs, service.Dir)
 		}
 	}
 	sort.Strings(dirs)
-	return dirs
+	return dirs, nil
 }
 
 type profileTotals struct {

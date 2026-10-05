@@ -100,7 +100,7 @@ func TestAcceptance(t *testing.T) {
 				params[p] = "123"
 			}
 			req := registry.ProvisionRequest{Environment: back, Parameters: params, Dir: filepath.Join(out, "program", env.Name)}
-			if err := spec.Provisioner.Render(back.Resources, req.Dir); err != nil {
+			if err := spec.Provisioner.Render(back, req.Dir); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := spec.Provisioner.Plan(context.Background(), req); err != nil {
