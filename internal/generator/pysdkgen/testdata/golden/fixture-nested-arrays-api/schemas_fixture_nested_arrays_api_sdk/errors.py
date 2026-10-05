@@ -13,7 +13,8 @@ class SDKError(Exception):
 
 
 class APIError(SDKError):
-    """Represents an HTTP API error response."""
+    """Represents an HTTP API error response: its status, the problem's
+    `detail` as the message, its `code` and the request id."""
 
     def __init__(
         self,
@@ -21,12 +22,17 @@ class APIError(SDKError):
         status_code: int,
         payload: Any | None = None,
         validation_errors: ValidationErrors | None = None,
+        *,
+        code: str | None = None,
+        request_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.payload = payload
         self.validation_errors = validation_errors
+        self.code = code
+        self.request_id = request_id
 
     def __str__(self) -> str:
         return f"{self.status_code}: {self.message}"
@@ -49,8 +55,10 @@ class RateLimitError(APIError):
         *,
         retry_after: int | None = None,
         payload: Any | None = None,
+        code: str | None = None,
+        request_id: str | None = None,
     ) -> None:
-        super().__init__(message, 429, payload)
+        super().__init__(message, 429, payload, code=code, request_id=request_id)
         self.retry_after = retry_after
 
 
