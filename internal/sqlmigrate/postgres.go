@@ -113,6 +113,8 @@ func (p postgresDialect) render(c *change) (rendered, error) {
 		return one(stepFor(c, append([]string{"DROP VIEW " + qualifiedView(c.oldView)}, createViewSQL(c.view)...)...)), nil
 	case opCommentOnTable:
 		return one(stepFor(c, "COMMENT ON TABLE "+q(c.table)+" IS "+literal(c.tableDef.Comment))), nil
+	case opGraphContent:
+		return noSQL(c), nil
 	case opSetNotNull:
 		return p.setNotNull(c), nil
 	case opDropView:
@@ -351,7 +353,9 @@ func (postgresDialect) foreignKey(c *change) rendered {
 	}
 	var statements []string
 	if c.op == opReplaceFK {
-		statements = append(statements, "ALTER TABLE "+q(c.table)+" DROP CONSTRAINT "+q(c.oldFK.Name))
+		// The key being replaced already has the new key's name: the diff
+		// matched it by name, or by its columns and expand renamed it.
+		statements = append(statements, "ALTER TABLE "+q(c.table)+" DROP CONSTRAINT "+q(fk.Name))
 	}
 	add := stepFor(c, append(statements, foreignKeySQL(c.table, fk, true))...)
 	validate := stepFor(c, "ALTER TABLE "+q(c.table)+" VALIDATE CONSTRAINT "+q(fk.Name))

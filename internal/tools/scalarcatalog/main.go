@@ -7,6 +7,13 @@
 //	runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts
 //	runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py
 //
+// The TypeScript catalog also gives each builtin scalar its value class
+// (D19, D32): the class the graph descriptor gives a single field of the
+// scalar, computed by graphdesc.ScalarClass over the scalar as the loader
+// hydrates it from the core catalog, so the engine classifies a field
+// with the compiler's rule. The Python catalog holds no scalar rows, only
+// the parse, normalize and validate functions, and gains nothing.
+//
 // Run from the repository root: go run ./internal/tools/scalarcatalog
 // With -check the command exits 1 when a committed file differs from what it
 // would write, which is how CI keeps the catalogs in step with the pinned
@@ -24,6 +31,11 @@ import (
 	"strings"
 
 	scalars "github.com/parable-work/superscalar/go"
+
+	"github.com/parable-work/superschematic/internal/generator/graphdesc"
+	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 const (
@@ -71,9 +83,14 @@ func main() {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	classes, err := valueClasses(names)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	outputs := map[string][]byte{
-		tsPath: renderTS(names),
+		tsPath: renderTS(names, classes),
 		pyPath: renderPython(names),
 	}
 	failed := false
@@ -97,7 +114,32 @@ func main() {
 	}
 }
 
-func renderTS(names []string) []byte {
+// valueClasses is the value class graphdesc gives a single field of each
+// named scalar (graphdesc.ScalarClass), each hydrated from the core catalog
+// as a load hydrates a scalar a schema names (loader.HydrateScalars). A
+// scalar no class reads is left out.
+func valueClasses(names []string) (map[string]string, error) {
+	schema := &ir.Schema{Scalars: make(map[string]*ir.ScalarDef, len(names))}
+	for _, name := range names {
+		schema.Scalars[name] = &ir.ScalarDef{Name: name}
+	}
+	if err := loader.HydrateScalars(schema, registry.CoreScalars()); err != nil {
+		return nil, fmt.Errorf("hydrate the builtin scalars: %w", err)
+	}
+	classes := make(map[string]string, len(names))
+	for _, name := range names {
+		class, err := graphdesc.ScalarClass(schema, name)
+		if err != nil {
+			return nil, fmt.Errorf("the value class of %s: %w", name, err)
+		}
+		if class != "" {
+			classes[name] = class
+		}
+	}
+	return classes, nil
+}
+
+func renderTS(names []string, classes map[string]string) []byte {
 	var b bytes.Buffer
 	b.WriteString("// @generated; do not edit\n")
 	b.WriteString("// Builtin scalar catalog: one row per scalar in the superscalar Go package\n")
@@ -144,6 +186,26 @@ func renderTS(names []string) []byte {
 		}
 		fmt.Fprintf(&b, "  %q: %s", row.Name, encoded)
 		if i < len(names)-1 {
+			b.WriteString(",")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("};\n")
+	b.WriteString("\n")
+	b.WriteString("// The value class (D19) the graph descriptor gives a single field of each\n")
+	b.WriteString("// builtin scalar: the class of one value of it stored in a column of its\n")
+	b.WriteString("// own (graphdesc.ScalarClass), keyed as BUILTIN_SCALARS is. A scalar no\n")
+	b.WriteString("// class reads is not here.\n")
+	b.WriteString("export const BUILTIN_SCALAR_VALUE_CLASSES: Record<string, string> = {\n")
+	classified := make([]string, 0, len(classes))
+	for _, name := range names {
+		if _, ok := classes[name]; ok {
+			classified = append(classified, name)
+		}
+	}
+	for i, name := range classified {
+		fmt.Fprintf(&b, "  %q: %q", strings.ReplaceAll(name, ".", "_"), classes[name])
+		if i < len(classified)-1 {
 			b.WriteString(",")
 		}
 		b.WriteString("\n")

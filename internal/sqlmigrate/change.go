@@ -34,6 +34,7 @@ const (
 	opCreateView       op = "createView"
 	opReplaceView      op = "replaceView"
 	opCommentOnTable   op = "commentOnTable"
+	opGraphContent     op = "changeGraphContent"
 	opSetNotNull       op = "setNotNull"
 	opDropDefault      op = "dropDefault"
 	opDropView         op = "dropView"
@@ -48,7 +49,8 @@ const (
 
 // rank is a change's place in its phase. Expand runs renames, then creates
 // and adds, then alterations, then indexes, constraints, functions,
-// triggers, views and comments. Contract runs tightenings, then drops in
+// triggers, views and comments, then the changes of a version graph's
+// content that change no table. Contract runs tightenings, then drops in
 // reverse dependency order (D27).
 var rank = map[op]int{
 	opCreateExtension:  0,
@@ -78,6 +80,7 @@ var rank = map[op]int{
 	opCreateView:       16,
 	opReplaceView:      16,
 	opCommentOnTable:   17,
+	opGraphContent:     18,
 
 	opSetNotNull:     20,
 	opDropDefault:    20,
@@ -112,7 +115,12 @@ type change struct {
 	// extension.
 	name, oldName string
 
-	tableDef   *Table
+	tableDef *Table
+	// dropsWith are the other tables of a reference cycle a dropTable
+	// change drops with tableDef, for a dialect that cannot drop the
+	// foreign key that closes the cycle first.
+	dropsWith []*Table
+
 	column     *Column
 	constraint *Constraint
 	foreignKey *ForeignKey

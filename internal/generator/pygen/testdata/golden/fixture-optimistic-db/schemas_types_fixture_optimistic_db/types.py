@@ -114,7 +114,7 @@ class Shelf(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -138,7 +138,7 @@ class Shelf(BaseModel):
             errors.add_field_error("created_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by), re.ASCII) is None:
                 errors.add_field_error("created_by", "pattern", "invalid format")
 
         # Validate updatedAt
@@ -150,7 +150,7 @@ class Shelf(BaseModel):
             errors.add_field_error("updated_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.updated_by)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.updated_by), re.ASCII) is None:
                 errors.add_field_error("updated_by", "pattern", "invalid format")
 
         # Validate deletedAt
@@ -163,7 +163,7 @@ class Shelf(BaseModel):
         # Validate deletedBy
         if self.deleted_by is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.deleted_by)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.deleted_by), re.ASCII) is None:
                 errors.add_field_error("deleted_by", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -355,7 +355,7 @@ class Stock(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only

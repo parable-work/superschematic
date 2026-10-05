@@ -61,10 +61,22 @@ type SchemaConfig struct {
 	// AuthDB names the DB service used for authentication, when set.
 	AuthDB string `json:"authDb,omitempty" yaml:"authDb,omitempty"`
 
+	// AuthDBKind is the kind the authDb handle gives, when the config
+	// spells it as a handle: the TypeScript form does, and the data forms
+	// write the name alone. The build plan checks it against the service
+	// AuthDB names.
+	AuthDBKind ir.SchemaKind `json:"-" yaml:"-"`
+
 	// Dependencies lists the services this service imports types from. The
 	// JSON/YAML forms carry this as an explicit array: there is no import
 	// system in the data forms to derive it from.
 	Dependencies []ServiceDependency `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+
+	// Calls lists the API services an API's implementation calls. It is
+	// valid on an API config only, and each entry names an API service.
+	// The build plan builds each callee before its caller
+	// (docs/stack-model.md, section 3.3).
+	Calls []ServiceDependency `json:"calls,omitempty" yaml:"calls,omitempty"`
 
 	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
@@ -178,5 +190,59 @@ func ValidateShapeWith(cfg *SchemaConfig, known KindSet) (*SchemaConfig, error) 
 			return nil, fmt.Errorf("schema config for %s has a malformed dependency (name %q, kind %q; registered kinds: %s)", cfg.Name, dep.Name, dep.Kind, strings.Join(known.Kinds(), ", "))
 		}
 	}
+	if cfg.AuthDBKind != "" && !known.KnowsKind(cfg.AuthDBKind) {
+		return nil, fmt.Errorf("schema config for %s has an authDb of unknown kind %q (registered kinds: %s)", cfg.Name, cfg.AuthDBKind, strings.Join(known.Kinds(), ", "))
+	}
+	if err := validateCalls(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// validateCalls checks calls on its own: an API config's list of other API
+// services, each named once.
+func validateCalls(cfg *SchemaConfig) error {
+	if len(cfg.Calls) > 0 && cfg.Kind != ir.SchemaKindAPI {
+		return fmt.Errorf("schema config for %s sets calls, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
+	}
+	seen := make(map[string]bool, len(cfg.Calls))
+	for _, call := range cfg.Calls {
+		switch {
+		case call.Name == "":
+			return fmt.Errorf("schema config for %s has a calls entry with no name", cfg.Name)
+		case call.Kind != ir.SchemaKindAPI:
+			return fmt.Errorf("schema config for %s calls %s, a handle of kind %q; calls names API services only", cfg.Name, call.Name, call.Kind)
+		case call.Name == cfg.Name:
+			return fmt.Errorf("schema config for %s calls itself", cfg.Name)
+		case seen[call.Name]:
+			return fmt.Errorf("schema config for %s calls %s more than once", cfg.Name, call.Name)
+		}
+		seen[call.Name] = true
+	}
+	return nil
+}
+
+// NewSchema returns an empty schema for the configured service, holding the
+// references the config makes: its authDb, dependencies and calls. Every
+// frontend starts its schema here, so the IR records them whatever form the
+// config takes.
+func (c *SchemaConfig) NewSchema() *ir.Schema {
+	schema := ir.NewSchema(c.Name, c.Kind)
+	schema.AuthDB = c.AuthDB
+	schema.Dependencies = serviceRefs(c.Dependencies)
+	schema.Calls = serviceRefs(c.Calls)
+	return schema
+}
+
+// serviceRefs converts config references to IR references; none is nil, so
+// the IR leaves the key out.
+func serviceRefs(deps []ServiceDependency) []ir.ServiceRef {
+	if len(deps) == 0 {
+		return nil
+	}
+	refs := make([]ir.ServiceRef, len(deps))
+	for i, dep := range deps {
+		refs[i] = ir.ServiceRef{Name: dep.Name, Kind: dep.Kind}
+	}
+	return refs
 }

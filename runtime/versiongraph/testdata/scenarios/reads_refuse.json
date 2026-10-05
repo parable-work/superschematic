@@ -23,7 +23,7 @@
     {"op": "history", "ref": "id:Missing", "expect": {"error": "not_found"}},
     {"op": "branch", "from": "id:Missing", "name": "nowhere", "expect": {"error": "not_found"}},
     {"op": "revert", "ref": "whisk", "toCommit": "id:Missing", "expect": {"error": "not_found"}},
-    {"op": "sql", "statement": {"postgres": "DELETE FROM utensil_history WHERE id IN (SELECT id FROM utensil WHERE entity_key = $1::uuid AND ref_id = $2::uuid)"}, "args": [{"uuid": "Whisk"}, {"ref": "main"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM utensil_history WHERE id IN (SELECT id FROM utensil WHERE entity_key = $1::uuid AND ref_id = $2::uuid)", "sqlite": "DELETE FROM graph_member_history WHERE kind = 'utensil' AND id IN (SELECT id FROM graph_member WHERE kind = 'utensil' AND entity_key = ?1 AND ref_id = ?2)"}, "args": [{"uuid": "Whisk"}, {"ref": "main"}]},
     {"op": "materialize", "commit": "c2", "expect": {"error": "history_missing"}},
     {"op": "materialize", "commit": "c1", "expect": {"contentHashOf": "c1"}},
     {"op": "branch", "from": "main", "name": "draft", "as": "draft", "expect": {"ref": {"base": "c2"}}},

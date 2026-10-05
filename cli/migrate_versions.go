@@ -131,19 +131,29 @@ func (v *schemaVersion) requireDatabase(service buildplan.Service) error {
 // outputs.sql.dialects does not list: no build of it writes that
 // dialect's create.sql, so no database of it is in that dialect.
 func (v *schemaVersion) requireDialect(name string, dialect sqlmigrate.Dialect) error {
-	_, cfg, err := v.load(name)
+	built, dialects, err := v.builtFor(name, dialect)
 	if err != nil {
 		return err
 	}
-	outputs, err := registry.ParseOutputs(cfg.Outputs, v.reg)
-	if err != nil {
-		return fmt.Errorf("schema config for %s: %w", name, err)
-	}
-	if !outputs.SQLDialect(string(dialect)) {
+	if !built {
 		return fmt.Errorf("migrate plan: %s is built for %s, not %s: add %s to its outputs.sql.dialects to plan for it",
-			name, strings.Join(outputs.SQLDialects(), ", "), dialect, dialect)
+			name, strings.Join(dialects, ", "), dialect, dialect)
 	}
 	return nil
+}
+
+// builtFor reports whether the named service's outputs.sql.dialects lists
+// dialect, with the dialects it lists.
+func (v *schemaVersion) builtFor(name string, dialect sqlmigrate.Dialect) (bool, []string, error) {
+	_, cfg, err := v.load(name)
+	if err != nil {
+		return false, nil, err
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, v.reg)
+	if err != nil {
+		return false, nil, fmt.Errorf("schema config for %s: %w", name, err)
+	}
+	return outputs.SQLDialect(string(dialect)), outputs.SQLDialects(), nil
 }
 
 // readsSources reports whether service's kind may hold @source views,
@@ -246,6 +256,24 @@ func (p *previousVersion) close() {
 	}
 }
 
+// requireDialect refuses a previous version whose outputs.sql.dialects
+// does not list dialect: no build of it wrote that dialect's create.sql,
+// so its model in that dialect is not what a database holds. A model file
+// is checked by its own dialect instead (readModelFile).
+func (p *previousVersion) requireDialect(name string, dialect sqlmigrate.Dialect) error {
+	built, dialects, err := p.version.builtFor(name, dialect)
+	if err != nil {
+		return fmt.Errorf("%s: %w", p.label, err)
+	}
+	if !built {
+		return fmt.Errorf("migrate plan: %s: the previous version of %s was not built for %s (its outputs.sql.dialects lists %s); "+
+			"plan from the model the database recorded (--from <model.json>, as superschematic-migrate status --model prints it), "+
+			"or from an empty database with neither --from nor --from-ref",
+			p.label, name, dialect, strings.Join(dialects, ", "))
+	}
+	return nil
+}
+
 // openPrevious resolves --from or --from-ref, or an empty database when
 // neither is given. name is the service the plan migrates.
 func openPrevious(cmd *cobra.Command, a *app, flags *migratePlanFlags, current *schemaVersion, name string, dialect sqlmigrate.Dialect) (*previousVersion, error) {
@@ -280,7 +308,12 @@ func openPrevious(cmd *cobra.Command, a *app, flags *migratePlanFlags, current *
 			version.close()
 			return nil, fmt.Errorf("%s: %w", label, err)
 		}
-		return &previousVersion{label: label, version: version, found: true}, nil
+		prev := &previousVersion{label: label, version: version, found: true}
+		if err := prev.requireDialect(name, dialect); err != nil {
+			prev.close()
+			return nil, err
+		}
+		return prev, nil
 
 	case flags.fromRef != "":
 		label := "--from-ref " + flags.fromRef
@@ -307,6 +340,9 @@ func openPrevious(cmd *cobra.Command, a *app, flags *migratePlanFlags, current *
 		prev.version = version
 		if _, prev.found = version.service(name); !prev.found {
 			_, _ = fmt.Fprintf(stderr, "migrate plan: at %s there is no service %s; planning from an empty database\n", flags.fromRef, name)
+		} else if err := prev.requireDialect(name, dialect); err != nil {
+			prev.close()
+			return nil, err
 		}
 		return prev, nil
 

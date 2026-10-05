@@ -635,3 +635,51 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+// TestScalarClassIsASingleFieldsClass checks ScalarClass against ValueClass
+// for a single field of each scalar of two schemas, one whose scalars map
+// their SQL types and one whose scalars infer them: the class is the
+// field's, and "" where ValueClass refuses the field.
+func TestScalarClassIsASingleFieldsClass(t *testing.T) {
+	for _, schema := range []*ir.Schema{
+		{Scalars: map[string]*ir.ScalarDef{
+			"Weight":  {Name: "Weight", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"json_schema": "number"}},
+			"Checked": {Name: "Checked", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"json_schema": "boolean", "sql": "BOOLEAN"}},
+			"Handle":  {Name: "Handle", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "CITEXT"}},
+			"Blob":    {Name: "Blob", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"json_schema": ir.JSONSchemaAnyType, "sql": "TEXT"}},
+			"Count":   {Name: "Count", LanguagePrimitive: ir.LanguageNumber, Primitive: "Int", TypeMappings: map[string]string{"json_schema": "integer", "sql": "INTEGER"}},
+			"Payload": {Name: "Payload", LanguagePrimitive: ir.LanguageObject, Primitive: "Object", TypeMappings: map[string]string{"sql": "TEXT"}},
+			"Point":   {Name: "Point", LanguagePrimitive: ir.LanguageString, Pattern: `^\d+,\d+$`, TypeMappings: map[string]string{"json_schema": "object", "sql": "POINT"}},
+		}},
+		{Scalars: map[string]*ir.ScalarDef{
+			"Ratio":         {Name: "Ratio", LanguagePrimitive: ir.LanguageNumber, Primitive: "Float"},
+			"Flag":          {Name: "Flag", LanguagePrimitive: ir.LanguageBoolean},
+			"Payload":       {Name: "Payload", LanguagePrimitive: ir.LanguageObject},
+			"Test.Uuid":     {Name: "Test.Uuid", LanguagePrimitive: ir.LanguageString},
+			"Test.DateTime": {Name: "Test.DateTime", LanguagePrimitive: ir.LanguageString},
+			"Test.Int":      {Name: "Test.Int", LanguagePrimitive: ir.LanguageNumber},
+		}},
+	} {
+		names := []string{"string", "number", "boolean"}
+		for name := range schema.Scalars {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			got, err := graphdesc.ScalarClass(schema, name)
+			if err != nil {
+				t.Fatalf("ScalarClass(%s): %v", name, err)
+			}
+			want, refused := graphdesc.ValueClass(schema, &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: name}})
+			if refused != nil {
+				want = ""
+			}
+			if got != want {
+				t.Errorf("ScalarClass(%s) = %q, a single field of it has %q (%v)", name, got, want, refused)
+			}
+		}
+	}
+	if _, err := graphdesc.ScalarClass(&ir.Schema{}, "Nope"); err == nil {
+		t.Error("ScalarClass of a name the schema lacks gives no error")
+	}
+}

@@ -236,9 +236,13 @@ func status(ctx context.Context, args []string, o options) error {
 		model = st.ModelHash
 	}
 	if st.PlanHash != "" {
-		plan = st.PlanHash + " (expand steps not all done)"
-		if st.PlanPhase == string(migrate.Expand) {
+		switch st.PlanPhase {
+		case migrate.PlanPhaseExpanded:
+			plan = st.PlanHash + " (expand done; contract pending; the applied model is the plan's expanded model, and a plan from it supersedes the contract)"
+		case migrate.PlanPhaseExpand:
 			plan = st.PlanHash + " (expand done; contract pending)"
+		default:
+			plan = st.PlanHash + " (expand steps not all done)"
 		}
 	}
 	_, _ = fmt.Fprintf(w, "service:          %s\n", st.Service)
