@@ -174,7 +174,9 @@ lean on SQLite's one writer. `createTables` and `storage` refuse a SQLite
 older than `minSqliteVersion` (3.37.0, the first with `STRICT` tables) and
 one that cannot run `json_each` and `json_extract`; in the caller's
 transaction, where D16 refuses the name `sqlite_version`, they check the
-JSON functions only. The engine's core `Branches` behavior runs it
+JSON functions only. A check that passes runs once, by client or, in the
+caller's transaction, by layout; one that fails runs again at the next
+open. The engine's core `Branches` behavior runs it
 so, in each operation's transaction, over its `sql`
 (`runtime/engine/README.md`, "Branches").
 

@@ -593,7 +593,11 @@ and in 3.37 with JSON1); its statements need nothing later than that
 the version with `sqlite_version()`. In the caller's transaction it checks
 the JSON functions only, since D16 refuses a behavior's statement that
 names `sqlite_version`, and D16's engine, whose own tables are `STRICT`,
-needs 3.37.0 already. Every language's SQLite adapter refuses the same.
+needs 3.37.0 already. A check that passes is kept, so it runs once: by
+client on a connection of the adapter's own, and by layout (its tables'
+names) in the caller's transaction, since a host such as `Branches` binds a
+new adapter over a new client for each call. A check that fails is not
+kept. Every language's SQLite adapter refuses the same.
 
 The adapter reaches SQLite through `SqliteClient`: `run`, `get` and `all`
 with positional parameters for numbered placeholders (`?1`), returning

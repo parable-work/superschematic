@@ -132,6 +132,23 @@ function assertCanonicalID(id: unknown, what: string): void {
   assert.match(hex, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, `${what} ${String(id)} is a version-4 UUID`);
 }
 
+let layouts = 0;
+
+/**
+ * A behavior's table names no other case uses, so a caller's-transaction
+ * SQLite check the adapter keeps for another case's layout does not stand
+ * in for this one's.
+ */
+function freshLayout(): (local: string) => string {
+  const n = ++layouts;
+  return (local) => behaviorTable(`probe${n}_${local}`);
+}
+
+/** How many of the statements are the adapter's SQLite checks: the version read and the JSON functions' probe. */
+function sqliteChecks(statements: readonly string[]): number {
+  return statements.filter((sql) => /sqlite_version\(\)|json_each\('\[\[1\]\]'\)/.test(sql)).length;
+}
+
 /** A ref and a tagged commit on it, written through the adapter, for the cases that need a commit. */
 function refAndCommit(tx: SyncTx, root = bread, name = "main"): { ref: Ref; commit: string } {
   const ref = tx.createRef({ root, parent: null, base: null, name, actor: cook });
@@ -1267,19 +1284,97 @@ export const cases: Case[] = [
         }
         // In the caller's transaction the adapter cannot read the version, a
         // name D16 refuses a behavior, so it checks the JSON functions only.
-        const caller: Partial<SqliteOptions> = { callerTransaction: true, tableName: behaviorTable };
+        // A layout whose check failed is checked again, and passes once its
+        // SQLite does.
+        const caller: Partial<SqliteOptions> = { callerTransaction: true, tableName: freshLayout() };
         const ran: Ran[] = [];
         inCallerTransaction(db.client, () => {
-          for (const open of opens(checkedClient(reporting("3.36.0"), "migrate", ran), caller)) {
-            open();
-          }
           for (const json of ["fails", "wrong"] as const) {
             for (const open of opens(checkedClient(reporting("3.36.0", json), "migrate"), caller)) {
               assert.throws(open, /this SQLite (cannot run json_each and json_extract|gives null)/, json);
             }
           }
+          for (const open of opens(checkedClient(reporting("3.36.0"), "migrate", ran), caller)) {
+            open();
+          }
         });
         assert.ok(ran.some((r) => /json_each/.test(r.sql)), "the caller's transaction checks the JSON functions");
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "a SQLite check that passes runs once per client on a connection of the adapter's own and once per layout in a caller's transaction, and one that fails runs again",
+    run(binding) {
+      const db = binding.open(":memory:");
+      try {
+        /** A client over the connection that records each statement, and whose JSON functions fail while json.works is false. */
+        const recording = (ran: string[], json = { works: true }): SqliteClient => ({
+          exec: (sql) => db.client.exec!(sql),
+          run: (sql, params) => {
+            ran.push(sql);
+            return db.client.run(sql, params);
+          },
+          get: (sql, params) => {
+            ran.push(sql);
+            if (!json.works && /json_each/.test(sql)) {
+              throw new SqliteError("no such function: json_each", 1);
+            }
+            return db.client.get(sql, params);
+          },
+          all: (sql, params) => {
+            ran.push(sql);
+            return db.client.all(sql, params);
+          },
+        });
+        // On a connection of its own: once per client, whichever adapter
+        // binds it and however many operations run over it.
+        const ran: string[] = [];
+        const client = recording(ran);
+        const recipe = new SqliteAdapter(descriptor, { graph });
+        recipe.createTables(client);
+        const first = sqliteChecks(ran);
+        assert.ok(first > 0, "the first open checks the SQLite");
+        const engine = new SyncEngine(core, descriptor, recipe.storage(client), { schemaEpoch: 1, snapshotEvery: 3 });
+        const main = engine.createPrimary(cook, bread, "main");
+        engine.branch(cook, main.id, "draft");
+        new SqliteAdapter(descriptor, { graph: "menu" }).storage(client);
+        assert.equal(sqliteChecks(ran), first, "another open of the client, and the operations over it, check nothing");
+        // A check that failed is not kept.
+        const flakyRan: string[] = [];
+        const json = { works: false };
+        const flaky = recording(flakyRan, json);
+        assert.throws(() => recipe.storage(flaky), /cannot run json_each and json_extract/);
+        json.works = true;
+        const failed = sqliteChecks(flakyRan);
+        recipe.storage(flaky);
+        assert.ok(sqliteChecks(flakyRan) > failed, "a client whose check failed is checked again");
+        const passed = sqliteChecks(flakyRan);
+        recipe.storage(flaky);
+        assert.equal(sqliteChecks(flakyRan), passed, "and once it passes, not again");
+
+        // In a caller's transaction, as Branches binds the adapter: a new
+        // adapter over a new client for each call, on one connection.
+        const tableName = freshLayout();
+        inCallerTransaction(db.client, () => {
+          for (const statement of sqliteLayout(tableName)) {
+            db.client.run(statement);
+          }
+        });
+        const calls: Ran[] = [];
+        const call = <T>(fn: (engine: SyncEngine) => T): T =>
+          inCallerTransaction(db.client, () => {
+            const adapter = new SqliteAdapter(descriptor, { graph, callerTransaction: true, tableName });
+            const storage = adapter.storage(checkedClient(db.client, "write", calls));
+            return fn(new SyncEngine(core, descriptor, storage, { schemaEpoch: 1, snapshotEvery: 3 }));
+          });
+        const primary = call((e) => e.createPrimary(cook, bread, "main"));
+        const once = sqliteChecks(calls.map((r) => r.sql));
+        assert.ok(once > 0, "the first call checks the SQLite");
+        call((e) => e.branch(cook, primary.id, "draft"));
+        call((e) => e.compose(primary.id));
+        assert.equal(sqliteChecks(calls.map((r) => r.sql)), once, "a later call, on a new adapter and a new client, checks nothing");
       } finally {
         db.close();
       }

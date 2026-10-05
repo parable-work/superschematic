@@ -126,15 +126,33 @@ function versionParts(version: string): [number, number, number] | undefined {
   return m === null ? undefined : [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 
+/** The clients on a connection of the adapter's own whose SQLite passed checkSqlite. */
+const checkedClients = new WeakSet<SqliteClient>();
+
+/**
+ * The layouts, by their tables' names, whose SQLite passed checkSqlite in a
+ * caller's transaction. A host such as D16's Branches binds a new adapter
+ * over a new client for each call, all on one connection, so a check kept
+ * by client would run on every call. What the check reads is the SQLite
+ * library's, which the host's connection keeps.
+ */
+const checkedLayouts = new Set<string>();
+
 /**
  * Refuses a SQLite the adapter cannot run on: one older than
  * minSqliteVersion, and one that cannot run json_each and json_extract. On a
  * connection of its own the adapter reads the version with sqlite_version().
  * In the caller's transaction it checks the JSON functions only: D16 refuses
  * a behavior's statement that names sqlite_version, and D16's engine, whose
- * own tables are STRICT, already needs 3.37.0.
+ * own tables are STRICT, already needs 3.37.0. A check that passes is kept,
+ * by client on a connection of the adapter's own and by layout in a
+ * caller's transaction, so it runs once; one that fails is not kept.
  */
 function checkSqlite(config: AdapterConfig, client: SqliteClient): void {
+  const layout = config.callerTransaction ? Object.values(config.tables).join("\u0000") : undefined;
+  if (layout !== undefined ? checkedLayouts.has(layout) : checkedClients.has(client)) {
+    return;
+  }
   let version: string | undefined;
   if (!config.callerTransaction) {
     const reported = client.get("SELECT sqlite_version() AS version")?.["version"];
@@ -161,6 +179,11 @@ function checkSqlite(config: AdapterConfig, client: SqliteClient): void {
   }
   if (Number(one) !== 1) {
     throw new Error(`sqlite: ${of} gives ${String(one)} for json_extract over json_each, not 1, so the adapter's statements cannot run on it`);
+  }
+  if (layout !== undefined) {
+    checkedLayouts.add(layout);
+  } else {
+    checkedClients.add(client);
   }
 }
 
