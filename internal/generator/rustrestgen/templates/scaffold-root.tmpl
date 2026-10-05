@@ -1,0 +1,6 @@
+//! Implementation scaffolds for the {{ .SchemaName }} API, one module per
+//! namespace. Mount this directory as a module of the service's crate.
+//! NOTE: Generated once and never overwritten.
+{{ range .Namespaces }}
+pub mod {{ toSnakeCase . }};
+{{- end }}

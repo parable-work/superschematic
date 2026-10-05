@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -41,13 +40,12 @@ func loadNestedArraysSchema(t *testing.T, withPaint bool) *ir.Schema {
 
 func generateNestedArraysAPI(t *testing.T, schema *ir.Schema, typesDir, outputDir string) *APIOutput {
 	t.Helper()
-	output, err := Generate(schema, Options{
-		AuthProvider: sessionauth.Provider{},
-		SchemaName:   nestedArraysService,
-		TypesCrate:   naming.Default().RustTypesCrate(nestedArraysService),
-		TypesDir:     typesDir,
-		OutputDir:    outputDir,
-		Clock:        nestedArraysClock,
+	output, err := generateFrom(schema, apiSource{}, Options{
+		SchemaName: nestedArraysService,
+		TypesCrate: naming.Default().RustTypesCrate(nestedArraysService),
+		TypesDir:   typesDir,
+		OutputDir:  outputDir,
+		Clock:      nestedArraysClock,
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -144,9 +142,10 @@ func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 // replaced by the crates' module names, and runs cargo test on the API
 // crate. The types crate resolves superscalar from the checkout
 // scripts/superscalar-dep.sh stands up. A test may pause tokio's clock
-// (#[tokio::test(start_paused = true)]). CARGO_TARGET_DIR is honored when
-// set.
-func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName, test string) {
+// (#[tokio::test(start_paused = true)]). Each extra runs on the written
+// crate before the build, to add files of its own. CARGO_TARGET_DIR is
+// honored when set.
+func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName, test string, extras ...func(apiDir string, output *APIOutput) error) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -172,13 +171,12 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 	if err := rustgen.WriteTypes(typesOutput, typesDir); err != nil {
 		t.Fatalf("rustgen.WriteTypes: %v", err)
 	}
-	output, err := Generate(schema, Options{
-		AuthProvider: sessionauth.Provider{},
-		SchemaName:   service,
-		TypesCrate:   naming.Default().RustTypesCrate(service),
-		TypesDir:     typesDir,
-		OutputDir:    apiDir,
-		Clock:        nestedArraysClock,
+	output, err := generateFrom(schema, apiSource{}, Options{
+		SchemaName: service,
+		TypesCrate: naming.Default().RustTypesCrate(service),
+		TypesDir:   typesDir,
+		OutputDir:  apiDir,
+		Clock:      nestedArraysClock,
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -188,6 +186,11 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 	}
 	if err := WriteAPI(output, apiDir); err != nil {
 		t.Fatalf("write api: %v", err)
+	}
+	for _, extra := range extras {
+		if err := extra(apiDir, output); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	cargoToml, err := os.ReadFile(filepath.Join(apiDir, "Cargo.toml"))

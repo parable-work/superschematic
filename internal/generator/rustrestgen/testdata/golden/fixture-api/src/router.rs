@@ -9,8 +9,8 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::Extension;
 use axum::{Json, Router};
 use superschematic_http_runtime::{
-    error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
-    RequestContext,
+    error_response, openapi_router, path_is_percent_encoded, request_id_from_headers,
+    wrap_envelope, ApiError, RequestContext, RouterOptions,
 };
 use superschematic_http_runtime::Principal;
 use superschematic_http_runtime::RouteControls;
@@ -33,6 +33,15 @@ pub struct RouterState {
 /// limit, the body limit, the permission check of a route that needs a
 /// caller, then the timeout around the handler.
 pub fn build_router(implementations: Implementations) -> Router {
+    build_router_with(implementations, RouterOptions::default())
+}
+
+/// `build_router` with `options`: the routes, and the OpenAPI document at
+/// `GET /api/openapi.json` with its RapiDoc page at `GET /api/docs` unless
+/// `options.serve_openapi` is off, stating `options.openapi_version` and
+/// `options.openapi_base_url` as the generated Go server states its
+/// `Config`'s.
+pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::new()
@@ -60,7 +69,9 @@ pub fn build_router(implementations: Implementations) -> Router {
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.write"])
         .apply(patch(handle_tenant_update_secret));
     router = router.route("/api/tenants/{id}", route);
-    router.with_state(state)
+    router
+        .with_state(state)
+        .merge(openapi_router(crate::openapi::OPENAPI_JSON, "fixture-api", &options))
 }
 
 fn method_from_str(method: &str) -> Method {

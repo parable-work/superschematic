@@ -332,3 +332,43 @@ let router = build_router(Implementations {
         .apply(post(custom_handler)),
 );
 ```
+
+The crate writes `openapi.json`, the document every server's build
+writes, and `build_router` serves it at `GET /api/openapi.json` with a
+[RapiDoc](https://rapidocweb.com/) page at `GET /api/docs`, as the Go
+server does. The served document states version `1.0.0` and the server
+`http://localhost:8080` unless you say otherwise. `build_router_with` takes
+a `RouterOptions` to restate both, or to serve neither route:
+
+```rust
+let router = build_router_with(implementations, RouterOptions {
+    openapi_version: env!("CARGO_PKG_VERSION").to_owned(),
+    openapi_base_url: "https://api.example.com".to_owned(),
+    ..RouterOptions::default()
+});
+```
+
+A schema with an `@envVars` class (see
+[Modeling types](/superschematic/guides/modeling-types/)) also gets the
+crate's `config` module, whose `load_config()` reads the class's
+variables from the environment and a `.env` file.
+
+With `scaffoldsOutputDir` set, the build writes starter implementations
+once, never overwriting them: a `mod.rs` with one module per namespace,
+and in each namespace's directory a `mod.rs`, `implementation.rs` with the
+`Implementation` struct and its one impl of the namespace trait, and a
+file per operation with the function that impl calls. Mount the directory
+as a module of the service's crate and build `Implementations` from it:
+
+```rust
+#[path = "implementations/mod.rs"]
+mod implementations;
+
+let router = build_router(Implementations {
+    tenant: Arc::new(implementations::tenant::Implementation::new()),
+    authenticator: Arc::clone(&authenticator),
+});
+```
+
+An operation added to the schema later is a method the scaffold's impl
+lacks; the compiler names it, and you add it with its file.
