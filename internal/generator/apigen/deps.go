@@ -71,7 +71,7 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 // the Deps database itself: a public API already does for its upstream
 // auth schema's.
 func (o *APIOutput) DepsRequiresORM() bool {
-	return o.Deps.ORMModule != "" && !(o.IsPublic && o.Deps.ORMModule == o.ORMModule)
+	return o.Deps.ORMModule != "" && (!o.IsPublic || o.Deps.ORMModule != o.ORMModule)
 }
 
 // HasEnvConfig reports whether config.go declares EnvConfig, which
