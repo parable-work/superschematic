@@ -43,7 +43,7 @@ A step:
 | `statements` | array of strings | Complete SQL statements without trailing semicolons. The runner runs each with one call, in order. A statement may contain semicolons inside a dollar-quoted body. The array may be empty: the step changes nothing and carries its hazards, and the runner logs it like any other. |
 | `transactional` | boolean | Whether the step runs in one transaction. |
 | `recovery` | array of strings | Absent unless `transactional` is false. Statements to run before a step that started and did not finish is run again. |
-| `foreignKeysOff` | boolean | SQLite only, absent when false. Run the step with foreign key enforcement off and check every foreign key before the commit. |
+| `foreignKeysOff` | boolean | SQLite only, absent when false. Run the step with foreign key enforcement off and check every foreign key before the commit. D1 cannot, and its driver refuses the plan. |
 | `hazards` | array | The step's hazards: `id`, `class`, `subject`, `reader`, `reason`. Informational to the runner. |
 
 ### Canonical JSON and hashes
@@ -100,6 +100,17 @@ CREATE TABLE IF NOT EXISTS superschematic_migrations (
 );
 ```
 
+On D1 the runner keeps a third table, the lease that stands in for a lock
+(`apply`, below):
+
+```sql
+CREATE TABLE IF NOT EXISTS superschematic_lock (
+  service    TEXT PRIMARY KEY,
+  holder     TEXT NOT NULL,     -- host:pid:random of the runner that holds it
+  expires_at TEXT NOT NULL      -- D1's time, as RFC 3339 UTC text with milliseconds
+);
+```
+
 The model is stored as text, not `JSONB`, so its bytes stay canonical.
 SQLite has no `now()`: its `updated_at` defaults to
 `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`, and the runner writes every time
@@ -127,12 +138,28 @@ on D1):
   batch; the log row's primary key fails a repeated or concurrent run of
   the step, and the batch with it. The state and the log are read in
   requests of their own.
+- The driver posts to the database's `raw` endpoint, which returns each
+  row as an array in column order. A batch is the API's
+  `{"batch": [{"sql", "params"}, ...]}` form: `PRAGMA defer_foreign_keys =
+  ON` first, since D1 keeps foreign keys on, then the lease's renewal, then
+  the step's statements, its log row and the state change. The runner's
+  `$1` placeholders go as `?1`, and every value as a string, the type the
+  API documents.
 - The lock of step 2 is a lease: a row of `superschematic_lock` (service,
   holder, expiry), taken with one conditional write, renewed at each step,
-  released at the end, and taken over once it expires.
-- A step with `transactional: false` or `foreignKeysOff` is refused: D1
-  can run neither. Plans written before the amendment may rebuild with
-  `foreignKeysOff`; apply those to a SQLite file.
+  released at the end, and taken over once it expires. The write inserts
+  the row or takes over an expired one, and its `changes` say whether it
+  took the lease. A lease lasts 2 minutes past its last renewal. A second
+  runner tries again every second, for up to 10 minutes. Every batch
+  renews the lease; once another runner has taken it over, the renewal
+  fails, and the batch with it. The expiry is D1's clock, so two runners'
+  clocks never disagree.
+- A step with `transactional: false` or `foreignKeysOff` is refused before
+  the lock, and nothing runs: D1 can run neither. Plans written before the
+  amendment may rebuild with `foreignKeysOff`; apply those to a SQLite
+  file.
+- A failed batch's error names the step's index and subject and D1's
+  message, and the statement that failed when D1's answer names it.
 - Until the real-D1 test has passed, the driver is unverified: Cloudflare
   documents a Worker's batch as a transaction, not a REST request's.
 
@@ -147,7 +174,8 @@ on D1):
    blocked there holds a snapshot, a `CREATE INDEX CONCURRENTLY` the first
    runner runs waits for that snapshot, and Postgres reports the two as a
    deadlock. On SQLite every step's transaction is `BEGIN IMMEDIATE`, and
-   the checks of steps 3 and 4 are made again inside it.
+   the checks of steps 3 and 4 are made again inside it. On D1 the runner
+   holds the lease for the whole run, and a second runner waits for it.
 3. Create the state tables if missing, and read the service's state row.
    No row means applied model `""` and no plan in progress.
 4. Decide:
@@ -247,8 +275,10 @@ Exit codes: 0 done, 1 refused or failed, 2 usage.
 | `go/` | The module. Package `migrate`: the plan and model read types, canonical JSON and the hashes, and `Runner`, which applies a plan through a `Driver` |
 | `go/postgres/` | The Postgres driver, over one pgx connection |
 | `go/sqlite/` | The SQLite driver, over `modernc.org/sqlite`, which is pure Go |
+| `go/d1/` | The D1 driver, over Cloudflare's REST API |
 | `go/cmd/superschematic-migrate/` | The binary |
 | `go/internal/testdb/` | A database of its own for each test |
+| `go/internal/d1fake/` | A fake D1 REST API over a SQLite file, for the tests |
 | `go/testdata/` | Hand-written plans per dialect, and the canonical JSON vectors |
 | `testdata/plans/<case>/` | The plans the compiler writes for the runner, `NN-<name>.plan.json` |
 
@@ -326,6 +356,21 @@ SQLite takes a path, a `sqlite:` URL (`sqlite:///var/lib/shop/shop.db` is
 superschematic-migrate apply --plan shop.plan.json --database-url /var/lib/shop/shop.db
 ```
 
+D1 takes `d1://<account id>/<database id>` and a Cloudflare API token
+that may edit the database, in `CLOUDFLARE_API_TOKEN`. As a step of a
+GitHub Actions job:
+
+```yaml
+- name: Migrate the shop database
+  env:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    DATABASE_URL: d1://${{ vars.CLOUDFLARE_ACCOUNT_ID }}/${{ vars.SHOP_D1_DATABASE_ID }}
+  run: superschematic-migrate apply --plan shop.plan.json
+```
+
+The D1 driver is unverified until the real-D1 test (Tests, below) has
+passed against a D1 database.
+
 A release publishes no image of the runner: Cloud Run cannot pull from
 GitHub's registry directly, and the stack model (D30) builds the migration
 job's image itself. As a Cloud Run job, an image that holds the binary and
@@ -364,12 +409,34 @@ defer driver.Close(ctx)
 result, err := (&migrate.Runner{Driver: driver, Log: os.Stdout}).Apply(ctx, plan, migrate.All)
 ```
 
+On D1, the driver is:
+
+```go
+driver, err := d1.Open(ctx, databaseURL, d1.Options{Token: os.Getenv("CLOUDFLARE_API_TOKEN")})
+```
+
 ## Tests
 
 `go test ./...` in `go/` runs every test against SQLite in temporary
-files. With `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` set to a Postgres
-whose role may create databases, the tests run against Postgres too; each
-creates and drops a database of its own. `TestCompilerVectors` applies
-every case under `testdata/plans` and skips while there is none.
+files, and against D1 through a fake of its REST API
+(`go/internal/d1fake`) that runs each request in one SQLite transaction
+with foreign keys on. With `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` set
+to a Postgres whose role may create databases, the tests run against
+Postgres too; each creates and drops a database of its own.
+`TestCompilerVectors` applies every case under `testdata/plans` and skips
+while there is none; on D1 it skips a case with a step that turns foreign
+keys off.
+
+`TestRealD1` applies a chain with a rebuild of a referenced table to a
+real D1 database, and checks the referencing rows survive. It runs only
+with `SUPERSCHEMATIC_MIGRATE_TEST_D1_URL` set to the database's `d1://`
+URL and `CLOUDFLARE_API_TOKEN` to a token that may edit it. The database
+is scratch: the test drops the tables `customer`, `order`, `audit` and the
+runner's before it starts.
+
+```sh
+SUPERSCHEMATIC_MIGRATE_TEST_D1_URL=d1://<account id>/<database id> CLOUDFLARE_API_TOKEN=... \
+  go test -run TestRealD1 -v .
+```
 `go test -run TestFixturesAreSealed -seal` rewrites the `from`, `to`,
 `expanded` and `hash` of the hand-written plans after an edit.

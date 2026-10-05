@@ -502,18 +502,37 @@ superschematic-migrate version
 
 `--database-url` defaults to `$DATABASE_URL`. A `postgres://` or
 `postgresql://` URL selects Postgres; a `sqlite:` URL, a `file:` URI or a
-path selects SQLite. It must match the plan's dialect. Exit codes: 0 done, 1
+path selects SQLite; a `d1://<account id>/<database id>` URL selects a
+Cloudflare D1 database, reached through Cloudflare's REST API with a token
+that may edit it in `$CLOUDFLARE_API_TOKEN`. SQLite and D1 run `sqlite`
+plans. The URL must match the plan's dialect. Exit codes: 0 done, 1
 refused or failed, 2 usage.
+
+In CI, a step that migrates a D1 database sets both variables:
+
+```yaml
+- name: Migrate the shop database
+  env:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    DATABASE_URL: d1://${{ vars.CLOUDFLARE_ACCOUNT_ID }}/${{ vars.SHOP_D1_DATABASE_ID }}
+  run: superschematic-migrate apply --plan plan.json
+```
+
+The D1 driver is unverified until its test against a real D1 database
+(`TestRealD1` in the runner's module) has passed: Cloudflare documents a
+Worker's batch as a transaction, not a REST request's, and the runner's
+tests run against a fake of the API.
 
 ### State
 
-The runner keeps two tables in the connection's current schema, and creates
+The runner keeps its tables in the connection's current schema, and creates
 them when they are missing:
 
 | Table | Holds |
 | --- | --- |
 | `superschematic_schema_state` | a row per service: the dialect, the applied model's hash and the model itself as canonical JSON, and the plan in progress with its finished phase: `expanded` when the applied model is the plan's `expandedModel`, `expand` for a plan without one |
 | `superschematic_migrations` | a row per step run: the plan's hash, the step's index, phase and subject, the SHA-256 of its SQL, and when it started and finished |
+| `superschematic_lock` | D1 only: a row per service, the lease of the runner that holds it and when it expires |
 
 The names are fixed.
 
@@ -523,15 +542,27 @@ The names are fixed.
 plan has one, its `expanded` hash before it runs anything, so an edited
 plan is never half-applied. It then takes a
 lock: on Postgres a session-level advisory lock keyed by the service, held
-for the whole run; on SQLite `BEGIN IMMEDIATE` per step. A second runner
-waits.
+for the whole run; on SQLite `BEGIN IMMEDIATE` per step; on D1 a lease in
+`superschematic_lock`, held for the whole run. A second runner waits.
+
+D1 has no `BEGIN` or `COMMIT`: one REST request runs its statements as one
+batch. So a step, its log row and any change of state are one request,
+led by `PRAGMA defer_foreign_keys = ON`, since D1 keeps foreign keys on,
+and by the renewal of the lease. A runner takes the lease with one
+conditional write; it lasts 2 minutes past its last renewal, and a runner
+that dies leaves it to expire and the next one to take it over. A batch
+whose renewal finds the lease taken over fails whole. The D1 driver
+refuses, before anything runs, a step outside a transaction and a step
+with `foreignKeysOff`, which plans written before SQLite rebuilds kept
+foreign keys on may carry; apply such a plan to a SQLite file.
 
 Each step runs in order. A step in a transaction commits with its log row,
 so it runs once. A step outside one logs its start, runs each statement on
 its own, and logs its end. Each step sets `lock_timeout` to 5 seconds, and a
 lock timeout rolls the step back and retries it after 1, 2, 4, 8 and 16
 seconds. Any other error stops the run with the step's index, subject and
-failing statement. The plan stays in progress, and the next `apply` of the
+failing statement; on D1, with D1's message, and the statement only when
+D1 names it. The plan stays in progress, and the next `apply` of the
 same plan resumes at that step, running a non-transactional step's recovery
 first. Running a finished plan again does nothing.
 
