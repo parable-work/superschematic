@@ -264,3 +264,13 @@ result type. The router decodes and checks every argument first, as the
 TypeScript router does, and refuses a key an input type does not declare.
 The [Rust page](/superschematic/install/rust/#serve-a-generated-api)
 lists what it refuses.
+
+The example serves shop-orders on it too, keeping its orders in memory,
+and runs all four SDKs' clients against it as against the Go server. It
+builds the service with its API in Rust, into an output root of its own:
+
+```bash
+superschematic build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders
+```
+
+<Snippet file="rust-server/src/main.rs" symbol="main" />
