@@ -1,0 +1,58 @@
+{
+  "dialect": "postgres",
+  "expanded": "134c1990b39fd878107aee674c40f49689006995a30c749b606f51209519bc96",
+  "from": "134c1990b39fd878107aee674c40f49689006995a30c749b606f51209519bc96",
+  "hash": "e30e4cc0678725303cfe871ec8fdf30b5497f46cbda93f4c1645cfaa84b81619",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE warehouse DROP CONSTRAINT fk_warehouse_supplier_id"
+      ],
+      "subject": "table/warehouse/constraint/fk_warehouse_supplier_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/supplier",
+          "reason": "Dropping table supplier deletes its rows (Supplier).",
+          "subject": "table/supplier"
+        }
+      ],
+      "index": 2,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE supplier"
+      ],
+      "subject": "table/supplier",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/warehouse",
+          "reason": "Dropping table warehouse deletes its rows (Warehouse).",
+          "subject": "table/warehouse"
+        }
+      ],
+      "index": 3,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE warehouse"
+      ],
+      "subject": "table/warehouse",
+      "transactional": true
+    }
+  ],
+  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "toModel": null,
+  "version": 1
+}

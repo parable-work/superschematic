@@ -19,7 +19,7 @@
     {"op": "discard", "ref": "x"},
     {"op": "sweep", "expect": {"report": {"collectedRefs": 0, "collectedRows": {}}}},
     {"op": "rows", "ref": "x", "kind": "step", "expect": {"rows": [{"entity_key": "Mix"}, {"entity_key": "Rest"}]}},
-    {"op": "sql", "statement": {"postgres": "UPDATE recipe_ref SET deleted_at = now() - interval '8 days' WHERE id = $1::uuid"}, "args": [{"ref": "x"}]},
+    {"op": "sql", "statement": {"postgres": "UPDATE recipe_ref SET deleted_at = now() - interval '8 days' WHERE id = $1::uuid", "sqlite": "UPDATE graph_ref SET deleted_at = deleted_at - 8 * 86400000000 WHERE id = ?1"}, "args": [{"ref": "x"}]},
     {"op": "sweep", "sweep": {"discardGraceSeconds": 864000}, "expect": {"report": {"collectedRefs": 0, "collectedRows": {}}}},
     {"op": "sweep", "actor": "Janitor", "expect": {"report": {"collectedRefs": 1, "collectedRows": {"step": 2}}}},
     {"op": "rows", "ref": "x", "kind": "step", "expect": {"rows": []}},
@@ -28,7 +28,7 @@
 
     {"op": "branch", "from": "main", "name": "idle", "as": "y"},
     {"op": "branch", "from": "main", "name": "busy", "as": "z"},
-    {"op": "sql", "statement": {"postgres": "UPDATE recipe_ref SET updated_at = now() - interval '3 days' WHERE id IN ($1::uuid, $2::uuid)"}, "args": [{"ref": "y"}, {"ref": "main"}]},
+    {"op": "sql", "statement": {"postgres": "UPDATE recipe_ref SET updated_at = now() - interval '3 days' WHERE id IN ($1::uuid, $2::uuid)", "sqlite": "UPDATE graph_ref SET updated_at = updated_at - 3 * 86400000000 WHERE id IN (?1, ?2)"}, "args": [{"ref": "y"}, {"ref": "main"}]},
     {"op": "sweep", "sweep": {"abandonAfterSeconds": 172800}, "expect": {"report": {"abandoned": 1, "collectedRefs": 0}}},
     {"op": "compose", "ref": "y", "expect": {"error": "not_found"}},
     {"op": "compose", "ref": "z", "expect": {"tree": {}}},
@@ -41,7 +41,7 @@
     {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead hard", "timings": {}}]}}},
     {"op": "commit", "ref": "p", "as": "pCommit"},
     {"op": "sweep", "expect": {"report": {"pruned": {}}}},
-    {"op": "sql", "statement": {"postgres": "UPDATE step_history SET recorded_at = now() - interval '400 days' WHERE id IN (SELECT id FROM step WHERE ref_id = $1::uuid)"}, "args": [{"ref": "p"}]},
+    {"op": "sql", "statement": {"postgres": "UPDATE step_history SET recorded_at = now() - interval '400 days' WHERE id IN (SELECT id FROM step WHERE ref_id = $1::uuid)", "sqlite": "UPDATE graph_member_history SET recorded_at = recorded_at - 400 * 86400000000 WHERE kind = 'step' AND id IN (SELECT id FROM graph_member WHERE kind = 'step' AND ref_id = ?1)"}, "args": [{"ref": "p"}]},
     {"op": "sweep", "expect": {"report": {"pruned": {"step": 2}}}},
     {"op": "materialize", "commit": "pCommit", "expect": {"contentHashOf": "pCommit", "tree": {"step": [{"entity_key": "Knead", "instruction": "Knead hard"}]}}},
 
@@ -49,8 +49,8 @@
     {"op": "commit", "ref": "p", "tag": true, "as": "pTagged"},
     {"op": "snapshot", "commit": "pTagged", "expect": {"snapshot": [{"kind": "step", "entityKey": "Knead", "entityVersion": 4}]}},
     {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead softly", "timings": {}}]}}},
-    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_patch WHERE commit_id = $1::uuid"}, "args": [{"commit": "pTagged"}]},
-    {"op": "sql", "statement": {"postgres": "UPDATE step_history SET recorded_at = now() - interval '400 days' WHERE id IN (SELECT id FROM step WHERE ref_id = $1::uuid)"}, "args": [{"ref": "p"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_patch WHERE commit_id = $1::uuid", "sqlite": "DELETE FROM graph_patch WHERE commit_id = ?1"}, "args": [{"commit": "pTagged"}]},
+    {"op": "sql", "statement": {"postgres": "UPDATE step_history SET recorded_at = now() - interval '400 days' WHERE id IN (SELECT id FROM step WHERE ref_id = $1::uuid)", "sqlite": "UPDATE graph_member_history SET recorded_at = recorded_at - 400 * 86400000000 WHERE kind = 'step' AND id IN (SELECT id FROM graph_member WHERE kind = 'step' AND ref_id = ?1)"}, "args": [{"ref": "p"}]},
     {"op": "sweep", "expect": {"report": {"pruned": {}}}},
     {"op": "materialize", "commit": "pTagged", "expect": {"contentHashOf": "pTagged", "tree": {"step": [{"entity_key": "Knead", "instruction": "Knead gently"}]}}},
 
@@ -61,7 +61,7 @@
     {"op": "commit", "ref": "q", "as": "q2"},
     {"op": "save", "ref": "q", "edits": {"step": {"upsert": [{"entity_key": "Bake", "position": 3, "instruction": "Bake", "timings": {}}]}}},
     {"op": "commit", "ref": "q", "as": "q3"},
-    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid"}, "args": [{"commit": "q3"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid", "sqlite": "DELETE FROM graph_snapshot_entry WHERE commit_id = ?1"}, "args": [{"commit": "q3"}]},
     {"op": "snapshot", "commit": "q3", "expect": {"snapshot": []}},
     {"op": "sweep", "expect": {"report": {"snapshots": 1, "pruned": {}}}},
     {"op": "snapshot", "commit": "q3", "expect": {"snapshot": [
@@ -73,7 +73,7 @@
 
     {"op": "save", "ref": "q", "edits": {"step": {"upsert": [{"entity_key": "Cool", "position": 4, "instruction": "Cool", "timings": {}}]}}},
     {"op": "commit", "ref": "q", "tag": true, "as": "q4"},
-    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid"}, "args": [{"commit": "q4"}]},
+    {"op": "sql", "statement": {"postgres": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid", "sqlite": "DELETE FROM graph_snapshot_entry WHERE commit_id = ?1"}, "args": [{"commit": "q4"}]},
     {"op": "sweep", "expect": {"report": {"snapshots": 1}}},
     {"op": "snapshot", "commit": "q4", "expect": {"snapshot": [
       {"kind": "step", "entityKey": "Bake", "entityVersion": 1},

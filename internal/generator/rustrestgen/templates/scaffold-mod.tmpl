@@ -1,0 +1,9 @@
+//! The {{ .Namespace }} operations of {{ .SchemaName }}.
+//! NOTE: Generated once and never overwritten.
+
+mod implementation;
+{{- range .Endpoints }}
+mod {{ .FunctionName }};
+{{- end }}
+
+pub use implementation::Implementation;

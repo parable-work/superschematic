@@ -13,9 +13,8 @@ says who the caller is and what they hold. The generated server enforces
 the first against the second: 401 when a route needs a caller and has
 none, 403 when the caller holds no permission the route accepts. This guide
 uses `shop-orders`, served in Go, and `shop-storefront`, served in
-TypeScript. The Rust server does not enforce any of this yet: every route
-it mounts answers any caller
-([Rust](/superschematic/install/rust/#serve-a-generated-api)).
+TypeScript; the Rust server applies the same rules
+([Rust](#say-who-the-caller-is-rust)).
 
 ## What a route requires
 
@@ -102,6 +101,16 @@ the request context, with the bearer token already read into
 The router applies the same 401 and 403 rules and the same nesting.
 `buildRouter`'s `permissionMatcher` option replaces the matching rule for a
 project with its own permission vocabulary.
+
+## Say who the caller is: Rust
+
+The Rust router asks `Implementations.authenticator`, an `Authenticator`
+you write, which the crate has when an operation needs a caller. It reads
+the request's head (`bearer_token` reads the token) and returns a
+`Principal` or `None`. The router applies the same 401 and 403 rules and
+the same nesting; overriding the trait's `permits` replaces the matching
+rule. The implementation finds the caller on `ctx.principal`. See
+[Rust](/superschematic/install/rust/#serve-a-generated-api).
 
 ## What the server does
 

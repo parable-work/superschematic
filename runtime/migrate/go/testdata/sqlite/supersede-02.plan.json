@@ -1,0 +1,240 @@
+{
+  "dialect": "sqlite",
+  "expanded": "3e3686c4b510b936558c14fd76c5ee912863d5a9454ce8efcb075159e593a41d",
+  "expandedModel": {
+    "dialect": "sqlite",
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Customer.email",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "nullable": true,
+            "origin": "Customer.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "phone",
+            "nullable": true,
+            "origin": "Customer.phone",
+            "type": "TEXT"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "method": "BTREE",
+            "name": "customer_email_key",
+            "unique": true
+          }
+        ],
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "INTEGER"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "INTEGER"
+          },
+          {
+            "name": "note",
+            "nullable": true,
+            "origin": "Order.note",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "method": "BTREE",
+            "name": "order_customer_id_idx"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "from": "995fc1b3eeab6e66ca8da6f51155cd8501de751bba929e3c4e7fe4bada948b66",
+  "hash": "54ee79843c8613d3ef7016afdfa1c1a7eb0719ee2ccb9ad667667069e698445d",
+  "service": "shop",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE customer ADD COLUMN phone TEXT"
+      ],
+      "subject": "table/customer/column/phone",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX order_customer_id_idx"
+      ],
+      "subject": "table/order/index/order_customer_id_idx",
+      "transactional": true
+    }
+  ],
+  "to": "c0baffa78c6a3efd60601a88abb71e132101a97f8c1c3aa800e1b622c9956d72",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Customer.email",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "nullable": true,
+            "origin": "Customer.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "phone",
+            "nullable": true,
+            "origin": "Customer.phone",
+            "type": "TEXT"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "method": "BTREE",
+            "name": "customer_email_key",
+            "unique": true
+          }
+        ],
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "INTEGER"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "INTEGER"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "INTEGER"
+          },
+          {
+            "name": "note",
+            "nullable": true,
+            "origin": "Order.note",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

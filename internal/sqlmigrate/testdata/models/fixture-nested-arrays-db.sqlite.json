@@ -11,21 +11,25 @@
           "type": "TEXT"
         },
         {
+          "holds": "json",
           "name": "labels",
           "origin": "Board.labels",
           "type": "TEXT"
         },
         {
+          "holds": "json",
           "name": "states",
           "origin": "Board.states",
           "type": "TEXT"
         },
         {
+          "holds": "json",
           "name": "walls",
           "origin": "Board.walls",
           "type": "TEXT"
         },
         {
+          "holds": "json",
           "name": "scores",
           "nullable": true,
           "origin": "Board.scores",

@@ -523,7 +523,7 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 		}
 		switch prop.Name {
 		case "uploadMaxBytes":
-			uploadMaxBytes, valid := uploadMaxBytesLiteral(v)
+			uploadMaxBytes, valid := safeIntegerLiteral(v)
 			if !valid {
 				return nil, errorAtNode(node, "Validate uploadMaxBytes must be a finite JavaScript-safe integer literal")
 			}
@@ -541,9 +541,11 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 // TypeScript number literal carries exactly.
 const maxJavaScriptSafeInteger = float64(1<<53 - 1)
 
-// uploadMaxBytesLiteral accepts a number literal that is a finite integer a
-// TypeScript number represents exactly, and returns it as int64.
-func uploadMaxBytesLiteral(value any) (int64, bool) {
+// safeIntegerLiteral accepts a number literal that is a finite integer a
+// TypeScript number represents exactly, and returns it as int64. Integer
+// options read through it are refused, not truncated, when the author wrote
+// a fraction.
+func safeIntegerLiteral(value any) (int64, bool) {
 	number, ok := value.(float64)
 	if !ok || math.IsNaN(number) || math.IsInf(number, 0) ||
 		math.Trunc(number) != number || math.Abs(number) > maxJavaScriptSafeInteger {

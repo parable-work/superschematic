@@ -31,7 +31,8 @@ func TestReadPlanAcceptsAnyEncoding(t *testing.T) {
 
 // TestReadPlanRefuses: ReadPlan refuses, before anything runs, a plan of
 // another version, a plan changed after it was sealed, a toModel that does
-// not hash to to, and steps the runner cannot run as written.
+// not hash to to, an expandedModel that does not hash to expanded or is of
+// another service, and steps the runner cannot run as written.
 func TestReadPlanRefuses(t *testing.T) {
 	sealed := func(edit func(plan map[string]any)) []byte {
 		return sealDoc(t, fixture(t, migrate.SQLite, "02-evolve"), edit, true)
@@ -65,6 +66,14 @@ func TestReadPlanRefuses(t *testing.T) {
 			p["toModel"].(map[string]any)["service"] = "other"
 		}, false), "not to the plan's to"},
 		{"no toModel", sealDoc(t, fixture(t, migrate.SQLite, "02-evolve"), func(p map[string]any) { delete(p, "toModel") }, false), "no toModel"},
+		{"an expandedModel that is not expanded", sealDoc(t, fixture(t, migrate.SQLite, "02-evolve"), func(p map[string]any) {
+			p["expandedModel"].(map[string]any)["tables"] = []any{}
+		}, false), "the plan's expandedModel hashes to"},
+		{"expanded with no expandedModel", sealed(func(p map[string]any) { delete(p, "expandedModel") }), "has expanded but no expandedModel"},
+		{"an expandedModel with no expanded", sealDoc(t, fixture(t, migrate.SQLite, "02-evolve"), func(p map[string]any) { delete(p, "expanded") }, false), "has an expandedModel but no expanded"},
+		{"an expandedModel of another service", sealed(func(p map[string]any) {
+			p["expandedModel"].(map[string]any)["service"] = "other"
+		}), "expandedModel is of sqlite service other"},
 		{"an unknown dialect", sealed(func(p map[string]any) { p["dialect"] = "mysql" }), `dialect is "mysql"`},
 		{"no service", sealed(func(p map[string]any) { p["service"] = "" }), "names no service"},
 		{"a step out of order", sealed(func(p map[string]any) { steps(p)[1].(map[string]any)["index"] = 7 }), "step 2 has index 7"},

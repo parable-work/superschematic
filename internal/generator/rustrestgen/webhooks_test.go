@@ -18,7 +18,8 @@ const webhooksService = "fixture-webhooks-api"
 // @manualRouteRegistration) and event.getEvent, which is not a webhook.
 // Implementations needs a verifier for both providers, the manual
 // operation's included, and build_router wraps each mounted webhook route in
-// webhook_verified. Regenerate with:
+// webhook_verified, outside the route's RouteControls: stripe's
+// @rateLimit and github's @requirePermission. Regenerate with:
 // go test ./internal/generator/rustrestgen -run TestWriteRustAPIGoldenWebhooks -update
 func TestWriteRustAPIGoldenWebhooks(t *testing.T) {
 	output := generateRustAPI(t, webhooksService, false, "", nil)
@@ -28,8 +29,8 @@ func TestWriteRustAPIGoldenWebhooks(t *testing.T) {
 	generated := writeGoldenAPI(t, webhooksService, output)
 	router := generated["src/router.rs"]
 	for _, want := range []string{
-		"webhook_verified(\n            post(handle_webhook_receive_stripe_event),\n            Arc::clone(&state.implementations.webhook_verifiers[\"stripe\"]),",
-		"webhook_verified(\n            post(handle_webhook_receive_github_event),\n            Arc::clone(&state.implementations.webhook_verifiers[\"github\"]),",
+		"let route = RouteControls::new()\n        .rate_limit(1)\n        .apply(post(handle_webhook_receive_stripe_event));\n    router = router.route(\n        \"/api/webhooks/stripe\",\n        webhook_verified(\n            route,\n            Arc::clone(&state.implementations.webhook_verifiers[\"stripe\"]),",
+		"let route = RouteControls::new()\n        .authorize(Arc::clone(&state.implementations.authenticator), &[\"webhooks.receive\"])\n        .apply(post(handle_webhook_receive_github_event));\n    router = router.route(\n        \"/api/webhooks/github\",\n        webhook_verified(\n            route,\n            Arc::clone(&state.implementations.webhook_verifiers[\"github\"]),",
 		`router = router.route("/api/events/{id}", get(handle_event_get_event));`,
 	} {
 		if !strings.Contains(router, want) {
@@ -41,9 +42,10 @@ func TestWriteRustAPIGoldenWebhooks(t *testing.T) {
 // TestWebhooksAPICrateBuildsAndRoutes runs cargo test on the Rust API crate
 // of fixture-webhooks-api with webhooksRouterTest: build_router panics
 // without a verifier for each provider, a provider's verifier runs before
-// the handler and its body extractor, the handler receives the body the
-// verifier read, the manual route runs the verifier once the service wraps
-// it in webhook_verified, and a route that is not a webhook runs none.
+// the rate limit, the permission check, the handler and its body extractor,
+// the handler receives the body the verifier read, the manual route runs
+// the verifier once the service wraps it in webhook_verified, and a route
+// that is not a webhook runs none.
 func TestWebhooksAPICrateBuildsAndRoutes(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, webhooksService))
 	if err != nil {
@@ -63,10 +65,11 @@ use std::sync::{Arc, Mutex};
 use API_CRATE::{
     build_router, webhook_verified, EventImplementation, Implementations, WebhookImplementation, WebhookVerifier,
 };
-use RUNTIME_CRATE::{error_response, ApiError, RequestContext};
+use RUNTIME_CRATE::{bearer_token, error_response, ApiError, Authenticator, Principal, RequestContext};
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
 use axum::extract::Request;
+use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -108,6 +111,23 @@ impl WebhookVerifier for Signed {
     }
 }
 
+// Tokens takes the bearer token as the caller's subject, holding
+// webhooks.receive unless the token is "outsider".
+struct Tokens {
+    log: Log,
+}
+
+#[async_trait]
+impl Authenticator for Tokens {
+    async fn authenticate(&self, request: &Parts) -> Result<Option<Principal>, ApiError> {
+        self.log.lock().unwrap().push("authenticate".to_string());
+        Ok(bearer_token(&request.headers).map(|token| {
+            let permissions: &[&str] = if token == "outsider" { &[] } else { &["webhooks.receive"] };
+            Principal::new(token, permissions.iter().copied())
+        }))
+    }
+}
+
 struct Events {
     log: Log,
 }
@@ -126,8 +146,9 @@ impl WebhookImplementation for Events {
         self.log.lock().unwrap().push(format!("receive_stripe_event {payload}"));
         Ok(json!({"id": payload["id"], "received": true}))
     }
-    async fn receive_github_event(&self, _ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
-        self.log.lock().unwrap().push(format!("receive_github_event {payload}"));
+    async fn receive_github_event(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
+        let caller = ctx.principal.map(|principal| principal.subject).unwrap_or_default();
+        self.log.lock().unwrap().push(format!("receive_github_event {payload} from {caller}"));
         Ok(json!({"id": payload["id"], "received": true}))
     }
 }
@@ -142,6 +163,7 @@ fn implementations(log: &Log, providers: &[&'static str]) -> Implementations {
     Implementations {
         event: events.clone(),
         webhook: events,
+        authenticator: Arc::new(Tokens { log: log.clone() }),
         webhook_verifiers: providers.iter().map(|provider| (provider.to_string(), verifier(provider, log))).collect::<HashMap<_, _>>(),
     }
 }
@@ -151,11 +173,14 @@ fn router(log: &Log) -> Router {
 }
 
 // send answers the status and the JSON body, or null for an empty body.
-async fn send(router: Router, method: &str, uri: &str, body: &str, signed_by: Option<&str>) -> (StatusCode, Value) {
+async fn send(router: Router, method: &str, uri: &str, body: &str, signed_by: Option<&str>, token: Option<&str>) -> (StatusCode, Value) {
     let mut request = axum::http::Request::builder().method(method).uri(uri).header("content-type", "application/json");
     if let Some(provider) = signed_by {
         let header = if provider == "stripe" { "stripe-signature" } else { "x-hub-signature-256" };
         request = request.header(header, signature(provider, body.as_bytes()));
+    }
+    if let Some(token) = token {
+        request = request.header("authorization", format!("Bearer {token}"));
     }
     let response = router.oneshot(request.body(Body::from(body.to_string())).unwrap()).await.unwrap();
     let status = response.status();
@@ -188,7 +213,7 @@ fn build_router_panics_without_a_verifier_for_each_provider() {
 async fn a_signed_event_reaches_the_handler_with_the_body_the_verifier_read() {
     let log = Log::default();
     let body = r#"{"id":"evt_1","type":"invoice.paid"}"#;
-    let (status, envelope) = send(router(&log), "POST", "/api/webhooks/stripe", body, Some("stripe")).await;
+    let (status, envelope) = send(router(&log), "POST", "/api/webhooks/stripe", body, Some("stripe"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(envelope["data"], json!({"id": "evt_1", "received": true}));
     assert_eq!(
@@ -207,26 +232,67 @@ async fn an_unsigned_event_is_refused_before_the_handler_and_its_extractor() {
         ("/api/webhooks/stripe", "not json", None),
         ("/api/webhooks/github", r#"{"id":"d1","action":"opened"}"#, Some("stripe")),
     ] {
-        let (status, envelope) = send(router(&log), "POST", path, body, signed_by).await;
+        let (status, envelope) = send(router(&log), "POST", path, body, signed_by, Some("octocat")).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{path} {body}");
-        assert_eq!(envelope["error"]["code"], "unauthorized", "{path} {body}");
+        assert_eq!(envelope["code"], "unauthorized", "{path} {body}");
     }
     assert_eq!(entries(&log), vec!["verify stripe", "verify stripe", "verify github"]);
 
-    let (status, _) = send(router(&log), "POST", "/api/webhooks/github", r#"{"id":"d1","action":"opened"}"#, Some("github")).await;
+    let (status, _) = send(router(&log), "POST", "/api/webhooks/github", r#"{"id":"d1","action":"opened"}"#, Some("github"), Some("octocat")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(entries(&log).last().unwrap(), r#"receive_github_event {"action":"opened","id":"d1"}"#);
+    assert_eq!(entries(&log).last().unwrap(), r#"receive_github_event {"action":"opened","id":"d1"} from octocat"#);
+}
+
+// stripe is @rateLimit({ requestsPerMinute: 1 }): an unsigned request is
+// refused by the verifier and takes no token from the bucket.
+#[tokio::test]
+async fn the_verifier_runs_before_the_rate_limit() {
+    let log = Log::default();
+    let router = router(&log);
+    let body = r#"{"id":"evt_3","type":"invoice.paid"}"#;
+    let (status, _) = send(router.clone(), "POST", "/api/webhooks/stripe", body, None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = send(router.clone(), "POST", "/api/webhooks/stripe", body, Some("stripe"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, envelope) = send(router.clone(), "POST", "/api/webhooks/stripe", body, Some("stripe"), None).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(envelope["code"], "too_many_requests");
+    let (status, _) = send(router, "POST", "/api/webhooks/stripe", body, None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        entries(&log),
+        vec!["verify stripe", "verify stripe", r#"receive_stripe_event {"id":"evt_3","type":"invoice.paid"}"#, "verify stripe", "verify stripe"]
+    );
+}
+
+// github is @requirePermission(["webhooks.receive"]): the verifier runs
+// first, so an unsigned request costs no authentication.
+#[tokio::test]
+async fn the_verifier_runs_before_the_permission_check() {
+    let log = Log::default();
+    let body = r#"{"id":"d2","action":"closed"}"#;
+    let (status, _) = send(router(&log), "POST", "/api/webhooks/github", body, None, Some("octocat")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(entries(&log), vec!["verify github"]);
+
+    let (status, envelope) = send(router(&log), "POST", "/api/webhooks/github", body, Some("github"), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(envelope["detail"], "Authentication required");
+    let (status, envelope) = send(router(&log), "POST", "/api/webhooks/github", body, Some("github"), Some("outsider")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(envelope["code"], "forbidden");
+    assert_eq!(entries(&log), vec!["verify github", "verify github", "authenticate", "verify github", "authenticate"]);
 }
 
 #[tokio::test]
 async fn a_route_that_is_not_a_webhook_runs_no_verifier() {
     let log = Log::default();
-    let (status, envelope) = send(router(&log), "GET", "/api/events/evt_1", "", None).await;
+    let (status, envelope) = send(router(&log), "GET", "/api/events/evt_1", "", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(envelope["data"], json!({"id": "evt_1", "received": true}));
     assert_eq!(entries(&log), vec!["get_event"]);
 
-    let (status, _) = send(router(&log), "GET", "/api/webhooks/stripe", "", None).await;
+    let (status, _) = send(router(&log), "GET", "/api/webhooks/stripe", "", None, None).await;
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(entries(&log), vec!["get_event"]);
 }
@@ -238,15 +304,15 @@ async fn a_route_that_is_not_a_webhook_runs_no_verifier() {
 async fn the_service_wraps_its_manual_route_in_webhook_verified() {
     let log = Log::default();
     let body = r#"{"payload":"ping"}"#;
-    let (status, _) = send(router(&log), "POST", "/api/webhooks/github/raw", body, Some("github")).await;
+    let (status, _) = send(router(&log), "POST", "/api/webhooks/github/raw", body, Some("github"), None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     let raw = webhook_verified(post(|body: String| async move { format!(r#"{{"raw":{body}}}"#) }), verifier("github", &log));
     let mounted = || router(&log).route("/api/webhooks/github/raw", raw.clone());
-    let (status, received) = send(mounted(), "POST", "/api/webhooks/github/raw", body, Some("github")).await;
+    let (status, received) = send(mounted(), "POST", "/api/webhooks/github/raw", body, Some("github"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(received, json!({"raw": {"payload": "ping"}}));
-    let (status, _) = send(mounted(), "POST", "/api/webhooks/github/raw", body, None).await;
+    let (status, _) = send(mounted(), "POST", "/api/webhooks/github/raw", body, None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(entries(&log), vec!["verify github", "verify github"]);
 }

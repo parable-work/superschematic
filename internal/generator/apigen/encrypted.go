@@ -85,3 +85,15 @@ func checkEncryptedMethod(namespace string, set *ir.OperationSet, op *ir.FieldDe
 	}
 	return fmt.Errorf("apigen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result), but a %s request has no body to encrypt; declare POST, PUT or PATCH, or drop the encryption", namespace, op.Name, method)
 }
+
+// checkEncryptedUpload refuses an encrypted operation that uploads files.
+// The envelope carries a JSON body, and the Go router's payload decryptor
+// reads one, so no server opens a multipart body sent as an envelope. Every
+// SDK sends a file upload as multipart before it would encrypt anything,
+// so the operation's arguments, the files included, would travel in clear.
+func checkEncryptedUpload(namespace string, set *ir.OperationSet, op *ir.FieldDef, uploads []FileUploadField) error {
+	if len(uploads) == 0 || !operationEncrypted(set, op) {
+		return nil
+	}
+	return fmt.Errorf("apigen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result or argument) and uploads files (%s), but the encrypted envelope carries a JSON body, not a multipart one; drop the encryption or the upload", namespace, op.Name, uploads[0].Name)
+}

@@ -1,0 +1,56 @@
+{
+  "dialect": "sqlite",
+  "from": "",
+  "hash": "5adab03b0b4b82807a35f3b5a00607af01936b63531a74d3379dcc95f734221e",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"account\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"email\" TEXT,\n  PRIMARY KEY (\"id\")\n)"
+      ],
+      "subject": "table/account",
+      "transactional": true
+    }
+  ],
+  "to": "5fc8a8510ddec0868a7a86a57f8bb5ea611e01218c7df66125ad73f10c807370",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Account.email",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

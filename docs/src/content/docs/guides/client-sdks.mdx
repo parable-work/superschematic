@@ -86,7 +86,13 @@ A response outside 2xx is an error that carries the status, the problem's
 | Go | `*APIError` | `*AuthenticationError` | `*AuthorizationError` | `*RateLimitError` (`RetryAfter`) |
 | TypeScript | `ApiError` (`statusCode`) | `AuthenticationError` | `AuthorizationError` | `RateLimitError` (`retryAfter`) |
 | Python | `APIError` (`status_code`) | `AuthenticationError` | `AuthorizationError` | `RateLimitError` (`retry_after`) |
-| Rust | `SDKError::Api { status_code, .. }` | `is_auth_denied()` | `is_auth_denied()` | `is_transient()` |
+| Rust | `SDKError::Api { status_code, .. }` | `is_auth_denied()` | `is_auth_denied()` | `is_transient()`, `retry_after()` |
+
+A Rust `SDKError::Api` reads the request id from `X-Request-ID` (else the
+problem's `requestId`) into `request_id()`, the seconds of `Retry-After`
+into `retry_after()`, and a refused input's field errors, the problem's
+`errors`, into `validation_errors()`; `problem()` holds them with the
+problem's `details`.
 
 In TypeScript and Python the 401, 403 and 429 classes extend the general
 one. In Go they embed `*APIError` but are types of their own, so

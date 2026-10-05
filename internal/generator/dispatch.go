@@ -745,25 +745,30 @@ func (r run) generateGoAPI() error {
 // generateRustAPI emits the Rust REST API server and route scaffolds. The
 // Rust writer does not emit env config; the standalone env path covers it.
 func (r run) generateRustAPI() error {
-	provider, err := r.Registry.SelectedAuthProvider()
-	if err != nil {
+	var apiOutput *apigen.APIOutput
+	if err := r.measure("output.api.prepare", func() error {
+		var err error
+		apiOutput, err = r.APIOutput()
+		return err
+	}); err != nil {
 		return err
 	}
-	output, err := rustrestgen.Generate(r.Schema, rustrestgen.Options{
-		SchemaName:   r.Config.Name,
-		IsPublic:     r.Config.Public,
-		TypesCrate:   r.Options.Naming.RustTypesCrate(r.Config.Name),
-		TypesDir:     TypesDir(r.Options.OutputRoot, "rust", r.Config.Name),
-		OutputDir:    APIDir(r.Options.OutputRoot, r.Config.Name),
-		Naming:       r.Options.Naming,
-		AuthProvider: provider,
-		Clock:        r.Options.Clock,
+	output, err := rustrestgen.Generate(apiOutput, rustrestgen.Options{
+		SchemaName: r.Config.Name,
+		TypesCrate: r.Options.Naming.RustTypesCrate(r.Config.Name),
+		TypesDir:   TypesDir(r.Options.OutputRoot, "rust", r.Config.Name),
+		OutputDir:  APIDir(r.Options.OutputRoot, r.Config.Name),
+		Naming:     r.Options.Naming,
+		Clock:      r.Options.Clock,
 	})
 	if err != nil {
 		return fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
 	}
 	if output == nil {
 		return r.generateEnvConfig(LangRust)
+	}
+	if output.HasEnvConfig, err = r.hasEnvConfig(); err != nil {
+		return err
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
@@ -785,6 +790,24 @@ func (r run) generateRustAPI() error {
 			len(scaffolds.Generated), len(scaffolds.Skipped), scaffoldsDir)
 	}
 	return r.generateEnvConfig(LangRust)
+}
+
+// hasEnvConfig reports whether generateEnvConfig writes a loader: whether
+// the schema, or a dependency it imports, declares an @envVars type.
+func (r run) hasEnvConfig() (bool, error) {
+	deps, err := r.loadDependencySchemas()
+	if err != nil {
+		return false, err
+	}
+	output, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
+		SchemaName:   r.Config.Name,
+		Dependencies: deps,
+		Naming:       r.Options.Naming,
+	})
+	if err != nil {
+		return false, fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+	}
+	return output != nil, nil
 }
 
 // generateEnvConfig emits the standalone env-var loader for schemas whose API

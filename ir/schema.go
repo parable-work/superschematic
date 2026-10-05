@@ -49,6 +49,19 @@ type Schema struct {
 	// Imports are always named; wildcard imports do not exist in v2.
 	Imports []Import `json:"imports,omitempty" yaml:"imports,omitempty"`
 
+	// AuthDB names the service the schema authenticates against: the
+	// config's authDb. It, Dependencies and Calls come from the service
+	// config, not the schema files, so generators and the stack resolver
+	// read every reference a service makes from the IR.
+	AuthDB string `json:"authDb,omitempty" yaml:"authDb,omitempty"`
+
+	// Dependencies lists the services the config declares as dependencies.
+	Dependencies []ServiceRef `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+
+	// Calls lists the API services an API's implementation calls: the
+	// config's calls (docs/stack-model.md, section 3.3).
+	Calls []ServiceRef `json:"calls,omitempty" yaml:"calls,omitempty"`
+
 	// RootType is retained for services that still consume the legacy runtime
 	// runtime schema shape during the IR flip.
 	RootType string `json:"rootType,omitempty" yaml:"rootType,omitempty"`
@@ -137,4 +150,14 @@ type Import struct {
 
 	// Types lists the imported symbol names. Never empty, never "*".
 	Types []string `json:"types" yaml:"types"`
+}
+
+// ServiceRef names another service by name and kind: a service handle of
+// the config, as service({ name, kind }) or an imported sentinel writes it.
+type ServiceRef struct {
+	// Name is the service name.
+	Name string `json:"name" yaml:"name"`
+
+	// Kind is the kind the reference gives the service.
+	Kind SchemaKind `json:"kind" yaml:"kind"`
 }
