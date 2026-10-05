@@ -2770,3 +2770,40 @@ an `@envVars` class through `generator.Run` and loads its config. The
 share and no longer extracts endpoints.
 
 The rule is reversible until the first release.
+
+## D39. The Rust server hands each method typed arguments, decoded and checked as the TypeScript server checks them
+
+Each method of the Rust server took the request body as a
+`serde_json::Value` and returned one. It decoded no argument: the
+implementation read path and query values as strings from
+`RequestContext`, a query list as its last value, and a body field from the
+`Value`. It validated nothing, so an input the Go and TypeScript servers
+refuse reached the implementation, and a Rust service could not call its
+own operations with types, as the Topcoat extension will.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each mounted operation's method takes `<Namespace><Operation>Args`: a field per path, query and body argument, typed as the schema declares it (`Option`, `Vec`, `Vec<Vec<T>>`, `HashMap<String, T>`), and `input` for an input type. It returns `Result<T, ApiError>` of the result type, `()` without one. An operation without arguments takes no `args`. The scaffolds take and return the same. The old signature is gone (pre-release). | An argument per parameter, as the Go interface has, which every added argument breaks; typed methods beside the `Value` ones, which leaves two contracts to keep |
+| The router decodes each argument as the TypeScript router does. `params.ts` is ported to the runtime crate's `ParamSpec`: the same kinds, list and map rules, messages and `details` (`location`, `parameter`, `path`, `reason`, `errors`). There are two exceptions. An integer is an `i64`, as in the Go server, where JavaScript stops at 2^53. A UUID or timestamp is checked by its scalar's generated validator, which runs the scalar core, rather than by the scalar library's parse. serde then builds the field from the checked value. | serde alone on the Args struct, whose errors name no parameter and which takes what the other servers refuse |
+| An input is parsed by its type's generated `parse_<type>`, which refuses undeclared top-level keys as the TypeScript server's parser does (D14 validators). A refused input is a 400 with the TypeScript server's detail. `details` is `{location: "body", reason}`, and a top-level `errors` holds the field errors by path: the Go server's member, which every SDK reads. An object-typed body argument goes through `prepare_<type>`, new in the types crate, which runs the same steps and returns the checked JSON. A type a dependency declares is parsed by that dependency's validators, and the crate then depends on its types crate. | The TypeScript server's bare 400, which names no field (a follow-up adds `errors` there); allowing undeclared keys, as the Go server does |
+| The HTTP runtime depends on the schema runtime, by path and by the release version, and re-exports it as `schema`. A spec's pattern, a scalar check's result and an input's `ParseError` are then the types crate's own types. `ApiError` boxes `details` and `errors`, so a `Result` of it stays small when superscalar turns on serde_json's `preserve_order`. CI lints and tests the runtime with and without those features. | A copy of the pattern translation (D14, amended) in the HTTP runtime |
+| The API crate re-exports the types crate as `types`, so an implementation names `types::<Type>` and the Args structs through the API crate alone. | |
+
+The runtime's parameter, input and response rules have unit tests.
+`TestNestedArraysAPICrateBuildsAndRoutes` checks these refusals: a
+list-of-lists, enum and object element at its path; a UUID and a number
+that do not parse; and an input's rule failures and undeclared keys, with
+its `errors`. It also checks the D23 path vectors on a string label. Four
+`TestRustSDKCallsTheRustServer*` tests serve a generated router on a socket
+and call it through the generated Rust SDK:
+
+- fixture-api: the auth refusals, and typed path, query, input and body
+  arguments;
+- fixture-nested-arrays-api: lists of lists, path labels and nested input
+  objects;
+- query lists, an optional `Generic.JSON` whose null is kept apart from
+  absent, and a result of none;
+- body-args-api: its body and query arguments of every kind, maps among
+  them.
+
+The rule is reversible until the first release.

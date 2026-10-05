@@ -247,3 +247,14 @@ of the Go interfaces.
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/)
 walks one, and the [TypeScript page](/superschematic/install/typescript/#serve-a-generated-api)
 lists what it refuses.
+
+## The Rust server
+
+`outputs.api.language: "RUST"` generates an [axum](https://docs.rs/axum)
+crate with the same routes, argument rules, envelopes and traffic
+controls. Each namespace is a trait whose methods take one struct of the
+route's typed arguments, `<Namespace><Operation>Args`, and return its
+result type. The router decodes and checks every argument first, as the
+TypeScript router does, and refuses a key an input type does not declare.
+The [Rust page](/superschematic/install/rust/#serve-a-generated-api)
+lists what it refuses.

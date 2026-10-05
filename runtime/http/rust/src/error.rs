@@ -13,13 +13,15 @@ pub struct ApiError {
     #[serde(skip)]
     pub status: StatusCode,
     /// Structured context the client may read, such as the parameter a
-    /// refusal names.
+    /// refusal names. Boxed, as `errors` is, so the error stays small
+    /// enough to return when serde_json's `preserve_order` feature makes a
+    /// `Value` large.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub details: Option<Value>,
+    pub details: Option<Box<Value>>,
     /// A refused input's field errors, keyed by path, the member the Go
     /// server and the TypeScript SDK use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub errors: Option<Value>,
+    pub errors: Option<Box<Value>>,
 }
 
 impl ApiError {
@@ -36,7 +38,7 @@ impl ApiError {
     /// The error with the problem's `details` member.
     #[must_use]
     pub fn with_details(mut self, details: Value) -> Self {
-        self.details = Some(details);
+        self.details = Some(Box::new(details));
         self
     }
 
@@ -44,7 +46,7 @@ impl ApiError {
     /// path.
     #[must_use]
     pub fn with_errors(mut self, errors: Value) -> Self {
-        self.errors = Some(errors);
+        self.errors = Some(Box::new(errors));
         self
     }
 

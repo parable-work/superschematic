@@ -57,8 +57,8 @@ func generateNestedArraysAPI(t *testing.T, schema *ir.Schema, typesDir, outputDi
 }
 
 // TestWriteRustAPIGoldenNestedArrays pins the Rust API crate of
-// fixture-nested-arrays-api. Handlers take and return serde_json::Value,
-// so a list-of-lists body argument or response needs no route of its own.
+// fixture-nested-arrays-api: an input with lists of lists, a list-of-lists
+// body argument decoded into Vec<Vec<String>>, and a list-of-lists result.
 // Regenerate with:
 // go test ./internal/generator/rustrestgen -run TestWriteRustAPIGoldenNestedArrays -update
 func TestWriteRustAPIGoldenNestedArrays(t *testing.T) {
@@ -124,14 +124,23 @@ func addImportOperation(t *testing.T, schema *ir.Schema) {
 }
 
 // TestNestedArraysAPICrateBuildsAndRoutes runs cargo test on the Rust API
-// crate of fixture-nested-arrays-api, with grid.paint and grid.importGrid
-// added, with nestedArraysRouterTest: a list-of-lists body reaches the
-// implementation as nested JSON arrays, a list-of-lists result comes back in
-// the success envelope, a path parameter reaches it decoded exactly once,
-// and the manual grid.importGrid has no trait method and no route until the
-// service adds one.
+// crate of fixture-nested-arrays-api, with grid.paint, grid.cell,
+// grid.placeOrder and grid.importGrid added, with nestedArraysRouterTest:
+// a list-of-lists body argument reaches the implementation typed, each
+// element checked at its path; a list-of-lists result comes back in the
+// success envelope; a path parameter reaches it decoded exactly once; a
+// UUID, number or enum that does not parse, and an object that breaks its
+// type, are 400 problems naming the parameter; an input is validated, its
+// undeclared keys refused and its field errors returned in `errors`; and the
+// manual grid.importGrid has no trait method and no route until the service
+// adds one. problemsRouterTest checks the wire contract on the same crate.
 func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 	schema := loadNestedArraysSchema(t, true)
+	for _, add := range []func(*ir.Schema) error{sdktest.AddCellOperation, sdktest.AddPlaceOrderOperation} {
+		if err := add(schema); err != nil {
+			t.Fatal(err)
+		}
+	}
 	addImportOperation(t, schema)
 	cargoTestAPICrate(t, nestedArraysService, schema, "nested_arrays", nestedArraysRouterTest, func(apiDir string, output *APIOutput) error {
 		test := strings.NewReplacer("API_CRATE", strings.ReplaceAll(output.CrateName, "-", "_"), "RUNTIME_CRATE", output.RuntimeCrateIdent).Replace(problemsRouterTest)
@@ -146,8 +155,9 @@ func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 // schema into a temp tree laid out as a build writes it, adds test as
 // tests/<testName>.rs of the API crate, with API_CRATE and RUNTIME_CRATE
 // replaced by the crates' module names, and runs cargo test on the API
-// crate. The types crate resolves superscalar from the checkout
-// scripts/superscalar-dep.sh stands up. A test may pause tokio's clock
+// crate, after cargo clippy with warnings denied. The types crate resolves
+// superscalar from the checkout scripts/superscalar-dep.sh stands up. A
+// test may pause tokio's clock
 // (#[tokio::test(start_paused = true)]). Each extra runs on the written
 // crate before the build, to add files of its own. CARGO_TARGET_DIR is
 // honored when set.
@@ -224,20 +234,30 @@ tower = { version = "0.5", features = ["util"] }
 	if targetDir == "" {
 		targetDir = filepath.Join(t.TempDir(), "target")
 	}
-	cmd := exec.Command(cargoPath, "test", "--quiet")
-	cmd.Dir = apiDir
-	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+targetDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("cargo test on the generated API crate: %v\n%s", err, out)
+	// The crate is linted as a service's CI would lint it, with warnings
+	// denied, before its tests run.
+	for _, args := range [][]string{
+		{"clippy", "--quiet", "--all-targets", "--", "-D", "warnings"},
+		{"test", "--quiet"},
+	} {
+		cmd := exec.Command(cargoPath, args...)
+		cmd.Dir = apiDir
+		cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+targetDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cargo %s on the generated API crate: %v\n%s", args[0], err, out)
+		}
 	}
 }
 
 // nestedArraysRouterTest is tests/nested_arrays.rs of the generated API
 // crate, with API_CRATE and RUNTIME_CRATE replaced by the crates' module
-// names. Its implementation echoes each body argument back.
+// names. Its implementation echoes each argument back.
 const nestedArraysRouterTest = `use std::sync::Arc;
 
-use API_CRATE::{build_router, GridImplementation, Implementations};
+use API_CRATE::{
+    build_router, types, GridCellArgs, GridGetGridArgs, GridGridLabelsArgs, GridImplementation, GridPaintArgs,
+    GridPlaceOrderArgs, GridReplaceLabelsArgs, GridSaveGridArgs, Implementations,
+};
 use RUNTIME_CRATE::{ApiError, RequestContext};
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
@@ -249,26 +269,49 @@ use tower::ServiceExt;
 
 const GRID_ID: &str = "0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40";
 
+fn uuid(text: &str) -> types::IdentityUUID {
+    serde_json::from_value(json!(text)).unwrap()
+}
+
+fn grid(id: types::IdentityUUID, labels: Vec<Vec<String>>) -> types::GridView {
+    types::GridView { id, labels, shades: vec![], polygons: vec![], weights: None }
+}
+
 struct Echo;
 
 #[async_trait]
 impl GridImplementation for Echo {
-    async fn save_grid(&self, _ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
-        Ok(payload)
+    async fn save_grid(&self, _ctx: RequestContext, args: GridSaveGridArgs) -> Result<types::GridView, ApiError> {
+        let input = args.input;
+        Ok(types::GridView {
+            id: uuid(GRID_ID),
+            labels: input.labels,
+            shades: input.shades,
+            polygons: input.polygons,
+            weights: input.weights,
+        })
     }
-    async fn replace_labels(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
-        Ok(json!({"id": ctx.path_params.get("id"), "labels": payload["labels"]}))
+    async fn replace_labels(&self, _ctx: RequestContext, args: GridReplaceLabelsArgs) -> Result<types::GridView, ApiError> {
+        Ok(grid(args.id, args.labels))
     }
-    async fn paint(&self, _ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
-        Ok(payload["polygons"].clone())
+    async fn paint(&self, _ctx: RequestContext, args: GridPaintArgs) -> Result<Vec<Vec<types::Point>>, ApiError> {
+        assert!(args.shades.iter().flatten().all(|shade| matches!(shade, types::Shade::Light | types::Shade::Dark)));
+        Ok(args.polygons.unwrap_or_default())
     }
-    async fn get_grid(&self, _ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
+    async fn get_grid(&self, _ctx: RequestContext, _args: GridGetGridArgs) -> Result<types::GridView, ApiError> {
         Err(ApiError::not_implemented("get_grid is not implemented"))
     }
-    async fn grid_labels(&self, ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
-        let rows: usize = ctx.query_params.get("limit").and_then(|limit| limit.parse().ok()).unwrap_or(3);
-        let labels = json!([["a", "b"], [], ["c"]]);
-        Ok(Value::Array(labels.as_array().unwrap().iter().take(rows).cloned().collect()))
+    async fn grid_labels(&self, _ctx: RequestContext, args: GridGridLabelsArgs) -> Result<Vec<Vec<String>>, ApiError> {
+        let rows = args.limit.map_or(3, |limit| limit as usize);
+        let labels = vec![vec!["a".to_string(), "b".to_string()], vec![], vec!["c".to_string()]];
+        Ok(labels.into_iter().take(rows).collect())
+    }
+    async fn cell(&self, _ctx: RequestContext, args: GridCellArgs) -> Result<String, ApiError> {
+        Ok(args.label)
+    }
+    async fn place_order(&self, _ctx: RequestContext, args: GridPlaceOrderArgs) -> Result<types::GridView, ApiError> {
+        let products = args.input.lines.into_iter().map(|line| line.product_id).collect();
+        Ok(grid(uuid(GRID_ID), vec![products, args.input.gift_codes.unwrap_or_default()]))
     }
 }
 
@@ -296,6 +339,13 @@ async fn send(router: Router, method: &str, uri: String, body: Option<Value>) ->
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 
+/// The refusal of a parameter: 400, its details, and the details' errors.
+fn assert_refusal(status: StatusCode, body: &Value, details: Value) {
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "bad_request", "{body}");
+    assert_eq!(body["details"], details, "{body}");
+}
+
 // grid.importGrid is encrypted and @manualRouteRegistration, so Echo has no
 // method for it and the generated router answers 404 at its path. The
 // service adds the route to the router build_router returns, and its handler
@@ -320,9 +370,24 @@ async fn a_list_of_lists_body_reaches_the_implementation() {
         Some(json!({"labels": [["a", "b"], []]})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(envelope["data"], json!({"id": GRID_ID, "labels": [["a", "b"], []]}));
+    assert_eq!(status, StatusCode::OK, "{envelope}");
+    assert_eq!(envelope["data"]["labels"], json!([["a", "b"], []]));
+    // The UUID comes back in its canonical (base62) form.
+    assert_eq!(envelope["data"]["id"], uuid(GRID_ID).to_string());
     assert!(envelope["meta"]["requestId"].is_string());
+}
+
+#[tokio::test]
+async fn a_list_of_lists_element_is_checked_at_its_path() {
+    let uri = format!("/api/grids/{GRID_ID}/labels");
+    let (status, body) = call("PUT", uri.clone(), Some(json!({"labels": [["a", 1]]}))).await;
+    assert_refusal(status, &body, json!({"location": "body", "parameter": "labels", "path": "labels[0][1]",
+        "reason": "expected a string", "errors": [{"validator": "type", "message": "expected a string"}]}));
+    let (status, body) = call("PUT", uri.clone(), Some(json!({"labels": [["a"], null]}))).await;
+    assert_refusal(status, &body, json!({"location": "body", "parameter": "labels", "path": "labels[1]",
+        "reason": "required field", "errors": [{"validator": "required", "message": "required field"}]}));
+    let (status, body) = call("PUT", uri, Some(json!({}))).await;
+    assert_refusal(status, &body, json!({"location": "body", "parameter": "labels", "reason": "required"}));
 }
 
 #[tokio::test]
@@ -338,11 +403,40 @@ async fn a_list_of_lists_result_is_the_envelope_data() {
         Some(json!({"shades": [["light"], []], "polygons": polygons})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{envelope}");
     assert_eq!(envelope["data"], polygons);
 }
 
-// The id is sent encoded once, as encodeURIComponent writes it, and in
+#[tokio::test]
+async fn an_enum_or_object_element_that_breaks_its_type_is_refused() {
+    let uri = format!("/api/grids/{GRID_ID}/paint");
+    let (status, body) = call("PUT", uri.clone(), Some(json!({"shades": [["light", "pink"]]}))).await;
+    assert_refusal(status, &body, json!({"location": "body", "parameter": "shades", "path": "shades[0][1]",
+        "reason": "expected one of light, dark"}));
+    let (status, body) = call("PUT", uri.clone(), Some(json!({"shades": [], "polygons": [[{"x": 1.0}]]}))).await;
+    assert_refusal(status, &body, json!({"location": "body", "parameter": "polygons", "path": "polygons[0][0]",
+        "reason": "does not match the declared type"}));
+    // A key Point does not declare is refused, as the TypeScript router's
+    // strict parser refuses it.
+    let (status, body) = call("PUT", uri, Some(json!({"shades": [], "polygons": [[{"x": 1.0, "y": 2.0, "z": 3.0}]]}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["details"]["path"], "polygons[0][0]");
+}
+
+#[tokio::test]
+async fn a_path_or_query_value_that_does_not_parse_is_refused() {
+    let (status, body) = call("GET", "/api/grids/not-a-uuid/labels".to_string(), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["details"]["location"], "path");
+    assert_eq!(body["details"]["parameter"], "id");
+    assert_eq!(body["details"]["reason"], "expected a UUID");
+    assert!(body["details"]["errors"].as_array().is_some_and(|errors| !errors.is_empty()), "{body}");
+
+    let (status, body) = call("GET", format!("/api/grids/{GRID_ID}/labels?limit=many"), None).await;
+    assert_refusal(status, &body, json!({"location": "query", "parameter": "limit", "reason": "expected a number"}));
+}
+
+// The label is sent encoded once, as encodeURIComponent writes it, and in
 // other encodings of the same value: the implementation receives it decoded
 // exactly once, as behind the TypeScript and Go routers. A path whose
 // escapes do not decode to UTF-8 answers 400 in the error envelope.
@@ -359,13 +453,14 @@ async fn a_path_parameter_is_decoded_once() {
         ("%41", "A"),
         ("caf%c3%a9", "caf\u{e9}"),
         ("a%2fb", "a/b"),
+        ("a%3Fb%23c", "a?b#c"),
     ] {
-        let (status, envelope) = call("PUT", format!("/api/grids/{segment}/labels"), Some(json!({"labels": []}))).await;
-        assert_eq!(status, StatusCode::OK, "{segment}");
-        assert_eq!(envelope["data"]["id"], want, "{segment}");
+        let (status, envelope) = call("GET", format!("/api/grids/{GRID_ID}/cells/{segment}"), None).await;
+        assert_eq!(status, StatusCode::OK, "{segment}: {envelope}");
+        assert_eq!(envelope["data"], want, "{segment}");
     }
     for segment in ["%", "100%", "%ZZ", "a%2", "%E9", "%C3%28"] {
-        let (status, envelope) = call("PUT", format!("/api/grids/{segment}/labels"), Some(json!({"labels": []}))).await;
+        let (status, envelope) = call("GET", format!("/api/grids/{GRID_ID}/cells/{segment}"), None).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{segment}");
         assert_eq!(envelope["code"], "bad_request", "{segment}");
     }
@@ -374,8 +469,44 @@ async fn a_path_parameter_is_decoded_once() {
 #[tokio::test]
 async fn an_input_type_with_lists_of_lists_passes_through() {
     let grid = json!({"labels": [["a"], []], "shades": [["dark"]], "polygons": [[]], "weights": null});
-    let (status, envelope) = call("POST", "/api/grids".to_string(), Some(grid.clone())).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(envelope["data"], grid);
+    let (status, envelope) = call("POST", "/api/grids".to_string(), Some(grid)).await;
+    assert_eq!(status, StatusCode::OK, "{envelope}");
+    assert_eq!(envelope["data"]["labels"], json!([["a"], []]));
+    assert_eq!(envelope["data"]["shades"], json!([["dark"]]));
+    assert_eq!(envelope["data"]["polygons"], json!([[]]));
+    assert_eq!(envelope["data"].get("weights"), None);
+}
+
+// PlaceOrderInput bounds its lines and holds objects with rules of their
+// own: the router validates the input as the generated validators do, and
+// refuses a top-level key the type does not declare.
+#[tokio::test]
+async fn an_input_is_validated_and_its_unknown_keys_refused() {
+    let order = json!({"lines": [{"productId": "abc", "quantity": 2}], "shipTo": {"postalCode": "12345"}, "giftCodes": ["G1"]});
+    let (status, envelope) = call("POST", "/api/orders".to_string(), Some(order)).await;
+    assert_eq!(status, StatusCode::OK, "{envelope}");
+    assert_eq!(envelope["data"]["labels"], json!([["abc"], ["G1"]]));
+
+    let invalid = json!({"lines": [{"productId": "a", "quantity": 0}], "shipTo": {"postalCode": "x"}});
+    let (status, body) = call("POST", "/api/orders".to_string(), Some(invalid)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["detail"], "Request body does not match the declared input");
+    assert_eq!(body["details"], json!({"location": "body", "reason": "validation failed"}));
+    assert_eq!(body["errors"]["lines[0]"]["productId"][0]["validator"], "minLength", "{body}");
+    assert_eq!(body["errors"]["lines[0]"]["quantity"][0]["validator"], "min", "{body}");
+    assert_eq!(body["errors"]["shipTo"]["postalCode"][0]["validator"], "pattern", "{body}");
+
+    let extra = json!({"lines": [{"productId": "abc", "quantity": 1}], "shipTo": {"postalCode": "12345"}, "coupon": "x"});
+    let (status, body) = call("POST", "/api/orders".to_string(), Some(extra)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["details"], json!({"location": "body", "reason": "unknown fields: coupon"}));
+    assert_eq!(body["errors"], json!({"coupon": [{"validator": "unknown", "message": "unknown field"}]}));
+
+    let (status, body) = call("POST", "/api/orders".to_string(), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["detail"], "Request body is required");
+    let (status, body) = call("POST", "/api/orders".to_string(), Some(json!([]))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["details"]["reason"], "expected an object");
 }
 `
