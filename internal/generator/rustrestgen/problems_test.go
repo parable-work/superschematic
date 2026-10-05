@@ -7,11 +7,13 @@ package rustrestgen
 // response echoes the request's id in x-request-id and is not cached, a
 // success's meta.requestId and a refusal's requestId are that id, a
 // refusal is an RFC 9457 problem, the body is JSON whatever its
-// Content-Type and an empty one is null, and a POST's query reaches the
-// implementation.
+// Content-Type, and a POST's query reaches the implementation.
 const problemsRouterTest = `use std::sync::Arc;
 
-use API_CRATE::{build_router, GridImplementation, Implementations};
+use API_CRATE::{
+    build_router, types, GridCellArgs, GridGetGridArgs, GridGridLabelsArgs, GridImplementation, GridPaintArgs,
+    GridPlaceOrderArgs, GridReplaceLabelsArgs, GridSaveGridArgs, Implementations,
+};
 use RUNTIME_CRATE::{ApiError, RequestContext};
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
@@ -21,25 +23,35 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 const GRID_ID: &str = "0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40";
+const GRID: &str = r#"{"labels": [], "shades": [], "polygons": []}"#;
 
 struct Grids;
 
 #[async_trait]
 impl GridImplementation for Grids {
-    async fn save_grid(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
-        Ok(json!({"payload": payload, "dryRun": ctx.query_params.get("dryRun")}))
+    async fn save_grid(&self, ctx: RequestContext, args: GridSaveGridArgs) -> Result<types::GridView, ApiError> {
+        // The query's dryRun, as the implementation reads it, in the labels.
+        let dry_run = ctx.query_params.get("dryRun").cloned().unwrap_or_default();
+        let id = serde_json::from_value(json!(GRID_ID)).unwrap();
+        Ok(types::GridView { id, labels: vec![vec![dry_run]], shades: args.input.shades, polygons: vec![], weights: None })
     }
-    async fn replace_labels(&self, _ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
+    async fn replace_labels(&self, _ctx: RequestContext, _args: GridReplaceLabelsArgs) -> Result<types::GridView, ApiError> {
         Err(ApiError::conflict("The labels changed since you read them").with_details(json!({"version": 3})))
     }
-    async fn paint(&self, _ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
-        Ok(Value::Null)
+    async fn paint(&self, _ctx: RequestContext, _args: GridPaintArgs) -> Result<Vec<Vec<types::Point>>, ApiError> {
+        Ok(vec![])
     }
-    async fn get_grid(&self, _ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
+    async fn get_grid(&self, _ctx: RequestContext, _args: GridGetGridArgs) -> Result<types::GridView, ApiError> {
         Err(ApiError::not_implemented("get_grid is not implemented"))
     }
-    async fn grid_labels(&self, _ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
-        Ok(json!([]))
+    async fn grid_labels(&self, _ctx: RequestContext, _args: GridGridLabelsArgs) -> Result<Vec<Vec<String>>, ApiError> {
+        Ok(vec![])
+    }
+    async fn cell(&self, _ctx: RequestContext, args: GridCellArgs) -> Result<String, ApiError> {
+        Ok(args.label)
+    }
+    async fn place_order(&self, _ctx: RequestContext, _args: GridPlaceOrderArgs) -> Result<types::GridView, ApiError> {
+        Err(ApiError::not_implemented("place_order is not implemented"))
     }
 }
 
@@ -75,23 +87,32 @@ fn assert_problem(headers: &HeaderMap, body: &Value, status: u16, title: &str, c
 
 #[tokio::test]
 async fn a_success_echoes_the_request_id() {
-    let (status, headers, body) = send("POST", "/api/grids?dryRun=true", Some("req-1"), r#"{"name": "g"}"#).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, headers, body) = send("POST", "/api/grids?dryRun=true", Some("req-1"), GRID).await;
+    assert_eq!(status, StatusCode::OK, "the body is JSON without a Content-Type: {body}");
     assert_eq!(headers["x-request-id"], "req-1");
     assert_eq!(headers["cache-control"], "no-store");
     assert_eq!(body["meta"]["requestId"], "req-1");
-    assert_eq!(body["data"]["payload"], json!({"name": "g"}), "the body is JSON without a Content-Type");
-    assert_eq!(body["data"]["dryRun"], "true", "a POST's query reaches the implementation");
+    assert_eq!(body["data"]["labels"], json!([["true"]]), "a POST's query reaches the implementation");
 }
 
 #[tokio::test]
 async fn a_request_without_an_id_gets_one() {
-    let (status, headers, body) = send("POST", "/api/grids", None, "").await;
+    let (status, headers, body) = send("GET", &format!("/api/grids/{GRID_ID}/labels"), None, "").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let id = headers["x-request-id"].to_str().unwrap();
     assert_eq!(id.len(), 36, "a UUID: {id}");
     assert_eq!(body["meta"]["requestId"], id);
-    assert_eq!(body["data"]["payload"], Value::Null, "an empty body is null");
+    assert_eq!(body["data"], json!([]));
+}
+
+#[tokio::test]
+async fn a_parameter_refusal_names_the_request() {
+    let (status, headers, body) = send("POST", "/api/grids", Some("req-3"), r#"{"labels": 1}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_problem(&headers, &body, 400, "Bad Request", "bad_request");
+    assert_eq!(body["requestId"], "req-3");
+    assert_eq!(body["details"]["location"], "body");
+    assert_eq!(body["errors"]["labels"][0]["validator"], "type", "{body}");
 }
 
 #[tokio::test]

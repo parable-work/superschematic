@@ -753,13 +753,18 @@ func (r run) generateRustAPI() error {
 	}); err != nil {
 		return err
 	}
-	output, err := rustrestgen.Generate(apiOutput, rustrestgen.Options{
-		SchemaName: r.Config.Name,
-		TypesCrate: r.Options.Naming.RustTypesCrate(r.Config.Name),
-		TypesDir:   TypesDir(r.Options.OutputRoot, "rust", r.Config.Name),
-		OutputDir:  APIDir(r.Options.OutputRoot, r.Config.Name),
-		Naming:     r.Options.Naming,
-		Clock:      r.Options.Clock,
+	deps, err := r.loadDependencySchemas()
+	if err != nil {
+		return err
+	}
+	output, err := rustrestgen.Generate(r.Schema, apiOutput, rustrestgen.Options{
+		SchemaName:   r.Config.Name,
+		Dependencies: deps,
+		TypesCrate:   r.Options.Naming.RustTypesCrate(r.Config.Name),
+		TypesDir:     TypesDir(r.Options.OutputRoot, "rust", r.Config.Name),
+		OutputDir:    APIDir(r.Options.OutputRoot, r.Config.Name),
+		Naming:       r.Options.Naming,
+		Clock:        r.Options.Clock,
 	})
 	if err != nil {
 		return fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)

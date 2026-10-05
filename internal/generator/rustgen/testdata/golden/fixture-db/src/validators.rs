@@ -5,8 +5,8 @@
 //! A validator checks a JSON value as the generated Go, TypeScript and
 //! Python validators do (D14): presence, then the JSON type, then the
 //! rules, with one error per failing value at its wire path (`field`,
-//! `field[i]`, `field.key`). `parse_<type>` fills the type's defaults,
-//! validates the value and decodes it.
+//! `field[i]`, `field.key`). `prepare_<type>` fills the type's defaults and
+//! validates the value; `parse_<type>` also decodes it.
 
 #![allow(clippy::too_many_lines, clippy::needless_borrow)]
 
@@ -227,9 +227,10 @@ pub fn validate_auditable_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_auditable)
 }
 
-/// Parses a JSON value as `Auditable`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_auditable(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Auditable, rt::ParseError> {
+/// Prepares a JSON value as `Auditable`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_auditable` decodes.
+pub fn prepare_auditable(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -239,6 +240,12 @@ pub fn parse_auditable(value: Value, unknown_fields: rt::UnknownFields) -> Resul
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Auditable`: `prepare_auditable`, then decodes it.
+pub fn parse_auditable(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Auditable, rt::ParseError> {
+    let value = prepare_auditable(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -340,9 +347,10 @@ pub fn validate_tenant_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_tenant)
 }
 
-/// Parses a JSON value as `Tenant`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_tenant(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Tenant, rt::ParseError> {
+/// Prepares a JSON value as `Tenant`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_tenant` decodes.
+pub fn prepare_tenant(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(mut object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -355,6 +363,12 @@ pub fn parse_tenant(value: Value, unknown_fields: rt::UnknownFields) -> Result<c
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Tenant`: `prepare_tenant`, then decodes it.
+pub fn parse_tenant(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Tenant, rt::ParseError> {
+    let value = prepare_tenant(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -422,9 +436,10 @@ pub fn validate_tenant_user_required(value: Option<&Value>) -> rt::ScalarResult 
     rt::require_object(value, validate_tenant_user)
 }
 
-/// Parses a JSON value as `TenantUser`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_tenant_user(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::TenantUser, rt::ParseError> {
+/// Prepares a JSON value as `TenantUser`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_tenant_user` decodes.
+pub fn prepare_tenant_user(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -434,5 +449,11 @@ pub fn parse_tenant_user(value: Value, unknown_fields: rt::UnknownFields) -> Res
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `TenantUser`: `prepare_tenant_user`, then decodes it.
+pub fn parse_tenant_user(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::TenantUser, rt::ParseError> {
+    let value = prepare_tenant_user(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
