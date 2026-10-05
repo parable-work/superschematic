@@ -4,6 +4,7 @@ package rustrestgen
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +17,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
-	ir "github.com/parable-work/superschematic/ir"
 )
 
 //go:embed templates/*.tmpl
@@ -104,6 +104,13 @@ type APIOutput struct {
 	// HasControls reports whether an endpoint, manual ones included, has
 	// RouteControls.
 	HasControls bool
+	// OpenAPIJSON is the service's OpenAPI document as apigen builds it
+	// for every server: written to openapi.json, embedded in src/openapi.rs
+	// and served at GET /api/openapi.json.
+	OpenAPIJSON string
+	// HasEnvConfig is true when the build writes src/config.rs, the env
+	// loader of the service's @envVars type; lib.rs then declares it.
+	HasEnvConfig bool
 }
 
 // NamespaceOutput contains data for generating namespace scaffold files.
@@ -111,7 +118,11 @@ type NamespaceOutput struct {
 	SchemaName        string
 	Namespace         string
 	CrateName         string
+	CrateIdent        string
 	RuntimeCrateIdent string
+	// Endpoints are the namespace's mounted operations, each a method of
+	// its trait and a file of its own.
+	Endpoints []EndpointInfo
 }
 
 // EndpointOutput contains data for generating endpoint scaffold files.
@@ -125,21 +136,15 @@ type EndpointOutput struct {
 
 // Options configures Rust REST API generation.
 type Options struct {
-	SchemaName     string
-	IsPublic       bool
-	UpstreamSchema string
-	UpstreamIR     *ir.Schema
-	TypesCrate     string
-	TypesDir       string
-	OutputDir      string
-	Naming         naming.Naming
-	// AuthProvider is the auth provider apigen derives the endpoint auth
-	// data with. Required.
-	AuthProvider apigen.AuthProvider
-	Clock        codegen.Clock
+	SchemaName string
+	TypesCrate string
+	TypesDir   string
+	OutputDir  string
+	Naming     naming.Naming
+	Clock      codegen.Clock
 }
 
-// Generate produces Rust REST API metadata from an IR schema. Handlers take
+// Generate produces Rust REST API metadata for a schema. Handlers take
 // the request body and return the response as serde_json::Value, so a body
 // argument or response that is an array of arrays (T[][]) passes through as
 // nested JSON arrays; the implementation decodes it.
@@ -163,34 +168,33 @@ type Options struct {
 // caller, and @timeout around the handler. They are the runtime crate's
 // RouteControls. The caller comes from Implementations.authenticator,
 // which the crate has when an operation needs one (D29).
-func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
-	generated, err := rustapigen.Generate(schema, rustapigen.Options{
-		SchemaName:     opts.SchemaName,
-		IsPublic:       opts.IsPublic,
-		UpstreamSchema: opts.UpstreamSchema,
-		UpstreamIR:     opts.UpstreamIR,
-		TypesCrate:     opts.TypesCrate,
-		TypesDir:       opts.TypesDir,
-		OutputDir:      opts.OutputDir,
-		Naming:         opts.Naming,
-		AuthProvider:   opts.AuthProvider,
-		Clock:          opts.Clock,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if generated == nil {
+//
+// The endpoints and the OpenAPI document come from api, the apigen output
+// generator.Run builds once for the Go and TypeScript servers and every
+// SDK, with the service's dependencies, naming, OpenAPI and tool hooks and
+// its authDb's auth model (D38). A nil api, or one without endpoints, is
+// no server.
+func Generate(api *apigen.APIOutput, opts Options) (*APIOutput, error) {
+	if api == nil || len(api.Endpoints) == 0 {
 		return nil, nil
 	}
 
 	output := &APIOutput{
-		APIOutputBase: generated.Base,
-		Endpoints:     make([]EndpointInfo, 0, len(generated.Endpoints)),
+		APIOutputBase: rustapigen.NewBase(rustapigen.BaseOptions{
+			SchemaName: opts.SchemaName,
+			TypesCrate: opts.TypesCrate,
+			TypesDir:   opts.TypesDir,
+			OutputDir:  opts.OutputDir,
+			Naming:     opts.Naming,
+			Clock:      opts.Clock,
+		}),
+		Endpoints:   make([]EndpointInfo, 0, len(api.Endpoints)),
+		OpenAPIJSON: api.OpenAPISpecRaw,
 	}
 
 	namespaceSet := make(map[string]struct{})
 	webhookProviders := make(map[string]struct{})
-	for _, endpoint := range generated.Endpoints {
+	for _, endpoint := range api.Endpoints {
 		// The Go router decrypts an encrypted operation's body with the
 		// configured PayloadDecryptor before it parses it. The Rust router
 		// has no such step and would hand the envelope to the implementation
@@ -308,6 +312,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "lib.tmpl", outputName: filepath.Join("src", "lib.rs")},
 		{templateName: "interfaces.tmpl", outputName: filepath.Join("src", "interfaces.rs")},
 		{templateName: "router.tmpl", outputName: filepath.Join("src", "router.rs")},
+		{templateName: "openapi.tmpl", outputName: filepath.Join("src", "openapi.rs")},
 	}
 
 	for _, file := range files {
@@ -316,26 +321,62 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		}
 	}
 
+	// The document every server's build writes; src/openapi.rs embeds it.
+	document := output.OpenAPIJSON
+	if document == "" {
+		document = "{}"
+	}
+	if !json.Valid([]byte(document)) {
+		return fmt.Errorf("openapi.json for %s is not valid JSON", output.SchemaName)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "openapi.json"), []byte(document), 0o644); err != nil {
+		return fmt.Errorf("write openapi.json: %w", err)
+	}
+
 	return nil
 }
 
-// WriteScaffolds writes implementation scaffold files and skips existing files.
+// WriteScaffolds writes implementation scaffold files and skips existing
+// files: a mod.rs that declares one module per namespace, and in each
+// namespace's directory (its snake_case name, a Rust module name) a mod.rs,
+// implementation.rs with the struct and its one impl of the namespace
+// trait, and a file per operation with the function that impl calls. The
+// files name the generated crate, not crate::, since they belong to the
+// service's own crate.
 func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldResult, error) {
-	return codegen.WriteScaffolds(codegen.ScaffoldConfig[EndpointInfo]{
+	moduleOf := func(namespace string) string { return rustutil.ToSnakeCase(namespace) }
+	namespaceByModule := make(map[string]string, len(output.Namespaces))
+	modules := make([]string, 0, len(output.Namespaces))
+	for _, namespace := range output.Namespaces {
+		namespaceByModule[moduleOf(namespace)] = namespace
+		modules = append(modules, moduleOf(namespace))
+	}
+	namespaceData := func(module string) NamespaceOutput {
+		namespace := namespaceByModule[module]
+		data := NamespaceOutput{
+			SchemaName:        output.SchemaName,
+			Namespace:         namespace,
+			CrateName:         output.CrateName,
+			CrateIdent:        strings.ReplaceAll(output.CrateName, "-", "_"),
+			RuntimeCrateIdent: output.RuntimeCrateIdent,
+		}
+		for _, endpoint := range output.Endpoints {
+			if endpoint.Namespace == namespace {
+				data.Endpoints = append(data.Endpoints, endpoint)
+			}
+		}
+		return data
+	}
+	result, err := codegen.WriteScaffolds(codegen.ScaffoldConfig[EndpointInfo]{
 		ScaffoldsDir: scaffoldsDir,
 		ReadmeData:   output,
-		Namespaces:   output.Namespaces,
+		Namespaces:   modules,
 		Endpoints:    output.Endpoints,
 		EndpointNamespace: func(endpoint EndpointInfo) string {
-			return endpoint.Namespace
+			return moduleOf(endpoint.Namespace)
 		},
-		NamespaceData: func(namespace string) any {
-			return NamespaceOutput{
-				SchemaName:        output.SchemaName,
-				Namespace:         namespace,
-				CrateName:         output.CrateName,
-				RuntimeCrateIdent: output.RuntimeCrateIdent,
-			}
+		NamespaceData: func(module string) any {
+			return namespaceData(module)
 		},
 		EndpointData: func(namespace string, endpoint EndpointInfo) any {
 			return EndpointOutput{
@@ -352,6 +393,31 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 		ImplFileName: "implementation.rs",
 		GenerateFile: generateFile,
 	})
+	if err != nil {
+		return nil, err
+	}
+	record := func(generated bool, path string) {
+		if generated {
+			result.Generated = append(result.Generated, path)
+		} else {
+			result.Skipped = append(result.Skipped, path)
+		}
+	}
+	rootPath := filepath.Join(scaffoldsDir, "mod.rs")
+	generated, err := codegen.GenerateFileIfNotExists(generateFile, "scaffold-root.tmpl", rootPath, output)
+	if err != nil {
+		return nil, fmt.Errorf("generate scaffold %s: %w", rootPath, err)
+	}
+	record(generated, rootPath)
+	for _, module := range modules {
+		modPath := filepath.Join(scaffoldsDir, module, "mod.rs")
+		generated, err := codegen.GenerateFileIfNotExists(generateFile, "scaffold-mod.tmpl", modPath, namespaceData(module))
+		if err != nil {
+			return nil, fmt.Errorf("generate scaffold %s: %w", modPath, err)
+		}
+		record(generated, modPath)
+	}
+	return result, nil
 }
 
 func generateFile(templateName, outputPath string, data any) error {

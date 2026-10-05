@@ -17,8 +17,8 @@ use axum::Extension;
 {{- end }}
 use axum::{Json, Router};
 use {{ .RuntimeCrateIdent }}::{
-    error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
-    RequestContext,
+    error_response, openapi_router, path_is_percent_encoded, request_id_from_headers,
+    wrap_envelope, ApiError, RequestContext, RouterOptions,
 };
 {{- if .HasAuth }}
 use {{ .RuntimeCrateIdent }}::Principal;
@@ -68,6 +68,21 @@ pub struct RouterState {
 /// provider (`Implementations::validate_implementations`).
 {{- end }}
 pub fn build_router(implementations: Implementations) -> Router {
+    build_router_with(implementations, RouterOptions::default())
+}
+
+/// `build_router` with `options`: the routes, and the OpenAPI document at
+/// `GET /api/openapi.json` with its RapiDoc page at `GET /api/docs` unless
+/// `options.serve_openapi` is off, stating `options.openapi_version` and
+/// `options.openapi_base_url` as the generated Go server states its
+/// `Config`'s.
+{{- if .WebhookProviders }}
+///
+/// # Panics
+///
+/// As `build_router` does.
+{{- end }}
+pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
 {{- if .WebhookProviders }}
     if let Err(message) = implementations.validate_implementations() {
         panic!("{message}");
@@ -97,7 +112,9 @@ pub fn build_router(implementations: Implementations) -> Router {
     router = router.route("{{ .Path }}", {{ $route }});
 {{- end }}
 {{- end }}
-    router.with_state(state)
+    router
+        .with_state(state)
+        .merge(openapi_router(crate::openapi::OPENAPI_JSON, {{ rustString .SchemaName }}, &options))
 }
 {{- if .WebhookProviders }}
 

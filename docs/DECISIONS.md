@@ -2592,3 +2592,33 @@ decorators (fixture-multiword-api, fixture-nested-arrays-api) is unchanged
 byte for byte.
 
 The rule is reversible until the first release.
+
+## D38. The Rust server builds from the shared API output, and serves its OpenAPI document
+
+The Rust server's generator ran apigen itself, without the service's
+dependencies, naming, OpenAPI and tool hooks or its `authDb`, where the Go
+and TypeScript servers and every SDK read the output `generator.Run`
+builds once. An OpenAPI hook's edit never reached a Rust service, a public
+Rust API skipped the `authDb` check every other server makes, and the
+crate wrote no `openapi.json`. The env loader the build wrote beside the
+crate (`src/config.rs`) was never declared in `lib.rs`, so it never
+compiled, and the scaffolds stopped compiling once a namespace had two
+operations: each operation's file held an impl of the namespace trait of
+its own.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Rust server takes `generator.Run`'s `APIOutput`, as the TypeScript server does. A public Rust API needs an `authDb` or a DB dependency, as the other servers do, and an OpenAPI or tool hook's edit reaches it. | Handing the missing options to a second apigen run, which can drift from the shared one again |
+| The crate writes `openapi.json`, the document every server's build writes, embeds it in `src/openapi.rs`, and serves it at `GET /api/openapi.json` with a RapiDoc page at `GET /api/docs`, as the Go server does, stating the running version and server URL (`1.0.0` and `http://localhost:8080` by default, the Go server's defaults). `build_router` keeps its signature; `build_router_with` takes the runtime crate's `RouterOptions` to restate them or to serve neither route. | Writing the file only, as the TypeScript server does; changing `build_router`'s signature, which D26 and D29 declined |
+| `lib.rs` declares the env loader, and the crate depends on `dotenvy`, when the schema has an `@envVars` class. | |
+| A namespace's scaffold is a directory named as a Rust module (snake_case): `mod.rs`, `implementation.rs` with the struct and its one impl of the namespace trait, and a file per operation with the function that impl calls. A `mod.rs` at the root declares the namespaces. The files name the generated crate, not `crate::`, since they belong to the service's crate. | An impl per operation file, which Rust refuses for a second operation; inherent methods named as the trait's, which call the trait method, and so themselves, when one is missing |
+
+`TestScaffoldsPlugIntoTheRouterThatServesOpenAPI` builds `Implementations`
+from fixture-api's scaffolds in an integration test crate, and checks a
+scaffolded route's 501 and both documentation routes, restated and turned
+off. `TestRustAPIWithEnvVarsCompilesItsConfigModule` builds a Rust API with
+an `@envVars` class through `generator.Run` and loads its config. The
+`rustapigen` package keeps the crate metadata the Rust server and SDK
+share and no longer extracts endpoints.
+
+The rule is reversible until the first release.

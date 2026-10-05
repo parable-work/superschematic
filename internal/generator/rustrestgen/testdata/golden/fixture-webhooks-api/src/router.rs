@@ -13,8 +13,8 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::Extension;
 use axum::{Json, Router};
 use superschematic_http_runtime::{
-    error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
-    RequestContext,
+    error_response, openapi_router, path_is_percent_encoded, request_id_from_headers,
+    wrap_envelope, ApiError, RequestContext, RouterOptions,
 };
 use superschematic_http_runtime::Principal;
 use superschematic_http_runtime::RouteControls;
@@ -45,6 +45,19 @@ pub struct RouterState {
 /// When `implementations.webhook_verifiers` lacks the verifier of a
 /// provider (`Implementations::validate_implementations`).
 pub fn build_router(implementations: Implementations) -> Router {
+    build_router_with(implementations, RouterOptions::default())
+}
+
+/// `build_router` with `options`: the routes, and the OpenAPI document at
+/// `GET /api/openapi.json` with its RapiDoc page at `GET /api/docs` unless
+/// `options.serve_openapi` is off, stating `options.openapi_version` and
+/// `options.openapi_base_url` as the generated Go server states its
+/// `Config`'s.
+///
+/// # Panics
+///
+/// As `build_router` does.
+pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
     if let Err(message) = implementations.validate_implementations() {
         panic!("{message}");
     }
@@ -71,7 +84,9 @@ pub fn build_router(implementations: Implementations) -> Router {
             Arc::clone(&state.implementations.webhook_verifiers["stripe"]),
         ),
     );
-    router.with_state(state)
+    router
+        .with_state(state)
+        .merge(openapi_router(crate::openapi::OPENAPI_JSON, "fixture-webhooks-api", &options))
 }
 
 /// Runs `verifier` before `route`'s handler, so before its extractors read

@@ -8,8 +8,8 @@ use axum::http::{HeaderMap, Method, Uri};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use superschematic_http_runtime::{
-    error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
-    RequestContext,
+    error_response, openapi_router, path_is_percent_encoded, request_id_from_headers,
+    wrap_envelope, ApiError, RequestContext, RouterOptions,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -21,13 +21,24 @@ pub struct RouterState {
 }
 
 pub fn build_router(implementations: Implementations) -> Router {
+    build_router_with(implementations, RouterOptions::default())
+}
+
+/// `build_router` with `options`: the routes, and the OpenAPI document at
+/// `GET /api/openapi.json` with its RapiDoc page at `GET /api/docs` unless
+/// `options.serve_openapi` is off, stating `options.openapi_version` and
+/// `options.openapi_base_url` as the generated Go server states its
+/// `Config`'s.
+pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     router = router.route("/api/grids", post(handle_grid_save_grid));
     router = router.route("/api/grids/{id}", get(handle_grid_get_grid));
     router = router.route("/api/grids/{id}/labels", get(handle_grid_grid_labels));
     router = router.route("/api/grids/{id}/labels", put(handle_grid_replace_labels));
-    router.with_state(state)
+    router
+        .with_state(state)
+        .merge(openapi_router(crate::openapi::OPENAPI_JSON, "fixture-nested-arrays-api", &options))
 }
 
 fn method_from_str(method: &str) -> Method {
