@@ -130,3 +130,30 @@ func TestCreateTablesReadsTheClock(t *testing.T) {
 		t.Fatalf("the layout's transaction read the clock %d times, want once", calls)
 	}
 }
+
+// TestUpdateKeepsTheSeal: an update of a sealed ref that does not seal it,
+// a move of its head say, keeps its seal and the seal's time.
+func TestUpdateKeepsTheSeal(t *testing.T) {
+	now := int64(1_800_000_000_000_000)
+	s := newSetup(t, sqlite.Options{Clock: func() int64 { now += 1_000_000; return now }}, "")
+	var ref storage.Ref
+	var commit string
+	must(in(s.storage, func(ctx context.Context, tx storage.Tx) (struct{}, error) {
+		var err error
+		ref, commit, err = refAndCommit(ctx, tx, bread, "main")
+		return struct{}{}, err
+	}))(t)
+	sealed := must(in(s.storage, func(ctx context.Context, tx storage.Tx) (storage.Ref, error) {
+		return tx.UpdateRef(ctx, storage.RefUpdate{ID: ref.ID, Version: ref.Version, Seal: true, Actor: cook})
+	}))(t)
+	moved := must(in(s.storage, func(ctx context.Context, tx storage.Tx) (storage.Ref, error) {
+		return tx.UpdateRef(ctx, storage.RefUpdate{ID: ref.ID, Version: sealed.Version, Head: commit, Actor: cook})
+	}))(t)
+	if !sealed.Sealed || !moved.Sealed {
+		t.Fatalf("the ref is sealed %t, then %t after an update that does not seal it; want sealed both times", sealed.Sealed, moved.Sealed)
+	}
+	images := historyOf(t, s.db, `"graph_ref_history"`, ref.ID)
+	if got, want := memberText(t, images[len(images)-1].data, "sealed_at"), memberText(t, images[len(images)-2].data, "sealed_at"); got != want || got == "null" {
+		t.Fatalf("the update's image holds sealed_at %s, the seal's %s", got, want)
+	}
+}
