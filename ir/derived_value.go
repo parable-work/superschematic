@@ -381,3 +381,182 @@ func sortedMemberKeys(m map[string]any) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// The core's rule for derived field names: the service's name in upper
+// snake case, suffixed `_DATABASE` for a sql edge and `_SERVICE` for an
+// http edge (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`).
+const (
+	// ServicePlaceholder is what a derived field template replaces with
+	// the service's name in upper snake case.
+	ServicePlaceholder = "{SERVICE}"
+
+	// DefaultDatabaseField is the core's template for a sql edge's field.
+	DefaultDatabaseField = ServicePlaceholder + "_DATABASE"
+
+	// DefaultServiceField is the core's template for an http edge's field.
+	DefaultServiceField = ServicePlaceholder + "_SERVICE"
+)
+
+// DerivedFieldNames are the templates that name the config field each
+// edge fills, the naming file's `[derived_fields]` (section 3.4). An empty
+// template is the core's.
+type DerivedFieldNames struct {
+	// Database names a sql edge's field, after the DB service.
+	Database string `json:"database,omitempty"`
+
+	// Service names an http edge's field, after the called API service.
+	Service string `json:"service,omitempty"`
+}
+
+// Field returns the name of the config field an edge of kind to service
+// fills.
+func (n DerivedFieldNames) Field(kind EdgeKind, service string) string {
+	return strings.ReplaceAll(n.template(kind), ServicePlaceholder, EnvName(service))
+}
+
+func (n DerivedFieldNames) template(kind EdgeKind) string {
+	if kind == EdgeSQL {
+		if n.Database != "" {
+			return n.Database
+		}
+		return DefaultDatabaseField
+	}
+	if n.Service != "" {
+		return n.Service
+	}
+	return DefaultServiceField
+}
+
+// Validate refuses a template that does not name the service once, or
+// whose other characters would not make an environment variable's name:
+// upper-case letters, digits and underscores, not starting with a digit.
+func (n DerivedFieldNames) Validate() error {
+	for _, t := range []struct{ key, template string }{{"database", n.Database}, {"service", n.Service}} {
+		if t.template == "" {
+			continue
+		}
+		if strings.Count(t.template, ServicePlaceholder) != 1 {
+			return fmt.Errorf("derived_fields.%s %q must contain %s once", t.key, t.template, ServicePlaceholder)
+		}
+		if !isEnvName(strings.ReplaceAll(t.template, ServicePlaceholder, "S")) {
+			return fmt.Errorf("derived_fields.%s %q: outside %s, a template holds upper-case letters, digits and underscores, and does not start with a digit", t.key, t.template, ServicePlaceholder)
+		}
+	}
+	return nil
+}
+
+func isEnvName(name string) bool {
+	for i, r := range name {
+		switch {
+		case r >= 'A' && r <= 'Z', r == '_':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return name != ""
+}
+
+// EnvName is a service's name in upper snake case: each letter upper case,
+// each character that is not a letter or a digit an underscore
+// (`shop-db` is `SHOP_DB`).
+func EnvName(service string) string {
+	var b strings.Builder
+	for _, r := range service {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToUpper(r))
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+// DerivedFieldClaims reports whether a config field named name collides
+// with the derived field: it is the field's name, or begins with it and an
+// underscore, as each of the field's variables does (DerivedVariables).
+// A member a later contract adds then cannot take a setting's name.
+func DerivedFieldClaims(field, name string) bool {
+	return name == field || strings.HasPrefix(name, field+"_")
+}
+
+// DerivedConfigField is a config field one of an API service's edges
+// derives.
+type DerivedConfigField struct {
+	// Name is the field's name.
+	Name string
+
+	// Kind is the edge's kind: sql for the database, http for a call.
+	Kind EdgeKind
+
+	// Service is the DB service or the called API service.
+	Service string
+
+	// From is the config key the edge comes from: authDb, dependencies or
+	// calls.
+	From string
+}
+
+// Database returns the DB service an API service connects to: its
+// `authDb`, or its one DB-kind dependency (section 3.3). It reports false
+// for a schema with neither, or with several DB-kind dependencies and no
+// `authDb`, and for a schema that is not an API.
+func (s *Schema) Database() (service, from string, ok bool) {
+	if s.Kind != SchemaKindAPI {
+		return "", "", false
+	}
+	if s.AuthDB != "" {
+		return s.AuthDB, "authDb", true
+	}
+	for _, dep := range s.Dependencies {
+		if dep.Kind != SchemaKindDB {
+			continue
+		}
+		if service != "" {
+			return "", "", false
+		}
+		service = dep.Name
+	}
+	return service, "dependencies", service != ""
+}
+
+// DerivedConfigFields lists the config fields an API service's edges
+// derive, named by names: its database's, then one per `calls` entry in
+// order. A schema that is not an API has none.
+func (s *Schema) DerivedConfigFields(names DerivedFieldNames) []DerivedConfigField {
+	if s.Kind != SchemaKindAPI {
+		return nil
+	}
+	var out []DerivedConfigField
+	if db, from, ok := s.Database(); ok {
+		out = append(out, DerivedConfigField{Name: names.Field(EdgeSQL, db), Kind: EdgeSQL, Service: db, From: from})
+	}
+	for _, call := range s.Calls {
+		out = append(out, DerivedConfigField{Name: names.Field(EdgeHTTP, call.Name), Kind: EdgeHTTP, Service: call.Name, From: "calls"})
+	}
+	return out
+}
+
+// DerivedMembers returns the paths of every member the value of an edge of
+// kind can have, dotted for a nested member: what a derived field's
+// variables are named after (DerivedVariableName).
+func DerivedMembers(kind EdgeKind) []string {
+	switch kind {
+	case EdgeSQL:
+		return []string{"url", "cloudSql.instance", "cloudSql.database", "cloudSql.user"}
+	case EdgeHTTP:
+		return []string{"url", "credential.source", "credential.audience", "credential.tokenFile", "credential.issuer", "credential.key", "credential.headers"}
+	}
+	return nil
+}
+
+// DerivedVariableName returns the environment variable of the member at
+// path, dotted, of the derived field named field: `SHOP_DB_DATABASE` and
+// `cloudSql.instance` make `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`.
+func DerivedVariableName(field, path string) string {
+	name := field
+	for _, segment := range strings.Split(path, ".") {
+		name += "_" + DerivedVariableSegment(segment)
+	}
+	return name
+}

@@ -21,6 +21,11 @@ type Input struct {
 
 	// Environment names the environment of Stack to resolve.
 	Environment string
+
+	// FieldNames name the config field each edge fills: the naming file's
+	// `[derived_fields]`, which envgen names the generated fields by. The
+	// zero value is the core's rule.
+	FieldNames ir.DerivedFieldNames
 }
 
 // Service is what resolution needs to know about one service. It is read

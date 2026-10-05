@@ -1,0 +1,34 @@
+name: deps-orders
+kind: API
+types:
+  OrdersConfig:
+    name: OrdersConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: FULFILLMENT_REGION
+        typeRef: { name: string }
+        required: true
+        default: "us"
+  OrderView:
+    name: OrderView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: sku
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: OrderQueries
+    operations:
+      - name: getOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: GET
+        restPath: orders/:id
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true

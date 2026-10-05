@@ -28,6 +28,9 @@ func Resolve(reg *registry.Registry, in Input) (*ir.ResolvedEnvironment, error) 
 	if in.Stack == nil {
 		return nil, &Errors{Environment: in.Environment, List: []Error{{Code: CodeInvalidStack, Message: "no stack to resolve"}}}
 	}
+	if err := in.FieldNames.Validate(); err != nil {
+		return nil, &Errors{Stack: in.Stack.Name, Environment: in.Environment, List: []Error{{Code: CodeInvalidStack, Message: err.Error()}}}
+	}
 	r := &resolver{
 		reg:         reg,
 		in:          in,
