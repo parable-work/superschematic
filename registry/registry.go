@@ -123,6 +123,7 @@ type (
 	ProvisionerSpec  = registry.ProvisionerSpec
 	Provisioner      = registry.Provisioner
 	ProvisionRequest = registry.ProvisionRequest
+	StateBackend     = registry.StateBackend
 	PlannedChange    = registry.PlannedChange
 	StackEnvironment = registry.StackEnvironment
 

@@ -39,9 +39,10 @@ func (p *FakeProvisioner) record(format string, args ...any) {
 	p.calls = append(p.calls, fmt.Sprintf(format, args...))
 }
 
-// Render writes program.json: one entry per node, with its type and
-// dependencies.
-func (p *FakeProvisioner) Render(graph *ir.ResourceGraph, dir string) error {
+// Render writes program.json: one entry per node of the environment's
+// graph, with its type and dependencies.
+func (p *FakeProvisioner) Render(env *ir.ResolvedEnvironment, dir string) error {
+	graph := env.Resources
 	type node struct {
 		ID        string   `json:"id"`
 		Type      string   `json:"type"`

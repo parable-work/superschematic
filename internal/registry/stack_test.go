@@ -33,7 +33,7 @@ func connect(ConnectorContext) (Connected, error) { return Connected{Value: "x"}
 
 type nopProvisioner struct{}
 
-func (nopProvisioner) Render(*ir.ResourceGraph, string) error { return nil }
+func (nopProvisioner) Render(*ir.ResolvedEnvironment, string) error { return nil }
 func (nopProvisioner) Plan(context.Context, ProvisionRequest) ([]PlannedChange, error) {
 	return nil, nil
 }
