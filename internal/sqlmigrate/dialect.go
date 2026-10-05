@@ -41,7 +41,10 @@ type dialect interface {
 	convert(from, to string) conversion
 
 	// canAlter reports whether the dialect changes a table that already
-	// exists by c in place. It is only asked about changes to such a table.
+	// exists by c in place. It is only asked about changes to such a table,
+	// including dropping the foreign key that closes a reference cycle
+	// among the tables the plan drops: a dialect that cannot drops the
+	// cycle's tables in one step instead.
 	canAlter(c *change) bool
 
 	// render turns one change into its steps, in order. Every step has its

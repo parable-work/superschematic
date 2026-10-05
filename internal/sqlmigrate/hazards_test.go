@@ -47,6 +47,8 @@ func TestHazardClasses(t *testing.T) {
 
 		{plan: "add-table", op: "createTable", phase: Expand},
 		{plan: "drop-table", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
+		{plan: "drop-tables-in-cycle", op: "dropForeignKey", phase: Contract},
+		{plan: "drop-tables-in-cycle", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
 		{plan: "rename-table-as-drop-add", op: "dropTable", subject: "table/label", phase: Contract, want: []HazardClass{destructive},
 			reason: "--rename label=tag"},
 		{plan: "rename-table", op: "renameTable", phase: Expand, want: []HazardClass{compat}},

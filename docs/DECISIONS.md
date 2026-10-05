@@ -2204,7 +2204,7 @@ plan as JSON, SQL or Markdown. The runner is the sixth Go module,
 `runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
 `superschematic-migrate` (`runtime/migrate/README.md`). The reference page
 is "Schema migrations".
-Plan goldens cover 56 pairs for Postgres and 39 for SQLite, 9 of them
+Plan goldens cover 57 pairs for Postgres and 40 for SQLite, 9 of them
 rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
 every SQLite pair and fixture converges on SQLite in every test run; the
 runner applies the compiler's vectors of both dialects, resumes after a
@@ -2261,9 +2261,12 @@ a table that exists and `DROP COLUMN`, which rewrites the table, are
 dropped before it and a foreign key over it rebuilds the table; a dropped
 table is dropped with foreign keys off, since with them on `DROP TABLE`
 deletes its rows first, which a `RESTRICT` on the table itself refuses;
-a plan that drops two tables that reference each other fails on SQLite,
-since dropping the foreign key that closes the cycle needs a rebuild of a
-table the plan drops; a change between a list, a JSON value and text, all
+tables a plan drops that reference each other are dropped in one step on
+SQLite, after the tables that reference them and before those they
+reference, since dropping the foreign key that closes the cycle needs a
+rebuild of a table the plan drops, and a `foreign_key_check` between two
+drops finds the rows of one referencing the other, while Postgres drops
+that foreign key first; a change between a list, a JSON value and text, all
 `TEXT`, is no step and converts no value; `migrate plan --dialect sqlite`
 refuses a service whose new version does not list `sqlite`, and a
 previous version, a service directory or a git ref, whose list lacks it,

@@ -2,6 +2,7 @@ package sqlmigrate
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -173,6 +174,7 @@ func TestSQLiteHazardClasses(t *testing.T) {
 
 		{plan: "add-table", op: "createTable", phase: Expand},
 		{plan: "drop-table", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
+		{plan: "drop-tables-in-cycle", op: "dropTable", phase: Contract, want: []HazardClass{destructive}, reason: "Dropping table warehouse"},
 		{plan: "rename-table", op: "renameTable", phase: Expand, want: []HazardClass{compat}},
 
 		{plan: "add-index", op: "createIndex", phase: Expand, want: []HazardClass{blockingClass}},
@@ -401,20 +403,49 @@ func TestSQLiteAddable(t *testing.T) {
 	}
 }
 
-// TestSQLiteDropCycle: SQLite cannot drop two tables that reference each
-// other, and the plan says so.
+// TestSQLiteDropCycle: SQLite drops the tables of a reference cycle in one
+// step, with foreign keys off, after the tables that reference them and
+// before the tables they reference, each table with its own hazard. A
+// table that is in the cycle only through another (z) is in the step too.
 func TestSQLiteDropCycle(t *testing.T) {
-	table := func(name, ref string) *Table {
-		return &Table{
-			Name: name, Kind: TableEntity,
-			Columns:     []*Column{{Name: "id", Type: "TEXT"}, {Name: ref + "_id", Type: "TEXT", Nullable: true}},
-			PrimaryKey:  &Constraint{Name: name + "_pkey", Columns: []string{"id"}},
-			ForeignKeys: []*ForeignKey{{Name: "fk_" + name + "_" + ref + "_id", Columns: []string{ref + "_id"}, RefTable: ref, RefColumns: []string{"id"}, OnDelete: "CASCADE"}},
+	table := func(name string, refs ...string) *Table {
+		tb := &Table{
+			Name: name, Kind: TableEntity, Origin: strings.ToUpper(name),
+			Columns:    []*Column{{Name: "id", Type: "TEXT"}},
+			PrimaryKey: &Constraint{Name: name + "_pkey", Columns: []string{"id"}},
 		}
+		for _, ref := range refs {
+			tb.Columns = append(tb.Columns, &Column{Name: ref + "_id", Type: "TEXT", Nullable: true})
+			tb.ForeignKeys = append(tb.ForeignKeys, &ForeignKey{
+				Name: "fk_" + name + "_" + ref + "_id", Columns: []string{ref + "_id"}, RefTable: ref, RefColumns: []string{"id"}, OnDelete: "CASCADE",
+			})
+		}
+		return tb
 	}
-	from := &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{table("a", "b"), table("b", "a")}}
-	_, err := Diff(from, &Model{Version: ModelVersion, Dialect: SQLite, Service: "s"}, Options{})
-	if err == nil || !strings.Contains(err.Error(), "the sqlite dialect cannot drop foreign key fk_b_a_id to break the cycle") {
-		t.Fatalf("Diff = %v, want the cycle refused", err)
+	// a and b reference each other, and a reaches b through z too; c
+	// references b, and a references d.
+	from := &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{
+		table("a", "b", "z", "d"), table("b", "a"), table("c", "b"), table("d"), table("z", "b"),
+	}}
+	plan, err := Diff(from, &Model{Version: ModelVersion, Dialect: SQLite, Service: "s"}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, step := range plan.Steps {
+		var ids []string
+		for _, h := range step.Hazards {
+			ids = append(ids, h.ID)
+		}
+		got = append(got, fmt.Sprintf("%s %s %t: %s [%s]", step.Op, step.Subject, step.ForeignKeysOff,
+			strings.Join(step.Statements, "; "), strings.Join(ids, " ")))
+	}
+	want := []string{
+		`dropTable table/c true: DROP TABLE "c" [destructive:table/c]`,
+		`dropTable table/a true: DROP TABLE "a"; DROP TABLE "b"; DROP TABLE "z" [destructive:table/a destructive:table/b destructive:table/z]`,
+		`dropTable table/d true: DROP TABLE "d" [destructive:table/d]`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("steps:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

@@ -115,7 +115,12 @@ type change struct {
 	// extension.
 	name, oldName string
 
-	tableDef   *Table
+	tableDef *Table
+	// dropsWith are the other tables of a reference cycle a dropTable
+	// change drops with tableDef, for a dialect that cannot drop the
+	// foreign key that closes the cycle first.
+	dropsWith []*Table
+
 	column     *Column
 	constraint *Constraint
 	foreignKey *ForeignKey

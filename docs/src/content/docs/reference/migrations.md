@@ -370,7 +370,7 @@ Every SQLite step runs in a transaction, which the runner opens with
 | a column dropped | `DROP COLUMN` (`blocking`: SQLite rewrites the table). Its indexes are dropped before it, and a foreign key over it makes its table's rebuild drop it instead |
 | an index or a unique field added or dropped | `CREATE INDEX`, `CREATE UNIQUE INDEX`, `DROP INDEX`; building an index on a table the previous version has is `blocking` |
 | an index or a unique field renamed | the index dropped and built again under its new name (`blocking`): SQLite cannot rename an index |
-| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs |
+| a table dropped | `DROP TABLE`, with foreign keys off, so no `ON DELETE` action runs. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops |
 
 Every other change to a table rebuilds it: a type, a nullability, a
 default, a foreign key added over a column the table has, changed or
@@ -423,10 +423,6 @@ the feature and the dialect:
   column;
 - the types SQLite has no storage for: `LTREE` and the PostGIS types
   (`POINT`, `GEOGRAPHY`, `GEOMETRY`).
-
-A plan that drops two tables that reference each other fails too: SQLite
-can drop the foreign key that closes the cycle only by rebuilding a table
-the plan drops. Drop one of the relations in a version of its own first.
 
 ### What SQLite does not keep
 

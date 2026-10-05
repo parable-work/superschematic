@@ -148,19 +148,17 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 	case opDropTable:
 		// With foreign keys on, DROP TABLE deletes every row first and
 		// runs the ON DELETE actions of the tables that reference them,
-		// which a RESTRICT on the table itself refuses.
-		step := sqliteStep(c, "DROP TABLE "+qs(c.table))
+		// which a RESTRICT on the table itself refuses. The tables of a
+		// reference cycle go in one step: the runner checks the foreign
+		// keys before its commit, when none of them is left to reference
+		// another.
+		statements := []string{"DROP TABLE " + qs(c.table)}
+		for _, t := range c.dropsWith {
+			statements = append(statements, "DROP TABLE "+qs(t.Name))
+		}
+		step := sqliteStep(c, statements...)
 		step.ForeignKeysOff = true
 		return one(step), nil
-	case opDropForeignKey:
-		// Only the tables the plan drops reach here: a foreign key of a
-		// table that stays is dropped by its rebuild. dropTables drops the
-		// foreign key that closes a cycle of references between dropped
-		// tables first, which SQLite can only do by rebuilding a table the
-		// plan then drops, and a table dropped with the other one's rows
-		// still referencing it fails the foreign key check.
-		return rendered{}, fmt.Errorf("sqlmigrate: the plan drops table %s and a table it references, which reference each other; the sqlite dialect cannot drop foreign key %s to break the cycle. Drop one of the relations in a version of its own first",
-			c.table, c.foreignKey.Name)
 	}
 	return rendered{}, fmt.Errorf("sqlmigrate: sqlite cannot render %s %s", c.op, c.subject)
 }
