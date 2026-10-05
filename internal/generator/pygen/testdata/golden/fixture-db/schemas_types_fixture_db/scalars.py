@@ -136,7 +136,7 @@ IdentityName = Annotated[
 ]
 
 # Identity.Slug - A URL friendly version of a string
-_IdentitySlug_pattern = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
+_IdentitySlug_pattern = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", re.ASCII)
 
 def _validate_identity_slug_pattern(v: Any) -> Any:
     """Validate Identity.Slug against its pattern."""
@@ -165,14 +165,14 @@ IdentitySlug = Annotated[
         description="A URL friendly version of a string",
         max_length=255,
         min_length=1,
-        pattern=r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+        pattern=re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", re.ASCII),
     ),
     AfterValidator(_validate_identity_slug_pattern),
     AfterValidator(_validate_identity_slug_length),
 ]
 
 # Identity.UUID - UUID v4 with automatic base62 encoding for client-facing APIs
-_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$")
+_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII)
 
 def _validate_identity_uuid_pattern(v: Any) -> Any:
     """Validate Identity.UUID against its pattern."""
@@ -188,7 +188,7 @@ IdentityUUID = Annotated[
     str,
     Field(
         description="UUID v4 with automatic base62 encoding for client-facing APIs",
-        pattern=r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+        pattern=re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII),
     ),
     BeforeValidator(_custom_parse_identity_uuid),
     AfterValidator(_validate_identity_uuid_pattern),
