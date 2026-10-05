@@ -9,6 +9,7 @@ from .client import (
     EncryptedRequestOptions,
     FilePart,
     PublicEncryptionKey,
+    ServiceCredential,
 )
 from .errors import (
     APIError,
@@ -26,6 +27,7 @@ __all__ = [
     "FixtureWebhooksApiSDK",
     "ClientConfig",
     "PublicEncryptionKey",
+    "ServiceCredential",
     "EncryptedRequestOptions",
     "FilePart",
     "SDKError",
