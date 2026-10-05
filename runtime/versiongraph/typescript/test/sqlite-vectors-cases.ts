@@ -5,14 +5,15 @@
 // stripping, so it uses no syntax that needs compiling.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { errorCode, isJsonObject, parseJson, SyncEngine, type JsonValue } from "../dist/engine.js";
+import { errorCode, isJsonObject, parseJson, SyncEngine, uuidHyphenated, type JsonValue } from "../dist/engine.js";
 import { initSync } from "../dist/index.js";
-import { defaultTableName, SqliteAdapter, sqliteLayout, type SqliteClient } from "../dist/sqlite.js";
+import { defaultTableName, SqliteAdapter, sqliteLayout, type SqliteClient, type SqliteValue } from "../dist/sqlite.js";
 import type { Binding } from "./sqlite.ts";
 import {
   descriptor,
   dumpDatabase,
   engineOptions,
+  gained,
   layoutFile,
   loadDatabase,
   readsFile,
@@ -186,6 +187,44 @@ export const vectorCases: VectorCase[] = [
           `SELECT 1 FROM ${t("member_history")} AS h JOIN ${t("member")} AS m ON m.id = h.id ` +
             `WHERE h.kind = 'step' AND json_type(m.data, '$.scratch') = 'text' AND json_type(h.data, '$.scratch') IS NULL`,
         );
+        holds(
+          "a partial insert's omitted columns stored null",
+          `SELECT 1 FROM ${t("member_history")} WHERE kind = 'tasting' AND operation = 'INSERT' ` +
+            `AND json_type(data, '$.taster') = 'null' AND json_type(data, '$.score') IN ('integer', 'real')`,
+        );
+        holds("an integer wider than a double, digit for digit", `SELECT 1 FROM ${t("member")} WHERE instr(data, '"servings":9007199254740993') > 0`);
+        holds("a number past 1e21, as 1e+21", `SELECT 1 FROM ${t("member")} WHERE instr(data, '"score":1e+21') > 0`);
+        holds("text with an apostrophe", `SELECT 1 FROM ${t("member")} WHERE instr(data, '''') > 0`);
+        const data = client.all(`SELECT data FROM ${t("member")}`).map((r) => r["data"] as string);
+        assert.ok(data.some((d) => /[^\u0000-\u007f]/.test(d)), "typescript.sql holds text outside ASCII");
+        assert.ok(data.some((d) => /[\u{10000}-\u{10ffff}]/u.test(d)), "typescript.sql holds text outside the Basic Multilingual Plane");
+        // The script gives entity keys as short names, never a version-4 UUID.
+        assert.ok(
+          client
+            .all(`SELECT entity_key FROM ${t("member")} WHERE kind = 'utensil'`)
+            .some((r) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uuidHyphenated(r["entity_key"] as string))),
+          "typescript.sql holds a utensil whose entity key the adapter generated",
+        );
+        const path = `'$.${gained.column}'`;
+        holds(
+          `a live ${gained.kind} row stored before its kind gained ${gained.column}`,
+          `SELECT 1 FROM ${t("member")} WHERE kind = '${gained.kind}' AND json_type(data, ${path}) IS NULL`,
+        );
+        holds(
+          `a ${gained.kind} image stored before the gain, without ${gained.column}`,
+          `SELECT 1 FROM ${t("member_history")} WHERE kind = '${gained.kind}' AND json_type(data, ${path}) IS NULL`,
+        );
+        holds(
+          `a ${gained.kind} image written after the gain, with ${gained.column}`,
+          `SELECT 1 FROM ${t("member_history")} WHERE kind = '${gained.kind}' AND json_type(data, ${path}) = 'text'`,
+        );
+        const reads = JSON.parse(readFileSync(readsFile, "utf8")) as {
+          graphs: { commits: { readCommit: { contentHash: string }; materialize: { contentHash?: string } }[] }[];
+        };
+        assert.ok(
+          reads.graphs.some((g) => g.commits.some((c) => c.materialize.contentHash !== undefined && c.materialize.contentHash !== c.readCommit.contentHash)),
+          "typescript.json holds a commit recorded before the gain, which materializes to another hash",
+        );
         const tastings = client.all(`SELECT data FROM ${t("member")} WHERE kind = 'tasting'`).map((r) => r["data"] as string);
         const tasting = kinds.find((k) => k.kind === "tasting")!;
         const roles = new Set([tasting.key, tasting.id, tasting.ref, tasting.root, tasting.tombstone, tasting.version]);
@@ -204,10 +243,35 @@ export const vectorCases: VectorCase[] = [
   {
     name: "the script writes typescript.sql, and its database reads as typescript.json",
     run(binding) {
+      const crypto = globalThis.crypto;
+      const method = crypto.randomUUID;
+      const own = Object.getOwnPropertyDescriptor(crypto, "randomUUID");
+      const restored = (after: string) => {
+        assert.equal(crypto.randomUUID, method, `crypto.randomUUID is the system's again after ${after}`);
+        assert.deepEqual(Object.getOwnPropertyDescriptor(crypto, "randomUUID"), own, `crypto's own randomUUID is as it was after ${after}`);
+      };
       inMemory(binding, (client) => {
         writeDatabase(client);
+        restored("the script");
         assert.equal(dumpDatabase(client), readFileSync(sqlFile, "utf8"));
         assert.equal(readVectors(client), readFileSync(readsFile, "utf8"));
+      });
+      // A run that fails partway, at the client's 40th statement.
+      inMemory(binding, (client) => {
+        let statements = 0;
+        const failing: SqliteClient = {
+          exec: (sql: string) => client.exec!(sql),
+          run: (sql: string, params?: readonly SqliteValue[]) => {
+            if (++statements === 40) {
+              throw new Error("the client failed partway");
+            }
+            return client.run(sql, params);
+          },
+          get: (sql: string, params?: readonly SqliteValue[]) => client.get(sql, params),
+          all: (sql: string, params?: readonly SqliteValue[]) => client.all(sql, params),
+        };
+        assert.throws(() => writeDatabase(failing), /the client failed partway/);
+        restored("a script that failed partway");
       });
     },
   },
