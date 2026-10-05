@@ -61,7 +61,37 @@ type Options struct {
 	// SkipFormat bypasses developer-friendly formatting for generated files.
 	// Generated files remain syntactically valid, but may not be gofmt/prettier-like.
 	SkipFormat bool
+
+	// Stage runs part of the pipeline: StageBase every generator but
+	// those that read the service's calls, and the documents; StageServer
+	// only those that read the calls. The empty stage runs all of it. The
+	// build plan splits a service whose API calls one built after it
+	// (docs/stack-model.md, section 3.3).
+	Stage BuildStage
+
+	// ImplementationRoot, when set, is the repository root under which the
+	// Go API generator scaffolds a missing implementation, at the naming
+	// file's [implementation_paths] template (docs/stack-model.md, section
+	// 8.5). Empty writes no scaffold; build and build-all set it under
+	// --scaffold.
+	ImplementationRoot string
 }
+
+// BuildStage is the part of a service's generator pipeline one run
+// executes (Options.Stage).
+type BuildStage string
+
+const (
+	// StageAll runs every generator and document.
+	StageAll BuildStage = ""
+
+	// StageBase runs every generator but those that read calls
+	// (GeneratorSpec.ReadsCalls), and the documents.
+	StageBase BuildStage = "base"
+
+	// StageServer runs only the generators that read calls.
+	StageServer BuildStage = "server"
+)
 
 // Result reports what a generator run produced.
 type Result struct {

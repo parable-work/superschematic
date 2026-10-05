@@ -27,6 +27,15 @@ require (
 {{- if .IsPublic }}
 	{{ .ORMModule }} v0.0.0-00010101000000-000000000000
 {{- end }}
+{{- if .DepsRequiresORM }}
+	{{ .Deps.ORMModule }} v0.0.0-00010101000000-000000000000
+{{- end }}
+{{- range .Deps.Calls }}
+	{{ .Module }} v0.0.0-00010101000000-000000000000
+{{- end }}
+{{- if .EnvConfig }}
+	github.com/joho/godotenv v1.5.1
+{{- end }}
 {{- authSnippet "moduleRequires" . }}
 	{{ .TypesModule }} v0.0.0-00010101000000-000000000000
 	{{ $.Naming.HTTPRuntimeGoModule }} v0.0.0-00010101000000-000000000000
@@ -63,6 +72,12 @@ replace {{ . }} => ../../types/go/{{ base . }}
 {{- end }}
 {{- if .IsPublic }}
 replace {{ .ORMModule }} => ../../orm/{{ .UpstreamSchema }}
+{{- end }}
+{{- if .DepsRequiresORM }}
+replace {{ .Deps.ORMModule }} => ../../orm/{{ .Deps.Database }}
+{{- end }}
+{{- range .Deps.Calls }}
+replace {{ .Module }} => ../../sdk/go/{{ .Service }}
 {{- end }}
 {{- if .VersionGraphReplacePath }}
 replace {{ $.Naming.VersionGraphGoModule }} => {{ .VersionGraphReplacePath }}

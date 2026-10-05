@@ -42,6 +42,19 @@ type buildServiceOptions struct {
 	// APILanguage, when set, replaces the loaded config's
 	// outputs.api.language (build --api-language).
 	APILanguage string
+
+	// Stage runs part of the service's generators (generator.Options.Stage):
+	// build-all and build --with-deps split a service whose API calls one
+	// built after it into a base and a server stage.
+	Stage registry.BuildStage
+
+	// Loaded is what the base stage loaded, which the server stage builds
+	// on instead of loading the service again.
+	Loaded *buildServiceResult
+
+	// ImplementationRoot is generator.Options.ImplementationRoot: the
+	// repository root under build --scaffold, else empty.
+	ImplementationRoot string
 }
 
 type buildServiceResult struct {
@@ -68,6 +81,9 @@ func withAPILanguage(cfg *schemaconfig.SchemaConfig, language string) (*schemaco
 }
 
 func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
+	if opts.Loaded != nil {
+		return generateService(opts, opts.Loaded.Schema, opts.Loaded.Config)
+	}
 	prof := opts.Profile
 	loadOpts := append([]loader.Option(nil), opts.LoadOptions...)
 	loadOpts = append(loadOpts, loader.WithProfiler(prof), loader.WithNaming(opts.Naming), loader.WithRegistry(opts.Registry))
@@ -119,6 +135,14 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 		return nil, err
 	}
 
+	return generateService(opts, schema, cfg)
+}
+
+// generateService runs the generators of opts.Stage on a loaded service.
+// The base and the whole stage also write the authoring-import depfile;
+// the server stage leaves it to the base stage before it.
+func generateService(opts buildServiceOptions, schema *ir.Schema, cfg *schemaconfig.SchemaConfig) (*buildServiceResult, error) {
+	prof := opts.Profile
 	outputRoot := opts.OutputRoot
 	if outputRoot == "" {
 		outputRoot = filepath.Join(opts.ServicePath, "..", "..", "dist")
@@ -142,11 +166,19 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 			Naming:         opts.Naming,
 			Registry:       opts.Registry,
 
-			DependencyConfig: opts.DependencyConfig,
+			DependencyConfig:   opts.DependencyConfig,
+			Stage:              opts.Stage,
+			ImplementationRoot: opts.ImplementationRoot,
 		})
 		return err
 	}); err != nil {
 		return nil, err
+	}
+
+	if opts.Stage == registry.StageServer {
+		_, _ = fmt.Fprintf(opts.Log, "Server stage complete: %d outputs generated, %d skipped\n",
+			len(result.Outputs), len(result.Skipped))
+		return &buildServiceResult{Schema: schema, Config: cfg, GeneratorResult: result}, nil
 	}
 
 	// Persist the sidecar documents' crawled module graph for cache
@@ -166,7 +198,11 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 		return nil, err
 	}
 
-	_, _ = fmt.Fprintf(opts.Log, "Build complete: %d outputs generated, %d skipped\n",
-		len(result.Outputs), len(result.Skipped))
+	label := "Build"
+	if opts.Stage == registry.StageBase {
+		label = "Base stage"
+	}
+	_, _ = fmt.Fprintf(opts.Log, "%s complete: %d outputs generated, %d skipped\n",
+		label, len(result.Outputs), len(result.Skipped))
 	return &buildServiceResult{Schema: schema, Config: cfg, GeneratorResult: result}, nil
 }

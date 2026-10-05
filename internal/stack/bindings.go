@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -30,26 +29,12 @@ type field struct {
 }
 
 // DerivedField returns the name of the config field an edge of kind to
-// service fills: the service's name in upper snake case, suffixed
-// `_DATABASE` for a sql edge and `_SERVICE` for an http edge
-// (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`). It is the core's rule; a naming
-// key replaces it when envgen writes the derived fields (section 3.4).
+// service fills under the core's rule: the service's name in upper snake
+// case, suffixed `_DATABASE` for a sql edge and `_SERVICE` for an http edge
+// (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`). Input.FieldNames replaces the
+// rule with the naming file's (section 3.4).
 func DerivedField(kind ir.EdgeKind, service string) string {
-	var b strings.Builder
-	for _, r := range service {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(unicode.ToUpper(r))
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	switch kind {
-	case ir.EdgeSQL:
-		b.WriteString("_DATABASE")
-	case ir.EdgeHTTP:
-		b.WriteString("_SERVICE")
-	}
-	return b.String()
+	return ir.DerivedFieldNames{}.Field(kind, service)
 }
 
 // databaseOf returns the DB service an API service connects to: its
@@ -111,7 +96,7 @@ func (r *resolver) addEdge(kind ir.EdgeKind, from *deployable, service string) {
 			From:    from.res.Name,
 			To:      to.res.Name,
 			Service: ir.ServiceRef{Name: svc.Name, Kind: svc.Kind},
-			Field:   DerivedField(kind, service),
+			Field:   r.in.FieldNames.Field(kind, service),
 		},
 		from: from,
 		to:   to,
@@ -156,8 +141,10 @@ func (r *resolver) bindConfig() {
 				r.fail(CodeFieldCollision, "server %s: edges %s and %s derive the same field %s", name, other.res.ID, e.res.ID, e.res.Field)
 			}
 			derived[e.res.Field] = e
-			if f, clash := d.fields[e.res.Field]; clash {
-				r.fail(CodeFieldCollision, "server %s: config field %s of %s has the name of the field edge %s derives", name, f.name, f.declaring, e.res.ID)
+			for _, fieldName := range sortedKeys(d.fields) {
+				if f := d.fields[fieldName]; ir.DerivedFieldClaims(e.res.Field, f.name) {
+					r.fail(CodeFieldCollision, "server %s: config field %s of %s collides with %s, the field edge %s derives", name, f.name, f.declaring, e.res.Field, e.res.ID)
+				}
 			}
 		}
 		for _, key := range sortedKeys(d.settings.env) {

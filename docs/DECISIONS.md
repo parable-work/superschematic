@@ -2472,6 +2472,22 @@ authoring package, the targets and the provisioners are not.
 | `RegisterDNSPlatform` registers a DNS platform: the schema of its values and a `Lower` from records to resources. A target names its default one, and `manual` is reserved for a domain that no DNS platform holds. | DNS as one more `PlatformSpec` kind, whose spec would carry a lowering that only DNS platforms set and a kind that no target places a deployable on |
 | A target also names its provisioner and registers the schema of each resource type its platforms emit. Resolution checks every node against the schema of its type, with references read as strings. | A provisioner chosen per environment; schemas registered per platform, which repeats a type that a platform and a connector share |
 
+### D30, amended: the derived fields, `Deps`, the scaffold and a build ordered by output
+
+Building the derived config fields, the Go `Deps` and the implementation
+scaffold settled what D30 left to the build (`docs/stack-model.md`,
+sections 3.3, 3.4 and 8.5). The server entrypoint, the Dockerfile, and
+`Deps` in TypeScript and Rust are not built.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| What a connector derives has a contract per edge kind, in `ir`. A database connection is a connection string or a Cloud SQL connector configuration (instance connection name, database, IAM user). A service endpoint is a base URL and an optional service credential: one of D37's sources, the settings it reads and the headers that carry it. Resolution refuses a value that breaks the contract. | A free-form value that connectors and loaders agree on in prose |
+| A derived field is one environment variable per member of its value: the field's name, an underscore and the member's path in upper snake case, with a list joined by commas. A platform sets each from an output reference, or from its secret store. | One JSON document per field, which every provisioner would have to render with references inside it, and none of whose members could come from a secret store |
+| The naming file's `[derived_fields]` templates name the fields after the service, `{SERVICE}_DATABASE` and `{SERVICE}_SERVICE` by default, and envgen and the resolver share them. A setting is refused when its name is a derived field's, or begins with it and an underscore. | Refusing only the exact name, which lets a setting take a variable that a member added later would need |
+| Go's `Deps` holds `Config` (the `@envVars` type embedded, and the derived fields), the ORM of the API's database, a Go SDK client per `calls` entry and a zap logger. `Constructor` types `New`. | A `*slog.Logger` beside the zap logger the generated `Config` takes, which gives an implementation two logger types |
+| `build --scaffold` and `build-all --scaffold` write the scaffold until the entrypoint lands. The entrypoint will scaffold each API a stack's servers serve. | Scaffolding on every build, which writes stub packages beside any Go code a tree already has, such as the examples' and the test fixtures', before anything imports them |
+| The build plan orders outputs. A caller's API server builds after each callee's SDK, so two APIs may call each other. The cache keeps one entry per service, and a caller's key adds each callee's key without the callee's own calls. | Ordering whole services and refusing a cycle of calls |
+
 ## D28. No SDK has a method for a `@webhook` operation
 
 `@webhook` marks an operation a third party calls. The Go and TypeScript
