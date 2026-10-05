@@ -198,7 +198,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		}); err != nil {
 			return nil, nil, err
 		}
-		schema = ir.NewSchema(cfg.Name, cfg.Kind)
+		schema = cfg.NewSchema()
 		vin.Dependencies = make(map[string]ir.SchemaKind, len(cfg.Dependencies))
 		for _, dep := range cfg.Dependencies {
 			vin.Dependencies[dep.Name] = dep.Kind

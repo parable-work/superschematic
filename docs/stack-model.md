@@ -122,9 +122,18 @@ all follow from it. A call between two APIs that one server serves stays an
 HTTP call to the server's own address.
 
 `calls` is also a build dependency, since the caller's generated `Deps`
-imports the callee's SDK. Two APIs that call each other form a cycle
-between services, so the build plan orders outputs (SDKs before APIs)
-rather than whole services (section 12).
+imports the callee's SDK. The build plan builds each callee before its
+caller, and `build --with-deps` builds the callees with the caller. Two
+APIs that call each other form a cycle between services. The build plan
+orders whole services, so it refuses that cycle, with an error that names
+each edge (`shop-api calls shop-orders, shop-orders calls shop-api`).
+
+Follow-up: order outputs instead, each SDK before the APIs that call it, so
+two APIs may call each other. It waits for the `Deps` generator (section
+8.5), the first output that imports a callee's SDK, and it splits a
+service's build, which the build cache stores as one entry. That generator
+also adds each callee's key to the caller's cache key, which leaves `calls`
+out while no output reads it.
 
 ### 3.4 Bindings in the generated config
 
@@ -883,8 +892,10 @@ registrations.
 
 ## 12. Core changes
 
-1. **IR.** `authDb`, `dependencies` and `calls` move into the IR (`ir/schema.go`
-   records only `Imports` today), and the Stack IR types are added.
+1. **IR.** The IR records the config's `authDb`, `dependencies` and
+   `calls` (`ir.Schema`'s `AuthDB`, `Dependencies` and `Calls`), so
+   generators and the resolver read every reference from it. The Stack IR
+   types are still to add.
 2. **Loader:**
    - Class values in the arguments of any registered decorator. Today the
      walker special-cases the decorators that take classes
@@ -893,20 +904,22 @@ registrations.
      (`ServiceHandle<"API", ShopApiConfig>`,
      `packages/schema-config/src/index.ts:31`), written by the sentinel
      generator (section 4.3), so TypeScript can restrict a handle argument
-     and type its settings. The loader checks a handle's kind against the
-     service it names; `internal/loader/schemaconfig/config.go:177` checks
-     only that the kind exists.
+     and type its settings. Build-plan discovery, which `build-all` and
+     `build --with-deps` run, checks each config handle's kind against the
+     service it names (`validateHandleKinds` in
+     `internal/buildplan/buildplan.go`).
    - Build-order edges from the handles a schema references, so a stack does
      not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
 3. **envgen.** The derived binding fields of section 3.4.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
    (section 8.5).
-5. **Config and build plan.** `calls` in the schema config, beside
-   `authDb`, in the TypeScript type and the data-form schema. The build
-   plan orders outputs (an SDK before the APIs that call it) where `calls`
-   forms a cycle between services. A naming-file key holds the
-   implementation path templates.
+5. **Config and build plan.** `calls` is in the schema config, beside
+   `authDb`, in the TypeScript type and the data-form schema, valid on an
+   API config and naming API services. It is a build-order edge, and the
+   build plan refuses a cycle of `calls`; ordering outputs instead is the
+   follow-up in section 3.3. A naming-file key holds the implementation
+   path templates.
 6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
    and TypeScript HTTP runtimes, and a service credential source in the
    SDKs.

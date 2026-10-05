@@ -109,13 +109,18 @@ export type SchemaConfig = {
   readonly public?: boolean;
   readonly authDb?: ServiceHandle;
   readonly dependencies?: readonly ServiceHandle[];
+  /**
+   * The API services this API's implementation calls. Only an API service sets it, and each entry is an API service's handle. Each callee is built before its caller.
+   */
+  readonly calls?: readonly ServiceHandle[];
   readonly outputs: SchemaOutputs;
 };
 
 /**
- * A dependency reference in the JSON/YAML config forms. The TypeScript form
- * builds ServiceHandle sentinels with the service() helper; the data forms
- * carry the same name + kind pair as a plain object.
+ * A service reference in the JSON/YAML config forms, in dependencies and
+ * calls. The TypeScript form builds ServiceHandle sentinels with the
+ * service() helper; the data forms carry the same name + kind pair as a
+ * plain object.
  */
 export type ServiceDependencyRef = {
   readonly name: string;
@@ -126,8 +131,9 @@ export type ServiceDependencyRef = {
  * The schema.config.json / schema.config.yaml document shape.
  *
  * This is the SchemaConfig contract projected onto plain data: authDb is the
- * service name, and dependencies is an explicit array (there is no import
- * system in the JSON/YAML forms to derive it from). superschematic validates the data
+ * service name, and dependencies and calls are explicit arrays of
+ * name + kind pairs (there is no import system in the JSON/YAML forms to
+ * derive them from). superschematic validates the data
  * forms against the JSON Schema generated from this type (see the
  * gen-json-schema package script).
  */
@@ -137,6 +143,10 @@ export type SchemaConfigDocument = {
   readonly public?: boolean;
   readonly authDb?: string;
   readonly dependencies?: readonly ServiceDependencyRef[];
+  /**
+   * The API services this API's implementation calls. Only an API service sets it, and each entry names an API service. Each callee is built before its caller.
+   */
+  readonly calls?: readonly ServiceDependencyRef[];
   readonly outputs: SchemaOutputsDocument;
 };
 
