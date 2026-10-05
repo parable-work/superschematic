@@ -829,19 +829,23 @@ export const cases: Case[] = [
         // not at exactly 365 days.
         now = start + 365 * 86_400_000_000;
         assert.equal(prune(0), 0);
-        // Make the row with the middle id the oldest, by a microsecond more
-        // than the row with the greatest id, so oldest first disagrees with
-        // id order either way.
+        // Make the row with the middle id the oldest, and the row with the
+        // greatest id the next, so that with all three past their retention
+        // oldest first disagrees with id order either way.
         const ids = left();
         s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 2 WHERE id = ?1 AND _version = 1`, [ids[1]!]);
         s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 1 WHERE id = ?1 AND _version = 1`, [ids[2]!]);
+        now += 1;
         assert.equal(prune(1), 1);
         assert.deepEqual(left(), [ids[0], ids[2]], "the oldest went first");
-        assert.equal(prune(0), 1);
+        assert.equal(prune(1), 1);
+        assert.deepEqual(left(), [ids[0]], "the next oldest went next");
+        now -= 1;
+        assert.equal(prune(0), 0);
         assert.deepEqual(left(), [ids[0]], "an image exactly 365 days old stays");
         now += 1;
         assert.equal(prune(0), 1);
-        assert.deepEqual(left(), []);
+        assert.deepEqual(left(), [], "an image a microsecond past its retention goes");
       });
     },
   },
