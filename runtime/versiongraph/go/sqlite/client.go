@@ -119,17 +119,19 @@ func (c *dbClient) Transact(ctx context.Context, fn func(ctx context.Context, co
 	if err != nil {
 		return fmt.Errorf("sqlite: take a connection: %w", err)
 	}
+	returned := false
 	defer func() {
+		if !returned || errors.Is(err, errConnState) {
+			// The connection's transaction may not have ended, so no other
+			// transaction may take it: the pool closes it.
+			_ = pinned.Raw(func(any) error { return driver.ErrBadConn })
+		}
 		if closeErr := pinned.Close(); closeErr != nil && err == nil {
 			err = fmt.Errorf("sqlite: return the connection: %w", closeErr)
 		}
 	}()
 	err = begin(ctx, &sqlConn{q: pinned}, openKey{c.db}, fn)
-	if errors.Is(err, errConnState) {
-		// The connection's transaction did not end, so no other
-		// transaction may take it: the pool closes it.
-		_ = pinned.Raw(func(any) error { return driver.ErrBadConn })
-	}
+	returned = true
 	return err
 }
 
@@ -156,6 +158,9 @@ func (c *txClient) Transact(ctx context.Context, fn func(ctx context.Context, co
 // still be open: a rollback that failed.
 var errConnState = errors.New("the connection's transaction may still be open")
 
+// errUnfinished is the cause of a rollback whose function did not return.
+var errUnfinished = errors.New("the transaction's function did not return")
+
 // begin runs fn in a transaction of its own on conn: it turns the
 // connection's foreign keys on, which SQLite ignores inside a transaction,
 // begins with BEGIN IMMEDIATE, and hands fn a context in which a
@@ -176,13 +181,17 @@ func begin(ctx context.Context, conn *sqlConn, key openKey, fn func(ctx context.
 		}
 		return cause
 	}
+	returned := false
 	defer func() {
-		if p := recover(); p != nil {
-			_ = rollback(nil)
-			panic(p)
+		if !returned {
+			// fn panicked, and the panic goes on, or its goroutine exited
+			// (runtime.Goexit, as a test's FailNow does).
+			_ = rollback(errUnfinished)
 		}
 	}()
-	if err := fn(context.WithValue(ctx, key, conn), conn); err != nil {
+	err = fn(context.WithValue(ctx, key, conn), conn)
+	returned = true
+	if err != nil {
 		return rollback(err)
 	}
 	if _, err := conn.Exec(ctx, "COMMIT"); err != nil {
@@ -207,13 +216,15 @@ func inSavepoint(ctx context.Context, conn *sqlConn, fn func(ctx context.Context
 		}
 		return cause
 	}
+	returned := false
 	defer func() {
-		if p := recover(); p != nil {
-			_ = rollback(nil)
-			panic(p)
+		if !returned {
+			_ = rollback(errUnfinished)
 		}
 	}()
-	if err := fn(ctx, conn); err != nil {
+	err := fn(ctx, conn)
+	returned = true
+	if err != nil {
 		return rollback(err)
 	}
 	if _, err := conn.Exec(ctx, "RELEASE "+savepoint); err != nil {

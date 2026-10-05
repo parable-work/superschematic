@@ -97,8 +97,10 @@ func (c callerTransaction) Transact(ctx context.Context, fn func(ctx context.Con
 	if err != nil {
 		return err
 	}
+	// Rolls back too when fn does not return, as when a step fails the
+	// test inside a transaction.
+	defer func() { _ = tx.Rollback() }()
 	if err := sqlite.DBTx(tx).Transact(ctx, fn); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()

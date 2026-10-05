@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -150,6 +151,7 @@ func TestStorageRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	tx := must(conn.BeginTx(ctx, nil))(t)
+	t.Cleanup(func() { _ = tx.Rollback() })
 	_, err := adapter.Storage(ctx, sqlite.DBTx(tx))
 	errorContains(t, err, "the connection's foreign keys are off", "Storage in a transaction without foreign keys")
 	if err := tx.Rollback(); err != nil {
@@ -339,6 +341,7 @@ func TestCallerTransaction(t *testing.T) {
 		return n
 	}
 	tx := must(conn.BeginTx(ctx, nil))(t)
+	t.Cleanup(func() { _ = tx.Rollback() })
 	s := must(adapter.Storage(ctx, sqlite.DBTx(tx)))(t)
 	calls = 0
 	both := must(in(s, func(ctx context.Context, tx storage.Tx) ([]storage.Ref, error) {
@@ -394,6 +397,8 @@ func TestCallerTransaction(t *testing.T) {
 	}
 	// The engine runs there too.
 	tx = must(conn.BeginTx(ctx, nil))(t)
+	committed := tx
+	t.Cleanup(func() { _ = committed.Rollback() })
 	eng := must(engine.New(readDescriptor(t), must(adapter.Storage(ctx, sqlite.DBTx(tx)))(t), engine.Options{SchemaEpoch: 1, SnapshotEvery: 3}))(t)
 	main := must(eng.CreatePrimary(ctx, cook, bread, "main"))(t)
 	draft := must(eng.Branch(ctx, cook, main.ID, "draft"))(t)
@@ -460,5 +465,69 @@ func TestDBNested(t *testing.T) {
 	})
 	if err != nil || !slices.Equal(rows, []string{"outer"}) {
 		t.Fatalf("the file holds %q (%v), want the outer row", rows, err)
+	}
+}
+
+// TestUnfinishedTransaction: on each binding, a transaction whose function
+// does not return, here because its goroutine exits inside it, rolls back,
+// and the next transaction on the connection runs.
+func TestUnfinishedTransaction(t *testing.T) {
+	ctx := context.Background()
+	for _, binding := range []string{"pool", "connection", "caller's transaction"} {
+		t.Run(binding, func(t *testing.T) {
+			db := openDB(t, "", "")
+			conn := must(db.Conn(ctx))(t)
+			t.Cleanup(func() { _ = conn.Close() })
+			if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+				t.Fatal(err)
+			}
+			adapter := must(sqlite.New(readDescriptor(t), sqlite.Options{Graph: graph}))(t)
+			if err := adapter.CreateTables(ctx, sqlite.DBConn(conn)); err != nil {
+				t.Fatal(err)
+			}
+			var client sqlite.Client
+			var tx *sql.Tx
+			switch binding {
+			case "pool":
+				client = sqlite.DB(db)
+			case "connection":
+				client = sqlite.DBConn(conn)
+			default:
+				tx = must(conn.BeginTx(ctx, nil))(t)
+				t.Cleanup(func() { _ = tx.Rollback() })
+				client = sqlite.DBTx(tx)
+			}
+			s := must(adapter.Storage(ctx, client))(t)
+			create := func(ctx context.Context, tx storage.Tx, name string) error {
+				_, err := tx.CreateRef(ctx, storage.NewRef{Root: bread, Name: name, Actor: cook})
+				return err
+			}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				_ = s.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+					if err := create(ctx, tx, "exited"); err != nil {
+						return err
+					}
+					runtime.Goexit()
+					return nil
+				})
+			}()
+			<-done
+			must(in(s, func(ctx context.Context, tx storage.Tx) (struct{}, error) { return struct{}{}, create(ctx, tx, "next") }))(t)
+			var q interface {
+				QueryRowContext(context.Context, string, ...any) *sql.Row
+			} = conn
+			if tx != nil {
+				q = tx
+			}
+			var names string
+			if err := q.QueryRowContext(ctx, `SELECT group_concat(name) FROM "graph_ref"`).Scan(&names); err != nil {
+				t.Fatal(err)
+			}
+			if names != "next" {
+				t.Fatalf("the refs are %q, want the next transaction's alone", names)
+			}
+		})
 	}
 }

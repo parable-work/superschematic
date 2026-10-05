@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1266,6 +1267,23 @@ func TestSavepoints(t *testing.T) {
 	}()
 	if got := names(); !slices.Equal(got, []string{"after", "kept"}) {
 		t.Fatalf("after a panic the refs are %q, want after and kept", got)
+	}
+	// So does one whose goroutine exits inside it, as a test's FailNow
+	// does, and the write lock is free again.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = s.storage.Transact(context.Background(), func(ctx context.Context, tx storage.Tx) error {
+			if err := create(ctx, tx, "exited"); err != nil {
+				return err
+			}
+			runtime.Goexit()
+			return nil
+		})
+	}()
+	<-done
+	if got := names(); !slices.Equal(got, []string{"after", "kept"}) {
+		t.Fatalf("after a goroutine exited in a transaction the refs are %q, want after and kept", got)
 	}
 	must(in(s.storage, func(ctx context.Context, tx storage.Tx) (struct{}, error) {
 		return struct{}{}, create(ctx, tx, "later")
