@@ -1,8 +1,8 @@
 {
   "name": "release",
   "description": "A root's release pointer names a tagged commit of that root, fenced by its version. Released reads the released tree; a rollback is a Release to an earlier tagged commit, which writes no member rows; an untagged commit, another root's commit and a stale version are refused.",
+  "roots": ["Bread", "Soup"],
   "steps": [
-    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid), ($3::uuid, 'Soup', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}, {"uuid": "Soup"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
     {"op": "released", "root": "Bread", "expect": {"error": "not_found"}},
 

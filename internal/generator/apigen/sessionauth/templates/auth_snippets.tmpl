@@ -128,22 +128,37 @@ func (s *ormSessionStore) FindByJTI(ctx context.Context, jti string) (runtimeses
 	if err != nil {
 		return runtimesession.Record{}, runtimesession.ErrNotFound
 	}
+{{- if .Auth.SessionSoftDelete }}
+	// A revoked (soft-deleted) session is found with its DeletedAt set, so
+	// the caller can tell it from a jti that names no session.
 	session, err := s.db.GetSessionRepository().FindOne(ctx, &orm.SessionFilter{
 		Jti: &orm.UUIDFilter{Eq: &jtiUUID},
 	}, &orm.SessionFindOptions{
 		IncludeDeleted: true,
 	})
+{{- else }}
+	session, err := s.db.GetSessionRepository().FindOne(ctx, &orm.SessionFilter{
+		Jti: &orm.UUIDFilter{Eq: &jtiUUID},
+	}, nil)
+{{- end }}
 	if err != nil {
 		if errors.Is(err, orm.ErrNotFound) {
 			return runtimesession.Record{}, runtimesession.ErrNotFound
 		}
 		return runtimesession.Record{}, err
 	}
-	return runtimesession.Record{
+	record := runtimesession.Record{
 		ID:          session.Id.String(),
 		PrincipalID: session.User.Id.String(),
 		ExpiresAt:   time.Time(session.ExpiresAt),
-	}, nil
+	}
+{{- if .Auth.SessionSoftDelete }}
+	if session.DeletedAt != nil {
+		deletedAt := time.Time(*session.DeletedAt)
+		record.DeletedAt = &deletedAt
+	}
+{{- end }}
+	return record, nil
 }
 
 // NewSessionStore creates a SessionStore backed by the generated ORM.

@@ -153,15 +153,26 @@ func moveTimedDirectivesToManualRoutes(schema *ir.Schema) {
 // Each mutateAPI function edits the loaded fixture-api IR first.
 func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider, mutateAPI ...func(*ir.Schema)) string {
 	t.Helper()
+	return buildFixtureAPIOver(t, provider, nil, mutateAPI...)
+}
+
+// buildFixtureAPIOver is buildFixtureAPI over dbSchema, a fixture-db IR the
+// caller loaded and edited, in place of the fixture-db it loads when
+// dbSchema is nil.
+func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *ir.Schema, mutateAPI ...func(*ir.Schema)) string {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
 
 	paths := testpaths.Local(t)
 
-	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
-	if err != nil {
-		t.Fatalf("load fixture-db: %v", err)
+	if dbSchema == nil {
+		var err error
+		dbSchema, err = loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
+		if err != nil {
+			t.Fatalf("load fixture-db: %v", err)
+		}
 	}
 	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
 	if err != nil {

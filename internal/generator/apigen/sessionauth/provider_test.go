@@ -65,7 +65,9 @@ func TestStoresParseStringIDsIntoScalarUUIDs(t *testing.T) {
 			t.Fatalf("middlewareStores lacks %q:\n%s", want, stores)
 		}
 	}
-	for _, reject := range []string{"Eq: &jti}", "Eq: &id}", "session.DeletedAt"} {
+	// Without SessionSoftDelete the store leaves soft-deleted rows to the
+	// ORM's filter: it could not report their DeletedAt.
+	for _, reject := range []string{"Eq: &jti}", "Eq: &id}", "session.DeletedAt", "IncludeDeleted"} {
 		if strings.Contains(stores, reject) {
 			t.Fatalf("middlewareStores still has %q:\n%s", reject, stores)
 		}
@@ -92,6 +94,66 @@ func TestStoresParseStringIDsIntoScalarUUIDs(t *testing.T) {
 	}
 	if strings.Contains(none, "scalars") {
 		t.Fatalf("middlewareImports = %q, must not import scalars when no store uses them", none)
+	}
+}
+
+// A store that reads soft-deleted sessions must report their DeletedAt, or
+// a revoked session authenticates; so it reads them only when the Session
+// table's deletedAt is the nullable Temporal.DateTime it can report.
+func TestAnalyzeReportsSessionSoftDeleteForANullableDateTime(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		deletedAt *ir.FieldDef
+		want      bool
+	}{
+		{name: "no deletedAt"},
+		{name: "nullable DateTime", deletedAt: &ir.FieldDef{TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}}, want: true},
+		{name: "required DateTime", deletedAt: &ir.FieldDef{TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true}},
+		{name: "nullable string", deletedAt: &ir.FieldDef{TypeRef: ir.TypeRef{Name: "string"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := ir.NewSchema("fixture-db", ir.SchemaKindDB)
+			session := &ir.TypeDef{Name: "Session", Role: ir.RoleDBTable}
+			for _, f := range []string{"id", "jti", "user", "expiresAt"} {
+				session.Fields = append(session.Fields, &ir.FieldDef{Name: f})
+			}
+			if tc.deletedAt != nil {
+				tc.deletedAt.Name = "deletedAt"
+				session.Fields = append(session.Fields, tc.deletedAt)
+			}
+			upstream.Types["Session"] = session
+
+			model, err := sessionauth.Provider{}.Analyze(nil, upstream)
+			if err != nil {
+				t.Fatalf("Analyze: %v", err)
+			}
+			if !model.HasSessionStore || model.SessionSoftDelete != tc.want {
+				t.Fatalf("model = %+v, want a session store with SessionSoftDelete %v", model, tc.want)
+			}
+		})
+	}
+}
+
+func TestSessionStoreReportsDeletedAtOnASoftDeletableSessionTable(t *testing.T) {
+	snippet, err := apigen.AuthSnippetFunc(sessionauth.Provider{})
+	if err != nil {
+		t.Fatalf("AuthSnippetFunc: %v", err)
+	}
+	stores, err := snippet("middlewareStores", map[string]any{
+		"Auth":   &apigen.AuthModel{HasSessionStore: true, SessionSoftDelete: true},
+		"Naming": map[string]string{"HTTPRuntimeGoModule": "example.com/http", "ScalarGoModule": "example.com/scalars"},
+	})
+	if err != nil {
+		t.Fatalf("render middlewareStores: %v", err)
+	}
+	for _, want := range []string{
+		"IncludeDeleted: true",
+		"deletedAt := time.Time(*session.DeletedAt)",
+		"record.DeletedAt = &deletedAt",
+	} {
+		if !strings.Contains(stores, want) {
+			t.Fatalf("middlewareStores lacks %q:\n%s", want, stores)
+		}
 	}
 }
 
