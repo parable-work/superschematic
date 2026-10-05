@@ -339,6 +339,42 @@ func TestVersionedRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+// TestVersionedRetentionFitsAPostgresInteger: the prune function takes its
+// retention as a Postgres INTEGER, so the largest one verifies and one day
+// more is refused.
+func TestVersionedRetentionFitsAPostgresInteger(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		days int
+		want string
+	}{
+		{"the largest INTEGER", 2147483647, ""},
+		{"one day more", 2147483648, "Recipe: @versioned retentionDays must be at most 2147483647, the largest Postgres INTEGER the prune function takes, got 2147483648"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			days := tc.days
+			schema := ir.NewSchema("svc", ir.SchemaKindDB)
+			schema.Types["Recipe"] = &ir.TypeDef{
+				Name:            "Recipe",
+				Role:            ir.RoleDBTable,
+				Versioned:       true,
+				VersionedConfig: &ir.VersionedConfig{RetentionDays: &days},
+				Owner:           "src/recipe.schema.ts",
+				Fields: []*ir.FieldDef{
+					{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Key: true},
+				},
+			}
+			r := Run(schema, Input{})
+			switch {
+			case tc.want == "" && len(r.Errors) > 0:
+				t.Fatalf("Run returned unexpected errors: %v", errorStrings(r))
+			case tc.want != "" && !hasError(r, tc.want):
+				t.Fatalf("expected %q, got %v", tc.want, errorStrings(r))
+			}
+		})
+	}
+}
+
 func TestCrossKindReferenceRules(t *testing.T) {
 	cases := []struct {
 		importer ir.SchemaKind

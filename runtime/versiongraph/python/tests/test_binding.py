@@ -14,7 +14,7 @@ import pytest
 import superschematic_versiongraph as vg
 
 DESCRIPTOR: vg.Descriptor = {
-    "version": 2,
+    "version": 3,
     "root": {"table": "recipe", "key": "id"},
     "refTable": "recipe_ref",
     "commitTable": "recipe_commit",
@@ -32,6 +32,7 @@ DESCRIPTOR: vg.Descriptor = {
             "tombstone": "deleted_on_ref",
             "version": "_version",
             "order": "position",
+            "history": {"exclude": []},
             "columns": {
                 "entity_key": "string",
                 "id": "string",
@@ -67,6 +68,18 @@ def test_a_refused_input_raises_version_graph_error() -> None:
     assert error.code == "invalid_request"
     assert "a tree is a JSON object" in error.message
     assert str(error) == f"invalid_request: {error.message}"
+
+
+def test_a_version_2_descriptor_is_invalid_descriptor() -> None:
+    # The descriptor as version 2 wrote it, without each kind's history.
+    v2: Any = json.loads(json.dumps(DESCRIPTOR))
+    v2["version"] = 2
+    for kind in v2["kinds"]:
+        del kind["history"]
+    with pytest.raises(vg.VersionGraphError) as caught:
+        vg.validate({"descriptor": v2, "tree": {}})
+    assert caught.value.code == "invalid_descriptor"
+    assert "version 2 is not supported" in caught.value.message
 
 
 def test_an_empty_document_is_invalid_json() -> None:

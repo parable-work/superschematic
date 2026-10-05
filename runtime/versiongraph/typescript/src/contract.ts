@@ -42,6 +42,21 @@ export interface ParentEdge {
   kind: string;
 }
 
+/**
+ * What a kind's history keeps: the facts the sql generator's triggers and
+ * prune function hold, for a storage adapter that writes history itself.
+ * The core checks it against the kind's columns and does not read it
+ * otherwise.
+ */
+export interface KindHistory {
+  /** How many days of history pruning keeps, an integer from 1 to 2147483647; absent for no retention. */
+  retentionDays?: number;
+  /** The columns every history image leaves out: none is content, nor a role column other than the author. */
+  exclude: string[];
+  /** The column a delete's image names its actor in, which history keeps; absent for none. */
+  actor?: string;
+}
+
 /** Which column of a kind's rows plays which role, and how content merges. */
 export interface KindDescriptor {
   /** The kind's name: the tree member that holds its rows. Unique. */
@@ -76,6 +91,8 @@ export interface KindDescriptor {
   units?: Record<string, Unit>;
   /** Columns that are not content. */
   excluded?: string[];
+  /** What the kind's history keeps. */
+  history: KindHistory;
   /** Every column of the kind's table, with its value class. */
   columns: Record<string, ValueClass>;
 }
@@ -88,8 +105,8 @@ export interface RootTable {
 
 /** The graph descriptor the ORM generator writes as versiongraph/<name>.json. */
 export interface Descriptor {
-  /** The descriptor format; the core reads version 2 and refuses any other. */
-  version: 2;
+  /** The descriptor format; the core reads version 3 and refuses any other. */
+  version: 3;
   /** The graph's name; the core does not read it. */
   graph?: string;
   root: RootTable;

@@ -1,0 +1,152 @@
+{
+  "name": "descriptor_rejects_null_actor",
+  "op": "validate",
+  "input": {
+    "descriptor": {
+      "commitTable": "recipe_commit",
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "inputs": "json",
+            "parent_step_key": "uuid",
+            "position": "integer",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "timings": "json",
+            "title": "string",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "history": {
+            "actor": null,
+            "exclude": []
+          },
+          "historyTable": "step_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "parent": {
+            "key": "parent_step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "table": "step",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "inputs": "jsonSchema",
+            "timings": "keyed"
+          },
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "name": "string",
+            "position": "integer",
+            "quantity": "string",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "step_key": "uuid",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "history": {
+            "actor": "updated_by",
+            "exclude": []
+          },
+          "historyTable": "ingredient_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "ingredient",
+          "order": "position",
+          "parent": {
+            "key": "step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "table": "ingredient",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "headline": "string",
+            "id": "uuid",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "history": {
+            "actor": "updated_by",
+            "exclude": []
+          },
+          "historyTable": "cover_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "cover",
+          "ref": "ref",
+          "singleton": true,
+          "table": "cover",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        }
+      ],
+      "patchTable": "recipe_patch",
+      "refTable": "recipe_ref",
+      "releaseTable": "recipe_release",
+      "root": {
+        "key": "id",
+        "table": "recipe"
+      },
+      "snapshotTable": "recipe_snapshot_entry",
+      "version": 3
+    },
+    "tree": {}
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_descriptor",
+      "message": "descriptor: invalid type: null, expected a string"
+    }
+  }
+}

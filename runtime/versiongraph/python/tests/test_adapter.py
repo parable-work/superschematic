@@ -50,7 +50,7 @@ REFUSALS = [
         _without(["kinds", "0", "columns", "_version"]),
         'version column "_version" is not in its columns',
     ),
-    ("a descriptor of another version", _set("version", 1), "reads version 2"),
+    ("a descriptor of version 2", _set("version", 2), "reads version 3"),
 ]
 
 

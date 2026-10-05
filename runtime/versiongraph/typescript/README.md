@@ -107,7 +107,7 @@ passes would block its thread; its host schedules `sweep`. The facade stays
 asynchronous, over `Engine`.
 
 The adapter builds its statements at run time from the descriptor
-(version 2) and reaches Postgres through `Client`, whose `query` returns
+(version 3) and reaches Postgres through `Client`, whose `query` returns
 every column as the text Postgres writes: no driver's type parsing touches
 a date, a time, an interval, a numeric or a bigint, and the canonical rules
 turn each row into its canonical form. `pgPool(pool)` runs each

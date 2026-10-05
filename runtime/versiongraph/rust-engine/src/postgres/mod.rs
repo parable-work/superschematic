@@ -1,5 +1,5 @@
 //! The Postgres storage adapter (D19). It builds its statements at run time
-//! from a graph's descriptor (version 2), which names the graph's tables,
+//! from a graph's descriptor (version 3), which names the graph's tables,
 //! each kind's role columns and every column's value class, and it returns
 //! every row as a canonical row through [`crate::canonical`].
 //!
@@ -165,9 +165,9 @@ impl Adapter {
     pub fn new(descriptor: &str, options: Options) -> Result<Self, Error> {
         let d: Descriptor = serde_json::from_str(descriptor)
             .map_err(|e| Error::Invalid(format!("postgres: read the descriptor: {e}")))?;
-        if d.version != 2 {
+        if d.version != 3 {
             return Err(Error::Invalid(format!(
-                "postgres: descriptor version {}; this adapter reads version 2",
+                "postgres: descriptor version {}; this adapter reads version 3",
                 d.version
             )));
         }
@@ -1240,9 +1240,9 @@ mod tests {
                 "version column \"_version\" is not in its columns",
             ),
             (
-                "version 1",
-                |d| d["version"] = 1.into(),
-                "this adapter reads version 2",
+                "version 2",
+                |d| d["version"] = 2.into(),
+                "this adapter reads version 3",
             ),
         ];
         for (name, edit, refuse) in cases {

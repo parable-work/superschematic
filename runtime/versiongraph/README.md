@@ -1,7 +1,7 @@
 # Version-graph core
 
 The version-graph core composes, merges, diffs, hashes and validates trees
-of versioned rows (D17 and D19 in `docs/DECISIONS.md`). It is one Rust crate
+of versioned rows (D17, D19 and D32 in `docs/DECISIONS.md`). It is one Rust crate
 with no IO, clock or randomness. Its operations take one JSON document and
 return one. A graph descriptor tells it which columns of each kind's rows
 play which role, so it holds no per-kind code.
@@ -36,13 +36,15 @@ types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
 
-The descriptor is version 2. The core refuses any other version with
-`invalid_descriptor`; a descriptor without `version` is version 1, which
-nothing has shipped.
+The descriptor is version 3. The core refuses any other version with
+`invalid_descriptor`, version 2 included: a version 2 descriptor does not
+say what each kind's history keeps, and reading it as keeping everything
+forever would be wrong for a kind that prunes or leaves columns out. A
+descriptor without `version` is version 1, which nothing has shipped.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "graph": "recipe",
   "root": { "table": "recipe", "key": "id" },
   "refTable": "recipe_ref",
@@ -66,6 +68,7 @@ nothing has shipped.
       "order": "position",
       "units": { "timings": "keyed", "inputs": "jsonSchema" },
       "excluded": ["created_at", "created_by", "updated_at", "recipe_id"],
+      "history": { "retentionDays": 365, "exclude": ["created_by"], "actor": "updated_by" },
       "columns": {
         "_version": "integer", "created_at": "dateTime", "created_by": "uuid",
         "deleted_on_ref": "boolean", "entity_key": "uuid", "id": "uuid",
@@ -81,6 +84,7 @@ nothing has shipped.
       "tombstone": "deleted_on_ref", "version": "_version",
       "singleton": true,
       "excluded": ["recipe_id"],
+      "history": { "exclude": [] },
       "columns": {
         "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
         "id": "uuid", "photo_url": "string", "recipe_id": "uuid", "ref_id": "uuid",
@@ -98,7 +102,7 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 
 | Member | Meaning |
 |---|---|
-| `version` | `2`. |
+| `version` | `3`. |
 | `graph` | Optional. The graph's name; the core does not read it. |
 | `root` | The graph root's `table` and its `key` column. |
 | `refTable`, `commitTable`, `patchTable`, `releaseTable`, `snapshotTable` | The tables of the graph's refs, commits, patches, release pointers and snapshot entries. Each is non-empty; the core does not read them. |
@@ -116,6 +120,7 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 | `singleton` | Optional, default `false`. At most one live row. |
 | `units` | Optional. A conflict unit per column: `atomic` (the default), `keyed` or `jsonSchema`. `keyed` and `jsonSchema` need a `json` column. |
 | `excluded` | Optional. Columns that are not content: audit columns and the graph's own columns. |
+| `history` | What the kind's history keeps (below). Required. |
 | `columns` | Every column of the kind's table, with its value class (below). Every column another member names must be here. |
 
 The role columns (`key`, `id`, `ref`, `root`, `tombstone`, `version`, `author`)
@@ -126,6 +131,22 @@ ids, refs, versions and audit columns say. Role columns may also be listed in
 `excluded`. The `parent` key and `order` columns must be content, and a unit
 may only name a content column. Unknown members are refused, and so is an
 empty table or column name.
+
+`history` holds what the sql generator's history trigger and prune
+function hold for the kind's table, for a storage adapter that writes
+history itself rather than through triggers (D32). The generator computes
+both from the same code (`sqlutil.VersionedHistory`), so they never
+disagree. The Postgres adapters do not read it, since their triggers and
+prune functions hold the same facts.
+
+| Member | Meaning |
+|---|---|
+| `retentionDays` | Optional. How many days of history pruning keeps, `@versioned({ retentionDays })`: an integer from 1 to 2147483647, the largest Postgres `INTEGER`, which the prune function's `retention_days` is. Absent for no retention, and then nothing is pruned. |
+| `exclude` | The columns every history image leaves out, `@versioned({ exclude })`, in the order it names them; `[]` for none. Each is a column of the kind that is not content (it is `excluded` or the `author`) and is not one of the role columns a history image is found and read by (`key`, `id`, `ref`, `root`, `tombstone`, `version`), and none is named twice. |
+| `actor` | Optional. The column a delete's image names its actor in: `deleted_by` when the kind has it, else `updated_by`. Absent when the kind has neither, or when that column is in `exclude`, since a delete's image leaves it out too. It is a column of the kind, not in `exclude`, and not one of those role columns; it may be the `author`. |
+
+The core checks `history` against the kind's columns and does not read it
+otherwise. An unknown member is refused, and so is a `null` member.
 
 The tables and the value classes are for a storage adapter, which builds its
 statements from them and normalizes each row it reads (below). The core
@@ -345,7 +366,7 @@ A refused input returns `{"error": {"code", "message"}}`. `code` is stable;
 |---|---|
 | `invalid_json` | The input is not JSON. |
 | `invalid_request` | The input is not an object, a member is missing or unknown, or a tree is not an object of arrays. |
-| `invalid_descriptor` | The descriptor is malformed, is not version 2, or breaks a rule above. |
+| `invalid_descriptor` | The descriptor is malformed, is not version 3, or breaks a rule above. |
 | `unknown_kind` | A tree names a kind the descriptor lacks. |
 | `invalid_row` | A row is not an object, or its key, tombstone, parent key or order has the wrong type. |
 | `duplicate_entity_key` | Two rows of a kind share an entity key (every operation but `validate`, which reports it). |

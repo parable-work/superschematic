@@ -316,7 +316,7 @@ class Engine:
         walk_ceiling: int = 0,
         snapshot_every: int = 0,
     ) -> None:
-        """The engine of the graph descriptor describes (version 2, as JSON
+        """The engine of the graph descriptor describes (version 3, as JSON
         text or a mapping), over storage. schema_epoch is the graph's: every
         commit records it, and materialize refuses a commit from a newer one.
         walk_ceiling bounds a commit walk and snapshot_every is the graph's

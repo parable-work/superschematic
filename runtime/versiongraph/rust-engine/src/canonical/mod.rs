@@ -3,7 +3,7 @@
 //!
 //! A canonical row is a JSON object keyed by column name whose values are the
 //! schema runtime's JSON for each field's type. A graph descriptor (version
-//! 2) gives every column a value class, and each class has one rule that
+//! 3) gives every column a value class, and each class has one rule that
 //! turns what Postgres returns, in `to_jsonb` of a live row or in a history
 //! image, into its canonical JSON. `runtime/versiongraph/README.md`
 //! ("Canonical rows") is the contract, `runtime/versiongraph/testdata/canonical`

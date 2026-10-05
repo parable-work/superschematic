@@ -72,7 +72,7 @@
   "expect": {
     "error": {
       "code": "invalid_descriptor",
-      "message": "descriptor: missing member \"version\"; this core reads descriptor version 2, and a descriptor without a version is version 1"
+      "message": "descriptor: missing member \"version\"; this core reads descriptor version 3, and a descriptor without a version is version 1"
     }
   }
 }

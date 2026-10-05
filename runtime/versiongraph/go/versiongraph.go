@@ -6,7 +6,7 @@
 // one back. Trees and rows stay json.RawMessage: a row is a JSON object keyed
 // by column name, a canonical row once a storage adapter has normalized it
 // (package canonical), and the core reads it as such. The descriptor is
-// version 2. runtime/versiongraph/README.md is the contract.
+// version 3. runtime/versiongraph/README.md is the contract.
 //
 // The package links libsuperschematic_versiongraph.a through cgo. Build it
 // with `make versiongraph` (scripts/versiongraph-archive.sh), which stages it

@@ -30,6 +30,9 @@
             "updated_at",
             "recipe_id"
           ],
+          "history": {
+            "exclude": []
+          },
           "historyTable": "step_history",
           "id": "id",
           "key": "entity_key",
@@ -72,6 +75,10 @@
             "updated_at",
             "recipe_id"
           ],
+          "history": {
+            "actor": "updated_by",
+            "exclude": []
+          },
           "historyTable": "ingredient_history",
           "id": "id",
           "key": "entity_key",
@@ -107,6 +114,10 @@
             "updated_at",
             "recipe_id"
           ],
+          "history": {
+            "actor": "updated_by",
+            "exclude": []
+          },
           "historyTable": "cover_history",
           "id": "id",
           "key": "entity_key",
@@ -126,7 +137,7 @@
         "table": "recipe"
       },
       "snapshotTable": "recipe_snapshot_entry",
-      "version": 2
+      "version": 3
     },
     "tree": {}
   },

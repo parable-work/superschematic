@@ -3,6 +3,7 @@ package graphdesc_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -201,8 +202,8 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 	}
 
 	d := graphs[0].Descriptor
-	if d.Version != 2 {
-		t.Fatalf("descriptor version %d, want 2", d.Version)
+	if d.Version != 3 {
+		t.Fatalf("descriptor version %d, want 3", d.Version)
 	}
 	root, ok := tables[d.Root.Table]
 	if !ok || root.PrimaryKey != d.Root.Key {
@@ -257,6 +258,175 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 			}
 		}
 	}
+}
+
+// TestHistoryIsWhatTheTriggersKeep checks each kind's history against the
+// history table the sql generator writes for the same schema: its retention
+// is the prune function's, its exclusions are the columns the capture
+// function leaves out of every image, and its actor is the column a
+// delete's image names its actor in. It checks every graph the fixture
+// corpus declares, then the fixture's own facts, and variants of it that
+// give a member deleted_by or exclude its actor column.
+func TestHistoryIsWhatTheTriggersKeep(t *testing.T) {
+	t.Run("fixture corpus", func(t *testing.T) {
+		dirs, err := filepath.Glob(filepath.Join(filepath.Dir(filepath.FromSlash(fixture)), "fixture-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		described := 0
+		for _, dir := range dirs {
+			// A fixture the loader refuses on purpose declares no graph to
+			// check; its own tests load it.
+			schema, err := loader.LoadService(dir)
+			if err != nil {
+				continue
+			}
+			described += checkHistory(t, schema)
+		}
+		if described == 0 {
+			t.Fatal("no fixture of the corpus declares a version graph")
+		}
+	})
+	t.Run("fixture", func(t *testing.T) {
+		schema := loadFixture(t)
+		checkHistory(t, schema)
+		expectHistory(t, schema, map[string]graphdesc.History{
+			"step":       {RetentionDays: 365, Exclude: []string{"scratch"}, Actor: "updated_by"},
+			"ingredient": {RetentionDays: 365, Exclude: []string{}},
+			"note":       {Exclude: []string{}},
+		})
+		// The graph's own versioned tables are not kinds, and the sql
+		// generator gives them an actor by the same rule: a ref has
+		// deleted_by and updated_by, a release pointer updated_by alone.
+		graphs, err := graphdesc.Graphs(schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actors := historyActors(t, schema)
+		d := graphs[0].Descriptor
+		for table, want := range map[string]string{d.RefTable: "deleted_by", d.ReleaseTable: "updated_by"} {
+			if actors[table] != want {
+				t.Errorf("the sql generator names %q as the actor of %s's delete images, want %q", actors[table], table, want)
+			}
+		}
+	})
+	t.Run("deleted_by before updated_by", func(t *testing.T) {
+		schema := loadFixture(t)
+		step := schema.Types["Step"]
+		step.Fields = append(step.Fields, &ir.FieldDef{Name: "deletedBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}})
+		checkHistory(t, schema)
+		expectHistory(t, schema, map[string]graphdesc.History{
+			"step": {RetentionDays: 365, Exclude: []string{"scratch"}, Actor: "deleted_by"},
+		})
+	})
+	t.Run("an excluded updated_by names no actor", func(t *testing.T) {
+		schema := loadFixture(t)
+		cfg := schema.Types["Step"].VersionedConfig
+		cfg.Exclude = append(cfg.Exclude, "updatedBy")
+		checkHistory(t, schema)
+		expectHistory(t, schema, map[string]graphdesc.History{
+			"step": {RetentionDays: 365, Exclude: []string{"scratch", "updated_by"}},
+		})
+	})
+	// An excluded deleted_by does not hand the actor to updated_by: the
+	// delete's image names none.
+	t.Run("an excluded deleted_by names no actor", func(t *testing.T) {
+		schema := loadFixture(t)
+		step := schema.Types["Step"]
+		step.Fields = append(step.Fields, &ir.FieldDef{
+			Name: "deletedBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, ConflictUnit: ir.ConflictUnitExcluded,
+		})
+		step.VersionedConfig.Exclude = append(step.VersionedConfig.Exclude, "deletedBy")
+		checkHistory(t, schema)
+		expectHistory(t, schema, map[string]graphdesc.History{
+			"step": {RetentionDays: 365, Exclude: []string{"scratch", "deleted_by"}},
+		})
+	})
+}
+
+// checkHistory compares every kind's history in schema's graphs with the
+// history table the sql generator writes for the kind's table, and returns
+// how many kinds it compared.
+func checkHistory(t *testing.T, schema *ir.Schema) int {
+	t.Helper()
+	graphs, err := graphdesc.Graphs(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graphs) == 0 {
+		return 0
+	}
+	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: schema.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	histories := map[string]sqlgen.HistoryTable{}
+	for _, history := range ddl.HistoryTables {
+		histories[history.SourceTableName] = history
+	}
+	compared := 0
+	for _, g := range graphs {
+		for _, kind := range g.Descriptor.Kinds {
+			history, ok := histories[kind.Table]
+			if !ok {
+				t.Errorf("%s kind %s: the sql generator writes no history for %s", g.Name, kind.Kind, kind.Table)
+				continue
+			}
+			compared++
+			got := kind.History
+			if got.RetentionDays != history.RetentionDays {
+				t.Errorf("%s kind %s: retentionDays %d, the prune function keeps %d", g.Name, kind.Kind, got.RetentionDays, history.RetentionDays)
+			}
+			if got.Exclude == nil {
+				t.Errorf("%s kind %s: exclude is nil, which the descriptor would write as null", g.Name, kind.Kind)
+			}
+			if !slices.Equal(got.Exclude, history.ExcludedColumns) {
+				t.Errorf("%s kind %s: exclude %q, the capture function leaves out %q", g.Name, kind.Kind, got.Exclude, history.ExcludedColumns)
+			}
+			if got.Actor != history.ActorColumn {
+				t.Errorf("%s kind %s: actor %q, a delete's image names %q", g.Name, kind.Kind, got.Actor, history.ActorColumn)
+			}
+		}
+	}
+	return compared
+}
+
+// expectHistory checks the history of each kind want names.
+func expectHistory(t *testing.T, schema *ir.Schema, want map[string]graphdesc.History) {
+	t.Helper()
+	graphs, err := graphdesc.Graphs(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range graphs[0].Descriptor.Kinds {
+		w, ok := want[kind.Kind]
+		if !ok {
+			continue
+		}
+		delete(want, kind.Kind)
+		got := kind.History
+		if got.RetentionDays != w.RetentionDays || !slices.Equal(got.Exclude, w.Exclude) || got.Actor != w.Actor {
+			t.Errorf("kind %s: history %+v, want %+v", kind.Kind, got, w)
+		}
+	}
+	for kind := range want {
+		t.Errorf("the graph has no kind %s", kind)
+	}
+}
+
+// historyActors maps each table the sql generator writes history for to the
+// column its delete images name their actor in.
+func historyActors(t *testing.T, schema *ir.Schema) map[string]string {
+	t.Helper()
+	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: schema.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actors := map[string]string{}
+	for _, history := range ddl.HistoryTables {
+		actors[history.SourceTableName] = history.ActorColumn
+	}
+	return actors
 }
 
 // TestEveryElementClassIsDerived checks that the fixture's graph, which

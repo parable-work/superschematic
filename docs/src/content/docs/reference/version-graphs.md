@@ -42,7 +42,7 @@ export abstract class Recipe {
   title: string;
 }
 
-@versioned({ retentionDays: 365 })
+@versioned({ retentionDays: 365, exclude: ["scratch"] })
 @graphMember({ graph: Recipe, order: "position" })
 export abstract class Step {
   @key
@@ -207,16 +207,23 @@ same one. Writing the types module removes each
 `versiongraph/*.json` that no graph of the schema writes and leaves any
 other file there.
 
-The descriptor is version 2, and the core refuses any other. Besides each
-kind's roles, it names the graph's tables and gives every column of each
-kind's table a value class, which a storage adapter reads to build its
-statements and to normalize the rows it reads. `root` names the column
-that holds the root's key, which the adapter writes on every row; the core
-does not read it:
+The descriptor is version 3, and the core refuses any other, version 2
+included. Besides each kind's roles, it names the graph's tables and gives
+every column of each kind's table a value class, which a storage adapter
+reads to build its statements and to normalize the rows it reads. `root`
+names the column that holds the root's key, which the adapter writes on
+every row; the core does not read it. `history` says what the kind's
+history keeps, as the sql generator's triggers and prune function hold it:
+`retentionDays` from `@versioned({ retentionDays })` (absent for none),
+`exclude`, the columns `@versioned({ exclude })` leaves out of every image,
+and `actor`, the column a delete's image names its actor in (`deleted_by`,
+else `updated_by`; absent when the kind has neither or excludes it). An
+adapter that writes history itself reads it; the Postgres adapters leave
+it to the triggers:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "graph": "recipe",
   "root": { "table": "recipe", "key": "id" },
   "refTable": "recipe_ref",
@@ -233,6 +240,7 @@ does not read it:
       "tombstone": "deleted_on_ref", "version": "_version",
       "parent": { "key": "step_key", "kind": "step" },
       "excluded": ["recipe_id"],
+      "history": { "retentionDays": 365, "exclude": [] },
       "columns": {
         "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
         "id": "uuid", "quantity": "string", "recipe_id": "uuid", "ref_id": "uuid",
@@ -249,6 +257,7 @@ does not read it:
       "order": "position",
       "units": { "timings": "keyed" },
       "excluded": ["recipe_id", "scratch", "updated_at"],
+      "history": { "retentionDays": 365, "exclude": ["scratch"], "actor": "updated_by" },
       "columns": {
         "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
         "id": "uuid", "instruction": "string", "position": "integer",

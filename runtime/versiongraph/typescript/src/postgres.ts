@@ -1,6 +1,6 @@
 // The Postgres storage adapter of the version-graph engine (D19), the
 // TypeScript counterpart of the Go module's package postgres. It builds its
-// statements at run time from a graph's descriptor (version 2), which names
+// statements at run time from a graph's descriptor (version 3), which names
 // the graph's tables, each kind's role columns and every column's value
 // class, and it returns every row as a canonical row (canonical.ts).
 //
@@ -172,8 +172,8 @@ export class PostgresAdapter {
    */
   constructor(descriptor: string | Descriptor, options: PostgresOptions = {}) {
     const d = (typeof descriptor === "string" ? JSON.parse(descriptor) : descriptor) as unknown as DescriptorDoc;
-    if (d.version !== 2) {
-      throw new Error(`postgres: descriptor version ${String(d.version ?? 0)}; this adapter reads version 2`);
+    if (d.version !== 3) {
+      throw new Error(`postgres: descriptor version ${String(d.version ?? 0)}; this adapter reads version 3`);
     }
     const tables: [string, string | undefined][] = [
       ["root table", d.root?.table],

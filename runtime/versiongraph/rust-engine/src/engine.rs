@@ -196,7 +196,7 @@ pub(crate) async fn finish<T>(tx: Box<dyn Tx + '_>, result: Result<T, Error>) ->
 }
 
 impl Engine {
-    /// The engine of the graph `descriptor` describes (version 2), over
+    /// The engine of the graph `descriptor` describes (version 3), over
     /// `storage`. The core checks the descriptor.
     pub fn new(
         descriptor: &str,
@@ -1382,5 +1382,50 @@ fn apply(pins: &mut PinSet, patches: impl Iterator<Item = Patch>) {
                 entity_version: p.entity_version,
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+
+    use super::*;
+    use crate::storage::{Storage, Tx};
+
+    struct NoStorage;
+
+    #[async_trait]
+    impl Storage for NoStorage {
+        async fn begin(&self) -> Result<Box<dyn Tx + '_>, Error> {
+            Err(Error::Invalid("no storage".to_owned()))
+        }
+    }
+
+    /// The engine takes the fixture's descriptor, and the core refuses it as
+    /// version 2 wrote it, without each kind's history.
+    #[test]
+    fn new_refuses_a_version_2_descriptor() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testdata/fixture/recipe.json"
+        );
+        let text = std::fs::read_to_string(path).expect("read the fixture");
+        Engine::new(&text, Arc::new(NoStorage), Options::default()).expect("the fixture's engine");
+        let mut descriptor: Value = serde_json::from_str(&text).expect("the fixture is JSON");
+        descriptor["version"] = 2.into();
+        for kind in descriptor["kinds"].as_array_mut().expect("kinds") {
+            kind.as_object_mut().expect("a kind").remove("history");
+        }
+        let refused = Engine::new(
+            &descriptor.to_string(),
+            Arc::new(NoStorage),
+            Options::default(),
+        );
+        match refused {
+            Err(error) => assert_eq!(error.code(), Some("invalid_descriptor"), "{error}"),
+            Ok(_) => panic!("a version 2 descriptor was accepted"),
+        }
     }
 }

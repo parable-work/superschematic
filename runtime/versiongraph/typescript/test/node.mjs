@@ -26,7 +26,7 @@ assert.equal(typeof VersionGraphFacade, "function");
 
 const graph = await init();
 const tables = {
-  version: 2,
+  version: 3,
   root: { table: "recipe", key: "id" },
   refTable: "recipe_ref",
   commitTable: "recipe_commit",
@@ -46,6 +46,7 @@ const descriptor = {
       ref: "ref",
       tombstone: "deleted_on_ref",
       version: "_version",
+      history: { exclude: [] },
       columns: { entity_key: "uuid", id: "uuid", ref: "uuid", deleted_on_ref: "boolean", _version: "integer", title: "string" },
     },
   ],
