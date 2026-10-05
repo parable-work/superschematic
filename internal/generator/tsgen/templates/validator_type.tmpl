@@ -24,8 +24,8 @@ import { validate{{.Name}}Required, validate{{.Name}} } from '{{.ImportPackage}}
 {{range .ParserScalarsUsed}}
 import { parse{{.Symbol}} as parse{{.Symbol}}FromLib } from '{{$.Naming.ScalarNpmPackage}}/scalars';
 {{end}}
-{{range .ParserNestedTypes}}
-import { parse{{.}}FromJSON, validate{{.}}{{if $.Type.StrictJSON}}Required{{end}} } from './{{lower .}}';
+{{range .ParserNestedImports}}
+import { parse{{.Name}}FromJSON, validate{{.Name}}{{if $.Type.StrictJSON}}Required{{end}} } from '{{.Module}}';
 {{end}}
 
 /**

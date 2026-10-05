@@ -1,0 +1,48 @@
+{
+  "token": "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry",
+  "terraform": {
+    "type": "google_certificate_manager_certificate_map_entry",
+    "renames": {
+      "deletionPolicy": "deletion_policy"
+    }
+  },
+  "inputProperties": {
+    "certificates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "hostname": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "map": {
+      "type": "string"
+    },
+    "matcher": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "certificates",
+    "map"
+  ]
+}

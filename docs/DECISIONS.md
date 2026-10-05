@@ -2679,7 +2679,7 @@ Status: phases 1 to 5 are built, `Branches` last
 
 ### D32, amended: Branches as it was built
 
-Building `Branches` settled four points that the entry above left open
+Building `Branches` settled five points that the entry above left open
 or put otherwise.
 
 | Decision | Alternatives not taken |
@@ -2688,6 +2688,7 @@ or put otherwise.
 | A scalar the document declares under a builtin's name takes the scalar catalog's class, where the `Branches` row gives it the class its JSON type gives. The engine validates such a scalar with the catalog's row, whatever the document declares, as the Go loader fills it in, and `format --to=json` declares every catalog scalar a schema uses, so the row as written would class every catalog scalar by its JSON type. | The document's JSON type, which gives `Identity.UUID` the class `string` |
 | `configChange` decides per kind: removing a kind, or changing its type, parent, order, singleton or a field's unit, is refused. `primary`, `snapshotEvery`, `sweep` and a retention may change, and a unit may be given a field the old type lacked, of which no stored row holds a value. | Refusing every change but a kind's fields and a retention, which freezes the sweep and the primary line's name for good |
 | `discard` refuses an instance's primary line, with the veto `primary_line`: the instance gets no other, so once discarded it would have no live ref to branch from. | Discarding it as the version graph engine allows |
+| `branch`'s `fromRef` is optional: left out, the draft branches from the instance's primary line. An instance created before its schema composed `Branches` gets its primary line at its first write, and every other writing operation names a ref or a commit it has none of, so its first `branch` makes the line, as the caller, and a draft of it, even where `Branches` is the schema's only writing behavior. | Only an update or another behavior's write, a dead end where `Branches` is the only writing behavior; creating each older instance's line in `afterConfigChange`, which the `Branches` rows rule out since it acts for no principal while a ref records its creator; a separate operation that only creates the line |
 
 ### D32, amended: a partial row and an absent content column
 
@@ -3011,3 +3012,46 @@ whether Workers callers present the identity a service binding carries or
 sign key-pair tokens.
 
 Nothing here is built. The design is reversible until the first release.
+
+## D40. A pull request runs the quick tier; main's full run is a release candidate twice a day
+
+Every pull request ran all of `ci.yml`, about 20 minutes, most of it the Go
+tests that compile and run generated modules in four languages. Drafts and
+stacked pull requests ran it on every push, and every merge to `main` ran it
+again.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A pull request runs CI only when it targets `main` and is not a draft. On a draft every job skips and `ci-pass` reports under another name, so the required check stays expected; `ready_for_review` starts the run. A stacked pull request retargeted onto `main` starts its run at its next push, or a close and reopen. | Running drafts and stacked pull requests on every push, which spends a run on unfinished work; listening for `edited` to catch a retarget, which starts a run on every title or body edit, and that run's skipped `ci-pass` replaces the real result |
+| One `ci.yml`, two tiers. The quick tier is the lints, the drift checks, `go test -short`, the runtimes' and the version graph's own test suites and the docs build. The full tier adds the Go tests without `-short`, the CLI smoke, the acme job, `examples/engine-notes` and the version-graph scenarios through every engine. For a Go test, `testing.Short()` draws the line: a test that compiles or runs a generated module skips under `-short`. | A second workflow for the full tier, which repeats every job's setup; path filters that wake the full tier per change, which nearly every generator change would trip |
+| Merges to `main` run no CI. `release-candidate.yml` dispatches `release.yml`'s dry run on `main` at 06:00 and 18:00 UTC unless the head already passed one: the full tier, the four platform builds and the assembled release set. It cuts no tag and publishes nothing. A red candidate opens an issue that the next green one closes. | CI on every merge, which repeats the pull request's run; a `vX.Y.Z-rc.N` tag per candidate, which would publish to npm's `next` dist-tag |
+| CodeQL analyzes `main`, on every push and weekly (`codeql.yml`), and not pull requests: the ruleset requires no code-scanning result, so a pull request scan gates nothing. Code scanning's default setup stays disabled, since it rejects a workflow's results while enabled. | Default setup, which analyzes every pull request and cannot be told not to; a weekly scan alone, which leaves a merged alert unreported for up to a week |
+| Every job stays on GitHub-hosted runners, which cost nothing on a public repository. | A paid runner provider such as Blacksmith: faster and wider, but paid by the minute where GitHub's are free |
+| `main`'s ruleset, declared outside this repository with the maintainers' other repository settings, asks for one approval and a green `ci-pass`. An approval from an agent or a bot counts: code-owner review is off. Approvals survive a push, review threads need not be resolved and the branch need not be up to date. | Requiring an up-to-date branch, which made merging serial at a full run each; dismissing approvals on push, which made every follow-up push need a new one |
+
+The cost is that a change which breaks only the full tier merges, and `main`
+is red until its next candidate reports it, up to twelve hours later.
+CONTRIBUTING.md lists the full-tier checks to run before pushing a change
+they cover.
+
+### D14, amended: a nested object of a dependency's type is checked by that dependency's validator
+
+The Go and Python validators check a field whose type a dependency
+declares, such as acme-shop's `PlaceOrderInput.shippingAddress`, a
+`ShippingAddress` of shop-db, with the dependency's own validator, and
+report its errors under the field. The generated TypeScript and Rust
+validators checked only a nested type of their own package or crate. So
+the TypeScript and Rust servers accepted a shipping address whose
+`country` the Go server refuses, and a TypeScript date-time field of such
+a type stayed a string after parsing.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field, list element or map value of an object type a dependency declares is checked by that dependency's generated validator in the TypeScript and Rust validators, as in Go and Python. Its errors sit under the field's path. TypeScript imports `validate<Type>` (`validate<Type>Required` in a `@strictJSON` type) and `parse<Type>FromJSON` from the dependency package's `validators`, so the nested value is parsed too. Rust calls the dependency crate's `validators::validate_<type>`. | Copying the dependency's validators into each package, where two copies of one rule could drift |
+| A dependency type its package generates without validators stays unchecked, as before: one whose role is not a table, a view, an embedded struct or an input. | |
+
+`TestANestedDependencyObjectIsValidated` builds the dependency-types
+fixture in every language. It checks that the Rust and TypeScript
+validators of shop-orders' `OrderView` report a wrong `amount` and an
+unknown `currency` under `total`, a shop-common `Money`, and pass a valid
+one. Both checks fail without the change.

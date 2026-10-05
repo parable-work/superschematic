@@ -1,0 +1,19 @@
+[package]
+name = "acme-shop-orders-server"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The generated server crate under ../schemas/dist-rust, which
+# scripts/check.sh builds with
+# `superschematic build --with-deps --api-language RUST --out schemas/dist-rust`,
+# and the runtime crate it is built on.
+[dependencies]
+acme-shop-orders-api = { path = "../schemas/dist-rust/api/shop-orders" }
+superschematic-http-runtime = { path = "../../../runtime/http/rust" }
+async-trait = "0.1"
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

@@ -13,6 +13,8 @@ target/
 # Binding and package build output.
 node_modules/
 dist/
+# examples/acme-shop's second output root, for shop-orders served in Rust.
+dist-rust/
 .venv/
 __pycache__/
 .pytest_cache/

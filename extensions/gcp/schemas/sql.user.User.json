@@ -1,0 +1,96 @@
+{
+  "token": "gcp:sql/user:User",
+  "terraform": {
+    "type": "google_sql_user",
+    "renames": {
+      "databaseRoles": "database_roles",
+      "deletionPolicy": "deletion_policy",
+      "passwordPolicy": "password_policy",
+      "passwordPolicy.allowedFailedAttempts": "allowed_failed_attempts",
+      "passwordPolicy.enableFailedAttemptsCheck": "enable_failed_attempts_check",
+      "passwordPolicy.enablePasswordVerification": "enable_password_verification",
+      "passwordPolicy.passwordExpirationDuration": "password_expiration_duration",
+      "passwordPolicy.statuses": "status",
+      "passwordPolicy.statuses.passwordExpirationTime": "password_expiration_time",
+      "passwordWo": "password_wo",
+      "passwordWoVersion": "password_wo_version"
+    }
+  },
+  "inputProperties": {
+    "databaseRoles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "host": {
+      "type": "string"
+    },
+    "instance": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "password": {
+      "type": "string"
+    },
+    "passwordPolicy": {
+      "$ref": "#/types/gcp:sql/UserPasswordPolicy:UserPasswordPolicy"
+    },
+    "passwordWo": {
+      "type": "string"
+    },
+    "passwordWoVersion": {
+      "type": "integer"
+    },
+    "project": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "instance"
+  ],
+  "types": {
+    "gcp:sql/UserPasswordPolicy:UserPasswordPolicy": {
+      "type": "object",
+      "properties": {
+        "allowedFailedAttempts": {
+          "type": "integer"
+        },
+        "enableFailedAttemptsCheck": {
+          "type": "boolean"
+        },
+        "enablePasswordVerification": {
+          "type": "boolean"
+        },
+        "passwordExpirationDuration": {
+          "type": "string"
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:sql/UserPasswordPolicyStatus:UserPasswordPolicyStatus"
+          }
+        }
+      }
+    },
+    "gcp:sql/UserPasswordPolicyStatus:UserPasswordPolicyStatus": {
+      "type": "object",
+      "properties": {
+        "locked": {
+          "type": "boolean"
+        },
+        "passwordExpirationTime": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -19,7 +19,7 @@ export GOTOOLCHAIN := go$(GO_VERSION)
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages.
 export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp
 BIN := bin/superschematic
 
 # build-all keys its cache on a hash of this binary. -trimpath drops the
@@ -30,7 +30,8 @@ BIN := bin/superschematic
 GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
-        go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check ts python rust \
+        go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
+        gcp-schemas gcp-schemas-check ts python rust \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke scrub versions clean
 
@@ -74,10 +75,12 @@ go-lint:
 	@for m in $(GO_MODULES); do echo "==> golangci-lint $$m"; (cd $$m && golangci-lint run ./...) || exit 1; done
 
 # Rewrite every golden file from the generators, and the schema-file JSON
-# Schema and TypeScript types. Review the diff by eye.
+# Schema and TypeScript types. Review the diff by eye. Each package's tests
+# run from the Go module that holds it.
 go-goldens: schema-file-types
 	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | xargs -n1 dirname | sort -u); do \
-		go test -count=1 $$p -update || exit 1; done
+		p=./$${p#./}; m=$$p; while [ ! -f $$m/go.mod ]; do m=$$(dirname $$m); done; \
+		(cd $$m && go test -count=1 .$${p#$$m} -update) || exit 1; done
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
 # Go package, the TypeScript one with each scalar's value class from the
@@ -92,6 +95,18 @@ schema-file-types:
 
 schema-file-types-check:
 	go run ./internal/tools/schemafiletypes -check
+
+# The gcp target's pinned provider schemas (extensions/gcp/schemas) are
+# extracted from the pulumi-gcp release extensions/gcp/schemas/pulumi-gcp.json
+# pins, whose upstream files are fetched once into the user cache. CI fails
+# when a committed file differs. Move the pin with
+# `cd extensions/gcp && go run ./internal/tools/providerschemas -version X.Y.Z`
+# and update gcp.ProviderVersion to match.
+gcp-schemas:
+	cd extensions/gcp && go run ./internal/tools/providerschemas
+
+gcp-schemas-check:
+	cd extensions/gcp && go run ./internal/tools/providerschemas -check
 
 # The engine and the work-queue package implement the core's behaviors over
 # a copy of each declaration (internal/registry/behaviors), which the core

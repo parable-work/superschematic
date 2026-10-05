@@ -55,11 +55,12 @@ schema that composes Branches is composed.
 
 initialize creates an instance's primary line, named by primary (main by
 default). An instance created before its schema composed Branches gets
-its primary line at its first write, in that write's transaction, through
-afterChange: an update that changes it or a writing operation of another
-behavior. A Branches operation records the root first too, but each
-names a ref or a commit the instance has none of yet, so it is refused
-and rolls the line back. Deleting an instance deletes its graph.
+its primary line at its first write, in that write's transaction, as its
+caller: a branch without fromRef, which then branches from that line, an
+update that changes it, or a writing operation of another behavior,
+through afterChange. Every Branches writing operation records the root
+first, and one that is refused rolls the line back with the rest.
+Deleting an instance deletes its graph.
 
 With sweep in the config, the sweep schedule runs on the schema: each run
 discards the drafts idle past abandonAfter by invoking discard on each
@@ -556,6 +557,19 @@ function ownRef(context: Scope & { readonly id: string }, graph: Store, operatio
     throw new OperationParamsError('Branches', operation, [{ path: `/${name}`, message: `${context.schema} ${context.id} has no ref ${String(value)}` }]);
   }
   return id;
+}
+
+// primaryOf is the id of the instance's primary line: its live ref with no
+// parent, which discard never takes.
+function primaryOf(context: Scope & { readonly id: string }, graph: Store): string {
+  const row = context.sql.get(
+    `SELECT id FROM ${graph.tables.ref} WHERE graph = ? AND root_id = ? AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1`,
+    [graph.name, rootOf(context.id)]
+  );
+  if (row === undefined) {
+    throw new OperationParamsError('Branches', 'branch', [{ path: '/fromRef', message: `${context.schema} ${context.id} has no primary line to branch from` }]);
+  }
+  return String(row.id);
 }
 
 // ownCommit reads a parameter that names a commit of the instance's graph.
@@ -1061,7 +1075,9 @@ export const branches = defineBehavior<BranchesConfig>({
     branch(context, params) {
       const graph = ensureRoot(context);
       return guarded(context, 'branch', () => {
-        const from = ownRef(context, graph, 'branch', 'fromRef', params.fromRef);
+        // Without fromRef, the draft branches from the primary line, which
+        // ensureRoot has just made for an instance that predates Branches.
+        const from = params.fromRef === undefined ? primaryOf(context, graph) : ownRef(context, graph, 'branch', 'fromRef', params.fromRef);
         return refOf(graph, graph.engine.branch(actorOf(context), from, params.name as string).id);
       });
     },

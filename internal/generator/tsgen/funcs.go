@@ -410,6 +410,28 @@ func typeParserNestedTypes(t *TypeInfo, generatedTypeNames map[string]bool) []st
 	return names
 }
 
+// NestedImport is where a nested type's validator and parser are imported
+// from: its own file in this package (./<type>), or a dependency package's
+// validators.
+type NestedImport struct {
+	Name   string
+	Module string
+}
+
+// nestedImports pairs each nested type with its module: modules names the
+// dependency-declared ones, and every other is a local type's file.
+func nestedImports(names []string, modules map[string]string) []NestedImport {
+	imports := make([]NestedImport, 0, len(names))
+	for _, name := range names {
+		module, ok := modules[name]
+		if !ok {
+			module = "./" + typeFileName(name)
+		}
+		imports = append(imports, NestedImport{Name: name, Module: module})
+	}
+	return imports
+}
+
 // typeValidatesNestedObjects reports whether validate<Type> of a type that is
 // not @strictJSON validates a nested object field: one whose type is a local
 // generated type (parserNestedTypes) or the type itself. A @strictJSON type
