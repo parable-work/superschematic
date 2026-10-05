@@ -85,7 +85,8 @@ type Options struct {
 	TableName func(local string) string
 	// Clock is the time a transaction writes, in microseconds since the
 	// Unix epoch. A transaction reads it once, once it holds the file's
-	// write lock. Nil is the system clock.
+	// write lock, and refuses a time outside ±(2^53 - 1) microseconds,
+	// which the TypeScript adapter cannot read. Nil is the system clock.
 	Clock func() int64
 	// ResultCode reads SQLite's extended result code from an error the
 	// client returned, for a driver whose errors do not carry it as Code()
@@ -226,7 +227,7 @@ func (a *Adapter) CreateTables(ctx context.Context, client Client) error {
 		// The layout stores no time, but its transaction reads the clock
 		// once, as every one does, so a clock that a writer of the file
 		// steps reads as the TypeScript adapter's does.
-		if _, _, err := a.begin(ctx, conn); err != nil {
+		if _, _, err := a.transactionTime(ctx, conn); err != nil {
 			return err
 		}
 		for _, statement := range statements {
@@ -344,7 +345,7 @@ func sameConn(a, b Conn) bool {
 // transaction has the one now().
 func (s *store) Transact(ctx context.Context, fn func(ctx context.Context, tx storage.Tx) error) error {
 	return s.client.Transact(ctx, func(ctx context.Context, conn Conn) error {
-		ctx, now, err := s.a.begin(ctx, conn)
+		ctx, now, err := s.a.transactionTime(ctx, conn)
 		if err != nil {
 			return err
 		}
@@ -352,11 +353,11 @@ func (s *store) Transact(ctx context.Context, fn func(ctx context.Context, tx st
 	})
 }
 
-// begin gives a transaction on conn its time: the outer one's when ctx
+// transactionTime gives a transaction on conn its time: the outer one's when ctx
 // carries a transaction open on conn, else the clock's, read once and
 // carried in the context it returns. It refuses a time outside
 // ±(2^53 - 1) microseconds, which the TypeScript adapter cannot read.
-func (a *Adapter) begin(ctx context.Context, conn Conn) (context.Context, int64, error) {
+func (a *Adapter) transactionTime(ctx context.Context, conn Conn) (context.Context, int64, error) {
 	if o, ok := ctx.Value(openTime{}).(*open); ok && sameConn(o.conn, conn) {
 		return ctx, o.time, nil
 	}
@@ -431,8 +432,9 @@ func (r *refScan) dest() []any {
 		&r.updatedAt, &r.updatedBy, &r.deleted, &r.deletedAt, &r.hasDeletedBy, &r.deletedBy, &r.version}
 }
 
-// ref is the ref the row holds. It refuses a seal or a discard time the
-// TypeScript adapter could not read, as that adapter reads both.
+// ref is the ref the row holds. It refuses a seal or a discard time, or a
+// version, the TypeScript adapter could not read, as that adapter reads
+// each.
 func (r *refScan) ref() (storage.Ref, error) {
 	for _, c := range []struct {
 		column string
@@ -440,10 +442,13 @@ func (r *refScan) ref() (storage.Ref, error) {
 		micros int64
 	}{{"sealed_at", r.sealed, r.sealedAt}, {"deleted_at", r.deleted, r.deletedAt}} {
 		if isSet(c.set) {
-			if err := exactTime(c.micros, c.column); err != nil {
+			if err := exactInt(c.micros, c.column); err != nil {
 				return storage.Ref{}, err
 			}
 		}
+	}
+	if err := exactInt(r.version, "_version"); err != nil {
+		return storage.Ref{}, err
 	}
 	return storage.Ref{
 		ID: r.id, Root: r.root, Parent: r.parent, Base: r.base, Head: r.head, Name: r.name,
@@ -455,6 +460,9 @@ func (r *refScan) ref() (storage.Ref, error) {
 // canonical form and a time as a canonical date-time. A ref's parent, base
 // and head reference rows, whose ids are never empty, so "" is none.
 func (r *refScan) image() (string, error) {
+	if err := exactInt(r.version, "_version"); err != nil {
+		return "", err
+	}
 	image := map[string]string{
 		"id":             jsonString(r.id),
 		"root_id":        jsonString(r.root),
@@ -711,6 +719,9 @@ func (t *tx) members(ctx context.Context, sql string, args ...any) ([]member, er
 			return err
 		}
 		m.tombstone = tombstone == 1
+		if err := exactInts("tombstone", tombstone, "_version", m.version); err != nil {
+			return err
+		}
 		var err error
 		if m.data, err = readObject(data, "data"); err != nil {
 			return err
@@ -1051,6 +1062,14 @@ func (c *commitScan) dest() []any {
 }
 
 func (c *commitScan) commit() (storage.Commit, error) {
+	if err := exactInt(c.epoch, "schema_epoch"); err != nil {
+		return storage.Commit{}, err
+	}
+	if c.tagged == 1 {
+		if err := exactInt(c.sequence, "sequence"); err != nil {
+			return storage.Commit{}, err
+		}
+	}
 	createdAt, err := microsToDateTime(c.createdAt)
 	if err != nil {
 		return storage.Commit{}, err
@@ -1243,6 +1262,9 @@ func (t *tx) Patches(ctx context.Context, commits []string) ([]storage.Patch, er
 			if err := scan(&p.Commit, &p.Kind, &p.EntityKey, &p.EntityID, &p.EntityVersion, &p.Operation); err != nil {
 				return err
 			}
+			if err := exactInt(p.EntityVersion, "entity_version"); err != nil {
+				return err
+			}
 			out = append(out, p)
 			return nil
 		})
@@ -1259,6 +1281,9 @@ func (t *tx) NextSequence(ctx context.Context, root string) (int64, error) {
 	if _, err := t.queryRow(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM `+t.a.t.commit+` WHERE graph = ?1 AND root_id = ?2`,
 		[]any{t.a.graph, root}, &next); err != nil {
 		return 0, fmt.Errorf("sqlite: read the next sequence: %w", err)
+	}
+	if err := exactInt(next, "next"); err != nil {
+		return 0, err
 	}
 	return next, nil
 }
@@ -1314,6 +1339,9 @@ func (t *tx) Snapshot(ctx context.Context, commit string) ([]storage.SnapshotEnt
 		[]any{t.a.graph, commit}, func(scan func(dest ...any) error) error {
 			var e storage.SnapshotEntry
 			if err := scan(&e.Kind, &e.EntityKey, &e.EntityID, &e.EntityVersion); err != nil {
+				return err
+			}
+			if err := exactInt(e.EntityVersion, "entity_version"); err != nil {
 				return err
 			}
 			out = append(out, e)
@@ -1389,12 +1417,20 @@ func (r *releaseScan) dest() []any {
 	return []any{&r.id, &r.root, &r.commit, &r.createdAt, &r.createdBy, &r.updatedAt, &r.updatedBy, &r.version}
 }
 
-func (r *releaseScan) release() storage.Release {
-	return storage.Release{ID: r.id, Root: r.root, Commit: r.commit, Version: r.version}
+// release is the pointer the row holds. It refuses a version the
+// TypeScript adapter could not read.
+func (r *releaseScan) release() (storage.Release, error) {
+	if err := exactInt(r.version, "_version"); err != nil {
+		return storage.Release{}, err
+	}
+	return storage.Release{ID: r.id, Root: r.root, Commit: r.commit, Version: r.version}, nil
 }
 
 // image is a release pointer's history image, as a ref's is written.
 func (r *releaseScan) image() (string, error) {
+	if err := exactInt(r.version, "_version"); err != nil {
+		return "", err
+	}
 	image := map[string]string{
 		"id":         jsonString(r.id),
 		"root_id":    jsonString(r.root),
@@ -1422,7 +1458,7 @@ func (t *tx) ReadRelease(ctx context.Context, root string) (storage.Release, err
 	if !found {
 		return storage.Release{}, storage.ErrNotFound
 	}
-	return r.release(), nil
+	return r.release()
 }
 
 func (t *tx) WriteRelease(ctx context.Context, write storage.ReleaseWrite) (storage.Release, error) {
@@ -1466,7 +1502,7 @@ func (t *tx) writeRelease(ctx context.Context, write storage.ReleaseWrite) (stor
 	if err := t.history(ctx, t.a.t.releaseHistory, r.id, r.version, operation, image); err != nil {
 		return storage.Release{}, err
 	}
-	return r.release(), nil
+	return r.release()
 }
 
 func (t *tx) DiscardedRefs(ctx context.Context, grace time.Duration) ([]storage.Ref, error) {

@@ -74,11 +74,24 @@ func newID() string {
 // reads.
 const maxExactMicros = 1<<53 - 1
 
-// exactTime refuses a time in microseconds outside ±maxExactMicros, which
-// the TypeScript adapter cannot read, as it says of a column that holds one.
-func exactTime(micros int64, column string) error {
-	if micros > maxExactMicros || micros < -maxExactMicros {
-		return fmt.Errorf("sqlite: column %s is %d, not an integer a number holds exactly", column, micros)
+// exactInt refuses an integer the adapter reads from a column (a time in
+// microseconds, a version, a sequence, a schema epoch, an entity version)
+// outside ±maxExactMicros, 2^53 - 1, which the TypeScript adapter cannot
+// read, as it says of a column that holds one.
+func exactInt(n int64, column string) error {
+	if n > maxExactMicros || n < -maxExactMicros {
+		return fmt.Errorf("sqlite: column %s is %d, not an integer a number holds exactly", column, n)
+	}
+	return nil
+}
+
+// exactInts is exactInt over pairs of a column's name and its integer,
+// the first refusal first.
+func exactInts(columns ...any) error {
+	for i := 0; i+1 < len(columns); i += 2 {
+		if err := exactInt(columns[i+1].(int64), columns[i].(string)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

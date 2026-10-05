@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -155,5 +156,87 @@ func TestUpdateKeepsTheSeal(t *testing.T) {
 	images := historyOf(t, s.db, `"graph_ref_history"`, ref.ID)
 	if got, want := memberText(t, images[len(images)-1].data, "sealed_at"), memberText(t, images[len(images)-2].data, "sealed_at"); got != want || got == "null" {
 		t.Fatalf("the update's image holds sealed_at %s, the seal's %s", got, want)
+	}
+}
+
+// TestIntegerRange: a read refuses every stored integer the adapter reads
+// back outside ±(2^53 - 1), as the TypeScript adapter's does: a ref's, a
+// member's and a release pointer's _version, a commit's sequence and schema
+// epoch, a patch's and a snapshot entry's entity_version, and a root's
+// next sequence; and takes 2^53 - 1 itself.
+func TestIntegerRange(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		what, update, read string
+		value              int64
+		refuse             string
+	}{
+		{"a ref's version", `UPDATE "graph_ref" SET _version = ?1`, "readRef", maxExact + 1, "column _version is 9007199254740992"},
+		{"a ref's version at 2^53 - 1", `UPDATE "graph_ref" SET _version = ?1`, "readRef", maxExact, ""},
+		{"a member's version", `UPDATE "graph_member" SET _version = ?1`, "rows", -maxExact - 1, "column _version is -9007199254740992"},
+		{"a commit's sequence", `UPDATE "graph_commit" SET sequence = ?1`, "readCommit", maxExact + 1, "column sequence is 9007199254740992"},
+		{"a commit's schema epoch", `UPDATE "graph_commit" SET schema_epoch = ?1`, "readCommit", maxExact + 1, "column schema_epoch is 9007199254740992"},
+		{"a patch's entity version", `UPDATE "graph_patch" SET entity_version = ?1`, "patches", maxExact + 1, "column entity_version is 9007199254740992"},
+		{"a snapshot entry's entity version", `UPDATE "graph_snapshot_entry" SET entity_version = ?1`, "snapshot", maxExact + 1, "column entity_version is 9007199254740992"},
+		{"a release pointer's version", `UPDATE "graph_release" SET _version = ?1`, "readRelease", maxExact + 1, "column _version is 9007199254740992"},
+		{"a root's next sequence", `UPDATE "graph_commit" SET sequence = ?1`, "nextSequence", maxExact, "column next is 9007199254740992"},
+	} {
+		t.Run(c.what, func(t *testing.T) {
+			s := newSetup(t, sqlite.Options{}, "")
+			var ref storage.Ref
+			var commit string
+			must(in(s.storage, func(ctx context.Context, tx storage.Tx) (struct{}, error) {
+				var err error
+				if ref, commit, err = refAndCommit(ctx, tx, bread, "main"); err != nil {
+					return struct{}{}, err
+				}
+				row, err := tx.UpsertRow(ctx, "step", storage.RowWrite{Ref: ref.ID, Root: bread, Row: stepRow(t, "Mix", "Mix"), Actor: cook})
+				if err != nil {
+					return struct{}{}, err
+				}
+				var id string
+				if err := json.Unmarshal([]byte(memberText(t, row, "id")), &id); err != nil {
+					return struct{}{}, err
+				}
+				if err := tx.InsertPatches(ctx, commit, []storage.Patch{{Kind: "step", EntityKey: "Mix", EntityID: id, EntityVersion: 1, Operation: "ADD"}}); err != nil {
+					return struct{}{}, err
+				}
+				if err := tx.InsertSnapshot(ctx, commit, []storage.SnapshotEntry{{Kind: "step", EntityKey: "Mix", EntityID: id, EntityVersion: 1}}); err != nil {
+					return struct{}{}, err
+				}
+				_, err = tx.WriteRelease(ctx, storage.ReleaseWrite{Root: bread, Commit: commit, Actor: cook})
+				return struct{}{}, err
+			}))(t)
+			if _, err := s.db.Exec(c.update, c.value); err != nil {
+				t.Fatal(err)
+			}
+			err := s.storage.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+				var err error
+				switch c.read {
+				case "readRef":
+					_, err = tx.ReadRef(ctx, ref.ID)
+				case "rows":
+					_, err = tx.Rows(ctx, "step", ref.ID)
+				case "readCommit":
+					_, err = tx.ReadCommit(ctx, commit)
+				case "patches":
+					_, err = tx.Patches(ctx, []string{commit})
+				case "snapshot":
+					_, err = tx.Snapshot(ctx, commit)
+				case "readRelease":
+					_, err = tx.ReadRelease(ctx, bread)
+				case "nextSequence":
+					_, err = tx.NextSequence(ctx, bread)
+				}
+				return err
+			})
+			if c.refuse == "" {
+				if err != nil {
+					t.Fatalf("%s at %d: %v", c.what, c.value, err)
+				}
+				return
+			}
+			errorContains(t, err, c.refuse+", not an integer a number holds exactly", c.what)
+		})
 	}
 }

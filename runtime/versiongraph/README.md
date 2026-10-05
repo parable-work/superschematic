@@ -623,7 +623,11 @@ statements' `json_each` and `json_extract`, built in from 3.38.0 and in
 3.37 with JSON1. A name already taken is SQLite's extended result code
 2067, which the adapter reads from the driver's error through its
 `Code() int`, as `modernc.org/sqlite`'s has, or through
-`Options.ResultCode` for a driver that carries it otherwise.
+`Options.ResultCode` for a driver that carries it otherwise. A transaction
+refuses a clock (`Options.Clock`, microseconds) outside ±(2^53 − 1), and a
+read refuses a stored integer outside that range, a time, a version, a
+sequence, a schema epoch or an entity version, since the TypeScript
+adapter can read neither.
 
 `testdata/sqlite` holds the vectors every language's SQLite adapter is
 held to, so a file one adapter writes reads the same in another's; its
