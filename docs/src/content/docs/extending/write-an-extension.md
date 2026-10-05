@@ -774,7 +774,12 @@ any guard is asked; it never sees a precondition, which is the guard's
 to judge. `checkedTypes` names the document's types it checks values
 against, which the compatibility rule then holds, and `instanceSchema`
 shows clients what it holds the fields to, under `allOf` in the describe
-document and the create and update tools. The engine's README
+document and the create and update tools. A behavior that keeps values
+of the schema's other types in its own tables reads those types in
+`parseConfig` (`target.types.get(name)`), which holds them to the
+schema's checks and its compatibility rule as a type a field reaches is
+held, and checks a value against one with `validate(type, value)` in its
+contexts. The engine's README
 ("Behaviors") has the whole interface: `parseConfig`, `configChange`,
 `afterConfigChange`, `migrations`, `initialize`, `validate`,
 `checkedTypes`, `instanceSchema`, `guard`, `operations`,

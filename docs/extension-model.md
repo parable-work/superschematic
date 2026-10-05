@@ -985,9 +985,15 @@ carries the same declaration. Some of its members have no part in the
 declaration, since a client never calls them: `reactions`, which the
 engine's runner hands committed events after the commit, as the
 principal the deployment names for it, and `schedules`, named timed work
-with an interval (`runtime/engine/README.md`, "Reactions and schedules"
-and "The runner"). The compiler neither sees nor checks them; the engine
-checks them when the implementation registers.
+with an interval, which a schema's config may turn off and whose runs may
+write the behavior's own tables where no operation's result changes
+(`runtime/engine/README.md`, "Reactions and schedules" and "The
+runner"). The compiler neither sees nor checks them; the engine checks
+them when the implementation registers. Nor does it see what
+`parseConfig` reads of the schema's other types (`ConfigTarget.types`):
+the engine holds each type read there to its document checks and its
+compatibility rule, and a behavior's contexts check a value against one
+with `validate(type, value)` ("Other types" there).
 
 `superschematic behaviors --out <dir>` copies the declaration there: one
 canonical `<name>.behavior.json` per behavior the binary registers

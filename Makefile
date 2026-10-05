@@ -80,7 +80,8 @@ go-goldens: schema-file-types
 		go test -count=1 $$p -update || exit 1; done
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
-# Go package. CI fails when a committed catalog differs.
+# Go package, the TypeScript one with each scalar's value class from the
+# graph descriptor's rule. CI fails when a committed catalog differs.
 catalog-check:
 	go run ./internal/tools/scalarcatalog -check
 
