@@ -23,11 +23,14 @@ import (
 //
 // The planner calls canAlter on every change to a table the previous
 // version has. A change the dialect can make goes to render on its own.
-// When the dialect cannot make one of a phase's changes to a table, every
-// change the phase makes to that table but the renames of the table and its
-// columns goes to rebuild together, so a dialect whose ALTER TABLE is
-// narrow (SQLite) rebuilds a table once per phase however many of its
-// columns change.
+// When the dialect cannot make one of a phase's changes to a table, the
+// table is rebuilt by copying it, together with every table that
+// references it, directly or through another table: dropping the old table
+// would otherwise run the ON DELETE actions of the tables that reference
+// it. Every change the phase makes to those tables but the renames of the
+// tables and their columns goes to rebuild together (tableRebuild), so a
+// dialect whose ALTER TABLE is narrow (SQLite) copies a table at most once
+// per phase however many of its columns change.
 type dialect interface {
 	// name is the dialect's name in models and plans.
 	name() Dialect
@@ -53,12 +56,35 @@ type dialect interface {
 	// rendered.main names and sets each step's phase and index.
 	render(c *change) (rendered, error)
 
-	// rebuild turns the changes of one table in one phase, one of which
-	// canAlter refused, into the steps that rebuild it by copying it: from
-	// before, the table as it is when the phase reaches it, after the
-	// renames, to after, the table as the phase leaves it. The planner adds
-	// every change's shared hazards to the step rendered.main names.
-	rebuild(before, after *Table, changes []*change) (rendered, error)
+	// rebuild turns a tableRebuild into the steps that rebuild its tables by
+	// copying them. The planner adds every change's shared hazards to the
+	// step rendered.main names.
+	rebuild(rb *tableRebuild) (rendered, error)
+}
+
+// tableRebuild is the tables one step of a phase rebuilds by copying them:
+// each table with a change the dialect cannot make in place, and every
+// table that references one of them, directly or through another table.
+type tableRebuild struct {
+	// at is the change whose place in the plan the step takes: the first
+	// change of the phase the dialect cannot make in place to one of the
+	// tables. The step's subject is its table.
+	at *change
+	// tables are the tables the step rebuilds, by name.
+	tables []*rebuiltTable
+	// changes are every change of the phase the step makes, in plan order:
+	// each change to one of the tables but the renames of the tables and
+	// their columns, which run first and in place.
+	changes []*change
+}
+
+// rebuiltTable is one table of a tableRebuild.
+type rebuiltTable struct {
+	name string
+	// before is the table as the phase finds it, with the renames applied.
+	// after is the table as the phase leaves it, or nil when the phase
+	// drops it: the step drops it with the tables it references.
+	before, after *Table
 }
 
 // rendered is a change, or a table's rebuild, as steps.

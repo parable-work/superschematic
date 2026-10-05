@@ -1,16 +1,15 @@
 {
   "dialect": "sqlite",
   "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
-  "hash": "cd13a8ba67d6796b8342d5abbb43bd02e2da4672018e0dec9b507267f765d9f4",
+  "hash": "2fae01ed8e609e620ab99877d5e8c39e23defc00763efd5618b4dc11879cfd69",
   "service": "shop-db",
   "steps": [
     {
-      "foreignKeysOff": true,
       "hazards": [
         {
           "class": "blocking",
           "id": "blocking:table/label",
-          "reason": "Copying label holds the database's write lock for time that grows with the table.",
+          "reason": "Copying label and order_label holds the database's write lock for time that grows with the tables.",
           "subject": "table/label"
         },
         {
@@ -22,7 +21,7 @@
         {
           "class": "copy-table",
           "id": "copy-table:table/label",
-          "reason": "SQLite's ALTER TABLE cannot change the type of name, so the step rebuilds label: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "reason": "SQLite's ALTER TABLE cannot change the type of name, so the step rebuilds label with the tables that reference it, directly or through another table: order_label. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
           "subject": "table/label"
         }
       ],
@@ -30,10 +29,15 @@
       "op": "copyTable",
       "phase": "expand",
       "statements": [
+        "PRAGMA defer_foreign_keys = ON",
         "CREATE TABLE \"_new_label\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"_new_label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"order\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_label\" (\"id\", \"name\")\nSELECT \"id\", \"name\"\nFROM \"label\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "DROP TABLE \"order_label\"",
         "DROP TABLE \"label\"",
         "ALTER TABLE \"_new_label\" RENAME TO \"label\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
         "CREATE UNIQUE INDEX \"label_name_key\" ON \"label\" (\"name\")"
       ],
       "subject": "table/label",

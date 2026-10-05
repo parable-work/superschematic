@@ -722,7 +722,10 @@ func TestMigratePlanSQLite(t *testing.T) {
 	}
 	// The rebuild that drops total's NOT NULL adds note too.
 	require.Equal(t, []string{"expand copyTable table/order"}, ops)
-	assert.True(t, plan.Steps[0].ForeignKeysOff)
+	// The rebuild runs with foreign keys on, its checks deferred to its
+	// commit, as D1 runs it (D27, amended).
+	assert.False(t, plan.Steps[0].ForeignKeysOff)
+	assert.Equal(t, "PRAGMA defer_foreign_keys = ON", plan.Steps[0].Statements[0])
 	assert.Contains(t, strings.Join(plan.Steps[0].Statements, "\n"), `"note" TEXT`)
 	assert.Contains(t, hazardIDs(plan), "copy-table:table/order")
 
