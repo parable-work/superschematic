@@ -2321,13 +2321,12 @@ is, a boolean becomes `1` or `0` or the text `true` or `false`, and any
 other element becomes a boolean by SQLite's truth test, which is lossy,
 so each lossy change is `destructive` with what it loses in its reason,
 never `data-dependent` as Postgres's `USING col::T[]` is for text to a
-number; a change between
-elements SQLite stores alike, such as `UUID` to text, is no step, as the
-same change of a column is; a change to or from a JSON value or bytes
-fails the plan, since SQLite's `CAST` keeps a nested JSON value as JSON
-and its JSON holds no bytes; a list of lists is a JSON value on both
-dialects, so a change of its inner element is no step on either;
-`migrate plan --dialect sqlite` refuses a service whose
+number; a change between elements SQLite stores alike, such as `UUID` to
+text, is no step, as the same change of a column is; a change to or from
+a JSON value or bytes fails the plan, since SQLite's `CAST` keeps a
+nested JSON value as JSON and its JSON holds no bytes; a list of lists is
+a JSON value on both dialects, so a change of its inner element is no
+step on either; `migrate plan --dialect sqlite` refuses a service whose
 new version does not list `sqlite`, and a previous version, a service
 directory or a git ref, whose list lacks it, pointing to the model the
 database recorded or an empty database, while a `--from` model is
