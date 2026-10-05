@@ -35,35 +35,18 @@ func (d *differ) steps() ([]*Step, error) {
 				changes = append(changes, c)
 			}
 		}
-		// A table that exists and that the dialect cannot change in place
-		// by one of the phase's changes is rebuilt once, at the place of
-		// the first such change. The rebuild makes every change the phase
-		// makes to the table but the renames of the table and its columns,
-		// which run first and in place.
-		first := map[string]*change{}
-		for _, c := range changes {
-			if d.existing(c) && first[c.table] == nil && !d.dialect.canAlter(c) {
-				first[c.table] = c
-			}
-		}
-		rebuilds := map[string][]*change{}
-		for _, c := range changes {
-			if d.rebuilt(c, first) {
-				rebuilds[c.table] = append(rebuilds[c.table], c)
-			}
-		}
+		rebuilds := d.rebuilds(phase, changes)
 		for _, c := range changes {
 			var r rendered
 			var hazards []*Hazard
 			var err error
+			rb := d.rebuildOf(c, rebuilds)
 			switch {
-			case d.rebuilt(c, first) && first[c.table] != c:
+			case rb != nil && rb.at != c:
 				continue
-			case d.rebuilt(c, first):
-				batch := rebuilds[c.table]
-				before, after := d.phaseTables(c.table, phase)
-				r, err = d.dialect.rebuild(before, after, batch)
-				for _, bc := range batch {
+			case rb != nil:
+				r, err = d.dialect.rebuild(rb)
+				for _, bc := range rb.changes {
 					hazards = append(hazards, bc.hazards...)
 				}
 			default:
@@ -94,12 +77,152 @@ func (d *differ) steps() ([]*Step, error) {
 	return steps, nil
 }
 
-// rebuilt reports whether c is made by the rebuild of its table: the table
-// is in first, which holds the first change of the phase the dialect cannot
-// make in place to each table it rebuilds, and c is not a rename of the
-// table or of a column.
-func (d *differ) rebuilt(c *change, first map[string]*change) bool {
-	return first[c.table] != nil && d.existing(c) && c.op != opRenameTable && c.op != opRenameColumn
+// rebuilds groups the tables a phase rebuilds by copying them, by table
+// name. A table the previous model has is rebuilt when the dialect cannot
+// make one of the phase's changes to it in place. So is every table that
+// references a rebuilt one, directly or through another table: dropping the
+// old table would run the ON DELETE actions of the tables that reference
+// it, and the copies of those tables reference the new one instead. The
+// rebuilt tables that reference one another, before or after the phase,
+// share one step, at the place of the first change among them the dialect
+// cannot make, so a table is copied at most once per phase. The step makes
+// every change the phase makes to its tables but the renames of the tables
+// and their columns, including the drop of a table that contract drops.
+func (d *differ) rebuilds(phase Phase, changes []*change) map[string]*tableRebuild {
+	first := map[string]*change{}
+	for _, c := range changes {
+		if d.existing(c) && first[c.table] == nil && !d.dialect.canAlter(c) {
+			first[c.table] = c
+		}
+	}
+	if len(first) == 0 {
+		return nil
+	}
+	tables := d.phaseTableSet(phase)
+	names := make([]string, 0, len(tables))
+	for name := range tables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	rebuilt := map[string]bool{}
+	for name := range first {
+		rebuilt[name] = true
+	}
+	for grew := true; grew; {
+		grew = false
+		for _, name := range names {
+			if rebuilt[name] {
+				continue
+			}
+			for _, fk := range tables[name].before.ForeignKeys {
+				if rebuilt[fk.RefTable] {
+					rebuilt[name] = true
+					grew = true
+					break
+				}
+			}
+		}
+	}
+
+	// Rebuilt tables that reference one another share a step.
+	group := map[string]string{}
+	var root func(string) string
+	root = func(name string) string {
+		if group[name] == "" || group[name] == name {
+			return name
+		}
+		r := root(group[name])
+		group[name] = r
+		return r
+	}
+	for _, name := range names {
+		if !rebuilt[name] {
+			continue
+		}
+		for _, t := range []*Table{tables[name].before, tables[name].after} {
+			if t == nil {
+				continue
+			}
+			for _, fk := range t.ForeignKeys {
+				if a, b := root(name), root(fk.RefTable); rebuilt[fk.RefTable] && a != b {
+					group[max(a, b)] = min(a, b)
+				}
+			}
+		}
+	}
+	out := map[string]*tableRebuild{}
+	byRoot := map[string]*tableRebuild{}
+	for _, name := range names {
+		if !rebuilt[name] {
+			continue
+		}
+		rb := byRoot[root(name)]
+		if rb == nil {
+			rb = &tableRebuild{}
+			byRoot[root(name)] = rb
+		}
+		rb.tables = append(rb.tables, tables[name])
+		out[name] = rb
+	}
+	for _, c := range changes {
+		rb := d.rebuildOf(c, out)
+		if rb == nil {
+			continue
+		}
+		if rb.at == nil && first[c.table] == c {
+			rb.at = c
+		}
+		rb.changes = append(rb.changes, c)
+	}
+	return out
+}
+
+// rebuildOf returns the rebuild that makes c, or nil: c changes a table a
+// rebuild copies, or drops one, and is not a rename of a table or of a
+// column.
+func (d *differ) rebuildOf(c *change, rebuilds map[string]*tableRebuild) *tableRebuild {
+	rb := rebuilds[c.table]
+	if rb == nil || c.op == opRenameTable || c.op == opRenameColumn {
+		return nil
+	}
+	if c.op == opDropTable || d.existing(c) {
+		return rb
+	}
+	return nil
+}
+
+// phaseTableSet returns the tables a phase may rebuild, by name, as the
+// phase finds them and leaves them: the previous model's tables as their
+// renames leave them in expand, the ones contract drops among them, and
+// every table expand leaves in contract, with no after for the ones
+// contract drops. The tables expand creates are left out of expand: no
+// server writes to them before the rollout, so dropping a table they
+// reference runs no ON DELETE action, and their keys name the new table
+// once it takes the name.
+func (d *differ) phaseTableSet(phase Phase) map[string]*rebuiltTable {
+	out := map[string]*rebuiltTable{}
+	for _, tt := range d.to.Tables {
+		switch {
+		case d.fromTables[d.renames.prevTable(tt.Name)] != nil:
+			before, after := d.phaseTables(tt.Name, phase)
+			out[tt.Name] = &rebuiltTable{name: tt.Name, before: before, after: after}
+		case phase == Contract:
+			out[tt.Name] = &rebuiltTable{name: tt.Name, before: tt, after: tt}
+		}
+	}
+	for _, ft := range d.from.Tables {
+		if !d.dropped[ft.Name] {
+			continue
+		}
+		t := d.renamedTable(ft)
+		rt := &rebuiltTable{name: t.Name, before: t}
+		if phase == Expand {
+			rt.after = t
+		}
+		out[t.Name] = rt
+	}
+	return out
 }
 
 // existing reports whether c changes a table the previous model has, as

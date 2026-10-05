@@ -1,11 +1,10 @@
 {
   "dialect": "sqlite",
   "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
-  "hash": "fd12d3350aaa3d7f501dbda156dc108deee345dd6ddc50e57e9fc6269b9792e2",
+  "hash": "e9897cb982f28842d6e564d48050ccba6ff6530fd3e1d564d9c8e26a11fe6541",
   "service": "shop-db",
   "steps": [
     {
-      "foreignKeysOff": true,
       "hazards": [
         {
           "class": "destructive",
@@ -28,7 +27,7 @@
         {
           "class": "copy-table",
           "id": "copy-table:table/order_line",
-          "reason": "SQLite's ALTER TABLE cannot change the type of quantity, so the step rebuilds order_line: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "reason": "SQLite's ALTER TABLE cannot change the type of quantity, so the step rebuilds order_line: it copies the rows into a new table, drops the old one and renames the new one.",
           "subject": "table/order_line"
         }
       ],
@@ -36,6 +35,7 @@
       "op": "copyTable",
       "phase": "expand",
       "statements": [
+        "PRAGMA defer_foreign_keys = ON",
         "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" REAL NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"order\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", CAST(\"quantity\" AS REAL), \"order_id\"\nFROM \"order_line\"",
         "DROP TABLE \"order_line\"",

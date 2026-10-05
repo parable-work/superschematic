@@ -774,9 +774,9 @@ func (d *differ) dropTableHazards(c *change, ft *Table, created []*Table) {
 // another through their references, share a unit, and every other table is
 // a unit of its own. Each unit comes before the units it references, by
 // its first table's name among equals, and holds its tables in name order.
-// With foreign keys off, as a dropped table's step runs, nothing checks a
-// reference until the step's end, when every table that references a
-// dropped one is gone too.
+// SQLite's step for a unit defers the foreign key checks to its end, when
+// every table that references a dropped one is gone too (sqliteDrops); its
+// rebuild drops the old tables in the same order.
 func dropUnits(tables []*Table, dropped map[string]bool) [][]*Table {
 	sort.Slice(tables, func(i, j int) bool { return tables[i].Name < tables[j].Name })
 	byName := map[string]*Table{}

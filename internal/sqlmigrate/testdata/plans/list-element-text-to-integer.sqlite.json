@@ -1,11 +1,10 @@
 {
   "dialect": "sqlite",
   "from": "70a84da9fa317641bee19121252de0ceb49115b491816fa7b7cb4d191f3934b1",
-  "hash": "681c932d22d5a723e163b41dc8d8544d5498b6fe044a0a56244d7927cf74beb2",
+  "hash": "1b341746e29aab6e4e899ebc20cc94b323fcb53ad0c4bf5b22e263fe7d57df75",
   "service": "shop-db",
   "steps": [
     {
-      "foreignKeysOff": true,
       "hazards": [
         {
           "class": "destructive",
@@ -28,7 +27,7 @@
         {
           "class": "copy-table",
           "id": "copy-table:table/product",
-          "reason": "SQLite's ALTER TABLE cannot convert the elements of items, so the step rebuilds product: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "reason": "SQLite's ALTER TABLE cannot convert the elements of items, so the step rebuilds product: it copies the rows into a new table, drops the old one and renames the new one.",
           "subject": "table/product"
         }
       ],
@@ -36,6 +35,7 @@
       "op": "copyTable",
       "phase": "expand",
       "statements": [
+        "PRAGMA defer_foreign_keys = ON",
         "CREATE TABLE \"_new_product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"items\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
         "INSERT INTO \"_new_product\" (\"id\", \"title\", \"price\", \"items\")\nSELECT \"id\", \"title\", \"price\", CASE WHEN \"product\".\"items\" IS NOT NULL THEN (SELECT json_group_array(CAST(\"_element\".\"value\" AS INTEGER) ORDER BY \"_element\".\"key\") FROM json_each(\"product\".\"items\") AS \"_element\") END\nFROM \"product\"",
         "DROP TABLE \"product\"",

@@ -251,8 +251,8 @@ func TestRenameInView(t *testing.T) {
 // TestDialectSeam plans through a dialect whose ALTER TABLE cannot change
 // a column's type or drop a column, as SQLite's cannot change a type: the
 // planner hands those changes, by table and phase, to rebuild, with the
-// other changes of the table in that phase, and every other change to
-// render, with no change to the diff.
+// other changes of the table in that phase and the tables that reference
+// it, and every other change to render, with no change to the diff.
 func TestDialectSeam(t *testing.T) {
 	pc := planCase{after: func(s *ir.Schema) {
 		fieldNamed(s, "OrderLine", "sku").TypeRef = ir.TypeRef{Name: "Contact.PhoneNumber"}
@@ -284,10 +284,11 @@ func TestDialectSeam(t *testing.T) {
 	if len(fake.rebuilds) != 2 {
 		t.Fatalf("rebuilds = %v", fake.rebuilds)
 	}
-	if got := fake.rebuilds[0]; got != "order_line expand 2: quantity DOUBLE PRECISION sku VARCHAR(16)" {
+	// The rebuild of order copies the tables that reference it too.
+	if got := fake.rebuilds[0]; got != "order_line expand 2: quantity DOUBLE PRECISION sku VARCHAR(16) [order_line]" {
 		t.Errorf("first rebuild = %q", got)
 	}
-	if got := fake.rebuilds[1]; got != "order contract 1: note dropped" {
+	if got := fake.rebuilds[1]; got != "order contract 1: note dropped [order order_label order_line]" {
 		t.Errorf("second rebuild = %q", got)
 	}
 	// The shared hazards of every change a rebuild makes ride on its step.
@@ -316,9 +317,16 @@ func (d *rebuildingDialect) canAlter(c *change) bool {
 	return c.op != opAlterColumnType && c.op != opDropColumn && c.op != opDropNotNull
 }
 
-func (d *rebuildingDialect) rebuild(before, after *Table, changes []*change) (rendered, error) {
+func (d *rebuildingDialect) rebuild(rb *tableRebuild) (rendered, error) {
+	tables := map[string]*rebuiltTable{}
+	var names []string
+	for _, rt := range rb.tables {
+		tables[rt.name] = rt
+		names = append(names, rt.name)
+	}
 	var parts []string
-	for _, c := range changes {
+	for _, c := range rb.changes {
+		before, after := tables[c.table].before, tables[c.table].after
 		switch c.op {
 		case opAlterColumnType:
 			for _, r := range c.alter.retypes {
@@ -330,8 +338,8 @@ func (d *rebuildingDialect) rebuild(before, after *Table, changes []*change) (re
 			}
 		}
 	}
-	d.rebuilds = append(d.rebuilds, fmt.Sprintf("%s %s %d: %s", after.Name, changes[0].phase, len(changes), strings.Join(parts, " ")))
-	step := &Step{Op: "copyTable", Subject: tableSubject(after.Name), Statements: []string{"-- rebuild " + after.Name}, Transactional: true, ForeignKeysOff: true}
+	d.rebuilds = append(d.rebuilds, fmt.Sprintf("%s %s %d: %s [%s]", rb.at.table, rb.at.phase, len(rb.changes), strings.Join(parts, " "), strings.Join(names, " ")))
+	step := &Step{Op: "copyTable", Subject: tableSubject(rb.at.table), Statements: []string{"-- rebuild " + rb.at.table}, Transactional: true}
 	step.Hazards = append(step.Hazards, &Hazard{
 		ID: HazardID(HazardCopyTable, step.Subject, ""), Class: HazardCopyTable, Subject: step.Subject, Reason: "rebuilt",
 	})

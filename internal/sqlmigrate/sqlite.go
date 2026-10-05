@@ -2,6 +2,7 @@ package sqlmigrate
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -12,7 +13,10 @@ import (
 // unique field's index and their drops are statements of their own. Every
 // other change to a table that exists rebuilds it by copying it (rebuild).
 // Every step runs in a transaction: the runner opens each with BEGIN
-// IMMEDIATE, which takes the database's write lock.
+// IMMEDIATE, which takes the database's write lock, or sends it to D1 as
+// one batch. Foreign keys stay on throughout, as D1 keeps them (D27,
+// amended), so a step that drops a table makes sure no ON DELETE action
+// reaches a row the plan keeps.
 type sqliteDialect struct{}
 
 func (sqliteDialect) name() Dialect { return SQLite }
@@ -146,19 +150,13 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 	case opGraphContent:
 		return noSQL(c), nil
 	case opDropTable:
-		// With foreign keys on, DROP TABLE deletes every row first and
-		// runs the ON DELETE actions of the tables that reference them,
-		// which a RESTRICT on the table itself refuses. The tables of a
-		// reference cycle go in one step: the runner checks the foreign
-		// keys before its commit, when none of them is left to reference
-		// another.
-		statements := []string{"DROP TABLE " + qs(c.table)}
-		for _, t := range c.dropsWith {
-			statements = append(statements, "DROP TABLE "+qs(t.Name))
+		// The tables of a reference cycle go in one step (dropTables).
+		// Every other table that references one of them is gone by then.
+		statements, internal := sqliteDrops(append([]*Table{c.tableDef}, c.dropsWith...))
+		if internal {
+			statements = append([]string{sqliteDeferForeignKeys}, statements...)
 		}
-		step := sqliteStep(c, statements...)
-		step.ForeignKeysOff = true
-		return one(step), nil
+		return one(sqliteStep(c, statements...)), nil
 	}
 	return rendered{}, fmt.Errorf("sqlmigrate: sqlite cannot render %s %s", c.op, c.subject)
 }
@@ -236,19 +234,143 @@ func sqliteUniqueSQL(table string, u *Constraint) string {
 // compiler names never starts with an underscore.
 const sqliteTempPrefix = "_new_"
 
+// sqliteDeferForeignKeys starts every rebuild, and a step that drops a
+// table whose rows another table may still reference when the drop runs:
+// the table itself, or a table the step drops after it. SQLite then checks
+// every foreign key at the commit, not at each statement: a NO ACTION and a
+// RESTRICT alike, since SQLite runs no RESTRICT action while the checks are
+// deferred. A CASCADE or a SET NULL still acts at once. So a rebuild may
+// copy a row before the row it references, and drop a table whose rows
+// reference one another. The setting ends with the transaction.
+const sqliteDeferForeignKeys = "PRAGMA defer_foreign_keys = ON"
+
 // rebuild is SQLite's copy-table procedure (https://sqlite.org/lang_altertable.html,
-// "Making Other Kinds Of Table Schema Changes"), in one transaction with
-// foreign keys off: create the table as after under a temporary name, copy
-// the rows, drop the old table, rename the new one, and create its unique
-// indexes and indexes. A column the new table adds is left out of the copy,
-// so its default fills it; a column whose affinity changes is cast, and a
-// list whose element changes has each element converted. With
-// foreign keys off, dropping the old table runs no ON DELETE action on the
-// tables that reference it, and those references resolve again once the
-// new table takes the name; the runner checks every foreign key before the
-// commit.
-func (d sqliteDialect) rebuild(before, after *Table, changes []*change) (rendered, error) {
-	temp := sqliteTempPrefix + after.Name
+// "Making Other Kinds Of Table Schema Changes") for every table of rb, in
+// one transaction with foreign keys on, as D1 keeps them (D27, amended).
+// It defers the foreign key checks to the commit; creates each table rb
+// keeps as the phase leaves it, under a temporary name, with its foreign
+// keys naming the other new tables; copies the rows, referenced tables
+// first; drops the old tables (sqliteDrops), referencing ones first, so no
+// ON DELETE action reaches a table the step keeps; renames each new table,
+// which rewrites the foreign keys naming it; and creates the unique
+// indexes and indexes. A column a table gains is left out of its copy, so
+// its default fills it; a column whose affinity changes is cast, and a list
+// whose element changes has each element converted. Renaming an old table
+// out of the way instead would rewrite the foreign keys that reference it
+// to the old table, whose drop would then run their ON DELETE actions.
+func (d sqliteDialect) rebuild(rb *tableRebuild) (rendered, error) {
+	temp := map[string]string{}
+	var kept []*rebuiltTable
+	var old []*Table
+	for _, rt := range rb.tables {
+		old = append(old, rt.before)
+		if rt.after != nil {
+			temp[rt.name] = sqliteTempPrefix + rt.name
+			kept = append(kept, rt)
+		}
+	}
+	kept = referencedFirst(kept)
+	statements := []string{sqliteDeferForeignKeys}
+	for _, rt := range kept {
+		statements = append(statements, sqliteCreateTableSQL(withTempRefs(rt.after, temp), temp[rt.name]))
+	}
+	for _, rt := range kept {
+		statements = append(statements, sqliteCopySQL(rt.before, rt.after, temp[rt.name]))
+	}
+	drops, _ := sqliteDrops(old)
+	statements = append(statements, drops...)
+	for _, rt := range kept {
+		statements = append(statements, "ALTER TABLE "+qs(temp[rt.name])+" RENAME TO "+qs(rt.name))
+	}
+	for _, rt := range kept {
+		for _, u := range rt.after.Uniques {
+			statements = append(statements, sqliteUniqueSQL(rt.name, u))
+		}
+		for _, idx := range rt.after.Indexes {
+			statements = append(statements, sqliteIndexSQL(rt.name, idx))
+		}
+	}
+	step := &Step{
+		Op:            "copyTable",
+		Subject:       tableSubject(rb.at.table),
+		Statements:    statements,
+		Transactional: true,
+	}
+	step.Hazards = append(step.Hazards, &Hazard{
+		ID:      HazardID(HazardCopyTable, step.Subject, ""),
+		Class:   HazardCopyTable,
+		Subject: step.Subject,
+		Reason:  d.rebuildReason(rb),
+	})
+	copied := make([]string, len(kept))
+	for i, rt := range kept {
+		copied[i] = rt.name
+	}
+	sort.Strings(copied)
+	if len(copied) == 1 {
+		blocking(step, fmt.Sprintf("Copying %s holds the database's write lock for time that grows with the table.", copied[0]))
+	} else {
+		blocking(step, fmt.Sprintf("Copying %s holds the database's write lock for time that grows with the tables.", joinAnd(copied)))
+	}
+	return one(step), nil
+}
+
+// rebuildReason is the copy-table hazard's reason: what SQLite's ALTER
+// TABLE cannot do, and every table the step copies or drops.
+func (d sqliteDialect) rebuildReason(rb *tableRebuild) string {
+	cannot := map[string][]string{}
+	var changed []string
+	for _, c := range rb.changes {
+		if c.op == opDropTable || d.canAlter(c) {
+			continue
+		}
+		if cannot[c.table] == nil {
+			changed = append(changed, c.table)
+		}
+		cannot[c.table] = append(cannot[c.table], sqliteCannot(c))
+	}
+	var referencing, dropped []string
+	for _, rt := range rb.tables {
+		switch {
+		case rt.after == nil:
+			dropped = append(dropped, rt.name)
+		case cannot[rt.name] == nil:
+			referencing = append(referencing, rt.name)
+		}
+	}
+	what := joinAnd(cannot[changed[0]])
+	if len(changed) > 1 {
+		parts := make([]string, len(changed))
+		for i, table := range changed {
+			parts[i] = joinAnd(cannot[table]) + " in " + table
+		}
+		what = strings.Join(parts, ", nor ")
+	}
+	reason := fmt.Sprintf("SQLite's ALTER TABLE cannot %s, so the step rebuilds %s", what, joinAnd(changed))
+	if len(rb.tables) == 1 {
+		return reason + ": it copies the rows into a new table, drops the old one and renames the new one."
+	}
+	it := "it"
+	if len(changed) > 1 {
+		it = "them"
+	}
+	if len(referencing) > 0 {
+		reason += fmt.Sprintf(" with the tables that reference %s, directly or through another table: %s", it, joinAnd(referencing))
+	}
+	reason += "."
+	switch len(dropped) {
+	case 0:
+	case 1:
+		reason += fmt.Sprintf(" The phase drops %s, which references %s too, so the step drops it without copying it.", dropped[0], it)
+	default:
+		reason += fmt.Sprintf(" The phase drops %s, which reference %s too, so the step drops them without copying them.", joinAnd(dropped), it)
+	}
+	return reason + " It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones."
+}
+
+// sqliteCopySQL copies the rows of before into the new table into, as
+// after has its columns.
+func sqliteCopySQL(before, after *Table, into string) string {
 	var columns, values []string
 	for _, col := range after.Columns {
 		prev := columnNamed(before, col.Name)
@@ -267,40 +389,91 @@ func (d sqliteDialect) rebuild(before, after *Table, changes []*change) (rendere
 		columns = append(columns, qs(col.Name))
 		values = append(values, value)
 	}
-	statements := []string{
-		sqliteCreateTableSQL(after, temp),
-		"INSERT INTO " + qs(temp) + " (" + strings.Join(columns, ", ") + ")\nSELECT " + strings.Join(values, ", ") + "\nFROM " + qs(before.Name),
-		"DROP TABLE " + qs(before.Name),
-		"ALTER TABLE " + qs(temp) + " RENAME TO " + qs(after.Name),
+	return "INSERT INTO " + qs(into) + " (" + strings.Join(columns, ", ") + ")\nSELECT " + strings.Join(values, ", ") + "\nFROM " + qs(before.Name)
+}
+
+// withTempRefs is t with each foreign key that references a table in temp
+// naming that table's temporary name instead.
+func withTempRefs(t *Table, temp map[string]string) *Table {
+	out := *t
+	out.ForeignKeys = nil
+	for _, fk := range t.ForeignKeys {
+		ref := *fk
+		if name, ok := temp[fk.RefTable]; ok {
+			ref.RefTable = name
+		}
+		out.ForeignKeys = append(out.ForeignKeys, &ref)
 	}
-	for _, u := range after.Uniques {
-		statements = append(statements, sqliteUniqueSQL(after.Name, u))
+	return &out
+}
+
+// referencedFirst orders tables, given by name, so that each comes after
+// the tables it references among them, as the phase leaves them; by name
+// among equals. A reference cycle is broken in name order.
+func referencedFirst(tables []*rebuiltTable) []*rebuiltTable {
+	in := map[string]bool{}
+	for _, rt := range tables {
+		in[rt.name] = true
 	}
-	for _, idx := range after.Indexes {
-		statements = append(statements, sqliteIndexSQL(after.Name, idx))
+	placed := map[string]bool{}
+	var out []*rebuiltTable
+	for len(out) < len(tables) {
+		next := -1
+		for i, rt := range tables {
+			if placed[rt.name] {
+				continue
+			}
+			if next < 0 {
+				next = i
+			}
+			ready := true
+			for _, fk := range rt.after.ForeignKeys {
+				if fk.RefTable != rt.name && in[fk.RefTable] && !placed[fk.RefTable] {
+					ready = false
+					break
+				}
+			}
+			if ready {
+				next = i
+				break
+			}
+		}
+		placed[tables[next].name] = true
+		out = append(out, tables[next])
 	}
-	step := &Step{
-		Op:             "copyTable",
-		Subject:        tableSubject(after.Name),
-		Statements:     statements,
-		Transactional:  true,
-		ForeignKeysOff: true,
+	return out
+}
+
+// sqliteDrops drops tables with foreign keys on, as D1 keeps them. DROP
+// TABLE deletes a table's rows first, which runs the ON DELETE actions of
+// the tables that reference them and checks their keys. The tables go by
+// dropUnits, those that reference others first, so no drop finds a row of
+// a table not yet dropped that references it, but within a reference cycle
+// or on a table that references itself: internal reports whether any key
+// is there. Such a step must defer the checks to its commit
+// (sqliteDeferForeignKeys). Then a CASCADE deletes rows the step drops
+// anyway and a SET NULL changes them, while the checks of a NO ACTION and a
+// RESTRICT wait for the commit, when no table left references another;
+// with the checks not deferred, a drop that finds a row the key protects
+// fails at once.
+func sqliteDrops(tables []*Table) (statements []string, internal bool) {
+	dropped := map[string]bool{}
+	for _, t := range tables {
+		dropped[t.Name] = true
 	}
-	var cannot []string
-	for _, c := range changes {
-		if !d.canAlter(c) {
-			cannot = append(cannot, sqliteCannot(c))
+	for _, unit := range dropUnits(append([]*Table(nil), tables...), dropped) {
+		inUnit := map[string]bool{}
+		for _, t := range unit {
+			inUnit[t.Name] = true
+		}
+		for _, t := range unit {
+			for _, fk := range t.ForeignKeys {
+				internal = internal || inUnit[fk.RefTable]
+			}
+			statements = append(statements, "DROP TABLE "+qs(t.Name))
 		}
 	}
-	step.Hazards = append(step.Hazards, &Hazard{
-		ID:      HazardID(HazardCopyTable, step.Subject, ""),
-		Class:   HazardCopyTable,
-		Subject: step.Subject,
-		Reason: fmt.Sprintf("SQLite's ALTER TABLE cannot %s, so the step rebuilds %s: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
-			joinAnd(cannot), after.Name),
-	})
-	blocking(step, fmt.Sprintf("Copying %s holds the database's write lock for time that grows with the table.", after.Name))
-	return one(step), nil
+	return statements, internal
 }
 
 // sqliteElementAlias names json_each's rows in a list's conversion. A
