@@ -382,8 +382,10 @@ jobs:
           key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
 
       - name: Install Rust toolchain
+        # The wasm32 target builds the version-graph core the engine's
+        # Branches behavior runs, which the smoke's engine step builds.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency

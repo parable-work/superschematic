@@ -7,10 +7,11 @@
 # Needs: the pinned Go toolchain, the superscalar dependency built by
 # scripts/superscalar-dep.sh, the version-graph core's archive built by
 # scripts/versiongraph-archive.sh, which shop-db's generated ORM links (the
-# Makefile's `setup` runs both), and jq. Nothing is installed from the
-# network beyond Go modules. Generated output goes to the example's own
-# schemas/dist (gitignored); the core-only builds go to a temp dir that is
-# removed on exit.
+# Makefile's `setup` runs both), cargo with the wasm32-unknown-unknown
+# target, which builds the version-graph core the engine depends on, and
+# jq. Nothing is installed from the network beyond Go modules. Generated
+# output goes to the example's own schemas/dist (gitignored); the core-only
+# builds go to a temp dir that is removed on exit.
 #
 # Asserts, in order:
 #   1. the acme module builds, vets and passes its tests;
@@ -535,10 +536,12 @@ BEHAVIORS="$EXAMPLE_DIR/packages/behaviors"
 ENGINE="$REPO_ROOT/runtime/engine/typescript"
 # The implementation's copy of the declaration is the one the binary registers.
 "$OUT/acme-schematic" behaviors --extension acme --out "$BEHAVIORS/declarations" --check
-# Build the schema runtime and the engine, as the typescript CI job does; the
-# engine's build links the schema runtime's dist, and the HTTP runtime's, which
-# step 16 built, into its node_modules.
+# Build the schema runtime, the version graph and the engine, as the
+# typescript CI job does; the engine's build links the schema runtime's
+# dist, the HTTP runtime's, which step 16 built, and the version graph's,
+# whose engine the Branches behavior runs, into its node_modules.
 (cd "$REPO_ROOT/runtime/schema/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
+(cd "$REPO_ROOT/runtime/versiongraph/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 (cd "$ENGINE" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 link_module "$ENGINE" "$BEHAVIORS/node_modules/@superschematic/engine"
 for dep in typescript @types/node; do
