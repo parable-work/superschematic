@@ -127,15 +127,20 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *Sch
 	if o.registry == nil {
 		o.registry = coreRegistry()
 	}
-	if o.programCache != nil {
-		unlock := o.programCache.lockLoad()
+	// A service the shared program was not built over gets its own program.
+	cache := o.programCache
+	if cache != nil && !cache.covers(servicePath) {
+		cache = nil
+	}
+	if cache != nil {
+		unlock := cache.lockLoad()
 		defer unlock()
 	}
 
 	var sp *serviceProgram
 	if err := o.profile.Measure("tsreader.program", func() error {
 		var err error
-		sp, err = newServiceProgram(servicePath, o.profile, o.programCache)
+		sp, err = newServiceProgram(servicePath, o.profile, cache)
 		return err
 	}); err != nil {
 		return nil, nil, nil, err

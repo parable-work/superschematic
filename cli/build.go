@@ -333,7 +333,11 @@ func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.N
 	if flags.scaffold {
 		ctx.scaffoldRoot = filepath.Dir(schemasRoot)
 	}
-	if tsServiceDirs := tsServiceDirectories(closure); len(tsServiceDirs) > 0 {
+	tsServiceDirs, err := tsServiceDirectories(closure)
+	if err != nil {
+		return err
+	}
+	if len(tsServiceDirs) > 0 {
 		ctx.tsProgramCache = tsreader.NewProgramCache(tsServiceDirs)
 		defer ctx.tsProgramCache.Close()
 	}

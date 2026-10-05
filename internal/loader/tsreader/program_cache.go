@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -37,6 +38,18 @@ func NewProgramCache(serviceDirs []string) *ProgramCache {
 	}
 	sort.Strings(dirs)
 	return &ProgramCache{serviceDirs: dirs}
+}
+
+// covers reports whether the cache was built over servicePath. The shared
+// program holds only those services' files: another service would classify
+// no schema files from it and load empty.
+func (c *ProgramCache) covers(servicePath string) bool {
+	abs, err := filepath.Abs(servicePath)
+	if err != nil {
+		return false
+	}
+	_, found := slices.BinarySearch(c.serviceDirs, filepath.ToSlash(abs))
+	return found
 }
 
 func (c *ProgramCache) lockLoad() func() {
