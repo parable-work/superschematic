@@ -1,11 +1,10 @@
 {
   "dialect": "sqlite",
   "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
-  "hash": "0e7a3f163d0bd8743842b274829bd634b2c6fde3fd49ce20d9bb6727a5fc80df",
+  "hash": "2d95499171fed9b27c6ffdc33fe1e879904837f83bd1712dc02e0ab25c4cb4f4",
   "service": "shop-db",
   "steps": [
     {
-      "foreignKeysOff": true,
       "hazards": [
         {
           "class": "blocking",
@@ -16,7 +15,7 @@
         {
           "class": "copy-table",
           "id": "copy-table:table/order_line",
-          "reason": "SQLite's ALTER TABLE cannot add batch with a default that is not a constant, so the step rebuilds order_line: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "reason": "SQLite's ALTER TABLE cannot add batch with a default that is not a constant, so the step rebuilds order_line: it copies the rows into a new table, drops the old one and renames the new one.",
           "subject": "table/order_line"
         }
       ],
@@ -24,6 +23,7 @@
       "op": "copyTable",
       "phase": "expand",
       "statements": [
+        "PRAGMA defer_foreign_keys = ON",
         "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"batch\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"order\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"order_id\"\nFROM \"order_line\"",
         "DROP TABLE \"order_line\"",

@@ -2,11 +2,10 @@
   "dialect": "sqlite",
   "expanded": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
   "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
-  "hash": "6eabcbf51ebfe941af0200d819c2fef83f0dadd7996ec8834e6881d3166deae2",
+  "hash": "e9b1665c950e4666fcebbbd7883d96c2c81ca6725e37e9f77e3392332a8ef185",
   "service": "shop-db",
   "steps": [
     {
-      "foreignKeysOff": true,
       "hazards": [
         {
           "class": "destructive",

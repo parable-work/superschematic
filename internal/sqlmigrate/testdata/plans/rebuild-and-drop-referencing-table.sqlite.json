@@ -1,0 +1,107 @@
+{
+  "dialect": "sqlite",
+  "expanded": "301c19aa8d252305e70b351f011e735cf426b2b35db77997addfb47ac216c452",
+  "from": "5bb6d28852f08377407f981f3a755764a6480819d6384538f95c115ed4b2e287",
+  "hash": "ae01560d918f9d93934eeedd57532a8c95d362518eea80a65f76db18f9488c9e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Copying customer, order, order_label, order_line and review holds the database's write lock for time that grows with the tables.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "SQLite's ALTER TABLE cannot drop NOT NULL from created_at, so the step rebuilds customer with the tables that reference it, directly or through another table: order, order_label, order_line and review. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_customer\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"email\" TEXT COLLATE NOCASE NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),\n  \"referrer_id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_review\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"body\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_customer\" (\"id\", \"name\", \"email\", \"created_at\", \"referrer_id\")\nSELECT \"id\", \"name\", \"email\", \"created_at\", \"referrer_id\"\nFROM \"customer\"",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"order_id\"\nFROM \"order_line\"",
+        "INSERT INTO \"_new_review\" (\"id\", \"customer_id\", \"body\")\nSELECT \"id\", \"customer_id\", \"body\"\nFROM \"review\"",
+        "DROP TABLE \"order_label\"",
+        "DROP TABLE \"order_line\"",
+        "DROP TABLE \"order\"",
+        "DROP TABLE \"review\"",
+        "DROP TABLE \"customer\"",
+        "ALTER TABLE \"_new_customer\" RENAME TO \"customer\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\"",
+        "ALTER TABLE \"_new_review\" RENAME TO \"review\"",
+        "CREATE UNIQUE INDEX \"customer_email_key\" ON \"customer\" (\"email\")",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/review",
+          "reason": "Dropping table review deletes its rows (Review).",
+          "subject": "table/review"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Copying customer, order, order_label and order_line holds the database's write lock for time that grows with the tables.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "SQLite's ALTER TABLE cannot drop the default of created_at and drop the default of referrer_id, so the step rebuilds customer with the tables that reference it, directly or through another table: order, order_label and order_line. The phase drops review, which references it too, so the step drops it without copying it. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 2,
+      "op": "copyTable",
+      "phase": "contract",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_customer\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"email\" TEXT COLLATE NOCASE NOT NULL,\n  \"created_at\" TEXT,\n  \"referrer_id\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"_new_customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_customer\" (\"id\", \"name\", \"email\", \"created_at\", \"referrer_id\")\nSELECT \"id\", \"name\", \"email\", \"created_at\", \"referrer_id\"\nFROM \"customer\"",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"order_id\"\nFROM \"order_line\"",
+        "DROP TABLE \"order_label\"",
+        "DROP TABLE \"order_line\"",
+        "DROP TABLE \"order\"",
+        "DROP TABLE \"review\"",
+        "DROP TABLE \"customer\"",
+        "ALTER TABLE \"_new_customer\" RENAME TO \"customer\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\"",
+        "CREATE UNIQUE INDEX \"customer_email_key\" ON \"customer\" (\"email\")",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    }
+  ],
+  "to": "f567c87c2126c6fdb3213750ddbdd1275c16b15633c9107872c9b410850b5160",
+  "toModel": null,
+  "version": 1
+}

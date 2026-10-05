@@ -6,8 +6,9 @@
 // and what apply, status and adopt do.
 //
 // A Runner reaches the database through a Driver. Package postgres
-// implements it over one pgx connection and package sqlite over one
-// connection of the pure-Go SQLite driver.
+// implements it over one pgx connection, package sqlite over one
+// connection of the pure-Go SQLite driver, and package d1 over
+// Cloudflare's REST API.
 package migrate
 
 import (
@@ -74,6 +75,13 @@ func (r *Runner) Apply(ctx context.Context, plan *Plan, phase Phase) (*Result, e
 	}
 	if dialect := r.Driver.Dialect(); plan.Dialect != dialect {
 		return nil, refusef("the plan is for %s and the database is %s", plan.Dialect, dialect)
+	}
+	if checker, ok := r.Driver.(StepChecker); ok {
+		for _, step := range plan.Steps {
+			if err := checker.CheckStep(step); err != nil {
+				return nil, refusef("%v", err)
+			}
+		}
 	}
 	sql := stateSQL[plan.Dialect]
 
@@ -451,7 +459,8 @@ func (r *Runner) sessionStep(ctx context.Context, plan *Plan, step *Step) (stepO
 	return outcome, asStepError(step, err)
 }
 
-// asStepError names the step in an error that does not name it yet.
+// asStepError names the step in an error that does not name it yet, and the
+// statement a driver traced the error to.
 func asStepError(step *Step, err error) error {
 	if err == nil {
 		return nil
@@ -460,7 +469,12 @@ func asStepError(step *Step, err error) error {
 	if errors.As(err, &stepErr) {
 		return err
 	}
-	return &StepError{Index: step.Index, Subject: step.Subject, Err: err}
+	statement := ""
+	var statementErr *StatementError
+	if errors.As(err, &statementErr) {
+		statement = statementErr.Statement
+	}
+	return &StepError{Index: step.Index, Subject: step.Subject, Statement: statement, Err: err}
 }
 
 // Status is a service's row of the state table and the log of the plan in

@@ -1,7 +1,8 @@
 // Package testdb gives each of the runner's tests a database of its own:
-// a SQLite file in a temporary directory, or a Postgres database created on
+// a SQLite file in a temporary directory, a Postgres database created on
 // the server SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL names and dropped when
-// the test ends. Only tests import it.
+// the test ends, or a D1 database a fake D1 server (package d1fake) serves
+// over a SQLite file. Only tests import it.
 package testdb
 
 import (
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	migrate "github.com/parable-work/superschematic/runtime/migrate/go"
+	"github.com/parable-work/superschematic/runtime/migrate/go/d1"
+	"github.com/parable-work/superschematic/runtime/migrate/go/internal/d1fake"
 	"github.com/parable-work/superschematic/runtime/migrate/go/sqlite"
 )
 
@@ -28,28 +32,120 @@ const EnvURL = "SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL"
 
 var counter atomic.Int64
 
-// Dialects are the dialects the tests run on.
-var Dialects = []migrate.Dialect{migrate.SQLite, migrate.Postgres}
+// Backend is a database the tests run on.
+type Backend string
 
-// New returns the URL of a new, empty database of dialect. A Postgres test
-// skips when EnvURL is unset.
-func New(t testing.TB, dialect migrate.Dialect) string {
-	t.Helper()
-	if dialect == migrate.Postgres {
-		return Postgres(t)
+const (
+	// SQLite is a SQLite file.
+	SQLite Backend = "sqlite"
+	// Postgres is a database on the server EnvURL names.
+	Postgres Backend = "postgres"
+	// D1 is a D1 database a fake D1 server serves.
+	D1 Backend = "d1"
+)
+
+// Backends are the backends the tests run on.
+var Backends = []Backend{SQLite, Postgres, D1}
+
+// Dialect is the dialect of the plans the backend runs.
+func (b Backend) Dialect() migrate.Dialect {
+	if b == Postgres {
+		return migrate.Postgres
 	}
-	return SQLite(t)
+	return migrate.SQLite
 }
 
-// SQLite returns the path of a database file that does not exist yet.
-func SQLite(t testing.TB) string {
+// New returns the URL of a new, empty database on backend. A Postgres test
+// skips when EnvURL is unset.
+func New(t testing.TB, backend Backend) string {
+	t.Helper()
+	switch backend {
+	case Postgres:
+		return NewPostgres(t)
+	case D1:
+		return NewD1(t)
+	}
+	return NewSQLite(t)
+}
+
+// D1Token is the API token every fake D1 server takes.
+const D1Token = "fake-d1-token"
+
+var (
+	d1Mu      sync.Mutex
+	d1Servers = map[string]*d1fake.Server{}
+)
+
+// NewD1 starts a fake D1 server over a new SQLite file, stops it when the
+// test ends, and returns its database's d1:// URL. D1Options reaches it.
+func NewD1(t testing.TB) string {
+	t.Helper()
+	server, err := d1fake.New(filepath.Join(t.TempDir(), "d1.db"), d1fake.Options{
+		Token:      D1Token,
+		AccountID:  "fakeaccount",
+		DatabaseID: fmt.Sprintf("database-%d", counter.Add(1)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbURL := server.DatabaseURL()
+	d1Mu.Lock()
+	d1Servers[dbURL] = server
+	d1Mu.Unlock()
+	t.Cleanup(func() {
+		d1Mu.Lock()
+		delete(d1Servers, dbURL)
+		d1Mu.Unlock()
+		server.Close()
+	})
+	return dbURL
+}
+
+func d1Server(t testing.TB, dbURL string) *d1fake.Server {
+	t.Helper()
+	d1Mu.Lock()
+	defer d1Mu.Unlock()
+	server, ok := d1Servers[dbURL]
+	if !ok {
+		t.Fatalf("no fake D1 server serves %s", dbURL)
+	}
+	return server
+}
+
+// D1Options are the options of a D1 driver that reaches the fake server of
+// dbURL: its base URL, its client and its token. Lock tries a held lease
+// again every 10ms.
+func D1Options(t testing.TB, dbURL string) d1.Options {
+	t.Helper()
+	server := d1Server(t, dbURL)
+	return d1.Options{
+		Token:      D1Token,
+		BaseURL:    server.BaseURL(),
+		HTTPClient: server.Client(),
+		LockPoll:   10 * time.Millisecond,
+	}
+}
+
+// sqliteName is the name database/sql opens for a SQLite URL, or for the
+// file behind a fake D1 database.
+func sqliteName(t testing.TB, dbURL string) string {
+	t.Helper()
+	if d1.IsURL(dbURL) {
+		return "file:" + d1Server(t, dbURL).Path() + "?_pragma=busy_timeout(5000)"
+	}
+	return sqlite.DSN(dbURL)
+}
+
+// NewSQLite returns the path of a database file that does not exist yet.
+func NewSQLite(t testing.TB) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "test.db")
 }
 
-// Postgres creates a database on the server EnvURL names, drops it when the
-// test ends, and returns its URL. It skips the test when EnvURL is unset.
-func Postgres(t testing.TB) string {
+// NewPostgres creates a database on the server EnvURL names, drops it when
+// the test ends, and returns its URL. It skips the test when EnvURL is
+// unset.
+func NewPostgres(t testing.TB) string {
 	t.Helper()
 	server := os.Getenv(EnvURL)
 	if server == "" {
@@ -84,12 +180,13 @@ func Postgres(t testing.TB) string {
 	return u.String()
 }
 
-// SQLiteDB opens a database/sql handle on a SQLite database and closes it
-// when the test ends. Its connections have foreign keys off, as SQLite's
-// connections do unless asked.
+// SQLiteDB opens a database/sql handle on a SQLite database, or on the file
+// behind a fake D1 database, and closes it when the test ends. Its
+// connections have foreign keys off, as SQLite's connections do unless
+// asked.
 func SQLiteDB(t testing.TB, dbURL string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", sqlite.DSN(dbURL))
+	db, err := sql.Open("sqlite", sqliteName(t, dbURL))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +206,8 @@ func PostgresConn(t testing.TB, dbURL string) *pgx.Conn {
 	return conn
 }
 
-// Exec runs statements on url, each on its own.
+// Exec runs statements on url, each on its own. On D1 it runs them on the
+// fake's file directly, with foreign keys off.
 func Exec(t testing.TB, dbURL string, statements ...string) {
 	t.Helper()
 	ctx := context.Background()
@@ -126,7 +224,7 @@ func Exec(t testing.TB, dbURL string, statements ...string) {
 		}
 		return
 	}
-	db, err := sql.Open("sqlite", sqlite.DSN(dbURL))
+	db, err := sql.Open("sqlite", sqliteName(t, dbURL))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +269,7 @@ func Strings(t testing.TB, dbURL, query string, args ...any) []string {
 		}
 		return out
 	}
-	db, err := sql.Open("sqlite", sqlite.DSN(dbURL))
+	db, err := sql.Open("sqlite", sqliteName(t, dbURL))
 	if err != nil {
 		t.Fatal(err)
 	}

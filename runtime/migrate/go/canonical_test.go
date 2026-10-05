@@ -106,12 +106,13 @@ func TestLockKey(t *testing.T) {
 }
 
 // TestURLDialect: postgres:// and postgresql:// select Postgres; anything
-// else is SQLite.
+// else, a D1 database included, runs SQLite plans.
 func TestURLDialect(t *testing.T) {
 	for url, want := range map[string]migrate.Dialect{
 		"postgres://u:p@h:5432/db?sslmode=disable": migrate.Postgres,
 		"postgresql://h/db":                        migrate.Postgres,
 		"POSTGRES://h/db":                          migrate.Postgres,
+		"d1://0123abcd/5c1e8a2b-database":          migrate.SQLite,
 		"sqlite:///tmp/app.db":                     migrate.SQLite,
 		"sqlite:app.db":                            migrate.SQLite,
 		"file:app.db?mode=rwc":                     migrate.SQLite,
