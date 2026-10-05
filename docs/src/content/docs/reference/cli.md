@@ -212,6 +212,12 @@ version's when it is a service directory or a git ref. A database whose
 previous version was not built for SQLite plans from the model it
 recorded (`--from <model.json>`).
 
+After a rollout that failed between a plan's phases, the database holds
+the model between them. Plan from that model (`--from <model.json>`, as
+`superschematic-migrate status --model` prints it): the new plan supersedes
+the pending contract
+([A failed rollout](/superschematic/reference/migrations/#a-failed-rollout)).
+
 `--format` prints the plan to stdout; notes, such as planning from an empty
 database, go to stderr. With `--fail-on`, the command prints the plan,
 then lists on stderr each hazard of a listed class that no `--allow` names,
