@@ -1,0 +1,25 @@
+{
+  "statements": [
+    "CREATE TABLE IF NOT EXISTS \"graph_ref\" (id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, root_id TEXT NOT NULL, parent_ref_id TEXT REFERENCES \"graph_ref\" (id), base_commit_id TEXT REFERENCES \"graph_commit\" (id), head_commit_id TEXT REFERENCES \"graph_commit\" (id), name TEXT NOT NULL, sealed_at INTEGER, created_at INTEGER NOT NULL, created_by TEXT NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, deleted_at INTEGER, deleted_by TEXT, _version INTEGER NOT NULL) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_ref_live_name\" ON \"graph_ref\" (graph, root_id, name) WHERE deleted_at IS NULL",
+    "CREATE TABLE IF NOT EXISTS \"graph_ref_history\" (history_id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, id TEXT NOT NULL, _version INTEGER NOT NULL, operation TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')), data TEXT NOT NULL, recorded_at INTEGER NOT NULL) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_ref_history_version\" ON \"graph_ref_history\" (id, _version)",
+    "CREATE TABLE IF NOT EXISTS \"graph_commit\" (id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, root_id TEXT NOT NULL, ref_id TEXT NOT NULL REFERENCES \"graph_ref\" (id), parent_commit_id TEXT REFERENCES \"graph_commit\" (id), message TEXT, schema_epoch INTEGER NOT NULL, content_hash TEXT NOT NULL, sequence INTEGER, created_at INTEGER NOT NULL, created_by TEXT NOT NULL) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_commit_sequence\" ON \"graph_commit\" (graph, root_id, sequence)",
+    "CREATE TABLE IF NOT EXISTS \"graph_patch\" (id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, commit_id TEXT NOT NULL REFERENCES \"graph_commit\" (id), entity_kind TEXT NOT NULL, entity_key TEXT NOT NULL, entity_id TEXT NOT NULL, entity_version INTEGER NOT NULL, operation TEXT NOT NULL CHECK (operation IN ('ADD', 'UPDATE', 'DELETE'))) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_patch_entity\" ON \"graph_patch\" (commit_id, entity_kind, entity_key)",
+    "CREATE INDEX IF NOT EXISTS \"graph_patch_pin\" ON \"graph_patch\" (entity_id, entity_version)",
+    "CREATE TABLE IF NOT EXISTS \"graph_snapshot_entry\" (id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, commit_id TEXT NOT NULL REFERENCES \"graph_commit\" (id), entity_kind TEXT NOT NULL, entity_key TEXT NOT NULL, entity_id TEXT NOT NULL, entity_version INTEGER NOT NULL) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_snapshot_entry_entity\" ON \"graph_snapshot_entry\" (commit_id, entity_kind, entity_key)",
+    "CREATE INDEX IF NOT EXISTS \"graph_snapshot_entry_pin\" ON \"graph_snapshot_entry\" (entity_id, entity_version)",
+    "CREATE TABLE IF NOT EXISTS \"graph_release\" (id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, root_id TEXT NOT NULL, commit_id TEXT NOT NULL REFERENCES \"graph_commit\" (id), created_at INTEGER NOT NULL, created_by TEXT NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, _version INTEGER NOT NULL) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_release_root\" ON \"graph_release\" (graph, root_id)",
+    "CREATE TABLE IF NOT EXISTS \"graph_release_history\" (history_id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, id TEXT NOT NULL, _version INTEGER NOT NULL, operation TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')), data TEXT NOT NULL, recorded_at INTEGER NOT NULL) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_release_history_version\" ON \"graph_release_history\" (id, _version)",
+    "CREATE TABLE IF NOT EXISTS \"graph_member\" (id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, kind TEXT NOT NULL, entity_key TEXT NOT NULL, ref_id TEXT NOT NULL REFERENCES \"graph_ref\" (id), root_id TEXT NOT NULL, tombstone INTEGER NOT NULL CHECK (tombstone IN (0, 1)), _version INTEGER NOT NULL, data TEXT NOT NULL) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_member_entity\" ON \"graph_member\" (graph, kind, ref_id, entity_key)",
+    "CREATE TABLE IF NOT EXISTS \"graph_member_history\" (history_id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, _version INTEGER NOT NULL, operation TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')), data TEXT NOT NULL, recorded_at INTEGER NOT NULL) STRICT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_member_history_version\" ON \"graph_member_history\" (id, _version)",
+    "CREATE INDEX IF NOT EXISTS \"graph_member_history_recorded\" ON \"graph_member_history\" (graph, kind, recorded_at)"
+  ]
+}

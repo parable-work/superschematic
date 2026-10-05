@@ -25,6 +25,7 @@ testdata/vectors/   the core's contract as vectors: {name, op, input, expect}
 testdata/canonical/ the canonical row contract as vectors: {cases} per class, {rows}
 testdata/fixture/   the scenarios' graph: fixture-version-graph-db's descriptor and Postgres DDL
 testdata/scenarios/ the engines' contract as scenarios: {name, description, roots, steps}
+testdata/sqlite/    the SQLite adapters' contract: the layout, a file the TypeScript adapter wrote, and its reads
 ```
 
 This page is the contract. The vectors are its executable form: the Rust
@@ -34,7 +35,8 @@ engine's module `canonical` and the Python package's module `canonical`
 run every canonical vector. The scenarios are the engines' contract: the
 Go, TypeScript, Rust and Python engines run every one through their
 Postgres adapters, and the TypeScript engine runs every one through its
-SQLite adapter too. The package's
+SQLite adapter too. The SQLite vectors are the SQLite adapters' contract,
+which the TypeScript package's tests check. The package's
 types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
@@ -616,6 +618,33 @@ adapter reads from the driver's error through its `Code() int`, as
 `modernc.org/sqlite`'s has, or through `Options.ResultCode` for a driver
 that carries it otherwise.
 
+`testdata/sqlite` holds the vectors every language's SQLite adapter is
+held to, so a file one adapter writes reads the same in another's; its
+README gives each file's shape. `layout.json` is the layout's statements
+under the default names, which `sqliteLayout()` returns exactly.
+`typescript.sql` is a database the TypeScript adapter wrote, as plain SQL:
+the layout's statements, then one `INSERT` per row, one statement per line.
+It loads with foreign keys off, since a ref and its head commit name each
+other, and every key holds once it has loaded. It holds two graphs of one
+root, with every stored form: a primary line, change sets, a sealed one, a
+discarded draft, tagged and untagged commits, patches of every operation,
+snapshots, a release moved to a second tagged commit, rows of every kind
+with a tasting of every value class, a tombstone, and a DELETE image that
+names the actor of the unset that removed its row. `typescript.json` is
+what that file reads back as through an adapter opened with each graph's
+name: each ref's `readRef`, rows, `compose` and `history`, each commit's
+`readCommit`, `materialize`, patches and snapshot, each root's `released`,
+and every history image, with each row as its exact canonical text. A
+script in the TypeScript tests writes the database, with the fixture's
+descriptor, a fixed clock and ids from a seeded generator, so it writes the
+same file each run; the TypeScript tests check that the file reads as
+`typescript.json` through both bindings, that one graph reads none of
+another's, and that the script still writes both files, and
+`UPDATE_SQLITE_VECTORS=1` rewrites them.
+The Go adapter's tests check them too: its layout is `layout.json`, and
+`typescript.sql` reads through it and the Go engine as `typescript.json`,
+with nothing of one graph read through another's adapter.
+
 ## Scenarios
 
 `testdata/scenarios` holds one scenario per file, named by its `name`:
@@ -752,8 +781,9 @@ make python                  # among the Python packages: the binding's unit tes
 cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
-make versiongraph-scenarios  # every scenario through the Go engine and the SQLite adapter, with the adapter's tests, then through the Postgres adapter
-make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
+UPDATE_SQLITE_VECTORS=1 bun test test/sqlite-vectors.test.ts  # in typescript/, after bun run build: rewrite testdata/sqlite; review the diff
+make versiongraph-scenarios  # every scenario through the Go engine and the SQLite adapter, with the adapter's tests and the SQLite vectors, then through the Postgres adapter
+make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, and the SQLite vectors, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
 make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
 ```
@@ -763,8 +793,8 @@ check run against the Postgres that
 `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names, and skip without it;
 `make versiongraph-scenarios`, `make versiongraph-scenarios-ts`,
 `make versiongraph-scenarios-rust` and `make versiongraph-scenarios-python`
-fail without it. The scenarios on SQLite and the SQLite adapter's tests
-need no server and run with or without it, and
+fail without it. The scenarios on SQLite, the SQLite adapters' tests and
+the SQLite vectors need no server and run with or without it, and
 `make versiongraph-scenarios` and `make versiongraph-scenarios-ts` run
 them before they check for the variable. The fixture is the
 compiler's output for `fixture-version-graph-db`, and a compiler test
