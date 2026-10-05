@@ -32,6 +32,7 @@ type NamespaceInfo struct {
 	HasAuth                bool           // Whether any endpoint requires auth
 	HasEncryptedPayload    bool           // Whether namespace has encrypted POST/PUT/PATCH endpoints
 	HasFilterableEndpoints bool           // Whether namespace has any @filterable endpoint
+	HasFileUpload          bool           // Whether namespace has a file upload endpoint, whose methods name RequestOptions
 	ScopeParamName         string         // Name of the hoisted scope parameter if IsScopedNS
 	Imports                []string       // Unique list of types to import from types package
 	// HasMapArgs gates the validateMapArgument helper, for a map argument
@@ -328,6 +329,9 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		if endpoint.Filterable {
 			namespaceMap[ns].HasFilterableEndpoints = true
 			output.HasFilterableEndpoints = true
+		}
+		if sdkEndpoint.HasFileUpload {
+			namespaceMap[ns].HasFileUpload = true
 		}
 	}
 

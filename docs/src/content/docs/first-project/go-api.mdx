@@ -132,8 +132,15 @@ server in-process, with the ORM's no-op database in place of Postgres:
 <Snippet file="go/server_test.go" symbol="TestTheSDKCallsTheGeneratedServer" />
 
 - `AuthConfig.Token` sends `Authorization: Bearer <token>`. `GetToken`
-  resolves a token per request instead, and `RefreshToken` is called after
-  a 401.
+  resolves a token per request, with the request's context, when no static
+  token is set, and `RefreshToken` is called after a 401.
+- `SDKConfig.ServiceCredential` sends a calling service's own credential in
+  `Service-Authorization` and asks its `Token` for a fresh one once after a
+  401 with the code `service_unauthorized`
+  ([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)).
+  A server forwards its own caller by setting `GetToken` to
+  `serviceauth.ForwardedToken`, which reads the token of the request on the
+  call's context.
 - The SDK validates an input before it sends it and returns a
   `*sdk.ValidationError` without a request.
 - A response outside 2xx returns an `*sdk.APIError`, or a type that embeds

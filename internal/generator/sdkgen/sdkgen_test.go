@@ -472,7 +472,7 @@ func renderNamespace(t *testing.T, endpoint EndpointInfo) string {
 		Namespace NamespaceInfo
 	}{
 		SDK:       &SDKOutput{TypesPackage: "@schemas/shop-api-types"},
-		Namespace: NamespaceInfo{Name: "archives", ClassName: "ArchivesNamespace", Endpoints: []EndpointInfo{endpoint}},
+		Namespace: NamespaceInfo{Name: "archives", ClassName: "ArchivesNamespace", Endpoints: []EndpointInfo{endpoint}, HasFileUpload: endpoint.HasFileUpload},
 	}
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, "namespace.tmpl", data); err != nil {
@@ -501,15 +501,16 @@ func TestNamespaceMultipartPreservesQueryParams(t *testing.T) {
 		}},
 	})
 	for _, snippet := range []string{
-		"files: {file: File; },\n    params?: { dryRun?: boolean },\n    signal?: AbortSignal",
-		"formData: FormData,\n    params?: { dryRun?: boolean },\n    signal?: AbortSignal",
+		"files: {file: File; },\n    params?: { dryRun?: boolean },\n    signal?: AbortSignal | RequestOptions",
+		"formData: FormData,\n    params?: { dryRun?: boolean },\n    signal?: AbortSignal | RequestOptions",
+		"import type { RequestOptions } from '../types';",
 		"* @param params - Optional query parameters",
 	} {
 		if !strings.Contains(got, snippet) {
 			t.Fatalf("multipart namespace output is missing:\n%s\n\ngenerated:\n%s", snippet, got)
 		}
 	}
-	if count := strings.Count(got, "{ signal, params }"); count != 2 {
+	if count := strings.Count(got, "{ ...toRequestOptions(signal), params }"); count != 2 {
 		t.Fatalf("the convenience and raw multipart methods must both send the query parameters; found %d calls\n%s", count, got)
 	}
 }
@@ -529,7 +530,7 @@ func TestNamespaceDeleteSendsDeclaredInput(t *testing.T) {
 		InputRequired: true,
 		PathParams:    []PathParam{{Name: "storeId", TSName: "storeId", TSType: "string"}},
 	})
-	if !strings.Contains(got, "this.client.delete<ArchiveStoreResult>(\n      `/api/stores/${storeId}`,\n      { signal, data: input }") {
+	if !strings.Contains(got, "this.client.delete<ArchiveStoreResult>(\n      `/api/stores/${storeId}`,\n      { ...toRequestOptions(signal), data: input }") {
 		t.Fatalf("DELETE does not send its input as the body:\n%s", got)
 	}
 }
@@ -551,7 +552,7 @@ func TestNamespaceDeleteSendsScalarArgumentsInTheBody(t *testing.T) {
 			{ScalarArg: apigen.ScalarArg{Name: "reason", Type: "string"}},
 		},
 	})
-	if !strings.Contains(got, "this.client.delete<string[]>(\n      `/api/posts/${id}/tags`,\n      { signal: requestSignal, data: scalarInput }") {
+	if !strings.Contains(got, "this.client.delete<string[]>(\n      `/api/posts/${id}/tags`,\n      { ...toRequestOptions(requestSignal), data: scalarInput }") {
 		t.Fatalf("DELETE does not send its arguments as the body:\n%s", got)
 	}
 }

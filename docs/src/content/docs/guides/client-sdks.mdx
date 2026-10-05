@@ -132,11 +132,40 @@ Python SDKs send it as it is.
 | Timeout (default 30 s) | `Timeout` (ms) | `timeout` (ms) | `timeout_seconds` | `timeout_ms` |
 | Token per request | `AuthConfig.GetToken` | `auth.getToken` | `auth_token_provider` | `auth_token_provider` |
 | Refresh after a 401 | `AuthConfig.RefreshToken` | `auth.refreshToken` | `auth_token_refresher` | `refresh_auth_token` |
+| Service credential | `ServiceCredential` | `serviceCredential` | `service_credential` | `service_credential` |
+| Forward the end user | `AuthConfig.GetToken`, from the call's context | `{ forward: ctx }`, a method's last argument | no | `RequestOptions::forward` |
 | Retries a 429 | up to 3 times, after `Retry-After` (`MaxRateLimitRetries`) | no | up to 3 times, after `Retry-After` (`max_rate_limit_retries`) | no |
 | Edit each request | `RequestInterceptor`, `Transport` | `requestInterceptor`, `fetch` | `request_interceptor`, `default_headers` | `request_interceptor` |
 
 The Python SDK also retries a `GET`, `HEAD` or `OPTIONS` that failed on the
 network, and logs each failed request through its logger.
+
+## Service credentials
+
+A server that calls another API sends its own credential beside the end
+user's
+([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)).
+Each SDK's config takes a source, a function from a `fresh` flag to a
+token, and the headers to send it in: `Service-Authorization` unless you
+list others, such as `X-Serverless-Authorization` too for a Cloud Run
+callee whose invoker check is on. The SDK sends `Bearer <token>` in each on
+every request, whatever the API's operations need. A 401 whose problem
+`code` is `service_unauthorized` (or whose `error.code` is, in the older
+`{"error": {...}}` envelope) asks the source for a fresh token once and
+retries, without the end-user refresh; any other 401 runs the end-user
+refresh and never asks the source. One call spends at most one of each.
+
+To act for its own caller, a server forwards that end user's
+`Authorization` per call. In Go, the client's `AuthConfig.GetToken` reads
+the token of the request on the call's context
+(`serviceauth.ForwardedToken`), so a handler that passes its context
+forwards; `GetToken` is asked on every call when no static `Token` is set. In
+TypeScript a method's last argument, an `AbortSignal` until now, also takes
+`{ signal, forward: ctx }`, and in Rust a method takes
+`RequestOptions::forward(ctx.bearer_token())`. A forwarded call sends that
+token, or no `Authorization` when the request has none, in place of the
+client's own, and never refreshes it. The Python SDK has the credential and
+no forward option, since no server is written in Python.
 
 ## Install them
 

@@ -181,13 +181,24 @@ as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
 and operation sets that share a namespace share it: `ProductQueries` and
 `ProductMutations` are both `sdk.product`.
 
+`serviceCredential: { token, headers }` is the calling service's own
+credential
+([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+`token(fresh)` returns it, and the SDK sends `Bearer <token>` in
+`Service-Authorization`, or in each of `headers`, on every request. A 401
+whose code is `service_unauthorized` calls `token(true)` once and retries,
+without the end-user refresh. A server forwards its own caller per call
+with `{ forward: ctx }` as a method's last argument: the call sends
+`ctx.bearerToken` as `Authorization`, or none when it is null, instead of
+the configured token, and does not refresh it.
+
 An operation without an input type takes its arguments in order after the
 path parameters, then its query parameters as one object, if it has any,
-and an `AbortSignal`. A plain object in the first argument's place is
-instead all of its arguments by name, followed by the query parameters and
-the signal. They travel where the route reads them: on `GET` in the query
-string, and on every other method, `DELETE` included, as the fields of the
-JSON body.
+and an `AbortSignal` or `RequestOptions` (`{ signal, forward }`). A plain
+object in the first argument's place is instead all of its arguments by
+name, followed by the query parameters and the signal or options. They
+travel where the route reads them: on `GET` in the query string, and on
+every other method, `DELETE` included, as the fields of the JSON body.
 
 A map argument (`Record<string, T>`, `Record<string, T[]>` for a map of
 lists) is sent as that JSON object. Since a plain object in first place is

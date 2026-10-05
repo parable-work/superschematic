@@ -131,6 +131,15 @@ product = sdk.product.get_product(id)
 Each namespace is a snake_case property of the SDK: `ProductQueries` and
 `ProductMutations` both live on `sdk.product`.
 
+`service_credential=ServiceCredential(token=..., headers=...)` is the
+calling service's own credential
+([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+`token(fresh)` returns it, and the SDK sends `Bearer <token>` in
+`Service-Authorization`, or in each of `headers`, on every request. A 401
+whose code is `service_unauthorized` calls `token(True)` once and retries,
+without the end-user refresh. The Python SDK has no option to forward an
+end user, since no server is written in Python.
+
 With the types package installed, an input is checked before the request:
 pydantic checks its types and required fields, then `validate_all` checks
 the schema's rules (`listMin`, `minLength`, `min`, `pattern`, ...) on the

@@ -40,6 +40,7 @@ use your_sdk_crate::RequestOptions;
 let request_options = RequestOptions {
     timeout_ms: Some(5_000),
     request_hook: Some(Arc::new(|request| request.header("x-trace-id", "trace-123"))),
+    ..Default::default()
 };
 ```
 
@@ -58,7 +59,7 @@ let encrypted_options = EncryptedRequestOptions {
     }),
     request_options: Some(RequestOptions {
         timeout_ms: Some(10_000),
-        request_hook: None,
+        ..Default::default()
     }),
 };
 ```

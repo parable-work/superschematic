@@ -128,6 +128,14 @@ func TestWriteSDKGoldenQueryLists(t *testing.T) {
 // empty one is left out, and a required empty list or an item the value
 // cannot carry fails validation at its path before any request.
 func TestQueryListsSDKCompilesAndRuns(t *testing.T) {
+	runInQueryListsSDK(t, "test_query_lists.js")
+}
+
+// runInQueryListsSDK writes the TypeScript SDK of query-lists-api with its
+// types package, type-checks it, then runs the bun test file testFile, next
+// to this file, with SDK_DIR set to the SDK package.
+func runInQueryListsSDK(t *testing.T, testFile string) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -152,10 +160,10 @@ func TestQueryListsSDKCompilesAndRuns(t *testing.T) {
 	if !ok {
 		t.Fatal("resolve current test file path")
 	}
-	run := exec.Command(bunPath, "test", filepath.Join(filepath.Dir(currentFile), "test_query_lists.js"))
+	run := exec.Command(bunPath, "test", filepath.Join(filepath.Dir(currentFile), testFile))
 	run.Env = append(os.Environ(), "SDK_DIR="+sdkDir)
 	if out, err := run.CombinedOutput(); err != nil {
-		t.Fatalf("query lists SDK runtime test failed: %v\n%s", err, out)
+		t.Fatalf("%s failed: %v\n%s", testFile, err, out)
 	}
 }
 
