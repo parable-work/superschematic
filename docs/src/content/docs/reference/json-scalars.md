@@ -83,6 +83,7 @@ hand over:
 | Go types, an input type's field | `InputField` not set | `IsNull()` |
 | Go types, any other type's field | `nil` | a pointer to `GenericJSON("null")` |
 | TypeScript API server and types | `undefined` | `null` |
+| Rust API server, a body argument | `None` | `Some(Value::Null)` |
 | Python types | not in `model_fields_set` | `None`, in `model_fields_set` |
 | Rust types | `None` | `Some(Value::Null)` |
 

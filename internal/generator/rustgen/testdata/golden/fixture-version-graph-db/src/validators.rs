@@ -5,8 +5,8 @@
 //! A validator checks a JSON value as the generated Go, TypeScript and
 //! Python validators do (D14): presence, then the JSON type, then the
 //! rules, with one error per failing value at its wire path (`field`,
-//! `field[i]`, `field.key`). `parse_<type>` fills the type's defaults,
-//! validates the value and decodes it.
+//! `field[i]`, `field.key`). `prepare_<type>` fills the type's defaults and
+//! validates the value; `parse_<type>` also decodes it.
 
 #![allow(clippy::too_many_lines, clippy::needless_borrow)]
 
@@ -417,9 +417,10 @@ pub fn validate_cover_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_cover)
 }
 
-/// Parses a JSON value as `Cover`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_cover(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Cover, rt::ParseError> {
+/// Prepares a JSON value as `Cover`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_cover` decodes.
+pub fn prepare_cover(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(mut object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -430,6 +431,12 @@ pub fn parse_cover(value: Value, unknown_fields: rt::UnknownFields) -> Result<cr
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Cover`: `prepare_cover`, then decodes it.
+pub fn parse_cover(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Cover, rt::ParseError> {
+    let value = prepare_cover(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -508,9 +515,10 @@ pub fn validate_ingredient_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_ingredient)
 }
 
-/// Parses a JSON value as `Ingredient`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_ingredient(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Ingredient, rt::ParseError> {
+/// Prepares a JSON value as `Ingredient`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_ingredient` decodes.
+pub fn prepare_ingredient(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(mut object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -521,6 +529,12 @@ pub fn parse_ingredient(value: Value, unknown_fields: rt::UnknownFields) -> Resu
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Ingredient`: `prepare_ingredient`, then decodes it.
+pub fn parse_ingredient(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Ingredient, rt::ParseError> {
+    let value = prepare_ingredient(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -597,9 +611,10 @@ pub fn validate_note_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_note)
 }
 
-/// Parses a JSON value as `Note`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_note(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Note, rt::ParseError> {
+/// Prepares a JSON value as `Note`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_note` decodes.
+pub fn prepare_note(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(mut object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -610,6 +625,12 @@ pub fn parse_note(value: Value, unknown_fields: rt::UnknownFields) -> Result<cra
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Note`: `prepare_note`, then decodes it.
+pub fn parse_note(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Note, rt::ParseError> {
+    let value = prepare_note(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -653,9 +674,10 @@ pub fn validate_recipe_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_recipe)
 }
 
-/// Parses a JSON value as `Recipe`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_recipe(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Recipe, rt::ParseError> {
+/// Prepares a JSON value as `Recipe`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_recipe` decodes.
+pub fn prepare_recipe(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -665,6 +687,12 @@ pub fn parse_recipe(value: Value, unknown_fields: rt::UnknownFields) -> Result<c
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Recipe`: `prepare_recipe`, then decodes it.
+pub fn parse_recipe(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Recipe, rt::ParseError> {
+    let value = prepare_recipe(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -746,9 +774,10 @@ pub fn validate_recipe_commit_required(value: Option<&Value>) -> rt::ScalarResul
     rt::require_object(value, validate_recipe_commit)
 }
 
-/// Parses a JSON value as `RecipeCommit`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_recipe_commit(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipeCommit, rt::ParseError> {
+/// Prepares a JSON value as `RecipeCommit`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_recipe_commit` decodes.
+pub fn prepare_recipe_commit(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -758,6 +787,12 @@ pub fn parse_recipe_commit(value: Value, unknown_fields: rt::UnknownFields) -> R
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `RecipeCommit`: `prepare_recipe_commit`, then decodes it.
+pub fn parse_recipe_commit(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipeCommit, rt::ParseError> {
+    let value = prepare_recipe_commit(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -815,9 +850,10 @@ pub fn validate_recipe_patch_required(value: Option<&Value>) -> rt::ScalarResult
     rt::require_object(value, validate_recipe_patch)
 }
 
-/// Parses a JSON value as `RecipePatch`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_recipe_patch(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipePatch, rt::ParseError> {
+/// Prepares a JSON value as `RecipePatch`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_recipe_patch` decodes.
+pub fn prepare_recipe_patch(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -827,6 +863,12 @@ pub fn parse_recipe_patch(value: Value, unknown_fields: rt::UnknownFields) -> Re
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `RecipePatch`: `prepare_recipe_patch`, then decodes it.
+pub fn parse_recipe_patch(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipePatch, rt::ParseError> {
+    let value = prepare_recipe_patch(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -927,9 +969,10 @@ pub fn validate_recipe_ref_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_recipe_ref)
 }
 
-/// Parses a JSON value as `RecipeRef`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_recipe_ref(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipeRef, rt::ParseError> {
+/// Prepares a JSON value as `RecipeRef`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_recipe_ref` decodes.
+pub fn prepare_recipe_ref(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -939,6 +982,12 @@ pub fn parse_recipe_ref(value: Value, unknown_fields: rt::UnknownFields) -> Resu
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `RecipeRef`: `prepare_recipe_ref`, then decodes it.
+pub fn parse_recipe_ref(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipeRef, rt::ParseError> {
+    let value = prepare_recipe_ref(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -1005,9 +1054,10 @@ pub fn validate_recipe_release_required(value: Option<&Value>) -> rt::ScalarResu
     rt::require_object(value, validate_recipe_release)
 }
 
-/// Parses a JSON value as `RecipeRelease`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_recipe_release(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipeRelease, rt::ParseError> {
+/// Prepares a JSON value as `RecipeRelease`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_recipe_release` decodes.
+pub fn prepare_recipe_release(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -1017,6 +1067,12 @@ pub fn parse_recipe_release(value: Value, unknown_fields: rt::UnknownFields) -> 
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `RecipeRelease`: `prepare_recipe_release`, then decodes it.
+pub fn parse_recipe_release(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipeRelease, rt::ParseError> {
+    let value = prepare_recipe_release(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -1070,9 +1126,10 @@ pub fn validate_recipe_snapshot_entry_required(value: Option<&Value>) -> rt::Sca
     rt::require_object(value, validate_recipe_snapshot_entry)
 }
 
-/// Parses a JSON value as `RecipeSnapshotEntry`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_recipe_snapshot_entry(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipeSnapshotEntry, rt::ParseError> {
+/// Prepares a JSON value as `RecipeSnapshotEntry`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_recipe_snapshot_entry` decodes.
+pub fn prepare_recipe_snapshot_entry(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -1082,6 +1139,12 @@ pub fn parse_recipe_snapshot_entry(value: Value, unknown_fields: rt::UnknownFiel
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `RecipeSnapshotEntry`: `prepare_recipe_snapshot_entry`, then decodes it.
+pub fn parse_recipe_snapshot_entry(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::RecipeSnapshotEntry, rt::ParseError> {
+    let value = prepare_recipe_snapshot_entry(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -1180,9 +1243,10 @@ pub fn validate_step_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_step)
 }
 
-/// Parses a JSON value as `Step`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_step(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Step, rt::ParseError> {
+/// Prepares a JSON value as `Step`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_step` decodes.
+pub fn prepare_step(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(mut object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -1193,6 +1257,12 @@ pub fn parse_step(value: Value, unknown_fields: rt::UnknownFields) -> Result<cra
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Step`: `prepare_step`, then decodes it.
+pub fn parse_step(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Step, rt::ParseError> {
+    let value = prepare_step(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -1350,9 +1420,10 @@ pub fn validate_tasting_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_tasting)
 }
 
-/// Parses a JSON value as `Tasting`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_tasting(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Tasting, rt::ParseError> {
+/// Prepares a JSON value as `Tasting`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_tasting` decodes.
+pub fn prepare_tasting(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(mut object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -1363,6 +1434,12 @@ pub fn parse_tasting(value: Value, unknown_fields: rt::UnknownFields) -> Result<
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Tasting`: `prepare_tasting`, then decodes it.
+pub fn parse_tasting(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Tasting, rt::ParseError> {
+    let value = prepare_tasting(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
@@ -1431,9 +1508,10 @@ pub fn validate_utensil_required(value: Option<&Value>) -> rt::ScalarResult {
     rt::require_object(value, validate_utensil)
 }
 
-/// Parses a JSON value as `Utensil`: fills its `@default` values, refuses
-/// undeclared keys when asked, validates it and decodes it.
-pub fn parse_utensil(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Utensil, rt::ParseError> {
+/// Prepares a JSON value as `Utensil`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_utensil` decodes.
+pub fn prepare_utensil(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
     let Value::Object(mut object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
@@ -1444,5 +1522,11 @@ pub fn parse_utensil(value: Value, unknown_fields: rt::UnknownFields) -> Result<
     if !errors.is_empty() {
         return Err(rt::ParseError::Invalid(errors));
     }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Utensil`: `prepare_utensil`, then decodes it.
+pub fn parse_utensil(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Utensil, rt::ParseError> {
+    let value = prepare_utensil(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }

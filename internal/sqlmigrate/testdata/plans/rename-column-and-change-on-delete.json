@@ -1,0 +1,74 @@
+{
+  "dialect": "postgres",
+  "expanded": "56316a0b570a36f1f34e000bd31c11180f12e53d7abcaa5d5ca0786cb0cb70c5",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "08c76915336648363b8caefb8e912cca09e8b23759392bb256f1584e07207237",
+  "renames": [
+    "order.customer_id=order.buyer_id"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/buyer_id",
+          "reason": "order.customer_id is renamed to order.buyer_id (Order.buyer): servers built from the previous version still use the old name.",
+          "subject": "table/order/column/buyer_id"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME COLUMN customer_id TO buyer_id"
+      ],
+      "subject": "table/order/column/buyer_id",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME CONSTRAINT fk_order_customer_id TO fk_order_buyer_id"
+      ],
+      "subject": "table/order/constraint/fk_order_buyer_id",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_customer_placed_at RENAME TO idx_order_buyer_placed_at"
+      ],
+      "subject": "table/order/index/idx_order_buyer_placed_at",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "replaceForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT fk_order_buyer_id",
+        "ALTER TABLE \"order\" ADD CONSTRAINT fk_order_buyer_id FOREIGN KEY (buyer_id) REFERENCES customer (id) ON DELETE CASCADE NOT VALID"
+      ],
+      "subject": "table/order/constraint/fk_order_buyer_id",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "validateForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT fk_order_buyer_id"
+      ],
+      "subject": "table/order/constraint/fk_order_buyer_id",
+      "transactional": true
+    }
+  ],
+  "to": "f0c4990703f8053995ed111db299af776caaa59b8670f6ddaabd5f6ddcad258d",
+  "toModel": null,
+  "version": 1
+}

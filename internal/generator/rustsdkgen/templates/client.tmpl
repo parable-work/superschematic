@@ -1,4 +1,4 @@
-use reqwest::header::{HeaderName, HeaderValue, AUTHORIZATION};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use reqwest::{Method, Url};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -104,14 +104,20 @@ struct ServiceState {
 /// A response read whole.
 struct ResponseText {
     status: reqwest::StatusCode,
+    headers: HeaderMap,
     body: String,
 }
 
 impl ResponseText {
     async fn read(response: reqwest::Response) -> Result<Self, SDKError> {
         let status = response.status();
+        let headers = response.headers().clone();
         let body = response.text().await?;
-        Ok(Self { status, body })
+        Ok(Self {
+            status,
+            headers,
+            body,
+        })
     }
 }
 
@@ -526,9 +532,13 @@ impl HttpClient {
     where
         T: DeserializeOwned,
     {
-        let ResponseText { status, body } = response;
+        let ResponseText {
+            status,
+            headers,
+            body,
+        } = response;
         if !status.is_success() {
-            return Err(SDKError::api(status.as_u16(), &body));
+            return Err(SDKError::api(status.as_u16(), &headers, &body));
         }
 
         if body.trim().is_empty() {

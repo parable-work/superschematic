@@ -25,10 +25,15 @@ var seal = flag.Bool("seal", false, "rewrite the from, to and hash members of th
 // chainFile is a fixture that follows the one before it: NN-<name>.
 var chainFile = regexp.MustCompile(`^\d\d-`)
 
+// supersedeFile is a fixture that starts from the model between the phases
+// of chain fixture NN: supersede-NN.
+var supersedeFile = regexp.MustCompile(`^supersede-(\d\d)\.`)
+
 // TestFixturesAreSealed: every hand-written plan in testdata/<dialect> reads
 // with ReadPlan, and its from is the to of the plan before it in name order
-// (the first from an empty database) or, for a fixture outside the chain,
-// the to of 01. With -seal it rewrites from, to and hash first.
+// (the first from an empty database), for supersede-NN the expanded of NN,
+// or, for any other fixture outside the chain, the to of 01. With -seal it
+// rewrites from, to, expanded and hash first.
 func TestFixturesAreSealed(t *testing.T) {
 	for _, dialect := range []string{"postgres", "sqlite"} {
 		dir := filepath.Join("testdata", dialect)
@@ -38,11 +43,18 @@ func TestFixturesAreSealed(t *testing.T) {
 		}
 		sort.Strings(names)
 		var previous, first string
+		expanded := map[string]string{} // NN -> the expanded of chain fixture NN
 		for _, path := range names {
 			name := filepath.Base(path)
 			from := first
 			if chainFile.MatchString(name) {
 				from = previous
+			}
+			if m := supersedeFile.FindStringSubmatch(name); m != nil {
+				from = expanded[m[1]]
+				if from == "" {
+					t.Fatalf("%s: fixture %s- has no expanded", path, m[1])
+				}
 			}
 			doc, err := os.ReadFile(path)
 			if err != nil {
@@ -69,14 +81,15 @@ func TestFixturesAreSealed(t *testing.T) {
 				if first == "" {
 					first = plan.To
 				}
+				expanded[name[:2]] = plan.Expanded
 			}
 		}
 	}
 }
 
 // sealDoc applies edit to a plan document and seals it again: it sets
-// to from toModel when setTo, and hash from the content. The result is
-// indented.
+// to from toModel, and expanded from expandedModel when the plan has one,
+// when setTo, and hash from the content. The result is indented.
 func sealDoc(t testing.TB, doc []byte, edit func(plan map[string]any), setTo bool) []byte {
 	t.Helper()
 	dec := json.NewDecoder(bytes.NewReader(doc))
@@ -96,6 +109,17 @@ func sealDoc(t testing.TB, doc []byte, edit func(plan map[string]any), setTo boo
 			t.Fatal(err)
 		}
 		plan["to"] = model.Hash
+		if between, ok := plan["expandedModel"]; ok {
+			raw, err := json.Marshal(between)
+			if err != nil {
+				t.Fatal(err)
+			}
+			model, err := migrate.ReadModel(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan["expanded"] = model.Hash
+		}
 	}
 	delete(plan, "hash")
 	raw, err := json.Marshal(plan)

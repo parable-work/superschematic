@@ -114,9 +114,9 @@ argument.
 ## List rules
 
 The generated Go, TypeScript, Python and Rust validators, the Go,
-TypeScript and Python schema runtimes and the Go API routes' body
-arguments apply one set of rules, to `T[]` and to the outer list of
-`T[][]` alike:
+TypeScript and Python schema runtimes and the Go, TypeScript and Rust API
+servers' body arguments apply one set of rules, to `T[]` and to the outer
+list of `T[][]` alike:
 
 - **Required means present, not non-empty.** `[]` satisfies a required
   list, and so does an empty outer list. Declare non-emptiness with

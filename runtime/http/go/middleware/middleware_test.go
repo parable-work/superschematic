@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/parable-work/superschematic/runtime/http/go/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,7 +129,8 @@ func TestTimeout(t *testing.T) {
 		handler.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusGatewayTimeout, w.Code)
-		assert.Contains(t, w.Body.String(), "Gateway Timeout")
+		assert.Equal(t, "application/problem+json", w.Header().Get("Content-Type"))
+		assert.JSONEq(t, `{"type":"about:blank","title":"Gateway Timeout","status":504,"detail":"Gateway Timeout","code":"gateway_timeout"}`, w.Body.String())
 	})
 
 	t.Run("preserves_headers_on_success", func(t *testing.T) {
@@ -166,16 +168,36 @@ func TestRateLimit(t *testing.T) {
 	t.Run("exceeds_limit_returns_429", func(t *testing.T) {
 		handler := middleware.RateLimit(2, time.Minute, nopLoggerGetter)(okHandler())
 
-		var lastStatus int
+		var last *httptest.ResponseRecorder
 		for i := 0; i < 5; i++ {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.99:12345"
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
-			lastStatus = w.Code
+			last = w
 		}
 
-		assert.Equal(t, http.StatusTooManyRequests, lastStatus)
+		assert.Equal(t, http.StatusTooManyRequests, last.Code)
+		assert.Equal(t, "application/problem+json", last.Header().Get("Content-Type"))
+		assert.Equal(t, "60", last.Header().Get("Retry-After"))
+		assert.JSONEq(t, `{"type":"about:blank","title":"Too Many Requests","status":429,"detail":"Too Many Requests","code":"too_many_requests"}`, last.Body.String())
+	})
+
+	t.Run("the_problem_carries_the_request_id", func(t *testing.T) {
+		handler := chimiddleware.RequestID(middleware.RateLimit(1, time.Minute, nopLoggerGetter)(okHandler()))
+
+		var last *httptest.ResponseRecorder
+		for i := 0; i < 2; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = "10.0.0.98:12345"
+			req.Header.Set("X-Request-Id", "req-7")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			last = w
+		}
+
+		assert.Equal(t, http.StatusTooManyRequests, last.Code)
+		assert.Contains(t, last.Body.String(), `"requestId":"req-7"`)
 	})
 }
 

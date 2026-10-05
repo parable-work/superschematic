@@ -12,7 +12,7 @@ pub use client::{
     ClientConfig, RefreshTokenCallback, RefreshTokenFuture, ServiceCredential, ServiceTokenFuture,
     ServiceTokenSource, TokenProvider, TokenProviderFuture,
 };
-pub use errors::SDKError;
+pub use errors::{ApiProblem, SDKError};
 pub use runtime::{
     EncryptedPayloadEnvelope, EncryptedRequestOptions, ForwardedUser, MultipartBody, PublicEncryptionKey,
     RequestHook, RequestOptions, UploadFile,

@@ -1,7 +1,81 @@
 {
   "dialect": "postgres",
+  "expanded": "1b9112bee450fad6e21f0e4703359d57a1d5eea00a03662098565c116fe7ecac",
+  "expandedModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        },
+        "uniques": [
+          {
+            "columns": [
+              "name"
+            ],
+            "name": "account_name_key"
+          }
+        ]
+      },
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "account_id",
+            "nullable": true,
+            "origin": "Entry.accountId",
+            "type": "UUID"
+          },
+          {
+            "name": "memo",
+            "nullable": true,
+            "origin": "Entry.memo",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Entry",
+        "kind": "entity",
+        "name": "entry",
+        "origin": "Entry",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "entry_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
   "from": "e4d34acd80f06c161377d9f3e4ee4a51550478a5ec4466bc043df5f54c95d176",
-  "hash": "93b845f219a7a779f3559b7fb940760fd406e02bd56a51340f8d6ca353772600",
+  "hash": "224591304541316d64a7db0a924c34d6b7ef88bc1c7c51f8b3f9682f840c4328",
   "service": "ledger-db",
   "steps": [
     {

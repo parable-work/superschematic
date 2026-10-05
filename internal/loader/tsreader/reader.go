@@ -150,7 +150,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *Sch
 		return nil, nil, nil, err
 	}
 
-	schema := ir.NewSchema(cfg.Name, cfg.Kind)
+	schema := cfg.NewSchema()
 	w := newWalker(sp, cfg, schema, packages, o.registry)
 	if err := o.profile.Measure("tsreader.walk", func() error {
 		for _, file := range sp.schemaFiles {
