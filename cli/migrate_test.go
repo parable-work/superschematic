@@ -732,6 +732,47 @@ func TestMigratePlanSQLite(t *testing.T) {
 	assert.Equal(t, sqlmigrate.Postgres, decodePlan(t, stdout).Dialect)
 }
 
+// TestMigratePlanSQLiteChecksThePreviousVersion: --dialect sqlite refuses a
+// previous version, a directory or a git ref, whose outputs.sql.dialects
+// does not list sqlite, and says to plan from the model the database
+// recorded or from an empty database. A model file is checked by its own
+// dialect, so a SQLite model plans.
+func TestMigratePlanSQLiteChecksThePreviousVersion(t *testing.T) {
+	const refused = "the previous version of shop-db was not built for sqlite (its outputs.sql.dialects lists postgres); " +
+		"plan from the model the database recorded (--from <model.json>, as superschematic-migrate status --model prints it), " +
+		"or from an empty database with neither --from nor --from-ref"
+
+	repo := newGitTestRepo(t)
+	schemasRoot := filepath.Join(repo.dir, "schemas")
+	writeSchemasRoot(t, schemasRoot, map[string]map[string]string{"shop-db": migrateDB(orderIDField, orderTotalField)})
+	repo.commit("v1, for postgres only")
+	writeSchemasRoot(t, schemasRoot, map[string]map[string]string{"shop-db": sqliteDB(orderIDField, orderTotalField, orderNoteField)})
+	service := filepath.Join(schemasRoot, "services", "shop-db")
+	previous := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{
+		"shop-db": migrateDB(orderIDField, orderTotalField),
+	})
+
+	for _, from := range [][]string{{"--from-ref", "main"}, {"--from", filepath.Join(previous, "shop-db")}} {
+		_, _, err := runMigratePlanCmd(t, append([]string{service, "--dialect", "sqlite", "--format", "json"}, from...)...)
+		require.Error(t, err, "%v", from)
+		assert.Contains(t, err.Error(), "migrate plan: "+strings.Join(from, " ")+": "+refused)
+
+		// Postgres plans from the same version.
+		_, _, err = runMigratePlanCmd(t, append([]string{service, "--format", "json"}, from...)...)
+		require.NoError(t, err, "%v", from)
+	}
+
+	// The model a SQLite database recorded plans, whatever its version
+	// listed.
+	stdout, _, err := runMigratePlanCmd(t, service, "--dialect", "sqlite", "--print-model")
+	require.NoError(t, err)
+	modelFile := filepath.Join(t.TempDir(), "model.json")
+	require.NoError(t, os.WriteFile(modelFile, []byte(stdout), 0o644))
+	stdout, _, err = runMigratePlanCmd(t, service, "--dialect", "sqlite", "--from", modelFile, "--format", "json")
+	require.NoError(t, err)
+	assert.Empty(t, decodePlan(t, stdout).Steps)
+}
+
 func TestMigratePlanRename(t *testing.T) {
 	previous := writeSchemasRoot(t, filepath.Join(t.TempDir(), "schemas"), map[string]map[string]string{
 		"shop-db": migrateDB(orderIDField, orderTotalField),

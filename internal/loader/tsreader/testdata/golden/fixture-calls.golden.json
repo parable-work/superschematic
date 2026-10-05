@@ -1,0 +1,27 @@
+{
+  "name": "fixture-calls",
+  "kind": "API",
+  "calls": [
+    {
+      "name": "fixture-api",
+      "kind": "API"
+    }
+  ],
+  "enums": {
+    "CallProbeStatus": {
+      "name": "CallProbeStatus",
+      "owner": "fixture-calls",
+      "comment": "Minimal schema content: the fixture exists to exercise calls in\nschema.config.ts.",
+      "values": [
+        {
+          "name": "Ok",
+          "serializedAs": "ok"
+        },
+        {
+          "name": "Failed",
+          "serializedAs": "failed"
+        }
+      ]
+    }
+  }
+}

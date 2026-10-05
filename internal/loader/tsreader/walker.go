@@ -253,7 +253,11 @@ func (w *walker) versionedConfigFromDecorator(d decoratorRef) (*ir.VersionedConf
 			if !ok {
 				return nil, errorAtNode(d.node, "@versioned retentionDays must be a number literal")
 			}
-			n := int(f)
+			days, ok := safeIntegerLiteral(f)
+			if !ok {
+				return nil, errorAtNode(d.node, "@versioned retentionDays must be an integer literal, got %s", formatLiteral(f))
+			}
+			n := int(days)
 			out.RetentionDays = &n
 		case "partitionBy":
 			s, ok := value.(string)
@@ -359,9 +363,10 @@ func (w *walker) versionGraphFromDecorator(d decoratorRef) (*ir.VersionGraphConf
 }
 
 // graphMemberFromDecorator reads @graphMember({ graph, parent?, order?,
-// singleton? }). graph and parent.of name schema classes as values, which
-// the argument evaluator does not read, so the object literal is walked
-// here.
+// singleton? }). graph and parent.of name schema classes as values. The
+// object literal is walked here rather than evaluated whole, so each bad
+// property is reported at its value; see the registration in
+// internal/registry/core_decorators.go for why the decorator has no Apply.
 func (w *walker) graphMemberFromDecorator(d decoratorRef) (*ir.GraphMemberConfig, *SchemaError) {
 	if len(d.args) != 1 || d.args[0].Kind != kindObjectLiteralExpression {
 		return nil, errorAtNode(d.node, "@graphMember takes one config object literal")
@@ -469,18 +474,31 @@ func (w *walker) eachProperty(node *astNode, fn func(key string, value *astNode)
 	return nil
 }
 
-// classReference resolves a decorator argument that names a schema class as
-// a value (graph: Recipe) to the class name. Whether the class belongs to
-// this schema is a verification rule.
+// classReference resolves a @graphMember property that names a schema class
+// as a value (graph: Recipe) to the class name. Unlike a class the argument
+// evaluator reads (evaluateClass), it records no import: whether the class
+// belongs to this schema is a verification rule.
 func (w *walker) classReference(d decoratorRef, node *astNode) (string, *SchemaError) {
 	if node.Kind != kindIdentifier && node.Kind != kindPropertyAccessExpression {
 		return "", errorAtNode(node, "@%s expects a schema class here", d.id.name)
 	}
-	id, ok := w.identityOf(node)
-	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
+	id, ok := w.classIdentity(node)
+	if !ok {
 		return "", errorAtNode(node, "cannot resolve %q in @%s to a schema class", w.nodeText(node), d.id.name)
 	}
 	return id.name, nil
+}
+
+// classIdentity resolves a name used as a value (an identifier or property
+// access) to the identity of the class it names. ok is false when the name
+// does not resolve or resolves to anything but a class declaration. The
+// argument evaluator, @graphMember and @source all resolve a class this way.
+func (w *walker) classIdentity(node *astNode) (symbolIdentity, bool) {
+	id, ok := w.identityOf(node)
+	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
+		return symbolIdentity{}, false
+	}
+	return id, true
 }
 
 // decoratorsOf parses and identity-resolves a node's decorators. Decorators
@@ -1050,14 +1068,16 @@ func applyValidateConfig(cfg map[string]any, fd *ir.FieldDef) {
 // The walk records the SourceRef and the resolved (flattened) source type;
 // the structural verification -- assignability, the @virtual requirement,
 // the @sourceMustProject warning -- is the format-agnostic validation
-// pass's job.
+// pass's job. The target is a class named as a value, but the argument
+// evaluator does not read it: the flattening needs the class's declaration,
+// and a cross-service target is never recorded as an import.
 func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 	if len(src.args) != 1 {
 		w.addErr(errorAtNode(src.node, "@source takes exactly one type argument"))
 		return
 	}
-	id, ok := w.identityOf(src.args[0])
-	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
+	id, ok := w.classIdentity(src.args[0])
+	if !ok {
 		w.addErr(errorAtNode(src.node, "@source target must be a schema class"))
 		return
 	}
@@ -1228,7 +1248,14 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 			w.addErr(serr)
 			continue
 		}
-		op.Auth = op.Auth || auth
+		// @publicRoute opens its route: the set's Authenticated does not reach
+		// it, and a caller decorator on the same method contradicts it.
+		if conflict := verify.PublicRouteConflict(op); conflict != "" {
+			w.addErr(errorAtNode(m, "@publicRoute contradicts %s on %s: a public route needs no caller", conflict, op.Name))
+		}
+		if !op.Public {
+			op.Auth = op.Auth || auth
+		}
 		set.Operations = append(set.Operations, op)
 	}
 

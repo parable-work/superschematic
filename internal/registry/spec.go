@@ -161,8 +161,10 @@ type DecoratorSpec struct {
 	// statically evaluated decorator arguments (string, float64, bool, nil,
 	// []any, map[string]any), in order. Only the null literal is nil; an
 	// empty list or object is an empty []any or map[string]any, as the data
-	// forms decode it. A nil Apply marks a decorator the frontend interprets
-	// itself (role selection, @source linkage, @envVars, @versioned): it
+	// forms decode it. A class named as a value is the map {"class": name}
+	// (ClassRef), from every form; DecodeClassRef reads one. A nil Apply
+	// marks a decorator the frontend interprets itself (role selection,
+	// @source linkage, @envVars, @versioned, the version graph markers): it
 	// still passes the origin, target and kind checks and appears in the
 	// JSON Schema, but its arguments are not evaluated. Extensions must set
 	// Apply.

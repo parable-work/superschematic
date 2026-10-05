@@ -309,10 +309,21 @@ route's body; a route without it keeps axum's default. `@timeout` answers
 
 A route's steps run in the Go server's order: the webhook verifier, the
 rate limit, the body limit, the permission check, then the timeout around
-the handler. Each refusal is the router's error envelope,
-`{"error": {"code", "message"}}`, with the code `unauthorized`,
-`forbidden`, `payload_too_large`, `too_many_requests` or
-`gateway_timeout`.
+the handler. Each refusal, and each `ApiError` an implementation returns,
+is an RFC 9457 problem (`application/problem+json`) as the Go and
+TypeScript servers write it: `type`, `title`, `status`, `detail` (the
+error's message), `code` (`unauthorized`, `forbidden`,
+`payload_too_large`, `too_many_requests`, `gateway_timeout`, or the
+implementation's own), `requestId`, and `details` and `errors` when the
+error has them (`ApiError::with_details`, `with_errors`).
+
+Every response carries the request's id in `x-request-id`: the caller's
+`X-Request-ID` when it is at most 128 characters without control
+characters, else a fresh UUID. A success's `meta.requestId` and a
+problem's `requestId` are the same id, and no response is cached
+(`cache-control: no-store`). The router reads a body as JSON whatever its
+`Content-Type`, an empty body as `null`, and a body that is not JSON as a
+400 problem.
 
 `build_router` applies none of this to a `@manualRouteRegistration`
 operation, since it does not mount one. Its doc lists each such
@@ -332,3 +343,43 @@ let router = build_router(Implementations {
         .apply(post(custom_handler)),
 );
 ```
+
+The crate writes `openapi.json`, the document every server's build
+writes, and `build_router` serves it at `GET /api/openapi.json` with a
+[RapiDoc](https://rapidocweb.com/) page at `GET /api/docs`, as the Go
+server does. The served document states version `1.0.0` and the server
+`http://localhost:8080` unless you say otherwise. `build_router_with` takes
+a `RouterOptions` to restate both, or to serve neither route:
+
+```rust
+let router = build_router_with(implementations, RouterOptions {
+    openapi_version: env!("CARGO_PKG_VERSION").to_owned(),
+    openapi_base_url: "https://api.example.com".to_owned(),
+    ..RouterOptions::default()
+});
+```
+
+A schema with an `@envVars` class (see
+[Modeling types](/superschematic/guides/modeling-types/)) also gets the
+crate's `config` module, whose `load_config()` reads the class's
+variables from the environment and a `.env` file.
+
+With `scaffoldsOutputDir` set, the build writes starter implementations
+once, never overwriting them: a `mod.rs` with one module per namespace,
+and in each namespace's directory a `mod.rs`, `implementation.rs` with the
+`Implementation` struct and its one impl of the namespace trait, and a
+file per operation with the function that impl calls. Mount the directory
+as a module of the service's crate and build `Implementations` from it:
+
+```rust
+#[path = "implementations/mod.rs"]
+mod implementations;
+
+let router = build_router(Implementations {
+    tenant: Arc::new(implementations::tenant::Implementation::new()),
+    authenticator: Arc::clone(&authenticator),
+});
+```
+
+An operation added to the schema later is a method the scaffold's impl
+lacks; the compiler names it, and you add it with its file.

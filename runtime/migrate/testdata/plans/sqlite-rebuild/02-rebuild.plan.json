@@ -1,7 +1,89 @@
 {
   "dialect": "sqlite",
+  "expanded": "3e09b177f397d3079e5b84f273d5922168e0a80515a87ddca3d297f499fe888e",
+  "expandedModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "nullable": true,
+            "origin": "Account.name",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        },
+        "uniques": [
+          {
+            "columns": [
+              "name"
+            ],
+            "name": "account_name_key"
+          }
+        ]
+      },
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "account_id",
+            "origin": "Entry.account",
+            "type": "TEXT"
+          },
+          {
+            "name": "memo",
+            "nullable": true,
+            "origin": "Entry.memo",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "account_id"
+            ],
+            "name": "fk_entry_account_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "account"
+          }
+        ],
+        "kind": "entity",
+        "name": "entry",
+        "origin": "Entry",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "entry_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
   "from": "295de4e412d1254794d91926feb77450972604e2271c35d8bc0b72a1fa2e637a",
-  "hash": "a8741ba849a576888f18082166688e862d212943f21e91821f9447d0a2b156d7",
+  "hash": "d9aaec4126e3f7b54c0fb5f2206f39a299b072a08348821c333c7fac6d69052a",
   "service": "ledger-db",
   "steps": [
     {

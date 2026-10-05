@@ -69,6 +69,20 @@ func sqliteType(pg string) (string, error) {
 	return sqlite, nil
 }
 
+// sqliteHolds is what a column of Postgres type pg holds as JSON TEXT in
+// SQLite: a list's JSON array, or a JSON value. A list of lists is JSONB
+// in Postgres, so a JSON value here. Any other column holds no JSON.
+func sqliteHolds(pg string) string {
+	t := parsePGType(pg)
+	switch {
+	case t.array:
+		return holdsList
+	case t.base == "JSONB", t.base == "JSON":
+		return holdsJSON
+	}
+	return ""
+}
+
 // SQLite defaults write the forms the schema runtime reads.
 const (
 	// sqliteUUIDDefault is a version 4 UUID in its lowercase string form:
@@ -135,11 +149,37 @@ func sqliteAffinity(t string) string {
 	return t
 }
 
-// convert classifies a type change. SQLite's CAST never fails: a value the
-// new type cannot hold becomes another one, such as 0 for text that is not
-// a number, so a cast that cannot keep every value is lossy rather than
-// one that may fail.
-func (sqliteDialect) convert(from, to string) conversion {
+// convert classifies a column's change between a scalar, a list and a
+// JSON value as well as its type. A list and a JSON value are TEXT like
+// text, so their types do not tell the change. A JSON value's text stays
+// as it is when the column becomes text, as Postgres's cast to text keeps
+// it, and casts to any other scalar as text does. No other change between
+// them keeps every value as the new kind reads it in the meaning Postgres
+// gives it: text is not a JSON array, Postgres parses text as JSON where
+// SQLite's json_quote would wrap it, and Postgres converts no list to or
+// from anything else. So each of them is impossible: the operator changes
+// the column by hand and adopts the new model (D27).
+func (sqliteDialect) convert(from, to *Column) conversion {
+	switch {
+	case from.Holds == to.Holds:
+		return sqliteConvert(from.Type, to.Type)
+	case from.Holds == holdsJSON && to.Holds == "":
+		c := sqliteConvert(from.Type, to.Type)
+		if c.kind == convertSame {
+			// The values stay; the change still needs a step for its
+			// hazards, and SQLite rebuilds a table for a type change.
+			c.kind = convertRewrite
+		}
+		return c
+	}
+	return conversion{kind: convertImpossible}
+}
+
+// sqliteConvert classifies a type change. SQLite's CAST never fails: a
+// value the new type cannot hold becomes another one, such as 0 for text
+// that is not a number, so a cast that cannot keep every value is lossy
+// rather than one that may fail.
+func sqliteConvert(from, to string) conversion {
 	if from == to {
 		return conversion{kind: convertSame}
 	}

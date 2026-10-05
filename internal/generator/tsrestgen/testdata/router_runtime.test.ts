@@ -88,14 +88,18 @@ describe('generated fixture-api router', () => {
     const router = app(undefined, { frozenClock: true });
     const id = '00000000-0000-4000-8000-000000000001';
     const headers = { 'x-user': 'reader', 'x-forwarded-for': '203.0.113.9' };
+    // A client is its connection's peer address (D35), not a header it writes.
+    const from = (peer: string, sent: Record<string, string> = headers) =>
+      router.request(`/api/tenants/${id}?includeArchived=false`, { headers: sent }, { incoming: { socket: { remoteAddress: peer } } });
     for (let i = 0; i < 60; i += 1) {
-      expect((await router.request(`/api/tenants/${id}?includeArchived=false`, { headers })).status).toBe(200);
+      expect((await from('198.51.100.9')).status).toBe(200);
     }
-    const refused = await router.request(`/api/tenants/${id}?includeArchived=false`, { headers });
+    const refused = await from('198.51.100.9');
     expect(refused.status).toBe(429);
     expect(refused.headers.get('retry-after')).toBe('1');
     expect(await refused.json()).toMatchObject({ status: 429, code: 'too_many_requests' });
-    const other = await router.request(`/api/tenants/${id}?includeArchived=false`, { headers: { ...headers, 'x-forwarded-for': '203.0.113.10' } });
+    expect((await from('198.51.100.9', { ...headers, 'x-forwarded-for': '203.0.113.10' })).status).toBe(429);
+    const other = await from('198.51.100.10');
     expect(other.status).toBe(200);
     const relaxed = app(undefined, { rateLimits: { getTenant: 0 } });
     for (let i = 0; i < 61; i += 1) {

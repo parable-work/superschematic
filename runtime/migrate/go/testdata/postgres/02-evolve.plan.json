@@ -1,7 +1,122 @@
 {
   "dialect": "postgres",
+  "expanded": "f55fcf84b2cd60699834a6d1aad510c7b7ad8e9f487c5ce61c86db3f6cf5d811",
+  "expandedModel": {
+    "dialect": "postgres",
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION order_total_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.total \u003c 0 THEN RAISE EXCEPTION 'total must not be negative; got %', NEW.total; END IF; RETURN NEW; END; $$",
+        "name": "order_total_check",
+        "origin": "Order"
+      }
+    ],
+    "service": "shop",
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Customer.id",
+            "type": "BIGINT"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Customer.email",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Customer.name",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "customer",
+        "origin": "Customer",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "customer_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "origin": "Order.id",
+            "type": "BIGINT"
+          },
+          {
+            "name": "customer_id",
+            "origin": "Order.customer",
+            "type": "BIGINT"
+          },
+          {
+            "name": "total",
+            "origin": "Order.total",
+            "type": "BIGINT"
+          },
+          {
+            "name": "note",
+            "nullable": true,
+            "origin": "Order.note",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "name": "order_customer_id_fkey",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "customer"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "method": "BTREE",
+            "name": "order_customer_id_idx"
+          },
+          {
+            "columns": [
+              "total"
+            ],
+            "method": "BTREE",
+            "name": "order_total_idx"
+          }
+        ],
+        "kind": "entity",
+        "name": "order",
+        "origin": "Order",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_pkey"
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "definition": "CREATE TRIGGER order_total_check BEFORE INSERT OR UPDATE ON \"order\" FOR EACH ROW EXECUTE FUNCTION order_total_check()",
+        "name": "order_total_check",
+        "origin": "Order",
+        "table": "order"
+      }
+    ],
+    "version": 1
+  },
   "from": "b66c5848826b22c127914d25196b97bd81e0d2eb088a9ed4abb0060ba5c78d5c",
-  "hash": "7208f44cc2a421c5fde9a3aff1984085eb95294f1c1c78aafeb9ac3dea79a75a",
+  "hash": "759dd54ed3759d6a8e6eda847b3b78c099b53683724ee9f7193a9255d7a6f3e4",
   "renames": [],
   "service": "shop",
   "steps": [

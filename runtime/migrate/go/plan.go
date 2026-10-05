@@ -39,11 +39,17 @@ type Plan struct {
 	From    string          `json:"from"`
 	To      string          `json:"to"`
 	ToModel json.RawMessage `json:"toModel"`
-	Renames []string        `json:"renames"`
-	Steps   []*Step         `json:"steps"`
-	Hash    string          `json:"hash"`
+	// Expanded is the hash of the model the database holds between the
+	// plan's phases, and ExpandedModel that model. A plan with contract
+	// steps has them; a plan written before they existed does not.
+	Expanded      string          `json:"expanded"`
+	ExpandedModel json.RawMessage `json:"expandedModel"`
+	Renames       []string        `json:"renames"`
+	Steps         []*Step         `json:"steps"`
+	Hash          string          `json:"hash"`
 
-	model *Model
+	model    *Model
+	expanded *Model
 }
 
 // Step is one step of a plan.
@@ -82,9 +88,15 @@ type Model struct {
 // return.
 func (p *Plan) Model() *Model { return p.model }
 
+// BetweenPhases returns the plan's expandedModel: the model the database
+// holds once the plan's expand steps have finished and until its contract
+// runs. It is nil for a plan without one.
+func (p *Plan) BetweenPhases() *Model { return p.expanded }
+
 // ReadPlan reads a plan document in any JSON encoding and checks it before
 // anything runs: its version, its hash against its content, its to against
-// the hash of its toModel, and the shape of its steps.
+// the hash of its toModel, its expanded, when it has one, against the hash
+// of its expandedModel, and the shape of its steps.
 func ReadPlan(doc []byte) (*Plan, error) {
 	value, err := decode(doc)
 	if err != nil {
@@ -129,7 +141,36 @@ func ReadPlan(doc []byte) (*Plan, error) {
 	if err := p.check(); err != nil {
 		return nil, err
 	}
+	if p.expanded, err = p.readExpanded(); err != nil {
+		return nil, err
+	}
 	return &p, nil
+}
+
+// readExpanded reads the plan's expandedModel, the model between its
+// phases: absent when the plan has neither it nor expanded, and otherwise a
+// model of the plan's service and dialect that hashes to expanded.
+func (p *Plan) readExpanded() (*Model, error) {
+	switch {
+	case p.Expanded == "" && len(p.ExpandedModel) == 0:
+		return nil, nil
+	case len(p.ExpandedModel) == 0:
+		return nil, refusef("the plan has expanded but no expandedModel")
+	case p.Expanded == "":
+		return nil, refusef("the plan has an expandedModel but no expanded")
+	}
+	model, err := ReadModel(p.ExpandedModel)
+	if err != nil {
+		return nil, fmt.Errorf("the plan's expandedModel: %w", err)
+	}
+	if model.Hash != p.Expanded {
+		return nil, refusef("the plan's expandedModel hashes to %s, not to the plan's expanded %s", model.Hash, p.Expanded)
+	}
+	if model.Service != p.Service || model.Dialect != p.Dialect {
+		return nil, refusef("the plan's expandedModel is of %s service %s; the plan is for %s service %s",
+			model.Dialect, model.Service, p.Dialect, p.Service)
+	}
+	return model, nil
 }
 
 // check refuses a plan the runner cannot run as written.

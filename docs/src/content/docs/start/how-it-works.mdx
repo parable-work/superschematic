@@ -108,9 +108,13 @@ A service may use another's types:
   depend on each other's packages.
 - On an API marked `public: true`, `authDb` names the DB schema whose
   `User` and `Session` tables the Go server's auth provider reads.
+- On an API, `calls` names the other APIs its implementation calls. Each
+  callee builds before its caller, so two APIs cannot call each other yet.
 
-`build-all` builds every service in dependency order. `build --with-deps`
-builds one service and what it depends on.
+In a TypeScript config each is a handle, `service({ name, kind })`, and
+its kind must be the kind of the service it names. `build-all` builds every service in dependency
+order. `build --with-deps` builds one service and what it depends on.
+Both check each handle's kind first.
 
 ## The IR is the contract
 
@@ -125,6 +129,8 @@ superschematic build schemas/services/shop-common --emit-ir | jq .types.Price
 <Snippet file="testdata/generated/logs/price-ir.json" />
 
 When a generator's output surprises you, the IR shows what it was given.
+It also records the references the config makes: `authDb`,
+`dependencies` and `calls`.
 `superschematic json-schema` prints the JSON Schema the JSON and YAML forms
 are validated against.
 

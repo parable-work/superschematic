@@ -17,7 +17,10 @@ import (
 // vectorsDir holds the plans the runner's tests apply
 // (runtime/migrate/README.md): one directory per case, one plan per file,
 // applied in name order. The first plan of a case starts from an empty
-// database and each later one from the model the one before it ends at.
+// database and each later one from the model the one before it ends at, or
+// from the model the one before it holds between its phases: then only
+// that plan's expand steps run, and the later plan supersedes its contract
+// (D27, amended).
 const vectorsDir = "../../runtime/migrate/testdata/plans"
 
 // vectorPlan is one plan of a vector case: the change it makes to the
@@ -26,6 +29,9 @@ type vectorPlan struct {
 	name    string
 	change  func(s *ir.Schema)
 	renames []Rename
+	// fromExpanded starts the plan from the model the plan before it holds
+	// between its phases, whose contract it supersedes.
+	fromExpanded bool
 }
 
 // vectorCases are kept small: the runner applies each plan once per step
@@ -73,6 +79,10 @@ var vectorCases = map[string][]vectorPlan{
 			fieldNamed(s, "Entry", "memo").Required = true
 		}},
 	},
+	// Supersede: a plan's expand phase, then a plan from the model it
+	// holds between its phases, which still drops the column the first
+	// plan's contract would have dropped and adds another.
+	"supersede": supersedeVector,
 	// Versioned: a table that becomes @versioned, with its history seeded.
 	"versioned": {
 		{name: "create", change: func(s *ir.Schema) {
@@ -84,8 +94,26 @@ var vectorCases = map[string][]vectorPlan{
 	},
 }
 
+// supersedeVector is the supersede case, in each dialect.
+var supersedeVector = []vectorPlan{
+	{name: "create", change: func(s *ir.Schema) {
+		s.Types["Account"] = &ir.TypeDef{Name: "Account", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+			{Name: "name", TypeRef: stringRef, Required: true},
+			{Name: "email", TypeRef: stringRef},
+		}}
+	}},
+	{name: "replace-email", change: func(s *ir.Schema) {
+		dropField(s, "Account", "email")
+		addField(s, "Account", &ir.FieldDef{Name: "nickname", TypeRef: stringRef})
+	}},
+	{name: "supersede", fromExpanded: true, change: func(s *ir.Schema) {
+		addField(s, "Account", &ir.FieldDef{Name: "phone", TypeRef: stringRef})
+	}},
+}
+
 // sqliteVectorCases are the vectors planned for SQLite.
 var sqliteVectorCases = map[string][]vectorPlan{
+	"sqlite-supersede": supersedeVector,
 	// Columns in place: ADD COLUMN with an index, RENAME COLUMN, and DROP
 	// COLUMN after its index.
 	"sqlite-columns": {
@@ -160,7 +188,14 @@ func planVector(t *testing.T, name string, dialect Dialect, plans []vectorPlan) 
 		if err != nil {
 			t.Fatalf("%s/%s: %v", name, vp.name, err)
 		}
-		plan, err := Diff(run.model, to, Options{Renames: vp.renames})
+		from := run.model
+		if vp.fromExpanded {
+			if i == 0 || run.plans[i-1].Expanded == "" {
+				t.Fatalf("%s/%s: the plan before it has no model between its phases", name, vp.name)
+			}
+			from = decodeModel(t, run.plans[i-1].ExpandedModel)
+		}
+		plan, err := Diff(from, to, Options{Renames: vp.renames})
 		if err != nil {
 			t.Fatalf("%s/%s: %v", name, vp.name, err)
 		}
@@ -169,6 +204,17 @@ func planVector(t *testing.T, name string, dialect Dialect, plans []vectorPlan) 
 		run.model = to
 	}
 	return run
+}
+
+// applied is the run's i-th plan as the runner applies it: its expand
+// steps only when the plan after it starts from its model between the
+// phases, and the whole plan otherwise.
+func (run vectorRun) applied(i int) *Plan {
+	plan := run.plans[i]
+	if i+1 < len(run.plans) && plan.Expanded != "" && run.plans[i+1].From == plan.Expanded {
+		return expandOnly(plan)
+	}
+	return plan
 }
 
 // vectorFiles returns each vector's path under vectorsDir and its

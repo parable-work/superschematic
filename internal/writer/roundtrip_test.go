@@ -487,7 +487,12 @@ func writeTSProject(t *testing.T, dir string, schema *ir.Schema) {
 // "src/tenant.schema.yaml" compare equal.
 func normalizeIR(t *testing.T, schema *ir.Schema) string {
 	t.Helper()
-	out, err := json.MarshalIndent(schema, "", "  ")
+	// The IR's references (authDb, dependencies, calls) come from the
+	// service config, which the writer does not write: writeServiceConfig
+	// writes the config the reload reads, so they are left out.
+	cp := *schema
+	cp.AuthDB, cp.Dependencies, cp.Calls = "", nil, nil
+	out, err := json.MarshalIndent(&cp, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
