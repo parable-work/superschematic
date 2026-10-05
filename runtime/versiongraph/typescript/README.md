@@ -151,6 +151,11 @@ row lacks as `null`, so the two compare, merge and hash the same.
 `sqliteLayout(tableName)` returns its statements, one each, with no trigger
 and no transaction control, for a caller that runs its own migrations.
 `runtime/versiongraph/README.md` ("SQLite") holds the layout and its rules.
+The vectors in `runtime/versiongraph/testdata/sqlite` hold every language's
+SQLite adapter to this one, so a file one writes reads the same in
+another's: the layout's statements under the default names, a database this
+adapter wrote, as SQL text, and what it reads back as through each graph's
+adapter. Their README gives each file's shape.
 
 The adapter does what Postgres's history triggers do, in the statements of
 the transaction that changes a row: it sets `_version`, writes each
@@ -186,6 +191,7 @@ bun install --frozen-lockfile
 bun run test     # cargo build for wasm32, tsc into dist/, the tests, the Node check
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... bun test test   # with the Postgres tests
 make versiongraph-scenarios-ts   # from the repository root: the SQLite pass, then the Postgres tests, failing without the variable
+UPDATE_SQLITE_VECTORS=1 bun test test/sqlite-vectors.test.ts   # after bun run build: rewrite the SQLite vectors; review the diff
 ```
 
 The build needs cargo with the `wasm32-unknown-unknown` target (`rustup
@@ -201,11 +207,18 @@ SQLite through `SyncEngine` and the SQLite adapter, in memory, once through
 holds with every statement held to D16's rules for a behavior's SQL
 (`test/scenarios.test.ts`), runs the SQLite adapter's own tests through both
 bindings (`test/sqlite.test.ts`, over the cases in `test/sqlite-cases.ts`),
+checks the SQLite vectors in `runtime/versiongraph/testdata/sqlite` through
+both bindings (`test/sqlite-vectors.test.ts`, over the checks in
+`test/sqlite-vectors-cases.ts`): `sqliteLayout()` is `layout.json`,
+`typescript.sql` reads as `typescript.json`, one graph reads none of
+another's, the file holds every stored form, and the script in
+`test/sqlite-vectors.ts` still writes both files,
 runs a kind that gains a column end to end on SQLite
 (`test/gained-column.test.ts`), checks `initSync`'s sources and
 `SyncEngine`'s driver (`test/sync.test.ts`), and loads every entry under
 Node with the `pg` driver and the SQLite modules refused, then runs the
-SQLite adapter's tests through `node:sqlite` (`test/node.mjs`). With the
+SQLite adapter's tests and the SQLite vectors' checks through
+`node:sqlite` (`test/node.mjs`). With the
 variable set it also runs every scenario in
 `runtime/versiongraph/testdata/scenarios` through the engine and the adapter
 (`test/scenarios.test.ts`), replaying each operation through a `SyncEngine`
