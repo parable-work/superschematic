@@ -3012,3 +3012,24 @@ whether Workers callers present the identity a service binding carries or
 sign key-pair tokens.
 
 Nothing here is built. The design is reversible until the first release.
+
+## D40. A pull request runs the quick tier; main's full run is a release candidate twice a day
+
+Every pull request ran all of `ci.yml`, about 20 minutes, most of it the Go
+tests that compile and run generated modules in four languages. Drafts and
+stacked pull requests ran it on every push, and every merge to `main` ran it
+again.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A pull request runs CI only when it targets `main` and is not a draft. On a draft every job skips and `ci-pass` reports under another name, so the required check stays expected; `ready_for_review` starts the run. A stacked pull request retargeted onto `main` starts its run at its next push, or a close and reopen. | Running drafts and stacked pull requests on every push, which spends a run on unfinished work; listening for `edited` to catch a retarget, which starts a run on every title or body edit, and that run's skipped `ci-pass` replaces the real result |
+| One `ci.yml`, two tiers. The quick tier is the lints, the drift checks, `go test -short`, the runtimes' and the version graph's own test suites and the docs build. The full tier adds the Go tests without `-short`, the CLI smoke, the acme job, `examples/engine-notes` and the version-graph scenarios through every engine. For a Go test, `testing.Short()` draws the line: a test that compiles or runs a generated module skips under `-short`. | A second workflow for the full tier, which repeats every job's setup; path filters that wake the full tier per change, which nearly every generator change would trip |
+| Merges to `main` run no CI. `release-candidate.yml` dispatches `release.yml`'s dry run on `main` at 06:00 and 18:00 UTC unless the head already passed one: the full tier, the four platform builds and the assembled release set. It cuts no tag and publishes nothing. A red candidate opens an issue that the next green one closes. | CI on every merge, which repeats the pull request's run; a `vX.Y.Z-rc.N` tag per candidate, which would publish to npm's `next` dist-tag |
+| CodeQL analyzes `main`, on every push and weekly (`codeql.yml`), and not pull requests: the ruleset requires no code-scanning result, so a pull request scan gates nothing. Code scanning's default setup stays disabled, since it rejects a workflow's results while enabled. | Default setup, which analyzes every pull request and cannot be told not to; a weekly scan alone, which leaves a merged alert unreported for up to a week |
+| Every job stays on GitHub-hosted runners, which cost nothing on a public repository. | A paid runner provider such as Blacksmith: faster and wider, but paid by the minute where GitHub's are free |
+| `main`'s ruleset, declared outside this repository with the maintainers' other repository settings, asks for one approval and a green `ci-pass`. An approval from an agent or a bot counts: code-owner review is off. Approvals survive a push, review threads need not be resolved and the branch need not be up to date. | Requiring an up-to-date branch, which made merging serial at a full run each; dismissing approvals on push, which made every follow-up push need a new one |
+
+The cost is that a change which breaks only the full tier merges, and `main`
+is red until its next candidate reports it, up to twelve hours later.
+CONTRIBUTING.md lists the full-tier checks to run before pushing a change
+they cover.
