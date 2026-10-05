@@ -117,7 +117,7 @@ class FeedItem(BaseModel):
                 errors.add_field_error("sku", "maxLength", "must be at most 255 characters")
             if len(str(self.sku)) < 1:
                 errors.add_field_error("sku", "minLength", "must be at least 1 characters")
-            if re.search(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", str(self.sku)) is None:
+            if re.search(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", str(self.sku), re.ASCII) is None:
                 errors.add_field_error("sku", "pattern", "invalid format")
 
         # Validate name
