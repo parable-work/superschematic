@@ -91,6 +91,10 @@ image:  {"kind", "id", "version", "image": row}
 | `TreeResult` | `tree` (`{kind: [row, ...]}`, a kind without rows absent), `contentHash`, `findings` (each `{code, kind, entityKey?, message}`) |
 | `Error` | `{"error": code}`: the engine's error code, where the read fails |
 
+An absent id (a ref's `parent`, `base` or `head`, a commit's `parent`) is
+`null`, which an engine whose type has no null, as Go's `""`, reads as its
+own none. Every id is a UUID in its canonical form (base62).
+
 Each entry is one read, and what it must return:
 
 | Entry | The read |
