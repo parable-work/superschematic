@@ -2284,13 +2284,35 @@ but the drops those servers cannot survive.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| A plan with contract steps carries the model the database holds between its phases: `expandedModel`, and its hash, `expanded`. It is the previous model with every expand step applied: the new version's tables, columns, indexes and objects, with what `contract` removes or tightens still there, and loose. The planner builds it from the tables it already hands a dialect's rebuild between the phases. A plan without contract steps carries neither, since its expand steps end at `to`. | Computing it in the runner, which cannot read a schema; leaving the applied model at `from` until the plan ends |
-| When a plan's last expand step commits, the runner records `expandedModel` as the applied model, with the plan's contract pending, so `status --model` prints the schema the database holds. | |
-| A new plan whose `from` is that model supersedes the pending contract: the runner says so, forgets the old plan and runs the new one. A deploy whose rollout failed plans again from the database's model, so the drops still wanted are in the new plan's contract, planned from what the database holds, and nothing of the old contract runs unless the new plan needs it. Taking the schema back to the previous version is a plan from that model too. The old plan's contract is refused afterwards: it is no longer in progress. | An `abandon` command, which a deploy would have to decide on its own to run; refusing every other plan until the contract runs, the rule before this amendment |
-| `expanded` and `expandedModel` are optional members of plan version 1. A runner that predates them ignores them and keeps the old rule, and this runner keeps the old rule for a plan without them. | Plan version 2, which every runner already built would refuse |
+| A plan with contract steps carries the model the database holds between its phases: `expandedModel`, and its hash, `expanded`. It is the previous model with every expand step applied: the new version's tables, columns, indexes and objects, with what `contract` removes still there and what it tightens still loose. The planner builds it from the tables it already hands a dialect's rebuild between the phases. A plan without contract steps carries neither, since its expand steps end at `to`. | Computing it in the runner, which cannot read a schema; leaving the applied model at `from` until the plan ends |
+| When a plan's last expand step commits, the runner records `expandedModel` as the applied model, with the plan's contract pending (`plan_phase` `expanded`), so `status --model` prints the schema the database holds. | |
+| A new plan whose `from` is that model supersedes the pending contract while none of it has started: the runner says so, forgets the old plan and runs the new one. Once a contract step has started, the database no longer holds that model, and the old plan must finish. A deploy whose rollout failed plans again from the database's model, so the drops still wanted are in the new plan's contract, planned from what the database holds, and nothing of the old contract runs unless the new plan needs it. Taking the schema back to the previous version is a plan from that model too. The old plan's contract is refused afterwards: it is no longer in progress. | An `abandon` command, which a deploy would have to decide on its own to run; refusing every other plan until the contract runs, the rule before this amendment |
+| `expanded` and `expandedModel` are optional members of plan version 1. A runner that predates them ignores them and keeps the old rule, and this runner keeps the old rule for a plan without them. Such a plan's expand phase records `plan_phase` `expand`, which no plan supersedes, as every runner before this amendment did, so a plan from a model the database does not hold never runs. | Plan version 2, which every runner already built would refuse |
 | The tests check, on Postgres and on SQLite, that a plan's expand steps leave the same schema as the plan from an empty database to its `expandedModel`, and that a plan from `expandedModel` to the plan's `to` has no expand steps and the plan's contract steps. | Trusting the model the planner builds between the phases, which no apply would check |
 
 The rule is reversible until the first release.
+
+Status: built. `Diff` sets `expanded` and `expandedModel` on every plan with
+contract steps, for both dialects (`expandedModel` in
+`internal/sqlmigrate`); the runner records the model between the phases,
+supersedes a pending contract and refuses the superseded one. Rules settled
+as they were built: a column `contract` drops keeps its `NOT NULL` between
+the phases when it has a default or is generated, as `expand` leaves it,
+which a SQLite rebuild in `expand` now keeps too; a foreign key `contract`
+replaces is, between the phases, the previous one under the name `expand`
+gave it; extensions and pool schemas of both models are there; a view,
+trigger or function `contract` drops or replaces is the previous one with
+`expand`'s renames applied; a version graph keeps the previous model's
+schema epoch, and a member's content is the new model's for the columns
+the new table has and the previous model's for the columns `contract`
+drops, so the plan from the model between the phases has no content change
+left for `expand` and its drops keep their history hazards; that plan's
+hazards differ from the contract's only by a destructive hazard's rename
+hint, which names an add the plan from the model between the phases does
+not see; and the plan goldens record `expanded` and leave `expandedModel`
+out. Every Postgres and SQLite plan case with contract steps converges to
+its `expandedModel` after its expand steps, and the runner's vectors
+include a plan superseded after its expand phase.
 
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
