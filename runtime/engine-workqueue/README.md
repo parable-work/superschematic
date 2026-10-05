@@ -839,6 +839,7 @@ operation, and to the current token when the caller presents one.
 ```
 cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build
 cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
+cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build
 cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build
 cd runtime/engine-workqueue/typescript
 bun install --frozen-lockfile

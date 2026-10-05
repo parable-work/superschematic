@@ -52,7 +52,12 @@ itself (D3), and this package's own build and tests get them from
 HTTP runtime's framework-free entry point, for the default permission
 matcher, and not Hono; the `./http` entry point also needs `hono`, an
 optional peer dependency, and the `./mcp` entry point `hono` and
-`@modelcontextprotocol/server`, another.
+`@modelcontextprotocol/server`, another. It depends on
+`@superschematic/versiongraph` (D32), whose engine and SQLite adapter the
+core `Branches` behavior runs over the version graph's wasm core; the
+package.json spec is a `file:` path into this checkout, as the TypeScript
+types tsgen writes for a graph depend on it, and the build replaces bun's
+copy with the package as `runtime/versiongraph/typescript` last built it.
 
 ## Storage
 
@@ -2483,6 +2488,7 @@ deployment that serves it to a browser on a local address puts the SDK's
 ```
 cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build
 cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
+cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build   # needs cargo and the wasm32-unknown-unknown target
 cd runtime/engine/typescript
 bun install --frozen-lockfile
 bun run typecheck

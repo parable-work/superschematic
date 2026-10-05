@@ -434,8 +434,10 @@ jobs:
           key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
 
       - name: Install Rust toolchain
+        # The wasm32 target builds the version-graph core the engine's
+        # Branches behavior runs.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency
@@ -463,9 +465,19 @@ jobs:
           bun run build
           bun run test
 
+      - name: Build the version-graph TypeScript package
+        # The engine depends on it: its Branches behavior runs the version
+        # graph's engine and SQLite adapter over the wasm core. The
+        # versiongraph job runs the package's own tests.
+        working-directory: runtime/versiongraph/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
       - name: runtime/engine/typescript typecheck + build + test (Node.js and Bun)
-        # Runs after the schema and http runtimes' builds, whose dist/ the
-        # engine's scripts/link-local-deps.mjs copies into node_modules.
+        # Runs after the schema and http runtimes' builds and the version
+        # graph's, whose dist/ the engine's scripts/link-local-deps.mjs
+        # copies into node_modules.
         working-directory: runtime/engine/typescript
         run: |
           bun install --frozen-lockfile
