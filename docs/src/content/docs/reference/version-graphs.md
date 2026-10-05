@@ -732,9 +732,9 @@ are version-4 UUIDs the adapter generates; and every value is stored in its
 canonical form, so a row reads back as the canonical row it was written as.
 A live row reads with every column its kind declares, `null` where the
 stored row lacks one, as Postgres's `ADD COLUMN` without a `DEFAULT` gives
-an existing row, and
-a history image reads as it was stored, as a Postgres image does: one taken
-before its kind gained a column lacks it, which the core reads as `null`.
+an existing row, and a history image reads as it was stored, as a Postgres
+image does: one taken before its kind gained a column lacks it, which the
+core reads as `null`.
 
 On a connection of its own the adapter begins each transaction with
 `BEGIN IMMEDIATE`, which takes the file's write lock, and runs one begun
