@@ -14,11 +14,10 @@ type apiSource struct {
 	upstreamIR *ir.Schema
 }
 
-// generateFrom runs apigen on schema with the core session provider, as
-// generator.Run builds the APIOutput every server and SDK shares, and
-// Generate on its output.
-func generateFrom(schema *ir.Schema, src apiSource, opts Options) (*APIOutput, error) {
-	api, err := apigen.Generate(schema, apigen.Options{
+// apiOutputOf runs apigen on schema with the core session provider, as
+// generator.Run builds the APIOutput every server and SDK shares.
+func apiOutputOf(schema *ir.Schema, src apiSource, opts Options) (*apigen.APIOutput, error) {
+	return apigen.Generate(schema, apigen.Options{
 		SchemaName:     opts.SchemaName,
 		IsPublic:       src.public,
 		UpstreamSchema: src.upstream,
@@ -27,8 +26,16 @@ func generateFrom(schema *ir.Schema, src apiSource, opts Options) (*APIOutput, e
 		Provider:       sessionauth.Provider{},
 		Clock:          opts.Clock,
 	})
+}
+
+// generateFrom runs Generate on schema's APIOutput (apiOutputOf).
+func generateFrom(schema *ir.Schema, src apiSource, opts Options) (*APIOutput, error) {
+	api, err := apiOutputOf(schema, src, opts)
 	if err != nil {
 		return nil, err
 	}
-	return Generate(api, opts)
+	if src.upstreamIR != nil {
+		opts.Dependencies = map[string]*ir.Schema{src.upstream: src.upstreamIR}
+	}
+	return Generate(schema, api, opts)
 }

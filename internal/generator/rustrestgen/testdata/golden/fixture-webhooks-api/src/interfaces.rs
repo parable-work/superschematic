@@ -3,28 +3,56 @@
 //! Operations declared @manualRouteRegistration have no method here: the
 //! service mounts them itself (see `build_router`).
 
+#![allow(unused_imports)]
+
+use crate::types;
 use async_trait::async_trait;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
 use superschematic_http_runtime::{ApiError, Authenticator, RequestContext};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// The arguments of event.getEvent (`GET /api/events/{id}`),
+/// decoded and checked by the router.
+#[derive(Debug, Clone)]
+pub struct EventGetEventArgs {
+    /// The `id` path parameter.
+    pub id: String,
+}
+
+/// The arguments of webhook.receiveGithubEvent (`POST /api/webhooks/github`),
+/// decoded and checked by the router.
+#[derive(Debug, Clone)]
+pub struct WebhookReceiveGithubEventArgs {
+    /// The `id` field of the request body.
+    pub id: String,
+    /// The `action` field of the request body.
+    pub action: String,
+}
+
+/// The arguments of webhook.receiveStripeEvent (`POST /api/webhooks/stripe`),
+/// decoded and checked by the router.
+#[derive(Debug, Clone)]
+pub struct WebhookReceiveStripeEventArgs {
+    /// The request body.
+    pub input: types::PaymentEvent,
+}
+
 #[async_trait]
 pub trait EventImplementation: Send + Sync + 'static {
     /// A received event. Not a webhook, so no verifier runs.
-    async fn get_event(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
+    async fn get_event(&self, ctx: RequestContext, args: EventGetEventArgs) -> Result<types::EventReceipt, ApiError>;
 }
 
 #[async_trait]
 pub trait WebhookImplementation: Send + Sync + 'static {
     /// A GitHub event. Its signature is checked before the permission.
-    async fn receive_github_event(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
+    async fn receive_github_event(&self, ctx: RequestContext, args: WebhookReceiveGithubEventArgs) -> Result<types::EventReceipt, ApiError>;
     /// A Stripe event. Its signature is checked before the rate limit.
-    async fn receive_stripe_event(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
+    async fn receive_stripe_event(&self, ctx: RequestContext, args: WebhookReceiveStripeEventArgs) -> Result<types::EventReceipt, ApiError>;
 }
-
 
 /// Checks the signature of an @hmacVerified provider's requests before
 /// every other step of their routes, the handler's extractors included. It

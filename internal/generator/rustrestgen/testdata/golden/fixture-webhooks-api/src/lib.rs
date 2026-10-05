@@ -5,6 +5,10 @@ pub mod interfaces;
 pub mod openapi;
 pub mod router;
 
+/// The schema's generated types crate, which every argument, input and
+/// result type comes from.
+pub use schemas_fixture_webhooks_api_types as types;
+
 pub use interfaces::*;
 pub use router::{build_router, build_router_with, webhook_verified, RouterState};
 pub use superschematic_http_runtime::{request_ids, RouterOptions};

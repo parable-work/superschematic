@@ -1,8 +1,13 @@
 //! {{ .Endpoint.Namespace }}.{{ .Endpoint.Name }}: `{{ toUpper .Endpoint.Method }} {{ .Endpoint.Path }}`.
 //! NOTE: Generated once and never overwritten.
 
+{{- if .Endpoint.UsesTypes }}
+use {{ .CrateIdent }}::types;
+{{- end }}
+{{- if .Endpoint.HasArgs }}
+use {{ .CrateIdent }}::{{ .Endpoint.ArgsName }};
+{{- end }}
 use {{ .RuntimeCrateIdent }}::{ApiError, RequestContext};
-use serde_json::Value;
 
 use super::Implementation;
 
@@ -13,8 +18,10 @@ use super::Implementation;
 pub(super) async fn {{ .Endpoint.FunctionName }}(
     _implementation: &Implementation,
     _ctx: RequestContext,
-    _payload: Value,
-) -> Result<Value, ApiError> {
+{{- if .Endpoint.HasArgs }}
+    _args: {{ .Endpoint.ArgsName }},
+{{- end }}
+) -> Result<{{ .Endpoint.OutputRustType }}, ApiError> {
 {{- if .Endpoint.RequireOwnership }}
     // @requireOwnership: the router has established the caller
     // (ctx.principal); check that it owns the resource (403 otherwise).

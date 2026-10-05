@@ -38,6 +38,40 @@ func EscapeKeyword(identifier string) string {
 	return "r#" + identifier
 }
 
+// Identifier is name as a snake_case Rust identifier: letters and digits
+// lowercased, anything else an underscore, runs of underscores collapsed, a
+// leading digit prefixed with an underscore and a keyword escaped
+// (EscapeKeyword). A name with nothing left is fallback. The Rust SDK names
+// its methods and fields with it, and the Rust server its argument fields,
+// so both spell an argument alike.
+func Identifier(name, fallback string) string {
+	base := codegen.ToSnakeCase(strings.TrimSpace(name))
+	if base == "" {
+		return fallback
+	}
+
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r == '_':
+			b.WriteRune(r)
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			b.WriteRune(unicode.ToLower(r))
+		default:
+			b.WriteRune('_')
+		}
+	}
+
+	identifier := CollapseUnderscores(strings.Trim(b.String(), "_"))
+	if identifier == "" {
+		identifier = fallback
+	}
+	if identifier[0] >= '0' && identifier[0] <= '9' {
+		identifier = "_" + identifier
+	}
+	return EscapeKeyword(identifier)
+}
+
 // CollapseUnderscores normalizes consecutive underscores into a single underscore.
 func CollapseUnderscores(value string) string {
 	for strings.Contains(value, "__") {

@@ -135,7 +135,9 @@ python:
 # arbitrary_precision too, which superscalar's default lossless-json feature
 # turns on: an error map and a number check must not depend on either.
 rust:
-	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
+		&& cargo test && cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \

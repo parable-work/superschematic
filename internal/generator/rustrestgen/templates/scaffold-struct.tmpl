@@ -4,9 +4,11 @@
 //! add it here and in a file of its own, as for the others.
 
 use async_trait::async_trait;
-use {{ .CrateIdent }}::{{ toPascalCase .Namespace }}Implementation;
+{{- if .UsesTypes }}
+use {{ .CrateIdent }}::types;
+{{- end }}
+use {{ .CrateIdent }}::{ {{- toPascalCase .Namespace }}Implementation{{ range .ArgsNames }}, {{ . }}{{ end -}} };
 use {{ .RuntimeCrateIdent }}::{ApiError, RequestContext};
-use serde_json::Value;
 
 /// Implements {{ toPascalCase .Namespace }}Implementation; each method runs the function of
 /// the same name in this directory.
@@ -22,8 +24,8 @@ impl Implementation {
 #[async_trait]
 impl {{ toPascalCase .Namespace }}Implementation for Implementation {
 {{- range .Endpoints }}
-    async fn {{ .FunctionName }}(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
-        super::{{ .FunctionName }}::{{ .FunctionName }}(self, ctx, payload).await
+    async fn {{ .FunctionName }}(&self, ctx: RequestContext{{ if .HasArgs }}, args: {{ .ArgsName }}{{ end }}) -> Result<{{ .OutputRustType }}, ApiError> {
+        super::{{ .FunctionName }}::{{ .FunctionName }}(self, ctx{{ if .HasArgs }}, args{{ end }}).await
     }
 {{- end }}
 }

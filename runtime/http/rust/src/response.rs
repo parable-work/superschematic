@@ -81,10 +81,10 @@ pub fn problem_body(err: &ApiError, request_id: Option<&str>) -> Value {
         problem.insert("requestId".to_owned(), Value::from(request_id));
     }
     if let Some(details) = &err.details {
-        problem.insert("details".to_owned(), details.clone());
+        problem.insert("details".to_owned(), Value::clone(details));
     }
     if let Some(errors) = &err.errors {
-        problem.insert("errors".to_owned(), errors.clone());
+        problem.insert("errors".to_owned(), Value::clone(errors));
     }
     Value::Object(problem)
 }

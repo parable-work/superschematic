@@ -63,7 +63,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex};
 
 use API_CRATE::{
-    build_router, webhook_verified, EventImplementation, Implementations, WebhookImplementation, WebhookVerifier,
+    build_router, types, webhook_verified, EventGetEventArgs, EventImplementation, Implementations,
+    WebhookImplementation, WebhookReceiveGithubEventArgs, WebhookReceiveStripeEventArgs, WebhookVerifier,
 };
 use RUNTIME_CRATE::{bearer_token, error_response, ApiError, Authenticator, Principal, RequestContext};
 use async_trait::async_trait;
@@ -132,24 +133,29 @@ struct Events {
     log: Log,
 }
 
+fn receipt(id: String) -> types::EventReceipt {
+    types::EventReceipt { id, received: true }
+}
+
 #[async_trait]
 impl EventImplementation for Events {
-    async fn get_event(&self, ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
+    async fn get_event(&self, _ctx: RequestContext, args: EventGetEventArgs) -> Result<types::EventReceipt, ApiError> {
         self.log.lock().unwrap().push("get_event".to_string());
-        Ok(json!({"id": ctx.path_params.get("id"), "received": true}))
+        Ok(receipt(args.id))
     }
 }
 
 #[async_trait]
 impl WebhookImplementation for Events {
-    async fn receive_stripe_event(&self, _ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
-        self.log.lock().unwrap().push(format!("receive_stripe_event {payload}"));
-        Ok(json!({"id": payload["id"], "received": true}))
+    async fn receive_stripe_event(&self, _ctx: RequestContext, args: WebhookReceiveStripeEventArgs) -> Result<types::EventReceipt, ApiError> {
+        let event = serde_json::to_string(&args.input).unwrap();
+        self.log.lock().unwrap().push(format!("receive_stripe_event {event}"));
+        Ok(receipt(args.input.id))
     }
-    async fn receive_github_event(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError> {
+    async fn receive_github_event(&self, ctx: RequestContext, args: WebhookReceiveGithubEventArgs) -> Result<types::EventReceipt, ApiError> {
         let caller = ctx.principal.map(|principal| principal.subject).unwrap_or_default();
-        self.log.lock().unwrap().push(format!("receive_github_event {payload} from {caller}"));
-        Ok(json!({"id": payload["id"], "received": true}))
+        self.log.lock().unwrap().push(format!("receive_github_event {} {} from {caller}", args.id, args.action));
+        Ok(receipt(args.id))
     }
 }
 
@@ -240,7 +246,7 @@ async fn an_unsigned_event_is_refused_before_the_handler_and_its_extractor() {
 
     let (status, _) = send(router(&log), "POST", "/api/webhooks/github", r#"{"id":"d1","action":"opened"}"#, Some("github"), Some("octocat")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(entries(&log).last().unwrap(), r#"receive_github_event {"action":"opened","id":"d1"} from octocat"#);
+    assert_eq!(entries(&log).last().unwrap(), "receive_github_event d1 opened from octocat");
 }
 
 // stripe is @rateLimit({ requestsPerMinute: 1 }): an unsigned request is
