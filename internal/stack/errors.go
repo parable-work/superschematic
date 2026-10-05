@@ -41,6 +41,10 @@ const (
 
 	// CodePolicy is a violation of a target's policy rule.
 	CodePolicy Code = "policy"
+
+	// CodeUnreachableEdge is a calls edge from a server to an API none of
+	// whose operations admits the server (section 9.3).
+	CodeUnreachableEdge Code = "unreachable-edge"
 )
 
 // The other failures resolution reports.
