@@ -39,11 +39,15 @@ func ResultCode(err error) (int, bool) {
 
 const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
+// randRead fills an id's bytes: crypto/rand's Read, which a test swaps for a
+// seeded generator (export_test.go) to write a file byte for byte.
+var randRead = rand.Read
+
 // newID returns a new version-4 UUID in its canonical form (base62).
 func newID() string {
 	var b [16]byte
 	// crypto/rand's Read never fails, and always fills b.
-	_, _ = rand.Read(b[:])
+	_, _ = randRead(b[:])
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
 	n := new(big.Int).SetBytes(b[:])
@@ -62,14 +66,32 @@ func newID() string {
 	return string(out)
 }
 
+// maxExactMicros is the widest time, in microseconds either side of the
+// Unix epoch, that every adapter reads exactly: 2^53 - 1, the largest
+// integer a double holds exactly, which bounds what the TypeScript adapter
+// reads.
+const maxExactMicros = 1<<53 - 1
+
+// exactTime refuses a time in microseconds outside ±maxExactMicros, which
+// the TypeScript adapter cannot read, as it says of a column that holds one.
+func exactTime(micros int64, column string) error {
+	if micros > maxExactMicros || micros < -maxExactMicros {
+		return fmt.Errorf("sqlite: column %s is %d, not an integer a number holds exactly", column, micros)
+	}
+	return nil
+}
+
 // microsToDateTime writes a time in microseconds since the Unix epoch as a
 // canonical date-time: UTC with Z, its fraction of a second without
 // trailing zeros and left out when zero. A year outside 0000-9999 is
-// refused.
+// refused, and then a time outside ±maxExactMicros.
 func microsToDateTime(micros int64) (string, error) {
 	t := time.UnixMicro(micros).UTC()
 	if t.Year() < 0 || t.Year() > 9999 {
 		return "", fmt.Errorf("sqlite: %d microseconds falls outside the years 0000-9999", micros)
+	}
+	if micros > maxExactMicros || micros < -maxExactMicros {
+		return "", fmt.Errorf("sqlite: %d is not a whole number of microseconds a number holds exactly", micros)
 	}
 	return t.Format(time.RFC3339Nano), nil
 }

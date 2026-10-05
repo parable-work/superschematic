@@ -1112,8 +1112,11 @@ func TestClockAfterLock(t *testing.T) {
 		return tx.CreateRef(ctx, storage.NewRef{Root: bread, Name: "main", Actor: cook})
 	}))(t)
 	must(s.engine.CreatePrimary(ctx, cook, "Soup", "main"))(t)
-	if !slices.Equal(held, []bool{true, true}) {
-		t.Fatalf("when each transaction read the clock, another connection was kept from the write lock: %v, want [true true]", held)
+	// Three transactions: the layout's, which reads the clock as the
+	// TypeScript adapter's createTables does, the ref's and the primary
+	// line's.
+	if !slices.Equal(held, []bool{true, true, true}) {
+		t.Fatalf("when each transaction read the clock, another connection was kept from the write lock: %v, want [true true true]", held)
 	}
 }
 

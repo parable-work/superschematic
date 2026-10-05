@@ -223,6 +223,12 @@ func (a *Adapter) CreateTables(ctx context.Context, client Client) error {
 		return err
 	}
 	return client.Transact(ctx, func(ctx context.Context, conn Conn) error {
+		// The layout stores no time, but its transaction reads the clock
+		// once, as every one does, so a clock that a writer of the file
+		// steps reads as the TypeScript adapter's does.
+		if _, _, err := a.begin(ctx, conn); err != nil {
+			return err
+		}
 		for _, statement := range statements {
 			if _, err := conn.Exec(ctx, statement); err != nil {
 				return fmt.Errorf("sqlite: create the layout: %w", err)
@@ -333,13 +339,27 @@ func sameConn(a, b Conn) bool {
 // transaction has the one now().
 func (s *store) Transact(ctx context.Context, fn func(ctx context.Context, tx storage.Tx) error) error {
 	return s.client.Transact(ctx, func(ctx context.Context, conn Conn) error {
-		o, ok := ctx.Value(openTime{}).(*open)
-		if !ok || !sameConn(o.conn, conn) {
-			o = &open{conn: conn, time: s.a.clock()}
-			ctx = context.WithValue(ctx, openTime{}, o)
+		ctx, now, err := s.a.begin(ctx, conn)
+		if err != nil {
+			return err
 		}
-		return fn(ctx, &tx{a: s.a, conn: conn, time: o.time})
+		return fn(ctx, &tx{a: s.a, conn: conn, time: now})
 	})
+}
+
+// begin gives a transaction on conn its time: the outer one's when ctx
+// carries a transaction open on conn, else the clock's, read once and
+// carried in the context it returns. It refuses a time outside
+// ±(2^53 - 1) microseconds, which the TypeScript adapter cannot read.
+func (a *Adapter) begin(ctx context.Context, conn Conn) (context.Context, int64, error) {
+	if o, ok := ctx.Value(openTime{}).(*open); ok && sameConn(o.conn, conn) {
+		return ctx, o.time, nil
+	}
+	now := a.clock()
+	if now > maxExactMicros || now < -maxExactMicros {
+		return nil, 0, fmt.Errorf("sqlite: the clock returned %d, not a whole number of microseconds a number holds exactly", now)
+	}
+	return context.WithValue(ctx, openTime{}, &open{conn: conn, time: now}), now, nil
 }
 
 // tx is one transaction's view of the graph, over a Conn, at the
@@ -406,11 +426,24 @@ func (r *refScan) dest() []any {
 		&r.updatedAt, &r.updatedBy, &r.deleted, &r.deletedAt, &r.hasDeletedBy, &r.deletedBy, &r.version}
 }
 
-func (r *refScan) ref() storage.Ref {
+// ref is the ref the row holds. It refuses a seal or a discard time the
+// TypeScript adapter could not read, as that adapter reads both.
+func (r *refScan) ref() (storage.Ref, error) {
+	for _, c := range []struct {
+		column string
+		set    int64
+		micros int64
+	}{{"sealed_at", r.sealed, r.sealedAt}, {"deleted_at", r.deleted, r.deletedAt}} {
+		if isSet(c.set) {
+			if err := exactTime(c.micros, c.column); err != nil {
+				return storage.Ref{}, err
+			}
+		}
+	}
 	return storage.Ref{
 		ID: r.id, Root: r.root, Parent: r.parent, Base: r.base, Head: r.head, Name: r.name,
 		Sealed: isSet(r.sealed), Discarded: isSet(r.deleted), Version: r.version,
-	}
+	}, nil
 }
 
 // image is a ref's history image: each of its columns, an id in its
@@ -558,7 +591,7 @@ func (t *tx) createRef(ctx context.Context, ref storage.NewRef) (storage.Ref, er
 	if err := t.history(ctx, t.a.t.refHistory, id, 1, "INSERT", image); err != nil {
 		return storage.Ref{}, err
 	}
-	return r.ref(), nil
+	return r.ref()
 }
 
 func (t *tx) ReadRef(ctx context.Context, id string) (storage.Ref, error) {
@@ -569,7 +602,7 @@ func (t *tx) ReadRef(ctx context.Context, id string) (storage.Ref, error) {
 	if r == nil {
 		return storage.Ref{}, storage.ErrNotFound
 	}
-	return r.ref(), nil
+	return r.ref()
 }
 
 // LockRef reads a ref as ReadRef does: the one writer the file's write lock
@@ -628,7 +661,7 @@ func (t *tx) updateRef(ctx context.Context, update storage.RefUpdate) (storage.R
 	if err := t.history(ctx, t.a.t.refHistory, update.ID, r.version, "UPDATE", image); err != nil {
 		return storage.Ref{}, err
 	}
-	return r.ref(), nil
+	return r.ref()
 }
 
 func (t *tx) DiscardRef(ctx context.Context, id string, version int64, actor string) error {
@@ -1450,7 +1483,11 @@ func (t *tx) refs(ctx context.Context, sql string, args ...any) ([]storage.Ref, 
 		if err := scan(r.dest()...); err != nil {
 			return err
 		}
-		out = append(out, r.ref())
+		ref, err := r.ref()
+		if err != nil {
+			return err
+		}
+		out = append(out, ref)
 		return nil
 	})
 	if err != nil {
