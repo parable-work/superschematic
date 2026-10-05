@@ -544,6 +544,44 @@ for (const driver of drivers) {
       assert.deepEqual(new Calls(engine, 'new').refs().map((ref) => ref.createdBy), ['alice']);
     });
 
+    test("where Branches is the only writing behavior, an older instance's first branch without fromRef makes its primary line and a draft of it, as the caller; a refused one makes neither", () => {
+      const refusing = { subject: 'reader', permissions: [] };
+      const { engine } = openBranches(driver, { policy: (request) => request.principal.subject !== refusing.subject || request.action === 'read' });
+      publish(engine, recipeDocument(null));
+      engine.instances.create(alice, 'Recipe', { title: 'Old soup' }, { id: 'old' });
+      publish(engine, recipeDocument());
+      const old = new Calls(engine, 'old', bob);
+      // A refused branch rolls the primary line it made back with it: a
+      // draft named like the primary line, and a caller the policy refuses.
+      assert.equal(vetoOf(() => old.invoke('branch', { name: 'main' })), 'name_taken');
+      assert.deepEqual(old.refs(), []);
+      assert.throws(
+        () => old.as(refusing).invoke('branch', { name: 'edit' }),
+        (error: unknown) => error instanceof EngineError && error.code === 'forbidden'
+      );
+      assert.deepEqual(old.refs(), []);
+      const draft = old.invoke<Ref>('branch', { name: 'edit' });
+      const refs = old.refs();
+      assert.deepEqual(
+        refs.map((ref) => [ref.name, ref.parent === null ? null : 'main', ref.createdBy]),
+        [
+          ['main', null, bob.subject],
+          ['edit', 'main', bob.subject],
+        ]
+      );
+      assert.deepEqual([draft.id, draft.parent, draft.base], [refs[1].id, refs[0].id, null]);
+      // On an instance with its line, branch without fromRef is branch from it.
+      engine.instances.create(alice, 'Recipe', { title: 'New soup' }, { id: 'new' });
+      const soup = new Calls(engine, 'new', alice);
+      const main = soup.main();
+      const implicit = soup.invoke<Ref>('branch', { name: 'implicit' });
+      const explicit = soup.invoke<Ref>('branch', { fromRef: main.id, name: 'explicit' });
+      assert.deepEqual([implicit.parent, implicit.base], [explicit.parent, explicit.base]);
+      assert.equal(implicit.parent, main.id);
+      // With fromRef it branches from that ref, a draft included.
+      assert.equal(soup.invoke<Ref>('branch', { fromRef: implicit.id, name: 'nested' }).parent, implicit.id);
+    });
+
     test("another behavior's writing operation is a first write too, and gives an older instance its primary line", () => {
       const { engine } = openBranches(driver);
       const before = recipeDocument(null);

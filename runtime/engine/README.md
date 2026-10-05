@@ -2124,7 +2124,7 @@ primary line and drafts of it.
 
 | Operation | Takes | Returns |
 | --- | --- | --- |
-| `branch` | `fromRef`, `name` | the draft, whose base is `fromRef`'s head |
+| `branch` | `fromRef?`, `name` | the draft, whose base is `fromRef`'s head; without `fromRef`, a draft of the primary line |
 | `save` | `ref`, `version`, `edits` (by kind: `upsert` rows, `delete` and `unset` entity keys) | `{ ref, saved }`: the draft at its new version and the rows stored |
 | `commit` | `ref`, `version`, `message?`, `tag?` | `{ ref, commit }` |
 | `seal` | `ref`, `version` | `{ ref, commit }`, `commit` null when there was nothing to commit |
@@ -2208,11 +2208,13 @@ times as UTC date-times; a tree is rows by kind.
   commit records schema epoch 0, which every version keeps.
 - **The primary line.** `initialize` creates it, named `primary`, as the
   creator. An instance created before its schema composed `Branches`
-  gets it at its first write after: an update that changes the instance,
-  or another behavior's writing operation, in that write's transaction,
-  as its caller. A `Branches` operation cannot be that write: each names
-  a ref or a commit of the instance, which it has none of until then, so
-  the operation is refused and rolls the line it would have made back.
+  gets it at its first write after, in that write's transaction, as its
+  caller: a `branch` without `fromRef`, which then branches from it, so
+  even a schema whose only writing behavior is `Branches` gives such an
+  instance its line; an update that changes the instance; or another
+  behavior's writing operation. Every other `Branches` writing operation
+  names a ref or a commit, which the instance has none of until then, and
+  a refused operation rolls back the line it made with the rest.
   `discard` refuses the primary line (`primary_line`).
 - **The sweep.** On a schema whose config gives `sweep`, each run, as the
   runner's principal, invokes `discard` on each instance for each draft
