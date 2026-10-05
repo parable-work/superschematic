@@ -154,8 +154,8 @@ versiongraph:
 
 # Every version-graph scenario (runtime/versiongraph/testdata/scenarios)
 # through the Go engine. First on SQLite (D32): the SQLite adapter, with its
-# own tests, which need no database server and run with or without a
-# Postgres URL. Then through its Postgres adapter, against the Postgres that
+# own tests and the SQLite vectors, which need no database server and run
+# with or without a Postgres URL. Then through its Postgres adapter, against the Postgres that
 # SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names; that pass fails
 # without it.
 versiongraph-scenarios: versiongraph
