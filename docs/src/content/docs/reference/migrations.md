@@ -472,10 +472,10 @@ change on SQLite is. Postgres plans the same change as `ALTER COLUMN ...
 TYPE T[] USING col::T[]`, which fails on text that is not a number
 (`data-dependent`). SQLite's `CAST` never fails, so where a cast cannot
 keep every element the change is `destructive` instead, and the hazard
-says what it loses. A list of JSON values or of bytes keeps its element:
-SQLite's `CAST` keeps a nested JSON value as JSON, where Postgres's cast
-to text gives its text, and SQLite's JSON holds no bytes. Change such a
-list by hand and adopt the new model.
+says what it loses. An element change to or from a JSON value or bytes
+fails the plan: SQLite's `CAST` keeps a nested JSON value as JSON, where
+Postgres's cast to text gives its text, and SQLite's JSON holds no bytes.
+Change such a list by hand and adopt the new model.
 
 A list of lists is a JSON value on both dialects, `JSONB` on Postgres, so
 a change of its inner element is no step on either.
