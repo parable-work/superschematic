@@ -528,7 +528,16 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 				return nil, errorAtNode(node, "Validate uploadMaxBytes must be a finite JavaScript-safe integer literal")
 			}
 			cfg[prop.Name] = uploadMaxBytes
-		case "min", "max", "minLength", "maxLength", "listMin", "listMax", "pattern":
+		case "minLength", "maxLength", "listMin", "listMax":
+			// A length or item count is a whole number: the JSON and YAML
+			// forms type these bounds as integers, so a fraction is refused
+			// here rather than truncated.
+			bound, valid := uploadMaxBytesLiteral(v)
+			if !valid {
+				return nil, errorAtNode(node, "Validate %s must be a finite JavaScript-safe integer literal, got %s", prop.Name, formatLiteral(v))
+			}
+			cfg[prop.Name] = int(bound)
+		case "min", "max", "pattern":
 			cfg[prop.Name] = v
 		default:
 			return nil, errorAtNode(node, "unsupported Validate config key %q", prop.Name)

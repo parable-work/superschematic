@@ -16,6 +16,7 @@ import {
   probe,
   publish,
   resetProbe,
+  settle,
   testClock,
 } from './runner-fixtures.ts';
 
@@ -35,7 +36,7 @@ function notesOf(engine: Engine): string[] {
   return engine.storage.all('SELECT note FROM bhv_test_ledger__notes ORDER BY row').map((row) => String(row.note));
 }
 
-const off = { state: 'off', everyMs: null, previous: null, next: Number.POSITIVE_INFINITY, failures: 0, error: null };
+const off = { state: 'off', everyMs: null, previous: null, next: null, failures: 0, error: null };
 
 for (const driver of drivers) {
   describe(`a schedule a schema turns off (${driver})`, () => {
@@ -80,6 +81,41 @@ for (const driver of drivers) {
       publish(engine, pacerDocument('On', { everyMs: 5_000 }));
       engine.runner.runDue();
       assert.deepEqual(schedules(engine).On, { state: 'active', everyMs: 5_000, previous: null, next: 105_000, failures: 0, error: null });
+    });
+
+    test('a started runner whose only schedule is off sets no timer and reads no clock once its pass is done; one that is on sets one', async () => {
+      const real = globalThis.setTimeout;
+      const timers: number[] = [];
+      globalThis.setTimeout = ((handler: () => void, delay?: number) => {
+        timers.push(Number(delay ?? 0));
+        return real(handler, delay);
+      }) as typeof setTimeout;
+      try {
+        for (const [config, armed] of [
+          [{}, []],
+          [{ everyMs: 60_000 }, [60_000]],
+        ] as const) {
+          let reads = 0;
+          const clock = testClock(0);
+          const counted = () => {
+            reads += 1;
+            return clock();
+          };
+          const engine = openRunnerEngine({ driver, clock: counted, behaviors: [ledger, pacer] });
+          probe.every = (pacing) => pacing.everyMs ?? null;
+          publish(engine, pacerDocument('P', config));
+          timers.length = 0;
+          engine.runner.start();
+          await settle();
+          const after = reads;
+          await new Promise<void>((resolve) => real(resolve, 50));
+          await settle();
+          assert.deepEqual([timers, reads - after], [armed, 0], `the runner with ${JSON.stringify(config)}`);
+          engine.runner.stop();
+        }
+      } finally {
+        globalThis.setTimeout = real;
+      }
     });
 
     test('only null turns it off: a function that returns nothing still fails the schedule there', () => {
