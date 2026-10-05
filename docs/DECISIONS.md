@@ -2608,7 +2608,8 @@ and each changes a D16 rule.
 Phases 1, 2 and 3 do not depend on each other; phase 4 needs all three,
 and phase 5 needs phase 4.
 
-Nothing here is built.
+The table's steps 1 to 5 are built, `Branches` last
+(`runtime/engine/README.md`, "Branches"), and its Later row is not.
 
 ## D33. The session store reports a revoked session's `DeletedAt`
 

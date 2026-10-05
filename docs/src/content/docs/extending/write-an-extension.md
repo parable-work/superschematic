@@ -805,7 +805,7 @@ engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
 An engine without the implementation refuses a schema that composes the
 behavior. The engine registers the core's own behaviors, `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-`Reactions`, `Constants` and `Variants`, when it opens; `behaviors` adds yours beside them, as it adds
+`Reactions`, `Constants`, `Variants` and `Branches`, when it opens; `behaviors` adds yours beside them, as it adds
 the core's [work-queue behaviors](/superschematic/guides/work-queues/)
 from `@superschematic/engine-workqueue`. No core operation names an
 invocation policy, so their tools take the default of the policy you

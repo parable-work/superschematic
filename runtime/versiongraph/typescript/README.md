@@ -162,7 +162,9 @@ as a savepoint; with `options.callerTransaction` it runs in the
 transaction its caller holds and issues no transaction control, as a D16
 behavior's `sql` requires. A taken name is the live-name index's
 `SQLITE_CONSTRAINT_UNIQUE`, and `lockRef`, `nextSequence` and `sweepLock`
-lean on SQLite's one writer.
+lean on SQLite's one writer. The engine's core `Branches` behavior runs it
+so, in each operation's transaction, over its `sql`
+(`runtime/engine/README.md`, "Branches").
 
 `SqliteClient` is the shape of D16's `SqlDriver`: `run`, `get` and `all`
 with positional parameters for numbered placeholders (`?1`), plain rows,

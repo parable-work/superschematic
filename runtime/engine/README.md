@@ -13,13 +13,13 @@ describe and tools documents, the MCP endpoint
 (`@superschematic/engine/mcp`), and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
 reach other instances, `Search`, full-text search, `Reactions`, which
-the runner runs, and `Constants` and `Variants`, which judge the fields a
-write stores. The plug-in interface has what D32 gives a behavior that
-keeps values of other types in its own tables: the schema's other types
-in `parseConfig`, `validate(type, value)` in its contexts, and schedules
-a schema turns off and whose runs write the behavior's own tables. Not
-built yet: the vectors D16 lists beside search, and D32's `Branches`. The
-work-queue behaviors are a package of their own,
+the runner runs, `Constants` and `Variants`, which judge the fields a
+write stores, and `Branches`, a version graph on each instance (D32). The
+plug-in interface has what D32 gives a behavior that keeps values of
+other types in its own tables: the schema's other types in
+`parseConfig`, `validate(type, value)` in its contexts, and schedules a
+schema turns off and whose runs write the behavior's own tables. Not
+built yet: the vectors D16 lists beside search. The work-queue behaviors are a package of their own,
 `@superschematic/engine-workqueue` (`runtime/engine-workqueue/README.md`),
 which a deployment registers with the engine.
 
@@ -1437,7 +1437,7 @@ operation that expects the sequence from before the operation is refused
 
 ### Core behaviors
 
-The core declares ten behaviors the engine implements
+The core declares eleven behaviors the engine implements
 (`internal/registry/behaviors`, section 3.16 of
 `docs/extension-model.md`), so every binary's meta-schema admits them,
 and the engine implements them in `src/behaviors/core` and registers
@@ -1505,8 +1505,20 @@ result has the kind's shape:
     "types": { "verify": "VerifyResult", "review": "ReviewResult" } } }
 ```
 
-Their records number from 1 per instance (a comment's id, a revision, a
-proposal's id), so a number says nothing about another instance. Their
+`Branches` keeps a version graph on each instance in tables of its own,
+the version graph's SQLite layout ("Branches"), on a schema whose kinds
+are other types of the document:
+
+```json
+{ "name": "Branches", "config": { "kinds": {
+    "step": { "type": "Step", "order": "position", "units": { "timings": "keyed" } },
+    "ingredient": { "type": "Ingredient", "parent": { "key": "stepKey", "of": "step" } },
+    "cover": { "type": "Cover", "singleton": true } } } }
+```
+
+Where they number their records, they number from 1 per instance (a
+comment's id, a revision, a proposal's id), so a number says nothing
+about another instance. Their
 list operations are read-only, so the policy is asked for `read` and they
 append no event: they take `limit` (1 to 500, 50 by default) and
 `cursor`, and return `{ items, next }` in the order the records were
@@ -2083,6 +2095,121 @@ result changes only the members it names.
   properties: { result: { type: "null" } } } }`. The create tool's `data`
   carries the same, and the update tool's `patch` a patch form, whose
   types require nothing and whose `if` needs `kind` in the patch.
+
+#### Branches
+
+A version graph on each instance (D32, over D17 and D19): the instance is
+the graph's root, never overlaid and in no commit, so its own fields stay
+outside the graph, and rows of the kinds the config names live on refs, a
+primary line and drafts of it.
+
+| | |
+| --- | --- |
+| Config | `kinds` (1 to 64, by name, camelCase): each `{ type, parent?, order?, singleton?, units?, retentionDays? }`, `type` a type of the document besides the instance type, whose fields are the kind's content, `parent: { key, of }`, `order` and `singleton` as `@graphMember`'s, `units` each field's conflict unit as `@conflictUnit` sets it (`atomic`, `keyed`, `jsonSchema`, `excluded`), `retentionDays` as `@versioned`'s; `primary`, the primary line's name (`main`); `snapshotEvery`, as `@versionGraph`'s (64); `sweep: { intervalMs, discardGrace?, pruneBatch?, abandonAfter? }`, milliseconds but `pruneBatch`; required |
+| Fields | none |
+| Operations | writing: `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `release`, `discard`; read-only: `refs`, `releases`, `compose`, `materialize`, `released`, `diff`, `history`; all of instance scope |
+| Storage | the SQLite adapter's layout (`sqliteLayout` of `@superschematic/versiongraph/sqlite`) under the behavior's names, `bhv_branches__ref` to `bhv_branches__member_history`, beside `roots` (each root's instance) and `actors` (each actor's subject) |
+| Schedule | `sweep`, every `sweep.intervalMs` on a schema whose config gives `sweep`, off on any other |
+| Vetoes | the version graph engine's codes: `version_conflict`, `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`, `entity_not_found`, `invalid_tree` (the core's findings in `details.findings`), `merge_into_itself`, `no_parent`, `not_tagged`, `walk_ceiling` |
+| Refusals at define | a kind whose type is no type of the document besides the instance type; a field whose JSON key is a role or audit column's; a field of a scalar no value class reads (`Geo.Location`); a parent that is no kind of the config, or whose key is not a field of the kind's type holding a UUID; an order that is not an integer field; a unit on a field the type lacks, a `keyed` or `jsonSchema` unit on a field that is not JSON, an excluded order or parent key; and what else the version graph's core refuses in the descriptor (`invalid_schema`) |
+| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused. Added to a schema with instances, not removed from one |
+
+| Operation | Takes | Returns |
+| --- | --- | --- |
+| `branch` | `fromRef`, `name` | the draft, whose base is `fromRef`'s head |
+| `save` | `ref`, `version`, `edits` (by kind: `upsert` rows, `delete` and `unset` entity keys) | `{ ref, saved }`: the draft at its new version and the rows stored |
+| `commit` | `ref`, `version`, `message?`, `tag?` | `{ ref, commit }` |
+| `seal` | `ref`, `version` | `{ ref, commit }`, `commit` null when there was nothing to commit |
+| `merge` | `source`, `target`, `targetVersion`, `resolutions?`, `message?`, `tag?` | `{ ref, commit, conflicts }` |
+| `rebase` | `draft`, `version`, `resolutions?` | `{ ref, commit, conflicts }` |
+| `revert` | `ref`, `version`, `toCommit` | `{ ref, commit }` |
+| `release` | `commit`, `version` (the release pointer's, 0 for the first) | `{ commit, version }` |
+| `discard` | `ref`, `version` | the ref, discarded |
+| `refs` | `limit?`, `cursor?` | the instance's live refs, the primary line first, a page at a time |
+| `releases` | `limit?`, `cursor?` | the release log: `{ version, commit, releasedAt, releasedBy }` per version of the pointer, oldest first |
+| `compose` | `ref` | `{ tree, contentHash, findings }` of the ref, uncommitted work included |
+| `materialize` | `commit` | `{ tree, contentHash, findings }` of the commit |
+| `released` | nothing | `{ release, tree, contentHash, findings }`; `not_found` before the first release |
+| `diff` | `from`, `to` | `{ changes }`, each `{ kind, entityKey, operation, row? }` |
+| `history` | `ref` | `{ commits }` the ref wrote, newest first |
+
+A ref is `{ id, name, parent, base, head, sealed, discarded, version,
+createdAt, createdBy, updatedAt, updatedBy }` and a commit `{ id, ref,
+parent, message, sequence, contentHash, createdAt, createdBy, snapshot }`,
+times as UTC date-times; a tree is rows by kind.
+
+- **The descriptor.** `parseConfig` derives the graph's descriptor
+  (version 3) from `kinds` and the types it reads through
+  `ConfigTarget.types` ("Other types"), so the version's checks cover the
+  kinds' types and the compatibility rule keeps them as it keeps the
+  instance type's. A kind's role and audit columns have fixed names:
+  `id`, `entity_key`, `ref_id`, `root_id`, `deleted_on_ref`, `_version`,
+  `created_at`, `created_by`, `updated_at` and `updated_by`, the author,
+  which conflicts report and a delete's image names as its actor; images
+  exclude nothing, and the root's column and the other audit columns are
+  not content. Each field is a column under its JSON key, of the value
+  class graphdesc gives a compiled field: a primitive's from its name
+  (`string`, `String` and `ID` are `string`, `Int` `integer`, `number`
+  and `Float` `number`, `boolean` and `Boolean` `boolean`), an enum's
+  `enum`, a nested type's `json`, a catalog scalar's the scalar catalog's
+  (`BUILTIN_SCALAR_VALUE_CLASSES`), whatever the document declares for
+  it, as the engine validates it, a scalar the document defines the one
+  its JSON type gives (`jsonType`: `string`, `integer`, `number`,
+  `boolean`, and `json` for an object, an array or any value), and each
+  list level adds `[]`. The core checks the descriptor at define.
+- **Rows.** `save` holds each upsert row's content, the row less
+  `entity_key`, to its kind's type with `validate(type, value)` before
+  the engine sees it: a JSON object, each field's value, no key the type
+  does not declare. Its issues refuse the save (`invalid_argument`, each
+  at a JSON pointer such as `/edits/step/upsert/0/position`). A row is an
+  entity's whole content: a field it leaves out is stored null, and an
+  `entity_key` replaces that entity on the draft. A read returns rows
+  with their role and audit columns, ids in their canonical form.
+- **Refs and commits.** Each is named by id, in either UUID form, and must
+  be the instance's: another instance's, a discarded ref or one that does
+  not exist is `invalid_argument` at the parameter. A primary line takes
+  writes only from `merge`; work happens on a draft, which `rebase`
+  brings up to its parent's head.
+- **Actors and roots.** The actor of a write is the version-5 UUID of
+  the principal's subject in `ACTOR_NAMESPACE`
+  (`e5df4b2e-719d-4507-8d3a-9474ef4afe81`), recorded in `actors`, and
+  every read returns the subject: a ref's and a commit's `createdBy`, a
+  row's `created_by` and `updated_by`, a conflict's authors, a release's
+  `releasedBy`. A root's id is the version-5 UUID of its instance's id in
+  `ROOT_NAMESPACE` (`cc634206-0f43-4e6c-a60f-65184f26131e`), since an
+  instance id is any string. Both are exported, with `uuidV5`.
+- **The graph's tables.** The behavior's migration creates the
+  adapter's statements under `sql.table`'s names. The adapter runs in the
+  caller's transaction and reaches the tables only through the call's
+  `sql`, whose checks its statements pass: one statement at a time, on
+  the behavior's own tables, with no trigger and no transaction control.
+  So an invoked operation's savepoint rolls the graph's writes back with
+  the rest. A graph is named by its namespace and schema
+  (`default/Recipe`), so the tables hold every schema's graphs. Each
+  commit records schema epoch 0, which every version keeps.
+- **The primary line.** `initialize` creates it, named `primary`, as the
+  creator. An instance created before its schema composed `Branches`
+  gets it at its first write, a `Branches` writing operation, an update,
+  or another behavior's writing operation, in that write's transaction,
+  as its caller.
+- **The sweep.** On a schema whose config gives `sweep`, each run, as the
+  runner's principal, invokes `discard` on each instance for each draft
+  with no write for `abandonAfter`, so each runs its guards and appends
+  its event (a vetoed one stays), and then runs the version graph's sweep
+  with abandoning off, writing only the behavior's tables: it deletes the
+  rows of refs discarded longer ago than `discardGrace` (seven days when
+  absent), whose ref rows and commits stay, prunes each kind's history
+  past its `retentionDays`, at most `pruneBatch` images a kind, keeping
+  every image a commit or a snapshot pins, and writes every snapshot the
+  graph's rules call for and it lacks.
+- **Deleting.** Deleting an instance deletes its graph: its refs,
+  commits, patches, snapshots, rows, release pointer and their history.
+- **The core.** `@superschematic/engine` depends on
+  `@superschematic/versiongraph`, whose `SyncEngine` and SQLite adapter
+  run each operation, and instantiates the wasm core with `initSync` the
+  first time a schema that composes `Branches` is composed.
+- **Lease.** `release` is also an operation of `Lease`, so a type cannot
+  compose both.
 
 ## Namespaces
 
