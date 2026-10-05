@@ -1,9 +1,9 @@
-# {{ .PackageName }}
+# @schemas/fixture-service-auth-api-api
 
-Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
-`{{ .RuntimePackage }}` and Hono {{ .HonoVersion }}.
+Generated TypeScript API server for the `fixture-service-auth-api` schema. Built on
+`@superschematic/http-runtime` and Hono 4.13.8.
 
-**Do not edit manually.** Regenerate it by building the `{{ .SchemaName }}` schema.
+**Do not edit manually.** Regenerate it by building the `fixture-service-auth-api` schema.
 
 ## Layout
 
@@ -11,23 +11,16 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   class with typed arguments (path params as scalar types, query params
   optional unless required, the input type from the generated types package)
   and the `Implementations` record the router takes.
-{{- if .WebhookProviders }} Its
-  `webhookVerifiers` holds the verifier of each `@hmacVerified` provider
-  ({{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}`{{ $p }}`{{ end }}), Hono middleware that checks a request's signature
-  before every other step of the provider's routes.
-{{- end }}
 - `router.ts`: `buildRouter(implementations, options)` returns a Hono router
   that mounts every `@rest` operation under `/api`, decodes parameters,
   parses JSON bodies through the generated strict `parse<Input>FromJSON`
   validators, applies the `@requirePermission` / `@publicRoute` gate, wraps
   results in the `{data, meta: {requestId}}` envelope and failures in
   RFC 9457 `application/problem+json`. `operationSpecs` is the operation table.
-{{- if .HasServiceCallers }}
   A `@requireService` or `@allowService` operation also admits a calling
   service: `authenticateService` verifies its `Service-Authorization`
   credential before the end-user step and puts it on `ctx.serviceCaller`;
   without it, such an operation answers 401 `service_unauthorized`.
-{{- end }}
 - `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
 - `values-schema.json`: the env-var contract, when the schema declares an
   `@envVars` class.
@@ -36,50 +29,33 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
 
 | Method | Path | Operation | Auth |
 | --- | --- | --- | --- |
-{{- range .Endpoints }}
-| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
-{{- end }}
+| `GET` | `/api/ledger/reservations` | `ledger.listReservations` | authenticated or service: fixture-service-caller-api |
+| `POST` | `/api/stock/reindex` | `stock.reindexStock` | service: any caller |
+| `POST` | `/api/stock/reservations` | `stock.reserveStock` | stock.reserve and service: fixture-service-caller-api |
+| `GET` | `/api/stock/reservations/{id}` | `stock.getReservation` | authenticated |
+| `POST` | `/api/stock/reservations/{id}/release` | `stock.releaseReservation` | stock.write or service: fixture-service-caller-api |
+| `GET` | `/api/sync/status` | `sync.syncStatus` | public |
+| `POST` | `/api/sync/stock` | `sync.syncStock` | service: fixture-service-caller-api |
+| `POST` | `/api/sync/stock/mine` | `sync.syncMyStock` | authenticated or service: any caller |
 
 ## Usage
 
 ```ts
 import { Hono } from 'hono';
-{{- if .HasServiceCallers }}
-import { serviceAuthenticator } from '{{ .RuntimePackage }}';
-{{- end }}
-import { errorHandler, notFoundHandler } from '{{ .RuntimePackage }}/hono';
-import { buildRouter, type Implementations } from '{{ .PackageName }}';
+import { serviceAuthenticator } from '@superschematic/http-runtime';
+import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
+import { buildRouter, type Implementations } from '@schemas/fixture-service-auth-api-api';
 
-{{ if .WebhookProviders -}}
-const implementations: Implementations = {
-  /* one object per operation class */
-  webhookVerifiers: {
-{{- range .WebhookProviders }}
-    {{ tsString . }}: async (c, next) => { /* refuse a bad signature, else */ await next(); },
-{{- end }}
-  },
-};
-{{ else -}}
 const implementations: Implementations = { /* one object per operation class */ };
-{{ end -}}
 const app = new Hono();
 app.route('/', buildRouter(implementations, {
   authenticate: async ctx => /* the caller, or null */ null,
-{{- if .HasServiceCallers }}
   authenticateService: serviceAuthenticator(serviceAuthConfig), // the issuers and callers this server admits
-{{- end }}
-{{- if .HasManualRoutes }}
-  manualRoutes: {
-{{- range .ManualEndpoints }}
-    {{ .Name }}: async (c, ctx) => new Response(/* the service's own handler */),
-{{- end }}
-  },
-{{- end }}
 }));
 app.notFound(notFoundHandler());
 app.onError(errorHandler());
 ```
 
-Peer dependencies (`{{ .RuntimePackage }}`, the generated types packages,
+Peer dependencies (`@superschematic/http-runtime`, the generated types packages,
 `hono`) are resolved by the consuming service, the way it resolves the scalar
 library.
