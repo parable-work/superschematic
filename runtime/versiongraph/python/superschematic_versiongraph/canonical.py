@@ -268,10 +268,15 @@ _SECOND = 1_000_000_000
 _DAY_SECONDS = 24 * 3600
 
 
+# Howard Hinnant's days_from_civil and civil_from_days, with Python's //,
+# which floors, so an era needs none of the adjustment C's truncating
+# division does.
+
+
 def _days_from_civil(year: int, month: int, day: int) -> int:
     """Days since 1970-01-01 of a proleptic Gregorian date."""
     year -= month <= 2
-    era = (year if year >= 0 else year - 399) // 400
+    era = year // 400
     yoe = year - era * 400
     doy = (153 * (month + (-3 if month > 2 else 9)) + 2) // 5 + day - 1
     doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
@@ -279,8 +284,9 @@ def _days_from_civil(year: int, month: int, day: int) -> int:
 
 
 def _civil_from_days(days: int) -> Tuple[int, int, int]:
+    """The proleptic Gregorian date of a count of days since 1970-01-01."""
     days += 719468
-    era = (days if days >= 0 else days - 146096) // 146097
+    era = days // 146097
     doe = days - era * 146097
     yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
     year = yoe + era * 400
