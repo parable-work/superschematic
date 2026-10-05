@@ -54,10 +54,15 @@ import (
 )
 
 // MinVersion is the oldest SQLite the adapter runs on: its tables are
-// STRICT (3.37.0), its writes read back with RETURNING (3.35.0), and its
+// STRICT (3.37.0), and its writes read back with RETURNING (3.35.0). Its
 // reads take lists through json_each and json_extract, which SQLite builds
-// in from 3.38.0 on.
-const MinVersion = "3.38.0"
+// in from 3.38.0 and 3.37 has in builds with JSON1; Storage checks that
+// they are there.
+const MinVersion = "3.37.0"
+
+// jsonProbe uses the JSON functions the adapter's statements use, and
+// fails on a SQLite built without them.
+const jsonProbe = `SELECT json_extract(p.value, '$[0]') FROM json_each('[[1]]') AS p`
 
 // The audit columns the adapter writes on every member row when a kind has
 // them.
@@ -228,8 +233,9 @@ func (a *Adapter) CreateTables(ctx context.Context, client Client) error {
 }
 
 // Storage binds the adapter to a client. It refuses, in one transaction of
-// the client, a connection whose foreign keys are off and a SQLite older
-// than MinVersion.
+// the client, a connection whose foreign keys are off, a SQLite older than
+// MinVersion, and one built without the JSON functions json_each and
+// json_extract.
 func (a *Adapter) Storage(ctx context.Context, client Client) (storage.Storage, error) {
 	err := client.Transact(ctx, func(ctx context.Context, conn Conn) error {
 		var on int64
@@ -249,7 +255,11 @@ func (a *Adapter) Storage(ctx context.Context, client Client) (storage.Storage, 
 			return err
 		}
 		if older {
-			return fmt.Errorf("sqlite: SQLite %s is older than %s, which the layout's STRICT tables and its statements' RETURNING and JSON functions need", version, MinVersion)
+			return fmt.Errorf("sqlite: SQLite %s is older than %s, which the layout's STRICT tables and its statements' RETURNING need", version, MinVersion)
+		}
+		var one int64
+		if found, err := queryRow(ctx, conn, jsonProbe, nil, &one); err != nil || !found || one != 1 {
+			return fmt.Errorf("sqlite: SQLite %s lacks the JSON functions json_each and json_extract, which the adapter's statements use (built in from 3.38.0, and in 3.37 with JSON1): %v", version, err)
 		}
 		return nil
 	})

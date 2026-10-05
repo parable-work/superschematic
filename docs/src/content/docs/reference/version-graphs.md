@@ -372,8 +372,8 @@ reads it from another driver's. Over a pool or a connection each
 transaction turns the connection's foreign keys on and begins with
 `BEGIN IMMEDIATE`, and one begun with the context another's function was
 given is a savepoint inside it; inside an open transaction each is a
-savepoint. `Storage` refuses a connection whose foreign keys are off and a
-SQLite older than 3.38.0.
+savepoint. `Storage` refuses a connection whose foreign keys are off, a
+SQLite older than 3.37.0, and one built without the JSON functions.
 
 ```go
 db, err := sql.Open("sqlite", "recipes.sqlite") // modernc.org/sqlite

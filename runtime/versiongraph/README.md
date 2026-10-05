@@ -610,13 +610,13 @@ begins with `BEGIN IMMEDIATE`, and one begun with the context another's
 function was given is a savepoint on the same connection, at the outer
 one's time. Inside a `database/sql` transaction the caller holds, each is
 a savepoint, as `postgres.Pgx` runs inside a pgx transaction. `Storage`
-refuses a connection whose foreign keys are off and a SQLite older than
-3.38.0 (`MinVersion`): `STRICT` needs 3.37.0, `RETURNING` 3.35.0, and the
-statements' `json_each` and `json_extract` are built in from 3.38.0. A
-name already taken is SQLite's extended result code 2067, which the
-adapter reads from the driver's error through its `Code() int`, as
-`modernc.org/sqlite`'s has, or through `Options.ResultCode` for a driver
-that carries it otherwise.
+refuses a connection whose foreign keys are off, a SQLite older than
+3.37.0 (`MinVersion`), which `STRICT` needs, and one without the
+statements' `json_each` and `json_extract`, built in from 3.38.0 and in
+3.37 with JSON1. A name already taken is SQLite's extended result code
+2067, which the adapter reads from the driver's error through its
+`Code() int`, as `modernc.org/sqlite`'s has, or through
+`Options.ResultCode` for a driver that carries it otherwise.
 
 `testdata/sqlite` holds the vectors every language's SQLite adapter is
 held to, so a file one adapter writes reads the same in another's; its

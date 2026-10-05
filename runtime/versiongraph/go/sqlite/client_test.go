@@ -136,8 +136,8 @@ func TestDBTurnsForeignKeysOn(t *testing.T) {
 
 // TestStorageRefuses: Storage refuses a connection whose foreign keys are
 // off, as they are in a transaction the caller began on a connection
-// without them, and a SQLite older than MinVersion; it takes the version
-// itself.
+// without them, a SQLite older than MinVersion, and one without the JSON
+// functions; it takes MinVersion itself.
 func TestStorageRefuses(t *testing.T) {
 	ctx := context.Background()
 	db := openDB(t, "", "")
@@ -159,14 +159,18 @@ func TestStorageRefuses(t *testing.T) {
 	}
 	for _, c := range []struct {
 		version, refuse string
+		noJSON          bool
 	}{
-		{"3.37.2", "SQLite 3.37.2 is older than 3.38.0"},
-		{"3.38.0", ""},
-		{"3.50.4", ""},
-		{"4.0.0", ""},
-		{"3.38", `not major.minor.patch`},
+		{version: "3.36.9", refuse: "SQLite 3.36.9 is older than 3.37.0"},
+		{version: "2.99.99", refuse: "SQLite 2.99.99 is older than 3.37.0"},
+		{version: "3.37.0"},
+		{version: "3.38.0"},
+		{version: "3.50.4"},
+		{version: "4.0.0"},
+		{version: "3.38", refuse: `not major.minor.patch`},
+		{version: "3.37.2", noJSON: true, refuse: "SQLite 3.37.2 lacks the JSON functions json_each and json_extract"},
 	} {
-		_, err := adapter.Storage(ctx, versionClient{inner: sqlite.DB(db), version: c.version})
+		_, err := adapter.Storage(ctx, versionClient{inner: sqlite.DB(db), version: c.version, noJSON: c.noJSON})
 		if c.refuse == "" && err != nil {
 			t.Fatalf("SQLite %s: %v", c.version, err)
 		}
@@ -176,26 +180,33 @@ func TestStorageRefuses(t *testing.T) {
 	}
 }
 
-// versionClient is a client whose SQLite reports version.
+// versionClient is a client whose SQLite reports version, and lacks the
+// JSON functions when noJSON is set.
 type versionClient struct {
 	inner   sqlite.Client
 	version string
+	noJSON  bool
 }
 
 func (c versionClient) Transact(ctx context.Context, fn func(ctx context.Context, conn sqlite.Conn) error) error {
 	return c.inner.Transact(ctx, func(ctx context.Context, conn sqlite.Conn) error {
-		return fn(ctx, versionConn{Conn: conn, version: c.version})
+		return fn(ctx, versionConn{Conn: conn, version: c.version, noJSON: c.noJSON})
 	})
 }
 
 type versionConn struct {
 	sqlite.Conn
 	version string
+	noJSON  bool
 }
 
 func (c versionConn) Query(ctx context.Context, sql string, args []any, row func(scan func(dest ...any) error) error) error {
 	if sql == "SELECT sqlite_version()" {
 		sql, args = "SELECT ?1", []any{c.version}
+	}
+	if c.noJSON && strings.Contains(sql, "json_") {
+		// What a SQLite built without JSON1 says of json_each.
+		sql = strings.ReplaceAll(sql, "json_each(", "no_such_table_valued_function(")
 	}
 	return c.Conn.Query(ctx, sql, args, row)
 }
