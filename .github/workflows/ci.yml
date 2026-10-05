@@ -223,11 +223,19 @@ jobs:
           # The migration runner's tests apply plans to databases they
           # create on it; its SQLite tests need no service.
           SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # The rustgen, rustsdkgen, rustrestgen and parity tests run cargo on
+          # the crates they generate. Each uses CARGO_TARGET_DIR when set, so
+          # one target directory compiles axum, tokio, reqwest and superscalar
+          # once for all of them, where a directory per test compiled them
+          # again for each and outran go test's ten-minute limit per package.
+          CARGO_TARGET_DIR: ${{ runner.temp }}/generated-crates-target
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go; do
             echo "==> $m"
-            (cd "$m" && go build ./... && go vet ./... && go test -count=1 ./...)
+            # Packages that run cargo queue on its lock of the shared target
+            # directory, and the wait counts against each package's timeout.
+            (cd "$m" && go build ./... && go vet ./... && go test -count=1 -timeout 30m ./...)
           done
 
       - name: gofmt
