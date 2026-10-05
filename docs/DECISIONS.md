@@ -2366,6 +2366,30 @@ out. Every Postgres and SQLite plan case with contract steps converges to
 its `expandedModel` after its expand steps, and the runner's vectors
 include a plan superseded after its expand phase.
 
+### D27, amended: SQLite rebuilds with foreign keys on, and the runner on D1
+
+D27 rebuilt a SQLite table with foreign key enforcement off, since
+dropping the old table otherwise runs the `ON DELETE` actions of the keys
+that reference it, and a `CASCADE` deletes their rows. D1, the SQLite
+database of D30's Cloudflare target, keeps enforcement on: a query cannot
+change `PRAGMA foreign_keys`, `PRAGMA defer_foreign_keys` only defers the
+checks to the end of the transaction, and renaming a table rewrites the
+keys that reference it even with `PRAGMA legacy_alter_table` on. D1 has
+no `BEGIN` or `COMMIT` either: a request to its REST API runs its
+statements as one batch.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A SQLite rebuild works with enforcement on. It rebuilds the table together with every table that references it, transitively, in one transaction with `defer_foreign_keys` on: it creates a new table for each, whose keys name the other new tables; copies the rows, referenced tables first; drops the old tables, referencing ones first, so no drop finds a key to act on; renames each new table to its name, which carries the references to the final names; and creates their indexes again. One SQLite plan serves a SQLite file and D1. The step's `copy-table` and `blocking` hazards name every table it copies. Plans no longer set `foreignKeysOff`. | Turning enforcement off around the step, which D1 refuses; renaming the old table first, which rewrites the referencing keys to it whatever `legacy_alter_table` says, so its drop cascades; a rendering of its own for D1, which would give one model two plans |
+| The runner gains a D1 driver over Cloudflare's REST API. Its URL is `d1://<account id>/<database id>`, and it reads its API token from `CLOUDFLARE_API_TOKEN`. A transactional step, with its log row and any state change, is one request run as one batch, so a repeated or concurrent run fails on the log row's primary key and the step runs once. The driver reads the state in requests of their own, outside the batch. | Exporting a plan as `wrangler d1 migrations` files, which would give up the baseline check, resuming and superseding; running the runner in a Worker, which a CI job deploying the stack cannot call |
+| A lease stands in for Postgres's advisory lock: a row of `superschematic_lock` holds the service, the holder and an expiry, taken with one conditional write, renewed at each step and released at the end. A runner that dies leaves its lease to expire, and the next one takes it over. D1 runs one write at a time, so the conditional write decides between two runners. | No lock, which leaves two runners deciding on the same read |
+| The D1 driver refuses a step outside a transaction and a step with `foreignKeysOff`, which D1 cannot run. A plan written before this amendment may rebuild with `foreignKeysOff`; the SQLite file driver still runs it. | |
+| Every SQLite rebuild converges with enforcement on. The runner's tests run against a fake D1 REST server backed by SQLite with enforcement forced on and each request run in one transaction, and against a real D1 database when `SUPERSCHEMATIC_MIGRATE_TEST_D1_URL` and its token are set. Cloudflare documents a Worker's batch as a transaction but not a REST request's, so the driver is documented as unverified until that test has passed against D1. | Trusting the fake alone |
+
+Status: the design. The SQLite rebuild and the D1 driver are not built.
+
+The rule is reversible until the first release.
+
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
 superschematic generates the code of a tree of services but nothing that

@@ -114,8 +114,27 @@ superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--d
 
 `--database-url` defaults to `$DATABASE_URL`. A `postgres://` or
 `postgresql://` URL selects Postgres; a `sqlite:` URL, a `file:` URI or a
-path selects SQLite. It must match the plan's dialect. `--phase` defaults
-to `all`.
+path selects a SQLite file; a `d1://<account id>/<database id>` URL selects
+a Cloudflare D1 database, reached through Cloudflare's REST API with the
+token in `$CLOUDFLARE_API_TOKEN`. SQLite and D1 run `sqlite` plans. The URL
+must match the plan's dialect. `--phase` defaults to `all`.
+
+On D1 (D27, amended: SQLite rebuilds with foreign keys on, and the runner
+on D1):
+
+- D1 has no `BEGIN` or `COMMIT`. A transactional step, with its log row
+  and any state change, is one REST request whose statements run as one
+  batch; the log row's primary key fails a repeated or concurrent run of
+  the step, and the batch with it. The state and the log are read in
+  requests of their own.
+- The lock of step 2 is a lease: a row of `superschematic_lock` (service,
+  holder, expiry), taken with one conditional write, renewed at each step,
+  released at the end, and taken over once it expires.
+- A step with `transactional: false` or `foreignKeysOff` is refused: D1
+  can run neither. Plans written before the amendment may rebuild with
+  `foreignKeysOff`; apply those to a SQLite file.
+- Until the real-D1 test has passed, the driver is unverified: Cloudflare
+  documents a Worker's batch as a transaction, not a REST request's.
 
 1. Read the plan and check its version, its `hash`, its `to` and, when
    it has one, its `expanded`.
