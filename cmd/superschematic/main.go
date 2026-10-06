@@ -1,9 +1,9 @@
 // Command superschematic is the installed binary: a distribution of the
 // core and the official extensions (docs/stack-model.md, section 13). It
 // reads .schema.{ts,json,yaml} service directories and generates code
-// artifacts, as the core does, and it links every official target and the
-// provisioner that applies them, so an engineer installs one binary and gets
-// every official target.
+// artifacts, as the core does, and it links every official target and DNS
+// platform and the provisioner that applies them, so an engineer installs one
+// binary and gets every official target.
 //
 // It is a Go module of its own, so the root module never depends on an
 // extension and the Pulumi SDK stays out of it. The core with no extension
@@ -18,6 +18,7 @@ import (
 	"github.com/parable-work/superschematic/cli"
 	"github.com/parable-work/superschematic/registry"
 
+	"github.com/parable-work/superschematic/extensions/cloudflare"
 	"github.com/parable-work/superschematic/extensions/gcp"
 	"github.com/parable-work/superschematic/extensions/pulumi"
 )
@@ -37,8 +38,10 @@ func main() {
 func extensions() []registry.Extension {
 	return []registry.Extension{
 		gcp.Extension{},
-		// extensions/cloudflare, the Cloudflare DNS platform, goes here
-		// once it lands, with its provider's pin in ProviderVersions below.
-		pulumi.Extension{ProviderVersions: map[string]string{"gcp": gcp.ProviderVersion}},
+		cloudflare.Extension{},
+		pulumi.Extension{ProviderVersions: map[string]string{
+			"gcp":              gcp.ProviderVersion,
+			cloudflare.Package: cloudflare.ProviderVersion,
+		}},
 	}
 }
