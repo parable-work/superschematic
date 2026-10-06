@@ -668,62 +668,12 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 // env-var loader. Schemas with @envVars config but no operations still get
 // their env loader via the standalone path.
 func (r run) generateGoAPI() error {
-	var output *apigen.APIOutput
-	if err := r.measure("output.api.prepare", func() error {
-		var err error
-		output, err = r.APIOutput()
-		return err
-	}); err != nil {
+	output, err := r.goServerOutput()
+	if err != nil {
 		return err
 	}
 	if output == nil {
 		return r.generateEnvConfig(LangGo)
-	}
-	apiOutput := *output
-	output = &apiOutput
-
-	if err := r.measure("output.api.generate-env", func() error {
-		envConfig, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
-			SchemaName: r.Config.Name,
-			Naming:     r.Options.Naming,
-			Derived:    true,
-		})
-		if err != nil {
-			return err
-		}
-		output.EnvConfig = envConfig
-		return nil
-	}); err != nil {
-		return fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
-	}
-
-	// The Go server alone needs the modules the types modules reach, so
-	// they go on this copy rather than the output the other generators
-	// share. Deps adds the ORM of the API's database and the SDK of each
-	// API it calls, whose types modules the server reaches through them.
-	deps, roots, err := r.goDeps(output)
-	if err != nil {
-		return err
-	}
-	if err := output.SetDeps(deps); err != nil {
-		return fmt.Errorf("generator: %w", err)
-	}
-	if output.UpstreamSchema != "" {
-		upstream, err := r.LoadDependency(output.UpstreamSchema)
-		if err != nil {
-			return fmt.Errorf("generator: load upstream auth schema %s: %w", output.UpstreamSchema, err)
-		}
-		roots = append(roots, upstream)
-	}
-	for _, root := range append([]*ir.Schema{r.Schema}, roots...) {
-		closure, err := r.goTypesClosure(root)
-		if err != nil {
-			return err
-		}
-		if root != r.Schema {
-			closure = append(closure, r.Options.Naming.GoTypesModule(root.Name))
-		}
-		output.AddIndirectModules(closure)
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
@@ -761,6 +711,72 @@ func (r run) generateGoAPI() error {
 			len(scaffolds.Generated), len(scaffolds.Skipped), scaffoldsDir)
 	}
 	return nil
+}
+
+// goServerOutput is the Go server's own copy of the API output: the
+// shared output with the server's config (EnvConfig), its Deps and the
+// modules its go.mod reaches. It is nil for a schema without operations.
+// The server entrypoint of a stack reads the same output for each API it
+// serves (generateServers).
+func (r run) goServerOutput() (*apigen.APIOutput, error) {
+	var output *apigen.APIOutput
+	if err := r.measure("output.api.prepare", func() error {
+		var err error
+		output, err = r.APIOutput()
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	if output == nil {
+		return nil, nil
+	}
+	apiOutput := *output
+	output = &apiOutput
+
+	if err := r.measure("output.api.generate-env", func() error {
+		envConfig, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
+			SchemaName: r.Config.Name,
+			Naming:     r.Options.Naming,
+			Derived:    true,
+		})
+		if err != nil {
+			return err
+		}
+		output.EnvConfig = envConfig
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+	}
+
+	// The Go server alone needs the modules the types modules reach, so
+	// they go on this copy rather than the output the other generators
+	// share. Deps adds the ORM of the API's database and the SDK of each
+	// API it calls, whose types modules the server reaches through them.
+	deps, roots, err := r.goDeps(output)
+	if err != nil {
+		return nil, err
+	}
+	if err := output.SetDeps(deps); err != nil {
+		return nil, fmt.Errorf("generator: %w", err)
+	}
+	if output.UpstreamSchema != "" {
+		upstream, err := r.LoadDependency(output.UpstreamSchema)
+		if err != nil {
+			return nil, fmt.Errorf("generator: load upstream auth schema %s: %w", output.UpstreamSchema, err)
+		}
+		roots = append(roots, upstream)
+	}
+	for _, root := range append([]*ir.Schema{r.Schema}, roots...) {
+		closure, err := r.goTypesClosure(root)
+		if err != nil {
+			return nil, err
+		}
+		if root != r.Schema {
+			closure = append(closure, r.Options.Naming.GoTypesModule(root.Name))
+		}
+		output.AddIndirectModules(closure)
+	}
+	return output, nil
 }
 
 // goDeps returns what the Go server's Deps holds beside its config and

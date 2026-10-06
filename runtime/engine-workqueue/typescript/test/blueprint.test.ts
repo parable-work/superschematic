@@ -536,7 +536,7 @@ for (const driver of drivers) {
       assert.equal(engine.instances.get(alice, 'Run', 'r1'), undefined);
       assert.equal(allSteps(engine).length, 0);
       assert.deepEqual(
-        engine.events.read(alice, { limit: 500 }).events.filter((event) => event.kind !== 'publish'),
+        engine.events.read(alice, { limit: 500 }).events.filter((event) => event.instanceId !== null),
         []
       );
     });

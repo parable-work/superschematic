@@ -1,0 +1,439 @@
+{
+  "token": "gcp:artifactregistry/repository:Repository",
+  "terraform": {
+    "type": "google_artifact_registry_repository",
+    "renames": {
+      "cleanupPolicies": "cleanup_policies",
+      "cleanupPolicies.condition.newerThan": "newer_than",
+      "cleanupPolicies.condition.olderThan": "older_than",
+      "cleanupPolicies.condition.packageNamePrefixes": "package_name_prefixes",
+      "cleanupPolicies.condition.tagPrefixes": "tag_prefixes",
+      "cleanupPolicies.condition.tagState": "tag_state",
+      "cleanupPolicies.condition.versionNamePrefixes": "version_name_prefixes",
+      "cleanupPolicies.mostRecentVersions": "most_recent_versions",
+      "cleanupPolicies.mostRecentVersions.keepCount": "keep_count",
+      "cleanupPolicies.mostRecentVersions.packageNamePrefixes": "package_name_prefixes",
+      "cleanupPolicyDryRun": "cleanup_policy_dry_run",
+      "deletionPolicy": "deletion_policy",
+      "dockerConfig": "docker_config",
+      "dockerConfig.immutableTags": "immutable_tags",
+      "kmsKeyName": "kms_key_name",
+      "mavenConfig": "maven_config",
+      "mavenConfig.allowSnapshotOverwrites": "allow_snapshot_overwrites",
+      "mavenConfig.versionPolicy": "version_policy",
+      "remoteRepositoryConfig": "remote_repository_config",
+      "remoteRepositoryConfig.aptRepository": "apt_repository",
+      "remoteRepositoryConfig.aptRepository.publicRepository": "public_repository",
+      "remoteRepositoryConfig.aptRepository.publicRepository.repositoryBase": "repository_base",
+      "remoteRepositoryConfig.aptRepository.publicRepository.repositoryPath": "repository_path",
+      "remoteRepositoryConfig.commonRepository": "common_repository",
+      "remoteRepositoryConfig.disableUpstreamValidation": "disable_upstream_validation",
+      "remoteRepositoryConfig.dockerRepository": "docker_repository",
+      "remoteRepositoryConfig.dockerRepository.customRepository": "custom_repository",
+      "remoteRepositoryConfig.dockerRepository.publicRepository": "public_repository",
+      "remoteRepositoryConfig.mavenRepository": "maven_repository",
+      "remoteRepositoryConfig.mavenRepository.customRepository": "custom_repository",
+      "remoteRepositoryConfig.mavenRepository.publicRepository": "public_repository",
+      "remoteRepositoryConfig.noCache": "no_cache",
+      "remoteRepositoryConfig.npmRepository": "npm_repository",
+      "remoteRepositoryConfig.npmRepository.customRepository": "custom_repository",
+      "remoteRepositoryConfig.npmRepository.publicRepository": "public_repository",
+      "remoteRepositoryConfig.pythonRepository": "python_repository",
+      "remoteRepositoryConfig.pythonRepository.customRepository": "custom_repository",
+      "remoteRepositoryConfig.pythonRepository.publicRepository": "public_repository",
+      "remoteRepositoryConfig.upstreamCredentials": "upstream_credentials",
+      "remoteRepositoryConfig.upstreamCredentials.usernamePasswordCredentials": "username_password_credentials",
+      "remoteRepositoryConfig.upstreamCredentials.usernamePasswordCredentials.passwordSecretVersion": "password_secret_version",
+      "remoteRepositoryConfig.yumRepository": "yum_repository",
+      "remoteRepositoryConfig.yumRepository.publicRepository": "public_repository",
+      "remoteRepositoryConfig.yumRepository.publicRepository.repositoryBase": "repository_base",
+      "remoteRepositoryConfig.yumRepository.publicRepository.repositoryPath": "repository_path",
+      "repositoryId": "repository_id",
+      "virtualRepositoryConfig": "virtual_repository_config",
+      "virtualRepositoryConfig.upstreamPolicies": "upstream_policies",
+      "vulnerabilityScanningConfig": "vulnerability_scanning_config",
+      "vulnerabilityScanningConfig.enablementConfig": "enablement_config",
+      "vulnerabilityScanningConfig.enablementState": "enablement_state",
+      "vulnerabilityScanningConfig.enablementStateReason": "enablement_state_reason"
+    }
+  },
+  "inputProperties": {
+    "cleanupPolicies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:artifactregistry/RepositoryCleanupPolicy:RepositoryCleanupPolicy"
+      }
+    },
+    "cleanupPolicyDryRun": {
+      "type": "boolean"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "dockerConfig": {
+      "$ref": "#/types/gcp:artifactregistry/RepositoryDockerConfig:RepositoryDockerConfig"
+    },
+    "format": {
+      "type": "string"
+    },
+    "kmsKeyName": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "location": {
+      "type": "string"
+    },
+    "mavenConfig": {
+      "$ref": "#/types/gcp:artifactregistry/RepositoryMavenConfig:RepositoryMavenConfig"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "remoteRepositoryConfig": {
+      "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfig:RepositoryRemoteRepositoryConfig"
+    },
+    "repositoryId": {
+      "type": "string"
+    },
+    "virtualRepositoryConfig": {
+      "$ref": "#/types/gcp:artifactregistry/RepositoryVirtualRepositoryConfig:RepositoryVirtualRepositoryConfig"
+    },
+    "vulnerabilityScanningConfig": {
+      "$ref": "#/types/gcp:artifactregistry/RepositoryVulnerabilityScanningConfig:RepositoryVulnerabilityScanningConfig"
+    }
+  },
+  "requiredInputs": [
+    "format",
+    "repositoryId"
+  ],
+  "types": {
+    "gcp:artifactregistry/RepositoryCleanupPolicy:RepositoryCleanupPolicy": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "condition": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryCleanupPolicyCondition:RepositoryCleanupPolicyCondition"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mostRecentVersions": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryCleanupPolicyMostRecentVersions:RepositoryCleanupPolicyMostRecentVersions"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "gcp:artifactregistry/RepositoryCleanupPolicyCondition:RepositoryCleanupPolicyCondition": {
+      "type": "object",
+      "properties": {
+        "newerThan": {
+          "type": "string"
+        },
+        "olderThan": {
+          "type": "string"
+        },
+        "packageNamePrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tagPrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tagState": {
+          "type": "string"
+        },
+        "versionNamePrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryCleanupPolicyMostRecentVersions:RepositoryCleanupPolicyMostRecentVersions": {
+      "type": "object",
+      "properties": {
+        "keepCount": {
+          "type": "integer"
+        },
+        "packageNamePrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryDockerConfig:RepositoryDockerConfig": {
+      "type": "object",
+      "properties": {
+        "immutableTags": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryMavenConfig:RepositoryMavenConfig": {
+      "type": "object",
+      "properties": {
+        "allowSnapshotOverwrites": {
+          "type": "boolean"
+        },
+        "versionPolicy": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfig:RepositoryRemoteRepositoryConfig": {
+      "type": "object",
+      "properties": {
+        "aptRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigAptRepository:RepositoryRemoteRepositoryConfigAptRepository"
+        },
+        "commonRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigCommonRepository:RepositoryRemoteRepositoryConfigCommonRepository"
+        },
+        "description": {
+          "type": "string"
+        },
+        "disableUpstreamValidation": {
+          "type": "boolean"
+        },
+        "dockerRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigDockerRepository:RepositoryRemoteRepositoryConfigDockerRepository"
+        },
+        "mavenRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigMavenRepository:RepositoryRemoteRepositoryConfigMavenRepository"
+        },
+        "noCache": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigNoCache:RepositoryRemoteRepositoryConfigNoCache"
+        },
+        "npmRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigNpmRepository:RepositoryRemoteRepositoryConfigNpmRepository"
+        },
+        "pythonRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigPythonRepository:RepositoryRemoteRepositoryConfigPythonRepository"
+        },
+        "upstreamCredentials": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigUpstreamCredentials:RepositoryRemoteRepositoryConfigUpstreamCredentials"
+        },
+        "yumRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigYumRepository:RepositoryRemoteRepositoryConfigYumRepository"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigAptRepository:RepositoryRemoteRepositoryConfigAptRepository": {
+      "type": "object",
+      "properties": {
+        "publicRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigAptRepositoryPublicRepository:RepositoryRemoteRepositoryConfigAptRepositoryPublicRepository"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigAptRepositoryPublicRepository:RepositoryRemoteRepositoryConfigAptRepositoryPublicRepository": {
+      "type": "object",
+      "properties": {
+        "repositoryBase": {
+          "type": "string"
+        },
+        "repositoryPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repositoryBase",
+        "repositoryPath"
+      ]
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigCommonRepository:RepositoryRemoteRepositoryConfigCommonRepository": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri"
+      ]
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigDockerRepository:RepositoryRemoteRepositoryConfigDockerRepository": {
+      "type": "object",
+      "properties": {
+        "customRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigDockerRepositoryCustomRepository:RepositoryRemoteRepositoryConfigDockerRepositoryCustomRepository"
+        },
+        "publicRepository": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigDockerRepositoryCustomRepository:RepositoryRemoteRepositoryConfigDockerRepositoryCustomRepository": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigMavenRepository:RepositoryRemoteRepositoryConfigMavenRepository": {
+      "type": "object",
+      "properties": {
+        "customRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigMavenRepositoryCustomRepository:RepositoryRemoteRepositoryConfigMavenRepositoryCustomRepository"
+        },
+        "publicRepository": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigMavenRepositoryCustomRepository:RepositoryRemoteRepositoryConfigMavenRepositoryCustomRepository": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigNoCache:RepositoryRemoteRepositoryConfigNoCache": {
+      "type": "object"
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigNpmRepository:RepositoryRemoteRepositoryConfigNpmRepository": {
+      "type": "object",
+      "properties": {
+        "customRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigNpmRepositoryCustomRepository:RepositoryRemoteRepositoryConfigNpmRepositoryCustomRepository"
+        },
+        "publicRepository": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigNpmRepositoryCustomRepository:RepositoryRemoteRepositoryConfigNpmRepositoryCustomRepository": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigPythonRepository:RepositoryRemoteRepositoryConfigPythonRepository": {
+      "type": "object",
+      "properties": {
+        "customRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigPythonRepositoryCustomRepository:RepositoryRemoteRepositoryConfigPythonRepositoryCustomRepository"
+        },
+        "publicRepository": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigPythonRepositoryCustomRepository:RepositoryRemoteRepositoryConfigPythonRepositoryCustomRepository": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigUpstreamCredentials:RepositoryRemoteRepositoryConfigUpstreamCredentials": {
+      "type": "object",
+      "properties": {
+        "usernamePasswordCredentials": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigUpstreamCredentialsUsernamePasswordCredentials:RepositoryRemoteRepositoryConfigUpstreamCredentialsUsernamePasswordCredentials"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigUpstreamCredentialsUsernamePasswordCredentials:RepositoryRemoteRepositoryConfigUpstreamCredentialsUsernamePasswordCredentials": {
+      "type": "object",
+      "properties": {
+        "passwordSecretVersion": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigYumRepository:RepositoryRemoteRepositoryConfigYumRepository": {
+      "type": "object",
+      "properties": {
+        "publicRepository": {
+          "$ref": "#/types/gcp:artifactregistry/RepositoryRemoteRepositoryConfigYumRepositoryPublicRepository:RepositoryRemoteRepositoryConfigYumRepositoryPublicRepository"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryRemoteRepositoryConfigYumRepositoryPublicRepository:RepositoryRemoteRepositoryConfigYumRepositoryPublicRepository": {
+      "type": "object",
+      "properties": {
+        "repositoryBase": {
+          "type": "string"
+        },
+        "repositoryPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repositoryBase",
+        "repositoryPath"
+      ]
+    },
+    "gcp:artifactregistry/RepositoryVirtualRepositoryConfig:RepositoryVirtualRepositoryConfig": {
+      "type": "object",
+      "properties": {
+        "upstreamPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:artifactregistry/RepositoryVirtualRepositoryConfigUpstreamPolicy:RepositoryVirtualRepositoryConfigUpstreamPolicy"
+          }
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryVirtualRepositoryConfigUpstreamPolicy:RepositoryVirtualRepositoryConfigUpstreamPolicy": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "repository": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:artifactregistry/RepositoryVulnerabilityScanningConfig:RepositoryVulnerabilityScanningConfig": {
+      "type": "object",
+      "properties": {
+        "enablementConfig": {
+          "type": "string"
+        },
+        "enablementState": {
+          "type": "string"
+        },
+        "enablementStateReason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -197,8 +197,13 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		for _, task := range tasks {
 			// The cache stores the generated outputs, not the scaffold,
 			// so a service whose implementation --scaffold must write
-			// builds.
+			// builds, and so does a stack one of whose servers serves an
+			// API with no implementation, which the stack's build
+			// scaffolds.
 			if scaffoldRoot != "" && needsImplementationScaffold(task.service, scaffoldRoot, activeNaming, reg) {
+				continue
+			}
+			if stackNeedsImplementationScaffold(task.service, services, repoRoot, activeNaming, reg) {
 				continue
 			}
 			ok, action := resolveBuildAllTask(task, cacheRoot, repoRoot, cmd.ErrOrStderr())
@@ -557,6 +562,39 @@ func needsImplementationScaffold(service buildplan.Service, repoRoot string, nam
 	}
 	exists, err := apigen.ImplementationExists(names.GoImplementationDir(repoRoot, service.Name))
 	return err == nil && !exists
+}
+
+// stackNeedsImplementationScaffold reports whether service is a stack
+// that serves a Go API whose implementation is missing, which the stack's
+// build scaffolds (docs/stack-model.md, section 8.5). The APIs a stack
+// serves are those its last build recorded as its references (D41) and
+// every API they call; a stack with no record builds anyway.
+func stackNeedsImplementationScaffold(service buildplan.Service, services []buildplan.Service, repoRoot string, names naming.Naming, reg *registry.Registry) bool {
+	if service.Config.Kind != ir.SchemaKindStack {
+		return false
+	}
+	byName := make(map[string]buildplan.Service, len(services))
+	for _, s := range services {
+		byName[s.Name] = s
+	}
+	seen := map[string]bool{}
+	queue := buildcache.ReadSchemaReferences(repoRoot, service.Name).References
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		member, ok := byName[name]
+		if seen[name] || !ok || member.Config.Kind != ir.SchemaKindAPI {
+			continue
+		}
+		seen[name] = true
+		if needsImplementationScaffold(member, repoRoot, names, reg) {
+			return true
+		}
+		for _, call := range member.Config.Calls {
+			queue = append(queue, call.Name)
+		}
+	}
+	return false
 }
 
 // stepLabel names a step in build-all's log: the service, and the stage

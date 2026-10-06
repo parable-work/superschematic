@@ -1,0 +1,45 @@
+{
+  "token": "gcp:storage/bucketIAMMember:BucketIAMMember",
+  "terraform": {
+    "type": "google_storage_bucket_iam_member"
+  },
+  "inputProperties": {
+    "bucket": {
+      "type": "string"
+    },
+    "condition": {
+      "$ref": "#/types/gcp:storage/BucketIAMMemberCondition:BucketIAMMemberCondition"
+    },
+    "member": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "bucket",
+    "member",
+    "role"
+  ],
+  "types": {
+    "gcp:storage/BucketIAMMemberCondition:BucketIAMMemberCondition": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression",
+        "title"
+      ]
+    }
+  }
+}

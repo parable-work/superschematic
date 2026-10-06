@@ -156,6 +156,13 @@ func generateService(opts buildServiceOptions, schema *ir.Schema, cfg *schemacon
 		return nil, fmt.Errorf("resolving output root: %w", err)
 	}
 
+	// The repository root is the parent of the schemas root, as the
+	// commands resolve it.
+	repositoryRoot := ""
+	if opts.SchemasRoot != "" {
+		repositoryRoot = filepath.Dir(opts.SchemasRoot)
+	}
+
 	var result *generator.Result
 	if err := prof.Measure("build.generate", func() error {
 		var err error
@@ -174,6 +181,7 @@ func generateService(opts buildServiceOptions, schema *ir.Schema, cfg *schemacon
 			LoadDependencyConfig: opts.LoadDependencyConfig,
 			Stage:                opts.Stage,
 			ImplementationRoot:   opts.ImplementationRoot,
+			RepositoryRoot:       repositoryRoot,
 		})
 		return err
 	}); err != nil {
