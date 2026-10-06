@@ -298,6 +298,17 @@ for (const driver of drivers) {
       }
     });
 
+    test("a scalar whose map key is not its name is refused, as the Go reader refuses it, before its JSON is judged", () => {
+      const engine = open();
+      const document = schemaDocument('Reading', [{ name: 'payload', typeRef: { name: 'Acme.Blob' } }], {
+        scalars: { 'Acme.Blob': { name: 'Acme.Other', languagePrimitive: 'object', typeMappings: { json_schema: 'object' } } },
+      });
+      assert.deepEqual(issuesOf(() => engine.schemas.define(alice, document)), [
+        { path: '/scalars/Acme.Blob', message: 'scalar map key "Acme.Blob" does not match the definition name "Acme.Other"' },
+      ]);
+      assert.deepEqual(engine.schemas.list(alice), []);
+    });
+
     test("an object scalar's refusal is the Go loader's, word for word", () => {
       // ir/testdata/object_scalar_errors.json: the cases the Go IR's
       // ScalarDef.ObjectJSONError tests read too.

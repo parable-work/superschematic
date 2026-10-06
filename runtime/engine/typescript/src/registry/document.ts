@@ -12,13 +12,14 @@ meta-schema. On top of the loader, the engine requires:
 - field types the schema runtime validates: a builtin primitive, a scalar,
   an enum or a type of the document, alone, as a list or a list of lists.
   A union or a map is refused, since the runtime checks neither;
+- each scalar's map key is its name, as the Go data-form reader requires;
 - a scalar the document declares and the builtin catalog does not hold,
-  when its language primitive is `object`, is one the schema runtime holds
-  to JSON: it is no file upload, whatever its mapping, and its
+  when its language primitive is `object`, is one the schema runtime
+  holds to JSON: it is no file upload, whatever its mapping, and its
   `json_schema` type mapping is `any`, or `object` or `array` with no
-  pattern and no length (objectScalarIssue), as the Go loader requires of a scalar once the
-  catalog has filled it in. The engine knows only the builtin catalog, so
-  it reads such a scalar as the document writes it;
+  pattern and no length (objectScalarIssue), as the Go loader requires of
+  a scalar once the catalog has filled it in. The engine knows only the
+  builtin catalog, so it reads such a scalar as the document writes it;
 - behaviors the engine has implementations for, composed as the compiler's
   loader requires (behaviors/composition.ts), which the caller checks
   through readSchema's compose argument.
@@ -114,10 +115,23 @@ export function readSchema(
       message: 'a schema declares no operations; the engine serves create, get, list, update and delete, and behaviors add their own',
     });
   }
+  // The Go data-form reader refuses a scalar whose map key is not its name
+  // (schemafile.keyMatchesName), and the schema runtime keys a scalar by
+  // its name, not its key.
+  const mismatched = new Set<string>();
+  for (const [key, scalar] of Object.entries(document.scalars ?? {})) {
+    if (scalar.name !== undefined && scalar.name !== '' && scalar.name !== key) {
+      mismatched.add(key);
+      issues.push({
+        path: pointer('scalars', key),
+        message: `scalar map key ${JSON.stringify(key)} does not match the definition name ${JSON.stringify(scalar.name)}`,
+      });
+    }
+  }
   // A catalog scalar is the catalog's, whatever the document declares for
   // it, and no builtin row is an object scalar without a JSON mapping.
   for (const [scalarName, scalar] of Object.entries(runtimeDocument(document).scalars ?? {})) {
-    const issue = objectScalarIssue(scalarName, scalar);
+    const issue = mismatched.has(scalarName) ? undefined : objectScalarIssue(scalarName, scalar);
     if (issue) {
       issues.push({ path: pointer('scalars', scalarName), message: issue });
     }
@@ -271,7 +285,8 @@ export function objectScalarIssue(name: string, scalar: ScalarDef): string | und
       'an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)'
     );
   }
-  const runtime = (parseSchemaIR({ scalars: { [name]: scalar } }).scalars ?? {})[scalarKey(name)];
+  // The runtime keys a parsed scalar by its definition's name.
+  const runtime = (parseSchemaIR({ scalars: { [name]: scalar } }).scalars ?? {})[scalarKey(scalar.name || name)];
   if (runtime !== undefined && (isAnyJSONScalar(runtime) || structuredJSONType(runtime) !== '')) {
     return undefined;
   }
