@@ -35,6 +35,7 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
+	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
 	"go.uber.org/zap"
 
@@ -105,8 +106,7 @@ func run(logger *zap.Logger) error {
 	}
 
 	// One client per API called, shared by every API that calls it.
-	serviceCredential(logger, "shop-api", shopOrdersConfig.ShopApiService)
-	shopApiClient, err := shopapisdk.New(shopapisdk.SDKConfig{BaseURL: shopOrdersConfig.ShopApiService.URL})
+	shopApiClient, err := newShopApiClient(shopOrdersConfig.ShopApiService)
 	if err != nil {
 		return fmt.Errorf("client of shop-api: %w", err)
 	}
@@ -161,6 +161,9 @@ func run(logger *zap.Logger) error {
 	}, []dependency{
 		{"shop-db", shopDb.Ping},
 	})
+	// A client forwards the end user of the request a call is made for,
+	// whose token this keeps on the request's context (section 9.4).
+	handler = serviceauth.CaptureAuthorization(handler)
 	return serve(ctx, stop, logger, &draining, handler)
 }
 
@@ -287,17 +290,47 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 	return pool, nil
 }
 
-// serviceCredential is where a client built for an edge gets the service
-// credential the edge's connector derived, and the end user's token it
-// forwards (docs/stack-model.md, sections 9.2, 9.4 and 9.6). The runtime
-// credential sources and the SDKs' slot for them arrive with D37's
-// implementation, which fills this function. Until then a client sends no
-// service credential, and one the platform configured is logged and left
-// unused.
-func serviceCredential(logger *zap.Logger, callee string, endpoint stackconfig.Service) {
-	if endpoint.Credential != nil {
-		logger.Warn("the service credential is not sent yet", zap.String("callee", callee), zap.String("source", endpoint.Credential.Source))
+// newShopApiClient builds the client of shop-api, which the server calls
+// at endpoint, the field its edge derives. The client sends the service
+// credential the edge's connector chose, and forwards the end user of the
+// request on each call's context (docs/stack-model.md, sections 9.4 and
+// 9.6).
+func newShopApiClient(endpoint stackconfig.Service) (*shopapisdk.ShopApiSDK, error) {
+	cfg := shopapisdk.SDKConfig{
+		BaseURL: endpoint.URL,
+		Auth:    &shopapisdk.AuthConfig{GetToken: serviceauth.ForwardedToken},
 	}
+	token, headers, err := serviceCredential(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	if token != nil {
+		cfg.ServiceCredential = &shopapisdk.ServiceCredentialConfig{Token: token, Headers: headers}
+	}
+	return shopapisdk.New(cfg)
+}
+
+// serviceCredential is the source of the service credential a client
+// built for an edge sends, which the edge's connector names in the
+// endpoint, and the headers that carry it: none without one (section 9.6).
+func serviceCredential(endpoint stackconfig.Service) (serviceauth.TokenSource, []string, error) {
+	c := endpoint.Credential
+	if c == nil {
+		return nil, nil, nil
+	}
+	switch c.Source {
+	case stackconfig.SourceGoogleIDToken:
+		return serviceauth.GoogleIDToken(c.Audience), c.HeaderNames(), nil
+	case stackconfig.SourceTokenFile:
+		return serviceauth.TokenFile(c.TokenFile), c.HeaderNames(), nil
+	case stackconfig.SourceSignedToken:
+		token, err := serviceauth.SignedToken([]byte(c.Key), c.Issuer, c.Issuer, c.Audience)
+		if err != nil {
+			return nil, nil, err
+		}
+		return token, c.HeaderNames(), nil
+	}
+	return nil, nil, fmt.Errorf("service credential source %q is not one the runtime ships", c.Source)
 }
 
 // writeJSON answers with status and body as JSON.

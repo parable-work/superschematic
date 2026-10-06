@@ -1,6 +1,10 @@
 package servergen_test
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -437,9 +441,11 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 		goCommand(t, dir, "build", "./...")
 	}
 
-	// Port 9 discards; nothing answers a database there.
+	// Port 9 discards; nothing answers a database there. The client of
+	// shop-api signs its service credential with an edge key, as the local
+	// target's connector derives it, which the server reads at startup.
 	unreachable := "postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1&sslmode=disable"
-	storefront := start(t, binaries["Storefront"], "SHOP_DB_DATABASE_URL="+unreachable, "SHOP_API_SERVICE_URL=http://127.0.0.1:9")
+	storefront := start(t, binaries["Storefront"], append([]string{"SHOP_DB_DATABASE_URL=" + unreachable}, edgeVariables(t, "SHOP_API_SERVICE")...)...)
 	storefront.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
 	storefront.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
 	storefront.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
@@ -452,4 +458,104 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	shopAPI.expect(t, http.MethodGet, "/api/products/p-1", http.StatusNotImplemented, "Product.GetProduct")
 	shopAPI.expect(t, http.MethodPut, "/api/products/p-1/name?name=x", http.StatusUnauthorized)
 	shopAPI.stop(t)
+}
+
+// edgeVariables are the variables of the service field named field, an
+// endpoint whose credential is a token signed with a fresh Ed25519 key,
+// encoded as ir.DerivedVariables encodes a resolved environment's value.
+func edgeVariables(t *testing.T, field string) []string {
+	t.Helper()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := json.Marshal(map[string]string{
+		"kty": "OKP", "crv": "Ed25519", "kid": "edge-1",
+		"d": base64.RawURLEncoding.EncodeToString(private.Seed()),
+		"x": base64.RawURLEncoding.EncodeToString(public),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vars, err := ir.DerivedVariables(field, ir.ServiceEndpoint{URL: "http://127.0.0.1:9", Credential: &ir.ServiceCredential{
+		Source: ir.CredentialSignedToken, Audience: "shop-api", Issuer: "Storefront", Key: string(key),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := make([]string, len(vars))
+	for i, v := range vars {
+		env[i] = fmt.Sprintf("%s=%v", v.Name, v.Value)
+	}
+	return env
+}
+
+// withServiceClause gives shop-api's renameProduct an @allowService clause
+// listing shop-orders, beside its user clause.
+func withServiceClause(f fixture) {
+	for _, set := range f.schemas["shop-api"].OperationSets {
+		for _, op := range set.Operations {
+			if op.Name == "renameProduct" {
+				op.ServiceCallers = &ir.ServiceCallers{Mode: ir.ServiceCallersAllow, From: []string{"shop-orders"}}
+			}
+		}
+	}
+}
+
+// TestAServiceClauseTakesTheServiceAuthenticator: an API whose operations
+// have a service clause gets its Config's service authenticator from the
+// entrypoint's serviceAuthenticator, and an API without one gets none.
+func TestAServiceClauseTakesTheServiceAuthenticator(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	withServiceClause(f)
+	f.build(t, repoRoot, fakePaths(repoRoot), "shop-stack")
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	main, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, "shop-stack", "shop-api"), servergen.MainFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`shopApiServiceAuthenticator, err := serviceAuthenticator("shop-api")`,
+		"ServiceAuthenticator: shopApiServiceAuthenticator,",
+		"func serviceAuthenticator(api string) (serviceauth.Authenticator, error) {",
+	} {
+		if !strings.Contains(string(main), want) {
+			t.Errorf("shop-api's main.go lacks %q:\n%s", want, main)
+		}
+	}
+	storefront, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, "shop-stack", "Storefront"), servergen.MainFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(storefront), "serviceAuthenticator") {
+		t.Errorf("Storefront, whose APIs have no service clause, has a service authenticator:\n%s", storefront)
+	}
+}
+
+// TestAServiceClauseRefusesToStartWithoutTheServiceAuthField: until a
+// connector derives the service-auth field, the server of an API with a
+// service clause does not start, and says why.
+func TestAServiceClauseRefusesToStartWithoutTheServiceAuthField(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	paths := testpaths.Local(t)
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	withServiceClause(f)
+	f.build(t, repoRoot, paths)
+	dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack", "shop-api")
+	goCommand(t, dir, "mod", "tidy")
+	binary := filepath.Join(t.TempDir(), "shop-api")
+	goCommand(t, dir, "build", "-o", binary, ".")
+	cmd := exec.Command(binary)
+	cmd.Env = append(os.Environ(), "PORT="+freePort(t), "SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("shop-api started:\n%s", out)
+	}
+	if want := "shop-api has operations with a service clause, and no environment derives the service-auth field"; !strings.Contains(string(out), want) {
+		t.Errorf("shop-api stopped without saying %q:\n%s", want, out)
+	}
 }

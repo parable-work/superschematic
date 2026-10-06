@@ -40,6 +40,9 @@ import (
 {{- if anyPrivate .APIs }}
 	runtimemiddleware "{{ .Naming.HTTPRuntimeGoModule }}/middleware"
 {{- end }}
+{{- if or .Clients (anyServiceAuth .APIs) }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/serviceauth"
+{{- end }}
 {{- if or .Databases .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
 {{- end }}
@@ -120,8 +123,7 @@ func run(logger *zap.Logger) error {
 
 	// One client per API called, shared by every API that calls it.
 {{- range .Clients }}
-	serviceCredential(logger, {{ quote .Service }}, {{ .From }})
-	{{ .Var }}, err := {{ .Package }}.New({{ .Package }}.SDKConfig{BaseURL: {{ .From }}.URL})
+	{{ .Var }}, err := {{ .Constructor }}({{ .From }})
 	if err != nil {
 		return fmt.Errorf("client of {{ .Service }}: %w", err)
 	}
@@ -159,6 +161,12 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("payload decryptor of {{ .Service }}: %w", err)
 	}
 {{- end }}
+{{- if .ServiceAuth }}
+	{{ .Var }}ServiceAuthenticator, err := serviceAuthenticator({{ quote .Service }})
+	if err != nil {
+		return fmt.Errorf("service authenticator of {{ .Service }}: %w", err)
+	}
+{{- end }}
 	{{ .Var }}Router := chi.NewRouter()
 {{- if not .Public }}
 	{{ .Var }}Router.Use(runtimemiddleware.Logger({{ .Var }}Logger, {{ .Package }}.ContextWithLogger))
@@ -167,6 +175,9 @@ func run(logger *zap.Logger) error {
 {{- if .Public }}
 		DB:             {{ .Database.Var }},
 		AuthMiddleware: {{ .Var }}Auth,
+{{- end }}
+{{- if .ServiceAuth }}
+		ServiceAuthenticator: {{ .Var }}ServiceAuthenticator,
 {{- end }}
 {{- if .Encrypted }}
 		PayloadDecryptor: {{ .Var }}Decryptor,
@@ -189,6 +200,11 @@ func run(logger *zap.Logger) error {
 		{ {{- quote .Service }}, {{ .Var }}.Ping},
 {{- end }}
 	})
+{{- if .Clients }}
+	// A client forwards the end user of the request a call is made for,
+	// whose token this keeps on the request's context (section 9.4).
+	handler = serviceauth.CaptureAuthorization(handler)
+{{- end }}
 	return serve(ctx, stop, logger, &draining, handler)
 }
 
@@ -316,19 +332,63 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 	return pool, nil
 }
 {{- end }}
+{{- range .Clients }}
+
+// {{ .Constructor }} builds the client of {{ .Service }}, which the server calls
+// at endpoint, the field its edge derives. The client sends the service
+// credential the edge's connector chose, and forwards the end user of the
+// request on each call's context (docs/stack-model.md, sections 9.4 and
+// 9.6).
+func {{ .Constructor }}(endpoint stackconfig.Service) (*{{ .Package }}.{{ .Type }}, error) {
+	cfg := {{ .Package }}.SDKConfig{
+		BaseURL: endpoint.URL,
+		Auth:    &{{ .Package }}.AuthConfig{GetToken: serviceauth.ForwardedToken},
+	}
+	token, headers, err := serviceCredential(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	if token != nil {
+		cfg.ServiceCredential = &{{ .Package }}.ServiceCredentialConfig{Token: token, Headers: headers}
+	}
+	return {{ .Package }}.New(cfg)
+}
+{{- end }}
 {{- if .Clients }}
 
-// serviceCredential is where a client built for an edge gets the service
-// credential the edge's connector derived, and the end user's token it
-// forwards (docs/stack-model.md, sections 9.2, 9.4 and 9.6). The runtime
-// credential sources and the SDKs' slot for them arrive with D37's
-// implementation, which fills this function. Until then a client sends no
-// service credential, and one the platform configured is logged and left
-// unused.
-func serviceCredential(logger *zap.Logger, callee string, endpoint stackconfig.Service) {
-	if endpoint.Credential != nil {
-		logger.Warn("the service credential is not sent yet", zap.String("callee", callee), zap.String("source", endpoint.Credential.Source))
+// serviceCredential is the source of the service credential a client
+// built for an edge sends, which the edge's connector names in the
+// endpoint, and the headers that carry it: none without one (section 9.6).
+func serviceCredential(endpoint stackconfig.Service) (serviceauth.TokenSource, []string, error) {
+	c := endpoint.Credential
+	if c == nil {
+		return nil, nil, nil
 	}
+	switch c.Source {
+	case stackconfig.SourceGoogleIDToken:
+		return serviceauth.GoogleIDToken(c.Audience), c.HeaderNames(), nil
+	case stackconfig.SourceTokenFile:
+		return serviceauth.TokenFile(c.TokenFile), c.HeaderNames(), nil
+	case stackconfig.SourceSignedToken:
+		token, err := serviceauth.SignedToken([]byte(c.Key), c.Issuer, c.Issuer, c.Audience)
+		if err != nil {
+			return nil, nil, err
+		}
+		return token, c.HeaderNames(), nil
+	}
+	return nil, nil, fmt.Errorf("service credential source %q is not one the runtime ships", c.Source)
+}
+{{- end }}
+{{- if anyServiceAuth .APIs }}
+
+// serviceAuthenticator is the service authenticator of an API whose
+// operations have a service clause: a serviceauth.Verifier over the
+// service-auth field, the config each inbound edge's connector derives
+// for the callee (docs/stack-model.md, sections 3.4 and 9.2). No connector
+// derives that field yet, so the server refuses to start rather than
+// answer every service caller 401.
+func serviceAuthenticator(api string) (serviceauth.Authenticator, error) {
+	return nil, fmt.Errorf("%s has operations with a service clause, and no environment derives the service-auth field its callers are verified against yet (docs/stack-model.md, section 3.4)", api)
 }
 {{- end }}
 

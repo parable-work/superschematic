@@ -210,10 +210,13 @@ type API struct {
 
 	// Config is true when the API has an EnvConfig, which Deps holds;
 	// Public when its Config takes the database and the auth middleware;
-	// Encrypted when it takes a payload decryptor.
-	Config    bool
-	Public    bool
-	Encrypted bool
+	// Encrypted when it takes a payload decryptor; ServiceAuth when it
+	// takes a service authenticator, which an operation's service clause
+	// needs (D37).
+	Config      bool
+	Public      bool
+	Encrypted   bool
+	ServiceAuth bool
 
 	// Database is the ORM Deps.DB holds, nil without one.
 	Database *Database
@@ -242,13 +245,14 @@ type Database struct {
 }
 
 // Client is an SDK client of an API called, built once for every API
-// that calls it.
+// that calls it, by the function Constructor names.
 type Client struct {
-	Service string
-	Var     string
-	Package string
-	Module  string
-	Type    string
+	Service     string
+	Var         string
+	Constructor string
+	Package     string
+	Module      string
+	Type        string
 
 	// From is the expression that reads the callee's endpoint from the
 	// first calling API's config.
@@ -282,6 +286,7 @@ var reserved = []string{
 	"chi", "chimiddleware", "context", "dependency", "dispatch", "draining", "err", "errors", "fmt", "handler", "http", "json",
 	"logger", "main", "net", "newHandler", "os", "pgxpool", "run", "runtimemiddleware", "serve", "served", "serviceCredential",
 	"signal", "stackconfig", "stop", "atomic", "syscall", "time", "writeJSON", "zap", "connect", "ctx", "api", "apis",
+	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -354,15 +359,16 @@ func Plan(in Input) (*Server, error) {
 		stem := taken.take(varStem(o.SchemaName))
 		pkg := taken.take(packageName(o.SchemaName))
 		apis[i] = &API{
-			Service:   o.SchemaName,
-			Var:       stem,
-			Package:   pkg,
-			Impl:      taken.take(pkg + "impl"),
-			Module:    o.ModulePath,
-			Import:    a.Implementation.Import,
-			Config:    o.HasEnvConfig(),
-			Public:    o.IsPublic,
-			Encrypted: o.HasEncryptedEndpoints,
+			Service:     o.SchemaName,
+			Var:         stem,
+			Package:     pkg,
+			Impl:        taken.take(pkg + "impl"),
+			Module:      o.ModulePath,
+			Import:      a.Implementation.Import,
+			Config:      o.HasEnvConfig(),
+			Public:      o.IsPublic,
+			Encrypted:   o.HasEncryptedEndpoints,
+			ServiceAuth: o.HasServiceCallers,
 		}
 	}
 	databases := map[string]*Database{}
@@ -410,12 +416,13 @@ func Plan(in Input) (*Server, error) {
 					return nil, fmt.Errorf("stack %s: server %s serves %s, whose config has no field for %s, which it calls", in.Stack, in.Server, o.SchemaName, call.Service)
 				}
 				c = &Client{
-					Service: call.Service,
-					Var:     taken.take(varStem(call.Service) + "Client"),
-					Package: taken.take(packageName(call.Service) + "sdk"),
-					Module:  call.Module,
-					Type:    call.Client,
-					From:    api.Var + "Config." + goName,
+					Service:     call.Service,
+					Var:         taken.take(varStem(call.Service) + "Client"),
+					Constructor: taken.take("new" + goutil.GoPublicIdentifier(call.Service) + "Client"),
+					Package:     taken.take(packageName(call.Service) + "sdk"),
+					Module:      call.Module,
+					Type:        call.Client,
+					From:        api.Var + "Config." + goName,
 				}
 				clients[call.Service] = c
 				s.Clients = append(s.Clients, c)
@@ -724,6 +731,9 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyPrivate": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return !a.Public })
+		},
+		"anyServiceAuth": func(apis []*API) bool {
+			return slices.ContainsFunc(apis, func(a *API) bool { return a.ServiceAuth })
 		},
 	}
 }
