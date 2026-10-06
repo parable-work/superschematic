@@ -290,6 +290,35 @@ func TestBuildAllCommand_IsolatedTypeScriptProgramsFallback(t *testing.T) {
 	assert.NotContains(t, errOut.String(), "phase=tsreader.program.workspace-create")
 }
 
+// TestBuildAllCommand_SharedProgramCoversDataConfigTSService: a service with
+// a data-form config and src/*.schema.ts files runs the TypeScript frontend,
+// so the shared program build-all and build --with-deps open must cover it.
+// Built over the schema.config.ts services alone, the program held none of
+// fixture-json-config's schema files, and the service loaded with 0 types
+// and no error.
+func TestBuildAllCommand_SharedProgramCoversDataConfigTSService(t *testing.T) {
+	servicesRoot := prepareTSServicesRoot(t, "fixture-db", "fixture-json-config")
+	const loaded = "Loaded schema fixture-json-config (kind General): 1 types"
+
+	out := new(bytes.Buffer)
+	root := New(Config{})
+	root.SetOut(out)
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", t.TempDir()})
+	require.NoError(t, root.Execute(), out.String())
+	assert.Contains(t, out.String(), "Shared TypeScript program: 2 service(s)")
+	assert.Contains(t, out.String(), loaded)
+
+	out.Reset()
+	root = New(Config{})
+	root.SetOut(out)
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build", "--with-deps", filepath.Join(servicesRoot, "fixture-json-config"), "--out", t.TempDir()})
+	require.NoError(t, root.Execute(), out.String())
+	assert.Contains(t, out.String(), "Resolved 2 schema services for fixture-json-config: fixture-db, fixture-json-config")
+	assert.Contains(t, out.String(), loaded)
+}
+
 // TestBuildAllCommand_AliasedConfigImport: a distribution republishes the
 // config package under its own name and maps that name onto it in
 // [package_aliases]. build-all and build --with-deps discover services whose

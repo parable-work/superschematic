@@ -49,6 +49,13 @@ type Options struct {
 	// set it; nil (a single build) makes Run log the check it skipped.
 	DependencyConfig func(name string) (*schemaconfig.SchemaConfig, bool)
 
+	// LoadDependencyConfig reads the config of a service by name, from where
+	// LoadDependency loads the service. Every build sets it, a single build
+	// included: the Stack kind's generator reads the outputs of each service
+	// a stack reaches from it, the API's language and the database's
+	// dialects (docs/stack-model.md, section 6.10).
+	LoadDependencyConfig func(name string) (*schemaconfig.SchemaConfig, error)
+
 	// Clock stamps generated file headers. Defaults to the wall clock.
 	Clock codegen.Clock
 
@@ -61,7 +68,37 @@ type Options struct {
 	// SkipFormat bypasses developer-friendly formatting for generated files.
 	// Generated files remain syntactically valid, but may not be gofmt/prettier-like.
 	SkipFormat bool
+
+	// Stage runs part of the pipeline: StageBase every generator but
+	// those that read the service's calls, and the documents; StageServer
+	// only those that read the calls. The empty stage runs all of it. The
+	// build plan splits a service whose API calls one built after it
+	// (docs/stack-model.md, section 3.3).
+	Stage BuildStage
+
+	// ImplementationRoot, when set, is the repository root under which the
+	// Go API generator scaffolds a missing implementation, at the naming
+	// file's [implementation_paths] template (docs/stack-model.md, section
+	// 8.5). Empty writes no scaffold; build and build-all set it under
+	// --scaffold.
+	ImplementationRoot string
 }
+
+// BuildStage is the part of a service's generator pipeline one run
+// executes (Options.Stage).
+type BuildStage string
+
+const (
+	// StageAll runs every generator and document.
+	StageAll BuildStage = ""
+
+	// StageBase runs every generator but those that read calls
+	// (GeneratorSpec.ReadsCalls), and the documents.
+	StageBase BuildStage = "base"
+
+	// StageServer runs only the generators that read calls.
+	StageServer BuildStage = "server"
+)
 
 // Result reports what a generator run produced.
 type Result struct {

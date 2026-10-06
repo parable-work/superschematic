@@ -158,7 +158,7 @@ r.RegisterKind(registry.KindSpec{
   from.
 
 A schema declares the kind with `kind: "Catalog"` in `schema.config.ts`.
-`SchemaKind` is a closed enum of the core three; `defineConfig` also takes
+`SchemaKind` is a closed enum of the core four; `defineConfig` also takes
 any string, and the registry validates it. The core-only binary rejects
 the file with `unknown kind "Catalog"`.
 
@@ -298,6 +298,40 @@ config must declare that service as a dependency. A class the schema
 neither declares nor imports fails the load, in every form, and the error
 names it. An object whose only key is `class` is always read as a class
 reference, so don't give other data that shape.
+
+### A service as an argument
+
+An argument can take another service's handle: its sentinel, imported
+from the service's package as a config imports one, or
+`service({ name, kind })`. `Apply` gets `{"name": ..., "kind": ...}`, and
+the data forms write the same object. The handle references the service:
+the IR lists it under `references`, and `build-all --cache` rebuilds your
+schema when that service, or one its config reaches, changes. It does not
+order the build. The data forms state the list themselves, as they state
+`imports`:
+
+```yaml
+references:
+  - { name: shop-db, kind: DB }
+```
+
+A handle that only names a service, such as a list of callers, is an
+identity. Declare where your argument holds them with `Identities`, paths
+of object keys from the argument (`"from"`, `"settings.of"`):
+
+```go
+r.RegisterDecorator(registry.DecoratorSpec{
+    Name: "admits", Extension: "acme", Packages: []string{"@acme/schematic"},
+    Target: registry.TargetType, Args: AdmitsArgs,
+    Identities: []string{"from"},
+    Apply: applyAdmits,
+})
+```
+
+An identity adds no edge: an edit to the named service leaves your schema
+cached, and two services may name each other. Only a change to the
+service's name or kind rebuilds it. D41 in `docs/DECISIONS.md` has the
+reasons.
 
 ## A scalar catalog
 

@@ -31,6 +31,7 @@ type buildFlags struct {
 	skipFormat bool
 	namingPath string
 	withDeps   bool
+	scaffold   bool
 	// apiLanguage, when set, replaces the target's outputs.api.language
 	// for this build (--api-language).
 	apiLanguage string
@@ -68,12 +69,18 @@ config must enable outputs.api and the types of that language. Pair it with
 --out so the two servers do not share an output root.
 
 Use --with-deps to also build every schema service the target transitively
-depends on (declared dependencies plus authDb), dependencies first. The
+depends on (declared dependencies, authDb and calls), dependencies first. The
 closure is resolved from the sibling services under the target's parent
 directory with the discovery and ordering build-all uses; siblings outside
 the closure are not built. A container image or CI job that needs one
 service's generated packages builds them with one command instead of
 listing the dependencies by hand.
+
+Use --scaffold to write the implementation of each Go API built whose
+package is missing: a package at the naming file's [implementation_paths]
+go template (go/{service} from the parent of the schemas root by default)
+whose New has the generated Deps constructor signature and whose methods
+answer 501 until implemented. It never writes into a package that exists.
 
 Examples:
   superschematic build ./schemas/services/shop-db
@@ -85,7 +92,8 @@ Examples:
 		},
 	}
 	cmd.Flags().BoolVar(&flags.emitIR, "emit-ir", false, "print the Schema IR as JSON to stdout")
-	cmd.Flags().BoolVar(&flags.withDeps, "with-deps", false, "also build the target's transitive dependencies (declared dependencies plus authDb), dependencies first")
+	cmd.Flags().BoolVar(&flags.withDeps, "with-deps", false, "also build the target's transitive dependencies (declared dependencies, authDb and calls), dependencies first")
+	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go API built whose package is missing, at the [implementation_paths] go template")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <service-dir>/../../dist)")
 	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit build phase timings to stderr")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
@@ -220,6 +228,10 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 	if flags.withDeps {
 		return runBuildWithDeps(cmd, reg, names, flags, servicePath, outputRoot, schemasRoot)
 	}
+	implementationRoot := ""
+	if flags.scaffold {
+		implementationRoot = repoRoot
+	}
 
 	_, err = buildService(buildServiceOptions{
 		Naming:      names,
@@ -231,12 +243,17 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(servicePath, "..", name), loader.WithProfiler(prof), loader.WithNaming(names), loader.WithRegistry(reg))
 		},
+		LoadDependencyConfig: func(name string) (*schemaconfig.SchemaConfig, error) {
+			return buildplan.ReadConfig(filepath.Join(servicePath, "..", name), reg)
+		},
 		Log:         cmd.OutOrStdout(),
 		Profile:     prof,
 		EmitIR:      flags.emitIR,
 		SkipFormat:  flags.skipFormat,
 		Registry:    reg,
 		APILanguage: flags.apiLanguage,
+
+		ImplementationRoot: implementationRoot,
 	})
 	return err
 }
@@ -314,17 +331,27 @@ func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.N
 		skipFormat:     flags.skipFormat,
 		naming:         names,
 		registry:       reg,
+		loaded:         newLoadedServices(),
 	}
-	if tsServiceDirs := tsServiceDirectories(closure); len(tsServiceDirs) > 0 {
+	if flags.scaffold {
+		ctx.scaffoldRoot = filepath.Dir(schemasRoot)
+	}
+	tsServiceDirs, err := tsServiceDirectories(closure)
+	if err != nil {
+		return err
+	}
+	if len(tsServiceDirs) > 0 {
 		ctx.tsProgramCache = tsreader.NewProgramCache(tsServiceDirs)
 		defer ctx.tsProgramCache.Close()
 	}
-	for _, service := range closure {
-		task := buildAllTask{service: service}
-		if service.Name == rootName {
+	// The build orders outputs: each API's server builds after the SDKs
+	// of the APIs it calls (docs/stack-model.md, section 3.3).
+	for _, step := range buildplan.Steps(closure) {
+		task := buildAllTask{service: step.Service}
+		if step.Service.Name == rootName {
 			task.apiLanguage = flags.apiLanguage
 		}
-		if err := executeBuildAllTask(cmd, task, ctx); err != nil {
+		if err := executeBuildAllStep(cmd, task, step.Stage, ctx); err != nil {
 			return err
 		}
 	}

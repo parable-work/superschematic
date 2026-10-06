@@ -1,0 +1,2945 @@
+{
+  "token": "gcp:compute/uRLMap:URLMap",
+  "terraform": {
+    "type": "google_compute_url_map",
+    "renames": {
+      "defaultCustomErrorResponsePolicy": "default_custom_error_response_policy",
+      "defaultCustomErrorResponsePolicy.errorResponseRules": "error_response_rule",
+      "defaultCustomErrorResponsePolicy.errorResponseRules.matchResponseCodes": "match_response_codes",
+      "defaultCustomErrorResponsePolicy.errorResponseRules.overrideResponseCode": "override_response_code",
+      "defaultCustomErrorResponsePolicy.errorService": "error_service",
+      "defaultRouteAction": "default_route_action",
+      "defaultRouteAction.cachePolicy": "cache_policy",
+      "defaultRouteAction.cachePolicy.cacheBypassRequestHeaderNames": "cache_bypass_request_header_names",
+      "defaultRouteAction.cachePolicy.cacheKeyPolicy": "cache_key_policy",
+      "defaultRouteAction.cachePolicy.cacheKeyPolicy.excludedQueryParameters": "excluded_query_parameters",
+      "defaultRouteAction.cachePolicy.cacheKeyPolicy.includeHost": "include_host",
+      "defaultRouteAction.cachePolicy.cacheKeyPolicy.includeProtocol": "include_protocol",
+      "defaultRouteAction.cachePolicy.cacheKeyPolicy.includeQueryString": "include_query_string",
+      "defaultRouteAction.cachePolicy.cacheKeyPolicy.includedCookieNames": "included_cookie_names",
+      "defaultRouteAction.cachePolicy.cacheKeyPolicy.includedHeaderNames": "included_header_names",
+      "defaultRouteAction.cachePolicy.cacheKeyPolicy.includedQueryParameters": "included_query_parameters",
+      "defaultRouteAction.cachePolicy.cacheMode": "cache_mode",
+      "defaultRouteAction.cachePolicy.clientTtl": "client_ttl",
+      "defaultRouteAction.cachePolicy.defaultTtl": "default_ttl",
+      "defaultRouteAction.cachePolicy.maxTtl": "max_ttl",
+      "defaultRouteAction.cachePolicy.negativeCaching": "negative_caching",
+      "defaultRouteAction.cachePolicy.negativeCachingPolicies": "negative_caching_policy",
+      "defaultRouteAction.cachePolicy.requestCoalescing": "request_coalescing",
+      "defaultRouteAction.cachePolicy.serveWhileStale": "serve_while_stale",
+      "defaultRouteAction.corsPolicy": "cors_policy",
+      "defaultRouteAction.corsPolicy.allowCredentials": "allow_credentials",
+      "defaultRouteAction.corsPolicy.allowHeaders": "allow_headers",
+      "defaultRouteAction.corsPolicy.allowMethods": "allow_methods",
+      "defaultRouteAction.corsPolicy.allowOriginRegexes": "allow_origin_regexes",
+      "defaultRouteAction.corsPolicy.allowOrigins": "allow_origins",
+      "defaultRouteAction.corsPolicy.exposeHeaders": "expose_headers",
+      "defaultRouteAction.corsPolicy.maxAge": "max_age",
+      "defaultRouteAction.faultInjectionPolicy": "fault_injection_policy",
+      "defaultRouteAction.faultInjectionPolicy.abort.httpStatus": "http_status",
+      "defaultRouteAction.faultInjectionPolicy.delay.fixedDelay": "fixed_delay",
+      "defaultRouteAction.maxStreamDuration": "max_stream_duration",
+      "defaultRouteAction.requestMirrorPolicy": "request_mirror_policy",
+      "defaultRouteAction.requestMirrorPolicy.backendService": "backend_service",
+      "defaultRouteAction.requestMirrorPolicy.mirrorPercent": "mirror_percent",
+      "defaultRouteAction.retryPolicy": "retry_policy",
+      "defaultRouteAction.retryPolicy.numRetries": "num_retries",
+      "defaultRouteAction.retryPolicy.perTryTimeout": "per_try_timeout",
+      "defaultRouteAction.retryPolicy.retryConditions": "retry_conditions",
+      "defaultRouteAction.urlRewrite": "url_rewrite",
+      "defaultRouteAction.urlRewrite.hostRewrite": "host_rewrite",
+      "defaultRouteAction.urlRewrite.pathPrefixRewrite": "path_prefix_rewrite",
+      "defaultRouteAction.weightedBackendServices": "weighted_backend_services",
+      "defaultRouteAction.weightedBackendServices.backendService": "backend_service",
+      "defaultRouteAction.weightedBackendServices.headerAction": "header_action",
+      "defaultRouteAction.weightedBackendServices.headerAction.requestHeadersToAdds": "request_headers_to_add",
+      "defaultRouteAction.weightedBackendServices.headerAction.requestHeadersToAdds.headerName": "header_name",
+      "defaultRouteAction.weightedBackendServices.headerAction.requestHeadersToAdds.headerValue": "header_value",
+      "defaultRouteAction.weightedBackendServices.headerAction.requestHeadersToRemoves": "request_headers_to_remove",
+      "defaultRouteAction.weightedBackendServices.headerAction.responseHeadersToAdds": "response_headers_to_add",
+      "defaultRouteAction.weightedBackendServices.headerAction.responseHeadersToAdds.headerName": "header_name",
+      "defaultRouteAction.weightedBackendServices.headerAction.responseHeadersToAdds.headerValue": "header_value",
+      "defaultRouteAction.weightedBackendServices.headerAction.responseHeadersToRemoves": "response_headers_to_remove",
+      "defaultService": "default_service",
+      "defaultUrlRedirect": "default_url_redirect",
+      "defaultUrlRedirect.hostRedirect": "host_redirect",
+      "defaultUrlRedirect.httpsRedirect": "https_redirect",
+      "defaultUrlRedirect.pathRedirect": "path_redirect",
+      "defaultUrlRedirect.prefixRedirect": "prefix_redirect",
+      "defaultUrlRedirect.redirectResponseCode": "redirect_response_code",
+      "defaultUrlRedirect.stripQuery": "strip_query",
+      "deletionPolicy": "deletion_policy",
+      "headerAction": "header_action",
+      "headerAction.requestHeadersToAdds": "request_headers_to_add",
+      "headerAction.requestHeadersToAdds.headerName": "header_name",
+      "headerAction.requestHeadersToAdds.headerValue": "header_value",
+      "headerAction.requestHeadersToRemoves": "request_headers_to_remove",
+      "headerAction.responseHeadersToAdds": "response_headers_to_add",
+      "headerAction.responseHeadersToAdds.headerName": "header_name",
+      "headerAction.responseHeadersToAdds.headerValue": "header_value",
+      "headerAction.responseHeadersToRemoves": "response_headers_to_remove",
+      "hostRules": "host_rule",
+      "hostRules.pathMatcher": "path_matcher",
+      "pathMatchers": "path_matcher",
+      "pathMatchers.defaultCustomErrorResponsePolicy": "default_custom_error_response_policy",
+      "pathMatchers.defaultCustomErrorResponsePolicy.errorResponseRules": "error_response_rule",
+      "pathMatchers.defaultCustomErrorResponsePolicy.errorResponseRules.matchResponseCodes": "match_response_codes",
+      "pathMatchers.defaultCustomErrorResponsePolicy.errorResponseRules.overrideResponseCode": "override_response_code",
+      "pathMatchers.defaultCustomErrorResponsePolicy.errorService": "error_service",
+      "pathMatchers.defaultRouteAction": "default_route_action",
+      "pathMatchers.defaultRouteAction.cachePolicy": "cache_policy",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheBypassRequestHeaderNames": "cache_bypass_request_header_names",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheKeyPolicy": "cache_key_policy",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheKeyPolicy.excludedQueryParameters": "excluded_query_parameters",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheKeyPolicy.includeHost": "include_host",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheKeyPolicy.includeProtocol": "include_protocol",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheKeyPolicy.includeQueryString": "include_query_string",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheKeyPolicy.includedCookieNames": "included_cookie_names",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheKeyPolicy.includedHeaderNames": "included_header_names",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheKeyPolicy.includedQueryParameters": "included_query_parameters",
+      "pathMatchers.defaultRouteAction.cachePolicy.cacheMode": "cache_mode",
+      "pathMatchers.defaultRouteAction.cachePolicy.clientTtl": "client_ttl",
+      "pathMatchers.defaultRouteAction.cachePolicy.defaultTtl": "default_ttl",
+      "pathMatchers.defaultRouteAction.cachePolicy.maxTtl": "max_ttl",
+      "pathMatchers.defaultRouteAction.cachePolicy.negativeCaching": "negative_caching",
+      "pathMatchers.defaultRouteAction.cachePolicy.negativeCachingPolicies": "negative_caching_policy",
+      "pathMatchers.defaultRouteAction.cachePolicy.requestCoalescing": "request_coalescing",
+      "pathMatchers.defaultRouteAction.cachePolicy.serveWhileStale": "serve_while_stale",
+      "pathMatchers.defaultRouteAction.corsPolicy": "cors_policy",
+      "pathMatchers.defaultRouteAction.corsPolicy.allowCredentials": "allow_credentials",
+      "pathMatchers.defaultRouteAction.corsPolicy.allowHeaders": "allow_headers",
+      "pathMatchers.defaultRouteAction.corsPolicy.allowMethods": "allow_methods",
+      "pathMatchers.defaultRouteAction.corsPolicy.allowOriginRegexes": "allow_origin_regexes",
+      "pathMatchers.defaultRouteAction.corsPolicy.allowOrigins": "allow_origins",
+      "pathMatchers.defaultRouteAction.corsPolicy.exposeHeaders": "expose_headers",
+      "pathMatchers.defaultRouteAction.corsPolicy.maxAge": "max_age",
+      "pathMatchers.defaultRouteAction.faultInjectionPolicy": "fault_injection_policy",
+      "pathMatchers.defaultRouteAction.faultInjectionPolicy.abort.httpStatus": "http_status",
+      "pathMatchers.defaultRouteAction.faultInjectionPolicy.delay.fixedDelay": "fixed_delay",
+      "pathMatchers.defaultRouteAction.maxStreamDuration": "max_stream_duration",
+      "pathMatchers.defaultRouteAction.requestMirrorPolicy": "request_mirror_policy",
+      "pathMatchers.defaultRouteAction.requestMirrorPolicy.backendService": "backend_service",
+      "pathMatchers.defaultRouteAction.requestMirrorPolicy.mirrorPercent": "mirror_percent",
+      "pathMatchers.defaultRouteAction.retryPolicy": "retry_policy",
+      "pathMatchers.defaultRouteAction.retryPolicy.numRetries": "num_retries",
+      "pathMatchers.defaultRouteAction.retryPolicy.perTryTimeout": "per_try_timeout",
+      "pathMatchers.defaultRouteAction.retryPolicy.retryConditions": "retry_conditions",
+      "pathMatchers.defaultRouteAction.urlRewrite": "url_rewrite",
+      "pathMatchers.defaultRouteAction.urlRewrite.hostRewrite": "host_rewrite",
+      "pathMatchers.defaultRouteAction.urlRewrite.pathPrefixRewrite": "path_prefix_rewrite",
+      "pathMatchers.defaultRouteAction.weightedBackendServices": "weighted_backend_services",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.backendService": "backend_service",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction": "header_action",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction.requestHeadersToAdds": "request_headers_to_add",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction.requestHeadersToAdds.headerName": "header_name",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction.requestHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction.requestHeadersToRemoves": "request_headers_to_remove",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction.responseHeadersToAdds": "response_headers_to_add",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction.responseHeadersToAdds.headerName": "header_name",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction.responseHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.defaultRouteAction.weightedBackendServices.headerAction.responseHeadersToRemoves": "response_headers_to_remove",
+      "pathMatchers.defaultService": "default_service",
+      "pathMatchers.defaultUrlRedirect": "default_url_redirect",
+      "pathMatchers.defaultUrlRedirect.hostRedirect": "host_redirect",
+      "pathMatchers.defaultUrlRedirect.httpsRedirect": "https_redirect",
+      "pathMatchers.defaultUrlRedirect.pathRedirect": "path_redirect",
+      "pathMatchers.defaultUrlRedirect.prefixRedirect": "prefix_redirect",
+      "pathMatchers.defaultUrlRedirect.redirectResponseCode": "redirect_response_code",
+      "pathMatchers.defaultUrlRedirect.stripQuery": "strip_query",
+      "pathMatchers.headerAction": "header_action",
+      "pathMatchers.headerAction.requestHeadersToAdds": "request_headers_to_add",
+      "pathMatchers.headerAction.requestHeadersToAdds.headerName": "header_name",
+      "pathMatchers.headerAction.requestHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.headerAction.requestHeadersToRemoves": "request_headers_to_remove",
+      "pathMatchers.headerAction.responseHeadersToAdds": "response_headers_to_add",
+      "pathMatchers.headerAction.responseHeadersToAdds.headerName": "header_name",
+      "pathMatchers.headerAction.responseHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.headerAction.responseHeadersToRemoves": "response_headers_to_remove",
+      "pathMatchers.pathRules": "path_rule",
+      "pathMatchers.pathRules.customErrorResponsePolicy": "custom_error_response_policy",
+      "pathMatchers.pathRules.customErrorResponsePolicy.errorResponseRules": "error_response_rule",
+      "pathMatchers.pathRules.customErrorResponsePolicy.errorResponseRules.matchResponseCodes": "match_response_codes",
+      "pathMatchers.pathRules.customErrorResponsePolicy.errorResponseRules.overrideResponseCode": "override_response_code",
+      "pathMatchers.pathRules.customErrorResponsePolicy.errorService": "error_service",
+      "pathMatchers.pathRules.routeAction": "route_action",
+      "pathMatchers.pathRules.routeAction.cachePolicy": "cache_policy",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheBypassRequestHeaderNames": "cache_bypass_request_header_names",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheKeyPolicy": "cache_key_policy",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheKeyPolicy.excludedQueryParameters": "excluded_query_parameters",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheKeyPolicy.includeHost": "include_host",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheKeyPolicy.includeProtocol": "include_protocol",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheKeyPolicy.includeQueryString": "include_query_string",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheKeyPolicy.includedCookieNames": "included_cookie_names",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheKeyPolicy.includedHeaderNames": "included_header_names",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheKeyPolicy.includedQueryParameters": "included_query_parameters",
+      "pathMatchers.pathRules.routeAction.cachePolicy.cacheMode": "cache_mode",
+      "pathMatchers.pathRules.routeAction.cachePolicy.clientTtl": "client_ttl",
+      "pathMatchers.pathRules.routeAction.cachePolicy.defaultTtl": "default_ttl",
+      "pathMatchers.pathRules.routeAction.cachePolicy.maxTtl": "max_ttl",
+      "pathMatchers.pathRules.routeAction.cachePolicy.negativeCaching": "negative_caching",
+      "pathMatchers.pathRules.routeAction.cachePolicy.negativeCachingPolicies": "negative_caching_policy",
+      "pathMatchers.pathRules.routeAction.cachePolicy.requestCoalescing": "request_coalescing",
+      "pathMatchers.pathRules.routeAction.cachePolicy.serveWhileStale": "serve_while_stale",
+      "pathMatchers.pathRules.routeAction.corsPolicy": "cors_policy",
+      "pathMatchers.pathRules.routeAction.corsPolicy.allowCredentials": "allow_credentials",
+      "pathMatchers.pathRules.routeAction.corsPolicy.allowHeaders": "allow_headers",
+      "pathMatchers.pathRules.routeAction.corsPolicy.allowMethods": "allow_methods",
+      "pathMatchers.pathRules.routeAction.corsPolicy.allowOriginRegexes": "allow_origin_regexes",
+      "pathMatchers.pathRules.routeAction.corsPolicy.allowOrigins": "allow_origins",
+      "pathMatchers.pathRules.routeAction.corsPolicy.exposeHeaders": "expose_headers",
+      "pathMatchers.pathRules.routeAction.corsPolicy.maxAge": "max_age",
+      "pathMatchers.pathRules.routeAction.faultInjectionPolicy": "fault_injection_policy",
+      "pathMatchers.pathRules.routeAction.faultInjectionPolicy.abort.httpStatus": "http_status",
+      "pathMatchers.pathRules.routeAction.faultInjectionPolicy.delay.fixedDelay": "fixed_delay",
+      "pathMatchers.pathRules.routeAction.maxStreamDuration": "max_stream_duration",
+      "pathMatchers.pathRules.routeAction.requestMirrorPolicy": "request_mirror_policy",
+      "pathMatchers.pathRules.routeAction.requestMirrorPolicy.backendService": "backend_service",
+      "pathMatchers.pathRules.routeAction.requestMirrorPolicy.mirrorPercent": "mirror_percent",
+      "pathMatchers.pathRules.routeAction.retryPolicy": "retry_policy",
+      "pathMatchers.pathRules.routeAction.retryPolicy.numRetries": "num_retries",
+      "pathMatchers.pathRules.routeAction.retryPolicy.perTryTimeout": "per_try_timeout",
+      "pathMatchers.pathRules.routeAction.retryPolicy.retryConditions": "retry_conditions",
+      "pathMatchers.pathRules.routeAction.urlRewrite": "url_rewrite",
+      "pathMatchers.pathRules.routeAction.urlRewrite.hostRewrite": "host_rewrite",
+      "pathMatchers.pathRules.routeAction.urlRewrite.pathPrefixRewrite": "path_prefix_rewrite",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices": "weighted_backend_services",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.backendService": "backend_service",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction": "header_action",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction.requestHeadersToAdds": "request_headers_to_add",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction.requestHeadersToAdds.headerName": "header_name",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction.requestHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction.requestHeadersToRemoves": "request_headers_to_remove",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction.responseHeadersToAdds": "response_headers_to_add",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction.responseHeadersToAdds.headerName": "header_name",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction.responseHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.pathRules.routeAction.weightedBackendServices.headerAction.responseHeadersToRemoves": "response_headers_to_remove",
+      "pathMatchers.pathRules.urlRedirect": "url_redirect",
+      "pathMatchers.pathRules.urlRedirect.hostRedirect": "host_redirect",
+      "pathMatchers.pathRules.urlRedirect.httpsRedirect": "https_redirect",
+      "pathMatchers.pathRules.urlRedirect.pathRedirect": "path_redirect",
+      "pathMatchers.pathRules.urlRedirect.prefixRedirect": "prefix_redirect",
+      "pathMatchers.pathRules.urlRedirect.redirectResponseCode": "redirect_response_code",
+      "pathMatchers.pathRules.urlRedirect.stripQuery": "strip_query",
+      "pathMatchers.routeRules": "route_rules",
+      "pathMatchers.routeRules.customErrorResponsePolicy": "custom_error_response_policy",
+      "pathMatchers.routeRules.customErrorResponsePolicy.errorResponseRules": "error_response_rule",
+      "pathMatchers.routeRules.customErrorResponsePolicy.errorResponseRules.matchResponseCodes": "match_response_codes",
+      "pathMatchers.routeRules.customErrorResponsePolicy.errorResponseRules.overrideResponseCode": "override_response_code",
+      "pathMatchers.routeRules.customErrorResponsePolicy.errorService": "error_service",
+      "pathMatchers.routeRules.headerAction": "header_action",
+      "pathMatchers.routeRules.headerAction.requestHeadersToAdds": "request_headers_to_add",
+      "pathMatchers.routeRules.headerAction.requestHeadersToAdds.headerName": "header_name",
+      "pathMatchers.routeRules.headerAction.requestHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.routeRules.headerAction.requestHeadersToRemoves": "request_headers_to_remove",
+      "pathMatchers.routeRules.headerAction.responseHeadersToAdds": "response_headers_to_add",
+      "pathMatchers.routeRules.headerAction.responseHeadersToAdds.headerName": "header_name",
+      "pathMatchers.routeRules.headerAction.responseHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.routeRules.headerAction.responseHeadersToRemoves": "response_headers_to_remove",
+      "pathMatchers.routeRules.httpFilterConfigs": "http_filter_configs",
+      "pathMatchers.routeRules.httpFilterConfigs.configTypeUrl": "config_type_url",
+      "pathMatchers.routeRules.httpFilterConfigs.filterName": "filter_name",
+      "pathMatchers.routeRules.httpFilterMetadatas": "http_filter_metadata",
+      "pathMatchers.routeRules.httpFilterMetadatas.configTypeUrl": "config_type_url",
+      "pathMatchers.routeRules.httpFilterMetadatas.filterName": "filter_name",
+      "pathMatchers.routeRules.matchRules": "match_rules",
+      "pathMatchers.routeRules.matchRules.fullPathMatch": "full_path_match",
+      "pathMatchers.routeRules.matchRules.headerMatches": "header_matches",
+      "pathMatchers.routeRules.matchRules.headerMatches.exactMatch": "exact_match",
+      "pathMatchers.routeRules.matchRules.headerMatches.headerName": "header_name",
+      "pathMatchers.routeRules.matchRules.headerMatches.invertMatch": "invert_match",
+      "pathMatchers.routeRules.matchRules.headerMatches.prefixMatch": "prefix_match",
+      "pathMatchers.routeRules.matchRules.headerMatches.presentMatch": "present_match",
+      "pathMatchers.routeRules.matchRules.headerMatches.rangeMatch": "range_match",
+      "pathMatchers.routeRules.matchRules.headerMatches.rangeMatch.rangeEnd": "range_end",
+      "pathMatchers.routeRules.matchRules.headerMatches.rangeMatch.rangeStart": "range_start",
+      "pathMatchers.routeRules.matchRules.headerMatches.regexMatch": "regex_match",
+      "pathMatchers.routeRules.matchRules.headerMatches.suffixMatch": "suffix_match",
+      "pathMatchers.routeRules.matchRules.ignoreCase": "ignore_case",
+      "pathMatchers.routeRules.matchRules.metadataFilters": "metadata_filters",
+      "pathMatchers.routeRules.matchRules.metadataFilters.filterLabels": "filter_labels",
+      "pathMatchers.routeRules.matchRules.metadataFilters.filterMatchCriteria": "filter_match_criteria",
+      "pathMatchers.routeRules.matchRules.pathTemplateMatch": "path_template_match",
+      "pathMatchers.routeRules.matchRules.prefixMatch": "prefix_match",
+      "pathMatchers.routeRules.matchRules.queryParameterMatches": "query_parameter_matches",
+      "pathMatchers.routeRules.matchRules.queryParameterMatches.exactMatch": "exact_match",
+      "pathMatchers.routeRules.matchRules.queryParameterMatches.presentMatch": "present_match",
+      "pathMatchers.routeRules.matchRules.queryParameterMatches.regexMatch": "regex_match",
+      "pathMatchers.routeRules.matchRules.regexMatch": "regex_match",
+      "pathMatchers.routeRules.routeAction": "route_action",
+      "pathMatchers.routeRules.routeAction.cachePolicy": "cache_policy",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheBypassRequestHeaderNames": "cache_bypass_request_header_names",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheKeyPolicy": "cache_key_policy",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheKeyPolicy.excludedQueryParameters": "excluded_query_parameters",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheKeyPolicy.includeHost": "include_host",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheKeyPolicy.includeProtocol": "include_protocol",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheKeyPolicy.includeQueryString": "include_query_string",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheKeyPolicy.includedCookieNames": "included_cookie_names",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheKeyPolicy.includedHeaderNames": "included_header_names",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheKeyPolicy.includedQueryParameters": "included_query_parameters",
+      "pathMatchers.routeRules.routeAction.cachePolicy.cacheMode": "cache_mode",
+      "pathMatchers.routeRules.routeAction.cachePolicy.clientTtl": "client_ttl",
+      "pathMatchers.routeRules.routeAction.cachePolicy.defaultTtl": "default_ttl",
+      "pathMatchers.routeRules.routeAction.cachePolicy.maxTtl": "max_ttl",
+      "pathMatchers.routeRules.routeAction.cachePolicy.negativeCaching": "negative_caching",
+      "pathMatchers.routeRules.routeAction.cachePolicy.negativeCachingPolicies": "negative_caching_policy",
+      "pathMatchers.routeRules.routeAction.cachePolicy.requestCoalescing": "request_coalescing",
+      "pathMatchers.routeRules.routeAction.cachePolicy.serveWhileStale": "serve_while_stale",
+      "pathMatchers.routeRules.routeAction.corsPolicy": "cors_policy",
+      "pathMatchers.routeRules.routeAction.corsPolicy.allowCredentials": "allow_credentials",
+      "pathMatchers.routeRules.routeAction.corsPolicy.allowHeaders": "allow_headers",
+      "pathMatchers.routeRules.routeAction.corsPolicy.allowMethods": "allow_methods",
+      "pathMatchers.routeRules.routeAction.corsPolicy.allowOriginRegexes": "allow_origin_regexes",
+      "pathMatchers.routeRules.routeAction.corsPolicy.allowOrigins": "allow_origins",
+      "pathMatchers.routeRules.routeAction.corsPolicy.exposeHeaders": "expose_headers",
+      "pathMatchers.routeRules.routeAction.corsPolicy.maxAge": "max_age",
+      "pathMatchers.routeRules.routeAction.faultInjectionPolicy": "fault_injection_policy",
+      "pathMatchers.routeRules.routeAction.faultInjectionPolicy.abort.httpStatus": "http_status",
+      "pathMatchers.routeRules.routeAction.faultInjectionPolicy.delay.fixedDelay": "fixed_delay",
+      "pathMatchers.routeRules.routeAction.maxStreamDuration": "max_stream_duration",
+      "pathMatchers.routeRules.routeAction.requestMirrorPolicy": "request_mirror_policy",
+      "pathMatchers.routeRules.routeAction.requestMirrorPolicy.backendService": "backend_service",
+      "pathMatchers.routeRules.routeAction.requestMirrorPolicy.mirrorPercent": "mirror_percent",
+      "pathMatchers.routeRules.routeAction.retryPolicy": "retry_policy",
+      "pathMatchers.routeRules.routeAction.retryPolicy.numRetries": "num_retries",
+      "pathMatchers.routeRules.routeAction.retryPolicy.perTryTimeout": "per_try_timeout",
+      "pathMatchers.routeRules.routeAction.retryPolicy.retryConditions": "retry_conditions",
+      "pathMatchers.routeRules.routeAction.urlRewrite": "url_rewrite",
+      "pathMatchers.routeRules.routeAction.urlRewrite.hostRewrite": "host_rewrite",
+      "pathMatchers.routeRules.routeAction.urlRewrite.pathPrefixRewrite": "path_prefix_rewrite",
+      "pathMatchers.routeRules.routeAction.urlRewrite.pathTemplateRewrite": "path_template_rewrite",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices": "weighted_backend_services",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.backendService": "backend_service",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction": "header_action",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction.requestHeadersToAdds": "request_headers_to_add",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction.requestHeadersToAdds.headerName": "header_name",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction.requestHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction.requestHeadersToRemoves": "request_headers_to_remove",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction.responseHeadersToAdds": "response_headers_to_add",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction.responseHeadersToAdds.headerName": "header_name",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction.responseHeadersToAdds.headerValue": "header_value",
+      "pathMatchers.routeRules.routeAction.weightedBackendServices.headerAction.responseHeadersToRemoves": "response_headers_to_remove",
+      "pathMatchers.routeRules.urlRedirect": "url_redirect",
+      "pathMatchers.routeRules.urlRedirect.hostRedirect": "host_redirect",
+      "pathMatchers.routeRules.urlRedirect.httpsRedirect": "https_redirect",
+      "pathMatchers.routeRules.urlRedirect.pathRedirect": "path_redirect",
+      "pathMatchers.routeRules.urlRedirect.prefixRedirect": "prefix_redirect",
+      "pathMatchers.routeRules.urlRedirect.redirectResponseCode": "redirect_response_code",
+      "pathMatchers.routeRules.urlRedirect.stripQuery": "strip_query",
+      "tests": "test",
+      "tests.expectedOutputUrl": "expected_output_url",
+      "tests.expectedRedirectResponseCode": "expected_redirect_response_code"
+    }
+  },
+  "inputProperties": {
+    "defaultCustomErrorResponsePolicy": {
+      "$ref": "#/types/gcp:compute/URLMapDefaultCustomErrorResponsePolicy:URLMapDefaultCustomErrorResponsePolicy"
+    },
+    "defaultRouteAction": {
+      "$ref": "#/types/gcp:compute/URLMapDefaultRouteAction:URLMapDefaultRouteAction"
+    },
+    "defaultService": {
+      "type": "string"
+    },
+    "defaultUrlRedirect": {
+      "$ref": "#/types/gcp:compute/URLMapDefaultUrlRedirect:URLMapDefaultUrlRedirect"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "headerAction": {
+      "$ref": "#/types/gcp:compute/URLMapHeaderAction:URLMapHeaderAction"
+    },
+    "hostRules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/URLMapHostRule:URLMapHostRule"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "pathMatchers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/URLMapPathMatcher:URLMapPathMatcher"
+      }
+    },
+    "project": {
+      "type": "string"
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/URLMapTest:URLMapTest"
+      }
+    }
+  },
+  "types": {
+    "gcp:compute/URLMapDefaultCustomErrorResponsePolicy:URLMapDefaultCustomErrorResponsePolicy": {
+      "type": "object",
+      "properties": {
+        "errorResponseRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapDefaultCustomErrorResponsePolicyErrorResponseRule:URLMapDefaultCustomErrorResponsePolicyErrorResponseRule"
+          }
+        },
+        "errorService": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultCustomErrorResponsePolicyErrorResponseRule:URLMapDefaultCustomErrorResponsePolicyErrorResponseRule": {
+      "type": "object",
+      "properties": {
+        "matchResponseCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "overrideResponseCode": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteAction:URLMapDefaultRouteAction": {
+      "type": "object",
+      "properties": {
+        "cachePolicy": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCachePolicy:URLMapDefaultRouteActionCachePolicy"
+        },
+        "corsPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCorsPolicy:URLMapDefaultRouteActionCorsPolicy"
+        },
+        "faultInjectionPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionFaultInjectionPolicy:URLMapDefaultRouteActionFaultInjectionPolicy"
+        },
+        "maxStreamDuration": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionMaxStreamDuration:URLMapDefaultRouteActionMaxStreamDuration"
+        },
+        "requestMirrorPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionRequestMirrorPolicy:URLMapDefaultRouteActionRequestMirrorPolicy"
+        },
+        "retryPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionRetryPolicy:URLMapDefaultRouteActionRetryPolicy"
+        },
+        "timeout": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionTimeout:URLMapDefaultRouteActionTimeout"
+        },
+        "urlRewrite": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionUrlRewrite:URLMapDefaultRouteActionUrlRewrite"
+        },
+        "weightedBackendServices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionWeightedBackendService:URLMapDefaultRouteActionWeightedBackendService"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionCachePolicy:URLMapDefaultRouteActionCachePolicy": {
+      "type": "object",
+      "properties": {
+        "cacheBypassRequestHeaderNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cacheKeyPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCachePolicyCacheKeyPolicy:URLMapDefaultRouteActionCachePolicyCacheKeyPolicy"
+        },
+        "cacheMode": {
+          "type": "string"
+        },
+        "clientTtl": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCachePolicyClientTtl:URLMapDefaultRouteActionCachePolicyClientTtl"
+        },
+        "defaultTtl": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCachePolicyDefaultTtl:URLMapDefaultRouteActionCachePolicyDefaultTtl"
+        },
+        "maxTtl": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCachePolicyMaxTtl:URLMapDefaultRouteActionCachePolicyMaxTtl"
+        },
+        "negativeCaching": {
+          "type": "boolean"
+        },
+        "negativeCachingPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCachePolicyNegativeCachingPolicy:URLMapDefaultRouteActionCachePolicyNegativeCachingPolicy"
+          }
+        },
+        "requestCoalescing": {
+          "type": "boolean"
+        },
+        "serveWhileStale": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCachePolicyServeWhileStale:URLMapDefaultRouteActionCachePolicyServeWhileStale"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionCachePolicyCacheKeyPolicy:URLMapDefaultRouteActionCachePolicyCacheKeyPolicy": {
+      "type": "object",
+      "properties": {
+        "excludedQueryParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeHost": {
+          "type": "boolean"
+        },
+        "includeProtocol": {
+          "type": "boolean"
+        },
+        "includeQueryString": {
+          "type": "boolean"
+        },
+        "includedCookieNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includedHeaderNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includedQueryParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionCachePolicyClientTtl:URLMapDefaultRouteActionCachePolicyClientTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapDefaultRouteActionCachePolicyDefaultTtl:URLMapDefaultRouteActionCachePolicyDefaultTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapDefaultRouteActionCachePolicyMaxTtl:URLMapDefaultRouteActionCachePolicyMaxTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapDefaultRouteActionCachePolicyNegativeCachingPolicy:URLMapDefaultRouteActionCachePolicyNegativeCachingPolicy": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "ttl": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionCachePolicyNegativeCachingPolicyTtl:URLMapDefaultRouteActionCachePolicyNegativeCachingPolicyTtl"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionCachePolicyNegativeCachingPolicyTtl:URLMapDefaultRouteActionCachePolicyNegativeCachingPolicyTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapDefaultRouteActionCachePolicyServeWhileStale:URLMapDefaultRouteActionCachePolicyServeWhileStale": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapDefaultRouteActionCorsPolicy:URLMapDefaultRouteActionCorsPolicy": {
+      "type": "object",
+      "properties": {
+        "allowCredentials": {
+          "type": "boolean"
+        },
+        "allowHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowMethods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowOriginRegexes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "exposeHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxAge": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionFaultInjectionPolicy:URLMapDefaultRouteActionFaultInjectionPolicy": {
+      "type": "object",
+      "properties": {
+        "abort": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionFaultInjectionPolicyAbort:URLMapDefaultRouteActionFaultInjectionPolicyAbort"
+        },
+        "delay": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionFaultInjectionPolicyDelay:URLMapDefaultRouteActionFaultInjectionPolicyDelay"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionFaultInjectionPolicyAbort:URLMapDefaultRouteActionFaultInjectionPolicyAbort": {
+      "type": "object",
+      "properties": {
+        "httpStatus": {
+          "type": "integer"
+        },
+        "percentage": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionFaultInjectionPolicyDelay:URLMapDefaultRouteActionFaultInjectionPolicyDelay": {
+      "type": "object",
+      "properties": {
+        "fixedDelay": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionFaultInjectionPolicyDelayFixedDelay:URLMapDefaultRouteActionFaultInjectionPolicyDelayFixedDelay"
+        },
+        "percentage": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionFaultInjectionPolicyDelayFixedDelay:URLMapDefaultRouteActionFaultInjectionPolicyDelayFixedDelay": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionMaxStreamDuration:URLMapDefaultRouteActionMaxStreamDuration": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapDefaultRouteActionRequestMirrorPolicy:URLMapDefaultRouteActionRequestMirrorPolicy": {
+      "type": "object",
+      "properties": {
+        "backendService": {
+          "type": "string"
+        },
+        "mirrorPercent": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "backendService"
+      ]
+    },
+    "gcp:compute/URLMapDefaultRouteActionRetryPolicy:URLMapDefaultRouteActionRetryPolicy": {
+      "type": "object",
+      "properties": {
+        "numRetries": {
+          "type": "integer"
+        },
+        "perTryTimeout": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionRetryPolicyPerTryTimeout:URLMapDefaultRouteActionRetryPolicyPerTryTimeout"
+        },
+        "retryConditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionRetryPolicyPerTryTimeout:URLMapDefaultRouteActionRetryPolicyPerTryTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionTimeout:URLMapDefaultRouteActionTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionUrlRewrite:URLMapDefaultRouteActionUrlRewrite": {
+      "type": "object",
+      "properties": {
+        "hostRewrite": {
+          "type": "string"
+        },
+        "pathPrefixRewrite": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionWeightedBackendService:URLMapDefaultRouteActionWeightedBackendService": {
+      "type": "object",
+      "properties": {
+        "backendService": {
+          "type": "string"
+        },
+        "headerAction": {
+          "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionWeightedBackendServiceHeaderAction:URLMapDefaultRouteActionWeightedBackendServiceHeaderAction"
+        },
+        "weight": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionWeightedBackendServiceHeaderAction:URLMapDefaultRouteActionWeightedBackendServiceHeaderAction": {
+      "type": "object",
+      "properties": {
+        "requestHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd:URLMapDefaultRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd"
+          }
+        },
+        "requestHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "responseHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapDefaultRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd:URLMapDefaultRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd"
+          }
+        },
+        "responseHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd:URLMapDefaultRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd:URLMapDefaultRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:compute/URLMapDefaultUrlRedirect:URLMapDefaultUrlRedirect": {
+      "type": "object",
+      "properties": {
+        "hostRedirect": {
+          "type": "string"
+        },
+        "httpsRedirect": {
+          "type": "boolean"
+        },
+        "pathRedirect": {
+          "type": "string"
+        },
+        "prefixRedirect": {
+          "type": "string"
+        },
+        "redirectResponseCode": {
+          "type": "string"
+        },
+        "stripQuery": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "stripQuery"
+      ]
+    },
+    "gcp:compute/URLMapHeaderAction:URLMapHeaderAction": {
+      "type": "object",
+      "properties": {
+        "requestHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapHeaderActionRequestHeadersToAdd:URLMapHeaderActionRequestHeadersToAdd"
+          }
+        },
+        "requestHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "responseHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapHeaderActionResponseHeadersToAdd:URLMapHeaderActionResponseHeadersToAdd"
+          }
+        },
+        "responseHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapHeaderActionRequestHeadersToAdd:URLMapHeaderActionRequestHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapHeaderActionResponseHeadersToAdd:URLMapHeaderActionResponseHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapHostRule:URLMapHostRule": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pathMatcher": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hosts",
+        "pathMatcher"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcher:URLMapPathMatcher": {
+      "type": "object",
+      "properties": {
+        "defaultCustomErrorResponsePolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultCustomErrorResponsePolicy:URLMapPathMatcherDefaultCustomErrorResponsePolicy"
+        },
+        "defaultRouteAction": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteAction:URLMapPathMatcherDefaultRouteAction"
+        },
+        "defaultService": {
+          "type": "string"
+        },
+        "defaultUrlRedirect": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultUrlRedirect:URLMapPathMatcherDefaultUrlRedirect"
+        },
+        "description": {
+          "type": "string"
+        },
+        "headerAction": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherHeaderAction:URLMapPathMatcherHeaderAction"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pathRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRule:URLMapPathMatcherPathRule"
+          }
+        },
+        "routeRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRule:URLMapPathMatcherRouteRule"
+          }
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherDefaultCustomErrorResponsePolicy:URLMapPathMatcherDefaultCustomErrorResponsePolicy": {
+      "type": "object",
+      "properties": {
+        "errorResponseRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultCustomErrorResponsePolicyErrorResponseRule:URLMapPathMatcherDefaultCustomErrorResponsePolicyErrorResponseRule"
+          }
+        },
+        "errorService": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultCustomErrorResponsePolicyErrorResponseRule:URLMapPathMatcherDefaultCustomErrorResponsePolicyErrorResponseRule": {
+      "type": "object",
+      "properties": {
+        "matchResponseCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "overrideResponseCode": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteAction:URLMapPathMatcherDefaultRouteAction": {
+      "type": "object",
+      "properties": {
+        "cachePolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicy:URLMapPathMatcherDefaultRouteActionCachePolicy"
+        },
+        "corsPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCorsPolicy:URLMapPathMatcherDefaultRouteActionCorsPolicy"
+        },
+        "faultInjectionPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionFaultInjectionPolicy:URLMapPathMatcherDefaultRouteActionFaultInjectionPolicy"
+        },
+        "maxStreamDuration": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionMaxStreamDuration:URLMapPathMatcherDefaultRouteActionMaxStreamDuration"
+        },
+        "requestMirrorPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionRequestMirrorPolicy:URLMapPathMatcherDefaultRouteActionRequestMirrorPolicy"
+        },
+        "retryPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionRetryPolicy:URLMapPathMatcherDefaultRouteActionRetryPolicy"
+        },
+        "timeout": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionTimeout:URLMapPathMatcherDefaultRouteActionTimeout"
+        },
+        "urlRewrite": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionUrlRewrite:URLMapPathMatcherDefaultRouteActionUrlRewrite"
+        },
+        "weightedBackendServices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionWeightedBackendService:URLMapPathMatcherDefaultRouteActionWeightedBackendService"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicy:URLMapPathMatcherDefaultRouteActionCachePolicy": {
+      "type": "object",
+      "properties": {
+        "cacheBypassRequestHeaderNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cacheKeyPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyCacheKeyPolicy:URLMapPathMatcherDefaultRouteActionCachePolicyCacheKeyPolicy"
+        },
+        "cacheMode": {
+          "type": "string"
+        },
+        "clientTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyClientTtl:URLMapPathMatcherDefaultRouteActionCachePolicyClientTtl"
+        },
+        "defaultTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyDefaultTtl:URLMapPathMatcherDefaultRouteActionCachePolicyDefaultTtl"
+        },
+        "maxTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyMaxTtl:URLMapPathMatcherDefaultRouteActionCachePolicyMaxTtl"
+        },
+        "negativeCaching": {
+          "type": "boolean"
+        },
+        "negativeCachingPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyNegativeCachingPolicy:URLMapPathMatcherDefaultRouteActionCachePolicyNegativeCachingPolicy"
+          }
+        },
+        "requestCoalescing": {
+          "type": "boolean"
+        },
+        "serveWhileStale": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyServeWhileStale:URLMapPathMatcherDefaultRouteActionCachePolicyServeWhileStale"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyCacheKeyPolicy:URLMapPathMatcherDefaultRouteActionCachePolicyCacheKeyPolicy": {
+      "type": "object",
+      "properties": {
+        "excludedQueryParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeHost": {
+          "type": "boolean"
+        },
+        "includeProtocol": {
+          "type": "boolean"
+        },
+        "includeQueryString": {
+          "type": "boolean"
+        },
+        "includedCookieNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includedHeaderNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includedQueryParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyClientTtl:URLMapPathMatcherDefaultRouteActionCachePolicyClientTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyDefaultTtl:URLMapPathMatcherDefaultRouteActionCachePolicyDefaultTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyMaxTtl:URLMapPathMatcherDefaultRouteActionCachePolicyMaxTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyNegativeCachingPolicy:URLMapPathMatcherDefaultRouteActionCachePolicyNegativeCachingPolicy": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "ttl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyNegativeCachingPolicyTtl:URLMapPathMatcherDefaultRouteActionCachePolicyNegativeCachingPolicyTtl"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyNegativeCachingPolicyTtl:URLMapPathMatcherDefaultRouteActionCachePolicyNegativeCachingPolicyTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCachePolicyServeWhileStale:URLMapPathMatcherDefaultRouteActionCachePolicyServeWhileStale": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionCorsPolicy:URLMapPathMatcherDefaultRouteActionCorsPolicy": {
+      "type": "object",
+      "properties": {
+        "allowCredentials": {
+          "type": "boolean"
+        },
+        "allowHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowMethods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowOriginRegexes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "exposeHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxAge": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionFaultInjectionPolicy:URLMapPathMatcherDefaultRouteActionFaultInjectionPolicy": {
+      "type": "object",
+      "properties": {
+        "abort": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyAbort:URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyAbort"
+        },
+        "delay": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyDelay:URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyDelay"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyAbort:URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyAbort": {
+      "type": "object",
+      "properties": {
+        "httpStatus": {
+          "type": "integer"
+        },
+        "percentage": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyDelay:URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyDelay": {
+      "type": "object",
+      "properties": {
+        "fixedDelay": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyDelayFixedDelay:URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyDelayFixedDelay"
+        },
+        "percentage": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyDelayFixedDelay:URLMapPathMatcherDefaultRouteActionFaultInjectionPolicyDelayFixedDelay": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionMaxStreamDuration:URLMapPathMatcherDefaultRouteActionMaxStreamDuration": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionRequestMirrorPolicy:URLMapPathMatcherDefaultRouteActionRequestMirrorPolicy": {
+      "type": "object",
+      "properties": {
+        "backendService": {
+          "type": "string"
+        },
+        "mirrorPercent": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "backendService"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionRetryPolicy:URLMapPathMatcherDefaultRouteActionRetryPolicy": {
+      "type": "object",
+      "properties": {
+        "numRetries": {
+          "type": "integer"
+        },
+        "perTryTimeout": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionRetryPolicyPerTryTimeout:URLMapPathMatcherDefaultRouteActionRetryPolicyPerTryTimeout"
+        },
+        "retryConditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionRetryPolicyPerTryTimeout:URLMapPathMatcherDefaultRouteActionRetryPolicyPerTryTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionTimeout:URLMapPathMatcherDefaultRouteActionTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionUrlRewrite:URLMapPathMatcherDefaultRouteActionUrlRewrite": {
+      "type": "object",
+      "properties": {
+        "hostRewrite": {
+          "type": "string"
+        },
+        "pathPrefixRewrite": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionWeightedBackendService:URLMapPathMatcherDefaultRouteActionWeightedBackendService": {
+      "type": "object",
+      "properties": {
+        "backendService": {
+          "type": "string"
+        },
+        "headerAction": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderAction:URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderAction"
+        },
+        "weight": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderAction:URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderAction": {
+      "type": "object",
+      "properties": {
+        "requestHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd:URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd"
+          }
+        },
+        "requestHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "responseHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd:URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd"
+          }
+        },
+        "responseHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd:URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd:URLMapPathMatcherDefaultRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherDefaultUrlRedirect:URLMapPathMatcherDefaultUrlRedirect": {
+      "type": "object",
+      "properties": {
+        "hostRedirect": {
+          "type": "string"
+        },
+        "httpsRedirect": {
+          "type": "boolean"
+        },
+        "pathRedirect": {
+          "type": "string"
+        },
+        "prefixRedirect": {
+          "type": "string"
+        },
+        "redirectResponseCode": {
+          "type": "string"
+        },
+        "stripQuery": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "stripQuery"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherHeaderAction:URLMapPathMatcherHeaderAction": {
+      "type": "object",
+      "properties": {
+        "requestHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherHeaderActionRequestHeadersToAdd:URLMapPathMatcherHeaderActionRequestHeadersToAdd"
+          }
+        },
+        "requestHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "responseHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherHeaderActionResponseHeadersToAdd:URLMapPathMatcherHeaderActionResponseHeadersToAdd"
+          }
+        },
+        "responseHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherHeaderActionRequestHeadersToAdd:URLMapPathMatcherHeaderActionRequestHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherHeaderActionResponseHeadersToAdd:URLMapPathMatcherHeaderActionResponseHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRule:URLMapPathMatcherPathRule": {
+      "type": "object",
+      "properties": {
+        "customErrorResponsePolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleCustomErrorResponsePolicy:URLMapPathMatcherPathRuleCustomErrorResponsePolicy"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "routeAction": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteAction:URLMapPathMatcherPathRuleRouteAction"
+        },
+        "service": {
+          "type": "string"
+        },
+        "urlRedirect": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleUrlRedirect:URLMapPathMatcherPathRuleUrlRedirect"
+        }
+      },
+      "required": [
+        "paths"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleCustomErrorResponsePolicy:URLMapPathMatcherPathRuleCustomErrorResponsePolicy": {
+      "type": "object",
+      "properties": {
+        "errorResponseRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleCustomErrorResponsePolicyErrorResponseRule:URLMapPathMatcherPathRuleCustomErrorResponsePolicyErrorResponseRule"
+          }
+        },
+        "errorService": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleCustomErrorResponsePolicyErrorResponseRule:URLMapPathMatcherPathRuleCustomErrorResponsePolicyErrorResponseRule": {
+      "type": "object",
+      "properties": {
+        "matchResponseCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "overrideResponseCode": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteAction:URLMapPathMatcherPathRuleRouteAction": {
+      "type": "object",
+      "properties": {
+        "cachePolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicy:URLMapPathMatcherPathRuleRouteActionCachePolicy"
+        },
+        "corsPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCorsPolicy:URLMapPathMatcherPathRuleRouteActionCorsPolicy"
+        },
+        "faultInjectionPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicy:URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicy"
+        },
+        "maxStreamDuration": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionMaxStreamDuration:URLMapPathMatcherPathRuleRouteActionMaxStreamDuration"
+        },
+        "requestMirrorPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionRequestMirrorPolicy:URLMapPathMatcherPathRuleRouteActionRequestMirrorPolicy"
+        },
+        "retryPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionRetryPolicy:URLMapPathMatcherPathRuleRouteActionRetryPolicy"
+        },
+        "timeout": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionTimeout:URLMapPathMatcherPathRuleRouteActionTimeout"
+        },
+        "urlRewrite": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionUrlRewrite:URLMapPathMatcherPathRuleRouteActionUrlRewrite"
+        },
+        "weightedBackendServices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionWeightedBackendService:URLMapPathMatcherPathRuleRouteActionWeightedBackendService"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicy:URLMapPathMatcherPathRuleRouteActionCachePolicy": {
+      "type": "object",
+      "properties": {
+        "cacheBypassRequestHeaderNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cacheKeyPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyCacheKeyPolicy:URLMapPathMatcherPathRuleRouteActionCachePolicyCacheKeyPolicy"
+        },
+        "cacheMode": {
+          "type": "string"
+        },
+        "clientTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyClientTtl:URLMapPathMatcherPathRuleRouteActionCachePolicyClientTtl"
+        },
+        "defaultTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyDefaultTtl:URLMapPathMatcherPathRuleRouteActionCachePolicyDefaultTtl"
+        },
+        "maxTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyMaxTtl:URLMapPathMatcherPathRuleRouteActionCachePolicyMaxTtl"
+        },
+        "negativeCaching": {
+          "type": "boolean"
+        },
+        "negativeCachingPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyNegativeCachingPolicy:URLMapPathMatcherPathRuleRouteActionCachePolicyNegativeCachingPolicy"
+          }
+        },
+        "requestCoalescing": {
+          "type": "boolean"
+        },
+        "serveWhileStale": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyServeWhileStale:URLMapPathMatcherPathRuleRouteActionCachePolicyServeWhileStale"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyCacheKeyPolicy:URLMapPathMatcherPathRuleRouteActionCachePolicyCacheKeyPolicy": {
+      "type": "object",
+      "properties": {
+        "excludedQueryParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeHost": {
+          "type": "boolean"
+        },
+        "includeProtocol": {
+          "type": "boolean"
+        },
+        "includeQueryString": {
+          "type": "boolean"
+        },
+        "includedCookieNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includedHeaderNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includedQueryParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyClientTtl:URLMapPathMatcherPathRuleRouteActionCachePolicyClientTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyDefaultTtl:URLMapPathMatcherPathRuleRouteActionCachePolicyDefaultTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyMaxTtl:URLMapPathMatcherPathRuleRouteActionCachePolicyMaxTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyNegativeCachingPolicy:URLMapPathMatcherPathRuleRouteActionCachePolicyNegativeCachingPolicy": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "ttl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyNegativeCachingPolicyTtl:URLMapPathMatcherPathRuleRouteActionCachePolicyNegativeCachingPolicyTtl"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyNegativeCachingPolicyTtl:URLMapPathMatcherPathRuleRouteActionCachePolicyNegativeCachingPolicyTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCachePolicyServeWhileStale:URLMapPathMatcherPathRuleRouteActionCachePolicyServeWhileStale": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionCorsPolicy:URLMapPathMatcherPathRuleRouteActionCorsPolicy": {
+      "type": "object",
+      "properties": {
+        "allowCredentials": {
+          "type": "boolean"
+        },
+        "allowHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowMethods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowOriginRegexes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "exposeHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxAge": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "disabled"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicy:URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicy": {
+      "type": "object",
+      "properties": {
+        "abort": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyAbort:URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyAbort"
+        },
+        "delay": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyDelay:URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyDelay"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyAbort:URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyAbort": {
+      "type": "object",
+      "properties": {
+        "httpStatus": {
+          "type": "integer"
+        },
+        "percentage": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "httpStatus",
+        "percentage"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyDelay:URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyDelay": {
+      "type": "object",
+      "properties": {
+        "fixedDelay": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyDelayFixedDelay:URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyDelayFixedDelay"
+        },
+        "percentage": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "fixedDelay",
+        "percentage"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyDelayFixedDelay:URLMapPathMatcherPathRuleRouteActionFaultInjectionPolicyDelayFixedDelay": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionMaxStreamDuration:URLMapPathMatcherPathRuleRouteActionMaxStreamDuration": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionRequestMirrorPolicy:URLMapPathMatcherPathRuleRouteActionRequestMirrorPolicy": {
+      "type": "object",
+      "properties": {
+        "backendService": {
+          "type": "string"
+        },
+        "mirrorPercent": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "backendService"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionRetryPolicy:URLMapPathMatcherPathRuleRouteActionRetryPolicy": {
+      "type": "object",
+      "properties": {
+        "numRetries": {
+          "type": "integer"
+        },
+        "perTryTimeout": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionRetryPolicyPerTryTimeout:URLMapPathMatcherPathRuleRouteActionRetryPolicyPerTryTimeout"
+        },
+        "retryConditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionRetryPolicyPerTryTimeout:URLMapPathMatcherPathRuleRouteActionRetryPolicyPerTryTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionTimeout:URLMapPathMatcherPathRuleRouteActionTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionUrlRewrite:URLMapPathMatcherPathRuleRouteActionUrlRewrite": {
+      "type": "object",
+      "properties": {
+        "hostRewrite": {
+          "type": "string"
+        },
+        "pathPrefixRewrite": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionWeightedBackendService:URLMapPathMatcherPathRuleRouteActionWeightedBackendService": {
+      "type": "object",
+      "properties": {
+        "backendService": {
+          "type": "string"
+        },
+        "headerAction": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderAction:URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderAction"
+        },
+        "weight": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "backendService",
+        "weight"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderAction:URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderAction": {
+      "type": "object",
+      "properties": {
+        "requestHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd:URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd"
+          }
+        },
+        "requestHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "responseHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd:URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd"
+          }
+        },
+        "responseHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd:URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd:URLMapPathMatcherPathRuleRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherPathRuleUrlRedirect:URLMapPathMatcherPathRuleUrlRedirect": {
+      "type": "object",
+      "properties": {
+        "hostRedirect": {
+          "type": "string"
+        },
+        "httpsRedirect": {
+          "type": "boolean"
+        },
+        "pathRedirect": {
+          "type": "string"
+        },
+        "prefixRedirect": {
+          "type": "string"
+        },
+        "redirectResponseCode": {
+          "type": "string"
+        },
+        "stripQuery": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "stripQuery"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRule:URLMapPathMatcherRouteRule": {
+      "type": "object",
+      "properties": {
+        "customErrorResponsePolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleCustomErrorResponsePolicy:URLMapPathMatcherRouteRuleCustomErrorResponsePolicy"
+        },
+        "headerAction": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleHeaderAction:URLMapPathMatcherRouteRuleHeaderAction"
+        },
+        "httpFilterConfigs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleHttpFilterConfig:URLMapPathMatcherRouteRuleHttpFilterConfig"
+          }
+        },
+        "httpFilterMetadatas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleHttpFilterMetadata:URLMapPathMatcherRouteRuleHttpFilterMetadata"
+          }
+        },
+        "matchRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleMatchRule:URLMapPathMatcherRouteRuleMatchRule"
+          }
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "routeAction": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteAction:URLMapPathMatcherRouteRuleRouteAction"
+        },
+        "service": {
+          "type": "string"
+        },
+        "urlRedirect": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleUrlRedirect:URLMapPathMatcherRouteRuleUrlRedirect"
+        }
+      },
+      "required": [
+        "priority"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleCustomErrorResponsePolicy:URLMapPathMatcherRouteRuleCustomErrorResponsePolicy": {
+      "type": "object",
+      "properties": {
+        "errorResponseRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleCustomErrorResponsePolicyErrorResponseRule:URLMapPathMatcherRouteRuleCustomErrorResponsePolicyErrorResponseRule"
+          }
+        },
+        "errorService": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleCustomErrorResponsePolicyErrorResponseRule:URLMapPathMatcherRouteRuleCustomErrorResponsePolicyErrorResponseRule": {
+      "type": "object",
+      "properties": {
+        "matchResponseCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "overrideResponseCode": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleHeaderAction:URLMapPathMatcherRouteRuleHeaderAction": {
+      "type": "object",
+      "properties": {
+        "requestHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleHeaderActionRequestHeadersToAdd:URLMapPathMatcherRouteRuleHeaderActionRequestHeadersToAdd"
+          }
+        },
+        "requestHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "responseHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleHeaderActionResponseHeadersToAdd:URLMapPathMatcherRouteRuleHeaderActionResponseHeadersToAdd"
+          }
+        },
+        "responseHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleHeaderActionRequestHeadersToAdd:URLMapPathMatcherRouteRuleHeaderActionRequestHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleHeaderActionResponseHeadersToAdd:URLMapPathMatcherRouteRuleHeaderActionResponseHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleHttpFilterConfig:URLMapPathMatcherRouteRuleHttpFilterConfig": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "string"
+        },
+        "configTypeUrl": {
+          "type": "string"
+        },
+        "filterName": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleHttpFilterMetadata:URLMapPathMatcherRouteRuleHttpFilterMetadata": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "string"
+        },
+        "configTypeUrl": {
+          "type": "string"
+        },
+        "filterName": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleMatchRule:URLMapPathMatcherRouteRuleMatchRule": {
+      "type": "object",
+      "properties": {
+        "fullPathMatch": {
+          "type": "string"
+        },
+        "headerMatches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleMatchRuleHeaderMatch:URLMapPathMatcherRouteRuleMatchRuleHeaderMatch"
+          }
+        },
+        "ignoreCase": {
+          "type": "boolean"
+        },
+        "metadataFilters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleMatchRuleMetadataFilter:URLMapPathMatcherRouteRuleMatchRuleMetadataFilter"
+          }
+        },
+        "pathTemplateMatch": {
+          "type": "string"
+        },
+        "prefixMatch": {
+          "type": "string"
+        },
+        "queryParameterMatches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleMatchRuleQueryParameterMatch:URLMapPathMatcherRouteRuleMatchRuleQueryParameterMatch"
+          }
+        },
+        "regexMatch": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleMatchRuleHeaderMatch:URLMapPathMatcherRouteRuleMatchRuleHeaderMatch": {
+      "type": "object",
+      "properties": {
+        "exactMatch": {
+          "type": "string"
+        },
+        "headerName": {
+          "type": "string"
+        },
+        "invertMatch": {
+          "type": "boolean"
+        },
+        "prefixMatch": {
+          "type": "string"
+        },
+        "presentMatch": {
+          "type": "boolean"
+        },
+        "rangeMatch": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleMatchRuleHeaderMatchRangeMatch:URLMapPathMatcherRouteRuleMatchRuleHeaderMatchRangeMatch"
+        },
+        "regexMatch": {
+          "type": "string"
+        },
+        "suffixMatch": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "headerName"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleMatchRuleHeaderMatchRangeMatch:URLMapPathMatcherRouteRuleMatchRuleHeaderMatchRangeMatch": {
+      "type": "object",
+      "properties": {
+        "rangeEnd": {
+          "type": "integer"
+        },
+        "rangeStart": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rangeEnd",
+        "rangeStart"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleMatchRuleMetadataFilter:URLMapPathMatcherRouteRuleMatchRuleMetadataFilter": {
+      "type": "object",
+      "properties": {
+        "filterLabels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleMatchRuleMetadataFilterFilterLabel:URLMapPathMatcherRouteRuleMatchRuleMetadataFilterFilterLabel"
+          }
+        },
+        "filterMatchCriteria": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "filterLabels",
+        "filterMatchCriteria"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleMatchRuleMetadataFilterFilterLabel:URLMapPathMatcherRouteRuleMatchRuleMetadataFilterFilterLabel": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleMatchRuleQueryParameterMatch:URLMapPathMatcherRouteRuleMatchRuleQueryParameterMatch": {
+      "type": "object",
+      "properties": {
+        "exactMatch": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "presentMatch": {
+          "type": "boolean"
+        },
+        "regexMatch": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteAction:URLMapPathMatcherRouteRuleRouteAction": {
+      "type": "object",
+      "properties": {
+        "cachePolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicy:URLMapPathMatcherRouteRuleRouteActionCachePolicy"
+        },
+        "corsPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCorsPolicy:URLMapPathMatcherRouteRuleRouteActionCorsPolicy"
+        },
+        "faultInjectionPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicy:URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicy"
+        },
+        "maxStreamDuration": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionMaxStreamDuration:URLMapPathMatcherRouteRuleRouteActionMaxStreamDuration"
+        },
+        "requestMirrorPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionRequestMirrorPolicy:URLMapPathMatcherRouteRuleRouteActionRequestMirrorPolicy"
+        },
+        "retryPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionRetryPolicy:URLMapPathMatcherRouteRuleRouteActionRetryPolicy"
+        },
+        "timeout": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionTimeout:URLMapPathMatcherRouteRuleRouteActionTimeout"
+        },
+        "urlRewrite": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionUrlRewrite:URLMapPathMatcherRouteRuleRouteActionUrlRewrite"
+        },
+        "weightedBackendServices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionWeightedBackendService:URLMapPathMatcherRouteRuleRouteActionWeightedBackendService"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicy:URLMapPathMatcherRouteRuleRouteActionCachePolicy": {
+      "type": "object",
+      "properties": {
+        "cacheBypassRequestHeaderNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cacheKeyPolicy": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyCacheKeyPolicy:URLMapPathMatcherRouteRuleRouteActionCachePolicyCacheKeyPolicy"
+        },
+        "cacheMode": {
+          "type": "string"
+        },
+        "clientTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyClientTtl:URLMapPathMatcherRouteRuleRouteActionCachePolicyClientTtl"
+        },
+        "defaultTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyDefaultTtl:URLMapPathMatcherRouteRuleRouteActionCachePolicyDefaultTtl"
+        },
+        "maxTtl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyMaxTtl:URLMapPathMatcherRouteRuleRouteActionCachePolicyMaxTtl"
+        },
+        "negativeCaching": {
+          "type": "boolean"
+        },
+        "negativeCachingPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyNegativeCachingPolicy:URLMapPathMatcherRouteRuleRouteActionCachePolicyNegativeCachingPolicy"
+          }
+        },
+        "requestCoalescing": {
+          "type": "boolean"
+        },
+        "serveWhileStale": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyServeWhileStale:URLMapPathMatcherRouteRuleRouteActionCachePolicyServeWhileStale"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyCacheKeyPolicy:URLMapPathMatcherRouteRuleRouteActionCachePolicyCacheKeyPolicy": {
+      "type": "object",
+      "properties": {
+        "excludedQueryParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeHost": {
+          "type": "boolean"
+        },
+        "includeProtocol": {
+          "type": "boolean"
+        },
+        "includeQueryString": {
+          "type": "boolean"
+        },
+        "includedCookieNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includedHeaderNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includedQueryParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyClientTtl:URLMapPathMatcherRouteRuleRouteActionCachePolicyClientTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyDefaultTtl:URLMapPathMatcherRouteRuleRouteActionCachePolicyDefaultTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyMaxTtl:URLMapPathMatcherRouteRuleRouteActionCachePolicyMaxTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyNegativeCachingPolicy:URLMapPathMatcherRouteRuleRouteActionCachePolicyNegativeCachingPolicy": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "ttl": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyNegativeCachingPolicyTtl:URLMapPathMatcherRouteRuleRouteActionCachePolicyNegativeCachingPolicyTtl"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyNegativeCachingPolicyTtl:URLMapPathMatcherRouteRuleRouteActionCachePolicyNegativeCachingPolicyTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCachePolicyServeWhileStale:URLMapPathMatcherRouteRuleRouteActionCachePolicyServeWhileStale": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionCorsPolicy:URLMapPathMatcherRouteRuleRouteActionCorsPolicy": {
+      "type": "object",
+      "properties": {
+        "allowCredentials": {
+          "type": "boolean"
+        },
+        "allowHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowMethods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowOriginRegexes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "exposeHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxAge": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicy:URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicy": {
+      "type": "object",
+      "properties": {
+        "abort": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyAbort:URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyAbort"
+        },
+        "delay": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyDelay:URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyDelay"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyAbort:URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyAbort": {
+      "type": "object",
+      "properties": {
+        "httpStatus": {
+          "type": "integer"
+        },
+        "percentage": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyDelay:URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyDelay": {
+      "type": "object",
+      "properties": {
+        "fixedDelay": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyDelayFixedDelay:URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyDelayFixedDelay"
+        },
+        "percentage": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyDelayFixedDelay:URLMapPathMatcherRouteRuleRouteActionFaultInjectionPolicyDelayFixedDelay": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionMaxStreamDuration:URLMapPathMatcherRouteRuleRouteActionMaxStreamDuration": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionRequestMirrorPolicy:URLMapPathMatcherRouteRuleRouteActionRequestMirrorPolicy": {
+      "type": "object",
+      "properties": {
+        "backendService": {
+          "type": "string"
+        },
+        "mirrorPercent": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "backendService"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionRetryPolicy:URLMapPathMatcherRouteRuleRouteActionRetryPolicy": {
+      "type": "object",
+      "properties": {
+        "numRetries": {
+          "type": "integer"
+        },
+        "perTryTimeout": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionRetryPolicyPerTryTimeout:URLMapPathMatcherRouteRuleRouteActionRetryPolicyPerTryTimeout"
+        },
+        "retryConditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "numRetries"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionRetryPolicyPerTryTimeout:URLMapPathMatcherRouteRuleRouteActionRetryPolicyPerTryTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionTimeout:URLMapPathMatcherRouteRuleRouteActionTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionUrlRewrite:URLMapPathMatcherRouteRuleRouteActionUrlRewrite": {
+      "type": "object",
+      "properties": {
+        "hostRewrite": {
+          "type": "string"
+        },
+        "pathPrefixRewrite": {
+          "type": "string"
+        },
+        "pathTemplateRewrite": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionWeightedBackendService:URLMapPathMatcherRouteRuleRouteActionWeightedBackendService": {
+      "type": "object",
+      "properties": {
+        "backendService": {
+          "type": "string"
+        },
+        "headerAction": {
+          "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderAction:URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderAction"
+        },
+        "weight": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "backendService",
+        "weight"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderAction:URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderAction": {
+      "type": "object",
+      "properties": {
+        "requestHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd:URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd"
+          }
+        },
+        "requestHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "responseHeadersToAdds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd:URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd"
+          }
+        },
+        "responseHeadersToRemoves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd:URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderActionRequestHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd:URLMapPathMatcherRouteRuleRouteActionWeightedBackendServiceHeaderActionResponseHeadersToAdd": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        },
+        "headerValue": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "headerName",
+        "headerValue",
+        "replace"
+      ]
+    },
+    "gcp:compute/URLMapPathMatcherRouteRuleUrlRedirect:URLMapPathMatcherRouteRuleUrlRedirect": {
+      "type": "object",
+      "properties": {
+        "hostRedirect": {
+          "type": "string"
+        },
+        "httpsRedirect": {
+          "type": "boolean"
+        },
+        "pathRedirect": {
+          "type": "string"
+        },
+        "prefixRedirect": {
+          "type": "string"
+        },
+        "redirectResponseCode": {
+          "type": "string"
+        },
+        "stripQuery": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:compute/URLMapTest:URLMapTest": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "expectedOutputUrl": {
+          "type": "string"
+        },
+        "expectedRedirectResponseCode": {
+          "type": "integer"
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/URLMapTestHeader:URLMapTestHeader"
+          }
+        },
+        "host": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "path"
+      ]
+    },
+    "gcp:compute/URLMapTestHeader:URLMapTestHeader": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# Names its database as authDb and calls deps-orders, which calls it back.
+# It has no @envVars type, so its config holds only derived fields.
+name: deps-catalog
+kind: API
+authDb: deps-db
+calls:
+  - { name: deps-orders, kind: API }
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }
+  sdk:
+    go: { enabled: true }

@@ -8,6 +8,7 @@ import {
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectNumber } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { BoardPoint } from '../../types';
 
 /**
@@ -68,12 +69,15 @@ function parseBoardPointInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseBoardPoint ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseBoardPoint ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseBoardPoint ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseBoardPoint ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -85,8 +89,14 @@ function parseBoardPointInput(
       (fieldName) => !BoardPointKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseBoardPoint ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseBoardPoint ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -94,8 +104,10 @@ function parseBoardPointInput(
   const typedCandidate = candidate as unknown as BoardPoint;
   const validationResult = validateBoardPoint(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseBoardPoint ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseBoardPoint ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

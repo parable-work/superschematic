@@ -17,3 +17,4 @@ export * from './scalars';
 export * from './enums';
 
 export * from './types';
+export { ParseError } from './errors';

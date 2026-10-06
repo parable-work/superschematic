@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/gosdkgen"
+	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/ormgen"
 	"github.com/parable-work/superschematic/internal/generator/pygen"
 	"github.com/parable-work/superschematic/internal/generator/pysdkgen"
@@ -684,6 +686,7 @@ func (r run) generateGoAPI() error {
 		envConfig, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
 			SchemaName: r.Config.Name,
 			Naming:     r.Options.Naming,
+			Derived:    true,
 		})
 		if err != nil {
 			return err
@@ -696,8 +699,15 @@ func (r run) generateGoAPI() error {
 
 	// The Go server alone needs the modules the types modules reach, so
 	// they go on this copy rather than the output the other generators
-	// share.
-	roots := []*ir.Schema{r.Schema}
+	// share. Deps adds the ORM of the API's database and the SDK of each
+	// API it calls, whose types modules the server reaches through them.
+	deps, roots, err := r.goDeps(output)
+	if err != nil {
+		return err
+	}
+	if err := output.SetDeps(deps); err != nil {
+		return fmt.Errorf("generator: %w", err)
+	}
 	if output.UpstreamSchema != "" {
 		upstream, err := r.LoadDependency(output.UpstreamSchema)
 		if err != nil {
@@ -705,10 +715,13 @@ func (r run) generateGoAPI() error {
 		}
 		roots = append(roots, upstream)
 	}
-	for _, root := range roots {
+	for _, root := range append([]*ir.Schema{r.Schema}, roots...) {
 		closure, err := r.goTypesClosure(root)
 		if err != nil {
 			return err
+		}
+		if root != r.Schema {
+			closure = append(closure, r.Options.Naming.GoTypesModule(root.Name))
 		}
 		output.AddIndirectModules(closure)
 	}
@@ -726,6 +739,14 @@ func (r run) generateGoAPI() error {
 	}
 	r.Done("api", dir)
 
+	if r.Options.ImplementationRoot != "" {
+		if err := r.measure("output.api.scaffold-implementation", func() error {
+			return r.scaffoldGoImplementation(output)
+		}); err != nil {
+			return err
+		}
+	}
+
 	if subdir := r.Outputs.API.ScaffoldsOutputDir; subdir != "" {
 		scaffoldsDir := filepath.Join(r.Options.ServicePath, subdir)
 		var scaffolds *codegen.ScaffoldResult
@@ -742,20 +763,118 @@ func (r run) generateGoAPI() error {
 	return nil
 }
 
-// generateRustAPI emits the Rust REST API server and route scaffolds. The
-// Rust writer does not emit env config; the standalone env path covers it.
-func (r run) generateRustAPI() error {
+// goDeps returns what the Go server's Deps holds beside its config and
+// logger (docs/stack-model.md, section 8.5): the ORM of the API's database,
+// its authDb or its one DB-kind dependency, and a Go SDK client per calls
+// entry. It also returns their schemas, whose Go types modules the server
+// reaches through the ORM and the SDKs. A dependency whose config the
+// build has must generate what Deps imports: the database its Go types,
+// and so its ORM, and each callee its Go SDK.
+func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, error) {
+	var deps apigen.DepsInfo
+	var roots []*ir.Schema
+	needs := func(service, what, lang string, enabled func(*registry.Outputs) bool) error {
+		if r.Options.DependencyConfig == nil {
+			return nil
+		}
+		cfg, ok := r.Options.DependencyConfig(service)
+		if !ok {
+			return nil
+		}
+		outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+		if err != nil {
+			return fmt.Errorf("generator: schema config for %s: %w", service, err)
+		}
+		if !enabled(outputs) {
+			return fmt.Errorf("generator: the Go server of %s holds %s in its Deps, and %s generates none; enable outputs.%s.%s in %s's config", r.Config.Name, what, service, lang, LangGo, service)
+		}
+		return nil
+	}
+	if db, _, ok := r.Schema.Database(); ok {
+		if err := needs(db, "the ORM of "+db, "types", func(o *registry.Outputs) bool { return o.TypesEnabled(LangGo) }); err != nil {
+			return deps, nil, err
+		}
+		schema, err := r.LoadDependency(db)
+		if err != nil {
+			return deps, nil, fmt.Errorf("generator: load %s, the database of %s: %w", db, r.Config.Name, err)
+		}
+		deps.Database = db
+		deps.ORMModule = r.Options.Naming.GoORMModule(db)
+		deps.VersionGraph = apigen.DeclaresVersionGraph(schema)
+		if db != output.UpstreamSchema {
+			roots = append(roots, schema)
+		}
+	}
+	for _, call := range r.Schema.Calls {
+		if err := needs(call.Name, "a client of "+call.Name, "sdk", func(o *registry.Outputs) bool { return o.SDKEnabled(LangGo) }); err != nil {
+			return deps, nil, err
+		}
+		schema, err := r.LoadDependency(call.Name)
+		if err != nil {
+			return deps, nil, fmt.Errorf("generator: load %s, which %s calls: %w", call.Name, r.Config.Name, err)
+		}
+		roots = append(roots, schema)
+		deps.Calls = append(deps.Calls, apigen.DepsCall{
+			Service: call.Name,
+			Field:   goutil.GoPublicIdentifier(call.Name),
+			Module:  r.Options.Naming.GoSDKModule(call.Name),
+			Alias:   toGoPackageName(call.Name) + "sdk",
+			Client:  gosdkgen.ClientTypeName(call.Name),
+		})
+	}
+	return deps, roots, nil
+}
+
+// scaffoldGoImplementation writes the scaffold of the API's Go
+// implementation under Options.ImplementationRoot, at the naming file's
+// [implementation_paths] go template, when that package is missing.
+func (r run) scaffoldGoImplementation(output *apigen.APIOutput) error {
+	dir := r.Options.Naming.GoImplementationDir(r.Options.ImplementationRoot, r.Config.Name)
+	written, err := apigen.WriteImplementationScaffold(output, dir)
+	if err != nil {
+		return fmt.Errorf("generator: implementation scaffold for %s: %w", r.Config.Name, err)
+	}
+	if written {
+		r.Logf("  + implementation scaffold written to %s\n", dir)
+	}
+	return nil
+}
+
+// toGoPackageName lowers a service name to the letters and digits of a Go
+// package name: shop-api is shopapi.
+func toGoPackageName(service string) string {
+	var b strings.Builder
+	for _, c := range strings.ToLower(service) {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
+// RustAPIOf is the Rust REST API crate the api generator writes for the
+// service c generates, as generateRustAPI builds it: nil for a schema
+// without operations. An extension that writes Rust beside it reads its
+// operations, their Args structs and result types from here instead of
+// deriving them again.
+func RustAPIOf(c registry.GenerateContext) (*rustrestgen.APIOutput, error) {
+	return run{c}.rustAPI()
+}
+
+// rustAPI is the Rust REST API crate of the run's schema, nil without
+// operations.
+func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 	var apiOutput *apigen.APIOutput
 	if err := r.measure("output.api.prepare", func() error {
 		var err error
 		apiOutput, err = r.APIOutput()
 		return err
 	}); err != nil {
-		return err
+		return nil, err
 	}
 	deps, err := r.loadDependencySchemas()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	output, err := rustrestgen.Generate(r.Schema, apiOutput, rustrestgen.Options{
 		SchemaName:   r.Config.Name,
@@ -767,13 +886,26 @@ func (r run) generateRustAPI() error {
 		Clock:        r.Options.Clock,
 	})
 	if err != nil {
-		return fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
+		return nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
+	}
+	if output == nil {
+		return nil, nil
+	}
+	if output.HasEnvConfig, err = r.hasEnvConfig(); err != nil {
+		return nil, err
+	}
+	return output, nil
+}
+
+// generateRustAPI emits the Rust REST API server and route scaffolds. The
+// Rust writer does not emit env config; the standalone env path covers it.
+func (r run) generateRustAPI() error {
+	output, err := r.rustAPI()
+	if err != nil {
+		return err
 	}
 	if output == nil {
 		return r.generateEnvConfig(LangRust)
-	}
-	if output.HasEnvConfig, err = r.hasEnvConfig(); err != nil {
-		return err
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)

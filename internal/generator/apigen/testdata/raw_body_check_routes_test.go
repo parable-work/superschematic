@@ -167,16 +167,40 @@ func TestEveryCheckedFieldIsReportedTogether(t *testing.T) {
 func TestTheCheckRunsBeforeTheBodyIsDecoded(t *testing.T) {
 	server, impl := serve(t)
 	response := refused(t, server, impl, `{"title": 5, "body": {"a": 1}}`)
-	if response["detail"] != "Invalid request body" || response["errors"] != nil {
+	details, _ := response["details"].(map[string]any)
+	if response["detail"] != "Request body does not match the declared input" || details["reason"] != "does not match the declared type" || response["errors"] != nil {
 		t.Fatalf("a body that fails to decode answered %v, want the decode error", response)
 	}
 	refusedAt(t, server, impl, `{"title": 5, "body": {"a": 1, "a": 2}}`, "body.a")
 }
 
-func TestANullBodyIsStillRequired(t *testing.T) {
+// TestANullBodyIsNoInput: null is not an object, and no body is required.
+func TestANullBodyIsNoInput(t *testing.T) {
 	server, impl := serve(t)
 	response := refused(t, server, impl, `null`)
-	if response["detail"] != "input is required" {
-		t.Fatalf("null answered %v, want input is required", response)
+	details, _ := response["details"].(map[string]any)
+	if response["detail"] != "Request body does not match the declared input" || details["reason"] != "expected an object" {
+		t.Fatalf("null answered %v, want expected an object", response)
+	}
+	response = refused(t, server, impl, ``)
+	if response["detail"] != "Request body is required" || response["code"] != "bad_request" {
+		t.Fatalf("an empty body answered %v, want Request body is required", response)
+	}
+}
+
+// TestAnUndeclaredKeyIsRefused: a top-level key the input type does not
+// declare is refused, as every generated server refuses it.
+func TestAnUndeclaredKeyIsRefused(t *testing.T) {
+	server, impl := serve(t)
+	response := refused(t, server, impl, `{"title": "t", "body": {"a": 1}, "tags": [], "tags2": 1}`)
+	details, _ := response["details"].(map[string]any)
+	if details["location"] != "body" || details["reason"] != "unknown fields: tags, tags2" {
+		t.Fatalf("an undeclared key answered %v", response)
+	}
+	errs, _ := response["errors"].(map[string]any)
+	got := map[string]string{}
+	errorPaths("", errs, got)
+	if len(got) != 2 || got["tags"] != "unknown" || got["tags2"] != "unknown" {
+		t.Fatalf("errors = %v, want unknown at tags and tags2", got)
 	}
 }

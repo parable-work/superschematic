@@ -457,6 +457,13 @@ func (t *FeedItem) MaskSecrets() *FeedItem {
 	return masked
 }
 
+// JSONFieldNames are the keys FeedItem's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*FeedItem) JSONFieldNames() []string {
+	return []string{"sku", "name", "price", "tags", "attributes"}
+}
+
 // Validate validates all fields in FeedItem
 func (t *FeedItem) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -757,6 +764,13 @@ func (t *Price) MaskSecrets() *Price {
 	masked.Currency = t.Currency
 
 	return masked
+}
+
+// JSONFieldNames are the keys Price's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Price) JSONFieldNames() []string {
+	return []string{"amountCents", "currency"}
 }
 
 // Validate validates all fields in Price

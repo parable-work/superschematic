@@ -1,0 +1,114 @@
+---
+title: Pages with Topcoat
+description: Call a Rust API's operations from the pages of a Topcoat app in the same process, by each route's rules, with forms and records built from the schema.
+sidebar:
+  order: 9
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+[Topcoat](https://github.com/tokio-rs/topcoat) is a Rust web framework for
+server-rendered pages. Its pages run in the same process as a service's
+Rust implementations. It leaves validation and authentication to the app,
+and a Rust API already has both, for each route. The Topcoat extension
+writes a crate that lets a page call an operation directly, by the route's
+rules. The crate also has a form per input type and a record per result
+type, and mounts the JSON API beside the pages.
+
+The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
+the in-memory implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
+serves.
+
+## Build the crate
+
+The extension is a Go module of its own, `extensions/topcoat`. The core
+binary does not link it; `superschematic-topcoat` is the core with it
+linked:
+
+```bash
+cd extensions/topcoat && go build -o superschematic-topcoat ./cmd/superschematic-topcoat
+```
+
+The crate needs the Rust server. A service turns it on with
+`outputs.topcoat: { enabled: true }` in its config, or by being listed in
+`superschematic.toml`. The core binary never reads that table, so the same
+configs still build there:
+
+<Snippet file="schemas/superschematic.toml" from="[extension.topcoat]" to="services" />
+
+Then build the service with its server in Rust:
+
+```bash
+superschematic-topcoat build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders
+```
+
+The crate, `acme-shop-orders-topcoat`, lands in
+`schemas/dist-rust/topcoat/shop-orders`, beside the API crate it builds
+on.
+
+## Mount it
+
+`shop_orders` keeps the API's `Implementations` for the in-process calls
+and mounts the JSON API at `/api`. It also takes a `PageAuthenticator`,
+which establishes a page's caller. Here that caller comes from a Topcoat
+session:
+
+<Snippet file="topcoat/src/lib.rs" symbol={['app', 'sign_in']} />
+
+The API's own `Authenticator` still decides whether a caller's permissions
+cover an operation's. A page and the JSON API therefore admit the same
+callers. The app names the crate, so the linker keeps it and `.discover()`
+finds its procedures.
+
+## Call an operation from a page
+
+`operations::<namespace>_<operation>(cx, args)` runs an operation as its
+route does:
+
+1. the caller, admitted by the route's rule (401 without one, 403 without a
+   permission it lists);
+2. the arguments, checked by the router's rules (the same 400);
+3. the implementation.
+
+`can_<namespace>_<operation>(cx)` admits the caller alone, for a page that
+shows or hides what the operation does.
+
+`forms::WriteReviewInputForm` holds the form's fields as the browser sends
+them. `parse()` reads them by `WriteReviewInput`'s rules, and
+`FormErrors::from_api` turns the operation's refusal into the same field
+messages:
+
+<Snippet file="topcoat/src/lib.rs" symbol="post_review" />
+
+`write_review_input_fields` renders the form's fields with the attributes
+the input type's rules give them: `required`, `min` and `max` on the
+rating, `maxlength` on the title. A browser checks them before it sends the
+form, and `parse()` checks every rule again.
+
+## Records
+
+`records` mirrors each type an operation returns as a Topcoat record,
+which a page hands the browser, here through a shard:
+
+<Snippet file="topcoat/src/lib.rs" symbol="review_card" />
+
+A record holds the type's JSON as the API sends it. UUIDs, timestamps and
+enums are strings, a map is its entries, and an `@uiHidden` field is left
+out, since a record reaches the browser.
+
+## Procedures
+
+Each operation is also a procedure on
+`/_superschematic/shop-orders/<namespace>/<operation>`, which browser code
+calls with its arguments as a record. It answers the result's record, or a
+`ProblemRecord` with the route's status and each refused field. A
+procedure's `Err` would reach the browser as a bare 500.
+
+## Test the app
+
+`Router::handle` drives the app as a browser would. The acme app's tests
+sign in, post a review signed out (422, "Authentication required"), post
+one with a rating out of range (422, the field marked invalid), post a
+valid one, and read it back from the page and from the JSON API:
+
+<Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />

@@ -5,7 +5,8 @@
     "api",
     "db",
     "schema",
-    "schema-config"
+    "schema-config",
+    "stack"
   ],
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",

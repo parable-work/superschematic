@@ -1,15 +1,19 @@
 package ir
 
+import "sort"
+
 // The Stack IR: what a stack declares (docs/stack-model.md, sections 3
 // and 4). A stack names its entry points, the deployables that differ from
 // the defaults, and its environments. The resolver
 // (internal/stack) turns one environment of it into a ResolvedEnvironment.
 //
-// The Stack kind's authoring package (`@stack`, `@server`,
-// `@environment`, and a counterpart of `@server` for a database) maps onto
-// these types. A service handle is a ServiceRef, a declared deployable's
-// class is its name, and the keys of one `settings` element other than
-// `of`, `platform` and `env` are the platform settings.
+// The Stack kind's decorators, `@stack`, `@server`, `@database` and
+// `@environment` from `@superschematic/stack`, each write a declaration on
+// its class's TypeDef (StackDecl, ServerDecl, DatabaseDecl and
+// EnvironmentDecl), and StackOf assembles a schema's declarations into its
+// Stack. A service handle is a ServiceRef, a declared deployable's class is
+// its name, and the keys of one `settings` element other than `of`,
+// `platform` and `env` are the platform settings.
 
 // DeployableKind is the kind of a deployable: what runs (section 3.1).
 type DeployableKind string
@@ -78,8 +82,8 @@ func (r DeployableRef) String() string {
 
 // Stack is a stack's declarations (section 4.1).
 type Stack struct {
-	// Name is the stack's name. It is the `<stack>` segment of
-	// `stack/<stack>/<environment>/environment.json`.
+	// Name is the stack's name: its service's name. It is the `<stack>`
+	// segment of `stack/<stack>/<environment>/environment.json`.
 	Name string `json:"name" yaml:"name"`
 
 	// Deploy names the entry points. Every service they reach through
@@ -91,10 +95,11 @@ type Stack struct {
 	Expose []DeployableRef `json:"expose,omitempty" yaml:"expose,omitempty"`
 
 	// Deployables are the declared deployables: those that differ from the
-	// defaults of section 3.2.
+	// defaults of section 3.2. StackOf gives them in name order.
 	Deployables []*DeployableDecl `json:"deployables,omitempty" yaml:"deployables,omitempty"`
 
-	// Environments are the stack's environments, in declaration order.
+	// Environments are the stack's environments. StackOf gives them in name
+	// order: a schema's types have no declaration order.
 	Environments []*Environment `json:"environments,omitempty" yaml:"environments,omitempty"`
 }
 
@@ -194,8 +199,153 @@ type DeployableSettings struct {
 // Exactly one is set.
 type EnvValue struct {
 	// Value is a literal: a string, a number or a boolean.
-	Value any `json:"value,omitempty" yaml:"value,omitempty"`
+	Value any `json:"value,omitempty" yaml:"value,omitempty" jsonschema:"oneof_type=string;number;boolean"`
 
 	// Parameter names one of the environment's parameters.
 	Parameter string `json:"parameter,omitempty" yaml:"parameter,omitempty"`
+}
+
+// StackDecl is the declaration of a stack's `@stack` class: Stack's Deploy
+// and Expose.
+type StackDecl struct {
+	// Deploy names the entry points.
+	Deploy []ServiceRef `json:"deploy,omitempty" yaml:"deploy,omitempty"`
+
+	// Expose names what is reachable from outside the environment.
+	Expose []DeployableRef `json:"expose,omitempty" yaml:"expose,omitempty"`
+}
+
+// ServerDecl is the declaration of an `@server` class: a declared server
+// that serves several APIs in one process.
+type ServerDecl struct {
+	// Serves lists the API services the server serves.
+	Serves []ServiceRef `json:"serves" yaml:"serves"`
+}
+
+// DatabaseDecl is the declaration of an `@database` class: a declared
+// database that hosts several DB schemas.
+type DatabaseDecl struct {
+	// Hosts lists the DB services the database hosts.
+	Hosts []ServiceRef `json:"hosts" yaml:"hosts"`
+}
+
+// EnvironmentDecl is the declaration of an `@environment` class: an
+// Environment without the name and the parent, which are the class's name
+// and the class it extends. Its fields are Environment's.
+type EnvironmentDecl struct {
+	Target     string                `json:"target,omitempty" yaml:"target,omitempty"`
+	Values     map[string]any        `json:"values,omitempty" yaml:"values,omitempty"`
+	Domain     string                `json:"domain,omitempty" yaml:"domain,omitempty"`
+	DNS        *DNSPlacement         `json:"dns,omitempty" yaml:"dns,omitempty"`
+	Settings   []*DeployableSettings `json:"settings,omitempty" yaml:"settings,omitempty"`
+	Parameters []string              `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+}
+
+// StackOf assembles the stack a Stack schema declares from its types'
+// declarations. The stack takes the schema's name, the `@stack` class gives
+// its entry points and what it exposes, each `@server` and `@database`
+// class is a declared deployable, and each `@environment` class is an
+// environment that extends the class it extends. It returns nil when no
+// type declares `@stack`, and reads the first by name when several do. It
+// checks nothing: the Stack kind's verification does, and resolution
+// checks the rest.
+func StackOf(schema *Schema) *Stack {
+	if schema == nil {
+		return nil
+	}
+	names := make([]string, 0, len(schema.Types))
+	for name := range schema.Types {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var stack *Stack
+	var deployables []*DeployableDecl
+	var environments []*Environment
+	for _, name := range names {
+		td := schema.Types[name]
+		if td == nil {
+			continue
+		}
+		if td.Stack != nil && stack == nil {
+			stack = &Stack{
+				Name:   schema.Name,
+				Deploy: td.Stack.Deploy,
+				Expose: td.Stack.Expose,
+			}
+		}
+		if td.Server != nil {
+			deployables = append(deployables, &DeployableDecl{Name: td.Name, Kind: DeployableServer, Serves: td.Server.Serves})
+		}
+		if td.Database != nil {
+			deployables = append(deployables, &DeployableDecl{Name: td.Name, Kind: DeployableDatabase, Hosts: td.Database.Hosts})
+		}
+		if e := td.Environment; e != nil {
+			environments = append(environments, &Environment{
+				Name:       td.Name,
+				Extends:    td.Extends,
+				Target:     e.Target,
+				Values:     e.Values,
+				Domain:     e.Domain,
+				DNS:        e.DNS,
+				Settings:   e.Settings,
+				Parameters: e.Parameters,
+			})
+		}
+	}
+	if stack == nil {
+		return nil
+	}
+	stack.Deployables = deployables
+	stack.Environments = environments
+	return stack
+}
+
+// StackReferences returns every service handle the declarations of a Stack
+// schema's classes hold: `@stack`'s deploy and its exposed handles,
+// `@server`'s serves, `@database`'s hosts and each settings element's `of`,
+// in declaration order and with repeats. They are the schema's references
+// (Schema.References, D41). The TypeScript form records them from the
+// decorators' arguments; the data forms write the declarations as these
+// typed fields, so the loader adds them from here in every form.
+func StackReferences(schema *Schema) []ServiceRef {
+	if schema == nil {
+		return nil
+	}
+	names := make([]string, 0, len(schema.Types))
+	for name := range schema.Types {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var refs []ServiceRef
+	deployable := func(ref DeployableRef) {
+		if ref.Service != nil {
+			refs = append(refs, *ref.Service)
+		}
+	}
+	for _, name := range names {
+		td := schema.Types[name]
+		if td == nil {
+			continue
+		}
+		if td.Stack != nil {
+			refs = append(refs, td.Stack.Deploy...)
+			for _, exposed := range td.Stack.Expose {
+				deployable(exposed)
+			}
+		}
+		if td.Server != nil {
+			refs = append(refs, td.Server.Serves...)
+		}
+		if td.Database != nil {
+			refs = append(refs, td.Database.Hosts...)
+		}
+		if td.Environment != nil {
+			for _, settings := range td.Environment.Settings {
+				if settings != nil {
+					deployable(settings.Of)
+				}
+			}
+		}
+	}
+	return refs
 }

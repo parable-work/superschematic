@@ -123,18 +123,33 @@ all follow from it. A call between two APIs that one server serves stays an
 HTTP call to the server's own address.
 
 `calls` is also a build dependency, since the caller's generated `Deps`
-imports the callee's SDK. The build plan builds each callee before its
-caller, and `build --with-deps` builds the callees with the caller. Two
-APIs that call each other form a cycle between services. The build plan
-orders whole services, so it refuses that cycle, with an error that names
-each edge (`shop-api calls shop-orders, shop-orders calls shop-api`).
+imports the callee's SDK (section 8.5), and `build --with-deps` builds the
+callees with the caller. The build plan orders outputs, not whole
+services: only a caller's API server reads its callees, so each callee's
+SDK builds before the servers that call it, and the caller's other outputs
+need nothing of the callee.
 
-Follow-up: order outputs instead, each SDK before the APIs that call it, so
-two APIs may call each other. It waits for the `Deps` generator (section
-8.5), the first output that imports a callee's SDK, and it splits a
-service's build, which the build cache stores as one entry. That generator
-also adds each callee's key to the caller's cache key, which leaves `calls`
-out while no output reads it.
+- Where the calls form no cycle, each callee builds whole before its
+  caller, as `dependencies` and `authDb` order a tree.
+- Two APIs that call each other form a cycle between services, which is
+  not an error. The tree is then ordered by `dependencies` and `authDb`
+  alone. A caller whose callee comes after it builds in two steps: its
+  base outputs (the types, SQL, ORM and SDKs) in its place, and its API
+  server once its callees' base outputs are built (`buildplan.Steps`).
+  `build-all --parallel` names the steps `shop-api (base)` and `shop-api
+  (server)`.
+- A cycle of `dependencies` and `authDb` still cannot build, and its error
+  names each edge (`a depends on b, b authenticates against a`).
+
+Building is not deploying: two servers that call each other still have no
+callee-first rollout (section 5.3), and resolution refuses them
+(`call-cycle`, section 6.10) unless one server serves both APIs.
+
+The build cache still stores a service as one entry, written after its
+last step. A caller's key adds each callee's key, taken without the
+callee's own calls, so two APIs that call each other hash without a cycle.
+What a caller reads of a callee is its SDK and its types, which that key
+covers.
 
 ### 3.4 Bindings in the generated config
 
@@ -152,6 +167,19 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
   what the server's `ServiceAuthenticator` checks: each inbound edge's
   issuer, keys and audience, and the deployable each caller identity is
   (section 9.2).
+
+An API's database field comes from its `authDb`, or its one DB-kind
+dependency, as its sql edge does (section 3.3).
+
+The Go loader has the first two. The API package's `EnvConfig` embeds the
+`@envVars` type and adds a field per edge, a `stackconfig.Database` or a
+`stackconfig.Service` from the Go HTTP runtime, which `LoadEnvConfig`
+reads. `values-schema.json` lists each derived field in
+`x-superschematic.envVars` with `derived` (the edge kind), `service` and
+`variables`, and each of its variables as an optional string property
+that the platform sets, not a deployment's values. The TypeScript and Rust
+loaders read no derived field yet (section 12), and the service-auth field
+waits for the connectors that write it.
 
 What a connector derives for each edge kind has a contract, in
 `ir/derived_value.go`. Resolution checks every connector's value against
@@ -182,9 +210,18 @@ provisioner would have to render references inside a JSON string, and no
 member of it could come from a secret store.
 
 Field and variable names follow a naming-file rule over the callee's
-service name, with the core's rule as the default (D7, D8). A server's own
-`@envVars` type holds only the application's settings. The loader refuses
-an `@envVars` field whose name collides with a derived one.
+service name, with the core's rule as the default (D7, D8). The
+`[derived_fields]` table holds a template per edge kind, `database` and
+`service`, in which `{SERVICE}` is the DB or called API service's name in
+upper snake case. They default to `{SERVICE}_DATABASE` and
+`{SERVICE}_SERVICE`. envgen and the resolver (`stack.Input.FieldNames`)
+name the fields by the same templates.
+
+A server's own `@envVars` type holds only the application's settings. The
+loader refuses an `@envVars` field whose name collides with a derived one:
+the derived field's name, or that name followed by an underscore. The
+second form covers each of its variables, and any member a later contract
+adds. The resolver applies the same rule (`field-collision`).
 
 The generated entrypoint (section 8.1) reads these fields, so application
 code never names an environment variable. `examples/acme-shop/go/example_test.go`
@@ -194,10 +231,21 @@ connecting with `os.Getenv("DATABASE_URL")` is the code this replaces.
 
 ### 4.1 The Stack kind
 
-A stack is a service of a new core kind, `Stack`, whose decorators come from
-`@superschematic/stack`. Its schema files declare the stack, any deployables
-that differ from the defaults, and the environments. A sketch over
-acme-shop:
+A stack is a service of the core kind `Stack`, whose decorators come from
+`@superschematic/stack`. The stack takes its service's name. Its schema
+files declare the stack, any deployables that differ from the defaults, and
+the environments, a class each. A sketch over acme-shop:
+
+```ts
+// schemas/services/shop-stack/schema.config.ts
+import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+
+export default defineConfig({
+  name: "shop-stack",
+  kind: SchemaKind.Stack,
+  outputs: {},
+});
+```
 
 ```ts
 // schemas/services/shop-stack/src/stack.schema.ts
@@ -234,34 +282,89 @@ export abstract class Staging {}
 })
 export abstract class Production {}
 
-@environment({ parameters: ["pr"] })
+@environment({
+  parameters: ["pr"],
+  settings: [{ of: Backend, env: { PREVIEW_ID: { parameter: "pr" } } }],
+})
 export abstract class Preview extends Staging {}
 ```
 
-- **`deploy`** names the entry points. Everything they reach through
-  `authDb`, DB dependencies and `calls` joins the stack, so `shop-db` needs
-  no mention.
-- **`expose`** names what is reachable from outside the environment.
-  Everything else is internal, and reachable only along its edges.
+- **`@stack`** declares the stack, once per schema. **`deploy`** names
+  the entry points, API and DB services. Everything they reach through
+  `authDb`, DB dependencies and `calls` joins the stack, so `shop-db`
+  needs no mention.
+- **`expose`** names what is reachable from outside the environment, an
+  API's handle or an `@server` class. Everything else is internal, and
+  reachable only along its edges.
 - **`@server`** declares a deployable only to change a default. Here it
   runs both APIs in one process in place of their two default servers. Its
   edges are its APIs' edges: shop-db through `authDb`, and shop-api
-  through shop-orders' `calls` (section 3.3).
-- **`target`** picks a target (section 6.3). `gcp` holds that target's
-  values, checked against the schema the target registers.
+  through shop-orders' `calls` (section 3.3). **`@database`** (`hosts`)
+  puts several DB schemas on one database in the same way.
+- **`target`** picks a target (section 6.3). The target's values sit under
+  its name, `gcp` here, and are checked against the schema the target
+  registers. An environment that inherits its target names it again to
+  change one of them.
 - **`domain`** is where exposed servers are reached, and **`dns`** places
-  its records on a DNS platform (section 6.9). Production omits `dns` and
-  gets the target's default, Cloud DNS.
-- **`settings`** sets values per deployable. `of` is a service handle or a
-  declared deployable's class. The loader checks each key against the
-  platform's settings schema, and `env` keys against the server's
-  `@envVars` fields. tsc checks the same in the editor (section 4.3).
+  its records on a DNS platform (section 6.9), named as its one key.
+  Production omits `dns` and gets the target's default, Cloud DNS.
+- **`settings`** sets values per deployable. `of` is a service handle or
+  an `@server` or `@database` class. `platform` places the deployable on
+  another platform than the target's, and every key but `of`, `platform`
+  and `env` is a platform setting, which the loader checks against that
+  platform's settings schema. `env` binds the server's `@envVars` fields,
+  each to a literal or to `{ parameter }`, a parameter of the environment
+  that the deploy run supplies. tsc checks the same in the editor
+  (section 4.3).
 - **`Preview extends Staging`** inherits Staging's values, and `parameters`
-  makes it a family of environments, one per value (section 5.4).
+  makes it a family of environments, one per value (section 5.4). An
+  `@environment` class extends only another `@environment` class.
 
-Every declaration has the JSON and YAML data forms every schema has.
-Handles are written as `{name, kind}` and classes by name, as other
-references are.
+Every class of the schema carries one of the four decorators and holds no
+fields. The kind's verification checks that, and that each class a
+declaration names is an `@server` or `@database` class of the schema, so
+the data forms are held to it too. Each decorator writes a declaration on
+its class's `TypeDef` (`Stack`, `Server`, `Database` or `Environment`),
+and `ir.StackOf` assembles them into the `ir.Stack` the resolver reads,
+its deployables and environments in name order.
+
+Every declaration has the JSON and YAML data forms every schema has. A
+class is a type, and its declaration the key the decorator writes. A
+handle is written `{name, kind}`, and a settings `of` or an `expose` entry
+`{service: {name, kind}}` or `{deployable: Backend}`. The target's values
+are `values`, the DNS platform `{platform, values}`, an env value `{value}`
+or `{parameter}`, and the parent the type's `extends`:
+
+```yaml
+types:
+  Production:
+    name: Production
+    role: EmbeddedStruct
+    environment:
+      target: gcp
+      values: { project: acme-prod, region: us-east1 }
+      domain: acme.dev
+      settings:
+        - of: { service: { name: shop-db, kind: DB } }
+          values: { tier: db-custom-2-7680, highAvailability: true }
+        - of: { deployable: Backend }
+          values: { minInstances: 1 }
+          env: { LOG_LEVEL: { value: warn } }
+```
+
+A stack is named by no other service, so it has no sentinel, and its
+schema files import its siblings' sentinels, which `build` writes first.
+Its one generator, `stack` (`internal/generator/stackgen`), loads each
+service the stack reaches, resolves every environment (section 6.10) and
+writes each to `<output-root>/stack/<stack>/<environment>/environment.json`.
+A resolve check fails the build and names the stack, the environment and
+each problem with its code. The output is keyed by the service's name, so
+build-all cleans, stores and restores it from the config alone.
+
+`internal/generator/stackgen/testdata` holds the stack `stack/stacktest`
+builds by hand, on its fake target, written in TypeScript and in YAML over
+services shaped like acme-shop's. Its `environment.json` goldens are
+stacktest's.
 
 ### 4.2 Secrets
 
@@ -318,7 +421,9 @@ tsc checks what the loader checks, so a mistake shows in the editor where
 it is typed. The loader stays the source of truth and runs every check
 again; the types are the early warning. Nothing here changes how
 superschematic reads a schema, because the walker evaluates decorator
-arguments as data either way.
+arguments as data either way. The TypeScript form's load reports tsc's
+diagnostics too, so a settings value tsc refuses also fails `build` at the
+line that holds it.
 
 - **Handles carry their kind and config type.** `ServiceHandle<K, C>` in
   `@superschematic/schema-config` has two phantom type parameters, the
@@ -346,17 +451,35 @@ arguments as data either way.
   }
   ```
 
-- **`@environment` infers each settings element.** Its signature uses a
-  `const` type parameter over the `settings` tuple and maps each element by
-  its `of`. The handle's kind picks the settings type from the chosen
-  target's entry, and `env` is typed from the handle's config type: the
-  keys are its fields, `Secret<T>` fields are left out so a literal for
-  one fails, and `Default<T, V>` is unwrapped to `T`. The wrappers in
-  `packages/schema/src/wrappers.ts` gain a phantom base type so a mapped
-  type can unwrap them.
+  `target` takes a key of `Targets`, so a target no installed package
+  augments is refused, and the values under the target's name take its
+  `values` type.
+- **`@environment` infers each settings element.** Its signature has two
+  `const` type parameters: the target, inferred from `target` alone, and
+  the `settings` tuple. Each element is checked by its `of`:
+  - an API handle takes the target's `server` settings, and an `env`
+    typed from the handle's config type;
+  - a DB handle takes the target's `database` settings and no `env`;
+  - an `@server` or `@database` class takes either kind's settings and an
+    `env` of any field, since tsc cannot see what a declared deployable
+    serves;
+  - an element that names a `platform`, which may be another target's,
+    takes any settings key, and so does every element of an environment
+    that names no target. Such an environment sets no target values.
 
-`@ts-expect-error` fixtures under the authoring packages pin the behavior,
-and run with tsc in `make ts`.
+  A key an element does not take is refused, as `env` keys are. The keys
+  of `env` are the config's fields, `Secret<T>` fields left out so a
+  literal for one fails, and each takes its field's type unwrapped, or
+  `{ parameter }`. `Default<T, V>`, `Validate<T, C>` and the other wrappers
+  in `packages/schema/src/wrappers.ts` share a phantom base,
+  `Wrapped<T>`, through which a mapped type takes T back, and `Nullable`
+  is dropped. A string enum field also takes its values as strings
+  (`LOG_LEVEL: "warn"`).
+
+`@ts-expect-error` fixtures pin the behavior:
+`packages/schema-config/src/service-handle.typecheck.ts` for handles, and
+`packages/stack/test/environment.typecheck.ts`, which augments `Targets`
+with a target of its own, for the rest. `make ts` runs tsc over both.
 
 Not taken:
 
@@ -536,7 +659,9 @@ In `environment.json` a reference is an object with one reserved key:
 joined. A node also records its phase (infrastructure, rollout or
 exposure), whether it is `inherited` from the parent environment
 (section 5.4), and its `owners`: the deployables, edges or DNS that
-produced it. Two producers that return the same node share it, and two that
+produced it. An output's name may be a path into the output, names joined
+by dots with list indexes in brackets: the gcp target reads a certificate
+authorization's record as `dnsResourceRecords[0].data`. Two producers that return the same node share it, and two that
 return different nodes under one id fail. A node's `dependsOn` holds the
 dependencies its producer named and every node its properties reference.
 
@@ -554,7 +679,13 @@ vocabulary (`gcp:cloudrunv2/service:Service`,
 A target pins each provider schema's version and checks in the schemas of
 the types it uses. A Go tool with a `-check` mode keeps them current, as
 `internal/tools/scalarcatalog` does for the scalar catalog, so properties
-validate offline.
+validate offline. The gcp target pins pulumi-gcp in
+`extensions/gcp/schemas/pulumi-gcp.json`: the release, the digest of each
+upstream file the schemas come from, and the types its platforms,
+connectors and DNS platform emit. `extensions/gcp/internal/tools/providerschemas`
+writes one file per type beside it, and CI runs it with `-check`. The
+target registers each file as the JSON Schema of its type's properties,
+with every object type closed, since Pulumi refuses an unknown property.
 
 Each pinned file also records the type's Terraform name and any property
 renames, taken from the bridged provider's published mapping:
@@ -564,11 +695,29 @@ renames, taken from the bridged provider's published mapping:
   "token": "gcp:cloudrunv2/service:Service",
   "terraform": {
     "type": "google_cloud_run_v2_service",
-    "renames": { "invokerIamDisabled": "invoker_iam_disabled" }
+    "renames": {
+      "invokerIamDisabled": "invoker_iam_disabled",
+      "template.containers.envs": "env"
+    }
   },
-  "inputProperties": { "...": "..." }
+  "inputProperties": { "...": "..." },
+  "requiredInputs": ["location", "template"],
+  "types": { "gcp:cloudrunv2/ServiceTemplate:ServiceTemplate": { "...": "..." } }
 }
 ```
+
+- `inputProperties` and `requiredInputs` are the type's own, and `types`
+  holds every object and enum type they reach. Descriptions are left out.
+- A rename's key is the property's path: the Pulumi names from the
+  resource down, joined with dots, through lists and objects alike.
+- The mapping is `bridge-metadata.json`, which the bridge publishes beside
+  `schema.json`. Its alias table names the Terraform type each token is
+  the current name of, and every list and block field. A property's
+  Terraform name is its snake case, except a list the bridge pluralized
+  (`env` is `envs`), which a list field names. The tool fails on a list no
+  field names rather than guess. Pulumi's full mapping (`pulumi package
+  get-mapping terraform gcp`) agreed with every path of the first pin, but
+  it needs the provider's plugin, so the tool does not read it.
 
 The Pulumi provisioner uses the token as it is. A Terraform-family
 provisioner such as OpenTofu uses `terraform.type` and `renames`, so adding
@@ -591,19 +740,22 @@ Not taken:
 
 A provisioner takes a resource graph to running resources and back:
 
-- `Render(graph, dir)` writes the tool's program where a person can read
-  it;
+- `Render(environment, dir)` writes the tool's program for the
+  environment's resource graph where a person can read it;
 - `Plan`, `Apply` and `Destroy` run with credentials, against a state
   backend the target's bootstrap created;
 - `Outputs` reads the applied graph's outputs. They feed the bindings
   (section 6.6) and the deploy manifest (section 11.2).
 
 A provisioner registers a `ProvisionerSpec` that holds an implementation of
-the `Provisioner` interface: `Render(graph, dir)`, then `Plan`, `Apply`,
-`Destroy` and `Outputs`, each with a request that carries the resolved
-environment, the parameter values of the run and the rendered program's
-directory. `Apply` applies one step of the deploy order, so the deploy runs
-image builds and migrations between steps.
+the `Provisioner` interface: `Render(environment, dir)`, then `Plan`,
+`Apply`, `Destroy` and `Outputs`. Each run takes a request that carries the
+resolved environment, the parameter values of the run, the rendered
+program's directory and the state backend: its URL and its secrets
+provider. `Apply` applies one step of the deploy order, so the deploy runs
+image builds and migrations between steps. `Render` takes the whole
+environment, not only its graph, because the program exports every output
+the environment references, a deployable's address included.
 
 Pulumi is the first provisioner:
 
@@ -618,6 +770,51 @@ Pulumi is the first provisioner:
   secrets provider, both created by bootstrap, so no Pulumi Cloud account is
   needed.
 
+`extensions/pulumi` builds it. The program, `Pulumi.yaml`:
+
+- belongs to a project named after the stack (`shop`). Each run of an
+  environment is a stack of it: `staging`, or `preview.pr-123` for a member
+  of a parameterized environment;
+- declares each parameter as a string of the project's config, which the
+  run sets, so one program serves every member and no value reaches the
+  file;
+- keys each node by its ID, with every character other than a letter, a
+  digit, `_` and `-` turned into `-`, and names it by the ID, so state is
+  keyed on the ID. An output reads `${shop-api-service.uri}`, and may be a
+  property path (`dnsResourceRecords[0].data`). Literal strings escape `$`;
+- gives a node the `version` option for the plugin version the
+  distribution pins for its package (`gcp`), which is the version of the
+  provider schema the target checks properties against (section 6.4);
+- reads an inherited node through a stack reference to the parent
+  environment's stack;
+- exports every node's `id` and every output the environment references,
+  each as `<node>.<output>`.
+
+The driver opens a local workspace over the rendered directory, with the
+request's backend and secrets provider: `gs://` and `gcpkms://` for the gcp
+target, `file://` and a passphrase in tests. It refuses a directory whose
+program is not the one the environment renders, and it fails with a clear
+error when the `pulumi` CLI is not on PATH.
+
+- `Plan` previews the whole program and maps each step to a change: create,
+  update, replace or delete.
+- `Apply` runs `up` with the step's nodes as targets. A targeted update
+  deletes any resource the program dropped that depends on a target, so
+  those resources are targets too. The last step that holds nodes runs `up`
+  over the whole program, which deletes whatever else the graph dropped.
+- A member first checks that the parent's stack exports every output it
+  reads. A stack reference would read a missing one as null.
+- `Destroy` deletes the resources and removes the stack.
+- `Outputs` leaves out secret outputs, and the unknowns of a step not yet
+  applied.
+
+The CLI keeps each stack's settings file beside the program. A fresh
+checkout has none, so the driver writes the request's secrets provider into
+it. Its integration test runs every operation against a `file://` backend
+with the `random` provider, which needs no credentials. CI installs the CLI
+at `PULUMI_VERSION` in `tools.env`, the version of the Go SDK the module
+requires.
+
 Later provisioners are registrations: OpenTofu over the same graph, or
 Kubernetes manifests that a GitOps controller applies, for Kubernetes
 targets.
@@ -627,14 +824,37 @@ targets.
 After apply, the provisioner's outputs become a generated, typed binding
 for code outside the stack. It is a Go package, with TypeScript later, that
 has one value per environment and one field per deployable
-(`staging.ShopApi.URL`, `staging.ShopApi.ServiceAccount`). Hand-written
-Pulumi programs read it over Pulumi stack references; scripts and CI read
-it over the outputs file.
+(`shopstack.Staging.ShopAPI.Address`,
+`shopstack.Staging.ShopAPI.Account.Email`). Hand-written Pulumi programs
+read it over Pulumi stack references; scripts and CI read it over the
+outputs file.
+
+`extensions/pulumi/bindings` is the generator. It reads each environment's
+`environment.json` and its outputs file, `outputs.json`, which holds what
+`Outputs` read for one run by node ID and output name. It writes two
+packages:
+
+- **The values** (`shopstack`). `Environment` has a field per deployable,
+  and a value per applied environment (`Staging`). A deployable's field
+  holds its name and address in the environment, and a field per node it
+  owns with that node's outputs. A node an edge owns sits with the edge's
+  server; DNS records sit in a field of their own. An output is a string, a
+  bool, a float64 or `any`, typed by the values the outputs files hold. A
+  parameterized environment has no value: each member is a run of its own.
+- **The stack references** (`shopstackpulumi`). The same types over Pulumi
+  outputs, and a function per environment that reads one over a stack
+  reference to its stack. A member's function takes the parameter values:
+  `shopstackpulumi.Preview(ctx, "123")`.
+
+Generate the binding again after an apply. Its goldens and a compile test
+that builds a program against both packages are in the generator's
+`testdata`.
 
 The binding is the escape hatch. A resource the vocabulary lacks is written
 by hand, in a program of its own, and references the stack's resources
 through the binding rather than through a copied name. An environment can
-name such a program, and the provisioner applies it after the stack.
+name such a program, and the provisioner applies it after the stack. That
+last part is not built: the Stack IR has no field for the program yet.
 
 ### 6.7 Registry surface
 
@@ -777,11 +997,23 @@ change reads as a diff.
 
 ## 7. The gcp target
 
+`extensions/gcp` builds this section, apart from bootstrap (section 7.3)
+and image builds: the target, its Cloud Run and Cloud SQL platforms, their
+connectors, the Cloud DNS platform, the policy rules and the pinned
+provider schemas (section 6.4), at pulumi-gcp 9.37.1. Its golden
+environments resolve the acme-shop stack of section 4.1 in a staging, a
+production and a parameterized preview environment.
+
 ### 7.1 What the engineer enters
 
-- `project` and `region`, which are required;
+- `project` and `region`, which are required, and `production: true` for
+  an environment the production defaults (section 7.5) and policy rules
+  (section 7.6) apply to;
 - `domain`, which is optional, and its DNS platform: Cloud DNS by default,
-  or Cloudflare with a zone and an API token (section 6.9);
+  or Cloudflare with a zone and an API token (section 6.9). Cloud DNS
+  writes into the managed zone that holds the domain. The zone is named
+  after the domain with its dots as hyphens unless `zone` names it, and
+  lives in the environment's project unless `project` names another;
 - secret values, through `stack secrets set`.
 
 Bootstrap reads the GitHub repository from the git remote.
@@ -790,15 +1022,32 @@ Bootstrap reads the GitHub repository from the git remote.
 
 | Stack concept | gcp |
 | --- | --- |
-| database | a Cloud SQL Postgres instance and a database per hosted schema; a migration job |
-| server | a Cloud Run service with its own service account |
-| sql edge | `roles/cloudsql.client` and an IAM database user for the server's account; a Cloud SQL connection on the service |
-| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's URL in the caller's config |
-| internal server | internal-only ingress; callers reach it over Direct VPC egress |
-| exposure | a global external Application Load Balancer, with a Google-managed certificate on a host under the domain and records written by the environment's DNS platform (section 6.9); without a domain, the `run.app` URL |
-| secret | a Secret Manager secret, an accessor grant to the server's account, and an environment variable that references it |
-| image | built by Cloud Build, pushed to Artifact Registry and deployed by digest |
-| parameter | names suffixed with the value; a database per value on the parent's instance |
+| database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
+| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service mounts |
+| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for that URL as the service credential (section 9.2) |
+| internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
+| calling server | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable |
+| exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
+| secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's account, and an environment variable that references its latest version |
+| image | built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
+| parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits |
+
+A caller reaches every callee at its `run.app` URL, exposed or not, from
+inside the VPC. Cloud Run counts a request from a VPC as internal, which
+an internal server's ingress requires and a server behind a load balancer
+accepts, so no caller waits on a load balancer the exposure step applies
+last. A call to an API the same server serves stays on loopback, with no
+grant and no credential.
+
+Each exposed server gets a load balancer of its own. A platform lowers one
+deployable, so it cannot write the host rules of a load balancer the
+environment's exposed servers would share; sharing one waits for a
+lowering that sees the whole environment.
+
+Every node sets its `project`, so the provisioner needs no provider
+configuration, and the network lives in the environment's graph rather
+than in bootstrap, since the edges decide whether there is one.
 
 ### 7.3 Bootstrap
 
@@ -809,11 +1058,10 @@ credentials (application default credentials), and is safe to run again:
 2. It creates the state bucket and the KMS key directly, since Pulumi needs
    them before it can run.
 3. It applies a bootstrap graph through the provisioner:
-   - an Artifact Registry repository;
+   - an Artifact Registry repository named after the stack, in the
+     environment's region;
    - a `deployer` service account and a read-only `planner` one;
-   - Workload Identity Federation for the repository the git remote names;
-   - a VPC with a subnet for Direct VPC egress, when a server is internal
-     and called.
+   - Workload Identity Federation for the repository the git remote names.
 4. When the environment's DNS platform is Cloudflare, it asks for an API
    token scoped to the zone's DNS, and stores it in Secret Manager where
    only the `deployer` and `planner` accounts can read it.
@@ -826,14 +1074,35 @@ password. Otherwise the platform generates a password into Secret Manager
 and uses the Cloud SQL mount Cloud Run provides. The server's database
 field is the same either way (section 3.4).
 
+The connector form is built. A Rust server's sql edge fails to lower until
+the derived value has a password form. An IAM database user starts with no
+privileges in its database; granting them belongs to the migration job
+(section 8.4), which is not built.
+
 ### 7.5 Defaults
 
 The target sets defaults that `settings` can override:
 
 - one service account per server;
-- deletion protection on production databases;
+- deletion protection on production databases (`deletionProtection`);
+- a zonal instance unless `highAvailability` is set, on the
+  `db-custom-1-3840` tier of the Enterprise edition (`tier`), running
+  Postgres 16, the version CI tests against (`version`), with backups on
+  and point-in-time recovery in production;
+- one CPU, 512 MiB and no minimum instances per server (`cpu`, `memory`,
+  `minInstances`, `maxInstances`, `concurrency`);
 - logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
   OpenTelemetry setup.
+
+### 7.6 Policy rules
+
+- `production-databases-highly-available`: in an environment whose values
+  set `production`, every Cloud SQL instance it creates is regional.
+- `nothing-public-unless-exposed`: nothing admits the public on behalf of
+  anything but an exposed server. It refuses an internal server's service
+  that takes outside traffic or turns its invoker check off, a load
+  balancer's address or forwarding rule, a grant to `allUsers` or
+  `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`.
 
 ## 8. Generated build and runtime
 
@@ -896,26 +1165,47 @@ The unit of implementation is the API service, not the server. Each API
 service has one implementation per language, at a conventional location,
 found with no declaration:
 
-- **Location.** The naming file holds a path template per language (for
-  example `go/{service}`, from the repository root), with a core default.
-  The service name fills it. A distribution changes the template, not each
-  service.
-- **Scaffold.** When the package is missing, superschematic writes it once,
-  with each method returning a not-implemented error. From then on the
-  package is the engineer's and is never regenerated.
+- **Location.** The naming file's `[implementation_paths]` table holds a
+  path template per language, from the repository root (the parent of the
+  schemas root), in which the service name fills `{service}`. `go`
+  defaults to `go/{service}`. A distribution changes the template, not
+  each service.
+- **Scaffold.** When the package is missing, superschematic writes it
+  once: an `implementation.go` whose `New` builds `Implementations` with a
+  struct per namespace, each method returning the API package's
+  not-implemented error, which answers 501. It never writes into a
+  directory that holds a Go file, so the package is the engineer's from
+  then on. `build --scaffold` and `build-all --scaffold` write it. A
+  service the cache would restore builds again when its implementation is
+  missing, since the cache stores outputs, not the scaffold.
 - **Signature.** The API generator writes `Deps` and the constructor's
-  signature: `func New(deps Deps) (Implementations, error)` in Go, and the
-  equivalent in TypeScript and Rust. `Deps` is typed and filled by the
-  entrypoint:
+  signature in `deps.go`: `type Constructor func(deps Deps)
+  (Implementations, error)`, which the scaffold asserts with `var _
+  api.Constructor = New`. TypeScript and Rust get the equivalent later
+  (section 12). `Deps` is typed and filled by the entrypoint:
 
   ```go
   type Deps struct {
-      Config  Config                 // the API's @envVars, derived fields included
-      DB      orm.DatabaseInterface  // from authDb
-      ShopApi *shopapisdk.Client     // from calls, with service credentials
-      Logger  *slog.Logger
+      Config  EnvConfig              // the API's @envVars settings and derived fields (section 3.4)
+      DB      orm.DatabaseInterface  // the ORM of its authDb, or of its one DB-kind dependency
+      ShopApi *shopapisdk.ShopApiSDK // a Go SDK client per calls entry, with service credentials
+      Logger  *zap.Logger
   }
   ```
+
+  A field is left out when the API has nothing for it: `Config` without
+  settings or edges, `DB` without a database. The logger is zap's, as the
+  generated `Config`'s is, so the entrypoint passes one logger to both. A
+  dependency must generate what `Deps` imports, its Go types (and so its
+  ORM) for the database and its Go SDK for a callee, and the build refuses
+  one whose config does not. The generated `Config` and `RegisterRoutes`
+  do not change.
+
+The scaffold is opt-in until the entrypoint lands. Nothing imports the
+package before the generated `main` does (section 8.1), and a build of a
+tree whose Go code lives elsewhere, such as `examples/acme-shop`, would
+gain a stub package beside it. The entrypoint scaffolds each API a stack's
+servers serve.
 
 A server that serves several APIs calls each one's constructor with that
 API's `Deps`, built from the server's shared connections and clients.
@@ -1408,7 +1698,10 @@ registrations.
    generators and the resolver read every reference from it.
    Landed: the Stack IR types, the stack (`ir/stack.go`), the resolved
    environment (`ir/stack_environment.go`) and the resource graph
-   (`ir/resource_graph.go`).
+   (`ir/resource_graph.go`). A Stack schema's class carries its
+   declaration on its `TypeDef` (`Stack`, `Server`, `Database` or
+   `Environment`), which the data forms write, and `ir.StackOf`
+   assembles a schema's declarations into its stack (section 4.1).
    Operations and operation sets gain `ServiceCallers` (section 9.3).
 2. **Loader:**
    - Landed: class values in the arguments of any registered decorator.
@@ -1427,30 +1720,68 @@ registrations.
      Build-plan discovery, which `build-all` and `build --with-deps` run,
      checks each config handle's kind against the service it names
      (`validateHandleKinds` in `internal/buildplan/buildplan.go`).
-   - Build-order edges from the handles a schema references, so a stack does
-     not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
+   - Done: references from a schema's body (D41). A service handle in a
+     decorator argument, such as `deploy` or a settings element's `of`,
+     references its service, so a stack does not restate it in
+     `dependencies`. `ir.Schema.References` records it, and the build
+     cache keys the referencing service on the sources of the referenced
+     service and of every service its config reaches, so the stack's
+     output rebuilds when any of them changes. A reference is a cache
+     edge, not a build-order edge: resolution reads the referenced
+     services' IR and configs, which a build loads from their sources,
+     and none of their outputs, so the build plan does not order them and
+     two services may name each other. A decorator declares the argument
+     paths whose handles only name a service (`DecoratorSpec.Identities`,
+     for D37's `from`): an identity adds no edge, and the cache tracks only
+     the sentinel it was imported from. Should an output compile against
+     a referenced service's generated code, such as an entrypoint that
+     imports a served API's package, that output will need a build-order
+     edge.
 3. **envgen.** The derived binding fields of section 3.4. Landed: the
    contract of the values connectors derive, with its environment
    variable encoding (`ir/derived_value.go`), and the resolver's check of
-   every connector's value against it.
+   every connector's value against it. The Go loader's `EnvConfig`, with
+   a field per database and per `calls` entry named by `[derived_fields]`
+   and read through the Go HTTP runtime's `stackconfig`;
+   `values-schema.json` marking those fields derived; and the loader's
+   refusal of an `@envVars` field that collides with one. Next: the
+   TypeScript and Rust loaders read the derived fields, in the PR that
+   gives them `Deps`, and the service-auth field arrives with the
+   connectors that write it.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
-   (section 8.5).
+   (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`, and
+   the scaffold under `build --scaffold` and `build-all --scaffold`. Next:
+   the entrypoint and the Dockerfile, then `Deps`, the constructor
+   signature and the scaffold in TypeScript and Rust, in a later PR.
+   `examples/acme-shop/go` keeps its hand wiring until the entrypoint
+   lands. Moving it to the scaffold layout now would move the code its
+   docs pages quote (`go/products.go`, `go/orders.go`, `NewHandler`) for
+   no running server.
 5. **Config and build plan.** `calls` is in the schema config, beside
    `authDb`, in the TypeScript type and the data-form schema, valid on an
-   API config and naming API services. It is a build-order edge, and the
-   build plan refuses a cycle of `calls`; ordering outputs instead is the
-   follow-up in section 3.3. A config imports its handles as siblings'
-   sentinels (D34): the import rule is in the static config read, and the
-   sentinel sweep runs before discovery. A naming-file key holds the
-   implementation path templates.
+   API config and naming API services. It is a build-order edge for the
+   caller's API server only: the build plan orders outputs, so two APIs
+   may call each other, and each callee's key joins the caller's cache key
+   (section 3.3). A config imports its handles as siblings' sentinels
+   (D34): the import rule is in the static config read, and the sentinel
+   sweep runs before discovery. The naming file's `[implementation_paths]`
+   holds the implementation path templates, and `[derived_fields]` the
+   derived field names.
 6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
    and TypeScript HTTP runtimes (section 9.5), and a service credential
    source in the SDKs (section 9.6).
 7. **Registry.** The specs of section 6.7, and the resolver that drives
    them (section 6.10). Landed: `internal/registry/stack.go`, the resolver
    in `internal/stack` with its public face in `stack`, and the acceptance
-   extension `stack/stacktest`.
+   extension `stack/stacktest`. Landed too: the core `Stack` kind with
+   `@stack`, `@server`, `@database` and `@environment`
+   (`internal/registry/core_stack.go`, authored from
+   `@superschematic/stack`), and its generator, `stack`
+   (`internal/generator/stackgen`). Its `Service` reads a service's
+   `stack.Service` from the service's IR and its config's outputs, and
+   `registry.Options.LoadDependencyConfig`, which every build sets, gives
+   it each config.
 8. **CLI.** The `stack` command group.
 
 ## 13. Module layout
@@ -1458,9 +1789,13 @@ registrations.
 - **The root module:** the Stack kind, the resolver, the registry specs,
   the `local` target and the `stack` commands.
 - **`extensions/gcp`**, a Go module of its own (D1): the gcp target's
-  platforms, connectors and bootstrap, and its pinned provider schemas.
+  platforms, connectors and Cloud DNS platform, its policy rules, and its
+  pinned provider schemas with the tool that keeps them current (sections
+  6.4 and 7). Bootstrap is to come.
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
-  binding generator.
+  binding generator (sections 6.5 and 6.6). Built: it registers provisioner
+  `pulumi`, its `bindings` package is the generator, and it joins
+  `make test` and CI.
 - **`extensions/cloudflare`**: the Cloudflare DNS platform in v1, and
   Workers and D1 later.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
@@ -1541,7 +1876,10 @@ model, or retired, when it lands.
    a handle goes, and `service({ name, kind })` stays as the data form and
    the fallback spelling. The import rule moves into the static read every
    command shares, and the sentinel sweep, which reads only `name` and
-   `kind`, runs before build-plan discovery (D34).
+   `kind`, runs before build-plan discovery (D34). A schema file may pass
+   an imported sentinel to a decorator too: the handle references the
+   service, a cache edge that orders nothing, unless the decorator
+   declares it an identity, which adds no edge (D41).
 
 ## 16. What the source tree taught
 

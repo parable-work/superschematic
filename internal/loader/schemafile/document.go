@@ -39,6 +39,12 @@ type Document struct {
 	// wildcard does not exist in v2.
 	Imports []ir.Import `json:"imports,omitempty" yaml:"imports,omitempty"`
 
+	// References lists the services the file's decorators reference by a
+	// handle, other than as identities: ir.Schema.References, which the
+	// TypeScript form records from the handles it evaluates. A data form
+	// has no imports to follow, so it states them, as it states imports.
+	References []ir.ServiceRef `json:"references,omitempty" yaml:"references,omitempty"`
+
 	// Scalars maps scalar names to definitions.
 	Scalars map[string]*ir.ScalarDef `json:"scalars,omitempty" yaml:"scalars,omitempty"`
 
@@ -80,7 +86,7 @@ var singleDefKinds = map[string]bool{
 // of every Document field except name, kind, description and comment.
 // TestDocumentCollectionKeysMatchTheDocument keeps the two in step.
 var documentCollectionKeys = []string{
-	"imports", "scalars", "types", "enums", "unions",
+	"imports", "references", "scalars", "types", "enums", "unions",
 	"operationSets", "documents", "extensions",
 }
 

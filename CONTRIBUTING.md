@@ -73,7 +73,7 @@ By making a contribution to this project, I certify that:
 | Bun           | 1.4.0   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
-| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
+| Rust          | 1.99.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
 | Postgres      | 16      | `tools.env` (`POSTGRES_VERSION`); CI's database tests run against it |
 | superscalar   | commit  | `superscalar.pin`; `go.mod` carries the same commit as a pseudo-version |
 
@@ -81,7 +81,7 @@ Setup on a fresh machine:
 
 ```
 export GOTOOLCHAIN=go1.26.4
-rustup toolchain install 1.95.0 --target wasm32-unknown-unknown
+rustup toolchain install 1.99.0 --target wasm32-unknown-unknown
 make setup
 ```
 
@@ -90,7 +90,12 @@ the pinned commit under `third_party/superscalar` (gitignored), builds its Go
 static archive and TypeScript binding, and prints the `CGO_LDFLAGS` value.
 It then runs `scripts/versiongraph-archive.sh`, which builds the
 version-graph core's static archive and stages it under
-`runtime/versiongraph/go/lib`, where that binding links it. The Makefile
+`runtime/versiongraph/go/lib`, where that binding links it. Both scripts
+build with `RUST_VERSION`, not the toolchain superscalar's checkout pins:
+Go binaries link the two archives together, and archives that two Rust
+releases built do not link into one binary (both define
+`rust_eh_personality`). The superscalar build records its commit and
+toolchain, so either changing rebuilds it. The Makefile
 exports both link directories for every Go target; outside make, run
 `eval "$(scripts/superscalar-dep.sh --export)"` first. Bump a tool version in
 `tools.env` only; workflows read that file and never inline a version. Bump

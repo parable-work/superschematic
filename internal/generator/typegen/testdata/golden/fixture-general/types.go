@@ -480,6 +480,13 @@ func (t *FixtureConfig) MaskSecrets() *FixtureConfig {
 	return masked
 }
 
+// JSONFieldNames are the keys FixtureConfig's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*FixtureConfig) JSONFieldNames() []string {
+	return []string{"DATABASE_URL", "JWT_SECRET", "PORT", "ENVIRONMENT"}
+}
+
 // Validate validates all fields in FixtureConfig
 func (t *FixtureConfig) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -740,6 +747,13 @@ func (t *FixtureFilter) MaskSecrets() *FixtureFilter {
 	}
 
 	return masked
+}
+
+// JSONFieldNames are the keys FixtureFilter's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*FixtureFilter) JSONFieldNames() []string {
+	return []string{"kind", "values", "minCents", "labels"}
 }
 
 // Validate validates all fields in FixtureFilter
@@ -1040,6 +1054,13 @@ func (t *RetryPolicy) MaskSecrets() *RetryPolicy {
 	masked.BackoffSeconds = t.BackoffSeconds
 
 	return masked
+}
+
+// JSONFieldNames are the keys RetryPolicy's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RetryPolicy) JSONFieldNames() []string {
+	return []string{"maxAttempts", "backoffSeconds"}
 }
 
 // Validate validates all fields in RetryPolicy

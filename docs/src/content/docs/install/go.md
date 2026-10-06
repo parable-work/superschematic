@@ -226,14 +226,36 @@ for an input type's fields:
 ```json
 {
   "type": "about:blank",
-  "title": "Validation Failed",
+  "title": "Bad Request",
   "status": 400,
   "detail": "Validation failed",
-  "code": "WA-VL-001",
+  "code": "bad_request",
   "errors": {
     "labels[1]": [{ "validator": "required", "message": "required field" }],
     "links[0]": [{ "validator": "pattern", "message": "invalid format" }]
   }
+}
+```
+
+An input type's body (`input: PlaceOrderInput`) is refused as every
+generated server, Go, TypeScript and Rust, refuses it. A missing body is
+"Request body is required" and one that is not JSON "Request body is not
+valid JSON". A body the type refuses is "Request body does not match the
+declared input": `details.reason` says why (`expected an object`,
+`unknown fields: coupon`, `validation failed`, `does not match the
+declared type`), and `errors` holds each field's errors by path. A
+top-level key the type does not declare is refused, `unknown` at its
+key:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "Request body does not match the declared input",
+  "code": "bad_request",
+  "details": { "location": "body", "reason": "unknown fields: coupon" },
+  "errors": { "coupon": [{ "validator": "unknown", "message": "unknown field" }] }
 }
 ```
 

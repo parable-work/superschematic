@@ -243,6 +243,13 @@ func (t *TenantView) MaskSecrets() *TenantView {
 	return masked
 }
 
+// JSONFieldNames are the keys TenantView's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*TenantView) JSONFieldNames() []string {
+	return []string{"id", "name", "userCount", "internalDebugLabel"}
+}
+
 // Validate validates all fields in TenantView
 func (t *TenantView) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -479,6 +486,13 @@ func (t *CreateTenantInput) MaskSecrets() *CreateTenantInput {
 	masked.Slug = t.Slug
 
 	return masked
+}
+
+// JSONFieldNames are the keys CreateTenantInput's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CreateTenantInput) JSONFieldNames() []string {
+	return []string{"name", "slug"}
 }
 
 // Validate validates all fields in CreateTenantInput

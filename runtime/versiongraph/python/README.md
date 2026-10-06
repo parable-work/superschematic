@@ -6,8 +6,8 @@ version graph for Python (D17 and D19 in `docs/DECISIONS.md`): the core
 maturin, with typed `compose`, `merge`, `diff`, `content_hash` and
 `validate` over its JSON contract (`runtime/versiongraph/README.md`); the
 engine, which runs every graph operation over a storage adapter; its
-Postgres adapter; and the base of the typed facade pygen generates per
-graph. It runs on CPython 3.9 and newer; one abi3 wheel per platform serves
+Postgres adapter and its SQLite adapter (D32); and the base of the typed
+facade pygen generates per graph. It runs on CPython 3.9 and newer; one abi3 wheel per platform serves
 them all.
 
 | Path | Holds |
@@ -21,8 +21,9 @@ them all.
 | `superschematic_versiongraph/canonical.py` | The canonical row rules, ported from the Go module's package `canonical`. |
 | `superschematic_versiongraph/exactjson.py` | The JSON reader and writer rows travel through, which keep every number's digits. |
 | `superschematic_versiongraph/postgres.py` | `PostgresAdapter`, which builds its statements from the descriptor at run time, its `Client` protocol, and `psycopg_client`, the psycopg 3 binding. |
+| `superschematic_versiongraph/sqlite.py` | `SqliteAdapter`, which holds every graph in one fixed layout of tables, `sqlite_layout`, its `Client` protocol, `is_unique_violation`, and `sqlite_client`, the binding over the standard library's `sqlite3`. |
 | `superschematic_versiongraph/facade.py` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
-| `tests/` | Every core vector through the package, the binding's own tests, every scenario and canonical vector through the engine and the adapter, and the adapter's, the sweeper's and the facade's own tests. |
+| `tests/` | Every core vector through the package, the binding's own tests, every scenario and canonical vector through the engine and each adapter, and the adapters', the sweeper's and the facade's own tests. |
 
 ## Use the core
 
@@ -95,6 +96,62 @@ package whose schema declares a graph) wraps the engine with typed trees
 and edits; "Use the engine from Python" in the version graphs reference
 shows it.
 
+## Use the engine on SQLite
+
+```python
+import sqlite3
+from superschematic_versiongraph.engine import Engine
+from superschematic_versiongraph.sqlite import SqliteAdapter, sqlite_client
+
+connection = sqlite3.connect("recipes.sqlite", isolation_level=None)
+client = sqlite_client(connection)
+adapter = SqliteAdapter(descriptor, graph="recipe")
+adapter.create_tables(client)
+engine = Engine(descriptor, adapter.storage(client), schema_epoch=1, snapshot_every=32)
+```
+
+- The SQLite adapter is the TypeScript package's
+  (`runtime/versiongraph/README.md`, "SQLite"), statement for statement and
+  stored form for stored form, so a file one writes the other reads: nine
+  `STRICT` tables, the same for every graph, each row carrying its graph's
+  name, history written in the statements that change a row, and every
+  value stored canonical. It reads only the descriptor's kinds.
+- `SqliteAdapter(descriptor, graph=..., table_name=..., clock=...)`:
+  `table_name` names each table and index from its local name
+  (`default_table_name`, `graph_` before it, when absent), and `clock`
+  gives a transaction's time in whole microseconds since the Unix epoch
+  (the system clock, `time.time_ns() // 1000`, when absent), inside
+  +/-(2^53-1). A transaction reads it once, when it begins: on a
+  connection of its own once `BEGIN IMMEDIATE` holds the write lock, and
+  inside a transaction the caller holds once its savepoint is set; one
+  begun inside another takes the outer one's time. A stored integer outside
+  +/-(2^53-1), which the TypeScript adapter does not read, is refused.
+  `sqlite_layout(table_name)` lists the layout's statements for a caller
+  that runs its own migrations, and `create_tables` runs them, reading the
+  clock once as every transaction does.
+- `sqlite_client(connection)` binds an open `sqlite3.Connection`, which
+  must be opened with `isolation_level=None` (or `autocommit=True` from
+  Python 3.12) so the module never begins a transaction on its own: the
+  client issues `BEGIN IMMEDIATE`, `SAVEPOINT`, `RELEASE`, `COMMIT` and
+  `ROLLBACK` itself. It refuses a SQLite older than 3.37.0
+  (`MIN_SQLITE_VERSION`, the first with `STRICT` tables) or one without
+  the JSON functions, and turns the connection's foreign keys on, which
+  SQLite ignores inside a transaction.
+- Each transaction begins with `BEGIN IMMEDIATE`, which waits for the
+  file's write lock as long as the connection's `timeout` says and then
+  fails with SQLite's busy error. One begun inside another, or while the
+  caller holds a transaction on the connection, is a savepoint of it, so
+  the graph's writes commit or roll back with the caller's. Over one
+  connection the client runs one transaction at a time; bind one client
+  per connection.
+- A name already taken is `name_taken`, from the unique index on live
+  refs' names. `is_unique_violation` reads that refusal: by the error's
+  `sqlite_errorcode` (2067) from Python 3.11, and before it, when the
+  sqlite3 module's errors carry no code, by SQLite's words for it.
+- Rows travel as JSON text read by `exactjson`, so a number keeps its
+  digits from the row written to every row read; no value goes through a
+  `float`.
+
 ## Development
 
 ```
@@ -102,7 +159,7 @@ cd runtime/versiongraph/python
 uv run pytest -q                            # builds the extension with maturin, then the tests
 uv run --python 3.9 --isolated pytest -q    # the same on the 3.9 floor
 make python                                 # from the repository root: both, with cargo fmt and clippy
-make versiongraph-scenarios-python          # from the repository root: the Postgres tests
+make versiongraph-scenarios-python          # from the repository root: the SQLite pass, then the Postgres tests
 ```
 
 uv builds the package with maturin into `.venv` and rebuilds it when the
@@ -116,12 +173,25 @@ loss. It also checks every vector's input and output against the types
 in `contract.py` and fails when a member or literal there appears in no
 vector. `tests/test_binding.py` checks the errors, that many calls do not
 grow the process, and that the core runs with the GIL released.
-`tests/test_engine.py` checks the engine's rules that need no database, and
-`tests/test_scenarios.py` reads every scenario file and checks the scenario
-format's rules without one.
+`tests/test_engine.py` checks the engine's rules that need no database,
+and `tests/test_scenarios.py` reads every scenario file and checks the
+scenario format's rules without one. The SQLite tests need no database
+server and run everywhere the others do, on Python 3.9 too:
+`tests/test_scenarios.py` runs every scenario through the engine and the
+SQLite adapter, in an in-memory database, and `tests/test_sqlite.py` holds
+the adapter's own rules: the version fences, a taken name, the history it
+writes, `STRICT` tables and foreign keys, two graphs in one file, the name
+function, the clock, its ids, a second connection's wait for the write
+lock, savepoints and the caller's transaction, a number's digits end to
+end, every canonical vector as a round trip, and what the binding
+refuses. `tests/test_sqlite_vectors.py` holds the adapter to the shared
+SQLite vectors (`runtime/versiongraph/testdata/sqlite`): its layout is
+`layout.json`'s, the database the TypeScript adapter wrote reads back as
+`typescript.json` byte for byte, and one graph reads none of another's.
 
 The Postgres tests need `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and
-skip without it; `make versiongraph-scenarios-python` fails without it.
+skip without it; `make versiongraph-scenarios-python` runs the SQLite pass
+first, then fails without it.
 `tests/test_scenarios.py` runs every scenario in
 `runtime/versiongraph/testdata/scenarios` through the engine and the
 adapter, each in a schema of its own holding the fixture's DDL.

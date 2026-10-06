@@ -1,11 +1,14 @@
 /**
  * The kinds the core compiler registers. Closed: an extension adds a kind by
- * registering it with superschematic, not by extending this enum.
+ * registering it with superschematic, not by extending this enum. A Stack
+ * service declares what runs where over the others (`@superschematic/stack`)
+ * and is named by none, so it has no sentinel.
  */
 export enum SchemaKind {
   DB = "DB",
   API = "API",
-  General = "General"
+  General = "General",
+  Stack = "Stack"
 }
 
 /**

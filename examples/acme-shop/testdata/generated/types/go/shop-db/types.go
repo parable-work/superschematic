@@ -524,6 +524,13 @@ func (t *Auditable) MaskSecrets() *Auditable {
 	return masked
 }
 
+// JSONFieldNames are the keys Auditable's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Auditable) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt"}
+}
+
 // Validate validates all fields in Auditable
 func (t *Auditable) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -821,6 +828,13 @@ func (t *Order) MaskSecrets() *Order {
 	}
 
 	return masked
+}
+
+// JSONFieldNames are the keys Order's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Order) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "customer", "status", "placedAt", "shippingAddress", "cancelReason", "lines"}
 }
 
 // Validate validates all fields in Order
@@ -1144,6 +1158,13 @@ func (t *OrderLine) MaskSecrets() *OrderLine {
 	return masked
 }
 
+// JSONFieldNames are the keys OrderLine's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OrderLine) JSONFieldNames() []string {
+	return []string{"id", "order", "product", "quantity", "unitPriceCents"}
+}
+
 // Validate validates all fields in OrderLine
 func (t *OrderLine) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -1441,6 +1462,13 @@ func (t *Product) MaskSecrets() *Product {
 	masked.InStock = t.InStock
 
 	return masked
+}
+
+// JSONFieldNames are the keys Product's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Product) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "sku", "name", "priceCents", "inStock"}
 }
 
 // Validate validates all fields in Product
@@ -1744,6 +1772,13 @@ func (t *Review) MaskSecrets() *Review {
 	masked.DeletedBy = t.DeletedBy
 
 	return masked
+}
+
+// JSONFieldNames are the keys Review's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Review) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "product", "author", "rating", "title", "body", "deletedAt", "deletedBy"}
 }
 
 // Validate validates all fields in Review
@@ -2059,6 +2094,13 @@ func (t *Session) MaskSecrets() *Session {
 	return masked
 }
 
+// JSONFieldNames are the keys Session's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Session) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "jti", "user", "expiresAt"}
+}
+
 // Validate validates all fields in Session
 func (t *Session) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -2337,6 +2379,13 @@ func (t *ShippingAddress) MaskSecrets() *ShippingAddress {
 	masked.Phone = t.Phone
 
 	return masked
+}
+
+// JSONFieldNames are the keys ShippingAddress's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*ShippingAddress) JSONFieldNames() []string {
+	return []string{"recipient", "line1", "line2", "city", "postcode", "country", "phone"}
 }
 
 // Validate validates all fields in ShippingAddress
@@ -2645,6 +2694,13 @@ func (t *StockLevel) MaskSecrets() *StockLevel {
 	return masked
 }
 
+// JSONFieldNames are the keys StockLevel's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*StockLevel) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "product", "quantity"}
+}
+
 // Validate validates all fields in StockLevel
 func (t *StockLevel) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -2908,6 +2964,13 @@ func (t *User) MaskSecrets() *User {
 	masked.Name = t.Name
 
 	return masked
+}
+
+// JSONFieldNames are the keys User's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*User) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "email", "name"}
 }
 
 // Validate validates all fields in User

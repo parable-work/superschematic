@@ -734,6 +734,13 @@ func (t *{{.Name}}) MaskSecrets() *{{.Name}} {
 	return masked
 }
 
+// JSONFieldNames are the keys {{.Name}}'s JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*{{.Name}}) JSONFieldNames() []string {
+	return []string{ {{- range $i, $f := .Fields}}{{if $i}}, {{end}}"{{$f.Name}}"{{end -}} }
+}
+
 // Validate validates all fields in {{.Name}}
 func (t *{{.Name}}) Validate() ValidationErrors {
 	errors := NewValidationErrors()

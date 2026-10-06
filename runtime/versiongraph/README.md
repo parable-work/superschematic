@@ -470,6 +470,7 @@ Postgres adapter are the modules `engine`, `storage` and `postgres` of
 sweep lock under the same key, so sweepers in different languages exclude
 each other. The TypeScript package also has a SQLite adapter,
 `typescript/src/sqlite.ts`, which `SyncEngine` runs over (below).
+The Python package has one too, `python/superschematic_versiongraph/sqlite.py`.
 
 Every id an engine takes or returns is a UUID in its canonical form. Each
 write takes an actor, and each write through a ref the ref's expected
@@ -587,6 +588,24 @@ row's newest image and every image a patch or a snapshot pins, at most a
 batch of them, oldest first; a kind without `retentionDays` prunes
 nothing.
 
+`createTables` and binding the adapter refuse a SQLite older than 3.37.0,
+the first with `STRICT` tables, and one that cannot run `json_each` and
+`json_extract`, which its reads take lists through (built in from 3.38.0,
+and in 3.37 with JSON1); its statements need nothing later than that
+(`RETURNING` came in 3.35.0). On a connection of its own the adapter reads
+the version with `sqlite_version()`. In the caller's transaction it checks
+the JSON functions only, since D16 refuses a behavior's statement that
+names `sqlite_version`, and D16's engine, whose own tables are `STRICT`,
+needs 3.37.0 already. A check that passes is kept, so it runs once: by
+client on a connection of the adapter's own, and by layout (its tables'
+names) in the caller's transaction, since a host such as `Branches` binds a
+new adapter over a new client for each call. The second assumes one
+SQLite library serves every connection that uses a layout name in the
+process, as D16's engine does; another library without the JSON functions
+under the same names would fail at its first `json_each` statement, with
+SQLite's own error. A check that fails is not kept. Every language's SQLite
+adapter refuses the same.
+
 The adapter reaches SQLite through `SqliteClient`: `run`, `get` and `all`
 with positional parameters for numbered placeholders (`?1`), returning
 plain rows and `undefined` for no row, and an error carrying SQLite's
@@ -595,6 +614,22 @@ extended result code as a number in `code`, as D16's driver's do, plus
 settings. `nodeSqlite` and `bunSqlite` bind an open `node:sqlite`
 `DatabaseSync` and an open `bun:sqlite` `Database`, using only the methods
 they call, so no entry imports either module.
+
+The Python package's SQLite adapter (`superschematic_versiongraph.sqlite`)
+is this one, statement for statement and stored form for stored form, so
+a file either writes the other reads; `python/README.md` has its use. Its
+`Client` holds the transactions, as the Python Postgres adapter's does:
+`sqlite_client` binds a `sqlite3.Connection` opened with
+`isolation_level=None` (or `autocommit=True`), issues `BEGIN IMMEDIATE`
+itself, and runs a transaction begun inside another, or inside one its
+caller holds, as a savepoint; there is no mode without transaction control,
+since no D16 engine runs in Python. It turns the connection's foreign keys
+on, and refuses a SQLite older than 3.37.0, the first with `STRICT` tables,
+or one without `json_each` and `json_extract`. Its system clock is
+`time.time_ns()` in whole microseconds. Before Python 3.11 the sqlite3
+module's errors carry no result code, so `is_unique_violation` reads a
+taken name from SQLite's message ("UNIQUE constraint failed"). Its tests
+hold it to the vectors below (`python/tests/test_sqlite_vectors.py`).
 
 The Go adapter, package `sqlite`, ports the TypeScript one statement for
 statement: the same layout under the same name function, the same stored
@@ -664,16 +699,18 @@ with nothing of one graph read through another's adapter.
 `testdata/scenarios` holds one scenario per file, named by its `name`:
 `{"name", "description", "roots", "steps": [step, ...]}`. A runner runs on
 one backend. The backends a scenario may name are `postgres` and `sqlite`;
-every runner runs on `postgres`, and the TypeScript and Go runners on
-`sqlite` too. On Postgres a runner applies `testdata/fixture/create.sql` to
-an empty schema and builds its engine and Postgres adapter from
-`testdata/fixture/recipe.json`; on SQLite the TypeScript runner creates the
-SQLite adapter's layout, under its default names, in an in-memory database
-and builds a `SyncEngine` and the SQLite adapter, graph `recipe`, from the
-same descriptor; the Go runner creates it in a file of its own and runs
-each scenario twice, once on the adapter's own transactions over a
-`database/sql` pool and once inside transactions it holds, under another
-name function. Either way the engine runs at schema epoch 1 and snapshot
+every runner runs on `postgres`, and the TypeScript, Go and Python
+runners on `sqlite` too. On Postgres a runner applies
+`testdata/fixture/create.sql` to an empty schema and builds its engine
+and Postgres adapter from `testdata/fixture/recipe.json`; on SQLite the
+TypeScript runner creates the SQLite adapter's layout, under its default
+names, in an in-memory database and builds a `SyncEngine` and the SQLite
+adapter, graph `recipe`, from the same descriptor, and the Python runner
+does the same with its engine and SQLite adapter; the Go runner creates
+it in a file of its own and runs each scenario twice, once on the
+adapter's own transactions over a `database/sql` pool and once inside
+transactions it holds, under another name function. Either way the
+engine runs at schema epoch 1 and snapshot
 interval 3, the fixture graph's; the runner seeds the scenario's roots and
 runs each step in order. It reads the whole scenario before the first
 step, and refuses one with an unknown member or one that breaks a rule
@@ -799,7 +836,7 @@ UPDATE_SQLITE_VECTORS=1 bun test test/sqlite-vectors.test.ts  # in typescript/, 
 make versiongraph-scenarios  # every scenario through the Go engine and the SQLite adapter, with the adapter's tests and the SQLite vectors, then through the Postgres adapter
 make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, and the SQLite vectors, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
-make versiongraph-scenarios-python  # every scenario and canonical vector through the Python engine and its adapter
+make versiongraph-scenarios-python  # every scenario through the Python engine and its SQLite adapter, and the SQLite vectors, then every scenario and canonical vector through its Postgres adapter
 ```
 
 The scenarios, the adapter's tests and the canonical vectors' Postgres
@@ -809,8 +846,9 @@ check run against the Postgres that
 `make versiongraph-scenarios-rust` and `make versiongraph-scenarios-python`
 fail without it. The scenarios on SQLite, the SQLite adapters' tests and
 the SQLite vectors need no server and run with or without it, and
-`make versiongraph-scenarios` and `make versiongraph-scenarios-ts` run
-them before they check for the variable. The fixture is the
+`make versiongraph-scenarios`, `make versiongraph-scenarios-ts` and
+`make versiongraph-scenarios-python` run them before they check for the
+variable. The fixture is the
 compiler's output for `fixture-version-graph-db`, and a compiler test
 (`go test ./internal/generator -run TestVersionGraphScenarioFixtureIsCurrent`)
 fails when the checked-in copy is stale; `-update` rewrites it.
