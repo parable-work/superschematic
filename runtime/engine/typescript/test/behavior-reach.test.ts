@@ -20,6 +20,7 @@ import {
   type AccessRequest,
   type Engine,
   type EngineOptions,
+  type FrozenJSON,
   type Principal,
 } from '../dist/index.js';
 import { openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
@@ -437,6 +438,135 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1' }, { namespace: 'east' });
       assert.equal(engine.instances.delete(alice, 'Item', 'i1', { namespace: 'west' }), true);
       assert.equal(thrown(() => engine.instances.delete(alice, 'Item', 'i1', { namespace: 'east' }), BehaviorVetoError).behavior, 'test.Holder');
+    });
+  });
+
+  describe(`references that hear less than every change (${driver})`, () => {
+    const notes = (engine: Engine, id: string) => engine.instances.invoke(alice, 'Note', id, 'notes') as string[];
+
+    test('one that hears a value runs its hook when a change moves it, with crosses when it moves across the number, and at the delete', () => {
+      const engine = world();
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', hears: { path: '/count', crosses: 3 } });
+      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Item', id: 'i1', hears: { path: '/count' } });
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'holding'), [{ schema: 'Item', id: 'i1', key: '', hears: { path: '/count', crosses: 3 } }]);
+      // The count starts at 1. A change that leaves it is heard by neither.
+      engine.instances.update(alice, 'Item', 'i1', { title: 'Oak desk' });
+      engine.instances.invoke(alice, 'Item', 'i1', 'flag', { reason: 'checking' });
+      engine.instances.invoke(alice, 'Item', 'i1', 'unflag');
+      assert.deepEqual([notes(engine, 'n1'), notes(engine, 'n2')], [[], []]);
+      // 1 to 2 moves it; 2 to 3 moves it across 3; 3 to 4 moves it on the same side.
+      for (let count = 2; count <= 4; count += 1) {
+        engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      }
+      assert.deepEqual(notes(engine, 'n1'), ['operation Item i1']);
+      assert.deepEqual(notes(engine, 'n2'), ['operation Item i1', 'operation Item i1', 'operation Item i1']);
+      // Every reference hears the delete, and must let go of it.
+      engine.instances.delete(alice, 'Item', 'i1');
+      assert.deepEqual([notes(engine, 'n1').at(-1), notes(engine, 'n2').at(-1)], ['delete Item i1', 'delete Item i1']);
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'holding'), []);
+    });
+
+    test('a value that is not a number is a side of its own: becoming one, or no longer one, crosses every number', () => {
+      const engine = open();
+      publish(engine, 'Note', [{ name: 'test.Reader' }, { name: 'test.Holder' }]);
+      const sized = schemaDocument('Box', [
+        { name: 'title', typeRef: { name: 'string' }, required: true },
+        { name: 'size', typeRef: { name: 'Generic.Int64' } },
+      ]);
+      engine.schemas.define(alice, sized);
+      engine.schemas.publish(alice, 'Box');
+      engine.instances.create(alice, 'Box', { title: 'Crate' }, { id: 'b1' });
+      engine.instances.create(alice, 'Note', { title: 'Low' }, { id: 'n1' });
+      engine.instances.create(alice, 'Note', { title: 'High' }, { id: 'n2' });
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Box', id: 'b1', hears: { path: '/size', crosses: 1 } });
+      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Box', id: 'b1', hears: { path: '/size', crosses: 100 } });
+      engine.instances.update(alice, 'Box', 'b1', { size: 50 });
+      engine.instances.update(alice, 'Box', 'b1', { size: 60 });
+      engine.instances.update(alice, 'Box', 'b1', { size: null });
+      assert.deepEqual(notes(engine, 'n1'), ['update Box b1', 'update Box b1']);
+      assert.deepEqual(notes(engine, 'n2'), ['update Box b1', 'update Box b1']);
+    });
+
+    test("one that hears less than every change is asked by guardReference before a delete only", () => {
+      const engine = world({}, { veto: ['update', 'delete', 'operation'] });
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', hears: 'delete' });
+      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Item', id: 'i2', hears: { path: '/count' } });
+      engine.instances.update(alice, 'Item', 'i1', { title: 'Oak desk' });
+      engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      engine.instances.invoke(alice, 'Item', 'i2', 'increment');
+      // 'delete' hears nothing else; a value's move runs the hook, which notes it.
+      assert.deepEqual([notes(engine, 'n1'), notes(engine, 'n2')], [[], ['operation Item i2']]);
+      for (const id of ['i1', 'i2']) {
+        const refused = thrown(() => engine.instances.delete(alice, 'Item', id), BehaviorVetoError);
+        assert.deepEqual([refused.behavior, refused.action], ['test.Holder', 'delete']);
+      }
+    });
+
+    test('recording one again records what it hears now and keeps its place', () => {
+      const engine = world();
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', key: 'a' });
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i2', key: 'b' });
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', key: 'a', hears: 'delete' });
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'holding'), [
+        { schema: 'Item', id: 'i1', key: 'a', hears: 'delete' },
+        { schema: 'Item', id: 'i2', key: 'b' },
+      ]);
+      engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      engine.instances.invoke(alice, 'Item', 'i2', 'increment');
+      assert.deepEqual(notes(engine, 'n1'), ['operation Item i2']);
+    });
+
+    test("add refuses what is neither 'delete' nor a JSON pointer with a finite number to cross", () => {
+      const engine = world();
+      for (const [hears, what] of [
+        ['all', 'not "all"'],
+        [{ path: 'count' }, 'its path a JSON pointer to a member of the target\'s data, not "count"'],
+        [{ path: '' }, 'its path a JSON pointer to a member of the target\'s data, not ""'],
+        [{ path: '/count/~2' }, 'its path a JSON pointer to a member of the target\'s data, not "/count/~2"'],
+        [{ path: '/count', crosses: '3' }, 'its crosses a finite number, not "3"'],
+        [{ path: '/count', over: 3 }, 'with no other member (over)'],
+      ] as Array<[unknown, string]>) {
+        const refused = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', hears } as FrozenJSON), BehaviorError);
+        assert.equal(refused.message, `behavior test.Holder: references.add: hears is 'delete' or { path, crosses? }, ${what}`);
+      }
+    });
+
+    test('a change runs the hooks of the references whose number it crosses, out of many on one value', () => {
+      const engine = world();
+      for (let at = 1; at <= 60; at += 1) {
+        engine.instances.create(alice, 'Note', { title: `n${at}` }, { id: `h${at}` });
+        engine.instances.invoke(alice, 'Note', `h${at}`, 'hold', { schema: 'Item', id: 'i1', hears: { path: '/count', crosses: at + 0.5 } });
+      }
+      const from = lastCursor(engine);
+      engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      // 1 to 2 crosses 1.5 alone, 2 to 3 crosses 2.5 alone.
+      assert.deepEqual(eventsOf(engine, from), [
+        ['operation', 'Item', 'i1', 'increment'],
+        ['operation', 'Note', 'h1', 'note'],
+        ['operation', 'Item', 'i1', 'increment'],
+        ['operation', 'Note', 'h2', 'note'],
+      ]);
+    });
+
+    test("the core's Links and Dependencies hear their targets' deletes alone", () => {
+      const engine = open();
+      const flow = { name: 'Workflow', config: { states: ['todo', 'done'], transitions: [{ from: 'todo', to: 'done' }] } };
+      publish(engine, 'Item', [flow]);
+      publish(engine, 'Note', [flow, { name: 'Links', config: { links: { item: { schema: 'Item' } } } }, { name: 'Dependencies', config: { schemas: ['Item'] } }]);
+      engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+      engine.instances.create(alice, 'Note', { title: 'First' }, { id: 'n1', behaviors: { Links: { item: 'i1' }, Dependencies: { blockers: [{ schema: 'Item', id: 'i1' }] } } });
+      assert.deepEqual(
+        engine.storage.all(`SELECT behavior, key, hears FROM engine_references WHERE target_id = 'i1' ORDER BY behavior`).map((row) => ({ ...row })),
+        [
+          { behavior: 'Dependencies', key: '', hears: 'delete' },
+          { behavior: 'Links', key: 'item', hears: 'delete' },
+        ]
+      );
+      engine.instances.invoke(alice, 'Item', 'i1', 'transition', { to: 'done' });
+      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.data.blocked, false);
+      engine.instances.delete(alice, 'Item', 'i1');
+      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.data.links, undefined);
     });
   });
 

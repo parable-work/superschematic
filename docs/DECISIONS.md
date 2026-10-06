@@ -1450,6 +1450,47 @@ declaration of its own.
 Generated guidance per behavior's tool and create parameters narrowed by
 a config are a later change.
 
+### D16, amended: a reference hears what can move its holder
+
+Queue kept an instance over its budget out of `claimNext` by copying
+Budget's `checkReserve` and recording a reference to each enclosing scope
+it read, and a reference heard every change of its target. So every
+reserve, usage report and settlement under a pool ran `checkReserve` for
+every instance queued under it: a pool with thousands of queued jobs paid
+that on every claim, quadratic over a run. Links' and Dependencies'
+references, which act only on a delete, were asked about every change of
+their targets as well, and a blocker's title edit appended a `refresh`
+event on each of its dependents. A reference now says what it hears, and
+a change reads only the references that hear it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `references.add(schema, id, key, hears)` takes what the reference hears (`ReferenceHears`): absent, every change, as before; `'delete'`, the delete alone; `{ path, crosses? }`, a JSON pointer into the target's data (its own fields and its behaviors' fields) and an optional number. One with a path runs `afterReferenceChange` after a change that moves the value, or with `crosses` moves it across the number, and after the delete. A value's side of the number is one of three: not a number, below it, at or above it. A reference that hears less than every change is asked by `guardReference` before a delete only. Recording a reference again records what it hears now and keeps its place. | A filter function the engine calls for each reference, which reads every reference to learn which; a waiting list in Budget's tables that the scope's `afterChange` reads, which makes Budget know Queue and writes the scope each time an instance starts waiting |
+| The engine compares the target's record before and after the change, which it computes for the event's patch anyway, lists the values that moved, and reads the references through an index led by the target, `hears` and `crosses` (engine migration 8): every one that hears every change, every one on a moved value, and of those with a number only the ones the move crosses. A delete reads every reference, as before. | Reading every reference and testing each in JavaScript, which is the per-instance cost this removes |
+| `Links` and `Dependencies` record their references with `'delete'`, since only a target's delete asks anything of them. Queue's reference to a blocker hears `/status`, the one value that moves whether the blocker is open. | Leaving them hearing every change, so a pool thousands of jobs link to costs each of its writes a guard and a hook per job |
+| Budget's `checkReserve` lists, with each scope it read, the values its answer turns on (`hears`): the meter's `remaining`, crossing the amount less what the settlement of an ended lease's reservation releases there, where the reservation fits exactly while the remaining is at or above it; where a daily meter keeps it out now, its `reserved`, crossing the limit less the amount and the release plus one, and its `limit`, which decide whether the next day lets it in; and the scope's own scope link. The remaining's number is exact while the scope holds what the instance reserved through it, which the scope operations keep. | Queue deriving the numbers from Budget's field and config, Budget's rule to know; hearing only the remaining, under which a daily pool whose reservations settle while its usage is high keeps its waiting work out past the next day |
+| Until an ended lease's reservation is settled, each number is given twice, as it is now and as the settlement leaves it: a Lease or Queue operation settles it in Budget's `afterChange`, which may run after Queue's has read the answer in the same write, and the scope's move then reaches Queue only with `writing` set. | One number, which such a write leaves off by the reservation, so the instance waits on a remaining the pool has already passed; requiring Budget before Queue in the type's list, a rule on the schema author for an order the engine keeps |
+| Queue records a reference to each value (`budget <path> <number>`), and a link's target's (below), and refreshes on one only when its exclusion, or what it hears, moved. So a write to a scope runs no check and no hook for an instance none of whose numbers it crosses; one whose number it crosses checks itself, and, when its exclusion moved, checks again in the `refresh` it invokes, which appends one event. A test queues 40 instances with two amounts under one pool and counts Budget's `checkReserve` calls and Queue's hooks. | Refreshing every instance a scope's write reaches, an event per queued instance per claim |
+
+### D16, amended: rules on a rollup that comes to hold and a revised link, and claims that wait for the newest revision
+
+`Reactions` heard terminal states only. A parent reacted to its children
+through `allTerminal` and `anyTerminal`, which restate what an `all` or
+`any` rollup computes, and nothing heard a spec change: work done against
+a spec that a newer revision superseded stayed where it was, and a queue
+went on handing it out. A rule now fires when a rollup comes to hold and
+when a link's target gains a revision or a release, and a queue keeps
+work pinned to a superseded revision out.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `when: { holds: <rollup> }` names an `all` or `any` rollup of the type's `Rollups`; `parseConfig` refuses a type without `Rollups`, a rollup it lacks and any other function. An event of the rollup's schema fires it on the instance the event's instance links to, now and before the event, when the rollup holds now, holds with that instance as the event left it, and does not hold with it as it was before the event (`before`), the other linked instances as they are when the rule runs. It fires on the edge from not holding to holding, and not again until the rollup has stopped holding. | Firing on every event while it holds, as `allTerminal` does, which fails a parent retried by hand again at the next failure; the event's instance as it is now, which credits the edge to an earlier event of it the runner handles later, at a depth the limit does not stop; remembering the last value, which a reaction cannot write without an event on the parent |
+| The value is the rollup's, read as `Rollups` reads it: one `listLinked` page of at most 500, their statuses, the linked schema's Workflow. One rule differs: an `all` over no instance, which holds for `Rollups`' gate, sets no rule off, as `allTerminal` needs one instance. Two events the runner handles together after both committed can each find the edge; the second finds the target in the state and leaves it. | The rollup's value as it is, under which deleting a run's last unfinished step completes it |
+| A `holds` rule hears only the rollup's schema, so the instance's own move sets one off only through another instance that links to it, up a tree of the type's own schema; the runner's depth limit stops such chains, and `parseConfig` refuses nothing more for them. | Refusing a rollup over the type's own schema, which is how a task completes as its subtasks do |
+| `when: { revised: { link } }` names a link of the type's `Links`. It fires on an update or an operation of the target whose change carries `revision`, of a schema that composes `Revisions`, and on a `releaseCommit` operation of one that composes `Branches`; a link to a schema with neither is a failure at run. It moves the instances `Links`' `listLinked` finds on the type's own schema, for a pinned link and a revision only the stale ones. No transition makes a revision or a release, so it never sets itself off. | Firing on every event of the target, which sends work back on a comment; every instance of a pinned link, which sends back work already pinned to the new revision; checking the target's schema at define, which need not be published yet, as the `Reactions` rows have it |
+| `Queue`'s `excludeStale` names pinned links of the type's `Links`, which `parseConfig` checks. While one is `stale` in the instance's `links` field, the instance is excluded until a change (`excluded_until`, as for Retries' exhaustion) and `claim` refuses it (`stale_link`, details `{ links }`). While none is, Queue hears each target's `/revision` crossing the pinned revision plus one, which the target's next revision does; once stale it hears nothing, since only its own new `link` lets it back in. A new `excludeStale` applies to an instance from its next change, as a new `priorityField` does. | A column of its own beside `blocked`, which the candidate query's index would read past; leaving the claim to `Links`, which has none to refuse |
+| `Links` pins revisions of `Revisions` only, so `excludeStale` cannot keep out work pinned to a `Branches` release; pinning one is a change to `Links` of its own. | |
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.

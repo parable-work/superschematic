@@ -587,7 +587,11 @@ for (const driver of drivers) {
       const moved = veto(() => invoke(engine, worker, 'Step', 's1', 'reserve', { meter: 'cpu', amount: 1 }));
       assert.deepEqual([moved.reason, moved.vetoCode], ['meter cpu has 60 reserved through Run r1; settle it before reserving through Run r2', 'scope_moved']);
       // checkReserve says so too: no reservation fits until the old one is settled.
-      assert.deepEqual(invoke(engine, worker, 'Step', 's1', 'checkReserve'), { fits: false, until: null, scopes: [{ schema: 'Run', id: 'r2' }] });
+      assert.deepEqual(invoke(engine, worker, 'Step', 's1', 'checkReserve'), {
+        fits: false,
+        until: null,
+        scopes: [{ schema: 'Run', id: 'r2', hears: [{ path: '/budget/cpu/remaining', crosses: 60 }, { path: '/links/pool' }] }],
+      });
       // The usage counts at the new scope; the part it draws is released at the old one, which holds it.
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 10 });
       assert.deepEqual([meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Run', 'r2'), meterOf(engine, 'Pool', 'p1')], [meter(0, 50, null), meter(10, 0, null), meter(0, 50, 100)]);
@@ -602,13 +606,18 @@ for (const driver of drivers) {
     test('it says whether reserve would fit, here and up the chain, lists the scopes it read, and changes nothing', () => {
       const { engine } = chain({ pool: { limit: 100 } });
       const check = (id = 's1', params: Record<string, unknown> = {}) => invoke(engine, worker, 'Step', id, 'checkReserve', params);
-      const scopes = [{ schema: 'Run', id: 'r1' }, { schema: 'Pool', id: 'p1' }];
-      assert.deepEqual(check(), { fits: true, until: null, scopes });
+      // Each scope comes with what the answer turns on there: the meter's
+      // remaining, at the amount, and the link up to the next scope.
+      const scopes = (amount: number) => [
+        { schema: 'Run', id: 'r1', hears: [{ path: '/budget/cpu/remaining', crosses: amount }, { path: '/links/pool' }] },
+        { schema: 'Pool', id: 'p1', hears: [{ path: '/budget/cpu/remaining', crosses: amount }] },
+      ];
+      assert.deepEqual(check(), { fits: true, until: null, scopes: scopes(60) });
       claim(engine);
       const seq = seqOf(engine, 'Step', 's2');
       // The pool has 40 of 100 left: s2's 60 does not fit, and only a change makes it.
-      assert.deepEqual(check('s2'), { fits: false, until: null, scopes });
-      assert.deepEqual(check('s2', { meter: 'cpu', amount: 40 }), { fits: true, until: null, scopes });
+      assert.deepEqual(check('s2'), { fits: false, until: null, scopes: scopes(60) });
+      assert.deepEqual(check('s2', { meter: 'cpu', amount: 40 }), { fits: true, until: null, scopes: scopes(40) });
       assert.equal(seqOf(engine, 'Step', 's2'), seq);
       assert.deepEqual(thrown(() => check('s2', { amount: 5 }), OperationParamsError).issues, [
         { path: '/amount', message: 'an amount is reserved of one meter, which meter names' },
@@ -621,11 +630,25 @@ for (const driver of drivers) {
     test("it counts a lease's reservation as settled once the lease is no longer active, as reserve settles it first", () => {
       const { engine, clock } = chain({ pool: { limit: 100 } });
       claim(engine);
-      assert.deepEqual(invoke(engine, other, 'Step', 's1', 'checkReserve'), { fits: false, until: null, scopes: [{ schema: 'Run', id: 'r1' }, { schema: 'Pool', id: 'p1' }] });
+      assert.deepEqual(invoke(engine, other, 'Step', 's1', 'checkReserve'), {
+        fits: false,
+        until: null,
+        scopes: [
+          { schema: 'Run', id: 'r1', hears: [{ path: '/budget/cpu/remaining', crosses: 60 }, { path: '/links/pool' }] },
+          { schema: 'Pool', id: 'p1', hears: [{ path: '/budget/cpu/remaining', crosses: 60 }] },
+        ],
+      });
       // Lapsed, not yet expired: the 60 still shows, and is counted as gone.
+      // Until it is settled the remaining it turns on is the amount less
+      // the 60, and after, the amount: the answer gives both.
       clock.advance(60000);
       assert.deepEqual(meterOf(engine, 'Pool', 'p1'), meter(0, 60, 100));
-      assert.equal((invoke(engine, other, 'Step', 's1', 'checkReserve') as { fits: boolean }).fits, true);
+      const lapsed = invoke(engine, other, 'Step', 's1', 'checkReserve') as { fits: boolean; scopes: Array<{ hears: unknown[] }> };
+      assert.equal(lapsed.fits, true);
+      assert.deepEqual(lapsed.scopes[1].hears, [
+        { path: '/budget/cpu/remaining', crosses: 0 },
+        { path: '/budget/cpu/remaining', crosses: 60 },
+      ]);
       assert.equal((invoke(engine, other, 'Step', 's2', 'checkReserve') as { fits: boolean }).fits, false);
     });
 
@@ -635,10 +658,19 @@ for (const driver of drivers) {
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 60 });
       engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
       // The pool, daily, has 40 left until the day turns; s2's own meter is not daily but empty.
+      // Where the daily meter keeps it out, its reserved and its limit decide whether the day lets it in:
+      // reserved at 41 or more, 100 less 60 and 1, keeps it out tomorrow too.
       assert.deepEqual(invoke(engine, other, 'Step', 's2', 'checkReserve'), {
         fits: false,
         until: DAY,
-        scopes: [{ schema: 'Run', id: 'r1' }, { schema: 'Pool', id: 'p1' }],
+        scopes: [
+          { schema: 'Run', id: 'r1', hears: [{ path: '/budget/cpu/remaining', crosses: 60 }, { path: '/links/pool' }] },
+          {
+            schema: 'Pool',
+            id: 'p1',
+            hears: [{ path: '/budget/cpu/remaining', crosses: 60 }, { path: '/budget/cpu/reserved', crosses: 41 }, { path: '/budget/cpu/limit' }],
+          },
+        ],
       });
       // s1's own meter, not daily, has 10 of 70 left: no day makes 60 fit.
       assert.deepEqual((invoke(engine, other, 'Step', 's1', 'checkReserve') as { until: unknown }).until, null);
