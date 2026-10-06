@@ -303,11 +303,41 @@ func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.N
 		return err
 	}
 
+	opts := closureBuild{
+		outputRoot:  outputRoot,
+		schemasRoot: schemasRoot,
+		profile:     flags.profile,
+		skipFormat:  flags.skipFormat,
+		apiLanguage: map[string]string{rootName: flags.apiLanguage},
+	}
+	if flags.scaffold {
+		opts.scaffoldRoot = filepath.Dir(schemasRoot)
+	}
+	return buildClosure(cmd, reg, names, services, closure, rootName, opts)
+}
+
+// closureBuild is how buildClosure builds.
+type closureBuild struct {
+	outputRoot  string
+	schemasRoot string
+	profile     bool
+	skipFormat  bool
+	// scaffoldRoot is the repository root under --scaffold, else empty.
+	scaffoldRoot string
+	// apiLanguage replaces a service's outputs.api.language, by service.
+	apiLanguage map[string]string
+}
+
+// buildClosure builds closure, a slice of the discovered services in
+// their order, for root: build --with-deps's closure, or stack dev's.
+// Discovery, ordering, the schema catalog, the shared TypeScript program,
+// the dependency schema cache and the per-service build are build-all's.
+func buildClosure(cmd *cobra.Command, reg *registry.Registry, names naming.Naming, services, closure []buildplan.Service, root string, opts closureBuild) error {
 	closureNames := make([]string, 0, len(closure))
 	for _, service := range closure {
 		closureNames = append(closureNames, service.Name)
 	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Resolved %d schema services for %s: %s\n", len(closure), rootName, strings.Join(closureNames, ", "))
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Resolved %d schema services for %s: %s\n", len(closure), root, strings.Join(closureNames, ", "))
 
 	// The catalog is build-all's: a document that references another service
 	// by name resolves it against every discovered service, not only the
@@ -320,21 +350,19 @@ func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.N
 	}
 
 	ctx := buildAllTaskContext{
-		outputRoot:     outputRoot,
-		schemasRoot:    schemasRoot,
-		repoRoot:       filepath.Dir(schemasRoot),
+		outputRoot:     opts.outputRoot,
+		schemasRoot:    opts.schemasRoot,
+		repoRoot:       filepath.Dir(opts.schemasRoot),
 		loadOpts:       []loader.Option{loader.WithSchemaCatalog(catalog), loader.WithNaming(names), loader.WithRegistry(reg)},
 		schemaCache:    newSharedSchemaCache(),
 		serviceByName:  serviceByName,
 		profileWriter:  cmd.ErrOrStderr(),
-		profileEnabled: flags.profile,
-		skipFormat:     flags.skipFormat,
+		profileEnabled: opts.profile,
+		skipFormat:     opts.skipFormat,
 		naming:         names,
 		registry:       reg,
 		loaded:         newLoadedServices(),
-	}
-	if flags.scaffold {
-		ctx.scaffoldRoot = filepath.Dir(schemasRoot)
+		scaffoldRoot:   opts.scaffoldRoot,
 	}
 	tsServiceDirs, err := tsServiceDirectories(closure)
 	if err != nil {
@@ -347,14 +375,11 @@ func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.N
 	// The build orders outputs: each API's server builds after the SDKs
 	// of the APIs it calls (docs/stack-model.md, section 3.3).
 	for _, step := range buildplan.Steps(closure) {
-		task := buildAllTask{service: step.Service}
-		if step.Service.Name == rootName {
-			task.apiLanguage = flags.apiLanguage
-		}
+		task := buildAllTask{service: step.Service, apiLanguage: opts.apiLanguage[step.Service.Name]}
 		if err := executeBuildAllStep(cmd, task, step.Stage, ctx); err != nil {
 			return err
 		}
 	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nBuilt %d schema services for %s\n", len(closure), rootName)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nBuilt %d schema services for %s\n", len(closure), root)
 	return nil
 }
