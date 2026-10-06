@@ -5,6 +5,9 @@ third_party/
 *.test
 *.out
 /bin/
+# `go build ./...` in the installed binary's module, one main package, writes
+# the binary beside it (make go-build and CI do).
+/cmd/superschematic/superschematic
 
 # Rust build output.
 target/

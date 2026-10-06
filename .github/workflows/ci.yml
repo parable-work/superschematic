@@ -1,15 +1,17 @@
 name: ci
 
-# Gates for the superschematic repository: DCO sign-off, nine Go modules (the
+# Gates for the superschematic repository: DCO sign-off, ten Go modules (the
 # compiler, the IR, the schema and http runtimes, the migration runner, the
-# gcp target, Cloudflare, Pulumi provisioner and Topcoat extensions: build,
-# vet, test
+# gcp target extension, the Cloudflare extension, the Pulumi provisioner
+# extension, the Topcoat extension and the installed binary,
+# cmd/superschematic: build, vet, test
 # with the database tests against a Postgres container and the provisioner's
 # against the pulumi CLI,
 # gofmt, golangci-lint, scalar catalog, schema-file types and core behavior
-# declarations drift, CLI smoke over the fixture corpus), the acme example
-# extension (smoke plus the no-core-edits check), the TypeScript authoring
-# packages, schema runtime, http runtime, engine, the engine's work-queue
+# declarations drift, CLI smoke over the fixture corpus with the core alone),
+# the acme example extension (smoke plus the no-core-edits check), the
+# TypeScript authoring packages, schema runtime, http runtime, engine, the
+# engine's work-queue
 # package and the engine example, the
 # Python schema runtime, the Rust http runtime, the version graph (the core
 # crate, its Go binding, the TypeScript package over its wasm build and the
@@ -285,7 +287,7 @@ jobs:
           GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
-          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat; do
+          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic; do
             echo "==> $m"
             # Packages that run cargo queue on its lock of the shared target
             # directory, and the wait counts against each package's timeout.
@@ -339,7 +341,7 @@ jobs:
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           make behaviors-check
 
-      - name: CLI smoke (no extension builds DB, API and General fixtures)
+      - name: CLI smoke (the core with no extension builds DB, API and General fixtures)
         if: github.event_name != 'pull_request'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
@@ -425,6 +427,15 @@ jobs:
         with:
           version: v${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: extensions/topcoat
+          install-mode: none
+
+      - name: golangci-lint (cmd/superschematic)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: cmd/superschematic
           install-mode: none
 
   acme:
@@ -524,7 +535,7 @@ jobs:
             examples/acme-shop/topcoat
 
       # The docs site's start-here, first-project and guide pages quote
-      # examples/acme-shop. This builds it with the core binary, compiles and
+      # examples/acme-shop. This builds it with the core alone, compiles and
       # tests the Go, TypeScript, Python and Rust code the pages show, runs
       # every SDK's client against shop-orders served in Go and in Rust,
       # tests the Topcoat app over shop-orders (built with the binary that
