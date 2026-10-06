@@ -208,7 +208,9 @@ func TestTheYAMLStackLoadsToTheSameIR(t *testing.T) {
 // IR and configs, the facts stacktest writes by hand for the services the
 // stack reaches. The hand-built facts leave shop-orders' language and
 // shop-db's dialects to the resolver's defaults, Go and postgres, which the
-// configs' outputs spell out.
+// configs' outputs spell out. Their operations are acme-shop's, where the
+// fixture's APIs declare one open query each, so the operations compared
+// are the fixture's.
 func TestServiceReadsStacktestsFacts(t *testing.T) {
 	reg := assemble(t)
 	c := registry.GenerateContext{Options: options(reg, t.TempDir()), Registry: reg}
@@ -224,6 +226,10 @@ func TestServiceReadsStacktestsFacts(t *testing.T) {
 	if len(got) != 3 {
 		t.Errorf("services = %v, want shop-api, shop-orders and shop-db", keys(got))
 	}
+	operations := map[string][]stack.Operation{
+		"shop-api":    {{Name: "ProductQueries.getProduct"}},
+		"shop-orders": {{Name: "OrderQueries.getOrder"}},
+	}
 	for _, want := range stacktest.AcmeShop() {
 		svc, ok := got[want.Name]
 		if !ok {
@@ -234,6 +240,9 @@ func TestServiceReadsStacktestsFacts(t *testing.T) {
 		}
 		if want.Kind == ir.SchemaKindDB && want.Dialects == nil {
 			want.Dialects = []string{registry.SQLDialectPostgres}
+		}
+		if want.Kind == ir.SchemaKindAPI {
+			want.Operations = operations[want.Name]
 		}
 		if want.Config != nil {
 			sort.Slice(want.Config.Fields, func(i, j int) bool { return want.Config.Fields[i].Name < want.Config.Fields[j].Name })

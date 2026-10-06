@@ -1795,7 +1795,8 @@ registrations.
    (`internal/registry/core_stack.go`, authored from
    `@superschematic/stack`), and its generator, `stack`
    (`internal/generator/stackgen`). Its `Service` reads a service's
-   `stack.Service` from the service's IR and its config's outputs, and
+   `stack.Service`, an API's operations for section 9.3's check included,
+   from the service's IR and its config's outputs, and
    `registry.Options.LoadDependencyConfig`, which every build sets, gives
    it each config.
 8. **CLI.** The `stack` command group.
