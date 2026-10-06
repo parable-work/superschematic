@@ -30,7 +30,9 @@ impl Row {
     /// diff and hash uses: each content column the row carries, and each one
     /// the descriptor declares that the row lacks, as null. A history image
     /// taken before its kind gained a column lacks it, where a live row
-    /// reads it as null; both hold the same content.
+    /// reads it as null; both hold the same content. The hash then leaves
+    /// out each declared content column that is null, so there the two are
+    /// both absent.
     pub fn content(&self, kind: &Kind) -> BTreeMap<String, Value> {
         let mut content: BTreeMap<String, Value> = self
             .value

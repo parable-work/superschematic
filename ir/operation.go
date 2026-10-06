@@ -28,6 +28,11 @@ type OperationSet struct {
 	// Individual operations can override these via their own Middleware field.
 	Middleware *MiddlewareConfig `json:"middleware,omitempty" yaml:"middleware,omitempty"`
 
+	// ServiceCallers is the set-level service clause (@requireService or
+	// @allowService on the class), inherited by every operation that declares
+	// none and is not @publicRoute (see [EffectiveServiceCallers]).
+	ServiceCallers *ServiceCallers `json:"serviceCallers,omitempty" yaml:"serviceCallers,omitempty"`
+
 	// Encrypted marks this entire operation set as requiring encrypted
 	// payload transport.
 	Encrypted bool `json:"encrypted,omitempty" yaml:"encrypted,omitempty"`
@@ -53,4 +58,61 @@ type MiddlewareConfig struct {
 
 	// Timeout is the maximum request processing time in seconds.
 	Timeout *int `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+}
+
+// ServiceCallersMode is how an operation admits a calling service (D37).
+type ServiceCallersMode string
+
+const (
+	// ServiceCallersRequire (@requireService) admits only a listed service.
+	// With a user clause, the service must forward an end user who meets
+	// it; without one, no end user is looked at.
+	ServiceCallersRequire ServiceCallersMode = "require"
+
+	// ServiceCallersAllow (@allowService) admits an end user who meets the
+	// operation's user clause, or a listed service with no end user, which
+	// then stands in for the user. It needs a user clause.
+	ServiceCallersAllow ServiceCallersMode = "allow"
+)
+
+// ServiceCallers is the service clause of an operation or an operation set
+// (@requireService or @allowService): which deployables may call it, beside
+// the end-user clause (Auth, Permissions, RequireOwnership). Section 9.3 of
+// docs/stack-model.md has the rules.
+//
+// When set on an [OperationSet], every operation of the set takes it unless
+// the operation declares its own, which replaces it, or is @publicRoute.
+// [EffectiveServiceCallers] applies that rule.
+type ServiceCallers struct {
+	// Mode is ServiceCallersRequire or ServiceCallersAllow.
+	Mode ServiceCallersMode `json:"mode" yaml:"mode"`
+
+	// From lists the API services whose servers may call, by service name
+	// (the handles in @requireService({ from })). Empty means every server
+	// with a calls edge to the API in the stack: from narrows the edges and
+	// never widens them.
+	From []string `json:"from,omitempty" yaml:"from,omitempty"`
+}
+
+// EffectiveServiceCallers returns the service clause that applies to op in
+// set: op's own, else the set's unless op is @publicRoute, which opens its
+// route even in a set with a service clause. Nil means no service clause.
+func EffectiveServiceCallers(set *OperationSet, op *FieldDef) *ServiceCallers {
+	if op == nil {
+		return nil
+	}
+	if op.ServiceCallers != nil {
+		return op.ServiceCallers
+	}
+	if set == nil || op.Public {
+		return nil
+	}
+	return set.ServiceCallers
+}
+
+// HasUserClause reports whether the operation requires an end user: @auth
+// (an Authenticated set reaches its operations as Auth), @requirePermission
+// or @requireOwnership.
+func (f *FieldDef) HasUserClause() bool {
+	return f.Auth || len(f.Permissions) > 0 || f.RequireOwnership
 }

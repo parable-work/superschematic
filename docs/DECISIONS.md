@@ -1528,6 +1528,25 @@ between schema epochs (`Materialize` refuses a newer epoch). D19 rules out a
 parent of several types and moves the engine into a runtime in every
 language.
 
+### D17, amended: a null content column hashes as absent
+
+`content_hash` covers each kind's content columns, and D32's amendment "a
+partial row and an absent content column" has the core read a content
+column a row lacks as null wherever it compares, merges, diffs or hashes
+content. The hashed document therefore held every content column the
+descriptor declares, null where a row lacked it. When a schema version
+added a field to a kind, every row written before read the field as null,
+so every commit recorded before materialized to another hash than the one
+it stored, while `history` and the commit's own record still returned the
+stored one. A human decided the rule below on 2026-10-05.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The content hash leaves out each content column the descriptor declares whose value is null, so a declared content column that is null hashes exactly as an absent one. A content column a row carries that the descriptor does not declare is hashed as the row holds it, null included, as compare, merge and diff read it, so two trees hash the same exactly when their diff is empty. Only a row's own members are left out: a null inside a `json` value is content and is hashed, and a live row whose every content column is null is still a row. A value moves the hash as before, a `DEFAULT` that Postgres writes into the existing rows when a column is added with one included. | Keeping null members in the hashed document, which moves every older commit's materialized hash whenever a version adds a field; leaving out every null member, declared or not, after which a null in a column the descriptor does not declare hashes as its absence while `diff` reports the two as a change |
+| A version that adds a field must not move older commits' hashes, as adding a kind already moves none. Every row written before the field reads it as null or lacks it, so a commit recorded before the gained column now materializes to the hash it recorded, under the descriptor that declares the column as under the one before, and `materialize`, `released` and `history` give it one hash. | Materializing a commit with the descriptor of its own version, which every read would have to look up per commit and which still gives a ref and its head commit two hashes once the field is added; rewriting the stored hashes when a version adds a field, which breaks "a commit is written once" |
+| This refines how the equal-as-null rule of D32's amendment "a partial row and an absent content column" is hashed. For a declared content column, absent and null are still one value when the core compares, merges and diffs, and those do not change; only their shared hashed form does, from present as null to left out. A column the descriptor does not declare had no shared form and gets none: absent and null stay two values to every operation. For the hash, this reverses that amendment's choice that null fills in for absent rather than nulls dropping out, so that no hash over the complete rows Postgres stores changes: nulls now drop out, so a hash over complete rows that hold a declared content column null moves, once, at this change. It also replaces that amendment's consequence that a tree hashes afresh once its kind gains a column, and that a commit's recorded hash is its tree's hash only under the descriptor it was recorded with: a commit recorded before a gained column now materializes to the hash it recorded. | |
+| Only a tree in which a live row holds a declared content column null, or lacks one, hashes differently from before this change; every other tree keeps its hash. No release has shipped, so nothing migrates, as D19 held for its own hash change. | |
+
 ## D18. A distribution's field directives live in its extension slot
 
 `ir.FieldDef` carried ten per-field directives from the source tree that
@@ -3306,6 +3325,51 @@ and YAML with no `dependencies` and gets the same three references, and
 stack reaches after the stack's depfile is written, as a build writes it.
 The stackgen fixtures and the sketch in section 4.1 of
 `docs/stack-model.md` no longer list `dependencies`.
+
+### D37, amended: what building it settled
+
+D37 recorded the design before any of it was built. Building it in the
+three runtimes, the three server generators, the four SDKs, the loader
+and the stack resolver settled what the design left to the build, and
+changed three of its sentences.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Go and Rust servers have the service step only when an operation declares a service clause, and then on every route: `Config.ServiceAuthenticator` and `Implementations.service_authenticator` exist only then. The TypeScript router takes `authenticateService` for any schema, since the option is the runtime's and adds nothing to the generated code. This replaces D37's sentence that a server with no clause may still be given one. | A service authenticator on every Go and Rust server, which changes every generated server and its goldens for a step most schemas do not use. |
+| The IR records a clause where it is written, on the operation or its set, as it records the middleware trio, and `ir.EffectiveServiceCallers(set, op)` gives the rule that applies. Folding the set's clause into each operation would lose the set's declaration when a data form is written back. | Recording only the effective rule, as D37 first said. |
+| The shared rule (`verify.ServiceCallersConflict`, in the TypeScript reader and the verify pass) also refuses a set's clause that reaches a `@webhook` or `@hmacVerified` operation, and a `@requireService` operation whose `@mcp` publishes a tool. No end user's agent can call such a tool, so the record says so with `hidden`. | Leaving the tool out silently, as the tool manifest still does for a hidden one. |
+| In `@superschematic/api`, `from` is a list of `ServiceHandleRef`, a structural type whose `kind` is the literal `"API"`. tsc refuses a DB handle, and the registry checks the kind again for a handle cast past it. | Importing `ServiceHandle` from the config package, which would add a dependency between authoring packages that declare none. |
+| The resolver's check has the code `unreachable-edge`. It reads each API's operations from `stack.Service.Operations`, which `stack.OperationsOf(schema)` builds from the IR. An API given no operations fails every edge to it, so whatever builds the resolver's input from loaded schemas must fill them: the Stack kind's `stackgen.Service` does. | |
+| The verifiers agree on rules D37 did not state, and the parity vectors pin most of them: an empty or repeated `Service-Authorization` header, a padded base64url segment, an ES256 signature in DER form and an empty `kid` are 401; a token without the subject claim is 403. A callee config with a private key, an RSA key under 2048 bits, or an issuer two entries share is refused when the authenticator is built. A key set is fetched at most once a minute, so a key endpoint that is down answers 503 for up to a minute. The 503 code is the existing `service_unavailable`. | |
+| The Go verifier and the Go and TypeScript sources use only their standard libraries. The Rust crate verifies with `ring`, which also signs the key-pair token. Its default dependencies fetch nothing: the optional `http-client` feature adds the default key fetcher and the Google metadata client, and without it a deployment passes a `KeyFetcher`. | `jsonwebtoken`, whose own validation would have to be turned off, and which does not read the `Ed25519` algorithm name. RustCrypto's `rsa`, which carries an unfixed advisory. |
+| A TypeScript SDK method's last parameter, which took an `AbortSignal`, now also takes `{ signal, forward }`, so every call site keeps working. A `forward` without a token sends no `Authorization`, never the client's own token. | A new trailing parameter, which leaves an optional parameter before another. |
+| On a Go API that is not public, `@allowService` with only `@auth` admits anyone the service step does not admit, since such an API's `@auth` routes check nothing (D15, amended). A `@requirePermission` still answers 401 without a caller there. | Refusing `@auth` with a service clause on a Go API that is not public, which would make the schema depend on the server's language. |
+
+The Kubernetes API server serves its keys over TLS signed by the
+cluster's own CA, which the runtimes' default HTTP clients do not trust.
+Until the Kubernetes platform lands, a deployment passes a key fetcher or
+HTTP client that trusts it. Section 9.9 of `docs/stack-model.md` lists
+that question with the three D37 left open.
+
+`runtime/http/testdata/serviceauth_parity.json` holds 85 vectors, which
+the Go, TypeScript and Rust runtimes pass. Each server generator compiles
+`fixture-service-auth-api` and runs requests through it, under Go, Bun
+and cargo, and output for a schema without the decorators is unchanged
+byte for byte. `from` declares its handles identities
+(`DecoratorSpec.Identities`, D41): naming a caller adds no reference, so
+two APIs may list each other, and the callee's cache key follows only the
+caller's sentinel file, not its schema. The stack-model pieces that do
+not exist yet are not built: connectors writing the callee config, the
+generated entrypoint, key rotation in the resource graph, and
+`stack dev`'s keys.
+
+D43's `OperationInfo` carries no service clause, so `OperationInfo::admit`
+applies only the end-user step: an in-process caller is the service's own
+code, not another deployable, and has no service credential to present.
+A `@requireService` operation run in-process is not refused. Whether it
+should be stays open.
+
+The rule is reversible until the first release.
 
 ### D30, amended: the installed binary links the official extensions, and the core alone moves under `internal/`
 

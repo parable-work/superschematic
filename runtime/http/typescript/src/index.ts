@@ -9,8 +9,10 @@ runtime/http/go and runtime/http/rust and keeps the same wire contract:
 
 Everything here is schema-agnostic. The generated package owns the operation
 table (paths, parameter specs, strict body parsers, auth requirements); this
-module owns how those specs are applied to one request. ./hono.ts binds it to
-Hono; nothing in this file imports a framework.
+module owns how those specs are applied to one request, and the service
+caller's verifier and credential sources (D37), which import nothing from
+node: so they run on Workers too. ./hono.ts binds it to Hono; nothing in
+this file imports a framework.
 */
 
 export { ErrorCode, HttpProblem, problemBody, problemResponse, statusText } from './problem.js';
@@ -24,6 +26,8 @@ export {
   notFound,
   notImplemented,
   payloadTooLarge,
+  serviceForbidden,
+  serviceUnauthorized,
   serviceUnavailable,
   tooManyRequests,
   unauthorized,
@@ -37,4 +41,24 @@ export { decodeJsonParam, decodeListOfLists, decodeMap, decodeParam, decodeParam
 export type { ParamKind, ParamSpec, ParamLocation, ParamSource, ScalarConstraints } from './params.js';
 export { authorize, covers, hasAnyPermission } from './auth.js';
 export type { Authenticator, PermissionMatcher, Principal } from './auth.js';
-export type { OperationAuth, OperationInput, OperationSpec, RequestContext } from './operation.js';
+export { authorizeService, serviceAuthenticator } from './serviceauth.js';
+export type {
+  PublicJwk,
+  ServiceAuthAlgorithm,
+  ServiceAuthConfig,
+  ServiceAuthIssuer,
+  ServiceAuthenticator,
+  ServiceAuthenticatorOptions,
+  ServiceCaller,
+  ServiceCallerConfig,
+} from './serviceauth.js';
+export { googleIdTokenSource, signedTokenSource, tokenFileSource } from './credentials.js';
+export type {
+  Ed25519PrivateJwk,
+  GoogleIdTokenSourceOptions,
+  ServiceTokenSource,
+  SignedTokenClaims,
+  SignedTokenSourceOptions,
+  TokenFileSourceOptions,
+} from './credentials.js';
+export type { OperationAuth, OperationInput, OperationServiceCallers, OperationSpec, RequestContext } from './operation.js';

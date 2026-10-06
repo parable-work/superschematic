@@ -183,6 +183,17 @@ per-request tokens and a one-shot refresh on 401. Each namespace is a
 field of the SDK struct: `ProductQueries` and `ProductMutations` both live
 on `sdk.product`, so a call is `sdk.product.get_product(id, None).await`.
 
+`service_credential: Some(ServiceCredential::new(source))` is the calling
+service's own credential
+([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+`source(fresh)` returns it, and the SDK sends `Bearer <token>` in
+`Service-Authorization`, or in each of `headers`, on every request. A 401
+whose code is `service_unauthorized` calls `source(true)` once and retries,
+without the end-user refresh. A server forwards its own caller per call
+with `RequestOptions::forward(ctx.bearer_token())`: the call sends that
+token as `Authorization`, or none for `None`, instead of the configured
+one, and does not refresh it.
+
 An operation without an input type takes its arguments as one input
 struct, `<Operation>Input`, whose fields are sent under the arguments'
 names as the schema spells them (`shadeByName`, not `shade_by_name`). On
@@ -354,6 +365,20 @@ vocabulary, such as a root permission. An `Err` from `authenticate`
 answers with that error, for a failure that is not the caller's. The
 handler puts the caller on `ctx.principal`, where an `@requireOwnership`
 implementation checks that it owns the resource.
+
+When an operation declares `@requireService` or `@allowService` (D37),
+the crate also has `Implementations.service_authenticator`, an
+`Arc<dyn ServiceAuthenticator>`. It reads the calling service from
+`Service-Authorization`; `JwtServiceAuthenticator::new(config)` is the
+standard one, over the callee config the stack writes. Every route of
+such a crate runs the service step after the body limit and before the
+end-user check, and the handler puts the caller on `ctx.service_caller`.
+A service listed by an `@allowService` operation stands in for the end
+user, so there `ctx.principal` may be `None`. The refusals are 401
+`service_unauthorized`, 403 `service_forbidden` and 503
+`service_unavailable`. Without the `http-client` feature the
+authenticator fetches no keys over the network: pass a `KeyFetcher`
+with `with_key_fetcher`, or turn the feature on.
 
 `@rateLimit`, `@bodyLimit` and `@timeout` apply as in the Go server. The
 rate limit counts each client's requests to the route per minute, in

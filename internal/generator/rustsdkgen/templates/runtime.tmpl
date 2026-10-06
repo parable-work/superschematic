@@ -177,13 +177,39 @@ pub type RequestHook =
 pub type RequestInterceptor =
     Arc<dyn Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Send + Sync>;
 
+/// The end user a call forwards, from the request a server is serving
+/// (D37). Set by [`RequestOptions::forward`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForwardedUser {
+    /// The bearer token of the request being served; `None` when it has no
+    /// end user.
+    pub bearer_token: Option<String>,
+}
+
 #[derive(Clone, Default)]
 pub struct RequestOptions {
     pub timeout_ms: Option<u64>,
     pub request_hook: Option<RequestHook>,
+    /// Forward this end user instead of the configured auth.
+    pub forward: Option<ForwardedUser>,
 }
 
 impl RequestOptions {
+    /// Options that forward the end user of the request being served, as
+    /// `RequestOptions::forward(ctx.bearer_token())`: the call sends
+    /// `Authorization: Bearer <token>`, or no `Authorization` when `token`
+    /// is `None`, instead of the configured auth, and does not refresh on a
+    /// 401. Other options combine by struct update:
+    /// `RequestOptions { timeout_ms: Some(5_000), ..RequestOptions::forward(token) }`.
+    pub fn forward(token: Option<&str>) -> Self {
+        Self {
+            forward: Some(ForwardedUser {
+                bearer_token: token.map(str::to_string),
+            }),
+            ..Self::default()
+        }
+    }
+
     /// Options that set one routing header (a scope such as an account or
     /// workspace header) and, when `auth_token` is given, a per-request
     /// `Authorization: Bearer` header. Batch services pass their
@@ -207,6 +233,7 @@ impl RequestOptions {
                     request
                 }
             })),
+            forward: None,
         }
     }
 }

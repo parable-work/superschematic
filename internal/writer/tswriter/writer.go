@@ -125,6 +125,7 @@ var symbolPackages = map[string]string{
 	"bodyLimit": "@superschematic/api", "manualRouteRegistration": "@superschematic/api",
 	"rateLimit": "@superschematic/api", "requireOwnership": "@superschematic/api",
 	"requirePermission": "@superschematic/api", "rest": "@superschematic/api",
+	"requireService": "@superschematic/api", "allowService": "@superschematic/api",
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"mcp": "@superschematic/api",

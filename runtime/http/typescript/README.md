@@ -20,7 +20,8 @@ Two entry points:
   envelope and `OperationResult` for a non-200 status, path, query and
   body parameter decoding from `ParamSpec`s (`Identity.UUID` and
   `Temporal.DateTime` go through superscalar; primitives stay local), the
-  permission gate, and a token-bucket rate limiter with a pluggable store.
+  permission gate, the service-caller verifier and credential sources
+  (below), and a token-bucket rate limiter with a pluggable store.
   `decodeParam` reads a path or query value from its strings; a query
   list accepts repeated keys and comma-separated values.
   `decodeJsonParam` reads every body parameter from its JSON value, with
@@ -46,8 +47,8 @@ Two entry points:
   `path`. A list-of-lists result is sent with every nullish list as `[]`.
 - `@superschematic/http-runtime/hono`, the Hono adapter. `mountOperation`
   runs the pipeline for one operation, in the Go router's order: request
-  id, the webhook verifier, `@rateLimit`, `hono/body-limit`,
-  `hono/bearer-auth` and the permission gate, then under `@timeout`
+  id, the webhook verifier, `@rateLimit`, `hono/body-limit`, the service
+  step, `hono/bearer-auth` and the permission gate, then under `@timeout`
   parameter decoding, JSON parsing, the generated strict body parser and
   the implementation, and the envelope. It maps every failure to the
   problem envelope. `@rateLimit` keys a client by the transport's peer
@@ -85,10 +86,51 @@ runtime applies that requirement. It does not decide who the caller is.
   router options: a root permission, roles resolved elsewhere. This is the
   counterpart of the Go runtime's `RequirePermissionsWith`.
 
-Identity models, token formats and service-to-service verification belong
-to the project's own package, next to the auth provider it registers for the
-Go server. That package supplies the `Authenticator` and, if it needs one,
-the `PermissionMatcher`.
+Identity models and token formats of end users belong to the project's own
+package, next to the auth provider it registers for the Go server. That
+package supplies the `Authenticator` and, if it needs one, the
+`PermissionMatcher`. A calling service is not an end user: it has its own
+credential and step (D37).
+
+## Service callers
+
+A server that another server in a stack calls learns which deployable is
+calling from a short-lived JWT in `Service-Authorization: Bearer <token>`,
+beside the end user's own `Authorization` (D37, section 9 of
+`docs/stack-model.md`).
+
+- The router takes `authenticateService`, a `ServiceAuthenticator`
+  (`(ctx) => Promise<ServiceCaller | null>`), beside `authenticate`. With
+  one, every route verifies a service credential that is present and puts
+  the caller (`deployable`, the APIs it `serves`, the credential's
+  `subject`) on `ctx.serviceCaller`. A credential that does not verify is
+  401 `service_unauthorized`, an identity the config does not list 403
+  `service_forbidden`, keys that cannot be fetched 503
+  `service_unavailable`.
+- The operation table's `service` (`{ mode: 'require' | 'allow', from }`,
+  from `@requireService` and `@allowService`) is applied right after,
+  before the end-user step: `require` refuses a missing caller (401) or one
+  `from` does not list (403), then runs the user clause if there is one;
+  `allow` admits a listed caller with no end-user step at all, and sends
+  anyone else through the user clause. An empty `from` lists every caller.
+  Without `authenticateService`, a route with `service` answers 401
+  `service_unauthorized` and other routes ignore the header.
+- `serviceAuthenticator(config, { now, fetchKeys, readFile })` is the
+  standard authenticator over the JSON config every runtime reads: per
+  issuer, the audience, the algorithms (`RS256`, `ES256`, `EdDSA`), the
+  keys or a `jwksUrl` (cached per URL, fetched again for an unknown kid or
+  after an hour, at most once a minute), the claim that names the caller
+  and the callers. It verifies with WebCrypto only.
+- The credential sources a calling server passes to its SDK's
+  `serviceCredential.token`: `googleIdTokenSource(audience)` (Cloud Run's
+  metadata server), `tokenFileSource(path)` (a Kubernetes projected token)
+  and `signedTokenSource(privateJwk, { issuer, subject, audience })` (an
+  edge's Ed25519 key). Each caches its token; `token(true)` gets a new one.
+
+None of this imports from `node:`, so it runs on Node.js 22.13 and later,
+Bun and Cloudflare Workers. A token file (`tokenFileSource`,
+`jwksBearerTokenFile`) is read through `process.getBuiltinModule` on
+Node.js and Bun; elsewhere pass `readFile`.
 
 ## Using it
 
