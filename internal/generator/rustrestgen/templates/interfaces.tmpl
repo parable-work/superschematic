@@ -103,11 +103,19 @@ impl Implementations {
     /// Checks that `webhook_verifiers` has a verifier for every @hmacVerified
     /// provider of the schema.
     pub fn validate_implementations(&self) -> Result<(), String> {
+{{- if eq (len .WebhookProviders) 1 }}
+        // One provider is no loop: clippy's single_element_loop.
+        let provider = {{ rustString (index .WebhookProviders 0) }};
+        if !self.webhook_verifiers.contains_key(provider) {
+            return Err(format!("Implementations.webhook_verifiers for provider {provider} is required"));
+        }
+{{- else }}
         for provider in [{{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}{{ rustString $p }}{{ end }}] {
             if !self.webhook_verifiers.contains_key(provider) {
                 return Err(format!("Implementations.webhook_verifiers for provider {provider} is required"));
             }
         }
+{{- end }}
         Ok(())
     }
 }
