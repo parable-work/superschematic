@@ -852,20 +852,29 @@ func toGoPackageName(service string) string {
 	return b.String()
 }
 
-// generateRustAPI emits the Rust REST API server and route scaffolds. The
-// Rust writer does not emit env config; the standalone env path covers it.
-func (r run) generateRustAPI() error {
+// RustAPIOf is the Rust REST API crate the api generator writes for the
+// service c generates, as generateRustAPI builds it: nil for a schema
+// without operations. An extension that writes Rust beside it reads its
+// operations, their Args structs and result types from here instead of
+// deriving them again.
+func RustAPIOf(c registry.GenerateContext) (*rustrestgen.APIOutput, error) {
+	return run{c}.rustAPI()
+}
+
+// rustAPI is the Rust REST API crate of the run's schema, nil without
+// operations.
+func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 	var apiOutput *apigen.APIOutput
 	if err := r.measure("output.api.prepare", func() error {
 		var err error
 		apiOutput, err = r.APIOutput()
 		return err
 	}); err != nil {
-		return err
+		return nil, err
 	}
 	deps, err := r.loadDependencySchemas()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	output, err := rustrestgen.Generate(r.Schema, apiOutput, rustrestgen.Options{
 		SchemaName:   r.Config.Name,
@@ -877,13 +886,26 @@ func (r run) generateRustAPI() error {
 		Clock:        r.Options.Clock,
 	})
 	if err != nil {
-		return fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
+		return nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
+	}
+	if output == nil {
+		return nil, nil
+	}
+	if output.HasEnvConfig, err = r.hasEnvConfig(); err != nil {
+		return nil, err
+	}
+	return output, nil
+}
+
+// generateRustAPI emits the Rust REST API server and route scaffolds. The
+// Rust writer does not emit env config; the standalone env path covers it.
+func (r run) generateRustAPI() error {
+	output, err := r.rustAPI()
+	if err != nil {
+		return err
 	}
 	if output == nil {
 		return r.generateEnvConfig(LangRust)
-	}
-	if output.HasEnvConfig, err = r.hasEnvConfig(); err != nil {
-		return err
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)

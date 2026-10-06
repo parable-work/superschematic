@@ -28,6 +28,7 @@
 use std::collections::HashMap;
 
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::{Map, Number, Value};
 
 use crate::schema::{
@@ -332,6 +333,27 @@ impl ParamSpec {
             body.and_then(|body| body.get(self.name)),
         )?;
         typed(ParamLocation::Body, self, value)
+    }
+
+    /// Checks a value a caller built for the parameter (an `Args` field), not
+    /// one a request carries, as the router checks a request's: its JSON is
+    /// decoded at `location`, so a value the router would refuse is refused
+    /// with the same 400. `None` is an absent parameter.
+    pub fn check_value<T: Serialize + ?Sized>(
+        &self,
+        location: ParamLocation,
+        value: &T,
+    ) -> Result<(), ApiError> {
+        let value = serde_json::to_value(value).map_err(|_| {
+            refuse(
+                location,
+                self,
+                "does not match the declared type",
+                None,
+                None,
+            )
+        })?;
+        decode_json_param(location, self, Some(&value)).map(drop)
     }
 
     /// An optional single `Generic.JSON` body parameter, whose null is a
@@ -1167,6 +1189,32 @@ mod tests {
                 .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
                 .collect(),
         )
+    }
+
+    #[test]
+    fn a_built_value_is_checked_as_a_request_value_is() {
+        static NAME_PATTERN: Pattern = Pattern::new("^[a-z]+$");
+        static NAME: ParamSpec = ParamSpec::new("name", ParamKind::String)
+            .required()
+            .pattern(&NAME_PATTERN)
+            .scalar(ScalarConstraints::new("Identity.Name").min_length(2));
+        static TAGS: ParamSpec = ParamSpec::new("tags", ParamKind::String)
+            .array()
+            .list_max(1);
+        NAME.check_value(ParamLocation::Query, "ab").unwrap();
+        assert_eq!(
+            refusal(NAME.check_value(ParamLocation::Query, "a")),
+            refusal(NAME.query::<String>(&query(&[("name", "a")])))
+        );
+        assert_eq!(
+            refusal(NAME.check_value(ParamLocation::Path, "AB")),
+            refusal(NAME.path::<String>(&HashMap::from([("name".to_owned(), "AB".to_owned())])))
+        );
+        TAGS.check_value(ParamLocation::Body, &None::<Vec<String>>)
+            .unwrap();
+        let details = refusal(TAGS.check_value(ParamLocation::Body, &Some(vec!["a", "b"])));
+        assert_eq!(details["parameter"], "tags");
+        assert_eq!(details["location"], "body");
     }
 
     #[test]
