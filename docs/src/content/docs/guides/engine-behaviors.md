@@ -710,9 +710,9 @@ call("released");                                                 // { release, 
   `revert`, `releaseCommit` and `discard` write; `refs`, `releases` (the
   release log), `compose`, `materialize`, `released`, `diff` and
   `history` read. Each is an operation of the instance, so the access
-  policy is asked `write` or `read` with its name, and who may merge or
-  release is the deployment's to decide. Each write appends the
-  instance's operation event.
+  policy is asked `write` or `read` with its name, and who may `merge`
+  or `releaseCommit` is the deployment's to decide. Each write appends
+  the instance's operation event.
 - **Refs, commits and versions.** An operation names refs and commits by
   id, and every write through a ref names the ref's version, which the
   write moves. One that is not the instance's is `invalid_argument`; the
