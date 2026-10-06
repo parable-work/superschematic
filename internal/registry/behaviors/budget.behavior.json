@@ -127,13 +127,26 @@
             "type": ["integer", "null"]
           },
           "scopes": {
-            "description": "The enclosing scopes the answer read, innermost first: a change of one can change it.",
+            "description": "The enclosing scopes the answer read, innermost first, each with the values of it the answer turns on: a move of one can change it.",
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["schema", "id"],
-              "properties": { "schema": { "type": "string" }, "id": { "type": "string" } }
+              "required": ["schema", "id", "hears"],
+              "properties": {
+                "schema": { "type": "string" },
+                "id": { "type": "string" },
+                "hears": {
+                  "description": "The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope's data, and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["path"],
+                    "properties": { "path": { "type": "string" }, "crosses": { "type": "number" } }
+                  }
+                }
+              }
             }
           }
         }

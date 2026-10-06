@@ -1,6 +1,6 @@
 {
   "name": "Queue",
-  "description": "Makes the type's instances claimable work. claim checks that an instance can be claimed, takes its lease and moves its Workflow status from a claimable state to the claimed one, in one transaction; claimNext claims the first instance that can be claimed, highest priority first, then oldest, and countClaimable counts them. Candidates come from copies of what a claim checks, kept current as the instance and what it waits on change, so work that cannot be claimed now (blocked, over budget, exhausted) is not tried. Requires Workflow and Lease.",
+  "description": "Makes the type's instances claimable work. claim checks that an instance can be claimed, takes its lease and moves its Workflow status from a claimable state to the claimed one, in one transaction; claimNext claims the first instance that can be claimed, highest priority first, then oldest, and countClaimable counts them. Candidates come from copies of what a claim checks, kept current as the instance and what it waits on change, so work that cannot be claimed now (blocked, over budget, exhausted, pinned to a superseded revision) is not tried. Requires Workflow and Lease.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -29,6 +29,17 @@
           "to"
         ],
         "type": "object"
+      },
+      "excludeStale": {
+        "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
+        "items": {
+          "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+          "type": "string"
+        },
+        "maxItems": 16,
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
       },
       "match": {
         "description": "The type's own top-level scalar fields claimNext and countClaimable may filter on, by equality with a value or membership in a list of values.",
@@ -64,7 +75,7 @@
   "operations": [
     {
       "name": "claim",
-      "description": "Claims the instance for the caller: its status must be one of the claimable states and no blocker may hold it up; then it takes the lease and moves the status to the claimed state, or does neither.",
+      "description": "Claims the instance for the caller: its status must be one of the claimable states, no blocker may hold it up, and no link excludeStale names may be stale; then it takes the lease and moves the status to the claimed state, or does neither.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -108,7 +119,7 @@
     },
     {
       "name": "claimNext",
-      "description": "Claims the first instance of the schema the caller can claim, highest priority first, then oldest, skipping each one whose claim is refused (vetoed, conflict or forbidden), up to maxCandidates; null when none can be claimed. An instance its copies show blocked, at maxExpiries, assigned to another principal, over its budget or exhausted is no candidate.",
+      "description": "Claims the first instance of the schema the caller can claim, highest priority first, then oldest, skipping each one whose claim is refused (vetoed, conflict or forbidden), up to maxCandidates; null when none can be claimed. An instance its copies show blocked, at maxExpiries, assigned to another principal, over its budget, exhausted or pinned to a superseded revision is no candidate.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -248,7 +259,7 @@
     },
     {
       "name": "refresh",
-      "description": "Recomputes what claimNext reads of the instance: whether its status is claimable, whether a blocker holds it up, its assignee, its priority, whether its lease has reached maxExpiries, and until when Budget's checkReserve or Retries' exhaustion keeps it out. Queue invokes it itself when a blocker or an enclosing budget scope changes.",
+      "description": "Recomputes what claimNext reads of the instance: whether its status is claimable, whether a blocker holds it up, its assignee, its priority, whether its lease has reached maxExpiries, and until when Budget's checkReserve, Retries' exhaustion or a stale pinned link keeps it out. Queue invokes it itself when a blocker's status, or a value of an enclosing budget scope or a pinned link's target, moves in a way that changes them.",
       "paramsSchema": {
         "additionalProperties": false,
         "type": "object"
@@ -268,6 +279,10 @@
     {
       "code": "blocked",
       "description": "A blocker of Dependencies holds the instance up."
+    },
+    {
+      "code": "stale_link",
+      "description": "A link excludeStale names is pinned to a revision its target has moved past; details.links names them."
     },
     {
       "code": "claim_required",

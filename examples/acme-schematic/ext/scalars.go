@@ -9,7 +9,7 @@ import (
 
 // PhotoScalar is the scalar the extension adds to the core set: a product
 // photo, uploaded as a multipart file part. Its TypeScript brand is
-// Acme.Photo in @acme/schema.
+// Acme.Photo in Package, @acme/schema.
 const PhotoScalar = "Acme.Photo"
 
 // PhotoUpload is the upload metadata the extension declares on PhotoScalar.
@@ -25,7 +25,11 @@ var PhotoUpload = registry.ScalarUpload{
 // registerScalars replaces the core scalar catalog with the core rows plus
 // PhotoScalar. The superscalar row type has no upload fields, so the upload
 // metadata travels beside the rows through ScalarCatalogWithUploads; the
-// loader hydrates it onto every schema that references Acme.Photo.
+// loader hydrates it onto every schema that references Acme.Photo. Nor has
+// it a field for the npm package a brand lives in, so the catalog names
+// Package for the Acme namespace through ScalarCatalogWithNpmPackages:
+// format --to=ts imports Acme from it, where the core's scalar library has
+// no Acme.
 func registerScalars(r *registry.Registry) error {
 	core := registry.CoreScalars()
 	rows := make(map[string]*scalars.ScalarMetadata, len(core.Names())+1)
@@ -48,5 +52,9 @@ func registerScalars(r *registry.Registry) error {
 	if err != nil {
 		return err
 	}
-	return r.RegisterScalars(Name, catalog)
+	named, err := registry.ScalarCatalogWithNpmPackages(catalog, map[string]string{"Acme": Package})
+	if err != nil {
+		return err
+	}
+	return r.RegisterScalars(Name, named)
 }

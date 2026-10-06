@@ -11,7 +11,7 @@ scalars:
     languagePrimitive: object
   Media.Photo:
     name: Media.Photo
-    languagePrimitive: object
+    languagePrimitive: string
     fileUpload:
       maxSize: 1048576
       allowedTypes: [image/png]

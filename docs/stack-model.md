@@ -2172,12 +2172,11 @@ registrations.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
   Built: it is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
-  cloudflare.Extension{}, pulumi.Extension{ProviderVersions:
-  map[string]string{"gcp": gcp.ProviderVersion, cloudflare.Package:
-  cloudflare.ProviderVersion}})`, so the provisioner installs the gcp and
-  cloudflare providers at the releases whose schemas the gcp target and
-  the Cloudflare DNS platform check against. An engineer installs one
-  binary and gets every official target and DNS platform. `extensions/topcoat`
+  pulumi.Extension{ProviderVersions: map[string]string{"gcp":
+  gcp.ProviderVersion}})`, so the provisioner installs the gcp provider at
+  the release whose schemas the target checks against.
+  `extensions/cloudflare` joins the list when it lands. An engineer
+  installs one binary and gets every official target. `extensions/topcoat`
   is not linked (D44); its own binary links it. A release builds this
   binary and tags the module with the others.
 
