@@ -3225,3 +3225,22 @@ drives a Topcoat app: the form renders its rules as attributes, a post
 that breaks a rule or that the operation refuses renders again with 422,
 the values as sent and each field's errors, and a valid post signs up
 and redirects.
+
+### D44, amended: a procedure per operation, its refusal a record
+
+Browser code calls a server function through a Topcoat procedure. An
+`Err` from a procedure reaches the browser as a bare 500, so a 400's field
+errors, a 401 or a 403 would be lost there.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each mounted operation is a `#[procedure]` on `/_superschematic/<service>/<namespace>/<operation>`, a path that does not change with the build, registered by the app's `.discover()`. | Topcoat's default path, a hash of the item that changes when it moves; registering in `<service>(...)`, which panics beside `.discover()` |
+| The procedure takes `<Op>ArgsRecord`, a field per argument by its IR type (as records hold it) and the input as its type's record. It answers `Ok(Result<OutputRecord, ProblemRecord>)`: the route's status, code, detail and each refused field's path, rule and message, as data. | Typed arguments, which a record cannot hold (UUIDs, timestamps, maps); an `Err`, which the browser cannot read |
+| `to_args()` writes each record field as the JSON a request carries and decodes it into the `Args` struct, so a value that does not decode is the router's 400. The operation then runs in-process (D43). `call_<operation>` is the body as a plain function, which Rust code and tests call, since Topcoat turns a procedure into a unit struct. | Testing through Topcoat's wire format, which is private |
+| Every record gains `to_wire`, and the records cover the types a procedure's arguments name, inputs included. `procedures` needs records, so `records: false` leaves out both. | |
+
+A cargo test drives fixture-api's app with `.discover()`. A procedure body
+answers its result, a 401, an input's `name:minLength` refusal and a UUID
+that does not parse (`id:type`) as records. The discovered procedure path
+refuses a body that is not its JSON (400) and a GET (405), where an
+unknown path is 404.

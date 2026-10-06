@@ -17,6 +17,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   Topcoat record a page can hand the browser.
 - reads and renders a form per input type whose fields a form holds, by
   the input type's rules ([Forms](#forms)).
+- lets browser code call each operation through a Topcoat procedure, its
+  arguments and result records and a refusal a record it reads
+  ([Procedures](#procedures)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are, and the core binary does not link it. A binary that does is the core
@@ -152,3 +155,40 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
 An input type with a list, a map, an object, a union or any JSON value
 gets no form, and the build log says why. `forms: false` in
 `outputs.topcoat` leaves out the module.
+
+## Procedures
+
+Each mounted operation is a Topcoat procedure in `procedures`, on a stable
+path: `/_superschematic/<service>/<namespace>/<operation>`. The app's
+`.discover()` registers them; registering one again with `.route` panics.
+
+- **Arguments.** The procedure takes the operation's arguments as a
+  record, `<Op>ArgsRecord`, with a field per argument and the input as its
+  type's record. `to_args()` writes each field as the JSON a request
+  carries and decodes it into the `Args` struct. A UUID or timestamp that
+  does not parse is the router's 400.
+- **Result.** It answers `Result<OutputRecord, ProblemRecord>`.
+  `ProblemRecord` holds the route's status, code and detail, and each
+  refused field's path, rule and message. A refusal reaches the browser as
+  data; an `Err` of a procedure would reach it as a bare 500.
+- **Body.** `call_<operation>(cx, args)` is the procedure's body as a plain
+  function: the arguments decoded, then the operation called in-process by
+  its route's rules. Rust code calls it, since a procedure itself is not
+  callable from Rust.
+
+```rust
+use schemas_shop_orders_topcoat::procedures::order_place_order;
+
+#[page("/checkout")]
+async fn checkout(cx: &Cx) -> topcoat::Result<impl View> {
+    let outcome = signal(cx, || None);
+    Ok(view! {
+        <button @click=$(async |_e| {
+            outcome.set(Some(order_place_order(args.clone()).await));
+        })>"Place order"</button>
+    })
+}
+```
+
+Records are the arguments' and results' carriers, so `records: false`
+leaves out the procedures too; `procedures: false` leaves out only them.
