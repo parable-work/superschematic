@@ -137,7 +137,7 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `RustAPIOf` and `APIDir` (the Rust API crate the `api` generator writes, as `RustAPI` with its `RustEndpoint`, `RustParam` and `RustInput` records, and where), `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `RustAPIOf` and `APIDir` (the Rust API crate the `api` generator writes, as `RustAPI` with its `RustEndpoint`, `RustParam` and `RustInput` records, and where), `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `ScalarCatalogWithNpmPackages`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
@@ -595,6 +595,39 @@ checks and composes with `ScalarCatalogWithUploads` in either order.
 D24 records the decision. `internal/generator/apigen/raw_body_check_test.go`
 covers the seam, including a generated router that refuses a body before
 decoding it.
+
+A catalog that implements `NpmPackageCatalog` names the npm package that
+exports a namespace of its scalars' TypeScript brands:
+`NpmPackage(namespace)` returns it. A TypeScript schema writes a scalar as
+its canonical name, `Acme.Photo`, and imports its namespace, `Acme`, from
+the package that exports it. The loader reads the brand through whatever
+import the schema wrote, but `format --to=ts` must write the import, and a
+`ScalarMetadata` row has no field for the package.
+`registry.ScalarCatalogWithNpmPackages` wraps a catalog with a map keyed by
+namespace, the part of a canonical name before its first dot
+(`{"Acme": "@acme/schema"}`), and composes with the other two wrappers in
+any order.
+
+- The TypeScript writer imports a namespace from the package the catalog
+  names for it, and any other from `scalar_npm_package`, the scalar
+  library, which exports the core table's namespaces.
+- A scalar the core table does not have, in a namespace the catalog names
+  no package for, has no package the writer knows exports its brand, so
+  the writer fails and names the scalar and its namespace. Without the
+  rule it would import the namespace from superscalar, and the file would
+  not compile.
+- The wrapper rejects a namespace no scalar of the catalog is in, a
+  canonical name given as a key, and a package that is empty, relative or
+  absolute.
+- A distribution that sets `scalar_npm_package` to a scalar package of
+  its own still names that package for each namespace it adds: the writer
+  takes `scalar_npm_package` to export the core table's namespaces only.
+
+acme names `@acme/schema` for `Acme` (section 10). D4 has the decision;
+`internal/registry/scalars_test.go` covers the wrapper, and
+`TestFormatCommand_JSONToTSImportsAnExtensionScalarFromItsPackage` in `cli`
+and acme's `TestAcmePhotoRoundTripsThroughTypeScript` write a schema with an
+extension's scalar to TypeScript and load it back.
 
 ### 3.11 Extension configuration
 
@@ -1513,7 +1546,7 @@ each surface:
 | --- | --- | --- |
 | Kind | `Catalog`, pipeline `types`, `catalog` | `ext/kind.go` |
 | Decorators | `@shelf` (an argument) and `@feedKey` (a marker) from `@acme/schema`, on Catalog fields; `@crossSell`, whose argument names a class, on Catalog types | `ext/decorator.go`, `ext/cross_sell.go`, `packages/schema` |
-| Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar; `Product.photo` in the Catalog service bounds it with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
+| Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar whose `Acme` namespace the catalog says `@acme/schema` exports; `Product.photo` in the Catalog service bounds it with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
 | Document | `catalog.config.yaml` on Catalog services, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |

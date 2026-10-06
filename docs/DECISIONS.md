@@ -3449,3 +3449,43 @@ service with an extension's JSON scalar, and the engine's registry test
 defines and publishes that file.
 
 No release has shipped, so the rule is reversible until the first release.
+
+### D4, amended: a TypeScript schema imports an extension's scalars from the package its catalog names
+
+The TypeScript writer imported every scalar namespace from
+`scalar_npm_package`, superscalar. A schema with an extension's scalar,
+such as acme's `Acme.Photo` or the CLI tests' `Ext.Doc`, converted with
+`format --to=ts` to `import { Ext, Generic } from "superscalar"`, which
+does not compile: superscalar has no `Ext`. The loader reads a brand
+through whatever import a schema writes, so nothing in the repository
+recorded where an extension's brands live; acme's said so only in a
+comment.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar catalog names the npm package that exports a namespace of its brands, beside its rows, as it declares uploads and raw-body checks: `NpmPackageCatalog`, built with `registry.ScalarCatalogWithNpmPackages(catalog, {"Acme": "@acme/schema"})`. It composes with the other two wrappers in any order. The registry hands the catalog to the writer, as `writer.WriteWith` already did for the rows (D14, amended above). | A `[scalar_npm_packages]` naming table, which puts what an extension's Go code knows into each deployment's file; reading the package off the extension's decorators, which may come from several packages, or none |
+| The map is keyed by namespace, not by canonical name. A schema imports a namespace once, so every scalar of a namespace comes from one package; a key per namespace cannot say otherwise. The wrapper refuses a namespace no scalar of the catalog is in, so a canonical name given as a key fails, and a package that is empty, relative or absolute. | A key per scalar, which can split a namespace across packages and would need a refusal of its own |
+| The writer imports a namespace the catalog names no package for from `scalar_npm_package`, which exports the core table's namespaces. A scalar the core table does not have, in such a namespace, has no package the writer knows exports its brand, so the writer refuses the file and names the scalar, its namespace and the wrapper. That holds for a distribution that renames `scalar_npm_package` to a package of its own too: it names the package for each namespace it adds. | Writing the import from `scalar_npm_package` anyway, which leaves a file that does not compile, where the writer otherwise refuses what it cannot write; trusting a renamed `scalar_npm_package` to export every scalar, which the writer cannot check |
+
+acme's catalog names `@acme/schema` for `Acme`. The fixture service
+`fixture-ext-json-scalar` imports `Ext` from `@fixture/ext-scalars`, a
+package under `internal/loader/tsreader/testdata/packages` that the
+fixtures' tsconfig resolves, and the CLI tests' extension names it.
+
+Writing the acme test found that a schema of a kind other than Catalog
+cannot import `@acme/schema`, even for a brand alone: every decorator it
+declares is Catalog's, so verify refuses the import
+(`Registry.PackageAllowsKind`). The data forms take `Acme.Photo` in any
+kind. acme uses the scalar in its Catalog service only, and this leaves
+the rule as it is.
+
+`TestScalarCatalogWithNpmPackagesNamesANamespacesPackage`,
+`TestScalarCatalogWithNpmPackagesRejectsAnUnknownNamespaceAPathAndNilCatalog`
+and `TestNpmPackagesUploadsAndRawBodyChecksComposeInAnyOrder` cover the
+wrapper. `TestFormatCommand_JSONToTSImportsAnExtensionScalarFromItsPackage`
+writes `cli/testdata/format/ext-json-scalar.schema.json` to TypeScript,
+which is the fixture's source; loads it as a service of its own with the
+extension linked; converts it back to the same JSON; and checks that a
+catalog that names no package for `Ext` is refused. acme's
+`TestAcmePhotoRoundTripsThroughTypeScript` does the same for a Catalog
+schema with an `Acme.Photo` field, and its upload metadata survives.
