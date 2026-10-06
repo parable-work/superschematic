@@ -1,0 +1,9 @@
+migrate plan: 2 hazards of a --fail-on class that no --allow names:
+  destructive:table/comment/column/legacy_id
+    Dropping comment.legacy_id deletes the values of Comment.legacyId.
+  destructive:table/task/column/title
+    Dropping task.title deletes the values of Task.title. It may be a rename: task.summary is added with the same type, nullability and default. If it is, plan with --rename task.title=task.summary.
+Review each, then allow it by its id:
+  --allow 'destructive:table/comment/column/legacy_id'
+  --allow 'destructive:table/task/column/title'
+migrate plan: 2 hazards not allowed

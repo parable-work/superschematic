@@ -18,8 +18,8 @@ such as a state machine, comments or reviewed revisions.
 This guide builds `examples/engine-notes`, a notes server. A note moves
 from draft through review to published, collects comments and keeps its
 revisions, and a reader can propose a change for an editor to approve.
-CI runs the example's end-to-end test on Node.js and on Bun on every pull
-request. The
+CI runs the example's end-to-end test on Node.js and on Bun in the
+release candidate run on `main` twice a day. The
 [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md)
 is the reference for everything below: every route, status, option and
 rule.
@@ -56,11 +56,13 @@ with `make setup`:
 examples/engine-notes/scripts/check.sh
 ```
 
-It builds the schema runtime, the HTTP runtime and the engine (`bun
-install --frozen-lockfile` and `bun run build` in each), links them into
-the example's `node_modules` (`scripts/link.sh`), type-checks the example,
-and runs its end-to-end test with `node --test` and with `bun test`. The
-last line it prints is `engine-notes: ok`.
+It builds the schema runtime, the HTTP runtime, the version graph and
+the engine (`bun install --frozen-lockfile` and `bun run build` in each),
+links them into the example's `node_modules` (`scripts/link.sh`),
+type-checks the example, and runs its end-to-end test with `node --test`
+and with `bun test`. The version graph's build compiles its core to
+WebAssembly, so it needs cargo and the `wasm32-unknown-unknown` target.
+The last line it prints is `engine-notes: ok`.
 
 `scripts/link.sh` links `@superschematic/engine`, and, from the engine's
 own install, the packages the example imports: `@superschematic/http-runtime`,
@@ -69,8 +71,10 @@ TypeScript and the Node.js types for the type-check. Each resolves to the
 engine's copy, so the engine and the example share one Hono. The engine
 needs `@superschematic/schema-runtime`, `@superschematic/schema-ir`,
 `@superschematic/http-runtime` and `superscalar` beside it, which its build
-links into its own `node_modules`. Its `./http` entry point also needs
-`hono`, and its `./mcp` entry point `hono` and
+links into its own `node_modules`. It depends on
+`@superschematic/versiongraph`, whose engine and SQLite adapter run the
+`Branches` behavior over the version graph's WebAssembly core. Its `./http`
+entry point also needs `hono`, and its `./mcp` entry point `hono` and
 `@modelcontextprotocol/server`.
 
 ## The schema
@@ -334,7 +338,11 @@ store"), has the rules.
 
 Each behavior operation on an instance is a route:
 `POST .../instances/{id}/operations/{operation}`, with the operation's
-parameters as the body and an optional `If-Match`. A few operations run
+parameters as the body, an optional `If-Match`, and an optional
+`Preconditions` header for the behaviors that check one, such as a
+lease's token
+([refusals and preconditions](/superschematic/guides/engine-behaviors/#refusals-and-preconditions)).
+A few operations run
 on the whole schema instead, such as `Search`'s `search` and `Queue`'s
 `claimNext`, at `POST .../schemas/{name}/operations/{operation}`
 ([schema-level operations](/superschematic/guides/engine-behaviors/#schema-level-operations)).
@@ -344,7 +352,8 @@ section lists every operation, guard and config change of each.
 
 This example uses three behaviors. The core also declares
 `Dependencies`, `Links` and `Rollups`, which reach other instances,
-`Search`, full-text search over a type's text fields, `Reactions`,
+`Search`, full-text search over a type's text fields and, optionally,
+vector search over embeddings an outside embedder computes, `Reactions`,
 whose rules the engine's [runner](/superschematic/guides/engine-behaviors/#the-runner)
 applies after a change commits, `Constants` and `Variants`, which keep
 fields as their create set them and type a JSON field by another field's
@@ -538,9 +547,12 @@ schedules at an interval its schema's config can set, or turn off. A
 behavior that keeps values of the schema's other types in its own
 tables reads those types' fields in `parseConfig` (`target.types`),
 which holds them to the schema's checks and its compatibility rule, and
-checks a value against one with `validate(type, value)`. A behavior
-that keeps an object with large members in its own tables, a copy of the
-instance's fields say, keeps it through the value store
+checks a value against one with `validate(type, value)`. Which types a
+config reads may depend on the config and the document only, not on the
+other schemas, since a version is checked against the next with no other
+schema in reach; a define or publish refuses a config whose reads do. A
+behavior that keeps an object with large members in its own tables, a
+copy of the instance's fields say, keeps it through the value store
 (`values.stow`, `load` and `release`), as Revisions does, so the value
 is stored once however many rows hold it. A schedule's
 run may write the behavior's own tables directly, but only what no

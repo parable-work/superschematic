@@ -1,0 +1,6 @@
+migrate plan: 1 hazard of a --fail-on class that no --allow names:
+  destructive:table/comment/column/legacy_id
+    Dropping comment.legacy_id deletes the values of Comment.legacyId.
+Review each, then allow it by its id:
+  --allow 'destructive:table/comment/column/legacy_id'
+migrate plan: 1 hazard not allowed

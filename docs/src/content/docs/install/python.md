@@ -22,12 +22,15 @@ HTTP client over those types. Module names come from
 
 A types package whose schema declares a
 [version graph](/superschematic/reference/version-graphs/#use-the-engine-from-python)
-depends on `superschematic-versiongraph`, the engine and its Postgres
-adapter, also unpublished: it is a PyO3 extension that uv builds from a
-checkout with maturin, which needs cargo. `[paths].versiongraph_python`
-points the generated `pyproject.toml` at `runtime/versiongraph/python`
-through `[tool.uv.sources]`. Its Postgres client binds psycopg 3, the
-package's `postgres` extra (`superschematic-versiongraph[postgres]`).
+depends on `superschematic-versiongraph`, the engine and its Postgres and
+SQLite adapters, also unpublished: it is a PyO3 extension that uv builds
+from a checkout with maturin, which needs cargo.
+`[paths].versiongraph_python` points the generated `pyproject.toml` at
+`runtime/versiongraph/python` through `[tool.uv.sources]`. Its Postgres
+client binds psycopg 3, the package's `postgres` extra
+(`superschematic-versiongraph[postgres]`); its SQLite client binds the
+standard library's `sqlite3` and needs no extra
+([The engine and its adapters](/superschematic/reference/version-graphs/#the-engine-and-its-adapters)).
 
 ## Install
 
@@ -107,7 +110,9 @@ and every model they hold, in lists and maps too, each nested error
 under its path (`lines[0].quantity`). It keys its errors by the
 snake_case names; `validate_all(by_alias=True)` keys them by the JSON
 names, nested fields included, as the Go and TypeScript validators do.
-`str()` of the result lists each error.
+`str()` of the result lists each error. A `pattern` rule matches with
+`re.ASCII`, so `\d`, `\w` and `\b` are ASCII classes, as every other
+language's validators read them.
 
 ## Consume a generated SDK
 
@@ -146,6 +151,14 @@ the schema's rules (`listMin`, `minLength`, `min`, `pattern`, ...) on the
 input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
 and message, as the Go and TypeScript SDKs report them.
+
+A response outside 2xx raises `APIError`, whose message is the problem's
+`detail` and which carries the `status_code`, the problem's `code` and the
+`request_id` (the problem's `requestId`, else the `X-Request-ID` header).
+`AuthenticationError` (401), `AuthorizationError` (403) and
+`RateLimitError` (429, with `retry_after`) are subclasses of it. The SDK
+retries a 429 up to 3 times after `Retry-After`
+(`max_rate_limit_retries`).
 
 An operation without an input type sends its arguments where the route
 reads them: on a `GET` in the query string, and on any other method, a

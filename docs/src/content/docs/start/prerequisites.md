@@ -26,6 +26,7 @@ The versions are the pins in `tools.env`, which CI reads too.
 | Bun | 1.4 | Installs the TypeScript runtimes and the generated TypeScript packages, which use the `workspace:` protocol. |
 | Python and uv | 3.12, uv 0.12 | Only for Python output: the Python schema runtime. |
 | Postgres | 16 | Only to run the SQL and the Go ORM a DB schema generates. |
+| Pulumi CLI | 3.259.0 | Only to apply a stack with the Pulumi provisioner, which drives the CLI through Pulumi's Automation API. Building needs no CLI. |
 | jq | any | The example scripts read JSON output with it. |
 
 ## Set up the checkout
