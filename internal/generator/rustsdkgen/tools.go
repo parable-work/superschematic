@@ -113,7 +113,9 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 	for _, endpoint := range apiOutput.Endpoints {
 		// A webhook has no SDK method, so no tool, as in the TypeScript
 		// and Go SDKs, whose tools come from the TypeScript SDK's methods.
-		if endpoint.IsWebhook {
+		// A @requireService operation has a method, which a service calls,
+		// but no tool: no end user's agent can call it.
+		if endpoint.IsWebhook || endpoint.ServiceOnly() {
 			continue
 		}
 		nsName := endpoint.Namespace

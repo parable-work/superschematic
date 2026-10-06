@@ -151,11 +151,13 @@ python:
 # too, and its lints run with and without each of its features. The schema
 # runtime's run again with arbitrary_precision too, which superscalar's
 # default lossless-json feature turns on: an error map and a number check
-# must not depend on either.
+# must not depend on either. The http runtime's run again with its optional
+# http-client feature.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
-		&& cargo test && cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
+		&& cargo test && cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order \
+		&& cargo clippy --all-targets --features http-client -- -D warnings && cargo test --features http-client
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \

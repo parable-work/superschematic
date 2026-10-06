@@ -470,6 +470,12 @@ type FieldDef struct {
 	// field/operation (@requirePermission).
 	Permissions []string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
 
+	// ServiceCallers is the operation's own service clause (@requireService
+	// or @allowService): which calling services it admits beside the end
+	// user. It replaces the operation set's; nil means the operation takes
+	// the set's (see [EffectiveServiceCallers]).
+	ServiceCallers *ServiceCallers `json:"serviceCallers,omitempty" yaml:"serviceCallers,omitempty"`
+
 	// HTTPMethod is the explicit HTTP method for operation fields
 	// ("GET", "POST", "PUT", "PATCH", "DELETE"). There is no
 	// Queries-versus-Mutations default inference in v2: every operation

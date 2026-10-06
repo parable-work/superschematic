@@ -16,10 +16,12 @@ type (
 	// Input is a stack, the facts of the services it references and the
 	// environment to resolve.
 	Input = stack.Input
-	// Service, Config and ConfigField are the facts of one service.
+	// Service, Config, ConfigField and Operation are the facts of one
+	// service.
 	Service     = stack.Service
 	Config      = stack.Config
 	ConfigField = stack.ConfigField
+	Operation   = stack.Operation
 	// Errors are every failure one resolution found; Error is one, and
 	// Code names its check.
 	Errors = stack.Errors
@@ -38,6 +40,7 @@ const (
 	CodeNoConnector       = stack.CodeNoConnector
 	CodeExposeNotServer   = stack.CodeExposeNotServer
 	CodePolicy            = stack.CodePolicy
+	CodeUnreachableEdge   = stack.CodeUnreachableEdge
 	CodeInvalidStack      = stack.CodeInvalidStack
 	CodeUnknownService    = stack.CodeUnknownService
 	CodeUnknownDeployable = stack.CodeUnknownDeployable
@@ -52,6 +55,10 @@ const (
 	CodeLowering          = stack.CodeLowering
 	CodeGraph             = stack.CodeGraph
 )
+
+// OperationsOf reads an API service's operations for Service.Operations;
+// see internal/stack.OperationsOf.
+func OperationsOf(schema *ir.Schema) []Operation { return stack.OperationsOf(schema) }
 
 // EnvironmentFile is the name of the resolved environment's file.
 const EnvironmentFile = stack.EnvironmentFile

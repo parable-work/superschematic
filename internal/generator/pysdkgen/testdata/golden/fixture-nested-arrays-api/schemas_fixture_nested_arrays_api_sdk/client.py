@@ -12,7 +12,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib import error, parse, request
 
 try:
@@ -101,6 +101,21 @@ ResponseInterceptor = Callable[[ResponseContext], ResponseContext | None]
 
 
 @dataclass(slots=True)
+class ServiceCredential:
+    """The calling service's own credential, beside the end user's (D37).
+
+    The client sends ``Bearer <token>`` in each of ``headers`` on every
+    request. ``token(fresh)`` returns the token; ``fresh`` asks for a new one
+    rather than a cached one. A 401 whose problem code is
+    ``service_unauthorized`` asks ``token(True)`` once and retries, without
+    the end-user refresh; any other 401 never asks this source.
+    """
+
+    token: Callable[[bool], str]
+    headers: Sequence[str] = ("Service-Authorization",)
+
+
+@dataclass(slots=True)
 class ClientConfig:
     base_url: str
     timeout_seconds: float = 30.0
@@ -115,6 +130,7 @@ class ClientConfig:
     logger: Logger | None = None
     max_rate_limit_retries: int = 3
     max_network_retries: int = 3
+    service_credential: ServiceCredential | None = None
 
 
 class SyncHTTPClient:
@@ -124,6 +140,7 @@ class SyncHTTPClient:
         self._auth_token = config.auth_token
         self._auth_token_provider = config.auth_token_provider
         self._auth_token_refresher = config.auth_token_refresher
+        self._service_credential = config.service_credential
         self._default_public_encryption_key = config.public_encryption_key
         self._default_headers = dict(config.default_headers or {})
         self._request_interceptor = config.request_interceptor
@@ -313,6 +330,8 @@ class SyncHTTPClient:
         is_retry: bool = False,
         _rate_limit_attempt: int = 0,
         _network_attempt: int = 0,
+        _service_retried: bool = False,
+        _fresh_service_token: bool = False,
     ) -> Any:
         request_context = self._apply_request_interceptor(
             RequestContext(
@@ -324,7 +343,7 @@ class SyncHTTPClient:
             ),
         )
 
-        headers = self._build_headers(requires_auth, request_context.headers)
+        headers = self._build_headers(requires_auth, request_context.headers, _fresh_service_token)
         payload_bytes: bytes | None = None
         if is_multipart:
             multipart_data, multipart_files = self._extract_multipart_payload(request_context.body)
@@ -349,6 +368,28 @@ class SyncHTTPClient:
                 path=request_context.path,
             )
         except AuthenticationError as err:
+            if err.status_code == 401 and self._problem_code(err.payload) == "service_unauthorized":
+                # The service credential was refused: ask its source for a
+                # fresh token once. The end-user refresh cannot help, so it
+                # does not run.
+                if self._service_credential is None or _service_retried:
+                    raise
+                self._log_debug("Service credential refused, retrying with a fresh one")
+                return self._request_with_retry(
+                    method=method,
+                    path=path,
+                    body=body,
+                    query_params=query_params,
+                    requires_auth=requires_auth,
+                    timeout_seconds=timeout_seconds,
+                    extra_headers=extra_headers,
+                    is_multipart=is_multipart,
+                    is_retry=is_retry,
+                    _rate_limit_attempt=_rate_limit_attempt,
+                    _network_attempt=_network_attempt,
+                    _service_retried=True,
+                    _fresh_service_token=True,
+                )
             if err.status_code == 401 and self._auth_token_refresher is not None and not is_retry:
                 self._log_debug("Received 401 response, attempting auth token refresh")
                 self._refresh_auth_token()
@@ -364,6 +405,7 @@ class SyncHTTPClient:
                     is_retry=True,
                     _rate_limit_attempt=_rate_limit_attempt,
                     _network_attempt=_network_attempt,
+                    _service_retried=_service_retried,
                 )
             raise
         except RateLimitError as err:
@@ -391,6 +433,7 @@ class SyncHTTPClient:
                 is_retry=is_retry,
                 _rate_limit_attempt=_rate_limit_attempt + 1,
                 _network_attempt=_network_attempt,
+                _service_retried=_service_retried,
             )
         except NetworkError:
             if (
@@ -418,6 +461,7 @@ class SyncHTTPClient:
                 is_retry=is_retry,
                 _rate_limit_attempt=_rate_limit_attempt,
                 _network_attempt=_network_attempt + 1,
+                _service_retried=_service_retried,
             )
 
     def _extract_multipart_payload(self, body: Any) -> tuple[Mapping[str, Any], Mapping[str, FilePart]]:
@@ -452,6 +496,7 @@ class SyncHTTPClient:
         self,
         requires_auth: bool,
         extra_headers: Mapping[str, str] | None,
+        fresh_service_token: bool = False,
     ) -> dict[str, str]:
         headers = dict(self._default_headers)
         if extra_headers:
@@ -462,6 +507,12 @@ class SyncHTTPClient:
             headers["Authorization"] = f"Bearer {token}"
         elif requires_auth:
             raise AuthenticationError("Authentication required", 401)
+
+        if self._service_credential is not None:
+            service_token = self._service_credential.token(fresh_service_token)
+            if service_token:
+                for name in self._service_credential.headers or ("Service-Authorization",):
+                    headers[name] = f"Bearer {service_token}"
 
         return headers
 
@@ -599,6 +650,23 @@ class SyncHTTPClient:
             return json.loads(text)
         except json.JSONDecodeError:
             return text
+
+    @staticmethod
+    def _problem_code(payload: Any) -> str | None:
+        """The problem code of an error body.
+
+        ``code`` of an RFC 9457 problem, or ``error.code`` of the legacy
+        ``{"error": {...}}`` envelope.
+        """
+        if not isinstance(payload, dict):
+            return None
+        code = payload.get("code")
+        if isinstance(code, str):
+            return code
+        envelope = payload.get("error")
+        if isinstance(envelope, dict) and isinstance(envelope.get("code"), str):
+            return envelope["code"]
+        return None
 
     def _extract_error_message(self, payload: Any) -> str | None:
         # The RFC 9457 problem's detail first, as the Go and TypeScript SDKs read it.

@@ -20,7 +20,7 @@ RequirePermissionsWith.
 */
 
 export interface Principal {
-  /** Stable subject identifier: a user id, a service identity, an API key's owner. */
+  /** Stable subject identifier: a user id, an API key's owner. A calling service is ctx.serviceCaller, not a principal (D37). */
   readonly subject: string;
   readonly permissions: readonly string[];
   /** Verified claims for the implementation's own checks; never echoed. */

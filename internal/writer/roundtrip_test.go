@@ -62,6 +62,11 @@ var corpus = []roundtripFixture{
 	{name: "fixture-version-graph-db", dir: tsFixtures + "/fixture-version-graph-db", native: FormatTS},
 	// @optimistic tables and, in the graph above, @versioned({ exclude }).
 	{name: "fixture-optimistic-db", dir: tsFixtures + "/fixture-optimistic-db", native: FormatTS},
+	// Service clauses on operations and sets (D37), in the data forms.
+	{
+		name: "fixture-service-auth-api", dir: tsFixtures + "/fixture-service-auth-api", native: FormatTS,
+		skipTSReason: "@publicRoute has no TypeScript authoring form in the writer",
+	},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},
@@ -456,6 +461,11 @@ func writeTSProject(t *testing.T, dir string, schema *ir.Schema) {
 		service := imp.Package[strings.LastIndex(imp.Package, "/")+1:]
 		paths[imp.Package] = []string{filepath.ToSlash(filepath.Join(servicesDir, service, "src", "index.ts"))}
 	}
+	// A service clause's from names API services whose sentinels the
+	// written source imports; they resolve to the fixture services too.
+	for _, service := range serviceClauseNames(schema) {
+		paths["@schemas/"+service] = []string{filepath.ToSlash(filepath.Join(servicesDir, service, "src", "index.ts"))}
+	}
 
 	tsconfig := map[string]any{
 		"compilerOptions": map[string]any{
@@ -480,6 +490,24 @@ func writeTSProject(t *testing.T, dir string, schema *ir.Schema) {
 	if err := os.WriteFile(filepath.Join(dir, "tsconfig.json"), append(data, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// serviceClauseNames lists the services the schema's service clauses name
+// in from.
+func serviceClauseNames(schema *ir.Schema) []string {
+	var names []string
+	add := func(clause *ir.ServiceCallers) {
+		if clause != nil {
+			names = append(names, clause.From...)
+		}
+	}
+	for _, set := range schema.OperationSets {
+		add(set.ServiceCallers)
+		for _, op := range set.Operations {
+			add(op.ServiceCallers)
+		}
+	}
+	return names
 }
 
 // normalizeIR renders a schema as comparison-stable JSON: Owner paths drop
