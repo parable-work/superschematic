@@ -174,7 +174,7 @@ func (s *ScalarDef) ObjectJSONError() error {
 	}
 	// A file part is no JSON, whatever the mapping says.
 	if s.FileUpload != nil {
-		return fmt.Errorf("scalar %s is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: "+
+		return fmt.Errorf("scalar %s is a file-upload scalar with language primitive object: a file part is not JSON, so "+
 			"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)", s.Name)
 	}
 	if s.IsAnyJSON() || s.StructuredJSONType() != "" {

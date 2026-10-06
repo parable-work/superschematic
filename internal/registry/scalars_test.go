@@ -170,10 +170,10 @@ func TestRegisterScalarsJudgesARowAsTheValidatorsDo(t *testing.T) {
 	}
 	for _, want := range []string{
 		"registry: acme's scalar catalog: scalar Acme.Blob has language primitive object and json_schema type mapping object, but its maxLength 10 is a rule on a string, so the validators check its values as strings: drop the maxLength",
-		"registry: acme's scalar catalog: scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
+		"registry: acme's scalar catalog: scalar Media.Photo is a file-upload scalar with language primitive object: a file part is not JSON, so " +
 			"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
 		// A file part is no JSON, whatever the mapping says.
-		"registry: acme's scalar catalog: scalar Media.Scan is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
+		"registry: acme's scalar catalog: scalar Media.Scan is a file-upload scalar with language primitive object: a file part is not JSON, so " +
 			"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
 	} {
 		if !strings.Contains(err.Error(), want) {

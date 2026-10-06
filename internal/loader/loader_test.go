@@ -1372,7 +1372,7 @@ func TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString(t *testing.T)
 			name:   "an upload",
 			scalar: "Media.Photo",
 			fields: map[string]any{"fileUpload": map[string]any{"maxSize": 1048576, "allowedTypes": []string{"image/png"}, "category": "image"}},
-			want: "temp-service: scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
+			want: "temp-service: scalar Media.Photo is a file-upload scalar with language primitive object: a file part is not JSON, so " +
 				"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
 		},
 		{
@@ -1383,7 +1383,7 @@ func TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString(t *testing.T)
 				"fileUpload":   map[string]any{"maxSize": 1048576, "allowedTypes": []string{"image/png"}, "category": "image"},
 				"typeMappings": map[string]string{"json_schema": "object"},
 			},
-			want: "temp-service: scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
+			want: "temp-service: scalar Media.Photo is a file-upload scalar with language primitive object: a file part is not JSON, so " +
 				"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
 		},
 	}

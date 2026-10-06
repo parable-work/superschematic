@@ -267,7 +267,7 @@ export function objectScalarIssue(name: string, scalar: ScalarDef): string | und
   // A file part is no JSON, whatever the mapping says.
   if (scalar.fileUpload) {
     return (
-      `scalar ${name} is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: ` +
+      `scalar ${name} is a file-upload scalar with language primitive object: a file part is not JSON, so ` +
       'an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)'
     );
   }

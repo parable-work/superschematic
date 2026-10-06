@@ -44,12 +44,12 @@
     {
       "case": "a file-upload scalar",
       "scalar": { "name": "Media.Photo", "languagePrimitive": "object", "fileUpload": { "maxSize": 1048576, "allowedTypes": ["image/png"], "category": "image" } },
-      "error": "scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)"
+      "error": "scalar Media.Photo is a file-upload scalar with language primitive object: a file part is not JSON, so an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)"
     },
     {
       "case": "a file-upload scalar with a json_schema mapping, which a file part does not follow",
       "scalar": { "name": "Media.Photo", "languagePrimitive": "object", "typeMappings": { "json_schema": "object" }, "fileUpload": { "maxSize": 1048576 } },
-      "error": "scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)"
+      "error": "scalar Media.Photo is a file-upload scalar with language primitive object: a file part is not JSON, so an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)"
     },
     {
       "case": "a file-upload scalar with the string primitive",
