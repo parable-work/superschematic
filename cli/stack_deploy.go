@@ -25,6 +25,7 @@ import (
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	"github.com/parable-work/superschematic/internal/stack"
+	"github.com/parable-work/superschematic/internal/stack/local"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -57,7 +58,7 @@ func newStackSecretsCmd(a *app) *cobra.Command {
 	return cmd
 }
 
-// stackFlags are the flags every stack command shares.
+// stackFlags are the flags every cloud stack command shares.
 type stackFlags struct {
 	stackDir   string
 	namingPath string
@@ -68,9 +69,9 @@ type stackFlags struct {
 // register adds the shared flags; a command that runs one run of an
 // environment takes --param too.
 func (f *stackFlags) register(cmd *cobra.Command, run bool) {
-	cmd.Flags().StringVar(&f.stackDir, "stack", "", "the Stack service directory (default: the one Stack service under ./schemas/services)")
+	cmd.Flags().StringVar(&f.stackDir, "stack", "", "the Stack service directory (default: the working directory when it is one, else the one Stack service under ./schemas/services)")
 	cmd.Flags().StringVar(&f.namingPath, "naming", "", "naming config file (default <stack>/../../superschematic.toml)")
-	cmd.Flags().StringVar(&f.programDir, "program-dir", "", "render the provisioner's program here (default: a temporary directory, removed after)")
+	cmd.Flags().StringVar(&f.programDir, "program-dir", "", "render the provisioner's program here (default <schemas-root>/dist/program/<stack>/<environment>)")
 	if run {
 		cmd.Flags().StringArrayVar(&f.params, "param", nil, "a parameter's value for this run of a parameterized environment: <name>=<value> (repeatable)")
 	}
@@ -103,14 +104,13 @@ func (g *gateFlags) gate() (stackdeploy.Gate, error) {
 }
 
 // deployContext is one stack command's environment, resolved from the
-// schemas, with what loaded it.
-//
-// TODO(D45): fold openDeployContext and findStackDir into the local
-// target's openStackProject and (*stackProject).environment once
-// claude/local-target merges, so every stack command finds and opens a
-// stack one way; and default --program-dir to its
-// programDir(outputRoot, stack, env).
+// schemas, with what loaded it. The project is the one stack dev opens
+// (openStackProject). The environment is resolved here rather than read
+// from the build's environment.json (stackProject.environment), so a plan
+// needs no build and never reads a stale environment, and the schemas
+// version beside it loads the DB models the migration plans need.
 type deployContext struct {
+	project  *stackProject
 	reg      *registry.Registry
 	env      *ir.ResolvedEnvironment
 	version  *schemaVersion
@@ -125,47 +125,36 @@ func (c *deployContext) close() {
 	}
 }
 
-// openDeployContext loads the stack, resolves the environment named
-// environment, and makes the program directory.
-func openDeployContext(a *app, flags *stackFlags, environment string) (*deployContext, error) {
-	stackDir, err := findStackDir(a, flags)
+// openDeployContext opens the stack, resolves the environment named
+// environment, and names the program directory. A local environment runs
+// with `stack dev`, so only a command that serves one, secrets set,
+// passes allowLocal.
+func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environment string, allowLocal bool) (*deployContext, error) {
+	p, err := openStackProject(cmd, a, flags.stackDir, "", flags.namingPath)
 	if err != nil {
 		return nil, err
 	}
-	servicesRoot := filepath.Dir(stackDir)
-	names, err := resolveNaming(flags.namingPath, filepath.Dir(servicesRoot))
+	version, err := openSchemaVersion(p.servicesRoot, p.names, p.reg)
 	if err != nil {
 		return nil, err
 	}
-	reg, err := a.resolveRegistry(names)
-	if err != nil {
-		return nil, err
-	}
-	version, err := openSchemaVersion(servicesRoot, names, reg)
-	if err != nil {
-		return nil, err
-	}
-	c := &deployContext{reg: reg, version: version, cleanup: []func(){version.close}}
+	c := &deployContext{project: p, reg: p.reg, version: version, cleanup: []func(){version.close}}
 	fail := func(err error) (*deployContext, error) {
 		c.close()
 		return nil, err
 	}
-	service, err := version.serviceAt(stackDir)
-	if err != nil {
-		return fail(err)
-	}
-	schema, cfg, err := version.load(service.Name)
+	schema, cfg, err := version.load(p.stack.Name)
 	if err != nil {
 		return fail(err)
 	}
 	st := ir.StackOf(schema)
 	if st == nil {
-		return fail(fmt.Errorf("%s is a %s service, not a stack: no class declares @stack", service.Name, schema.Kind))
+		return fail(fmt.Errorf("stack %s: no class declares @stack", p.stack.Name))
 	}
 	gen := registry.GenerateContext{
 		Schema:   schema,
 		Config:   cfg,
-		Registry: reg,
+		Registry: p.reg,
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			s, _, err := version.load(name)
 			return s, err
@@ -185,17 +174,16 @@ func openDeployContext(a *app, flags *stackFlags, environment string) (*deployCo
 		}
 		return fail(fmt.Errorf("stack %s has no environment %s (its environments: %s)", st.Name, environment, strings.Join(known, ", ")))
 	}
-	if c.env, err = stack.Resolve(reg, stack.Input{Stack: st, Services: c.services, Environment: environment}); err != nil {
+	if c.env, err = stack.Resolve(p.reg, stack.Input{Stack: st, Services: c.services, Environment: environment}); err != nil {
 		return fail(err)
+	}
+	if c.env.Target == local.Target && !allowLocal {
+		return fail(fmt.Errorf("environment %s is on the %s target, which `stack %s` does not deploy: run it with `superschematic stack dev --environment %s`",
+			environment, local.Target, cmd.Name(), environment))
 	}
 	c.dir = flags.programDir
 	if c.dir == "" {
-		dir, err := os.MkdirTemp("", "superschematic-stack-")
-		if err != nil {
-			return fail(err)
-		}
-		c.dir = dir
-		c.cleanup = append(c.cleanup, func() { _ = os.RemoveAll(dir) })
+		c.dir = programDir(p.outputRoot, st.Name, environment)
 	}
 	return c, nil
 }
@@ -209,53 +197,63 @@ func stackHasEnvironment(st *ir.Stack, name string) bool {
 	return false
 }
 
-// findStackDir returns --stack as an absolute path, or the one Stack
-// service under ./schemas/services.
-func findStackDir(a *app, flags *stackFlags) (string, error) {
-	if flags.stackDir != "" {
-		dir, err := filepath.Abs(flags.stackDir)
-		if err != nil {
-			return "", err
-		}
-		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			return "", fmt.Errorf("--stack %s: not a service directory", flags.stackDir)
-		}
-		return dir, nil
-	}
-	servicesRoot, err := filepath.Abs(filepath.Join("schemas", "services"))
+// localSecretsStore is a local environment's secret store over the
+// secrets.env stack dev reads (local.SecretsFile, local.WriteSecret). The
+// local target registers no SecretStore: the file sits under the schemas
+// root, which a registry does not know. So secrets set hands this one to
+// the operation in the target's place.
+type localSecretsStore struct {
+	schemasRoot string
+}
+
+var _ registry.SecretStore = localSecretsStore{}
+
+func (c *deployContext) localSecrets() localSecretsStore {
+	return localSecretsStore{schemasRoot: c.project.schemasRoot}
+}
+
+func (s localSecretsStore) path(env *ir.ResolvedEnvironment) string {
+	return filepath.Join(local.StateDir(s.schemasRoot, env.Stack, env.Environment), local.SecretsFile)
+}
+
+func (s localSecretsStore) Exists(_ context.Context, env *ir.ResolvedEnvironment, id string) (bool, error) {
+	values, err := local.ReadSecrets(s.path(env))
+	_, ok := values[id]
+	return ok, err
+}
+
+func (s localSecretsStore) List(_ context.Context, env *ir.ResolvedEnvironment) ([]string, error) {
+	values, err := local.ReadSecrets(s.path(env))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if info, err := os.Stat(servicesRoot); err != nil || !info.IsDir() {
-		return "", errors.New("no --stack, and no ./schemas/services to find a Stack service in: name the stack's service directory with --stack")
-	}
-	names, err := resolveNaming(flags.namingPath, filepath.Dir(servicesRoot))
-	if err != nil {
-		return "", err
-	}
-	reg, err := a.resolveRegistry(names)
-	if err != nil {
-		return "", err
-	}
-	version, err := openSchemaVersion(servicesRoot, names, reg)
-	if err != nil {
-		return "", err
-	}
-	defer version.close()
-	var stacks []string
-	for _, service := range version.services {
-		if service.Config.Kind == ir.SchemaKindStack {
-			stacks = append(stacks, service.Dir)
+	var ids []string
+	for _, secret := range env.Secrets {
+		if _, ok := values[secret.ID]; ok {
+			ids = append(ids, secret.ID)
 		}
 	}
-	switch len(stacks) {
-	case 0:
-		return "", fmt.Errorf("%s holds no Stack service; name one with --stack", servicesRoot)
-	case 1:
-		return stacks[0], nil
+	sort.Strings(ids)
+	return ids, nil
+}
+
+func (s localSecretsStore) Set(_ context.Context, env *ir.ResolvedEnvironment, id string, value []byte) error {
+	if _, err := local.EnsureStateDir(s.schemasRoot, env.Stack, env.Environment); err != nil {
+		return err
 	}
-	sort.Strings(stacks)
-	return "", fmt.Errorf("%s holds several Stack services (%s); name one with --stack", servicesRoot, strings.Join(stacks, ", "))
+	return local.WriteSecret(s.path(env), id, string(value))
+}
+
+func (s localSecretsStore) Get(_ context.Context, env *ir.ResolvedEnvironment, id string) ([]byte, error) {
+	values, err := local.ReadSecrets(s.path(env))
+	if err != nil {
+		return nil, err
+	}
+	value, ok := values[id]
+	if !ok {
+		return nil, fmt.Errorf("secret %s has no value", id)
+	}
+	return []byte(value), nil
 }
 
 // parseParams reads --param values.
@@ -360,7 +358,7 @@ creates the secret of each platform credential the environment needs.
 Then it asks for each credential that has no value, without echoing it.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := openDeployContext(a, flags, args[0])
+			c, err := openDeployContext(cmd, a, flags, args[0], false)
 			if err != nil {
 				return err
 			}
@@ -419,16 +417,15 @@ step, so on a fresh environment run stack deploy first: it stops for the
 values it lacks, and asks for them when it runs at a terminal.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// TODO(D45): once claude/local-target merges, a local
-			// environment's secrets go through its store
-			// (local.WriteSecret, local.SecretsFile), which the local
-			// target's SecretStore should wrap, so this command stays
-			// target-neutral.
-			c, err := openDeployContext(a, flags, args[0])
+			c, err := openDeployContext(cmd, a, flags, args[0], true)
 			if err != nil {
 				return err
 			}
 			defer c.close()
+			var store registry.SecretStore
+			if c.env.Target == local.Target {
+				store = c.localSecrets()
+			}
 			only := ""
 			if len(args) == 2 {
 				only = args[1]
@@ -441,6 +438,7 @@ values it lacks, and asks for them when it runs at a terminal.`,
 				Options:  c.options(cmd, nil),
 				Only:     only,
 				Prompter: prompter,
+				Store:    store,
 			})
 			if err != nil {
 				return err
@@ -492,7 +490,7 @@ plans.`,
 			if err != nil {
 				return err
 			}
-			c, err := openDeployContext(a, flags, args[0])
+			c, err := openDeployContext(cmd, a, flags, args[0], false)
 			if err != nil {
 				return err
 			}
@@ -637,7 +635,7 @@ schema between the phases, and the next deploy plans from it.`,
 				}
 				expected = shown.Expected()
 			}
-			c, err := openDeployContext(a, flags, args[0])
+			c, err := openDeployContext(cmd, a, flags, args[0], false)
 			if err != nil {
 				return err
 			}
@@ -687,7 +685,7 @@ its deploy manifest. It asks for the run's name at a terminal, unless
 			if err != nil {
 				return err
 			}
-			c, err := openDeployContext(a, flags, args[0])
+			c, err := openDeployContext(cmd, a, flags, args[0], false)
 			if err != nil {
 				return err
 			}
@@ -749,7 +747,7 @@ applied resources, by node ID and output name, leaving out secret ones.
 			if err != nil {
 				return err
 			}
-			c, err := openDeployContext(a, flags, args[0])
+			c, err := openDeployContext(cmd, a, flags, args[0], false)
 			if err != nil {
 				return err
 			}

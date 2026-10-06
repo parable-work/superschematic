@@ -3425,7 +3425,12 @@ deploy in `internal/stackdeploy` with its public face in `stack`, and the
 commands in `cli/stack_deploy.go`; `stack/stacktest`'s fake target carries
 every seam, and `TestDeployRandom` in `extensions/pulumi` deploys through
 the real provisioner against a `file://` backend. The gcp target has
-bootstrap, the Secret Manager store and the state bucket. Not built: the
+bootstrap, the Secret Manager store and the state bucket. The local target
+carries no deploy seam: `stack dev` runs it, the cloud commands refuse a
+local environment and point to it, and `secrets set` writes a local
+environment's `secrets.env` through a store the CLI hands the operation,
+since the file sits under the schemas root, which a registry does not
+know. Not built: the
 gcp migration runner, a Cloud Run job running `superschematic-migrate`, so
 a gcp deploy with a migration to run is refused; `CredentialsOf` returns
 none until the Cloudflare DNS platform resolves its credentials into

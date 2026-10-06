@@ -275,6 +275,11 @@ type SecretsOptions struct {
 
 	// Prompter asks for each value.
 	Prompter Prompter
+
+	// Store, when set, replaces the target's secret store: the CLI's
+	// store for a local environment, whose secrets file sits under the
+	// schemas root, which the registry does not know.
+	Store registry.SecretStore
 }
 
 // SetSecrets asks for and stores secret values (docs/stack-model.md,
@@ -287,6 +292,9 @@ func SetSecrets(ctx context.Context, o SecretsOptions) ([]string, error) {
 	s, err := openEnvironment(o.Options)
 	if err != nil {
 		return nil, err
+	}
+	if o.Store != nil {
+		s.target.Secrets = o.Store
 	}
 	if s.target.Secrets == nil {
 		return nil, fmt.Errorf("target %s stores no secrets", s.target.Name)

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/parable-work/superschematic/internal/stack/local"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack/stacktest"
@@ -119,6 +120,11 @@ types:
     rawHeritage: { extends: Staging }
     environment:
       parameters: [pr]
+  Dev:
+    name: Dev
+    role: EmbeddedStruct
+    environment:
+      target: local
 `,
 	}
 	for name, content := range files {
@@ -177,6 +183,7 @@ func TestStackCommands(t *testing.T) {
 		root.SetArgs(append([]string{"stack"}, append(args, "--stack", stackDir)...))
 		err := root.Execute()
 		assert.NotContains(t, stdout.String()+stderr.String(), "key-", "a secret value reached the output")
+		assert.NotContains(t, stdout.String()+stderr.String(), "local \"key\"", "a secret value reached the output")
 		return stdout.String(), err
 	}
 	useTerminal(t, nil)
@@ -275,8 +282,23 @@ func TestStackCommands(t *testing.T) {
 	assert.Equal(t, "destroyed Staging\n", out)
 	assert.True(t, slices.Contains(ext.Provisioner.Calls(), "destroy Staging"))
 
+	// A local environment runs with stack dev, and secrets set writes the
+	// secrets.env stack dev reads.
+	for _, command := range []string{"plan", "deploy", "bootstrap", "destroy", "outputs"} {
+		_, err = run(command, "Dev")
+		require.ErrorContains(t, err, "environment Dev is on the local target, which `stack "+command+"` does not deploy: run it with `superschematic stack dev --environment Dev`")
+	}
+	useTerminal(t, &fakeTerminal{answers: []string{"local \"key\""}})
+	_, err = run("secrets", "set", "Dev")
+	require.NoError(t, err)
+	schemasRoot := filepath.Dir(filepath.Dir(stackDir))
+	values, err := local.ReadSecrets(filepath.Join(local.StateDir(schemasRoot, "demo-stack", "Dev"), local.SecretsFile))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"DemoConfig.API_KEY": "local \"key\""}, values)
+	useTerminal(t, nil)
+
 	_, err = run("plan", "Nowhere")
-	require.ErrorContains(t, err, "stack demo-stack has no environment Nowhere (its environments: Preview, Staging)")
+	require.ErrorContains(t, err, "stack demo-stack has no environment Nowhere (its environments: Dev, Preview, Staging)")
 	_, err = run("deploy", "Staging", "--image", "demo-api")
 	require.ErrorContains(t, err, "want <server>=<repository>@sha256:<digest>")
 }

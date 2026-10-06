@@ -402,13 +402,15 @@ environment that has no value and every platform credential that has
 none (section 7.3), or for the one secret named
 (`PaymentsSecrets.STRIPE_KEY`), which it asks for even when it has a value,
 to replace it. Each value goes through the target's secret store, keyed
-by the secret's identity, to Secret Manager on GCP, and never into a file
-or a log. A parameterized environment's members share its secrets, so
-`secrets set` takes no parameter values.
+by the secret's identity, to Secret Manager on GCP, and never into a log.
+For a local environment it goes to the `secrets.env` that `stack dev`
+reads (section 8.3), the one file a value is written to. A parameterized
+environment's members share its secrets, so `secrets set` takes no
+parameter values.
 
-The secret itself, without a value, is a node of the environment's graph,
-so on a fresh environment `stack deploy` creates it in its infrastructure
-step. The deploy then needs a value for every secret before its next step:
+On a cloud target the secret itself, without a value, is a node of the
+environment's graph, so on a fresh environment `stack deploy` creates it
+in its infrastructure step. The deploy then needs a value for every secret before its next step:
 at a terminal it asks for each one missing, and elsewhere, as in CI, it
 stops and names them, and `secrets set` gives them. `secrets set` on a
 secret whose storage does not exist yet says to deploy first. Resolution
@@ -1017,10 +1019,11 @@ change reads as a diff.
 
 ## 7. The gcp target
 
-`extensions/gcp` builds this section, apart from bootstrap (section 7.3)
-and image builds: the target, its Cloud Run and Cloud SQL platforms, their
-connectors, the Cloud DNS platform, the policy rules and the pinned
-provider schemas (section 6.4), at pulumi-gcp 9.37.1. Its golden
+`extensions/gcp` builds this section, apart from image builds and the
+migration job: the target, its Cloud Run and Cloud SQL platforms, their
+connectors, the Cloud DNS platform, the policy rules, the pinned provider
+schemas (section 6.4), at pulumi-gcp 9.37.1, and bootstrap with the
+target's Secret Manager store and state bucket (section 7.3). Its golden
 environments resolve the acme-shop stack of section 4.1 in a staging, a
 production and a parameterized preview environment.
 
@@ -1763,9 +1766,16 @@ The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
 plug into it; they add no commands of their own. `stack dev` runs a local
 environment (section 8.3).
 
-Each command loads the Stack service `--stack` names, or the one under
-`./schemas/services`, and resolves the environment as the `stack`
-generator does, so it never reads a stale `environment.json`. A command
+Each cloud command opens the Stack service as `stack dev` does: the one
+`--stack` names, else the working directory when it is one, else the one
+under `./schemas/services`. Unlike `stack dev`, which builds the stack
+and reads the `environment.json` the build writes, it resolves the
+environment as the `stack` generator does, without a build, so `plan`
+never reads a stale one. The provisioner's program goes to
+`<schemas-root>/dist/program/<stack>/<environment>`, or `--program-dir`.
+`plan`, `deploy`, `bootstrap`, `destroy` and `outputs` refuse a local
+environment, which `stack dev` runs, and `secrets set` writes its
+`secrets.env`. A command
 that works on one run of a parameterized environment takes each
 parameter's value as `--param pr=123`. `bootstrap`, `secrets set`,
 `plan`, `deploy`, `destroy` and `outputs` are built, in
@@ -1983,7 +1993,9 @@ registrations.
 - **`extensions/gcp`**, a Go module of its own (D1): the gcp target's
   platforms, connectors and Cloud DNS platform, its policy rules, and its
   pinned provider schemas with the tool that keeps them current (sections
-  6.4 and 7). Bootstrap is to come.
+  6.4 and 7), and its bootstrap, secret store and state store over Google
+  Cloud's client libraries (section 7.3), which stay out of the root
+  module. Its migration runner is to come.
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
   binding generator (sections 6.5 and 6.6). Built: it registers provisioner
   `pulumi`, its `bindings` package is the generator, and it joins

@@ -497,9 +497,9 @@ Each of these commands takes these flags:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--stack` | the one Stack service under `./schemas/services` | the Stack service directory |
+| `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
 | `--naming` | `<stack>/../../superschematic.toml` | naming config file |
-| `--program-dir` | a temporary directory, removed after | where to render the provisioner's program |
+| `--program-dir` | `<schemas-root>/dist/program/<stack>/<environment>` | where to render the provisioner's program |
 | `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `deploy`, `destroy` and `outputs` take it |
 
 ### `stack bootstrap <environment>`
@@ -520,10 +520,11 @@ credential with no value, with the terminal's echo off.
 
 Ask for the value of every secret of the environment that has none, and
 every platform credential, with the terminal's echo off, and store each in
-the target's secret store (Secret Manager on gcp). Name one secret, by
+the target's secret store (Secret Manager on gcp), or, for a local
+environment, in the `secrets.env` `stack dev` reads. Name one secret, by
 the type that declares it and its field, to replace its value. It needs a
-terminal, and writes no value to a file. On a fresh environment, deploy
-first: its infrastructure step creates each secret's storage.
+terminal. On a fresh cloud environment, deploy first: its infrastructure
+step creates each secret's storage.
 
 ```
 superschematic stack secrets set Staging
