@@ -17,7 +17,7 @@ func TestGenerateUsesFieldUploadMaxBytesInMultipartContract(t *testing.T) {
 	schema := ir.NewSchema("upload-api", ir.SchemaKindAPI)
 	schema.Scalars["Media.File"] = &ir.ScalarDef{
 		Name:              "Media.File",
-		LanguagePrimitive: ir.LanguageObject,
+		LanguagePrimitive: ir.LanguageString,
 		FileUpload:        &ir.FileUploadConfig{MaxSize: 1024, Category: "file"},
 	}
 	schema.Types["UploadArchiveInput"] = &ir.TypeDef{
@@ -80,7 +80,7 @@ func TestUploadFieldsComeFromFileUploadMetadataOnly(t *testing.T) {
 	}
 	schema.Scalars["Media.Badge"] = &ir.ScalarDef{
 		Name:              "Media.Badge",
-		LanguagePrimitive: ir.LanguageObject,
+		LanguagePrimitive: ir.LanguageString,
 		FileUpload:        &ir.FileUploadConfig{MaxSize: 2048, Category: "image", AllowedTypes: []string{"image/png"}},
 		ImageConstraints:  &ir.ImageConstraints{RequireTransparency: true},
 	}

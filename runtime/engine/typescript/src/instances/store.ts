@@ -31,8 +31,9 @@ behaviors reach. The store is their reach (D16, amended): it reads other
 instances, invokes their operations and creates new ones as the chain's
 principal, asking the policy each time, records the references behaviors
 hold, asks the guards of the behaviors that refer to an instance before
-it changes and runs their hooks after, and refuses a delete that leaves
-a reference to the deleted instance behind. The runner's work reaches
+it changes and runs their hooks after, each reference's as far as it
+hears the change (instances/references.ts), and refuses a delete that
+leaves a reference to the deleted instance behind. The runner's work reaches
 through it too, on a chain whose cause each event it appends records.
 
 list pages through a schema's instances in creation order with an opaque
@@ -74,7 +75,7 @@ import { readOnlyIssue } from '../registry/validator.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { diffPatch, isPlainObject, jsonEqual, mergePatch } from './patch.js';
-import { ReferenceTable, type IncomingReference } from './references.js';
+import { ReferenceTable, moves, type IncomingReference, type Move } from './references.js';
 
 /** An instance id: a letter or digit, then letters, digits, `.`, `_`, `:` and `-`, at most 256 characters. */
 export const INSTANCE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -383,7 +384,7 @@ export class InstanceStore {
           cause: chain.cause,
         });
         const updated = toInstance(this.row(namespace, schema, id) as Row, after);
-        this.referenced(chain, schema, id, change);
+        this.referenced(chain, schema, id, change, moves({ ...current, ...before }, updated.data));
         return updated;
       })
     );
@@ -428,7 +429,7 @@ export class InstanceStore {
           change: null,
           cause: chain.cause,
         });
-        this.referenced(chain, schema, id, { kind: 'delete' });
+        this.referenced(chain, schema, id, { kind: 'delete' }, []);
         return true;
       })
     );
@@ -591,7 +592,7 @@ export class InstanceStore {
         change: JSON.stringify(operationChange),
         cause: chain.cause,
       });
-      this.referenced(chain, schema, id, change);
+      this.referenced(chain, schema, id, change, moves({ ...own, ...before }, { ...ownAfter, ...after }));
       return { result, seq };
     });
   }
@@ -775,10 +776,13 @@ export class InstanceStore {
   }
 
   // guardReferences asks the guardReference of each behavior that refers
-  // to an instance, on its own instance, whoever the caller.
+  // to an instance, on its own instance, whoever the caller: before a
+  // delete every reference, before another change the ones that hear
+  // every change.
   private guardReferences(chain: Chain, schema: string, id: string, request: GuardRequest): void {
     const action = request.kind === 'operation' ? request.operation : request.kind;
-    for (const incoming of this.references.to(chain.namespace, schema, id)) {
+    const asked = request.kind === 'delete' ? this.references.to(chain.namespace, schema, id) : this.references.guarding(chain.namespace, schema, id);
+    for (const incoming of asked) {
       const source = this.source(chain, incoming);
       const implementation = source?.bound.behavior.implementation;
       if (!source || !implementation?.guardReference) {
@@ -788,7 +792,7 @@ export class InstanceStore {
         const answer: unknown = implementation.guardReference?.call(
           implementation,
           source.execution.view(source.bound),
-          deepFreeze({ schema, id, key: incoming.key }),
+          deepFreeze({ schema, id, key: incoming.key, ...(incoming.hears === undefined ? {} : { hears: incoming.hears }) }),
           request
         );
         synchronous(incoming.behavior, 'guardReference', answer);
@@ -802,14 +806,16 @@ export class InstanceStore {
   }
 
   // referenced runs the afterReferenceChange of each behavior that refers
-  // to an instance, after the instance's change. After a delete, a
-  // reference left behind by a behavior its source still composes refuses
-  // the delete; one a behavior the source no longer composes left is
-  // dropped.
-  private referenced(chain: Chain, schema: string, id: string, change: InstanceChange): void {
+  // to an instance, after the instance's change: after a delete every
+  // reference, after another change the ones that hear the values it
+  // moved. After a delete, a reference left behind by a behavior its
+  // source still composes refuses the delete; one a behavior the source no
+  // longer composes left is dropped.
+  private referenced(chain: Chain, schema: string, id: string, change: InstanceChange, moved: readonly Move[]): void {
     const frozenChange = deepFreeze(change);
-    for (const incoming of this.references.to(chain.namespace, schema, id)) {
-      const target: Reference = deepFreeze({ schema, id, key: incoming.key });
+    const hearing = change.kind === 'delete' ? this.references.to(chain.namespace, schema, id) : this.references.hearing(chain.namespace, schema, id, moved);
+    for (const incoming of hearing) {
+      const target: Reference = deepFreeze({ schema, id, key: incoming.key, ...(incoming.hears === undefined ? {} : { hears: incoming.hears }) });
       // An earlier hook may have removed this reference.
       if (!this.references.has(chain.namespace, incoming, target)) {
         continue;
