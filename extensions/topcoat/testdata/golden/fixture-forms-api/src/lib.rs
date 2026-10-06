@@ -8,12 +8,15 @@
 //! can hand the browser.
 //! `forms` reads and renders a form per input type whose fields a form
 //! holds.
+//! `procedures` lets browser code call each operation, its arguments and
+//! result records; the app's `.discover()` registers them.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
 pub mod forms;
 pub mod operations;
+pub mod procedures;
 pub mod records;
 mod wire;
 

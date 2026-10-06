@@ -38,6 +38,7 @@ type crate struct {
 	Guards     []operation
 	Records    []record
 	Forms      []form
+	Procedures []procedure
 }
 
 // operation is one operation of the service, from the API crate's own
@@ -109,10 +110,19 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 	if err != nil {
 		return nil, err
 	}
+	// A procedure's arguments and result are records, so procedures need
+	// them.
 	if cfg.WritesRecords() {
-		if out.Records, err = recordsOf(schemas); err != nil {
+		records := newRecordBuilder(schemas)
+		if err := records.addResults(); err != nil {
 			return nil, fmt.Errorf("topcoat: records of %s: %w", service, err)
 		}
+		if cfg.WritesProcedures() {
+			if out.Procedures, err = proceduresOf(records, api, service); err != nil {
+				return nil, err
+			}
+		}
+		out.Records = records.sorted()
 	}
 	if cfg.WritesForms() {
 		if out.Forms, err = formsOf(schemas, api, c.Logf); err != nil {
@@ -165,6 +175,9 @@ func (c *crate) write(dir string) error {
 	if len(c.Forms) > 0 {
 		files = append(files, struct{ template, path string }{"forms.tmpl", filepath.Join("src", "forms.rs")})
 	}
+	if len(c.Procedures) > 0 {
+		files = append(files, struct{ template, path string }{"procedures.tmpl", filepath.Join("src", "procedures.rs")})
+	}
 	tmpl, err := template.New("topcoat").Funcs(template.FuncMap{
 		"rustString": rustString,
 		"join":       strings.Join,
@@ -173,7 +186,7 @@ func (c *crate) write(dir string) error {
 		return err
 	}
 	// A crate written before with records or forms keeps no stale module.
-	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "procedures.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

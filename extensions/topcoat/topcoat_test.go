@@ -58,7 +58,13 @@ func build(t *testing.T, outputRoot string, outputs map[string]any) (*registry.R
 // step.
 func buildService(t *testing.T, name, outputRoot string, outputs map[string]any) (*registry.Result, error) {
 	t.Helper()
-	reg, err := registry.Assemble(registry.DefaultNaming(), topcoat.Extension{})
+	return buildWithNaming(t, registry.DefaultNaming(), name, outputRoot, outputs)
+}
+
+// buildWithNaming is buildService under names, a superschematic.toml.
+func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot string, outputs map[string]any) (*registry.Result, error) {
+	t.Helper()
+	reg, err := registry.Assemble(names, topcoat.Extension{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -81,7 +87,7 @@ func buildService(t *testing.T, name, outputRoot string, outputs map[string]any)
 		OutputRoot:  outputRoot,
 		ServicePath: service,
 		Paths:       testpaths.Local(t),
-		Naming:      registry.DefaultNaming(),
+		Naming:      names,
 		Registry:    reg,
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(fixtures, name), loader.WithRegistry(reg))
@@ -127,6 +133,46 @@ func TestTheCrateIsWrittenOnlyBesideARustServer(t *testing.T) {
 	unknown["topcoat"] = map[string]any{"enabled": true, "pages": true}
 	if _, err := build(t, testpaths.TempDir(t), unknown); err == nil || !strings.Contains(err.Error(), "pages") {
 		t.Errorf("an undeclared key in outputs.topcoat: %v", err)
+	}
+}
+
+// TestTheNamingFileListsServices builds fixture-api, whose config has no
+// outputs.topcoat, under a superschematic.toml whose [extension.topcoat]
+// lists it: the crate is written, as the section would write it. The core
+// binary never reads the table, so the same configs build there. A key the
+// table does not declare fails assembly.
+func TestTheNamingFileListsServices(t *testing.T) {
+	names, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"fixture-api\"]\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	outputs := rustOutputs()
+	delete(outputs, "topcoat")
+	root := testpaths.TempDir(t)
+	result, err := buildWithNaming(t, names, "fixture-api", root, outputs)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if got := result.Outputs[topcoat.OutputKey]; got != topcoat.Dir(root, "fixture-api") {
+		t.Errorf("a listed service wrote no crate: outputs %v, skipped %v", result.Outputs, result.Skipped)
+	}
+
+	unlisted, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"other-api\"]\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	if result, err = buildWithNaming(t, unlisted, "fixture-api", testpaths.TempDir(t), outputs); err != nil || result.Outputs[topcoat.OutputKey] != "" {
+		t.Errorf("an unlisted service wrote a crate: %v, %v", err, result.Outputs)
+	}
+
+	for _, table := range []string{"services = \"fixture-api\"", "pages = true"} {
+		names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+table+"\n"), "superschematic.toml")
+		if err != nil {
+			t.Fatalf("ParseNaming: %v", err)
+		}
+		if _, err := registry.Assemble(names, topcoat.Extension{}); err == nil {
+			t.Errorf("[extension.topcoat] %s: assembled, want it refused", table)
+		}
 	}
 }
 
@@ -365,10 +411,11 @@ use schemas_fixture_api_topcoat::api::{
     types, Implementations, SessionImplementation, TenantCreateTenantArgs, TenantGetTenantArgs, TenantImplementation,
     TenantListTenantsArgs, TenantUpdateSecretArgs,
 };
-use schemas_fixture_api_topcoat::records::TenantViewRecord;
+use schemas_fixture_api_topcoat::procedures::{self, TenantCreateTenantArgsRecord, TenantGetTenantArgsRecord};
+use schemas_fixture_api_topcoat::records::{CreateTenantInputRecord, TenantViewRecord};
 use schemas_fixture_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureApiExt};
 use topcoat::context::Cx;
-use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
+use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
 // The API's own authenticator, for requests to the mounted JSON API.
@@ -458,15 +505,47 @@ async fn readable(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <p>(said)</p> })
 }
 
+// A procedure's body, from a page: the problem as status, code and each
+// field error's path and rule, or the result.
+fn problem(result: Result<TenantViewRecord, procedures::ProblemRecord>) -> String {
+    match result {
+        Ok(tenant) => format!("created {}", tenant.name),
+        Err(problem) => {
+            let fields: Vec<String> = problem.errors.iter().map(|error| format!("{}:{}", error.path, error.validator)).collect();
+            format!("{} {} [{}]", problem.status, problem.code, fields.join(","))
+        }
+    }
+}
+
+async fn create_through_procedure(cx: &Cx, name: &str) -> String {
+    let args = TenantCreateTenantArgsRecord { input: CreateTenantInputRecord { name: name.to_string(), slug: "acme".to_string() } };
+    problem(procedures::call_tenant_create_tenant(cx, args).await)
+}
+
+#[page(POST "/procedures/create")]
+async fn procedure_create(cx: &Cx) -> topcoat::Result<impl View> {
+    let said = create_through_procedure(cx, "Acme").await;
+    Ok(view! { <p>(said)</p> })
+}
+
+#[page(POST "/procedures/create-short")]
+async fn procedure_create_short(cx: &Cx) -> topcoat::Result<impl View> {
+    let said = create_through_procedure(cx, "a").await;
+    Ok(view! { <p>(said)</p> })
+}
+
+#[page(POST "/procedures/get-unparsed")]
+async fn procedure_get_unparsed(cx: &Cx) -> topcoat::Result<impl View> {
+    let args = TenantGetTenantArgsRecord { id: "not a uuid!".to_string(), include_archived: false };
+    let said = problem(procedures::call_tenant_get_tenant(cx, args).await);
+    Ok(view! { <p>(said)</p> })
+}
+
+// The app registers its pages and the crate's procedures by discovery.
 fn app(caller: Option<Principal>) -> Router {
     let implementations =
         Implementations { session: Arc::new(Tenants), tenant: Arc::new(Tenants), authenticator: Arc::new(NoRequests) };
-    Router::builder()
-        .page(create_tenant)
-        .page(create_short_tenant)
-        .page(readable)
-        .fixture_api(implementations, Caller(caller))
-        .build()
+    Router::builder().discover().fixture_api(implementations, Caller(caller)).build()
 }
 
 async fn send(router: &Router, method: &str, uri: &str) -> (StatusCode, String) {
@@ -498,6 +577,31 @@ async fn a_page_calls_an_operation_by_its_route_rules() {
     assert!(body.contains("readable by ada"), "{body}");
     let (_, body) = send(&app(None), "GET", "/tenants/readable").await;
     assert!(body.contains("401 unauthorized"), "{body}");
+}
+
+#[tokio::test]
+async fn a_procedure_answers_a_refusal_as_a_record() {
+    let writer = Some(Principal::new("ada", ["tenants"]));
+    let (_, body) = send(&app(writer.clone()), "POST", "/procedures/create").await;
+    assert!(body.contains("created Acme"), "{body}");
+    let (_, body) = send(&app(writer.clone()), "POST", "/procedures/create-short").await;
+    assert!(body.contains("400 bad_request [name:minLength]"), "{body}");
+    let (_, body) = send(&app(None), "POST", "/procedures/create").await;
+    assert!(body.contains("401 unauthorized []"), "{body}");
+    let (_, body) = send(&app(writer), "POST", "/procedures/get-unparsed").await;
+    assert!(body.contains("400 bad_request [id:type]"), "{body}");
+}
+
+#[tokio::test]
+async fn the_procedures_are_discovered_on_their_paths() {
+    // Registered: the procedure refuses a body that is not its JSON,
+    // rather than the router answering 404.
+    let (status, _) = send(&app(None), "POST", "/_superschematic/fixture-api/tenant/create-tenant").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send(&app(None), "GET", "/_superschematic/fixture-api/tenant/create-tenant").await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    let (status, _) = send(&app(None), "POST", "/_superschematic/fixture-api/tenant/no-such-operation").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

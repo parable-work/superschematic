@@ -12,7 +12,7 @@ license = "UNLICENSED"
 {{- if .HasAuth }}
 async-trait = "0.1.89"
 {{- end }}
-{{- if .Forms }}
+{{- if or .Forms .Procedures }}
 serde = { version = "1.0.228", features = ["derive"] }
 {{- end }}
 {{- if or .Records .Forms }}
