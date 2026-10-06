@@ -23,6 +23,7 @@ import (
 
 	versiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/engine"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/internal/testdb"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/postgres"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/storage"
 )
@@ -237,13 +238,15 @@ type commitExpect struct {
 // TestScenarios runs every scenario in runtime/versiongraph/testdata/scenarios
 // through the engine and the Postgres adapter, each in a schema of its own
 // that holds the fixture's DDL. It needs the Postgres named by
-// SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL. TestScenariosOnSQLite runs
-// them on SQLite.
+// SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL. The schemas are in a
+// database of the test's own (package testdb), since scenarios hold and
+// take the graph's sweep lock. TestScenariosOnSQLite runs them on SQLite.
 func TestScenarios(t *testing.T) {
 	dsn := os.Getenv(databaseVariable)
 	if dsn == "" {
 		t.Skip("set " + databaseVariable + " to run the version-graph scenarios against Postgres")
 	}
+	dsn = testdb.New(t, dsn)
 	descriptor, err := os.ReadFile(filepath.Join(fixtureDir, "recipe.json"))
 	if err != nil {
 		t.Fatal(err)

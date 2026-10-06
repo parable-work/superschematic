@@ -137,4 +137,8 @@ The SQLite tests need no server and run with or without a database. The
 Postgres tests read `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and skip
 without it; `make versiongraph-scenarios-rust` runs the SQLite pass first
 and then fails without it. Each Postgres test creates a schema of its own,
-applies `../testdata/fixture/create.sql` and drops the schema after.
+applies `../testdata/fixture/create.sql` and drops the schema after. The
+sweeper's tests run side by side and hold and take the graph's sweep lock,
+an advisory lock, which Postgres keys to the database rather than the
+schema, so each creates its schema in a database of its own and drops the
+database after; the variable's role must be able to create databases.

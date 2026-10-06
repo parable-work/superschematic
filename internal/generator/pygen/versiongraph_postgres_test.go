@@ -20,11 +20,16 @@ import (
 // tests that import it against the Postgres
 // SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names, in the Python
 // package's uv environment (runtime/versiongraph/python), which holds the
-// engine, psycopg and pydantic. The first saves a Tasting, whose columns hold
-// a value of every class a descriptor names, commits it and reads it back
-// from the save and from the commit: each field comes back as the typed
-// value of its canonical form. The second merges, resolves a conflict,
-// diffs, releases and rolls back, rebases and sweeps through the facade.
+// engine, psycopg and pydantic. Each test creates a database of its own
+// there and drops it after: the graph's sweep lock is an advisory lock,
+// which Postgres keys to the database, and go test runs rustgen's, tsgen's
+// and ormgen's facade tests, which sweep the same graph, beside this one.
+// The variable's role must be able to create databases. The first saves a
+// Tasting, whose columns hold a value of every class a descriptor names,
+// commits it and reads it back from the save and from the commit: each
+// field comes back as the typed value of its canonical form. The second
+// merges, resolves a conflict, diffs, releases and rolls back, rebases and
+// sweeps through the facade.
 func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the generated facade in -short mode")
@@ -88,6 +93,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
+from psycopg.conninfo import make_conninfo
 
 from MODULE.types import Step, Tasting
 from MODULE.versiongraph_recipe import RecipeEdits, RecipeGraph
@@ -110,14 +116,19 @@ BREAD = "00000000-0000-4000-8000-00000000b0b0"
 
 @pytest.fixture
 def graph():
-    """A schema of its own holding the fixture's DDL and a Bread recipe, the
-    Recipe graph over a connection to it, and a connection for SQL."""
-    schema = f"vg_py_facade_{os.getpid()}_{time.time_ns()}"
+    """A database of its own holding the fixture's DDL and a Bread recipe,
+    the Recipe graph over a connection to it, and a connection for SQL.
+
+    The graph's sweep lock is an advisory lock, which Postgres keys to the
+    database, not to a schema; go test runs the other languages' facade
+    tests beside this one, and in a database they shared, their sweeps
+    would make this one's skip."""
+    database = f"vg_py_facade_{os.getpid()}_{time.time_ns()}"
     with psycopg.connect(DSN, autocommit=True) as admin:
-        admin.execute(f"CREATE SCHEMA {schema}")
-    options = f"-c search_path={schema},public"
-    sql = psycopg.connect(DSN, autocommit=True, options=options)
-    engine_connection = psycopg.connect(DSN, autocommit=True, options=options)
+        admin.execute(f"CREATE DATABASE {database}")
+    dsn = make_conninfo(DSN, dbname=database)
+    sql = psycopg.connect(dsn, autocommit=True)
+    engine_connection = psycopg.connect(dsn, autocommit=True)
     try:
         with open(os.environ["FACADE_DDL"], encoding="utf-8") as ddl:
             sql.execute(ddl.read())
@@ -127,7 +138,7 @@ def graph():
         sql.close()
         engine_connection.close()
         with psycopg.connect(DSN, autocommit=True) as admin:
-            admin.execute(f"DROP SCHEMA {schema} CASCADE")
+            admin.execute(f"DROP DATABASE IF EXISTS {database} WITH (FORCE)")
 
 
 def base62(hyphenated):

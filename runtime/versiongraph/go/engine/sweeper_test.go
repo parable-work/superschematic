@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/engine"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/internal/testdb"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/postgres"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/storage"
 )
@@ -25,7 +26,8 @@ type pass struct {
 // TestRunSweeperSkipsWhileTheLockIsHeld runs the sweeper while another
 // transaction holds the graph's sweep lock: its passes are skipped until the
 // lock is released, the next pass sweeps, and cancelling the context stops
-// it with the context's error.
+// it with the context's error. It runs in a database of its own (package
+// testdb), where no other test's lock or sweep reaches it.
 func TestRunSweeperSkipsWhileTheLockIsHeld(t *testing.T) {
 	dsn := os.Getenv(databaseVariable)
 	if dsn == "" {
@@ -35,7 +37,7 @@ func TestRunSweeperSkipsWhileTheLockIsHeld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := newRunner(t, dsn, mustReadFixture(t), createSQL)
+	r := newRunner(t, testdb.New(t, dsn), mustReadFixture(t), createSQL)
 	r.holdSweepLock(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -89,7 +91,8 @@ func TestRunSweeperSkipsWhileTheLockIsHeld(t *testing.T) {
 // change set after the pass read it as idle and before the pass discards
 // it. The pass leaves that change set live, since it is no longer idle,
 // and the rest of the pass lands: it discards the other idle change set
-// and collects a discarded ref's rows.
+// and collects a discarded ref's rows. It runs in a database of its own
+// (package testdb), where no other test's lock makes its pass skip.
 func TestSweepSkipsAnIdleDraftWrittenDuringThePass(t *testing.T) {
 	dsn := os.Getenv(databaseVariable)
 	if dsn == "" {
@@ -99,7 +102,7 @@ func TestSweepSkipsAnIdleDraftWrittenDuringThePass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := newRunner(t, dsn, mustReadFixture(t), createSQL)
+	r := newRunner(t, testdb.New(t, dsn), mustReadFixture(t), createSQL)
 	ctx := context.Background()
 	check := func(what string, err error) {
 		t.Helper()
