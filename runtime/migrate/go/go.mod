@@ -3,6 +3,7 @@ module github.com/parable-work/superschematic/runtime/migrate/go
 go 1.26.4
 
 require (
+	cloud.google.com/go/auth v0.24.0
 	cloud.google.com/go/cloudsqlconn v1.25.3
 	github.com/jackc/pgx/v5 v5.11.0
 	modernc.org/libc v1.74.4
@@ -10,7 +11,6 @@ require (
 )
 
 require (
-	cloud.google.com/go/auth v0.24.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.0 // indirect
 	cloud.google.com/go/compute/metadata v0.10.0 // indirect
 	cloud.google.com/go/sql v0.2.0 // indirect
