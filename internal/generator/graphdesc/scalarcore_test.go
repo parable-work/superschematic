@@ -14,7 +14,11 @@ import (
 // (runtime/versiongraph/testdata/canonical) and checks each canonical value
 // against superscalar, which the schema runtime's parse step calls: parsing
 // it gives it back unchanged. A UUID's Postgres rendering, the hyphenated
-// form, also parses to the vector's canonical value.
+// form, also parses to the vector's canonical value. The canonical rule
+// takes a date-time in the years 0000 to 9999, as Postgres renders them
+// (runtime/versiongraph/README.md), and superscalar refuses a year before
+// 1000, so a canonical date-time before 1000 has no scalar form to match:
+// superscalar refuses it instead.
 func TestCanonicalValuesAreTheScalarCoresCanonicalForm(t *testing.T) {
 	for class, scalar := range map[string]string{
 		"uuid":     "Identity.UUID",
@@ -43,6 +47,12 @@ func TestCanonicalValuesAreTheScalarCoresCanonicalForm(t *testing.T) {
 			canonical, rendered := stringsOf(t, c.Canonical), stringsOf(t, c.Postgres)
 			for i, value := range canonical {
 				got, err := scalarlib.Parse(scalar, value)
+				if class == "dateTime" && value < "1000" {
+					if err == nil {
+						t.Errorf("%s %q: %s parses %q to %q; it refuses a year before 1000", class, c.Name, scalar, value, got)
+					}
+					continue
+				}
 				if err != nil || got != value {
 					t.Errorf("%s %q: %s parses %q to %q, %v; the canonical form is its own parse", class, c.Name, scalar, value, got, err)
 				}
