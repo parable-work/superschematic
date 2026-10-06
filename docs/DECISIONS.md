@@ -3606,7 +3606,6 @@ Status: built. extensions/cloudflare's `TestBootstrapAndDeployReadTheToken`
 bootstraps and deploys the shop's Staging, its records on Cloudflare, on
 `stack/stacktest`'s fake target: bootstrap hands the target the zone's
 token secret and stores its value, and the deploy hands it to the
-provisioner in `CLOUDFLARE_API_TOKEN`. The installed binary links the
-Cloudflare DNS platform beside the gcp target.
+provisioner in `CLOUDFLARE_API_TOKEN`.
 
 The rule is reversible until the first release.
