@@ -34,6 +34,7 @@ func decoratorTestService(t *testing.T, kind string, files map[string]string) st
       "@superschematic/api": ["` + pkg("api") + `"],
       "@superschematic/db": ["` + pkg("db") + `"],
       "@superschematic/schema": ["` + pkg("schema") + `"],
+      "@superschematic/schema-config": ["` + pkg("schema-config") + `"],
       "superscalar": ["` + scalars + `"]
     }
   },

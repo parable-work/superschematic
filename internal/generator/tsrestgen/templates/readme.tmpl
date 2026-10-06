@@ -22,6 +22,12 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   validators, applies the `@requirePermission` / `@publicRoute` gate, wraps
   results in the `{data, meta: {requestId}}` envelope and failures in
   RFC 9457 `application/problem+json`. `operationSpecs` is the operation table.
+{{- if .HasServiceCallers }}
+  A `@requireService` or `@allowService` operation also admits a calling
+  service: `authenticateService` verifies its `Service-Authorization`
+  credential before the end-user step and puts it on `ctx.serviceCaller`;
+  without it, such an operation answers 401 `service_unauthorized`.
+{{- end }}
 - `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
 - `values-schema.json`: the env-var contract, when the schema declares an
   `@envVars` class.
@@ -31,13 +37,16 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
 | Method | Path | Operation | Auth |
 | --- | --- | --- | --- |
 {{- range .Endpoints }}
-| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ if .PublicRoute }}public{{ else if .RequiredPerms }}{{ join .RequiredPerms ", " }}{{ else if .RequiresAuth }}authenticated{{ else }}none{{ end }} |
+| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
 {{- end }}
 
 ## Usage
 
 ```ts
 import { Hono } from 'hono';
+{{- if .HasServiceCallers }}
+import { serviceAuthenticator } from '{{ .RuntimePackage }}';
+{{- end }}
 import { errorHandler, notFoundHandler } from '{{ .RuntimePackage }}/hono';
 import { buildRouter, type Implementations } from '{{ .PackageName }}';
 
@@ -56,6 +65,9 @@ const implementations: Implementations = { /* one object per operation class */ 
 const app = new Hono();
 app.route('/', buildRouter(implementations, {
   authenticate: async ctx => /* the caller, or null */ null,
+{{- if .HasServiceCallers }}
+  authenticateService: serviceAuthenticator(serviceAuthConfig), // the issuers and callers this server admits
+{{- end }}
 {{- if .HasManualRoutes }}
   manualRoutes: {
 {{- range .ManualEndpoints }}

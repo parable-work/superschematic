@@ -235,7 +235,11 @@ func (c *HTTPClient) do(
 		return 0, nil, nil, err
 	}
 
+	// One call refreshes the end user at most once and asks for a fresh
+	// service credential at most once.
 	alreadyRetriedAuth := false
+	serviceRetried := false
+	freshServiceToken := false
 	rateLimitAttempt := 0
 	for {
 		req, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(requestBody))
@@ -248,6 +252,10 @@ func (c *HTTPClient) do(
 		if err := c.applyAuth(ctx, req); err != nil {
 			return 0, nil, nil, err
 		}
+		if err := c.applyServiceCredential(ctx, req, freshServiceToken); err != nil {
+			return 0, nil, nil, err
+		}
+		freshServiceToken = false
 		if interceptor := c.config.RequestInterceptor; interceptor != nil {
 			if err := interceptor(ctx, req); err != nil {
 				return 0, nil, nil, fmt.Errorf("request interceptor: %w", err)
@@ -268,7 +276,15 @@ func (c *HTTPClient) do(
 			return 0, nil, nil, err
 		}
 
-		if resp.StatusCode == http.StatusUnauthorized && !alreadyRetriedAuth && c.refreshTokenProvider() != nil {
+		if resp.StatusCode == http.StatusUnauthorized && problemCode(responseBody) == "service_unauthorized" {
+			// The service credential was refused: ask its source for a fresh
+			// token once. The end-user refresh cannot help, so it does not run.
+			if !serviceRetried && c.serviceTokenSource() != nil {
+				serviceRetried = true
+				freshServiceToken = true
+				continue
+			}
+		} else if resp.StatusCode == http.StatusUnauthorized && !alreadyRetriedAuth && c.refreshTokenProvider() != nil {
 			if _, err := c.refreshAuthToken(ctx); err != nil {
 				return 0, nil, nil, &AuthenticationError{APIError: &APIError{
 					Message:    "authentication failed",
@@ -328,6 +344,38 @@ func (c *HTTPClient) applyAuth(ctx context.Context, req *http.Request) error {
 		req.Header.Set(headerName, token)
 	}
 	return nil
+}
+
+// applyServiceCredential sends the service credential, "Bearer <token>", in
+// each configured header. fresh asks the source for a new token.
+func (c *HTTPClient) applyServiceCredential(ctx context.Context, req *http.Request, fresh bool) error {
+	source := c.serviceTokenSource()
+	if source == nil {
+		return nil
+	}
+	token, err := source(ctx, fresh)
+	if err != nil {
+		return fmt.Errorf("resolve service credential: %w", err)
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil
+	}
+	headers := c.config.ServiceCredential.Headers
+	if len(headers) == 0 {
+		headers = []string{"Service-Authorization"}
+	}
+	for _, name := range headers {
+		req.Header.Set(name, "Bearer "+token)
+	}
+	return nil
+}
+
+func (c *HTTPClient) serviceTokenSource() func(ctx context.Context, fresh bool) (string, error) {
+	if c.config.ServiceCredential == nil {
+		return nil
+	}
+	return c.config.ServiceCredential.Token
 }
 
 func (c *HTTPClient) buildRequestBody(body any) ([]byte, string, error) {
@@ -705,6 +753,22 @@ func decodeError(statusCode int, body []byte, headers http.Header) error {
 	default:
 		return apiErr
 	}
+}
+
+// problemCode returns the code of an error body: code of an RFC 9457
+// problem, or error.code of the legacy {"error": {...}} envelope.
+func problemCode(body []byte) string {
+	var payload map[string]any
+	if len(body) == 0 || json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	if code := parsePayloadString(payload, "code"); code != "" {
+		return code
+	}
+	if envelope := parsePayloadMap(payload, "error"); envelope != nil {
+		return parsePayloadString(envelope, "code")
+	}
+	return ""
 }
 
 func defaultErrorMessage(statusCode int) string {

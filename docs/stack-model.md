@@ -976,7 +976,8 @@ every model check reports before anything is connected or lowered:
 Each failure carries a code, and `internal/stack/errors.go` lists them
 all. The checks of section 5.2 have one each: `unbound-field`,
 `unknown-env-key`, `secret-literal`, `kind-mismatch`, `unrealizable`,
-`no-connector`, `expose-not-server` and `policy`. Malformed declarations,
+`no-connector`, `expose-not-server` and `policy`, and the check section
+9.3 adds has `unreachable-edge`. Malformed declarations,
 unknown names and values that fail a schema have their own codes. So do
 three failures section 5.2 does not list:
 
@@ -1400,14 +1401,20 @@ export class StockMutations {
   authored as IR: `@allowService` without a user clause (an operation only
   services call is `@requireService`); either decorator with
   `@publicRoute`, `@webhook` or `@hmacVerified` on one operation (a third
-  party holds no service credential); and both on one operation or one
-  set. An `@publicRoute` operation opens its route even in a set with a
-  service clause.
+  party holds no service credential), its set's included; a
+  `@requireService` operation, its own clause or its set's, whose `@mcp`
+  publishes a tool (no end user's agent can call it, so the record says
+  so with `hidden`); and both on one operation or one set. An
+  `@publicRoute` operation opens its route even in a set with a service
+  clause.
 
-The IR records the effective rule on `FieldDef.ServiceCallers` and
-`OperationSet.ServiceCallers`, a `ServiceCallers{Mode, From}` where `Mode`
-is `require` or `allow` and `From` holds the API service names. The
-generators read it through `EndpointInfo`, as they read `RequiresAuth`.
+The IR records each declaration where it is written, on
+`FieldDef.ServiceCallers` and `OperationSet.ServiceCallers`, a
+`ServiceCallers{Mode, From}` where `Mode` is `require` or `allow` and
+`From` holds the API service names, as it records the middleware trio, so
+the data forms round-trip. `ir.EffectiveServiceCallers(set, op)` gives the
+rule that applies, and the generators read that through `EndpointInfo`,
+as they read `RequiresAuth`.
 
 Resolution adds a check to those of section 5.2. Every `calls` edge from a
 server C to an API A must reach at least one operation of A that C may
@@ -1423,9 +1430,10 @@ invoke:
 C can forward an end user when an API it serves has an operation with a
 user clause. So an edge fails when every operation of the callee lists
 other services or needs an end user the caller does not have: "orders
-calls shop-api, but no shop-api operation admits orders". A handle in `from` that names a service
-the stack does not deploy, or deploys without an edge, is not an error: an
-API is written once and deployed in many stacks.
+calls shop-api, but no shop-api operation admits orders"
+(`unreachable-edge`). A handle in `from` that names a service the stack
+does not deploy, or deploys without an edge, is not an error: an API is
+written once and deployed in many stacks.
 
 The OpenAPI document gains a `serviceAuth` security scheme, a bearer token
 in the `Service-Authorization` header. OpenAPI's security list is an OR of
@@ -1521,8 +1529,11 @@ When an operation has a service clause and the server has no service
 authenticator, the Go server's `Config.Validate` refuses to start it, the
 Rust crate does not compile, as D29 makes it for an end-user
 authenticator, and the TypeScript router answers the route with 401, as it
-does without `authenticate`. A server with no service clause may still
-be given one, so its routes can tell a delegated call from a direct one.
+does without `authenticate`. The TypeScript router takes a service
+authenticator whether or not an operation has a clause, so its routes can
+tell a delegated call from a direct one. The Go and Rust servers have the
+service step only when an operation has a clause, and then on every
+route, so their output for any other schema is unchanged.
 
 End-user auth providers do not change. No auth snippet is added; a
 provider never sees the service header and the service authenticator never
@@ -1618,6 +1629,11 @@ left alone.
   rather than in it. The Workers platform (section 6.8) decides whether the
   TypeScript service authenticator reads it there, or whether Workers
   callers sign key-pair tokens like the generic connector's.
+- The cluster's certificate authority. A Kubernetes API server serves its
+  keys over TLS signed by the cluster's own CA, which the runtimes' default
+  HTTP clients do not trust. Until the Kubernetes platform lands, a
+  deployment passes a key fetcher or HTTP client that trusts it; the
+  platform may add a CA to the callee config instead.
 
 ## 10. Validation and simulation
 
@@ -1779,7 +1795,8 @@ registrations.
    (`internal/registry/core_stack.go`, authored from
    `@superschematic/stack`), and its generator, `stack`
    (`internal/generator/stackgen`). Its `Service` reads a service's
-   `stack.Service` from the service's IR and its config's outputs, and
+   `stack.Service`, an API's operations for section 9.3's check included,
+   from the service's IR and its config's outputs, and
    `registry.Options.LoadDependencyConfig`, which every build sets, gives
    it each config.
 8. **CLI.** The `stack` command group.

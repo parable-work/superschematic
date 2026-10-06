@@ -12,6 +12,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/registry/registrytest"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	"github.com/parable-work/superschematic/internal/writer"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -220,5 +221,65 @@ types:
 	_, err := loader.LoadService(dir, loader.WithRegistry(reg))
 	if err == nil || !strings.Contains(err.Error(), "references") {
 		t.Fatalf("a reference of an unknown kind loaded: %v", err)
+	}
+}
+
+// An API operation's @requireService({ from }) only names who may call, so
+// the core declares `from` an identity path: the caller API's handle is no
+// reference, and the schema keeps the sentinel it came from (D37, D41).
+func TestServiceCallersFromIsAnIdentity(t *testing.T) {
+	reg := referencesRegistry(t)
+	root := t.TempDir()
+	dir := filepath.Join(root, "shop-api")
+	tsProject(t, dir)
+	addTSPath(t, dir, "@superschematic/api", filepath.Join(testpaths.RepoRoot(t), "packages", "api", "src", "index.ts"))
+	otherDir := filepath.Join(root, "other-api")
+	writeFiles(t, otherDir, map[string][]byte{
+		"package.json": []byte(`{"name": "@schemas/other-api", "private": true}`),
+		"src/index.ts": []byte("export * from \"./service.generated\";\n"),
+		"src/service.generated.ts": []byte(`import { SchemaKind, service } from "@superschematic/schema-config";
+export const OtherApi = service({ name: "other-api", kind: SchemaKind.API });
+`),
+	})
+	addTSPath(t, dir, "@schemas/other-api", filepath.Join(otherDir, "src", "index.ts"))
+	writeFiles(t, dir, map[string][]byte{
+		"schema.config.json": []byte(`{"name": "shop-api", "kind": "API", "outputs": {}}`),
+		"src/stock.schema.ts": []byte(`import { HttpMethod, requireService, rest } from "@superschematic/api";
+import { OtherApi } from "@schemas/other-api";
+
+export class StockOperations {
+  @requireService({ from: [OtherApi] })
+  @rest(HttpMethod.POST, "stock/reindex")
+  reindex(): string {
+    throw new Error("schema declaration only");
+  }
+}
+`),
+	})
+	schema, err := loader.LoadService(dir, loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("loading the API: %v", err)
+	}
+	if len(schema.References) != 0 {
+		t.Errorf("References = %+v, want none: a from handle is an identity", schema.References)
+	}
+	otherSentinel, err := filepath.EvalSymlinks(filepath.Join(otherDir, "src", "service.generated.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identities []string
+	for _, file := range schema.IdentitySentinels {
+		real, err := filepath.EvalSymlinks(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		identities = append(identities, real)
+	}
+	if !slices.Equal(identities, []string{otherSentinel}) {
+		t.Errorf("IdentitySentinels = %v, want only %s", schema.IdentitySentinels, otherSentinel)
+	}
+	got := ir.EffectiveServiceCallers(schema.OperationSets[0], schema.OperationSets[0].Operations[0])
+	if got == nil || got.Mode != ir.ServiceCallersRequire || !slices.Equal(got.From, []string{"other-api"}) {
+		t.Errorf("reindex ServiceCallers = %+v, want require from other-api", got)
 	}
 }

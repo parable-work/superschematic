@@ -132,6 +132,16 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 	scalars := apiOutput.Scalars
 	typeImports := map[string]bool{}
 
+	// A @requireService operation keeps its SDK method, which a service
+	// calls, but is no tool: no end user's agent can call it. The SDK
+	// endpoint's operation id is the API endpoint's handler name.
+	serviceOnly := map[string]bool{}
+	for _, endpoint := range apiOutput.Endpoints {
+		if endpoint.ServiceOnly() {
+			serviceOnly[endpoint.HandlerName] = true
+		}
+	}
+
 	for _, ns := range sdkOutput.Namespaces {
 		toolsNS := ToolsNamespace{
 			Name:       ns.Name,
@@ -142,6 +152,9 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		}
 
 		for _, endpoint := range ns.Endpoints {
+			if serviceOnly[endpoint.OperationID] {
+				continue
+			}
 			tool := endpointToTool(output.APIID, endpoint, ns, inputTypeFields, apiOutput.TypeUnions, apiOutput.TypeEnums, scalars, apiOutput.ToolKeys)
 			if err := toolsutil.ValidateReplayContract(tool.Parameters, tool.ReplayMode, tool.IdempotencyKeyPointers, tool.ExpectedRevisionPointers); err != nil {
 				return nil, fmt.Errorf("operation %s replay contract: %w", tool.OperationID, err)

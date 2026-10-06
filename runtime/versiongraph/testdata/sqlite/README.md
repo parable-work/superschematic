@@ -111,12 +111,13 @@ without a `DEFAULT`:
 - An image reads as it was stored: the images of `Knife` taken before the
   gain lack `name`, in `images` and in the trees `materialize` and
   `released` read from them.
-- The core reads a content column a row lacks as null wherever it hashes,
-  so a tree hashes the same however it is read: `compose` of `today` and
-  `materialize` of its head give one hash. A commit recorded before the
-  gain keeps the hash it was recorded with, which `readCommit` returns,
-  and its tree hashes afresh under the fixture's descriptor:
-  `materialize` of `lunch`, and `released`, give another hash.
+- The core reads a content column a row lacks as null, and hashes a
+  declared content column that is null as an absent one, so a tree
+  hashes the same however it is read, under either descriptor:
+  `compose` of `today` and `materialize` of its head give one hash. A
+  commit recorded before the gain keeps the hash it was recorded with,
+  which `readCommit` returns, and `materialize` of `lunch`, and
+  `released`, give that hash too.
 
 ## Stored forms
 

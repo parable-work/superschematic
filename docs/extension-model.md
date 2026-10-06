@@ -1395,9 +1395,12 @@ The `api` generator takes the provider `auth_provider` selects
   (imports, context shims, store adapters, config fields, route setup, the
   per-route permission middleware, `go.mod` lines). A provider defines every
   one, empty when it adds nothing. The per-route permission middleware runs
-  after the route's rate and body limits and before its payload decryptor
-  and timeout, so it reads the caller from the request context, never from
-  the body. The generator checks the set when it
+  after the route's rate and body limits and its service step (D37), and
+  before its payload decryptor and timeout, so it reads the caller from the
+  request context, never from the body. A route with a service clause runs
+  `AuthMiddleware` and `routesProtectedMiddleware` in its own chain, just
+  before the permission middleware, instead of on the protected group. The
+  generator checks the set when it
   parses the templates, before it writes a file, and
   `registry.AuthSnippetFunc(provider)` runs the same check in a provider's
   own test;
@@ -1467,7 +1470,7 @@ its provider, which supplies those two functions. D15 in
 | Surface | Core registration |
 | --- | --- |
 | Kinds | `DB`, `API`, `General`, `Stack` (section 3.3) |
-| Decorators | 50 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `core_stack.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config,stack}`. Types (18): `trait`, `source`, `envVars`, `jsonField`, `denyUnknownFields`, `strictJSON`, `versioned`, `optimistic`, `versionGraph`, `graphMember`, `index`, `projection`, `join`, `behavior`, `stack`, `server`, `database`, `environment`. Fields (14): `key`, `unique`, `searchField`, `jsonField`, `uiHidden`, `internalMetadata`, `temporalFormat`, `conflictUnit`, `virtual`, `sourceMustProject`, `docs`, `purpose`, `icon`, `column`. Operation sets (3): `rateLimit`, `bodyLimit`, `timeout`. Operations (15): `rest`, `requirePermission`, `requireOwnership`, `auth`, `encrypted`, `publicRoute`, `webhook`, `hmacVerified`, `manualRouteRegistration`, `rateLimit`, `bodyLimit`, `timeout`, `docs`, `mcp`, `icon` |
+| Decorators | 54 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `core_stack.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config,stack}`. Types (18): `trait`, `source`, `envVars`, `jsonField`, `denyUnknownFields`, `strictJSON`, `versioned`, `optimistic`, `versionGraph`, `graphMember`, `index`, `projection`, `join`, `behavior`, `stack`, `server`, `database`, `environment`. Fields (14): `key`, `unique`, `searchField`, `jsonField`, `uiHidden`, `internalMetadata`, `temporalFormat`, `conflictUnit`, `virtual`, `sourceMustProject`, `docs`, `purpose`, `icon`, `column`. Operation sets (5): `rateLimit`, `bodyLimit`, `timeout`, `requireService`, `allowService`. Operations (17): `rest`, `requirePermission`, `requireOwnership`, `auth`, `encrypted`, `publicRoute`, `webhook`, `hmacVerified`, `manualRouteRegistration`, `rateLimit`, `bodyLimit`, `timeout`, `requireService`, `allowService`, `docs`, `mcp`, `icon` |
 | Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig`, `stack` (section 3.6). For a schema that declares a version graph, `orm` also writes the graph's shell and `types` its descriptor (D17) |
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |

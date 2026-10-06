@@ -47,6 +47,9 @@ import (
 {{- end }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 	runtimerouting "{{ $.Naming.HTTPRuntimeGoModule }}/routing"
+{{- if .HasServiceCallers }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/serviceauth"
+{{- end }}
 {{- range .RawBodyCheckImports }}
 	{{ .Name }} "{{ .Path }}"
 {{- end }}
@@ -96,6 +99,14 @@ type Config struct {
 	AuthMiddleware func(gohttp.Handler) gohttp.Handler
 {{- authSnippet "routesConfigMiddlewares" . }}
 {{- end }}
+{{- if .HasServiceCallers }}
+
+	// ServiceAuthenticator establishes the service calling a request from its
+	// Service-Authorization credential (D37), usually a serviceauth.Verifier.
+	// Every route runs it; a route with a service clause admits by the caller
+	// it finds.
+	ServiceAuthenticator serviceauth.Authenticator
+{{- end }}
 {{- if .HasEncryptedEndpoints }}
 
 	// PayloadDecryptor decrypts encrypted endpoint request bodies.
@@ -122,6 +133,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("Config.AuthMiddleware is required")
 	}
 {{- authSnippet "routesConfigValidate" . }}
+{{- end }}
+{{- if .HasServiceCallers }}
+	if c.ServiceAuthenticator == nil {
+		return fmt.Errorf("Config.ServiceAuthenticator is required for endpoints with a service clause")
+	}
 {{- end }}
 {{- if .HasEncryptedEndpoints }}
 	if c.PayloadDecryptor == nil {
@@ -150,11 +166,17 @@ func (c *Config) Validate() error {
 //		Logger:                      logger,
 //		AuthMiddleware:              authMiddleware,
 {{- authSnippet "routesConfigExample" . }}
+{{- if .HasServiceCallers }}
+//		ServiceAuthenticator:        serviceAuthenticator,
+{{- end }}
 {{- if .HasEncryptedEndpoints }}
 //		PayloadDecryptor:            payloadDecryptor,
 {{- end }}
 {{- else }}
 //		Logger: logger,
+{{- if .HasServiceCallers }}
+//		ServiceAuthenticator: serviceAuthenticator,
+{{- end }}
 {{- end }}
 //		Implementations: {{ toPackageName .SchemaName }}.Implementations{
 {{- range .Namespaces }}
@@ -199,6 +221,9 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 	// API routes
 	r.Route("/api", func(r chi.Router) {
 		runtimerouting.Register(r, publicAPIRoutes(cfg))
+{{- if .HasServiceCallers }}
+		runtimerouting.Register(r, serviceAPIRoutes(cfg))
+{{- end }}
 {{- if .IsPublic }}
 		runtimerouting.RegisterGroup(
 			r,
@@ -223,9 +248,9 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 	return routes
 }
 
-{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the permission check), so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. The timeout wraps the handler. */ -}}
+{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. The timeout wraps the handler. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
 {{- define "routeMiddlewares" }}
-			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") }}
+			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers }}
 			Middlewares: []runtimerouting.Middleware{
 				{{- if ne .WebhookHMACProviderTypesExpr "" }}
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
@@ -236,8 +261,21 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				{{- if .BodyLimit }}
 				runtimemiddleware.BodyLimit({{ .BodyLimit }}, RespondError),
 				{{- end }}
+				{{- if .Output.HasServiceCallers }}
+				serviceauth.Authenticate(cfg.ServiceAuthenticator),
+				{{- end }}
+				{{- if not .ServiceCallers }}
 				{{- if .RequiredPerms }}
-				{{- authSnippet "routePermissions" . }}
+				{{- authSnippet "routePermissions" .EndpointInfo }}
+				{{- end }}
+				{{- else if eq .ServiceCallers.Mode "require" }}
+				serviceauth.Require({{ range $i, $api := .ServiceCallers.From }}{{ if $i }}, {{ end }}{{ printf "%q" $api }}{{ end }}),
+				{{- template "routeUserStep" . }}
+				{{- else }}
+				serviceauth.AllowOr(
+					{{- if .ServiceCallers.From }}[]string{ {{- range $i, $api := .ServiceCallers.From }}{{ if $i }}, {{ end }}{{ printf "%q" $api }}{{ end }}}{{ else }}nil{{ end }},
+					{{- template "routeUserStep" . }}
+				),
 				{{- end }}
 				{{- if .Encrypted }}
 				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
@@ -249,10 +287,21 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 			{{- end }}
 {{- end }}
 
+{{- /* routeUserStep is the end-user step of a route with a service clause: what the protected group runs (the provider's AuthMiddleware and the snippets after it), when the API has one and the route a user clause, then the permission check. Its data is route $ <endpoint>. */ -}}
+{{- define "routeUserStep" }}
+				{{- if and .Output.IsPublic .RequiresAuth }}
+				cfg.AuthMiddleware,
+				{{- authSnippet "routesProtectedMiddleware" .Output }}
+				{{- end }}
+				{{- if .RequiredPerms }}
+				{{- authSnippet "routePermissions" .EndpointInfo }}
+				{{- end }}
+{{- end }}
+
 func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
 		{{- range .Endpoints }}
-		{{- if and (not .ManualRouteRegistration) (not .RequiresAuth) }}
+		{{- if and (not .ManualRouteRegistration) (not .RequiresAuth) (not .ServiceCallers) }}
 		{{- if .Description }}
 
 		{{- range $line := splitLines .Description }}
@@ -263,7 +312,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
 			Handler: create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }}),
-			{{- template "routeMiddlewares" . }}
+			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
 		{{- end }}
@@ -273,7 +322,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
 		{{- range .Endpoints }}
-		{{- if and (not .ManualRouteRegistration) .RequiresAuth .IsScopedEndpoint }}
+		{{- if and (not .ManualRouteRegistration) .RequiresAuth (not .ServiceCallers) .IsScopedEndpoint }}
 		{{- if .Description }}
 
 		{{- range $line := splitLines .Description }}
@@ -284,12 +333,12 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
 			Handler: create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }}),
-			{{- template "routeMiddlewares" . }}
+			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
 		{{- end }}
 		{{- range .Endpoints }}
-		{{- if and (not .ManualRouteRegistration) .RequiresAuth (not .IsScopedEndpoint) }}
+		{{- if and (not .ManualRouteRegistration) .RequiresAuth (not .ServiceCallers) (not .IsScopedEndpoint) }}
 		{{- if .Description }}
 
 		{{- range $line := splitLines .Description }}
@@ -300,12 +349,39 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
 			Handler: create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }}),
-			{{- template "routeMiddlewares" . }}
+			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
 		{{- end }}
 	}
 }
+
+{{- if .HasServiceCallers }}
+
+// serviceAPIRoutes are the routes with a service clause (@requireService or
+// @allowService). Each runs its own end-user step after the service step, so
+// none sits in the protected group.
+func serviceAPIRoutes(cfg Config) []runtimerouting.Route {
+	return []runtimerouting.Route{
+		{{- range .Endpoints }}
+		{{- if and (not .ManualRouteRegistration) .ServiceCallers }}
+		{{- if .Description }}
+
+		{{- range $line := splitLines .Description }}
+		// {{ $line }}
+		{{- end }}
+		{{- end }}
+		{
+			Method:  "{{ .Method }}",
+			Path:    "{{ .RoutePath }}",
+			Handler: create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }}),
+			{{- template "routeMiddlewares" (route $ .) }}
+		},
+		{{- end }}
+		{{- end }}
+	}
+}
+{{- end }}
 
 // =============================================================================
 // Handler factory functions
@@ -321,6 +397,10 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 //
 // This endpoint uses @manualRouteRegistration: it is NOT registered by
 // RegisterRoutes. Register it yourself on the router.
+{{- if .ServiceCallers }}
+// Apply its service clause there too: serviceauth.Authenticate(cfg.ServiceAuthenticator),
+// then serviceauth.{{ if eq .ServiceCallers.Mode "require" }}Require{{ else }}AllowOr{{ end }} with the end-user step.
+{{- end }}
 {{- end }}
 {{- if .Description }}
 //

@@ -10,6 +10,10 @@ mod body;
 mod context;
 mod controls;
 mod error;
+#[cfg(feature = "http-client")]
+mod http_client;
+mod jws;
+mod jwt;
 mod openapi;
 mod operation;
 mod params;
@@ -17,12 +21,18 @@ mod path;
 mod ratelimit;
 mod request_id;
 mod response;
+mod service_auth;
+mod token_source;
 
 pub use auth::{admit, bearer_token, covers, has_any_permission, Authenticator, Principal};
 pub use body::{json_body, query_values};
 pub use context::RequestContext;
 pub use controls::RouteControls;
 pub use error::ApiError;
+#[cfg(feature = "http-client")]
+pub use http_client::HttpFetcher;
+pub use jws::JwsAlgorithm;
+pub use jwt::{JwtServiceAuthenticator, KeyFetcher};
 pub use openapi::{
     openapi_document, openapi_router, rapidoc_html, RouterOptions, DEFAULT_OPENAPI_BASE_URL,
     DEFAULT_OPENAPI_VERSION,
@@ -41,4 +51,11 @@ pub use request_id::{request_id_of, request_ids};
 pub use response::{
     error_response, json_response, problem_body, request_id_from_headers, status_title,
     wrap_envelope, PROBLEM_CONTENT_TYPE,
+};
+pub use service_auth::{
+    ServiceAuthConfig, ServiceAuthenticator, ServiceCaller, ServiceCallerConfig, ServiceIssuer,
+    SERVICE_AUTHORIZATION,
+};
+pub use token_source::{
+    GoogleIdTokenSource, HttpGetter, SignedKeySource, TokenFileSource, TokenFuture, TokenSource,
 };

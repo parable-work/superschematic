@@ -18,6 +18,9 @@ export interface SDKConfig {
   /** Authentication configuration (only for authenticated APIs) */
   auth?: AuthConfig;
 
+  /** The calling service's credential, sent on every request (D37) */
+  serviceCredential?: ServiceCredentialConfig;
+
   /** Encryption configuration (used for encrypted endpoints) */
   encryption?: EncryptionConfig;
 
@@ -33,7 +36,7 @@ export interface SDKConfig {
   /** Custom response interceptor */
   responseInterceptor?: ResponseInterceptor;
 
-  /** Invoked after an HTTP attempt finishes, except intermediate 401 refresh retries. */
+  /** Invoked after an HTTP attempt finishes, except an attempt whose 401 is retried. */
   onRequestComplete?: (info: RequestCompletionInfo) => void;
 
   /** Optional transport. Defaults to globalThis.fetch. */
@@ -55,6 +58,21 @@ export interface AuthConfig {
 
   /** Custom token storage (defaults to localStorage) */
   storage?: TokenStorage;
+}
+
+/**
+ * Service credential configuration: the calling service's own credential,
+ * beside the end user's. The client sends `Bearer <token>` in each header
+ * on every request. A 401 whose problem code is `service_unauthorized`
+ * asks `token(true)` for a fresh token once and retries, without the
+ * end-user refresh; any other 401 never asks this source.
+ */
+export interface ServiceCredentialConfig {
+  /** Returns the token; `fresh` asks for a new one rather than a cached one. */
+  token: (fresh: boolean) => Promise<string>;
+
+  /** Headers that carry the token (default: ['Service-Authorization']) */
+  headers?: readonly string[];
 }
 
 /**
@@ -154,13 +172,30 @@ export interface HttpRequestOptions {
   params?: Record<string, unknown>;
   data?: unknown;
   signal?: AbortSignal;
+  forward?: ForwardedUser;
 }
 
 /**
- * Common route request options
+ * The end user a call forwards, from the request a server is serving. A
+ * server's RequestContext is one: pass `{ forward: ctx }`.
+ */
+export interface ForwardedUser {
+  readonly bearerToken?: string | null;
+}
+
+/**
+ * Common route request options. A method's last argument takes these, or
+ * an AbortSignal alone.
  */
 export interface RequestOptions {
   signal?: AbortSignal;
+
+  /**
+   * Forward this end user: the call sends `Authorization: Bearer` with its
+   * token, or no Authorization when it has none, instead of the configured
+   * auth, and does not refresh on a 401.
+   */
+  forward?: ForwardedUser;
 }
 
 /**
