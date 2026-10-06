@@ -163,7 +163,11 @@ async function openStream(token: string, after: number) {
   const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
   return {
-    /** next returns the next event; comment lines (": open", ": keepalive") are skipped. */
+    /**
+     * next returns the next event of the log. Comments (": open",
+     * ": keepalive"), the ready event that follows replay and a message
+     * with only an id are skipped.
+     */
     async next(timeoutMs = 5000): Promise<EngineEvent> {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
@@ -171,8 +175,9 @@ async function openStream(token: string, after: number) {
         if (end >= 0) {
           const frame = buffer.slice(0, end);
           buffer = buffer.slice(end + 2);
-          const data = frame.split('\n').find((line) => line.startsWith('data: '));
-          if (data !== undefined) {
+          const lines = frame.split('\n');
+          const data = lines.find((line) => line.startsWith('data: '));
+          if (data !== undefined && !lines.some((line) => line.startsWith('event: '))) {
             return JSON.parse(data.slice('data: '.length)) as EngineEvent;
           }
           continue;
@@ -203,6 +208,7 @@ test('the event log reads from a cursor, as JSON pages and as a stream', async (
   assert.deepEqual(
     events.map((event) => [event.kind, event.actor, event.kind === 'operation' ? (event.change as { operation: string }).operation : null]),
     [
+      ['define', 'engine-notes', null],
       ['publish', 'engine-notes', null],
       ['create', 'alice', null],
       ['operation', 'alice', 'transition'],
@@ -215,13 +221,13 @@ test('the event log reads from a cursor, as JSON pages and as a stream', async (
   assert.equal(page.body.more, false);
 
   // The stream starts after the cursor it is given: here, the create.
-  const created = events[1];
+  const created = events[2];
   const stream = await openStream('carol-token', created.cursor);
   try {
     const first = await stream.next();
-    assert.equal(first.cursor, events[2].cursor);
+    assert.equal(first.cursor, events[3].cursor);
     assert.deepEqual(first.change, { behavior: 'Workflow', operation: 'transition', params: { to: 'review' }, patch: { status: 'review' } });
-    for (const expected of events.slice(3)) {
+    for (const expected of events.slice(4)) {
       assert.equal((await stream.next()).cursor, expected.cursor);
     }
     // Caught up, it sends each event as it commits.

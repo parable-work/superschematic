@@ -1,14 +1,15 @@
 // The HTTP API through Hono's app.request: the routes, the envelopes, the
-// status of each refusal, authentication and access, If-Match, the merge
-// patch media type, paging and namespace isolation. The event stream over
-// a listening server is in stream.test.ts.
+// status of each refusal, authentication and access, service callers,
+// If-Match, the merge patch media type, paging, event filters, namespace
+// isolation and the behavior catalog. The event stream over a listening
+// server is in stream.test.ts.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { HttpProblem, type Authenticator } from '@superschematic/http-runtime';
+import { HttpProblem, serviceForbidden, serviceUnauthorized, type Authenticator, type ServiceAuthenticator } from '@superschematic/http-runtime';
 import { Hono } from 'hono';
 
-import { BehaviorError, OperationParamsError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
+import { BehaviorError, OperationParamsError, type AccessPolicy, type AccessRequest, type Engine, type EngineOptions } from '../dist/index.js';
 import { ENGINE_ERROR_STATUS, MERGE_PATCH_MEDIA_TYPE, engineApp, engineProblem, type EngineHttpOptions } from '../dist/http/index.js';
 import { counter, flag, hold, itemDocument, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown } from './helpers.ts';
@@ -440,7 +441,13 @@ describe('namespaces', () => {
     }
     assert.deepEqual((await data(call(app, 'GET', east))).items, []);
     const events = await data(call(app, 'GET', '/namespaces/east/events'));
-    assert.deepEqual(events.events.map((event: { kind: string; namespace: string }) => [event.kind, event.namespace]), [['publish', 'east']]);
+    assert.deepEqual(
+      events.events.map((event: { kind: string; namespace: string }) => [event.kind, event.namespace]),
+      [
+        ['define', 'east'],
+        ['publish', 'east'],
+      ]
+    );
     // Creating the same id in east is not a conflict.
     await data(call(app, 'POST', east, { body: { id: 'secret', data: { title: 'East' } } }), 201);
   });
@@ -484,9 +491,9 @@ describe('events as JSON', () => {
     }
     await data(call(app, 'PATCH', `${ORDERS}/o1`, { body: { title: 'Lamp' } }));
     const first = await data(call(app, 'GET', '/namespaces/default/events?limit=2'));
-    assert.deepEqual([first.events.map((event: { kind: string }) => event.kind), first.more], [['publish', 'create'], true]);
+    assert.deepEqual([first.events.map((event: { kind: string }) => event.kind), first.more], [['define', 'publish'], true]);
     const rest = await data(call(app, 'GET', `/namespaces/default/events?after=${first.next}`));
-    assert.deepEqual([rest.events.map((event: { kind: string }) => event.kind), rest.more], [['create', 'update'], false]);
+    assert.deepEqual([rest.events.map((event: { kind: string }) => event.kind), rest.more], [['create', 'create', 'update'], false]);
     const one = await data(call(app, 'GET', '/namespaces/default/events?schema=Order&instanceId=o1'));
     assert.deepEqual(one.events.map((event: { seq: number }) => event.seq), [1, 2]);
     // Last-Event-ID wins over after, as a reconnecting EventSource sends both.
@@ -496,6 +503,26 @@ describe('events as JSON', () => {
     await problem(call(app, 'GET', '/namespaces/default/events', { headers: { 'last-event-id': 'abc' } }), 400);
     await problem(call(app, 'GET', '/namespaces/default/events?instanceId=o1'), 400);
     await problem(call(app, 'GET', '/namespaces/default/events?schema=Order', { token: 'writer' }), 403);
+  });
+
+  test('after=head answers the cursor of the last event and no events; a reader goes on from it', async () => {
+    const { app } = await withOrders();
+    await data(call(app, 'POST', ORDERS, { body: { id: 'o1', data: { title: 'Desk' } } }), 201);
+    const all = await data(call(app, 'GET', '/namespaces/default/events'));
+    const head = await data(call(app, 'GET', '/namespaces/default/events?after=head&schema=Order'));
+    assert.deepEqual(head, { events: [], next: all.next, more: false });
+    await data(call(app, 'PATCH', `${ORDERS}/o1`, { body: { title: 'Lamp' } }));
+    const next = await data(call(app, 'GET', `/namespaces/default/events?after=${head.next}`));
+    assert.deepEqual(
+      next.events.map((event: { kind: string }) => event.kind),
+      ['update']
+    );
+    // The bad spellings of after are 400; Last-Event-ID still wins over head.
+    for (const after of ['tail', '-1', '1.5', 'HEAD']) {
+      assert.equal((await problem(call(app, 'GET', `/namespaces/default/events?after=${after}`), 400)).code, 'bad_request');
+    }
+    const resumed = await data(call(app, 'GET', '/namespaces/default/events?after=head', { headers: { 'last-event-id': '0' } }));
+    assert.equal(resumed.events.length, all.events.length + 1);
   });
 });
 
@@ -595,7 +622,185 @@ describe('behaviors', () => {
     const all = await data(call(app, 'GET', '/namespaces/default/events'));
     assert.deepEqual(
       all.events.map((event: { kind: string }) => event.kind),
-      ['publish', 'create', 'operation', 'operation']
+      ['define', 'publish', 'create', 'operation', 'operation']
     );
+  });
+
+  test('the JSON event pages filter by kind, by behavior and by operation name, repeated or comma-separated', async () => {
+    const { app, engine } = await withItems();
+    await data(call(app, 'POST', ITEMS, { body: { id: 'i1', data: { title: 'Desk' } } }), 201);
+    for (let beat = 0; beat < 3; beat += 1) {
+      engine.instances.invoke(everything, 'Item', 'i1', 'increment');
+    }
+    engine.instances.invoke(everything, 'Item', 'i1', 'flag', { reason: 'on hold' });
+    const kept = async (query: string) =>
+      (await data(call(app, 'GET', `/namespaces/default/events?${query}`))).events.map((event: { kind: string; change: { operation?: string } }) =>
+        event.kind === 'operation' ? event.change.operation : event.kind
+      );
+    assert.deepEqual(await kept('kind=define,publish'), ['define', 'publish']);
+    assert.deepEqual(await kept('kind=create&kind=operation&exclude=increment'), ['create', 'flag']);
+    assert.deepEqual(await kept('behavior=test.Counter'), ['increment', 'increment', 'increment']);
+    assert.deepEqual(await kept('behavior=test.Counter&behavior=test.Flag&exclude=flag'), ['increment', 'increment', 'increment']);
+    // A page of dropped events is empty, and its next is past them.
+    const page = await data(call(app, 'GET', '/namespaces/default/events?after=3&limit=3&exclude=increment'));
+    assert.deepEqual([page.events, page.more], [[], true]);
+    assert.equal(page.next, 6);
+    for (const query of ['kind=created', 'kind=create,bogus', 'behavior=not-a-name', 'exclude=Increment']) {
+      assert.equal((await problem(call(app, 'GET', `/namespaces/default/events?${query}`), 400)).code, 'invalid_argument', query);
+    }
+  });
+});
+
+describe('service callers', () => {
+  // A service credential is the calling deployable's name; `bad` does not
+  // verify and `stranger` is no caller of this server.
+  const authenticateService: ServiceAuthenticator = async (ctx) => {
+    const header = ctx.headers.get('service-authorization');
+    if (header === null) {
+      return null;
+    }
+    const token = header.replace(/^Bearer /u, '');
+    if (token === 'bad') {
+      throw serviceUnauthorized();
+    }
+    if (token === 'stranger') {
+      throw serviceForbidden();
+    }
+    return { deployable: token, serves: [`${token}-api`], subject: `sa-${token}` };
+  };
+
+  // The worker deployable may do anything in the default namespace,
+  // alone or for anyone; services hold no permissions, so the
+  // permission rule alone admits none.
+  function withService(options: EngineHttpOptions = { authenticateService }): Served & { asked: AccessRequest[] } {
+    const asked: AccessRequest[] = [];
+    const served = serve(options, {
+      policy: (request) => {
+        asked.push(request);
+        return policy(request) || (request.principal.service?.deployable === 'worker' && request.namespace === 'default');
+      },
+    });
+    served.engine.schemas.define(everything, orderDocument());
+    served.engine.schemas.publish(everything, 'Order');
+    return { ...served, asked };
+  }
+
+  const service = (token: string) => ({ 'service-authorization': `Bearer ${token}` });
+
+  test('a service with no end user stands in for one, as service:<deployable> with no permissions', async () => {
+    const { app, engine, asked } = withService();
+    const created = await data(call(app, 'POST', ORDERS, { token: null, headers: service('worker'), body: { id: 'o1', data: { title: 'Desk' } } }), 201);
+    assert.deepEqual([created.createdBy, created.updatedBy], ['service:worker', 'service:worker']);
+    assert.deepEqual(asked.at(-1)?.principal, {
+      subject: 'service:worker',
+      permissions: [],
+      service: { deployable: 'worker', serves: ['worker-api'], subject: 'sa-worker', standsIn: true },
+    });
+    const [event] = engine.events.read(everything, { schema: 'Order', instanceId: 'o1' }).events;
+    assert.deepEqual([event.actor, event.service], ['service:worker', 'worker']);
+    // Reads go through the same principal, the event log's included.
+    const events = await data(call(app, 'GET', '/namespaces/default/events?schema=Order&kind=create', { token: null, headers: service('worker') }));
+    assert.deepEqual(
+      events.events.map((logged: { actor: string; service: string }) => [logged.actor, logged.service]),
+      [['service:worker', 'worker']]
+    );
+    // The policy decides what a service may do: crawler is a verified
+    // caller, which the policy admits nowhere.
+    assert.equal((await problem(call(app, 'GET', `${ORDERS}/o1`, { token: null, headers: service('crawler') }), 403)).code, 'forbidden');
+  });
+
+  test('a service acting for an end user acts as that end user, beside it', async () => {
+    const { app, engine, asked } = withService();
+    const created = await data(call(app, 'POST', ORDERS, { token: 'bob', headers: service('worker'), body: { id: 'o1', data: { title: 'Desk' } } }), 201);
+    assert.equal(created.createdBy, 'bob');
+    assert.deepEqual(asked.at(-1)?.principal, {
+      subject: 'bob',
+      permissions: ['*'],
+      service: { deployable: 'worker', serves: ['worker-api'], subject: 'sa-worker', standsIn: false },
+    });
+    const [event] = engine.events.read(everything, { schema: 'Order', instanceId: 'o1' }).events;
+    assert.deepEqual([event.actor, event.service], ['bob', 'worker']);
+    // An end user the Authenticator refuses is 401, whatever service sent it:
+    // the service never acts with its own authority instead.
+    assert.equal((await problem(call(app, 'GET', `${ORDERS}/o1`, { token: 'nobody', headers: service('worker') }), 401)).code, 'unauthorized');
+    // An end user alone is as before: no service beside it.
+    await data(call(app, 'GET', `${ORDERS}/o1`, { token: 'bob' }));
+    assert.equal(asked.at(-1)?.principal.service, undefined);
+  });
+
+  test('a credential that does not verify, or names no caller, is refused before the end user is asked', async () => {
+    const { app } = withService();
+    assert.equal((await problem(call(app, 'GET', ORDERS, { headers: service('bad') }), 401)).code, 'service_unauthorized');
+    assert.equal((await problem(call(app, 'GET', ORDERS, { headers: service('stranger') }), 403)).code, 'service_forbidden');
+    assert.equal((await problem(call(app, 'GET', ORDERS, { token: null }), 401)).code, 'unauthorized');
+  });
+
+  test('without a service authenticator the header is ignored, and a caller needs an end user', async () => {
+    const { app } = withService({});
+    assert.equal((await problem(call(app, 'GET', ORDERS, { token: null, headers: service('worker') }), 401)).code, 'unauthorized');
+    await data(call(app, 'GET', ORDERS, { token: 'bob', headers: service('bad') }));
+  });
+
+  test('a deployment with services and no end-user authenticator admits a service alone', async () => {
+    const { app } = withService({ authenticateService, authenticate: undefined });
+    await data(call(app, 'GET', ORDERS, { token: null, headers: service('worker') }));
+    assert.equal((await problem(call(app, 'GET', ORDERS, { token: 'bob', headers: service('worker') }), 401)).code, 'unauthorized');
+  });
+});
+
+describe('the behavior catalog', () => {
+  test('lists every behavior the engine runs, to any caller, and describes one by name', async () => {
+    const { app, engine } = serve({}, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
+    // writer may read no schema; the catalog names none.
+    const summaries = await data(call(app, 'GET', '/behaviors', { token: 'writer' }));
+    assert.deepEqual(
+      summaries.map((summary: { name: string }) => summary.name),
+      engine.behaviors.names()
+    );
+    assert.ok(engine.behaviors.names().includes('Workflow'));
+    assert.deepEqual(
+      summaries.find((summary: { name: string }) => summary.name === 'test.Tally'),
+      {
+        name: 'test.Tally',
+        description: 'Counts the updates of an instance and bumps its counter.',
+        requires: ['test.Counter'],
+        conflicts: [],
+        fields: ['edits'],
+        operations: ['bump', 'tryBump'],
+      }
+    );
+    const described = await data(call(app, 'GET', '/behaviors/test.Flag', { token: 'writer' }));
+    assert.deepEqual(described, {
+      name: 'test.Flag',
+      description: 'Holds an instance still while it is flagged.',
+      requires: [],
+      conflicts: ['test.Tally'],
+      fields: [
+        { name: 'flagged', description: 'Whether the instance is flagged.' },
+        { name: 'flagReason', description: 'Why; absent when it is not flagged.' },
+      ],
+      operations: [
+        {
+          name: 'flag',
+          scope: 'instance',
+          writes: true,
+          invocationPolicy: 'ask',
+          paramsSchema: flag.declaration.operations?.[0].paramsSchema,
+          resultSchema: { type: 'boolean' },
+        },
+        {
+          name: 'unflag',
+          scope: 'instance',
+          writes: true,
+          invocationPolicy: 'auto',
+          paramsSchema: flag.declaration.operations?.[1].paramsSchema,
+          resultSchema: { type: 'boolean' },
+        },
+      ],
+      vetoes: [],
+    });
+    assert.equal((await problem(call(app, 'GET', '/behaviors/test.Missing'), 404)).code, 'not_found');
+    assert.equal((await problem(call(app, 'GET', '/behaviors/not-a-name'), 400)).code, 'invalid_argument');
+    await problem(call(app, 'GET', '/behaviors', { token: null }), 401);
   });
 });

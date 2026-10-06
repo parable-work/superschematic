@@ -3,8 +3,9 @@
 // through the HTTP runtime's gate and the engine's access policy, a
 // refused call as a tool error carrying the problem document, an unknown
 // tool as a JSON-RPC error, the 2026-07-28 revision beside the 2025 ones,
-// and the core's behaviors' operations as tools. The HTTP API and the MCP
-// endpoint are mounted on one app. On Node.js the server is
+// the behavior catalog's tools, service callers, and the core's behaviors'
+// operations as tools. The HTTP API and the MCP endpoint are mounted on
+// one app. On Node.js the server is
 // @hono/node-server, on Bun it is Bun.serve.
 import assert from 'node:assert/strict';
 import type { Server as NodeServer } from 'node:http';
@@ -13,7 +14,7 @@ import { afterEach, describe, test } from 'node:test';
 
 import { serve as serveNode } from '@hono/node-server';
 import { Client, ProtocolError, ProtocolErrorCode, StreamableHTTPClientTransport, type CallToolResult } from '@modelcontextprotocol/client';
-import type { Authenticator } from '@superschematic/http-runtime';
+import type { Authenticator, ServiceAuthenticator } from '@superschematic/http-runtime';
 import { Hono } from 'hono';
 
 import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
@@ -128,9 +129,16 @@ function endpoint(url: string, namespace = 'default'): URL {
   return new URL(`${url}/api${MCP_PATH.replace('{namespace}', namespace)}`);
 }
 
-async function connect(url: URL, token: string | null = 'alice', mode: 'legacy' | 'auto' = 'legacy'): Promise<{ client: Client; transport: StreamableHTTPClientTransport }> {
+async function connect(
+  url: URL,
+  token: string | null = 'alice',
+  mode: 'legacy' | 'auto' = 'legacy',
+  headers: Record<string, string> = {}
+): Promise<{ client: Client; transport: StreamableHTTPClientTransport }> {
   const client = new Client({ name: 'engine-test', version: '1.0.0' }, { versionNegotiation: { mode } });
-  const transport = new StreamableHTTPClientTransport(url, token === null ? {} : { requestInit: { headers: { authorization: `Bearer ${token}` } } });
+  const transport = new StreamableHTTPClientTransport(url, {
+    requestInit: { headers: { ...(token === null ? {} : { authorization: `Bearer ${token}` }), ...headers } },
+  });
   await client.connect(transport);
   clients.push(client);
   return { client, transport };
@@ -193,6 +201,8 @@ describe('tools/list', () => {
         'list_schemas',
         'describe_schema',
         'define_schema',
+        'list_behaviors',
+        'describe_behavior',
         'item_create',
         'item_get',
         'item_list',
@@ -248,6 +258,8 @@ describe('tools/list', () => {
         ['list_schemas', { confirm: 'never' }],
         ['describe_schema', { confirm: 'never' }],
         ['define_schema', { confirm: 'never' }],
+        ['list_behaviors', { confirm: 'never' }],
+        ['describe_behavior', { confirm: 'never' }],
         ['order_create', { confirm: 'never' }],
         ['order_get', { confirm: 'never' }],
         ['order_list', { confirm: 'never' }],
@@ -258,11 +270,11 @@ describe('tools/list', () => {
     for (const tool of tools) {
       assert.equal((tool.inputSchema as Record<string, unknown>)['x-acme-arguments'], 1, tool.name);
     }
-    const data = (tools[3].inputSchema.properties as Record<string, any>).data;
+    const data = (tools[5].inputSchema.properties as Record<string, any>).data;
     assert.equal(data.properties.quantity['x-acme-scalar'], 'Generic.Int64');
     // The other namespace has no schema.
     const { client: other } = await connect(endpoint(url));
-    assert.equal((await other.listTools()).tools.length, 3);
+    assert.equal((await other.listTools()).tools.length, 5);
   });
 
   test('lists only what the access policy lets the caller call', async () => {
@@ -270,7 +282,7 @@ describe('tools/list', () => {
     const { client } = await connect(endpoint(url), 'reader');
     assert.deepEqual(
       (await client.listTools()).tools.map((tool) => tool.name),
-      ['list_schemas', 'describe_schema', 'define_schema', 'item_get', 'item_list', 'item_history']
+      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'item_get', 'item_list', 'item_history']
     );
   });
 });
@@ -405,6 +417,29 @@ describe('tools/call', () => {
     assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 1);
   });
 
+  test('list_behaviors and describe_behavior read the behaviors the engine runs, for any caller', async () => {
+    const { url, engine } = await served({ policy: ({ principal }) => principal.subject === 'alice' });
+    const { client } = await connect(endpoint(url), 'reader');
+    const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+    assert.deepEqual(
+      [...byName.keys()],
+      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior'],
+      'reader may read no schema, and still lists the engine tools'
+    );
+    assert.deepEqual(byName.get('list_behaviors')?.annotations, { readOnlyHint: true });
+    assert.deepEqual(byName.get('describe_behavior')?.inputSchema.required, ['name']);
+    const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as CallToolResult;
+
+    const listed = await call('list_behaviors', {});
+    assert.deepEqual(JSON.parse((listed.content[0] as { text: string }).text), engine.tools.listBehaviors(everything));
+    const described = await call('describe_behavior', { name: 'test.Counter' });
+    assert.deepEqual(described.structuredContent, engine.tools.describeBehavior(everything, 'test.Counter'));
+    assert.deepEqual((described.structuredContent as { configSchema: unknown }).configSchema, engine.behaviors.declaration('test.Counter')?.configSchema);
+    const missing = problemOf(await call('describe_behavior', { name: 'test.Missing' }));
+    assert.deepEqual([missing.status, missing.code], [404, 'not_found']);
+    assert.equal(problemOf(await call('describe_behavior', {})).code, 'invalid_argument');
+  });
+
   test('an unknown tool, or one the caller may not read, is a JSON-RPC invalid-params error', async () => {
     const { url } = await served({ policy: ({ principal, action, schema }) => policy({ principal, action, namespace: 'default', schema }) && !(principal.subject === 'reader' && schema === 'Item') });
     const { client } = await connect(endpoint(url), 'reader');
@@ -416,6 +451,43 @@ describe('tools/call', () => {
         return true;
       });
     }
+  });
+});
+
+describe('service callers', () => {
+  // A service credential is the calling deployable's name.
+  const authenticateService: ServiceAuthenticator = async (ctx) => {
+    const header = ctx.headers.get('service-authorization');
+    return header === null ? null : { deployable: header.replace(/^Bearer /u, ''), serves: [], subject: 'sa' };
+  };
+  // The worker deployable may do anything standing in for an end user;
+  // acting for one, it may do what that end user may.
+  const withServices: AccessPolicy = (request) =>
+    policy(request) || (request.principal.service?.standsIn === true && request.principal.service.deployable === 'worker');
+  const service = (deployable: string) => ({ 'service-authorization': `Bearer ${deployable}` });
+
+  test('a service with no end user stands in for one; acting for one, it acts as that end user', async () => {
+    const { url, engine } = await served({ policy: withServices }, { authenticateService });
+    const { client: worker } = await connect(endpoint(url), null, 'legacy', service('worker'));
+    assert.ok((await worker.listTools()).tools.some((tool) => tool.name === 'item_increment'));
+    const incremented = (await worker.callTool({ name: 'item_increment', arguments: { id: 'i1' } })) as CallToolResult;
+    assert.deepEqual(incremented.structuredContent, { count: 1 });
+
+    const { client: forReader } = await connect(endpoint(url), 'reader', 'legacy', service('worker'));
+    assert.ok(!(await forReader.listTools()).tools.some((tool) => tool.name === 'item_increment'));
+    const refused = problemOf((await forReader.callTool({ name: 'item_increment', arguments: { id: 'i1' } })) as CallToolResult);
+    assert.deepEqual([refused.status, refused.code], [403, 'forbidden']);
+    assert.match(refused.detail, /^reader may not/);
+
+    const { client: crawler } = await connect(endpoint(url), null, 'legacy', service('crawler'));
+    assert.ok(!(await crawler.listTools()).tools.some((tool) => tool.name.startsWith('item_')));
+    assert.deepEqual(
+      engine.events.read(alice, { schema: 'Item', instanceId: 'i1', kinds: ['operation'] }).events.map((event) => [event.actor, event.service]),
+      [['service:worker', 'worker']]
+    );
+    // Without the service authenticator the header names nobody.
+    const { url: plain } = await served({ policy: withServices });
+    await assert.rejects(connect(endpoint(plain), null, 'legacy', service('worker')), /401|Unauthorized|unauthorized/);
   });
 });
 

@@ -155,7 +155,7 @@ for (const driver of drivers) {
       // The write is the behavior's alone: no event records it.
       assert.deepEqual(
         engine.events.read(alice, { schema: 'Order' }).events.map((event) => event.kind),
-        ['publish', 'create']
+        ['define', 'publish', 'create']
       );
 
       fail = true;
