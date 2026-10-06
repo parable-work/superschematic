@@ -235,9 +235,52 @@ const seeds: Record<number, Seed> = {
       );
     },
   },
-  // Version 6 recorded references that hear every change of their target,
-  // with no column to say otherwise.
+  // Version 6 added subscriptions, schedules and the causes of the
+  // runner's events. It had no define events and recorded no service.
   6: {
+    write(storage) {
+      const order = canonical(orderDocument());
+      storage.run(
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
+      );
+      storage.run(
+        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 'o1', 'default', 1, 2, '{"title":"Lamp"}', 300, 'alice', 400, 'runner']
+      );
+      const insert = `INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, depth)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text, null, null, 0]);
+      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}', null, null, 0]);
+      storage.run(insert, ['update', 'default', 'Order', 'o1', 2, 1, 'runner', 400, '{"title":"Lamp"}', 'test.Ledger', 2, 1]);
+      storage.run('INSERT INTO engine_subscriptions (behavior, namespace, schema, cursor) VALUES (?, ?, ?, ?)', ['test.Ledger', 'default', 'Order', 3]);
+    },
+    check(engine) {
+      assert.deepEqual(
+        engine.events.read(alice).events.map((event) => [event.cursor, event.kind, event.version, event.cause, 'service' in event]),
+        [
+          [1, 'publish', 1, undefined, false],
+          [2, 'create', 1, undefined, false],
+          [3, 'update', 1, { behavior: 'test.Ledger', event: 2, depth: 1 }, false],
+        ]
+      );
+      assert.deepEqual(
+        engine.runner.status().subscriptions.map((status) => [status.behavior, status.schema, status.cursor]),
+        [['test.Ledger', 'Order', 3]]
+      );
+      const draft = engine.schemas.define(alice, { ...orderDocument(), description: 'a draft' });
+      assert.deepEqual(
+        engine.events.read(alice, { after: 3 }).events.map((event) => [event.cursor, event.kind, event.version, event.change]),
+        [[4, 'define', null, { hash: draft.hash }]]
+      );
+      checkOperationEvents(engine, 4, 'define');
+    },
+  },
+  // Version 7 recorded references that hear every change of their target,
+  // with no column to say otherwise.
+  7: {
     write(storage) {
       storage.run(
         `INSERT INTO engine_references (namespace, target_schema, target_id, source_schema, source_id, behavior, key)
@@ -264,28 +307,30 @@ const seeds: Record<number, Seed> = {
 
 // checkOperationEvents publishes a schema with a behavior on a migrated file,
 // runs one of its writing operations and reads the events that follow the
-// update the seed's check made at cursor `update`: the log's cursors carry
-// on from the seed's, and the rebuilt kind CHECK admits an operation.
-function checkOperationEvents(engine: Engine, update: number): void {
+// write the seed's check made at cursor `last`: the log's cursors carry
+// on from the seed's, and the rebuilt kind CHECK admits a define and an
+// operation.
+function checkOperationEvents(engine: Engine, last: number, kind = 'update'): void {
   publishItem(engine, [{ name: 'test.Counter' }]);
   engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
   engine.instances.invoke(alice, 'Item', 'i1', 'increment');
   assert.equal(engine.instances.get(alice, 'Item', 'i1')?.seq, 2);
   assert.deepEqual(
-    engine.events.read(alice, { after: update - 1 }).events.map((event) => [event.cursor, event.kind]),
+    engine.events.read(alice, { after: last - 1 }).events.map((event) => [event.cursor, event.kind]),
     [
-      [update, 'update'],
-      [update + 1, 'publish'],
-      [update + 2, 'create'],
-      [update + 3, 'operation'],
+      [last, kind],
+      [last + 1, 'define'],
+      [last + 2, 'publish'],
+      [last + 3, 'create'],
+      [last + 4, 'operation'],
     ]
   );
 }
 
 // The indexes and triggers of engine_events that the code relies on: the
 // instance index a one-instance read names (INDEXED BY), the namespace,
-// schema and publish ranges, and the append-only triggers. The last
-// migration rebuilds the table, which drops its indexes and triggers.
+// schema and publish ranges, and the append-only triggers. Migration 7
+// rebuilds the table, which drops its indexes and triggers.
 const EVENT_LOG_OBJECTS = [
   'index engine_events_instance',
   'index engine_events_namespace',
@@ -329,6 +374,16 @@ for (const driver of drivers) {
         // The log now holds an event whatever the seed wrote, so its triggers fire.
         assert.throws(() => engine.storage.run('DELETE FROM engine_events'), /engine_events is append-only/);
         assert.throws(() => engine.storage.run("UPDATE engine_events SET actor = 'mallory'"), /engine_events is append-only/);
+        // A define has no instance and no version, and only a define lacks a version.
+        const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+        for (const row of [
+          ['define', 'default', 'Order', null, null, 1, 'mallory', 1],
+          ['define', 'default', 'Order', 'o9', 1, null, 'mallory', 1],
+          ['publish', 'default', 'Order', null, null, null, 'mallory', 1],
+          ['create', 'default', 'Order', 'o9', 1, null, 'mallory', 1],
+        ]) {
+          assert.throws(() => engine.storage.run(insert, row), /CHECK constraint failed/, JSON.stringify(row));
+        }
       });
     }
 
@@ -353,7 +408,10 @@ for (const driver of drivers) {
       const second = track(openEngine({ path, driver, policy: allowAll }));
       assert.equal(second.schemas.live(alice, 'Order')?.version, 1);
       assert.equal(second.instances.get(alice, 'Order', 'o1')?.data.title, 'Desk');
-      assert.equal(second.events.read(alice).events.length, 2);
+      assert.deepEqual(
+        second.events.read(alice).events.map((event) => event.kind),
+        ['define', 'publish', 'create']
+      );
     });
   });
 }

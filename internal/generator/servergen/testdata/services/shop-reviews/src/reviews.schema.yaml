@@ -1,0 +1,25 @@
+name: shop-reviews
+kind: API
+types:
+  ReviewView:
+    name: ReviewView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: body
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: ReviewQueries
+    operations:
+      - name: listReviews
+        typeRef: { name: ReviewView, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: products/{productId}/reviews
+        arguments:
+          - name: productId
+            typeRef: { name: string }
+            required: true

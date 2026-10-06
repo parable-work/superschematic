@@ -60,9 +60,14 @@ const (
 )
 
 // Extension is the fake extension. Its Provisioner records the calls a
-// test makes; Register creates one when it is nil.
+// test makes, and the target's deploy seams record theirs in the same
+// log; Register creates each one that is nil.
 type Extension struct {
 	Provisioner *FakeProvisioner
+	State       *FakeState
+	Secrets     *FakeSecrets
+	Migrations  *FakeMigrations
+	Bootstrap   *FakeBootstrap
 }
 
 // Name is the extension's name.
@@ -73,6 +78,20 @@ func (e *Extension) Register(r *registry.Registry) error {
 	if e.Provisioner == nil {
 		e.Provisioner = &FakeProvisioner{}
 	}
+	if e.State == nil {
+		e.State = &FakeState{}
+	}
+	if e.Secrets == nil {
+		e.Secrets = &FakeSecrets{}
+	}
+	if e.Migrations == nil {
+		e.Migrations = &FakeMigrations{}
+	}
+	if e.Bootstrap == nil {
+		e.Bootstrap = &FakeBootstrap{}
+	}
+	e.Migrations.log = e.Provisioner
+	e.Bootstrap.log = e.Provisioner
 	server := func(name string, languages ...string) registry.PlatformSpec {
 		return registry.PlatformSpec{
 			Name:      name,
@@ -154,6 +173,10 @@ func (e *Extension) Register(r *registry.Registry) error {
 			{Name: PolicyPublic, Check: checkPublic},
 			{Name: PolicyHighAvailability, Check: checkHighAvailability},
 		},
+		State:      e.State,
+		Secrets:    e.Secrets,
+		Bootstrap:  e.Bootstrap,
+		Migrations: e.Migrations,
 	})
 }
 

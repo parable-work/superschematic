@@ -92,7 +92,7 @@ for (const driver of drivers) {
       const error = thrown(() => engine.instances.create(alice, 'Order', { title: 'Lamp' }, { id: 'fixed' }), EngineError);
       assert.equal(error.code, 'conflict');
       assert.equal(engine.instances.get(alice, 'Order', 'fixed')?.data.title, 'Desk');
-      assert.equal(eventCount(engine), 2); // the publish and the first create
+      assert.equal(eventCount(engine), 3); // the define, the publish and the first create
     });
 
     test('an id in another namespace or schema is another instance', () => {
@@ -148,7 +148,7 @@ for (const driver of drivers) {
         ]
       );
       assert.deepEqual(engine.instances.list(alice, 'Order').items, []);
-      assert.equal(eventCount(engine), 1);
+      assert.equal(eventCount(engine), 2);
     });
 
     test('update merges a patch, validates the result and records who and when', () => {
@@ -198,7 +198,7 @@ for (const driver of drivers) {
       now = 2000;
       const same = engine.instances.update(bob, 'Order', 'o1', { quantity: 3, status: undefined });
       assert.deepEqual([same.seq, same.updatedAt, same.updatedBy], [1, 1000, 'alice']);
-      assert.equal(eventCount(engine), 2);
+      assert.equal(eventCount(engine), 3);
     });
 
     test('a patch is a JSON object, and the instance must exist', () => {
@@ -218,7 +218,7 @@ for (const driver of drivers) {
       assert.equal(engine.instances.delete(alice, 'Order', 'o1'), true);
       assert.equal(engine.instances.get(alice, 'Order', 'o1'), undefined);
       assert.equal(engine.instances.delete(alice, 'Order', 'o1'), false);
-      assert.equal(eventCount(engine), 3);
+      assert.equal(eventCount(engine), 4);
     });
 
     test('update and delete with an expected sequence write only while the instance is at it', () => {
@@ -235,7 +235,7 @@ for (const driver of drivers) {
       assert.equal(thrown(() => engine.instances.delete(alice, 'Order', 'o1', { expectedSeq: 1 }), EngineError).code, 'seq_mismatch');
       // 0 matches no instance: sequences start at 1.
       assert.equal(thrown(() => engine.instances.delete(alice, 'Order', 'o1', { expectedSeq: 0 }), EngineError).code, 'seq_mismatch');
-      assert.deepEqual([engine.instances.get(alice, 'Order', 'o1')?.data, eventCount(engine)], [{ title: 'Lamp' }, 3]);
+      assert.deepEqual([engine.instances.get(alice, 'Order', 'o1')?.data, eventCount(engine)], [{ title: 'Lamp' }, 4]);
 
       // A patch that changes nothing still needs the sequence.
       assert.equal(engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' }, { expectedSeq: 2 }).seq, 2);

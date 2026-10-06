@@ -1,0 +1,33 @@
+// The module of the implementation of {{ .Service }}. superschematic wrote it
+// once, with the scaffold beside it, because no go.mod held the package
+// (docs/stack-model.md, section 8.5), and never writes it again: it is
+// yours. Each build of a stack reads the module's path from here, so you may
+// rename it, or move the package into a module of your own. The replace
+// lines point at the modules the package builds from, so it builds and
+// tests on its own after `go mod tidy`.
+
+module {{ .Path }}
+
+go {{ .GoVersion }}
+
+require (
+{{- range .Requires }}
+	{{ .Path }} {{ .Version }}
+{{- end }}
+)
+{{- if .Indirect }}
+
+require (
+{{- range .Indirect }}
+	{{ .Path }} {{ .Version }} // indirect
+{{- end }}
+)
+{{- end }}
+{{- if .Replaces }}
+
+replace (
+{{- range .Replaces }}
+	{{ .Path }} => {{ .Dir }}
+{{- end }}
+)
+{{- end }}

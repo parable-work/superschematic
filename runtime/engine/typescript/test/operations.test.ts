@@ -255,7 +255,16 @@ describe('the describe and tools routes', () => {
     const tools = (await data(call(app, 'GET', '/namespaces/default/tools', { token: 'reader' }))).data;
     assert.deepEqual(tools, engine.tools.manifest({ subject: 'reader', permissions: ['read'] }));
     const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
-    assert.deepEqual(visible, ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'item.get', 'item.list', 'item.history']);
+    assert.deepEqual(visible, [
+      'engine.listSchemas',
+      'engine.describeSchema',
+      'engine.defineSchema',
+      'engine.listBehaviors',
+      'engine.describeBehavior',
+      'item.get',
+      'item.list',
+      'item.history',
+    ]);
     await problem(call(app, 'GET', '/namespaces/nowhere/tools'), 404);
   });
 });

@@ -3,7 +3,17 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, openEngine, type AccessPolicy, type AccessRequest, type DriverName, type Engine, type Principal } from '../dist/index.js';
+import {
+  EngineError,
+  openEngine,
+  servicePrincipal,
+  standsIn,
+  type AccessPolicy,
+  type AccessRequest,
+  type DriverName,
+  type Engine,
+  type Principal,
+} from '../dist/index.js';
 import { alice, cleanup, drivers, freshPath, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
@@ -112,6 +122,7 @@ for (const driver of drivers) {
       assert.deepEqual(
         engine.events.read(reader).events.map((event) => [event.kind, event.schema]),
         [
+          ['define', 'Order'],
           ['publish', 'Order'],
           ['create', 'Order'],
         ]
@@ -146,6 +157,60 @@ for (const driver of drivers) {
       assert.equal(engine.schemas.live(owner, 'Order')?.definedBy, 'owner');
       const events = engine.events.read(owner, { schema: 'Order', instanceId: 'o1' }).events;
       assert.deepEqual(events.map((event) => event.actor), ['owner', 'writer']);
+    });
+
+    test('a calling service reaches the policy beside the end user it acts for, and the log records both', () => {
+      const asked: AccessRequest[] = [];
+      const engine = seeded(driver, (request) => {
+        asked.push(request);
+        return byPermission(request);
+      });
+      const worker = { deployable: 'worker', serves: ['jobs'], subject: 'sa-1' };
+      const forBob: Principal = { ...principal('bob', 'Order.write', 'Order.read'), service: { ...worker, standsIn: false } };
+      const updated = engine.instances.update(forBob, 'Order', 'o1', { title: 'Lamp' });
+      assert.equal(updated.updatedBy, 'bob');
+      assert.deepEqual(asked.at(-1)?.principal, forBob);
+      assert.equal(standsIn(forBob), false);
+      const [, event] = engine.events.read(owner, { schema: 'Order', instanceId: 'o1' }).events;
+      assert.deepEqual([event.actor, event.service], ['bob', 'worker']);
+    });
+
+    test('a service with no end user stands in for one: its own subject, no permissions, and the policy decides', () => {
+      // The policy admits the worker deployable to write orders, as a
+      // deployment admits a service along its edge; services hold no
+      // permissions, so a permission rule alone admits none.
+      const policy: AccessPolicy = (request) =>
+        byPermission(request) || (request.principal.service?.deployable === 'worker' && request.schema === 'Order');
+      const engine = seeded(driver, policy);
+      const worker = servicePrincipal({ deployable: 'worker', serves: ['jobs'], subject: 'sa-1' });
+      assert.deepEqual(worker, {
+        subject: 'service:worker',
+        permissions: [],
+        service: { deployable: 'worker', serves: ['jobs'], subject: 'sa-1', standsIn: true },
+      });
+      assert.equal(standsIn(worker), true);
+      const updated = engine.instances.update(worker, 'Order', 'o1', { title: 'Lamp' });
+      assert.equal(updated.updatedBy, 'service:worker');
+      const [, event] = engine.events.read(owner, { schema: 'Order', instanceId: 'o1' }).events;
+      assert.deepEqual([event.actor, event.service], ['service:worker', 'worker']);
+      const crawler = servicePrincipal({ deployable: 'crawler', serves: [], subject: 'sa-2' });
+      assert.equal(thrown(() => engine.instances.get(crawler, 'Order', 'o1'), EngineError).code, 'forbidden');
+    });
+
+    test("a principal's service is checked: well formed, and holding no permission when it stands in", () => {
+      const engine = seeded(driver, () => true);
+      const service = { deployable: 'worker', serves: [], subject: 'sa-1', standsIn: true };
+      for (const malformed of [
+        { ...servicePrincipal(service), permissions: ['Order.read'] },
+        { subject: 'bob', permissions: [], service: { ...service, deployable: '' } },
+        { subject: 'bob', permissions: [], service: { ...service, serves: 'jobs' } },
+        { subject: 'bob', permissions: [], service: { deployable: 'worker', serves: [], subject: 'sa-1' } },
+        { subject: 'bob', permissions: [], service: null },
+      ]) {
+        const error = thrown(() => engine.instances.get(malformed as unknown as Principal, 'Order', 'o1'), EngineError);
+        assert.equal(error.code, 'invalid_argument', JSON.stringify(malformed));
+      }
+      assert.ok(engine.instances.get({ subject: 'bob', permissions: ['x'], service: { ...service, standsIn: false } }, 'Order', 'o1'));
     });
   });
 }

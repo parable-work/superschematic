@@ -21,11 +21,11 @@ import { alice, cleanup, drivers, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
-// eventsOf lists the instance events of Item, without its publish.
+// eventsOf lists the instance events of Item, without its define and publish.
 function eventsOf(engine: Engine): Array<{ kind: string; seq: number | null; change: unknown }> {
   return engine.events
     .read(alice, { schema: 'Item' })
-    .events.filter((event) => event.kind !== 'publish')
+    .events.filter((event) => event.instanceId !== null)
     .map((event) => ({ kind: event.kind, seq: event.seq, change: event.change }));
 }
 
@@ -299,7 +299,7 @@ for (const driver of drivers) {
       assert.equal(heard.length, 4);
       assert.deepEqual(
         heard.map(([cursor]) => cursor),
-        engine.events.read(alice, { schema: 'Item' }).events.slice(2).map((event) => event.cursor)
+        engine.events.read(alice, { schema: 'Item' }).events.slice(3).map((event) => event.cursor)
       );
     });
 

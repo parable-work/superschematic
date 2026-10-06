@@ -160,3 +160,36 @@ export abstract class HostsApi {}
 // @ts-expect-error only API and DB services are deployed
 @stack({ deploy: [ShopCommon] })
 export abstract class DeploysGeneral {}
+
+// The core's local target needs no package: its values set the Postgres
+// container, and a server's settings its port.
+@environment({ target: "local" })
+export abstract class Dev {}
+
+@environment({
+  target: "local",
+  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432 },
+  settings: [{ of: ShopApi, port: 8080, env: { LOG_LEVEL: "debug" } }, { of: Backend, port: 8081 }],
+})
+export abstract class PinnedDev {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a value the local target does not take
+  local: { project: "acme" },
+})
+export abstract class LocalProject {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a local database takes no settings
+  settings: [{ of: ShopDb, tier: "large" }],
+})
+export abstract class LocalDatabaseSetting {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a port is a number
+  settings: [{ of: ShopApi, port: "8080" }],
+})
+export abstract class LocalPortString {}

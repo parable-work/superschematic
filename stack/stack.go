@@ -1,8 +1,9 @@
 // Package stack is the public face of the stack model's resolver
-// (docs/stack-model.md, section 5): an extension's tests resolve a stack
-// over its platforms with it, and a command writes the result. Every
-// identifier is an alias or a one-line forward over internal/stack, as
-// the registry and loader packages are (D2).
+// (docs/stack-model.md, section 5) and of its deploy (sections 7.3 and
+// 11): an extension's tests resolve a stack over its platforms and deploy
+// it through its seams with it, and a command writes the result. Every
+// identifier is an alias or a one-line forward over internal/stack or
+// internal/stackdeploy, as the registry and loader packages are (D2).
 package stack
 
 import (
@@ -66,6 +67,10 @@ const EnvironmentFile = stack.EnvironmentFile
 func Resolve(reg *registry.Registry, in Input) (*ir.ResolvedEnvironment, error) {
 	return stack.Resolve(reg, in)
 }
+
+// Servers returns the servers of a stack, which no environment changes;
+// see internal/stack.Servers.
+func Servers(in Input) ([]*ir.ResolvedDeployable, error) { return stack.Servers(in) }
 
 // DerivedField returns the config field an edge fills; see
 // internal/stack.DerivedField.

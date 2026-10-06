@@ -41,6 +41,16 @@ schema that composes one until a deployment registers that package.
 | `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases | | [Branches](#branches) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
+A running engine lists the behaviors it runs, an extension's included,
+at `GET /behaviors`, and returns one's declaration at
+`GET /behaviors/{name}`: the JSON Schema of its config, its create
+parameters and preconditions, the behaviors it requires and conflicts
+with, its fields, its operations with their scope, parameters, result
+and invocation policy, and its veto codes. An MCP client calls
+`list_behaviors` and `describe_behavior` for the same, before it writes
+a draft with `define_schema`. Every caller may read them
+([the behavior catalog](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#the-behavior-catalog)).
+
 ## Compose a behavior
 
 A type composes behaviors in its `behaviors` list, each with its config.

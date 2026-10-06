@@ -91,3 +91,33 @@ func TestScaffoldWritesEachMissingImplementation(t *testing.T) {
 	assert.Contains(t, out, "implementation scaffold written to "+filepath.Dir(orders)+"\n")
 	assert.FileExists(t, orders)
 }
+
+// TestAStackScaffoldsTheImplementationsItServes: a stack's build writes
+// each server's entrypoint and the implementation of every API its
+// servers serve, without --scaffold, and a cached run rebuilds the stack
+// when one of those implementations is missing so it can write it again.
+func TestAStackScaffoldsTheImplementationsItServes(t *testing.T) {
+	repoRoot := t.TempDir()
+	servicesRoot := filepath.Join(repoRoot, "schemas", "services")
+	for _, fixture := range []string{"shop-db", "shop-api", "shop-orders", "shop-reviews", "shop-stack"} {
+		copyDir(t, filepath.Join("../internal/generator/servergen/testdata/services", fixture), filepath.Join(servicesRoot, fixture))
+	}
+	cacheRoot := t.TempDir()
+	reviews := filepath.Join(repoRoot, "go", "shop-reviews", "implementation.go")
+
+	runCLI(t, "build-all", servicesRoot, "--cache", "--cache-root", cacheRoot)
+	for _, server := range []string{"Storefront", "shop-api"} {
+		assert.FileExists(t, filepath.Join(repoRoot, "schemas", "dist", "server", "shop-stack", server, "main.go"))
+	}
+	for _, service := range []string{"shop-api", "shop-orders", "shop-reviews"} {
+		assert.FileExists(t, filepath.Join(repoRoot, "go", service, "implementation.go"))
+		assert.FileExists(t, filepath.Join(repoRoot, "go", service, "go.mod"))
+	}
+
+	require.NoError(t, os.RemoveAll(filepath.Dir(reviews)))
+	out := runCLI(t, "build-all", servicesRoot, "--cache", "--cache-root", cacheRoot)
+	assert.FileExists(t, reviews)
+	assert.Contains(t, out, "OK: shop-reviews (up to date")
+	assert.Contains(t, out, "OK: shop-stack (built")
+	assert.Contains(t, out, "implementation scaffold of shop-reviews written to "+filepath.Dir(reviews)+"\n")
+}

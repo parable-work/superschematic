@@ -1,0 +1,7 @@
+# The one database of the stack: shop-api and shop-orders name it as their
+# authDb, shop-reviews as its one DB-kind dependency.
+name: shop-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
