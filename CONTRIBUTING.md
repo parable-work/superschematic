@@ -141,15 +141,16 @@ agent or a bot with write access counts.
 
 | Target                | What it checks                                                      |
 | --------------------- | ------------------------------------------------------------------- |
-| `make go-build`       | `go build ./...` in the six Go modules                               |
-| `make go-vet`         | `go vet ./...` in the six Go modules                                 |
-| `make go-test`        | `go test -count=1 ./...` in the six Go modules                       |
+| `make go-build`       | `go build ./...` in the Go modules (`GO_MODULES` in the Makefile)    |
+| `make go-vet`         | `go vet ./...` in the Go modules                                     |
+| `make go-test`        | `go test -count=1 ./...` in the Go modules                           |
 | `make go-fmt-check`   | `gofmt -l` is empty                                                  |
-| `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the six Go modules       |
+| `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the Go modules           |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make behaviors-check` | The copies of the core's behavior declarations in the packages that implement them (`runtime/engine/typescript/src/behaviors/core/declarations`, `runtime/engine-workqueue/typescript/src/declarations`) match the core registry; `make behaviors` rewrites them |
-| `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
+| `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target and the Pulumi provisioner linked) |
+| `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |
 | `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript` and `runtime/engine-workqueue/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's and the work-queue package's tests run under Node.js and Bun, and so does `examples/engine-notes`'s end-to-end test (`scripts/check.sh` there) |
 | `make python`         | `runtime/schema/python` pytest; `runtime/versiongraph/python` fmt, clippy `-D warnings`, the PyO3 extension built by uv with maturin, and every core vector and the engine's tests that need no database through the package under the default Python and 3.9 |
 | `make rust`           | `runtime/http/rust`, `runtime/schema/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test; the schema runtime's and the version-graph crates' tests again with the serde_json features superscalar turns on |
@@ -239,7 +240,7 @@ PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
 (`superschematic-http-runtime`, and `superschematic-versiongraph`,
 `superschematic-versiongraph-engine` and
-`superschematic-versiongraph-python`, which are not published) and the six
+`superschematic-versiongraph-python`, which are not published) and the ten
 Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing
 that writes it. `bump_version.py check` fails when any site disagrees; CI
@@ -248,11 +249,18 @@ building anything. `0.0.0` means unreleased.
 
 The Go modules are versioned by tags, one per module because each is its own
 module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
-`runtime/http/go/vX.Y.Z`, `runtime/versiongraph/go/vX.Y.Z` and
-`runtime/migrate/go/vX.Y.Z`. The `require`
+`runtime/http/go/vX.Y.Z`, `runtime/versiongraph/go/vX.Y.Z`,
+`runtime/migrate/go/vX.Y.Z`, `extensions/gcp/vX.Y.Z`,
+`extensions/pulumi/vX.Y.Z`, `extensions/topcoat/vX.Y.Z` and
+`cmd/superschematic/vX.Y.Z` (`bump_version.py go-modules` lists them, and
+a test fails when a module is missing). The `require`
 lines between them carry the release version so a consumer at a tag resolves
 the siblings from their tags; the `replace` lines next to them keep local
-builds on the checkout.
+builds on the checkout. A release keeps the `replace` lines, and `go
+install <package>@vX.Y.Z` refuses a module that has any, so the installed
+binary is not `go install`able: users download it from the release or run
+`make build` in a checkout. `superschematic-migrate`, whose module has
+none, installs that way.
 
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
@@ -291,9 +299,11 @@ A release is three steps, each started by a person. For the first release,
    every sub-module's path matches its directory, then creates
    `ir/v0.1.0-alpha.1`, `runtime/schema/go/v0.1.0-alpha.1`,
    `runtime/http/go/v0.1.0-alpha.1`,
-   `runtime/versiongraph/go/v0.1.0-alpha.1` and
-   `runtime/migrate/go/v0.1.0-alpha.1` on the same commit. `release.yml` runs
-   the full CI and builds the CLI for linux and darwin on x64 and arm64, each
+   `runtime/versiongraph/go/v0.1.0-alpha.1`,
+   `runtime/migrate/go/v0.1.0-alpha.1` and the extension and
+   `cmd/superschematic` tags on the same commit. `release.yml` runs
+   the full CI and builds the CLI (`cmd/superschematic`, the core with the
+   official extensions) for linux and darwin on x64 and arm64, each
    on a runner of that os/arch, linked against the superscalar archive built
    from the pinned checkout. It cross-compiles the migration runner,
    `superschematic-migrate`, for the same four on one runner, since it needs
@@ -310,8 +320,10 @@ A release is three steps, each started by a person. For the first release,
 
 After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
 (and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@`,
-`.../runtime/versiongraph/go@`, `.../runtime/migrate/go@` at the same
-version) resolves. The migration runner needs no cgo. The other Go modules
+`.../runtime/versiongraph/go@`, `.../runtime/migrate/go@`,
+`.../extensions/gcp@`, `.../extensions/pulumi@` and
+`.../extensions/topcoat@` at the same version) resolves, so a downstream
+distribution can link the official extensions. The migration runner needs no cgo. The other Go modules
 still link superscalar through cgo from a pseudo-version pin, so a consumer
 needs `CGO_LDFLAGS` from `scripts/superscalar-dep.sh --print` until
 superscalar publishes its `go/vX.Y.Z` tags; the docs quickstart says so. The

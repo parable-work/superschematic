@@ -13,8 +13,8 @@ import (
 )
 
 // TestCoreOnlyBinaryBuildsAFixture pins that New with no extensions, which
-// is what cmd/superschematic runs, builds a fixture end to end under the
-// default naming.
+// is what internal/cmd/superschematic-core runs, builds a fixture end to end
+// under the default naming.
 func TestCoreOnlyBinaryBuildsAFixture(t *testing.T) {
 	out := t.TempDir()
 	buf := new(bytes.Buffer)

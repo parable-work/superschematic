@@ -12,6 +12,7 @@ import contextlib
 import io
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,6 +21,12 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bump_version  # noqa: E402
+
+# The checkout, before a test points the script at its copy.
+CHECKOUT = bump_version.ROOT
+
+# A go.mod line that requires a module of this repository.
+SIBLING_REQUIRE = re.compile(r"^\t(" + re.escape(bump_version.GO_MODULE) + r"(?:/\S+)?) v", re.M)
 
 UV_LOCK = Path("runtime", "schema", "python", "uv.lock")
 PYPROJECT = Path("runtime", "schema", "python", "pyproject.toml")
@@ -75,6 +82,32 @@ class BumpVersionTest(unittest.TestCase):
         changed = [a for b, a in zip(before, after) if b != a]
         self.assertEqual(changed, ['version = "1.2.3b4"'])
         self.assertEqual(bump_version.check(expect="1.2.3-beta.4"), "1.2.3-beta.4")
+
+    def test_every_go_module_is_tagged_and_requires_its_siblings_at_the_version(self):
+        # Every module outside the examples and test data is one go-module-tag.yml
+        # tags, and each of its requires of another module of this repository is
+        # a version site, so a release moves them all.
+        listed = subprocess.run(
+            ["git", "ls-files", "*go.mod"], cwd=CHECKOUT, capture_output=True, text=True, check=True
+        ).stdout.split()
+        modules = sorted(
+            "" if str(Path(path).parent) == "." else str(Path(path).parent)
+            for path in listed
+            if not {"examples", "testdata"} & set(Path(path).parts)
+        )
+        self.assertEqual(sorted(bump_version.GO_MODULES), modules)
+
+        patterns = {}
+        for path, site_patterns, _ in bump_version.sites():
+            patterns.setdefault(path.relative_to(self.root), set()).update(p for p, _ in site_patterns)
+        for module in bump_version.GO_MODULES:
+            gomod = Path(module, "go.mod")
+            for sibling in SIBLING_REQUIRE.findall((CHECKOUT / gomod).read_text(encoding="utf-8")):
+                self.assertIn(
+                    bump_version.go_require_pattern(sibling),
+                    patterns.get(gomod, set()),
+                    f"{gomod} requires {sibling}, which bump_version.py does not set",
+                )
 
 
 if __name__ == "__main__":

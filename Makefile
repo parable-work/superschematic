@@ -1,7 +1,7 @@
 # superschematic (the schema compiler). Convenience targets for the Go
-# modules, the TypeScript authoring packages, the schema runtimes, the
-# TypeScript and Rust http runtimes, the version-graph core, the engine and
-# the engine's work-queue package.
+# modules, the installed binary, the TypeScript authoring packages, the
+# schema runtimes, the TypeScript and Rust http runtimes, the version-graph
+# core, the engine and the engine's work-queue package.
 # Mirrors the CI workflow gates (.github/workflows/ci.yml).
 #
 #   make setup && make all
@@ -26,8 +26,16 @@ export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages.
 export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp extensions/pulumi extensions/topcoat
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp extensions/pulumi extensions/topcoat cmd/superschematic
+
+# Two programs, one CLI (docs/stack-model.md, section 13). BIN is the binary
+# a release ships and a user installs: cmd/superschematic, a Go module of its
+# own, which links the core and the official extensions. CORE_BIN is the core
+# with no extension linked, internal/cmd/superschematic-core in the root
+# module; it is never shipped. cli-smoke runs it to prove the core works
+# alone, and behaviors runs it because it needs only the core.
 BIN := bin/superschematic
+CORE_BIN := bin/superschematic-core
 
 # build-all keys its cache on a hash of this binary. -trimpath drops the
 # checkout's absolute source paths, and -buildvcs=false drops the revision,
@@ -61,7 +69,10 @@ setup:
 build: go-build $(BIN)
 
 $(BIN): FORCE
-	go build $(GO_BUILD_FLAGS) -o $(BIN) ./cmd/superschematic
+	cd cmd/superschematic && go build $(GO_BUILD_FLAGS) -o $(CURDIR)/$(BIN) .
+
+$(CORE_BIN): FORCE
+	go build $(GO_BUILD_FLAGS) -o $(CORE_BIN) ./internal/cmd/superschematic-core
 
 FORCE:
 
@@ -117,18 +128,18 @@ gcp-schemas-check:
 
 # The engine and the work-queue package implement the core's behaviors over
 # a copy of each declaration (internal/registry/behaviors), which the core
-# binary writes into the package that implements it (--package). CI fails
-# when a committed copy differs.
+# with no extension linked writes into the package that implements it
+# (--package). CI fails when a committed copy differs.
 ENGINE_DECLARATIONS := runtime/engine/typescript/src/behaviors/core/declarations
 WORKQUEUE_DECLARATIONS := runtime/engine-workqueue/typescript/src/declarations
 
 behaviors:
-	go run ./cmd/superschematic behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS)
-	go run ./cmd/superschematic behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS)
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS)
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS)
 
 behaviors-check:
-	go run ./cmd/superschematic behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS) --check
-	go run ./cmd/superschematic behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS) --check
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS) --check
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS) --check
 
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
@@ -255,8 +266,8 @@ versiongraph-scenarios-python:
 docs:
 	cd docs && npm ci && npm run build
 
-# The binary with no extension linked builds a DB, an API and a General
-# service from the fixture corpus, and loads fixture-behaviors-json,
+# The core with no extension linked (CORE_BIN) builds a DB, an API and a
+# General service from the fixture corpus, and loads fixture-behaviors-json,
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
 # fixture-reactions-json, fixture-variants-json, fixture-branches-json and
 # fixture-workqueue-json, whose types compose the core's behaviors (D10):
@@ -265,29 +276,29 @@ docs:
 # runtime/engine/typescript/test/core-behaviors.test.ts, and the work-queue
 # package runs the last in
 # runtime/engine-workqueue/typescript/test/package.test.ts.
-cli-smoke: $(BIN)
+cli-smoke: $(CORE_BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
 	@for s in fixture-db fixture-api fixture-general; do \
-		$(BIN) build internal/loader/tsreader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
+		$(CORE_BIN) build internal/loader/tsreader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
 	@for s in fixture-db-json fixture-general-yaml; do \
-		$(BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
-	@$(BIN) build internal/loader/testdata/services/fixture-behaviors-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		$(CORE_BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-behaviors-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(BIN) build internal/loader/testdata/services/fixture-cross-instance-json --emit-ir --out /tmp/superschematic-cli-smoke \
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-cross-instance-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(BIN) build internal/loader/testdata/services/fixture-rollups-json --emit-ir --out /tmp/superschematic-cli-smoke \
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-rollups-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(BIN) build internal/loader/testdata/services/fixture-search-json --emit-ir --out /tmp/superschematic-cli-smoke \
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-search-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(BIN) build internal/loader/testdata/services/fixture-reactions-json --emit-ir --out /tmp/superschematic-cli-smoke \
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-reactions-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(BIN) build internal/loader/testdata/services/fixture-variants-json --emit-ir --out /tmp/superschematic-cli-smoke \
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-variants-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(BIN) build internal/loader/testdata/services/fixture-branches-json --emit-ir --out /tmp/superschematic-cli-smoke \
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-branches-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
+	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
 	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches Lease Assignment Queue Presence Blueprint Budget Retries; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done

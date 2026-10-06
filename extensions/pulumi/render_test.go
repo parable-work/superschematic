@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/extensions/gcp"
 	"github.com/parable-work/superschematic/extensions/pulumi"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -37,9 +38,12 @@ func checkGolden(t *testing.T, path string, got []byte) {
 }
 
 // TestRenderGoldens renders the acme-shop environments the acceptance
-// extension resolves, the integration test's environments and the edge
-// cases, and compares each Pulumi.yaml with its golden copy.
+// extension resolves, the gcp target's golden environments with the gcp
+// provider pinned as the installed binary pins it, the integration test's
+// environments and the edge cases, and compares each Pulumi.yaml with its
+// golden copy.
 func TestRenderGoldens(t *testing.T) {
+	gcpVersions := map[string]string{"gcp": gcp.ProviderVersion}
 	cases := []struct {
 		name     string
 		env      func(t *testing.T) *ir.ResolvedEnvironment
@@ -48,6 +52,12 @@ func TestRenderGoldens(t *testing.T) {
 		{name: "shop-staging", env: func(t *testing.T) *ir.ResolvedEnvironment { return shopEnvironment(t, "Staging") }},
 		{name: "shop-production", env: func(t *testing.T) *ir.ResolvedEnvironment { return shopEnvironment(t, "Production") }},
 		{name: "shop-preview", env: func(t *testing.T) *ir.ResolvedEnvironment { return shopEnvironment(t, "Preview") }},
+		{name: "gcp-shop-staging", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpEnvironment(t, "Staging") },
+			versions: gcpVersions},
+		{name: "gcp-shop-production", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpEnvironment(t, "Production") },
+			versions: gcpVersions},
+		{name: "gcp-shop-preview", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpEnvironment(t, "Preview") },
+			versions: gcpVersions},
 		{name: "demo-shared", env: func(*testing.T) *ir.ResolvedEnvironment { return sharedEnvironment() },
 			versions: map[string]string{"random": randomVersion}},
 		{name: "demo-preview", env: func(*testing.T) *ir.ResolvedEnvironment { return previewEnvironment(8, true) },
