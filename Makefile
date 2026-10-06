@@ -12,6 +12,13 @@
 include tools.env
 export GOTOOLCHAIN := go$(GO_VERSION)
 
+# Every crate declares RUST_VERSION as its rust-version, so every cargo run
+# here uses that toolchain, whatever rustup's default is, unless
+# RUSTUP_TOOLCHAIN already names one: cargo's own, and maturin's when uv
+# builds the Python binding. The two archive scripts set it to RUST_VERSION
+# regardless (scripts/superscalar-dep.sh says why).
+export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
+
 # The Go binding of superscalar is cgo against a static archive that
 # scripts/superscalar-dep.sh builds under third_party/superscalar. Every go
 # command that links a scalar-dependent package needs this in CGO_LDFLAGS.
