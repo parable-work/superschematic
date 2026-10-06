@@ -7,6 +7,9 @@ package shoporders
 
 import (
 	"context"
+	"errors"
+
+	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 
 	api "example.com/schemas/api/shop-orders"
 	types "example.com/schemas/types/go/shop-orders"
@@ -22,9 +25,29 @@ func New(deps api.Deps) (api.Implementations, error) {
 
 var _ api.Constructor = New
 
+// PayloadDecryptor decrypts the request bodies of the encrypted operations
+// of shop-orders. The server's entrypoint passes it to the generated
+// Config.PayloadDecryptor. The scaffold's decrypts nothing, so each encrypted
+// operation is refused until it returns your key service's decryptor.
+func PayloadDecryptor(deps api.Deps) (runtimemiddleware.PayloadDecryptor, error) {
+	return noDecryptor{}, nil
+}
+
+// noDecryptor refuses every payload.
+type noDecryptor struct{}
+
+func (noDecryptor) Decrypt(context.Context, string) ([]byte, error) {
+	return nil, errors.New("shop-orders has no payload decryptor yet")
+}
+
 // Order implements api.OrderImplementation.
 type Order struct {
 	deps api.Deps
+}
+
+// PlaceOrder handles POST /api/orders.
+func (impl *Order) PlaceOrder(ctx context.Context, sku string) (*types.OrderView, error) {
+	return nil, api.NotImplementedError("Order.PlaceOrder")
 }
 
 // GetOrder handles GET /api/orders/{id}.

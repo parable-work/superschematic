@@ -63,8 +63,8 @@ func AuthMiddleware(deps api.Deps) (func(http.Handler) http.Handler, error) {
 {{- end }}
 {{- if .HasEncryptedEndpoints }}
 
-// PayloadDecryptor decrypts the request bodies of {{ .SchemaName }}'s encrypted
-// operations. The server's entrypoint passes it to the generated
+// PayloadDecryptor decrypts the request bodies of the encrypted operations
+// of {{ .SchemaName }}. The server's entrypoint passes it to the generated
 // Config.PayloadDecryptor. The scaffold's decrypts nothing, so each encrypted
 // operation is refused until it returns your key service's decryptor.
 func PayloadDecryptor(deps api.Deps) (runtimemiddleware.PayloadDecryptor, error) {

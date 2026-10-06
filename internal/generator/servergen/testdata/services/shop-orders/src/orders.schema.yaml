@@ -29,3 +29,17 @@ operationSets:
           - name: id
             typeRef: { name: string }
             required: true
+  - name: OrderMutations
+    operations:
+      # Encrypted: the server's Config takes the implementation's
+      # PayloadDecryptor.
+      - name: placeOrder
+        typeRef: { name: OrderView }
+        required: true
+        encrypted: true
+        httpMethod: POST
+        restPath: orders
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true

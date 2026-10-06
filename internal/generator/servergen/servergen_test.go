@@ -370,7 +370,13 @@ func start(t *testing.T, binary string, env ...string) *started {
 // holds each of contains.
 func (s *started) expect(t *testing.T, method, path string, status int, contains ...string) {
 	t.Helper()
-	req, err := http.NewRequest(method, s.base+path, strings.NewReader("{}"))
+	s.send(t, method, path, "{}", status, contains...)
+}
+
+// send is expect with the request body body.
+func (s *started) send(t *testing.T, method, path, body string, status int, contains ...string) {
+	t.Helper()
+	req, err := http.NewRequest(method, s.base+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,13 +386,13 @@ func (s *started) expect(t *testing.T, method, path string, status int, contains
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	answer, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != status {
-		t.Errorf("%s %s = %d, want %d: %s", method, path, resp.StatusCode, status, body)
+		t.Errorf("%s %s = %d, want %d: %s", method, path, resp.StatusCode, status, answer)
 	}
 	for _, want := range contains {
-		if !strings.Contains(string(body), want) {
-			t.Errorf("%s %s answered %s, which lacks %q", method, path, body, want)
+		if !strings.Contains(string(answer), want) {
+			t.Errorf("%s %s answered %s, which lacks %q", method, path, answer, want)
 		}
 	}
 }
@@ -415,9 +421,9 @@ func (s *started) stop(t *testing.T) {
 // TestEntrypointCompilesAndServes: each server's entrypoint builds with
 // its scaffolded implementations and vets. Storefront starts with no
 // database up, answers /healthz and reports the database in /readyz, and
-// routes each API's requests to it, the scaffold answering 501; shop-api's
-// scaffolded auth middleware refuses its protected route. Each stops
-// cleanly on SIGTERM.
+// routes each API's requests to it, the scaffold answering 501 and its
+// payload decryptor refusing an encrypted body; shop-api's scaffolded auth
+// middleware refuses its protected route. Each stops cleanly on SIGTERM.
 func TestEntrypointCompilesAndServes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -451,6 +457,7 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	storefront.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
 	storefront.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
 	storefront.expect(t, http.MethodGet, "/api/products/p-1/reviews", http.StatusNotImplemented, "Review.ListReviews")
+	storefront.send(t, http.MethodPost, "/api/orders", `{"algorithm":"RSA_OAEP_256","payload":"c2t1"}`, http.StatusBadRequest, "Failed to decrypt request payload")
 	storefront.expect(t, http.MethodGet, "/api/openapi.json", http.StatusOK, "/api/orders/{id}")
 	storefront.expect(t, http.MethodGet, "/api/nowhere", http.StatusNotFound)
 	storefront.stop(t)

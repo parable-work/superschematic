@@ -123,11 +123,16 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("implementation of shop-orders: %w", err)
 	}
+	shopOrdersDecryptor, err := shopordersimpl.PayloadDecryptor(shopOrdersDeps)
+	if err != nil {
+		return fmt.Errorf("payload decryptor of shop-orders: %w", err)
+	}
 	shopOrdersRouter := chi.NewRouter()
 	shopOrdersRouter.Use(runtimemiddleware.Logger(shopOrdersLogger, shoporders.ContextWithLogger))
 	err = shoporders.RegisterRoutes(shopOrdersRouter, shoporders.Config{
-		Logger:          shopOrdersLogger,
-		Implementations: shopOrdersImplementations,
+		PayloadDecryptor: shopOrdersDecryptor,
+		Logger:           shopOrdersLogger,
+		Implementations:  shopOrdersImplementations,
 	})
 	if err != nil {
 		return fmt.Errorf("routes of shop-orders: %w", err)
