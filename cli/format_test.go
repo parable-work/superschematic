@@ -150,9 +150,10 @@ func (extJSONScalars) Register(r *registry.Registry) error {
 // the name and primitive. The engine, which knows only the builtin catalog,
 // then holds Ext.Doc to a JSON object instead of refusing it: its tests
 // define and publish testdata/format/ext-json-scalar.schema.json, which this
-// test keeps equal to what format writes (-update rewrites it). The JSON
-// converts back to TypeScript with the extension's catalog, which owns the
-// mapping; the core binary, which does not know the row, refuses it.
+// test keeps equal to what format writes (-update rewrites it). Converting
+// the JSON back to TypeScript runs with the extension's catalog, which owns
+// the mapping, where the core binary, which does not know the row, refuses
+// it. This test does not load the TypeScript it writes.
 func TestFormatCommand_TSToJSONWritesAnExtensionJSONScalarsMapping(t *testing.T) {
 	exts := []registry.Extension{extJSONScalars{}}
 	out, err := runFormatCommandWith(t, exts, "--to=json", "--stdout",

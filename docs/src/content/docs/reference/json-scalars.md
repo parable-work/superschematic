@@ -61,12 +61,13 @@ catalog scalar a schema names by name and `languagePrimitive: object`, as
 `superschematic format --to=json` writes `Generic.JSON`, takes the
 catalog's row, mapping included, and loads.
 
-The engine knows only the builtin catalog, so it reads any other scalar a
-document declares as the document writes it, and a document for the engine
-carries an extension scalar's full definition. `format --to=json` writes the
-`json_schema` mapping of a scalar the binary's catalog gives one of
-`object`, `array` or `any`, so the engine holds an extension's JSON scalar
-to JSON.
+The engine knows only the builtin catalog, so to any other scalar a
+document declares it applies only what the document writes.
+`superschematic format --to=json` writes such a scalar's name, its
+language primitive and, when the binary's catalog gives it `object`,
+`array` or `any`, its `json_schema` mapping, so the engine holds an
+extension's JSON scalar to JSON. It does not write the row's pattern,
+lengths or other rules, and the engine checks none of them.
 
 ## What each target generates
 

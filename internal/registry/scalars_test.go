@@ -130,9 +130,19 @@ func TestRegisterScalarsNamesAnUnknownPrimitive(t *testing.T) {
 	row := &scalars.ScalarMetadata{CanonicalName: "Acme.Id", Symbol: "AcmeId", Primitive: "Uuid"}
 	err := New(naming.Default()).RegisterScalars("acme", ScalarCatalogOf(map[string]*scalars.ScalarMetadata{"Acme.Id": row}))
 	want := `registry: acme's scalar catalog: scalar Acme.Id has primitive "Uuid", which the loader does not know and reads as object, so the validators check its values as strings: ` +
-		`spell the primitive String, Int, Float or Bool, or, for a scalar that holds JSON, Object with a JSONSchemaType of object, array or any`
+		`spell the primitive String, Int, Float or Bool, or, for a scalar that holds JSON, Object with a JSONSchemaType of any, or of object or array with no pattern and no length`
 	if err == nil || err.Error() != want {
 		t.Fatalf("RegisterScalars: err = %v\nwant %s", err, want)
+	}
+
+	// With an object mapping and a length, the same message: following it
+	// to Object alone would meet the length's refusal, so it names both.
+	lengthy := *row
+	lengthy.JSONSchemaType = "object"
+	lengthy.MaxLength = 10
+	err = New(naming.Default()).RegisterScalars("acme", ScalarCatalogOf(map[string]*scalars.ScalarMetadata{"Acme.Id": &lengthy}))
+	if err == nil || err.Error() != want {
+		t.Fatalf("RegisterScalars with an object mapping and a length: err = %v\nwant %s", err, want)
 	}
 
 	mapped := *row

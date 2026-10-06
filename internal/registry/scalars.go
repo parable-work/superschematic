@@ -100,7 +100,7 @@ func checkObjectScalarRows(owner string, catalog ScalarCatalog) error {
 			errs = append(errs, fmt.Errorf("registry: %s's scalar catalog: %w", owner, err))
 		default:
 			errs = append(errs, fmt.Errorf("registry: %s's scalar catalog: scalar %s has primitive %q, which the loader does not know and reads as object, so the validators check its values as strings: "+
-				"spell the primitive String, Int, Float or Bool, or, for a scalar that holds JSON, Object with a JSONSchemaType of object, array or any", owner, name, row.Primitive))
+				"spell the primitive String, Int, Float or Bool, or, for a scalar that holds JSON, Object with a JSONSchemaType of any, or of object or array with no pattern and no length", owner, name, row.Primitive))
 		}
 	}
 	return errors.Join(errs...)
