@@ -136,7 +136,7 @@ func TestCoreBehaviors(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"branch:true", "save:true", "commit:true", "seal:true", "merge:true", "rebase:true", "revert:true", "release:true", "discard:true",
+	if want := []string{"branch:true", "save:true", "commit:true", "seal:true", "merge:true", "rebase:true", "revert:true", "releaseCommit:true", "discard:true",
 		"refs:false", "releases:false", "compose:false", "materialize:false", "released:false", "diff:false", "history:false"}; !slices.Equal(branchOps, want) {
 		t.Errorf("Branches operations = %v, want %v", branchOps, want)
 	}

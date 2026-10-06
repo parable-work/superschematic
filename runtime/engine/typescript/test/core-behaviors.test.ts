@@ -368,7 +368,7 @@ for (const driver of drivers) {
       const committed = invoke<{ ref: Ref }>('commit', { ref: draft.id, version: saved.ref.version + 1 });
       const merged = invoke<{ commit: { id: string; sequence: number } }>('merge', { source: draft.id, target: main.id, targetVersion: main.version, tag: true });
       assert.equal(merged.commit.sequence, 1);
-      assert.deepEqual(invoke('release', { commit: merged.commit.id, version: 0 }), { commit: merged.commit.id, version: 1 });
+      assert.deepEqual(invoke('releaseCommit', { commit: merged.commit.id, version: 0 }), { commit: merged.commit.id, version: 1 });
       const released = invoke<{ tree: Record<string, Array<Record<string, unknown>>> }>('released');
       assert.deepEqual(
         Object.fromEntries(Object.entries(released.tree).map(([kind, rows]) => [kind, rows.length])),

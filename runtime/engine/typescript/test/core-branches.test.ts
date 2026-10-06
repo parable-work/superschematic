@@ -161,19 +161,19 @@ for (const driver of drivers) {
         { instruction: 'Stir', position: 2 },
       ]);
       // Only a tagged commit is released, at the pointer's version: 0 first.
-      assert.equal(vetoOf(() => soup.invoke('release', { commit: committed.commit?.id, version: 0 })), 'not_tagged');
+      assert.equal(vetoOf(() => soup.invoke('releaseCommit', { commit: committed.commit?.id, version: 0 })), 'not_tagged');
       assert.deepEqual(
         [thrown(() => soup.invoke('released'), EngineError).code, thrown(() => soup.invoke('released'), EngineError).message],
         ['not_found', 'Recipe soup has not been released']
       );
       const first = merged.commit as Commit;
-      assert.deepEqual(soup.invoke('release', { commit: first.id, version: 0 }), { commit: first.id, version: 1 });
-      assert.equal(vetoOf(() => soup.invoke('release', { commit: first.id, version: 0 })), 'version_conflict');
+      assert.deepEqual(soup.invoke('releaseCommit', { commit: first.id, version: 0 }), { commit: first.id, version: 1 });
+      assert.equal(vetoOf(() => soup.invoke('releaseCommit', { commit: first.id, version: 0 })), 'version_conflict');
       const second = soup.as(bob).change('more', { cover: { upsert: [{ photoUrl: 'soup.jpg' }] } });
-      assert.deepEqual(soup.as(bob).invoke('release', { commit: second.id, version: 1 }), { commit: second.id, version: 2 });
+      assert.deepEqual(soup.as(bob).invoke('releaseCommit', { commit: second.id, version: 1 }), { commit: second.id, version: 2 });
       assert.deepEqual(Object.keys(soup.invoke<{ tree: Tree }>('released').tree), ['cover', 'step']);
-      // A rollback is a release of the earlier commit.
-      soup.invoke('release', { commit: first.id, version: 2 });
+      // A rollback is a releaseCommit of the earlier commit.
+      soup.invoke('releaseCommit', { commit: first.id, version: 2 });
       const released = soup.invoke<{ release: { commit: string; version: number }; tree: Tree }>('released');
       assert.deepEqual([released.release, Object.keys(released.tree)], [{ commit: first.id, version: 3 }, ['step']]);
       const log = soup.invoke<{ items: Array<{ version: number; commit: string; releasedBy: string; releasedAt: string }>; next: string | null }>('releases', {
@@ -440,7 +440,7 @@ for (const driver of drivers) {
       soup.invoke('materialize', { commit: commit.id });
       soup.invoke('diff', { from: commit.id, to: commit.id });
       soup.invoke('history', { ref: draft.id });
-      soup.invoke('release', { commit: commit.id, version: 0 });
+      soup.invoke('releaseCommit', { commit: commit.id, version: 0 });
       soup.invoke('released');
       soup.invoke('releases');
       const merged = soup.merge(committed.ref, main);
@@ -452,10 +452,10 @@ for (const driver of drivers) {
       soup.invoke('discard', { ref: other.id, version: sealed.ref.version });
       assert.deepEqual(new Set(operations()), new Set([
         'read refs', 'write branch', 'write save', 'write commit', 'read compose', 'read materialize', 'read diff', 'read history',
-        'write release', 'read released', 'read releases', 'write merge', 'write rebase', 'write revert', 'write seal', 'write discard',
+        'write releaseCommit', 'read released', 'read releases', 'write merge', 'write rebase', 'write revert', 'write seal', 'write discard',
       ]));
       // One operation event for each write: two branches, two saves, a
-      // commit, a release, a merge, a rebase, a revert, a seal, a discard.
+      // commit, a releaseCommit, a merge, a rebase, a revert, a seal, a discard.
       const written = handle.engine.events
         .read(alice, { schema: 'Recipe', instanceId: 'soup' })
         .events.slice(before)
@@ -464,7 +464,7 @@ for (const driver of drivers) {
         ['operation', 'branch'],
         ['operation', 'save'],
         ['operation', 'commit'],
-        ['operation', 'release'],
+        ['operation', 'releaseCommit'],
         ['operation', 'merge'],
         ['operation', 'branch'],
         ['operation', 'save'],
@@ -689,7 +689,7 @@ for (const driver of drivers) {
       const stew = new Calls(engine, 'stew');
       for (const calls of [soup, stew]) {
         const first = calls.change('first', { step: { upsert: [boil] } });
-        calls.invoke('release', { commit: first.id, version: 0 });
+        calls.invoke('releaseCommit', { commit: first.id, version: 0 });
         const draft = calls.branch('draft');
         calls.save(draft, { step: { upsert: [stir] } });
       }
