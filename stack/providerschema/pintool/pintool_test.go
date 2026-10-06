@@ -1,4 +1,4 @@
-package main
+package pintool
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parable-work/superschematic/extensions/gcp/schemas"
+	"github.com/parable-work/superschematic/stack/providerschema"
 )
 
 // The fixture provider: one resource with a renamed scalar, a list the
@@ -55,18 +55,24 @@ const fixtureMetadata = `{
   }
 }`
 
+// pinFile is the fixture's pin file, of package gcp.
+const pinFile = "pulumi-gcp.json"
+
 // fixture writes a pin for the widget at version 1.0.0 into a new
 // directory and returns it with a fetcher that serves the fixture files.
-func fixture(t *testing.T, schema, metadata string) (string, fetcher) {
+func fixture(t *testing.T, schema, metadata string) (string, Fetcher) {
 	t.Helper()
 	dir := t.TempDir()
 	pin := `{"package": "gcp", "version": "1.0.0", "sources": [], "types": ["gcp:test/widget:Widget"]}`
-	if err := os.WriteFile(filepath.Join(dir, schemas.PinFile), []byte(pin), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, pinFile), []byte(pin), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return dir, func(url string) ([]byte, error) {
 		if !strings.Contains(url, "/v1.0.0/") {
 			t.Errorf("fetched %s, not at the pinned version", url)
+		}
+		if !strings.HasPrefix(url, "https://raw.githubusercontent.com/pulumi/pulumi-gcp/") || !strings.Contains(url, "/provider/cmd/pulumi-resource-gcp/") {
+			t.Errorf("fetched %s, not from the gcp provider's repository", url)
 		}
 		if strings.HasSuffix(url, "/"+schemaFile) {
 			return []byte(schema), nil
@@ -77,7 +83,7 @@ func fixture(t *testing.T, schema, metadata string) (string, fetcher) {
 
 func TestExtract(t *testing.T) {
 	dir, fetch := fixture(t, fixtureSchema, fixtureMetadata)
-	if err := run(dir, "", false, fetch); err != nil {
+	if err := Run(dir, pinFile, "", false, fetch); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "test.widget.Widget.json"))
@@ -87,7 +93,7 @@ func TestExtract(t *testing.T) {
 	if strings.Contains(string(data), "description") || strings.Contains(string(data), "Unused") {
 		t.Errorf("the pinned file keeps descriptions or an unreferenced type:\n%s", data)
 	}
-	var s schemas.Schema
+	var s providerschema.Schema
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +127,8 @@ func TestExtract(t *testing.T) {
 		t.Errorf("template.containers.commands = %+v", p)
 	}
 
-	var pin schemas.Pin
-	pinData, err := os.ReadFile(filepath.Join(dir, schemas.PinFile))
+	var pin providerschema.Pin
+	pinData, err := os.ReadFile(filepath.Join(dir, pinFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,34 +143,34 @@ func TestExtract(t *testing.T) {
 	if _, err := s.JSONSchema(); err != nil {
 		t.Error(err)
 	}
-	if err := run(dir, "", true, fetch); err != nil {
+	if err := Run(dir, pinFile, "", true, fetch); err != nil {
 		t.Errorf("-check after a write: %v", err)
 	}
 }
 
 func TestCheckFindsDrift(t *testing.T) {
 	dir, fetch := fixture(t, fixtureSchema, fixtureMetadata)
-	if err := run(dir, "", false, fetch); err != nil {
+	if err := Run(dir, pinFile, "", false, fetch); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "test.widget.Widget.json")
 	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(dir, "", true, fetch); err == nil {
+	if err := Run(dir, pinFile, "", true, fetch); err == nil {
 		t.Error("-check passed an edited file")
 	}
-	if err := run(dir, "", false, fetch); err != nil {
+	if err := Run(dir, pinFile, "", false, fetch); err != nil {
 		t.Fatal(err)
 	}
 	stale := filepath.Join(dir, "test.other.Other.json")
 	if err := os.WriteFile(stale, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(dir, "", true, fetch); err == nil {
+	if err := Run(dir, pinFile, "", true, fetch); err == nil {
 		t.Error("-check passed a file for a type the pin does not list")
 	}
-	if err := run(dir, "", false, fetch); err != nil {
+	if err := Run(dir, pinFile, "", false, fetch); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -174,7 +180,7 @@ func TestCheckFindsDrift(t *testing.T) {
 
 func TestDigestMismatch(t *testing.T) {
 	dir, fetch := fixture(t, fixtureSchema, fixtureMetadata)
-	if err := run(dir, "", false, fetch); err != nil {
+	if err := Run(dir, pinFile, "", false, fetch); err != nil {
 		t.Fatal(err)
 	}
 	changed := func(url string) ([]byte, error) {
@@ -185,7 +191,7 @@ func TestDigestMismatch(t *testing.T) {
 		return data, err
 	}
 	for _, check := range []bool{true, false} {
-		if err := run(dir, "", check, changed); err == nil || !strings.Contains(err.Error(), "records") {
+		if err := Run(dir, pinFile, "", check, changed); err == nil || !strings.Contains(err.Error(), "records") {
 			t.Errorf("check=%v: err = %v, want a digest mismatch", check, err)
 		}
 	}
@@ -194,15 +200,28 @@ func TestDigestMismatch(t *testing.T) {
 func TestUnmatchedList(t *testing.T) {
 	metadata := strings.Replace(fixtureMetadata, `"env": {"maxItemsOne": false},`, "", 1)
 	dir, fetch := fixture(t, fixtureSchema, metadata)
-	err := run(dir, "", false, fetch)
+	err := Run(dir, pinFile, "", false, fetch)
 	if err == nil || !strings.Contains(err.Error(), "property envs") {
 		t.Fatalf("err = %v, want envs refused for want of a list field", err)
 	}
 }
 
+// TestPinNamesItsPackage refuses a pin whose package is not the one its
+// file name says, since the package picks the repository fetched from.
+func TestPinNamesItsPackage(t *testing.T) {
+	dir, fetch := fixture(t, fixtureSchema, fixtureMetadata)
+	if err := os.Rename(filepath.Join(dir, pinFile), filepath.Join(dir, "pulumi-cloudflare.json")); err != nil {
+		t.Fatal(err)
+	}
+	err := Run(dir, "pulumi-cloudflare.json", "", false, fetch)
+	if err == nil || !strings.Contains(err.Error(), `pins package "gcp"`) {
+		t.Errorf("err = %v, want the package refused", err)
+	}
+}
+
 func TestVersionMovesThePin(t *testing.T) {
 	dir, fetch := fixture(t, fixtureSchema, fixtureMetadata)
-	if err := run(dir, "", false, fetch); err != nil {
+	if err := Run(dir, pinFile, "", false, fetch); err != nil {
 		t.Fatal(err)
 	}
 	var fetched []string
@@ -210,20 +229,20 @@ func TestVersionMovesThePin(t *testing.T) {
 		fetched = append(fetched, url)
 		return fetch(strings.Replace(url, "/v2.0.0/", "/v1.0.0/", 1))
 	}
-	if err := run(dir, "2.0.0", false, moved); err != nil {
+	if err := Run(dir, pinFile, "2.0.0", false, moved); err != nil {
 		t.Fatal(err)
 	}
 	if len(fetched) != 2 || !strings.Contains(fetched[0], "/v2.0.0/") {
 		t.Errorf("fetched %v, want both files at v2.0.0", fetched)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, schemas.PinFile))
+	data, err := os.ReadFile(filepath.Join(dir, pinFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"version": "2.0.0"`) {
 		t.Errorf("the pin is not at 2.0.0:\n%s", data)
 	}
-	if err := run(dir, "3.0.0", true, moved); err == nil {
+	if err := Run(dir, pinFile, "3.0.0", true, moved); err == nil {
 		t.Error("-check with -version passed")
 	}
 }

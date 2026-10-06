@@ -135,24 +135,9 @@ func (Extension) Register(r *registry.Registry) error {
 // resourceTypeSchemas returns the JSON Schema of every pinned type, keyed
 // by token. It refuses a pin at another version than ProviderVersion.
 func resourceTypeSchemas() (map[string]json.RawMessage, error) {
-	pin, err := schemas.ReadPin()
+	types, err := schemas.ResourceTypes(ProviderVersion)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gcp: %w", err)
 	}
-	if pin.Version != ProviderVersion {
-		return nil, fmt.Errorf("gcp: %s pins pulumi-gcp %s, but ProviderVersion is %s", schemas.PinFile, pin.Version, ProviderVersion)
-	}
-	out := make(map[string]json.RawMessage, len(pin.Types))
-	for _, token := range pin.Types {
-		s, err := schemas.Load(token)
-		if err != nil {
-			return nil, fmt.Errorf("gcp: %w", err)
-		}
-		data, err := s.JSONSchema()
-		if err != nil {
-			return nil, fmt.Errorf("gcp: %w", err)
-		}
-		out[token] = data
-	}
-	return out, nil
+	return types, nil
 }
