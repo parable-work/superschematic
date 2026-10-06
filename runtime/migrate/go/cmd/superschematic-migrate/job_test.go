@@ -21,9 +21,16 @@ import (
 	"github.com/parable-work/superschematic/runtime/migrate/go/internal/testdb"
 )
 
-// roles creates login roles named after names, unique to the run, and
-// drops them when the test ends, after the test's databases are dropped,
-// so call it before testdb.NewPostgres. It skips without a server.
+// rolePassword is the password of the login roles roles creates. A
+// Postgres that trusts no connection by name alone, such as CI's, which
+// takes scram-sha-256 from every host but its own, refuses a role that has
+// none.
+const rolePassword = "superschematic-job-role"
+
+// roles creates login roles named after names, unique to the run, with
+// rolePassword, and drops them when the test ends, after the test's
+// databases are dropped, so call it before testdb.NewPostgres. It skips
+// without a server.
 func roles(t *testing.T, names ...string) []string {
 	t.Helper()
 	server := os.Getenv(testdb.EnvURL)
@@ -37,7 +44,7 @@ func roles(t *testing.T, names ...string) []string {
 	testdb.Exec(t, server, func() []string {
 		var statements []string
 		for _, role := range out {
-			statements = append(statements, "CREATE ROLE "+pgx.Identifier{role}.Sanitize()+" LOGIN")
+			statements = append(statements, "CREATE ROLE "+pgx.Identifier{role}.Sanitize()+" LOGIN PASSWORD '"+rolePassword+"'")
 		}
 		return statements
 	}()...)
@@ -74,14 +81,14 @@ func can(t *testing.T, dbURL, role, object, privilege string) bool {
 	return len(got) == 1 && got[0] == "true"
 }
 
-// asRole is dbURL with role as its user.
+// asRole is dbURL with role as its user, and its password.
 func asRole(t *testing.T, dbURL, role string) string {
 	t.Helper()
 	u, err := url.Parse(dbURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	u.User = url.User(role)
+	u.User = url.UserPassword(role, rolePassword)
 	return u.String()
 }
 
@@ -205,6 +212,10 @@ func (d *localDialer) Close() error { return nil }
 func TestJobOnCloudSQL(t *testing.T) {
 	r := roles(t, "shop-migrator", "shop-api")
 	migrator, api := r[0], r[1]
+	// The connector signs the IAM user in with a token, so the job's URL
+	// for it has no password; the local server stands in with the role's,
+	// which pgx reads from PGPASSWORD when a URL has none, as libpq does.
+	t.Setenv("PGPASSWORD", rolePassword)
 	dbURL := testdb.NewPostgres(t)
 	u, err := url.Parse(dbURL)
 	if err != nil {
