@@ -589,9 +589,26 @@ run's name at a terminal unless `--yes`, and refuses without either.
 
 ### `stack outputs <environment>`
 
-Print the outputs of the run's applied resources as JSON, by node ID and
-output name, leaving out secret ones. `--out` writes them to a file, the
-`outputs.json` the bindings generator reads.
+Print the run's outputs file, the `outputs.json` the bindings generator
+reads: a JSON object with the format's `version`, the `stack`, the
+`environment`, the run's `parameters` for a member of a parameterized
+environment, and under `resources` the outputs of the run's applied
+resources by node ID and output name, leaving out secret ones.
+
+```json
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Staging",
+  "resources": {
+    "shop-api.service": { "url": "https://shop-api-3kq7x2-ue.a.run.app" }
+  }
+}
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--out` | stdout | write the outputs file to this path; put it beside the environment's `environment.json` for the bindings generator |
 
 ## Extension commands
 

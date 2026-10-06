@@ -157,10 +157,11 @@ func Destroy(ctx context.Context, o Options) error {
 	return nil
 }
 
-// Outputs returns the outputs of the run's applied resources, by node ID
-// and output name: what the bindings generator reads as outputs.json
-// (section 6.6).
-func Outputs(ctx context.Context, o Options) (map[string]map[string]any, error) {
+// Outputs returns the outputs file of the run: the outputs of its applied
+// resources, by node ID and output name, with the stack, the environment
+// and the run's parameter values. It is what the bindings generator reads
+// as outputs.json (section 6.6).
+func Outputs(ctx context.Context, o Options) (*RunOutputs, error) {
 	s, err := open(o)
 	if err != nil {
 		return nil, err
@@ -172,7 +173,11 @@ func Outputs(ctx context.Context, o Options) (map[string]map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
-	return s.prov.Outputs(ctx, req)
+	resources, err := s.prov.Outputs(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return NewOutputs(s.env, maps.Clone(s.run.Parameters), resources), nil
 }
 
 // deployedRequest is the provisioner's request over the environment with
