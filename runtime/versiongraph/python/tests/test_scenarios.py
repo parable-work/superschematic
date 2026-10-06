@@ -1,17 +1,25 @@
 """Runs every scenario in runtime/versiongraph/testdata/scenarios through the
-Python engine and its Postgres adapter, each in a schema of its own that
-holds the fixture's DDL (runtime/versiongraph/README.md, "Scenarios"). The
-Python counterpart of the Go engine's scenario_test.go: the same files, the
-same rules for reading them, the same checks. It needs the Postgres
-SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names, and skips without it;
-make versiongraph-scenarios-python fails without it."""
+Python engine (runtime/versiongraph/README.md, "Scenarios"), on each backend
+a scenario may name. The Python counterpart of the Go engine's
+scenario_test.go: the same files, the same rules for reading them, the same
+checks.
 
+On Postgres each scenario runs through the Postgres adapter, in a schema of
+its own that holds the fixture's DDL. It needs the Postgres
+SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names, and skips without it;
+make versiongraph-scenarios-python fails without it.
+
+On SQLite each scenario runs through the SQLite adapter (D32), over the
+fixed layout in an in-memory database through the standard library's
+sqlite3, and needs no server."""
+
+import sqlite3
 from dataclasses import fields, is_dataclass
 from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import pytest
-from support import DESCRIPTOR, TESTDATA, Scratch, create_scratch, drop_scratch, hyphenated, requires_database
+from support import DESCRIPTOR, TESTDATA, create_scratch, drop_scratch, hyphenated, requires_database
 
 from superschematic_versiongraph.engine import (
     CommitOptions,
@@ -25,7 +33,8 @@ from superschematic_versiongraph.engine import (
 from superschematic_versiongraph.errors import error_code
 from superschematic_versiongraph.exactjson import JsonNumber, dumps, json_equal, loads
 from superschematic_versiongraph.postgres import PostgresAdapter, psycopg_client
-from superschematic_versiongraph.storage import Commit, Ref, Release
+from superschematic_versiongraph.sqlite import SqliteAdapter, sqlite_client
+from superschematic_versiongraph.storage import Commit, Ref, Release, Storage
 
 # The schema epoch and snapshot interval the fixture's Recipe graph declares,
 # which the engine of every step runs at unless the step names another.
@@ -35,13 +44,17 @@ FIXTURE_SNAPSHOT_EVERY = 3
 # The actor of a step that names none: "Cook", a UUID in its canonical form.
 DEFAULT_ACTOR = "Cook"
 
-# The backend this runner runs the scenarios on. A step that lists its
-# backends runs here only when it lists this one, and an sql step runs its
-# statement for this backend.
-BACKEND = "postgres"
-
-# The backends a scenario may name.
+# The backends a scenario may name. A runner runs on one of them: a step
+# that lists its backends runs only on the ones it lists, and an sql step
+# runs its statement for the runner's backend.
 KNOWN_BACKENDS = ("postgres", "sqlite")
+
+# The graph the SQLite runner keeps the fixture's Recipe graph under.
+SQLITE_GRAPH = "recipe"
+
+# Each backend's pass: the Postgres one runs when a database is there to run
+# it on, the SQLite one always.
+PASSES = [pytest.param("postgres", marks=requires_database, id="postgres"), pytest.param("sqlite", id="sqlite")]
 
 SCENARIOS = TESTDATA / "scenarios"
 FILES = sorted(SCENARIOS.glob("*.json"))
@@ -243,33 +256,34 @@ def runs_on(step: Dict[str, Any], backend: str) -> bool:
     return backends is None or backend in backends
 
 
-def run_scenario(scenario: Scenario, then: Optional[Callable[["Runner"], None]] = None) -> None:
-    """Opens a runner, seeds the scenario's roots, and runs each step that
-    runs on the runner's backend, in order; then runs on the runner before
-    it closes."""
-    runner = Runner(create_scratch("vg_scenario_py"))
+def run_scenario(scenario: Scenario, backend: str, then: Optional[Callable[["Runner"], None]] = None) -> None:
+    """Opens a runner on the backend, seeds the scenario's roots, and runs
+    each step that runs on the backend, in order; then runs on the runner
+    before it closes."""
+    runner = Runner(PostgresBackend() if backend == "postgres" else SqliteBackend())
     try:
-        runner.seed(scenario.roots)
+        runner.backend.seed(scenario.roots)
         for i, step in enumerate(scenario.steps):
-            if not runs_on(step, BACKEND):
+            if not runs_on(step, backend):
                 continue
             runner.where = f"{scenario.name} step {i} ({text(step.get('op'))})"
             runner.run(step)
         if then is not None:
             then(runner)
     finally:
-        runner.close()
+        runner.backend.close()
 
 
 def test_the_scenario_directory_holds_scenarios() -> None:
     assert FILES
 
 
+@pytest.mark.parametrize("backend", KNOWN_BACKENDS)
 @pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
-def test_scenario_file_reads(path: Any) -> None:
-    """Every scenario file reads as the format says, whether or not a
-    database is there to run it on."""
-    scenario = read_scenario(path.read_text(encoding="utf-8"), path.name, BACKEND)
+def test_scenario_file_reads(path: Any, backend: str) -> None:
+    """Every scenario file reads as the format says, for a runner of each
+    backend, whether or not a database is there to run it on."""
+    scenario = read_scenario(path.read_text(encoding="utf-8"), path.name, backend)
     assert scenario.name == path.stem, f"{path.name}: the scenario's name is not the file's"
 
 
@@ -282,44 +296,77 @@ def format_scenario(roots: str, *steps: str) -> str:
 CREATE_PRIMARY = '{"op": "createPrimary", "root": "Bread", "name": "main"}'
 
 # Scenarios that each break one rule of the format, with a part of the error
-# each is refused with, and ones that keep them ("" for none).
+# each is refused with, and ones that keep them ("" for none), for a runner of
+# the backend named first.
 FORMAT_CASES = [
     (
+        "postgres",
         "a statement per backend",
         format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}'),
         "",
     ),
     (
+        "sqlite",
+        "a statement per backend",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}'),
+        "",
+    ),
+    (
+        "postgres",
         "a plain string statement",
         format_scenario('["Bread"]', '{"op": "sql", "statement": "SELECT 1"}'),
         "a statement is an object of one statement per backend",
     ),
     (
+        "postgres",
         "a statement that is not text",
         format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": 1}}'),
         "a statement is an object of one statement per backend",
     ),
     (
+        "postgres",
         "an sql step without the runner's statement",
         format_scenario('["Bread"]', '{"op": "sql", "statement": {"sqlite": "SELECT 1"}}'),
         "the sql step has no postgres statement",
     ),
     (
+        "sqlite",
+        "an sql step without the runner's statement",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": "SELECT 1"}}'),
+        "the sql step has no sqlite statement",
+    ),
+    (
+        "postgres",
         "an sql step with no statement",
         format_scenario('["Bread"]', '{"op": "sql"}'),
         "the sql step has no postgres statement",
     ),
     (
+        "sqlite",
+        "an sql step with no statement",
+        format_scenario('["Bread"]', '{"op": "sql"}'),
+        "the sql step has no sqlite statement",
+    ),
+    (
+        "postgres",
         "a null statement for the runner's backend",
         format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": null}}'),
         "a statement is an object of one statement per backend",
     ),
     (
+        "sqlite",
+        "a null statement for the runner's backend",
+        format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": null}}'),
+        "a statement is an object of one statement per backend",
+    ),
+    (
+        "postgres",
         "a null statement on a step that is not sql",
         format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "statement": null}'),
         "",
     ),
     (
+        "postgres",
         "a statement for an unknown backend on a step that is not sql",
         format_scenario(
             '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "statement": {"mysql": "x"}}'
@@ -327,21 +374,31 @@ FORMAT_CASES = [
         "a statement for unknown backend 'mysql'",
     ),
     (
+        "postgres",
         "a plain string statement on a step that is not sql",
         format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "statement": "x"}'),
         "a statement is an object of one statement per backend",
     ),
     (
+        "postgres",
         "a statement for an unknown backend",
         format_scenario('["Bread"]', '{"op": "sql", "statement": {"postgres": "SELECT 1", "mysql": "SELECT 1"}}'),
         "a statement for unknown backend 'mysql'",
     ),
     (
+        "postgres",
         "an sql step for another backend, without the runner's statement",
         format_scenario('["Bread"]', '{"op": "sql", "backends": ["sqlite"], "statement": {"sqlite": "SELECT 1"}}'),
         "",
     ),
     (
+        "sqlite",
+        "an sql step for another backend, without the runner's statement",
+        format_scenario('["Bread"]', '{"op": "sql", "backends": ["postgres"], "statement": {"postgres": "SELECT 1"}}'),
+        "",
+    ),
+    (
+        "postgres",
         "backends listing the runner's",
         format_scenario(
             '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["sqlite", "postgres"]}'
@@ -349,6 +406,7 @@ FORMAT_CASES = [
         "",
     ),
     (
+        "postgres",
         "backends listing an unknown backend",
         format_scenario(
             '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "mysql"]}'
@@ -356,29 +414,38 @@ FORMAT_CASES = [
         "backends lists unknown backend 'mysql'",
     ),
     (
+        "postgres",
         "an empty backends",
         format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": []}'),
         "backends lists no backend",
     ),
     (
+        "postgres",
         "null backends",
         format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": null}'),
         "",
     ),
     (
+        "postgres",
         "backends listing a backend twice",
         format_scenario(
             '["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backends": ["postgres", "postgres"]}'
         ),
         "backends lists 'postgres' twice",
     ),
-    ("no roots", format_scenario("", CREATE_PRIMARY), "a scenario names its roots"),
-    ("null roots", format_scenario("null", CREATE_PRIMARY), "a scenario names its roots"),
-    ("empty roots", format_scenario("[]", CREATE_PRIMARY), "a scenario names at least one root"),
-    ("a root named twice", format_scenario('["Bread", "Soup", "Bread"]', CREATE_PRIMARY), "roots lists 'Bread' twice"),
-    ("a null root", format_scenario("[null]", CREATE_PRIMARY), "roots lists null, not a name"),
-    ("no steps", format_scenario('["Bread"]'), "a scenario has steps"),
+    ("postgres", "no roots", format_scenario("", CREATE_PRIMARY), "a scenario names its roots"),
+    ("postgres", "null roots", format_scenario("null", CREATE_PRIMARY), "a scenario names its roots"),
+    ("postgres", "empty roots", format_scenario("[]", CREATE_PRIMARY), "a scenario names at least one root"),
     (
+        "postgres",
+        "a root named twice",
+        format_scenario('["Bread", "Soup", "Bread"]', CREATE_PRIMARY),
+        "roots lists 'Bread' twice",
+    ),
+    ("postgres", "a null root", format_scenario("[null]", CREATE_PRIMARY), "roots lists null, not a name"),
+    ("postgres", "no steps", format_scenario('["Bread"]'), "a scenario has steps"),
+    (
+        "postgres",
         "an unknown scenario member",
         '{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": ['
         + CREATE_PRIMARY
@@ -386,6 +453,7 @@ FORMAT_CASES = [
         "unknown scenario member 'backend'",
     ),
     (
+        "postgres",
         "an unknown step member",
         format_scenario('["Bread"]', '{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}'),
         "unknown step member 'backend'",
@@ -393,30 +461,33 @@ FORMAT_CASES = [
 ]
 
 
-@pytest.mark.parametrize("source,refused", [c[1:] for c in FORMAT_CASES], ids=[c[0] for c in FORMAT_CASES])
-def test_scenario_format(source: str, refused: str) -> None:
+@pytest.mark.parametrize(
+    "backend,source,refused", [(c[0],) + c[2:] for c in FORMAT_CASES], ids=[f"{c[0]}: {c[1]}" for c in FORMAT_CASES]
+)
+def test_scenario_format(backend: str, source: str, refused: str) -> None:
     """A scenario that breaks a rule of the format is refused, and one that
-    keeps them reads."""
+    keeps them reads, for a runner of the backend."""
     if not refused:
-        read_scenario(source, "format", BACKEND)
+        read_scenario(source, "format", backend)
         return
     with pytest.raises(AssertionError) as caught:
-        read_scenario(source, "format", BACKEND)
+        read_scenario(source, "format", backend)
     assert refused in str(caught.value)
 
 
-@requires_database
-def test_a_step_whose_backends_leave_out_the_runners_is_skipped() -> None:
-    """A scenario whose steps list their backends: a save listed for SQLite
-    alone is skipped and leaves no row, and a save listed for Postgres too
-    writes its row."""
+@pytest.mark.parametrize("backend", PASSES)
+def test_a_step_whose_backends_leave_out_the_runners_is_skipped(backend: str) -> None:
+    """A scenario whose steps list their backends: a save listed for the
+    other backend alone is skipped and leaves no row, and a save listed for
+    both writes its row."""
+    other = "sqlite" if backend == "postgres" else "postgres"
     run_scenario(
         read_scenario(
             format_scenario(
                 '["Bread"]',
                 '{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}',
                 '{"op": "branch", "from": "main", "name": "mix", "as": "mix"}',
-                '{"op": "save", "ref": "mix", "backends": ["sqlite"], "edits": {"step": {"upsert": '
+                '{"op": "save", "ref": "mix", "backends": ["' + other + '"], "edits": {"step": {"upsert": '
                 '[{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}}',
                 '{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}}',
                 '{"op": "save", "ref": "mix", "backends": ["sqlite", "postgres"], "edits": {"step": {"upsert": '
@@ -424,17 +495,18 @@ def test_a_step_whose_backends_leave_out_the_runners_is_skipped() -> None:
                 '{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": [{"entity_key": "Rest"}]}}',
             ),
             "backends",
-            BACKEND,
-        )
+            backend,
+        ),
+        backend,
     )
 
 
 @requires_database
 def test_a_scenarios_roots_are_seeded_and_only_they() -> None:
-    """A scenario of two roots: each has the recipe row the seeding sql steps
-    gave it (its id, its name as the title and the default actor as its
-    creator) and no other root has one, so a primary line of a root the
-    scenario does not name fails on the foreign key from
+    """A scenario of two roots on Postgres: each has the recipe row the
+    runner seeded for it (its id, its name as the title and the default
+    actor as its creator) and no other root has one, so a primary line of a
+    root the scenario does not name fails on the foreign key from
     recipe_ref.root_id."""
     import psycopg
 
@@ -457,51 +529,82 @@ def test_a_scenarios_roots_are_seeded_and_only_they() -> None:
                 '{"op": "createPrimary", "root": "Pie", "name": "main"}',
             ),
             "roots",
-            BACKEND,
+            "postgres",
         ),
+        "postgres",
         missing_root,
     )
 
 
-@requires_database
-@pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
-def test_scenario(path: Any) -> None:
-    scenario = read_scenario(path.read_text(encoding="utf-8"), path.name, BACKEND)
-    assert scenario.name == path.stem, f"{path.name}: the scenario's name is not the file's"
-    run_scenario(scenario)
+def test_a_scenarios_roots_are_not_seeded_on_sqlite() -> None:
+    """On SQLite the runner seeds nothing, since the layout has no root
+    table: a root the scenario does not name takes a primary line as a named
+    one does, and no table holds a row for either."""
+
+    def unnamed_root(runner: "Runner") -> None:
+        assert runner.engine.create_primary(DEFAULT_ACTOR, "Bread", "main").root == "Bread"
+
+    run_scenario(
+        read_scenario(
+            format_scenario(
+                '["Soup"]',
+                '{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": '
+                '"SELECT CAST(count(*) AS TEXT) AS n FROM sqlite_schema WHERE type = \'table\' '
+                "AND name NOT LIKE 'graph_%'\"}, \"expect\": {\"rows\": [{\"n\": \"0\"}]}}",
+                '{"op": "createPrimary", "root": "Soup", "name": "main"}',
+            ),
+            "roots",
+            "sqlite",
+        ),
+        "sqlite",
+        unnamed_root,
+    )
 
 
-class Failure(AssertionError):
-    pass
+def test_an_sql_steps_column_that_is_not_text_is_refused_on_sqlite() -> None:
+    """An sql step's rows are its columns read as text: on SQLite, where a
+    column keeps its type, a column that is not text is refused rather than
+    turned into text, and a statement casts what it selects."""
 
-
-class Runner:
-    """One scenario's database, engine and named results."""
-
-    def __init__(self, scratch: Scratch) -> None:
-        self.scratch = scratch
-        self.where = ""
-        self.connection = scratch.connect()
-        self.adapter = PostgresAdapter(DESCRIPTOR)
-        self.client = psycopg_client(self.connection)
-        self.engine = Engine(
-            DESCRIPTOR,
-            self.adapter.storage(self.client),
-            schema_epoch=FIXTURE_SCHEMA_EPOCH,
-            snapshot_every=FIXTURE_SNAPSHOT_EVERY,
+    def step(select: str) -> Scenario:
+        return read_scenario(
+            format_scenario(
+                '["Bread"]',
+                '{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "'
+                + select
+                + '"}, "expect": {"rows": [{"n": "1"}]}}',
+            ),
+            "sql",
+            "sqlite",
         )
-        self.refs: Dict[str, Ref] = {}
-        self.commits: Dict[str, Commit] = {}
-        self.releases: Dict[str, Release] = {}
+
+    run_scenario(step("SELECT CAST(1 AS TEXT) AS n"), "sqlite")
+    with pytest.raises(AssertionError, match="column n is int, not text: cast it in the statement"):
+        run_scenario(step("SELECT 1 AS n"), "sqlite")
+
+
+@pytest.mark.parametrize("backend", PASSES)
+@pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
+def test_scenario(path: Any, backend: str) -> None:
+    scenario = read_scenario(path.read_text(encoding="utf-8"), path.name, backend)
+    assert scenario.name == path.stem, f"{path.name}: the scenario's name is not the file's"
+    run_scenario(scenario, backend)
+
+
+class PostgresBackend:
+    """A scenario on Postgres: a schema of its own holding the fixture's DDL,
+    and the Postgres adapter."""
+
+    name = "postgres"
+
+    def __init__(self) -> None:
+        self.scratch = create_scratch("vg_scenario_py")
+        self.connection = self.scratch.connect()
+        self.adapter = PostgresAdapter(DESCRIPTOR)
+        self.storage: Storage = self.adapter.storage(psycopg_client(self.connection))
         # The connection whose transaction holds the graph's sweep lock,
         # between holdSweepLock and releaseSweepLock.
         self.holder: Any = None
-
-    def close(self) -> None:
-        if self.holder is not None:
-            self.holder.execute("ROLLBACK")
-            self.holder = None
-        drop_scratch(self.scratch)
 
     def seed(self, roots: List[str]) -> None:
         """Gives each root the row a root has on Postgres: a recipe whose id
@@ -512,7 +615,130 @@ class Runner:
         for root in roots:
             args += [hyphenated(root), root]
             values.append(f"(${len(args) - 1}::uuid, ${len(args)}, $1::uuid)")
-        self.query("INSERT INTO recipe (id, title, created_by) VALUES " + ", ".join(values), args)
+        self._query("INSERT INTO recipe (id, title, created_by) VALUES " + ", ".join(values), args)
+
+    def query(self, statement: str, args: List[str]) -> List[str]:
+        """An sql step's statement, with each argument, an id in its
+        canonical form, as the hyphenated text Postgres reads, and its rows
+        in the order it returns them, each a JSON object of its columns read
+        as the text Postgres writes: the statement casts what it selects."""
+        return self._query(statement, [hyphenated(a) for a in args])
+
+    def _query(self, statement: str, args: List[str]) -> List[str]:
+        import psycopg
+
+        cursor = psycopg.RawCursor(self.connection)
+        cursor.execute(statement, args)
+        result = cursor.pgresult
+        out: List[str] = []
+        if result is not None:
+            names = [bytes(result.fname(j) or b"").decode() for j in range(result.nfields)]
+            for i in range(result.ntuples):
+                row = {}
+                for j, name in enumerate(names):
+                    value = result.get_value(i, j)
+                    row[name] = None if value is None else bytes(value).decode()
+                out.append(dumps(row))
+        cursor.close()
+        return out
+
+    def hold_sweep_lock(self) -> None:
+        """Takes the graph's sweep lock through the adapter in a transaction
+        of another connection, and keeps it open until release_sweep_lock."""
+        if self.holder is not None:
+            raise AssertionError("the sweep lock is already held")
+        holder = self.scratch.connect()
+        holder.execute("BEGIN")
+        self.holder = holder
+        locked = self.adapter.storage(psycopg_client(holder)).transact(lambda tx: tx.sweep_lock())
+        if not locked:
+            raise AssertionError("take the sweep lock: another transaction holds it")
+
+    def release_sweep_lock(self) -> None:
+        if self.holder is None:
+            raise AssertionError("no sweep lock is held")
+        holder, self.holder = self.holder, None
+        holder.execute("ROLLBACK")
+
+    def close(self) -> None:
+        if self.holder is not None:
+            self.holder.execute("ROLLBACK")
+            self.holder = None
+        drop_scratch(self.scratch)
+
+
+class SqliteBackend:
+    """A scenario on SQLite: the fixed layout, under its default names, in an
+    in-memory database of its own, and the SQLite adapter over the standard
+    library's sqlite3."""
+
+    name = "sqlite"
+
+    def __init__(self) -> None:
+        self.connection = sqlite3.connect(":memory:", isolation_level=None)
+        client = sqlite_client(self.connection)
+        adapter = SqliteAdapter(DESCRIPTOR, graph=SQLITE_GRAPH)
+        adapter.create_tables(client)
+        self.storage: Storage = adapter.storage(client)
+
+    def seed(self, roots: List[str]) -> None:
+        """The layout has no root table, so a root needs nothing."""
+
+    def query(self, statement: str, args: List[str]) -> List[str]:
+        """An sql step's statement, with each argument an id in its canonical
+        form, as the layout stores it, and its rows in the order it returns
+        them, each a JSON object of its columns. A column that is not text or
+        NULL is refused: the statement casts what it selects, as on Postgres
+        every column reads as text."""
+        cursor = self.connection.execute(statement, args)
+        try:
+            names = [d[0] for d in cursor.description] if cursor.description else []
+            out: List[str] = []
+            for values in cursor.fetchall():
+                row = {}
+                for name, value in zip(names, values):
+                    if value is not None and not isinstance(value, str):
+                        raise AssertionError(
+                            f"column {name} is {type(value).__name__}, not text: cast it in the statement"
+                        )
+                    row[name] = value
+                out.append(dumps(row))
+            return out
+        finally:
+            cursor.close()
+
+    def hold_sweep_lock(self) -> None:
+        raise AssertionError(
+            "the sweep lock steps run on postgres only: under SQLite's one writer no transaction holds the lock "
+            "while a sweep runs"
+        )
+
+    def release_sweep_lock(self) -> None:
+        self.hold_sweep_lock()
+
+    def close(self) -> None:
+        self.connection.close()
+
+
+class Failure(AssertionError):
+    pass
+
+
+class Runner:
+    """One scenario's backend, engine and named results."""
+
+    def __init__(self, backend: Any) -> None:
+        self.backend = backend
+        self.where = ""
+        self.engine = Engine(
+            DESCRIPTOR,
+            backend.storage,
+            schema_epoch=FIXTURE_SCHEMA_EPOCH,
+            snapshot_every=FIXTURE_SNAPSHOT_EVERY,
+        )
+        self.refs: Dict[str, Ref] = {}
+        self.commits: Dict[str, Commit] = {}
+        self.releases: Dict[str, Release] = {}
 
     def fail(self, message: str) -> Failure:
         return Failure(f"{self.where}: {message}")
@@ -559,7 +785,7 @@ class Runner:
         if schema_epoch is not None or snapshot_every != 0:
             engine = Engine(
                 DESCRIPTOR,
-                self.adapter.storage(self.client),
+                self.backend.storage,
                 schema_epoch=schema_epoch if schema_epoch is not None else FIXTURE_SCHEMA_EPOCH,
                 snapshot_every=snapshot_every or FIXTURE_SNAPSHOT_EVERY,
             )
@@ -642,15 +868,12 @@ class Runner:
             elif op == "sweep":
                 report = engine.sweep(self.sweep_options(step, actor))
             elif op == "holdSweepLock":
-                self.hold_sweep_lock()
+                self.backend.hold_sweep_lock()
             elif op == "releaseSweepLock":
-                if self.holder is None:
-                    raise self.fail("no sweep lock is held")
-                holder, self.holder = self.holder, None
-                holder.execute("ROLLBACK")
+                self.backend.release_sweep_lock()
             elif op == "snapshot":
                 commit_id = self.commit_id(text(step.get("commit")))
-                entries = self.adapter.storage(self.client).transact(lambda tx: tx.snapshot(commit_id))
+                entries = self.backend.storage.transact(lambda tx: tx.snapshot(commit_id))
             elif op == "materialize":
                 tree = engine.materialize(self.commit_id(text(step.get("commit"))))
             elif op == "compose":
@@ -664,12 +887,14 @@ class Runner:
                 engine.discard(actor, self.ref_id(name), self.version(step, name))
             elif op == "rows":
                 kind, ref_id = text(step.get("kind")), self.ref_id(text(step.get("ref")))
-                rows = self.adapter.storage(self.client).transact(lambda tx: tx.rows(kind, ref_id))
+                rows = self.backend.storage.transact(lambda tx: tx.rows(kind, ref_id))
             elif op == "patches":
                 commit_id = self.commit_id(text(step.get("commit")))
-                patches = self.adapter.storage(self.client).transact(lambda tx: tx.patches([commit_id]))
+                patches = self.backend.storage.transact(lambda tx: tx.patches([commit_id]))
             elif op == "sql":
-                rows = self.query(step["statement"][BACKEND], [self.sql_arg(a) for a in step.get("args") or []])
+                rows = self.backend.query(
+                    step["statement"][self.backend.name], [self.sql_arg(a) for a in step.get("args") or []]
+                )
             else:
                 raise self.fail(f"unknown op {op!r}")
         except Failure:
@@ -813,39 +1038,6 @@ class Runner:
             prune_batch=num(o.get("pruneBatch")) or 0,
         )
 
-    def hold_sweep_lock(self) -> None:
-        """Takes the graph's sweep lock through the adapter in a transaction
-        of another connection, and keeps it open until releaseSweepLock."""
-        if self.holder is not None:
-            raise self.fail("the sweep lock is already held")
-        holder = self.scratch.connect()
-        holder.execute("BEGIN")
-        self.holder = holder
-        locked = self.adapter.storage(psycopg_client(holder)).transact(lambda tx: tx.sweep_lock())
-        if not locked:
-            raise self.fail("take the sweep lock: another transaction holds it")
-
-    def query(self, statement: str, args: List[str]) -> List[str]:
-        """An sql step's statement, and its rows in the order it returns
-        them, each a JSON object of its columns read as text: the statement
-        casts what it selects."""
-        import psycopg
-
-        cursor = psycopg.RawCursor(self.connection)
-        cursor.execute(statement, args)
-        result = cursor.pgresult
-        out: List[str] = []
-        if result is not None:
-            names = [bytes(result.fname(j) or b"").decode() for j in range(result.nfields)]
-            for i in range(result.ntuples):
-                row = {}
-                for j, name in enumerate(names):
-                    value = result.get_value(i, j)
-                    row[name] = None if value is None else bytes(value).decode()
-                out.append(dumps(row))
-        cursor.close()
-        return out
-
     def sql_arg(self, value: Any) -> str:
         arg = obj(value, "sqlArg", self.where)
         if text(arg.get("uuid")):
@@ -856,7 +1048,7 @@ class Runner:
             id = self.commit_id(text(arg.get("commit")))
         else:
             raise self.fail("an sql argument names a uuid, a ref or a commit")
-        return hyphenated(id)
+        return id
 
     def commit_name(self, id: str) -> str:
         """The name an earlier step bound a commit to, or its id."""

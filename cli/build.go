@@ -243,6 +243,9 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(servicePath, "..", name), loader.WithProfiler(prof), loader.WithNaming(names), loader.WithRegistry(reg))
 		},
+		LoadDependencyConfig: func(name string) (*schemaconfig.SchemaConfig, error) {
+			return buildplan.ReadConfig(filepath.Join(servicePath, "..", name), reg)
+		},
 		Log:         cmd.OutOrStdout(),
 		Profile:     prof,
 		EmitIR:      flags.emitIR,

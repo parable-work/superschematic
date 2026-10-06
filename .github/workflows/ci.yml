@@ -146,12 +146,12 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
-        # Builds the superscalar ffi archive from source; the checkout carries
-        # its own rust-toolchain.toml which rustup reads when it builds. The
-        # wasm32 target builds the version-graph TypeScript package, and
+        # Builds the superscalar ffi archive from source, with this toolchain
+        # rather than the one the checkout's rust-toolchain.toml pins, as the
+        # version-graph archive is (tools.env says why). The wasm32 target builds the version-graph TypeScript package, and
         # rustsdkgen compile tests run cargo clippy on the generated SDK
         # crates, so this toolchain carries clippy.
         run: |
@@ -284,7 +284,7 @@ jobs:
           GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
-          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/pulumi; do
+          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/pulumi extensions/topcoat; do
             echo "==> $m"
             # Packages that run cargo queue on its lock of the shared target
             # directory, and the wait counts against each package's timeout.
@@ -401,6 +401,15 @@ jobs:
           working-directory: extensions/pulumi
           install-mode: none
 
+      - name: golangci-lint (extensions/topcoat)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: extensions/topcoat
+          install-mode: none
+
   acme:
     name: acme (example extension builds without core edits)
     # The full tier: every step builds the example end to end.
@@ -453,7 +462,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The wasm32 target builds the version-graph core the engine's
@@ -487,19 +496,22 @@ jobs:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: examples/acme-schematic/scripts/check_second_decorator.sh
 
-      # The Rust client and the Rust server check.sh builds against the
-      # example's generated crates.
+      # The Rust client, the Rust server and the Topcoat app check.sh builds
+      # against the example's generated crates.
       - name: Cache the acme-shop Rust builds
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             examples/acme-shop/rust
             examples/acme-shop/rust-server
+            examples/acme-shop/topcoat
 
       # The docs site's start-here, first-project and guide pages quote
       # examples/acme-shop. This builds it with the core binary, compiles and
       # tests the Go, TypeScript, Python and Rust code the pages show, runs
-      # every SDK's client against shop-orders served in Go and in Rust, and
+      # every SDK's client against shop-orders served in Go and in Rust,
+      # tests the Topcoat app over shop-orders (built with the binary that
+      # links extensions/topcoat), and
       # fails when a generated file or command output a page quotes
       # (examples/acme-shop/testdata/generated/) is stale.
       - name: acme-shop (the docs example builds and passes its tests in four languages)
@@ -540,7 +552,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The wasm32 target builds the version-graph core the engine's
@@ -654,7 +666,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The superscalar Python package is built from the checkout by
@@ -804,18 +816,27 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --all-features -- -D warnings
           cargo clippy --no-default-features -- -D warnings
+          cargo clippy --no-default-features --features rusqlite -- -D warnings
 
-      - name: Rust engine and Postgres adapter (every scenario and canonical vector through the Rust engine, also with serde_json's preserve_order)
-        # make versiongraph-scenarios-rust fails, rather than skips, without
-        # the database. The second run turns serde_json's preserve_order on,
-        # as superscalar does, so the canonical rules' key sort is checked.
+      - name: Rust engine (its own tests, the SQLite adapter's and the SQLite vectors, and every scenario on SQLite)
+        # The quick tier: no database URL, so the Postgres tests skip; the
+        # full tier's step below runs them, and every scenario on Postgres.
+        working-directory: runtime/versiongraph/rust-engine
+        run: cargo test --features rusqlite
+
+      - name: Rust engine and its Postgres and SQLite adapters (every scenario on SQLite and on Postgres and every canonical vector through the Rust engine, also with serde_json's preserve_order)
+        # The SQLite pass of make versiongraph-scenarios-rust needs no
+        # database; its Postgres pass fails, rather than skips, without one.
+        # The second run turns serde_json's preserve_order on, as superscalar
+        # does, so the canonical rules' key sort is checked.
         if: github.event_name != 'pull_request'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           make versiongraph-scenarios-rust
-          (cd runtime/versiongraph/rust-engine && cargo test --tests --features serde_json/preserve_order)
+          (cd runtime/versiongraph/rust-engine && cargo test --tests --features rusqlite,serde_json/preserve_order)
 
       - name: golangci-lint (runtime/versiongraph/go)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -860,9 +881,10 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
-      - name: Scenarios through the Python engine (every scenario, the canonical vectors against Postgres, the adapter, the sweeper and the facade)
-        # uv builds the package's PyO3 extension with maturin. Fails, rather
-        # than skips, without the database.
+      - name: Scenarios through the Python engine (every scenario on SQLite, then on Postgres with the canonical vectors against Postgres, the adapter, the sweeper and the facade)
+        # uv builds the package's PyO3 extension with maturin. The SQLite
+        # pass needs no database; the Postgres pass fails, rather than
+        # skips, without one.
         if: github.event_name != 'pull_request'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable

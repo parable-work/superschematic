@@ -18,7 +18,7 @@
 //! generated `webhook_verified` wraps a route [`RouteControls::apply`]
 //! returned. Each refusal is the problem of [`error_response`].
 
-use crate::{error_response, ApiError, Authenticator, Principal, RateLimiter};
+use crate::{error_response, ApiError, Authenticator, RateLimiter};
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Request};
 use axum::middleware::{from_fn, Next};
@@ -190,17 +190,14 @@ async fn authorize(authorization: Authorization, request: Request, next: Next) -
         permissions,
     } = authorization;
     let (mut parts, body) = request.into_parts();
-    let principal: Principal = match authenticator.authenticate(&parts).await {
-        Ok(Some(principal)) => principal,
-        Ok(None) => {
-            return error_response(ApiError::unauthorized("Authentication required"))
-                .into_response()
-        }
+    let principal = match authenticator
+        .authenticate(&parts)
+        .await
+        .and_then(|principal| crate::auth::admit(authenticator.as_ref(), principal, &permissions))
+    {
+        Ok(principal) => principal,
         Err(err) => return error_response(err).into_response(),
     };
-    if !permissions.is_empty() && !authenticator.permits(&principal.permissions, &permissions) {
-        return error_response(ApiError::forbidden("Insufficient permissions")).into_response();
-    }
     parts.extensions.insert(principal);
     next.run(Request::from_parts(parts, body)).await
 }
@@ -215,6 +212,7 @@ async fn time_out(timeout: Duration, request: Request, next: Next) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Principal;
     use async_trait::async_trait;
     use axum::extract::Extension;
     use axum::routing::post;

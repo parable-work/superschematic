@@ -14,7 +14,7 @@ D32 in `docs/DECISIONS.md`).
 | `@superschematic/versiongraph` | The core: `init` and `initSync`, the operations, `VersionGraphError` and the contract's types. Runs in the browser, bun and Node, has no dependencies, and drives the module through its C ABI exports (`vg_alloc`, `vg_<op>`, `vg_free`, `vg_dealloc`) with no generated glue. |
 | `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, the canonical rules (`canonicalValue`, `canonicalRow`) and the exact JSON codec they read with (`parseJson`, `stringifyJson`, `JsonNumber`). |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
-| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout` and `sqliteTables`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
+| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout` and `sqliteTables`, `minSqliteVersion`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
 ## The core
@@ -151,6 +151,11 @@ row lacks as `null`, so the two compare, merge and hash the same.
 `sqliteLayout(tableName)` returns its statements, one each, with no trigger
 and no transaction control, for a caller that runs its own migrations.
 `runtime/versiongraph/README.md` ("SQLite") holds the layout and its rules.
+The vectors in `runtime/versiongraph/testdata/sqlite` hold every language's
+SQLite adapter to this one, so a file one writes reads the same in
+another's: the layout's statements under the default names, a database this
+adapter wrote, as SQL text, and what it reads back as through each graph's
+adapter. Their README gives each file's shape.
 
 The adapter does what Postgres's history triggers do, in the statements of
 the transaction that changes a row: it sets `_version`, writes each
@@ -165,7 +170,13 @@ as a savepoint; with `options.callerTransaction` it runs in the
 transaction its caller holds and issues no transaction control, as a D16
 behavior's `sql` requires. A taken name is the live-name index's
 `SQLITE_CONSTRAINT_UNIQUE`, and `lockRef`, `nextSequence` and `sweepLock`
-lean on SQLite's one writer. The engine's core `Branches` behavior runs it
+lean on SQLite's one writer. `createTables` and `storage` refuse a SQLite
+older than `minSqliteVersion` (3.37.0, the first with `STRICT` tables) and
+one that cannot run `json_each` and `json_extract`; in the caller's
+transaction, where D16 refuses the name `sqlite_version`, they check the
+JSON functions only. A check that passes runs once, by client or, in the
+caller's transaction, by layout; one that fails runs again at the next
+open. The engine's core `Branches` behavior runs it
 so, in each operation's transaction, over its `sql`
 (`runtime/engine/README.md`, "Branches").
 
@@ -186,6 +197,7 @@ bun install --frozen-lockfile
 bun run test     # cargo build for wasm32, tsc into dist/, the tests, the Node check
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... bun test test   # with the Postgres tests
 make versiongraph-scenarios-ts   # from the repository root: the SQLite pass, then the Postgres tests, failing without the variable
+UPDATE_SQLITE_VECTORS=1 bun test test/sqlite-vectors.test.ts   # after bun run build: rewrite the SQLite vectors; review the diff
 ```
 
 The build needs cargo with the `wasm32-unknown-unknown` target (`rustup
@@ -201,11 +213,18 @@ SQLite through `SyncEngine` and the SQLite adapter, in memory, once through
 holds with every statement held to D16's rules for a behavior's SQL
 (`test/scenarios.test.ts`), runs the SQLite adapter's own tests through both
 bindings (`test/sqlite.test.ts`, over the cases in `test/sqlite-cases.ts`),
+checks the SQLite vectors in `runtime/versiongraph/testdata/sqlite` through
+both bindings (`test/sqlite-vectors.test.ts`, over the checks in
+`test/sqlite-vectors-cases.ts`): `sqliteLayout()` is `layout.json`,
+`typescript.sql` reads as `typescript.json`, one graph reads none of
+another's, the file holds every stored form, and the script in
+`test/sqlite-vectors.ts` still writes both files,
 runs a kind that gains a column end to end on SQLite
 (`test/gained-column.test.ts`), checks `initSync`'s sources and
 `SyncEngine`'s driver (`test/sync.test.ts`), and loads every entry under
 Node with the `pg` driver and the SQLite modules refused, then runs the
-SQLite adapter's tests through `node:sqlite` (`test/node.mjs`). With the
+SQLite adapter's tests and the SQLite vectors' checks through
+`node:sqlite` (`test/node.mjs`). With the
 variable set it also runs every scenario in
 `runtime/versiongraph/testdata/scenarios` through the engine and the adapter
 (`test/scenarios.test.ts`), replaying each operation through a `SyncEngine`

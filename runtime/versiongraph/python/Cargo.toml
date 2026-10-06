@@ -2,7 +2,7 @@
 name = "superschematic-versiongraph-python"
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.95.0"
+rust-version = "1.99.0"
 description = "PyO3 binding of the version-graph core; maturin builds it into the superschematic-versiongraph wheel"
 license = "Apache-2.0"
 repository = "https://github.com/parable-work/superschematic"

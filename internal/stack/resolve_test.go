@@ -355,7 +355,7 @@ func TestCheckExposeNotServer(t *testing.T) {
 	s, services := shop()
 	s.Expose = append(s.Expose, stacktest.Of(stacktest.ShopDB))
 	_, errs := resolve(t, reg, s, services, "Staging")
-	mustFail(t, errs, stack.CodeExposeNotServer, "stack Shop exposes shop-db, a database; only a server is exposed")
+	mustFail(t, errs, stack.CodeExposeNotServer, "stack shop-stack exposes shop-db, a database; only a server is exposed")
 }
 
 func TestCheckPolicy(t *testing.T) {
@@ -393,8 +393,8 @@ func TestUnknownDeployable(t *testing.T) {
 		&ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-storefront", Kind: ir.SchemaKindAPI}}},
 	)
 	_, errs := resolve(t, reg, s, services, "Staging")
-	mustFail(t, errs, stack.CodeUnknownDeployable, "names deployable Checkout, which stack Shop does not declare")
-	mustFail(t, errs, stack.CodeUnknownDeployable, "names service shop-storefront, which is not in stack Shop")
+	mustFail(t, errs, stack.CodeUnknownDeployable, "names deployable Checkout, which stack shop-stack does not declare")
+	mustFail(t, errs, stack.CodeUnknownDeployable, "names service shop-storefront, which is not in stack shop-stack")
 }
 
 func TestTargetValuesAndPlatforms(t *testing.T) {
@@ -559,11 +559,11 @@ func TestInvalidStack(t *testing.T) {
 		{"unknown environment", func(s *ir.Stack, sv []stack.Service) []stack.Service {
 			s.Environments = s.Environments[1:]
 			return sv
-		}, "stack Shop has no environment Staging"},
+		}, "stack shop-stack has no environment Staging"},
 		{"unknown parent", func(s *ir.Stack, sv []stack.Service) []stack.Service {
 			s.Environments[0].Extends = "Base"
 			return sv
-		}, "environment Staging extends Base, which stack Shop does not declare"},
+		}, "environment Staging extends Base, which stack shop-stack does not declare"},
 		{"extends cycle", func(s *ir.Stack, sv []stack.Service) []stack.Service {
 			s.Environments[0].Extends = "Preview"
 			return sv

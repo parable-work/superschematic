@@ -32,7 +32,7 @@ consumed at a commit. APIs an extension depends on (`registry`, `loader`,
 
 ## What the core knows
 
-The core registers three schema kinds (DB, API, General), one auth provider
+The core registers four schema kinds (DB, API, General, Stack), one auth provider
 (`session`) and the generic scalar set. A kind, decorator, document,
 generator, auth provider or command that only one deployment needs lives in
 an extension: a Go package you pass to `cli.New`. The `cmd/superschematic`

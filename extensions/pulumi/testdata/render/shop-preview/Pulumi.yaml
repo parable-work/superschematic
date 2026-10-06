@@ -1,9 +1,9 @@
 # Rendered by superschematic from the resource graph of environment Preview of
-# stack Shop. Do not edit: change the stack and render it again.
+# stack shop-stack. Do not edit: change the stack and render it again.
 
-name: shop
+name: shop-stack
 runtime: yaml
-description: Environment Preview of stack Shop
+description: Environment Preview of stack shop-stack
 config:
   pr:
     type: string

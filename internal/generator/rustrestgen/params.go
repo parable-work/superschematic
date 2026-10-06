@@ -39,6 +39,10 @@ type ParamInfo struct {
 type InputInfo struct {
 	RustType string // types::<Input>, in Option when the input is optional
 	Parse    string // the parse function, or a closure that only decodes
+	// Prepare is the type's prepare_<type>, which the Args struct's check
+	// runs on an input a caller built; empty for a type its crate emits
+	// without validators, which has no rules to check.
+	Prepare  string
 	Required bool
 }
 
@@ -391,6 +395,7 @@ func (b *builder) input(typeName string, required bool) (*InputInfo, error) {
 	}
 	if validators, ok := b.validatorsOf(typeName); ok {
 		input.Parse = validators + "::parse_" + codegen.ToSnakeCase(typeName)
+		input.Prepare = validators + "::prepare_" + codegen.ToSnakeCase(typeName)
 	} else {
 		// A type its crate emits without validators is only decoded.
 		b.usesSchemaRef = true
