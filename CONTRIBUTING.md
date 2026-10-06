@@ -95,7 +95,14 @@ build with `RUST_VERSION`, not the toolchain superscalar's checkout pins:
 Go binaries link the two archives together, and archives that two Rust
 releases built do not link into one binary (both define
 `rust_eh_personality`). The superscalar build records its commit and
-toolchain, so either changing rebuilds it. The Makefile
+toolchain, so either changing rebuilds it. The other Rust builds use
+`RUST_VERSION` too, whatever rustup's default is, unless `RUSTUP_TOOLCHAIN`
+already names a toolchain: the Makefile exports it as `RUSTUP_TOOLCHAIN` for
+every target, so cargo and maturin (when uv builds the Python binding) pick
+it up, and `runtime/versiongraph/typescript`'s `bun run build` sets it for
+its wasm32 build. A bare `cargo` or `uv run` outside make still uses
+rustup's default; export `RUSTUP_TOOLCHAIN=1.99.0` first, or make 1.99.0
+the default. The Makefile
 exports both link directories for every Go target; outside make, run
 `eval "$(scripts/superscalar-dep.sh --export)"` first. Bump a tool version in
 `tools.env` only; workflows read that file and never inline a version. Bump
