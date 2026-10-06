@@ -26,27 +26,17 @@ type fixture struct {
 	log *bytes.Buffer
 }
 
-// dnsToken is the credential the fake DNS platform needs, as the DNS
-// platform's resolution would name it in environment.json; tokenEnv is the
-// variable a run hands it in.
+// dnsToken is the credential the fake DNS platform needs, as a DNS
+// platform's resolution names it in environment.json (`dns.credentials`);
+// Env is the variable a run hands it in.
 var dnsToken = stackdeploy.Credential{
 	Secret:      "shop-stack-fake-dns-acme_dev",
 	Env:         "FAKE_DNS_API_TOKEN",
 	Description: "An API token with DNS Edit on zone acme.dev",
 }
 
-// fakeCredentials is CredentialsOf for the fake target: an environment on
-// the fake DNS platform needs its token.
-func fakeCredentials(env *ir.ResolvedEnvironment) []stackdeploy.Credential {
-	if env.DNS != nil && env.DNS.Platform == stacktest.DNSPlatform {
-		return []stackdeploy.Credential{dnsToken, dnsToken}
-	}
-	return nil
-}
-
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	t.Cleanup(stackdeploy.SetCredentialsOf(fakeCredentials))
 	ext := &stacktest.Extension{}
 	reg, err := registry.Assemble(registry.DefaultNaming(), ext)
 	if err != nil {
@@ -61,6 +51,12 @@ func (f *fixture) env(t *testing.T, name string) *ir.ResolvedEnvironment {
 	env, err := stack.Resolve(f.reg, stack.Input{Stack: stacktest.Shop(), Services: stacktest.AcmeShop(), Environment: name})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The fake DNS platform names no credential, so the environment gets
+	// its token here, as a DNS platform's resolution writes one into
+	// dns.credentials, where CredentialsOf reads it.
+	if env.DNS != nil && env.DNS.Platform == stacktest.DNSPlatform {
+		env.DNS.Credentials = []*ir.DNSCredential{{Secret: dnsToken.Secret, Env: dnsToken.Env, Description: dnsToken.Description}}
 	}
 	return env
 }
