@@ -1,0 +1,9 @@
+migrate plan: 2 hazards of a --fail-on class that no --allow names:
+  destructive:table/task/column/remind_before
+    Task.remindBefore changes from a list of TEXT to a list of INTEGER: SQLite converts each element with a cast that never fails, so the conversion does not keep every element: text that is not a number becomes 0 and a fraction is cut toward zero.
+  destructive:table/comment/column/legacy_id
+    Dropping comment.legacy_id deletes the values of Comment.legacyId.
+Review each, then allow it by its id:
+  --allow 'destructive:table/task/column/remind_before'
+  --allow 'destructive:table/comment/column/legacy_id'
+migrate plan: 2 hazards not allowed

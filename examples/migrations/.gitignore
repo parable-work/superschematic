@@ -1,0 +1,4 @@
+# What the commands in README.md write when run by hand from here.
+/v1-dist/
+/tasks.db
+/*.json
