@@ -22,8 +22,15 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   ([Procedures](#procedures)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
-are, and the core binary does not link it. A binary that does is the core
-with the extension passed to `cli.New`:
+are, and the core binary does not link it. `cmd/superschematic-topcoat` is
+the core with it linked:
+
+```bash
+go build -o superschematic-topcoat ./cmd/superschematic-topcoat
+```
+
+A project's own binary links it beside its other extensions the same way,
+passing it to `cli.New`:
 
 ```go
 package main
@@ -58,28 +65,39 @@ The crate needs the Rust server. A service whose server is in another
 language skips `outputs.topcoat` and logs why, so one config can serve a Go
 build and `build --api-language RUST`.
 
+A binary without the extension refuses `outputs.topcoat`, as it refuses
+any outputs key no generator claims. A project that also builds its
+configs with the core binary lists its Topcoat services in
+`superschematic.toml` instead. The core binary never reads that table:
+
+```toml
+[extension.topcoat]
+services = ["shop-orders"]
+```
+
+A listed service gets the crate with every default when its server is
+Rust. `outputs.topcoat` in its config, when present, wins.
+
 ## The app
 
+The acme shop's `examples/acme-shop/topcoat` is a Topcoat app over
+`shop-orders`, and the docs site's
+[Pages with Topcoat](../../docs/src/content/docs/guides/topcoat.mdx)
+guide walks it. Its `app` mounts the crate:
+
 ```rust
-use schemas_shop_orders_topcoat::api::{types, OrderPlaceOrderArgs};
-use schemas_shop_orders_topcoat::{operations, RouterBuilderShopOrdersExt};
-
-let router = Router::builder()
+Router::builder()
     .discover()
-    .shop_orders(implementations, SessionCaller)
-    .build();
-
-#[page(POST "/orders")]
-async fn place_order(cx: &Cx) -> topcoat::Result<impl View> {
-    let args = OrderPlaceOrderArgs { input: types::PlaceOrderInput { /* ... */ } };
-    let order = operations::order_place_order(cx, args).await?;
-    Ok(view! { <p>"Order " (order.id.to_string()) " placed"</p> })
-}
+    .cookies()
+    .sessions(SessionConfig::default())
+    .app_context(Arc::clone(&sessions))
+    .shop_orders(implementations(shop), SessionCaller(sessions))
+    .build()
 ```
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
-The authenticator establishes a page's caller, typically from the app's
+The authenticator establishes a page's caller, here from the app's
 Topcoat session. The API's own `Authenticator` still decides whether the
 caller's permissions cover an operation's, so pages and the JSON API agree.
 
@@ -176,19 +194,8 @@ path: `/_superschematic/<service>/<namespace>/<operation>`. The app's
   its route's rules. Rust code calls it, since a procedure itself is not
   callable from Rust.
 
-```rust
-use schemas_shop_orders_topcoat::procedures::order_place_order;
-
-#[page("/checkout")]
-async fn checkout(cx: &Cx) -> topcoat::Result<impl View> {
-    let outcome = signal(cx, || None);
-    Ok(view! {
-        <button @click=$(async |_e| {
-            outcome.set(Some(order_place_order(args.clone()).await));
-        })>"Place order"</button>
-    })
-}
-```
+Browser code imports a procedure and calls it with the arguments record
+inside an event handler; see Topcoat's procedures.
 
 Records are the arguments' and results' carriers, so `records: false`
 leaves out the procedures too; `procedures: false` leaves out only them.

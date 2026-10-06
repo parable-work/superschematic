@@ -58,7 +58,13 @@ func build(t *testing.T, outputRoot string, outputs map[string]any) (*registry.R
 // step.
 func buildService(t *testing.T, name, outputRoot string, outputs map[string]any) (*registry.Result, error) {
 	t.Helper()
-	reg, err := registry.Assemble(registry.DefaultNaming(), topcoat.Extension{})
+	return buildWithNaming(t, registry.DefaultNaming(), name, outputRoot, outputs)
+}
+
+// buildWithNaming is buildService under names, a superschematic.toml.
+func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot string, outputs map[string]any) (*registry.Result, error) {
+	t.Helper()
+	reg, err := registry.Assemble(names, topcoat.Extension{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -81,7 +87,7 @@ func buildService(t *testing.T, name, outputRoot string, outputs map[string]any)
 		OutputRoot:  outputRoot,
 		ServicePath: service,
 		Paths:       testpaths.Local(t),
-		Naming:      registry.DefaultNaming(),
+		Naming:      names,
 		Registry:    reg,
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(fixtures, name), loader.WithRegistry(reg))
@@ -127,6 +133,46 @@ func TestTheCrateIsWrittenOnlyBesideARustServer(t *testing.T) {
 	unknown["topcoat"] = map[string]any{"enabled": true, "pages": true}
 	if _, err := build(t, testpaths.TempDir(t), unknown); err == nil || !strings.Contains(err.Error(), "pages") {
 		t.Errorf("an undeclared key in outputs.topcoat: %v", err)
+	}
+}
+
+// TestTheNamingFileListsServices builds fixture-api, whose config has no
+// outputs.topcoat, under a superschematic.toml whose [extension.topcoat]
+// lists it: the crate is written, as the section would write it. The core
+// binary never reads the table, so the same configs build there. A key the
+// table does not declare fails assembly.
+func TestTheNamingFileListsServices(t *testing.T) {
+	names, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"fixture-api\"]\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	outputs := rustOutputs()
+	delete(outputs, "topcoat")
+	root := testpaths.TempDir(t)
+	result, err := buildWithNaming(t, names, "fixture-api", root, outputs)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if got := result.Outputs[topcoat.OutputKey]; got != topcoat.Dir(root, "fixture-api") {
+		t.Errorf("a listed service wrote no crate: outputs %v, skipped %v", result.Outputs, result.Skipped)
+	}
+
+	unlisted, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"other-api\"]\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	if result, err = buildWithNaming(t, unlisted, "fixture-api", testpaths.TempDir(t), outputs); err != nil || result.Outputs[topcoat.OutputKey] != "" {
+		t.Errorf("an unlisted service wrote a crate: %v, %v", err, result.Outputs)
+	}
+
+	for _, table := range []string{"services = \"fixture-api\"", "pages = true"} {
+		names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+table+"\n"), "superschematic.toml")
+		if err != nil {
+			t.Fatalf("ParseNaming: %v", err)
+		}
+		if _, err := registry.Assemble(names, topcoat.Extension{}); err == nil {
+			t.Errorf("[extension.topcoat] %s: assembled, want it refused", table)
+		}
 	}
 }
 
