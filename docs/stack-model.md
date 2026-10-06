@@ -1264,9 +1264,10 @@ to compile at level 2 of section 10.
 
 `go.mod` requires each generated module, runtime module and
 implementation module the server builds from, and a replace points each
-at its directory. superschematic writes no `go.sum`: `go mod tidy` fills
-it before the first `go build .`, or the build runs with
-`GOFLAGS=-mod=mod`.
+at its directory. superschematic writes no `go.sum`: the build runs with
+`-mod=mod`, which fills it. `go mod tidy` would also resolve the imports
+of the tests of the implementation's module, such as an SDK a test calls
+its API through, which the server's `go.mod` does not replace.
 
 ### 8.2 Container image
 
@@ -1295,7 +1296,7 @@ stages:
   version graph's archive when a database the server connects to declares
   a version graph;
 - a Go stage, on the Go release `tools.env` pins, puts each archive where
-  its binding's cgo flags look, then tidies and builds the server;
+  its binding's cgo flags look, then builds the server with `-mod=mod`;
 - the binary runs on distroless `cc`, which holds the glibc and libgcc
   the archives need and nothing else, as a non-root user.
 
