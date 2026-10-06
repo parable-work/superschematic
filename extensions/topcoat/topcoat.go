@@ -7,7 +7,9 @@
 // rules (the caller admitted as the route admits it, the arguments checked
 // as the router checks them, D43), offers a guard per operation, and
 // mirrors each type an operation returns as a Topcoat record, which a
-// page can hand the browser.
+// page can hand the browser. A form per input type whose fields a form
+// holds parses what the browser sends by the input type's rules (D14) and
+// renders its fields with the attributes those rules give them.
 //
 // The package uses only the public registry and ir packages, as an
 // out-of-tree extension would.
@@ -54,20 +56,27 @@ var OutputSchema = json.RawMessage(`{
   "additionalProperties": false,
   "properties": {
     "enabled": {"type": "boolean"},
-    "records": {"type": "boolean", "description": "Mirror each type an operation returns as a Topcoat record (default true)."}
+    "records": {"type": "boolean", "description": "Mirror each type an operation returns as a Topcoat record (default true)."},
+    "forms": {"type": "boolean", "description": "A form per input type whose fields a form holds (default true)."}
   }
 }`)
 
 // Config is the decoded outputs.topcoat.
 type Config struct {
 	Enabled bool `json:"enabled"`
-	// Records is nil when the section leaves it out, which is on.
+	// Records and Forms are nil when the section leaves them out, which is
+	// on.
 	Records *bool `json:"records,omitempty"`
+	Forms   *bool `json:"forms,omitempty"`
 }
 
 // WritesRecords reports whether the crate mirrors the operations' result
 // types as records.
 func (c Config) WritesRecords() bool { return c.Records == nil || *c.Records }
+
+// WritesForms reports whether the crate has a form per input type a form
+// holds.
+func (c Config) WritesForms() bool { return c.Forms == nil || *c.Forms }
 
 // Dir is where the crate is written for a service.
 func Dir(outputRoot, service string) string {

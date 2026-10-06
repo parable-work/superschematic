@@ -23,6 +23,19 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixtures = "../../internal/loader/tsreader/testdata/services"
 
+// formsService is the extension's own fixture, whose input types are of
+// every kind a form field takes, and one a form cannot hold.
+const formsService = "fixture-forms-api"
+
+// serviceDir is a fixture's directory: the extension's own, or the
+// loader's.
+func serviceDir(name string) string {
+	if name == formsService {
+		return filepath.Join("testdata", "services", name)
+	}
+	return filepath.Join(fixtures, name)
+}
+
 // rustOutputs are a fixture's outputs with the server in Rust and the
 // Topcoat crate on.
 func rustOutputs() map[string]any {
@@ -49,7 +62,7 @@ func buildService(t *testing.T, name, outputRoot string, outputs map[string]any)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	service := filepath.Join(fixtures, name)
+	service := serviceDir(name)
 	schema, cfg, err := loader.LoadServiceWithConfig(service, loader.WithRegistry(reg))
 	if err != nil {
 		t.Fatalf("LoadServiceWithConfig: %v", err)
@@ -127,41 +140,67 @@ func skipped(result *registry.Result, reason string) bool {
 }
 
 // TestGolden compares the crates written for fixture-api, whose
-// operations need a caller, and fixture-nested-arrays-api, whose operations
-// need none and whose result nests records in lists of lists, with
+// operations need a caller, fixture-nested-arrays-api, whose operations
+// need none and whose result nests records in lists of lists, and
+// fixture-forms-api, whose input types make forms, with
 // testdata/golden/<service>; -update rewrites them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api"} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, rustOutputs()); err != nil {
 			t.Fatalf("build %s: %v", service, err)
 		}
-		dir := topcoat.Dir(root, service)
+		got := treeOf(t, topcoat.Dir(root, service))
 		golden := filepath.Join("testdata", "golden", service)
-		for _, file := range []string{"Cargo.toml", "src/lib.rs", "src/operations.rs", "src/records.rs", "src/wire.rs"} {
-			got, err := os.ReadFile(filepath.Join(dir, file))
-			if err != nil {
+		if *update {
+			if err := os.RemoveAll(golden); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(golden, file)
-			if *update {
+			for file, data := range got {
+				path := filepath.Join(golden, file)
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(path, got, 0o644); err != nil {
+				if err := os.WriteFile(path, data, 0o644); err != nil {
 					t.Fatal(err)
 				}
-				continue
 			}
-			want, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(got, want) {
+			continue
+		}
+		want := treeOf(t, golden)
+		for file, data := range got {
+			if !bytes.Equal(data, want[file]) {
 				t.Errorf("%s/%s differs from golden (run with -update to accept)", service, file)
 			}
 		}
+		for file := range want {
+			if _, ok := got[file]; !ok {
+				t.Errorf("%s/%s is in the golden but was not written", service, file)
+			}
+		}
 	}
+}
+
+// treeOf reads every file under dir, by its slash path relative to dir.
+func treeOf(t *testing.T, dir string) map[string][]byte {
+	t.Helper()
+	files := map[string][]byte{}
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		files[filepath.ToSlash(rel)] = data
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 // TestRecordsOff builds with outputs.topcoat.records false: the crate has
@@ -202,6 +241,41 @@ func TestTheCrateServesATopcoatApp(t *testing.T) {
 // optional list read from the API's JSON.
 func TestACrateWithoutCallersBuilds(t *testing.T) {
 	cargoTestCrate(t, "fixture-nested-arrays-api", nestedRecordsTest)
+}
+
+// TestFormsServeATopcoatApp does the same for fixture-forms-api with
+// formsAppTest: a page renders the signup form's fields with the
+// attributes its input type's rules give them; a post that breaks a rule,
+// or that the operation refuses, re-renders as sent with 422 and each
+// field's errors; a valid post signs up and redirects.
+func TestFormsServeATopcoatApp(t *testing.T) {
+	cargoTestCrate(t, formsService, formsAppTest)
+}
+
+// TestAnInputAFormCannotHoldHasNoForm builds fixture-forms-api: NoteInput
+// holds a list, so the crate has no form for it.
+func TestAnInputAFormCannotHoldHasNoForm(t *testing.T) {
+	root := testpaths.TempDir(t)
+	if _, err := buildService(t, formsService, root, rustOutputs()); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	forms, err := os.ReadFile(filepath.Join(topcoat.Dir(root, formsService), "src", "forms.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(forms), "pub struct SignupInputForm") || strings.Contains(string(forms), "NoteInputForm") {
+		t.Error("forms.rs: want a form for SignupInput and none for NoteInput")
+	}
+
+	outputs := rustOutputs()
+	outputs["topcoat"] = map[string]any{"enabled": true, "forms": false}
+	root = testpaths.TempDir(t)
+	if _, err := buildService(t, formsService, root, outputs); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, formsService), "src", "forms.rs")); !os.IsNotExist(err) {
+		t.Errorf("forms.rs written with forms false: %v", err)
+	}
 }
 
 // cargoTestCrate builds service's crates with the Topcoat crate on, adds
@@ -515,5 +589,159 @@ fn a_record_holds_nested_lists_of_records() {
     assert_eq!(record.shades, vec![vec!["dark".to_string()]]);
     assert_eq!(record.polygons, vec![vec![PointRecord { x: 1.0, y: 2.0 }], vec![]]);
     assert_eq!(record.weights, None);
+}
+`
+
+// formsAppTest is tests/app.rs of fixture-forms-api's Topcoat crate.
+const formsAppTest = `use std::sync::Arc;
+
+use async_trait::async_trait;
+use schemas_fixture_forms_api_topcoat::api::runtime::{ApiError, RequestContext};
+use schemas_fixture_forms_api_topcoat::api::{types, AccountAnnotateArgs, AccountImplementation, AccountSignUpArgs, Implementations};
+use schemas_fixture_forms_api_topcoat::forms::{signup_input_fields, FormErrors, SignupInputForm};
+use schemas_fixture_forms_api_topcoat::{operations, RouterBuilderFixtureFormsApiExt};
+use serde_json::json;
+use topcoat::context::Cx;
+use topcoat::router::content::Form;
+use topcoat::router::error::see_other;
+use topcoat::router::{header, page, to_bytes, Body, Router, StatusCode};
+use topcoat::view::{view, View};
+
+struct Accounts;
+
+#[async_trait]
+impl AccountImplementation for Accounts {
+    async fn sign_up(&self, _ctx: RequestContext, args: AccountSignUpArgs) -> Result<types::AccountView, ApiError> {
+        let input = args.input;
+        if input.email == "taken@example.com" {
+            return Err(ApiError::conflict("That email is taken")
+                .with_errors(json!({"email": [{"validator": "unique", "message": "is taken"}]})));
+        }
+        Ok(types::AccountView {
+            id: serde_json::from_value(json!("1")).unwrap(),
+            email: input.email,
+            display_name: input.display_name,
+            plan: input.plan,
+            seats: input.seats,
+            newsletter: input.newsletter.unwrap_or_default(),
+        })
+    }
+    async fn annotate(&self, _ctx: RequestContext, _args: AccountAnnotateArgs) -> Result<types::AccountView, ApiError> {
+        Err(ApiError::not_implemented("annotate"))
+    }
+}
+
+#[page("/signup")]
+async fn signup_form() -> topcoat::Result<impl View> {
+    Ok(view! { <form method="post">signup_input_fields()</form> })
+}
+
+#[page(POST "/signup")]
+async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<impl View> {
+    let errors = match form.parse() {
+        Ok(input) => match operations::account_sign_up(cx, AccountSignUpArgs { input }).await {
+            Ok(_) => return Err(see_other("/welcome").into()),
+            Err(err) => FormErrors::from_api(&err),
+        },
+        Err(errors) => errors,
+    };
+    Ok(view! {
+        (StatusCode::UNPROCESSABLE_ENTITY)
+        <form method="post">signup_input_fields(form: form, errors: errors)</form>
+    })
+}
+
+fn app() -> Router {
+    Router::builder()
+        .page(signup_form)
+        .page(sign_up)
+        .fixture_forms_api(Implementations { account: Arc::new(Accounts) })
+        .build()
+}
+
+async fn send(request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
+    let response = app().handle(request).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+async fn post(body: &str) -> (StatusCode, http::HeaderMap, String) {
+    send(
+        http::Request::builder()
+            .method("POST")
+            .uri("/signup")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn the_form_renders_its_rules_as_attributes() {
+    let (status, _, html) = send(http::Request::builder().uri("/signup").body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    for want in [
+        r#"name="email" type="email" required="" maxlength="255""#,
+        r#"<label for="signup-input-display-name">Display name</label>"#,
+        r#"type="text" required="" minlength="2" maxlength="40" placeholder="Ada Lovelace""#,
+        r#"pattern="^[a-z0-9]+$""#,
+        r#"name="website" type="url""#,
+        r#"type="number" step="1" min="1" max="50""#,
+        r#"type="number" step="any""#,
+        r#"<option value="pro">Pro</option>"#,
+        r#"name="newsletter" type="checkbox""#,
+    ] {
+        assert!(html.contains(want), "missing {want} in {html}");
+    }
+    assert!(!html.contains("pattern=\"^[a-zA-Z0-9._%+-]"), "an email input carries the scalar's pattern: {html}");
+}
+
+#[tokio::test]
+async fn a_post_that_breaks_a_rule_renders_again_with_its_errors() {
+    let (status, _, html) = post("email=ada%40example.com&displayName=Ada&plan=pro&seats=many&newsletter=on").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains("must be a whole number"), "{html}");
+    assert!(html.contains(r#"value="many""#), "{html}");
+    assert!(html.contains(r#"<option value="pro" selected="">"#), "{html}");
+    assert!(html.contains(r#"type="checkbox" checked="""#), "{html}");
+
+    let (status, _, html) = post("email=ada%40example.com&displayName=A&plan=pro&seats=3").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains("at least 2"), "{html}");
+    assert!(html.contains(r#"value="A" aria-invalid="true""#), "{html}");
+
+    let (status, _, html) = post("email=taken%40example.com&displayName=Ada&plan=free").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains("is taken"), "{html}");
+}
+
+#[tokio::test]
+async fn a_valid_post_signs_up() {
+    let (status, headers, _) = post("email=ada%40example.com&displayName=Ada&plan=free&seats=3&budget=12.5").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(headers[header::LOCATION], "/welcome");
+}
+
+#[test]
+fn a_form_parses_into_its_input() {
+    let form = SignupInputForm {
+        email: Some("ada@example.com".to_string()),
+        display_name: Some("Ada".to_string()),
+        handle: Some("ada".to_string()),
+        plan: Some("pro".to_string()),
+        seats: Some(" 4 ".to_string()),
+        budget: Some("2.5".to_string()),
+        newsletter: Some("on".to_string()),
+        ..SignupInputForm::default()
+    };
+    let input = form.parse().unwrap();
+    assert_eq!((input.plan, input.seats, input.budget, input.newsletter), (types::Plan::Pro, Some(4), Some(2.5), Some(true)));
+    assert_eq!(input.website, None);
+
+    let errors = SignupInputForm { handle: Some("Not A Handle".to_string()), ..form }.parse().unwrap_err();
+    assert!(!errors.of("handle").is_empty(), "{errors:?}");
+    assert!(errors.of("email").is_empty(), "{errors:?}");
 }
 `

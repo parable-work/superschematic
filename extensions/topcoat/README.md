@@ -15,6 +15,8 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   alone;
 - mirrors each type an operation returns, and the types it nests, as a
   Topcoat record a page can hand the browser.
+- reads and renders a form per input type whose fields a form holds, by
+  the input type's rules ([Forms](#forms)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are, and the core binary does not link it. A binary that does is the core
@@ -102,3 +104,51 @@ A field marked `@uiHidden` is left out, since everything in a record
 reaches the browser. A field whose name a record reserves (`clone`,
 `then`, ...) gets a trailing underscore. `From<types::X>` builds the
 record from the API's value.
+
+## Forms
+
+An operation's input type whose fields a form holds (a string, a number,
+a boolean or an enum, each alone, declared by the service itself) gets a
+form in `forms`:
+
+- **`<Input>Form`** holds each field as the browser sends it
+  (`Option<String>`), so it deserializes from Topcoat's `Form<T>`, and a
+  refused form renders again exactly as it was sent.
+- **`parse()`** reads the fields as the input type's JSON and parses it with
+  the generated `parse_<type>` and its rules ([D14](../../docs/DECISIONS.md)),
+  undeclared keys refused. A checkbox is true when sent. Each field's
+  errors come back as `FormErrors`. `FormErrors::from_api` reads an
+  operation's refusal the same way, so a form shows both.
+- **`<input>_fields(form, errors)`** is a component that renders each field
+  with its label, its value as sent, and its errors:
+  - each field's input type: email, url, tel, number (`step="1"` for an
+    integer) or checkbox, from the field's type; `<select>` for an enum;
+  - the attributes its rules give it: `required`, `min`/`max`,
+    `minlength`/`maxlength`, and `pattern`. A pattern is written only when
+    a browser reads it as the server does: no group syntax, and nothing
+    the HTML `v` flag refuses. It is never written on an email or URL
+    input, which checks its own syntax.
+
+  A browser checks those attributes before sending, and `parse` checks
+  every rule again.
+
+```rust
+#[page(POST "/signup")]
+async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<impl View> {
+    let errors = match form.parse() {
+        Ok(input) => match operations::account_sign_up(cx, AccountSignUpArgs { input }).await {
+            Ok(_) => return Err(see_other("/welcome").into()),
+            Err(err) => FormErrors::from_api(&err),
+        },
+        Err(errors) => errors,
+    };
+    Ok(view! {
+        (StatusCode::UNPROCESSABLE_ENTITY)
+        <form method="post">signup_input_fields(form: form, errors: errors)</form>
+    })
+}
+```
+
+An input type with a list, a map, an object, a union or any JSON value
+gets no form, and the build log says why. `forms: false` in
+`outputs.topcoat` leaves out the module.

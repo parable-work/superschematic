@@ -53,17 +53,21 @@ var (
 	jsonLeaf = leaf{"String", "wire::json_text"}
 )
 
+// schemaSet is the service's schema and its dependencies', where a type
+// an operation names is declared.
+type schemaSet []*ir.Schema
+
 // recordBuilder walks the result types of the service's operations and
 // the object types they nest.
 type recordBuilder struct {
-	schemas []*ir.Schema
+	schemaSet
 	records map[string]*record
 }
 
 // recordsOf is a record per object type an operation of schemas[0]
 // returns, and per object type such a type nests, sorted by name.
-func recordsOf(schemas []*ir.Schema) ([]record, error) {
-	b := &recordBuilder{schemas: schemas, records: map[string]*record{}}
+func recordsOf(schemas schemaSet) ([]record, error) {
+	b := &recordBuilder{schemaSet: schemas, records: map[string]*record{}}
 	for _, set := range schemas[0].OperationSets {
 		for _, op := range set.Operations {
 			if b.objectType(op.TypeRef.Name) != nil {
@@ -146,7 +150,7 @@ func (b *recordBuilder) element(name string) (string, string, error) {
 
 // leafOf is how a record holds a value of a primitive, a scalar, an enum
 // or a union, by the JSON the API sends for it.
-func (b *recordBuilder) leafOf(name string) leaf {
+func (s schemaSet) leafOf(name string) leaf {
 	switch name {
 	case "string":
 		return stringLeaf
@@ -155,7 +159,7 @@ func (b *recordBuilder) leafOf(name string) leaf {
 	case "boolean":
 		return booleanLeaf
 	}
-	for _, schema := range b.schemas {
+	for _, schema := range s {
 		if _, ok := schema.Enums[name]; ok {
 			return stringLeaf
 		}
@@ -186,8 +190,8 @@ func (b *recordBuilder) leafOf(name string) leaf {
 }
 
 // objectType is the object type the schemas declare as name, or nil.
-func (b *recordBuilder) objectType(name string) *ir.TypeDef {
-	for _, schema := range b.schemas {
+func (s schemaSet) objectType(name string) *ir.TypeDef {
+	for _, schema := range s {
 		if typeDef := schema.Types[name]; typeDef != nil && !typeDef.IsTrait {
 			return typeDef
 		}
@@ -208,4 +212,24 @@ func apply(read, arg string) string {
 		return strings.Replace(body, "(v, ", "("+arg+", ", 1)
 	}
 	return read + "(" + arg + ")"
+}
+
+// enum is the enum the schemas declare as name, or nil.
+func (s schemaSet) enum(name string) *ir.EnumDef {
+	for _, schema := range s {
+		if enum := schema.Enums[name]; enum != nil {
+			return enum
+		}
+	}
+	return nil
+}
+
+// scalar is the scalar the schemas declare as name, or nil.
+func (s schemaSet) scalar(name string) *ir.ScalarDef {
+	for _, schema := range s {
+		if scalar := schema.Scalars[name]; scalar != nil {
+			return scalar
+		}
+	}
+	return nil
 }
