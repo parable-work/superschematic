@@ -58,10 +58,18 @@ the result says which moved.
 checkReserve, read-only, answers whether reserve would fit now, here and
 up the chain, after the reservations of an ended lease are settled as
 reserve settles them first, and when not, whether the next UTC day's
-start alone makes it fit; and it lists the scopes it read. It reads the
-scopes through their budget and links fields, never their rows. Queue
-copies its answer so that work over its budget is not tried, and hears
-the scopes it lists change.
+start alone makes it fit; and it lists the scopes it read, each with the
+values of it the answer turns on (hears), in the form a reference hears
+them (ReferenceHears): the meter's remaining, which the reservation fits
+while it is at or above the amount less what the settlement releases
+there; where a daily meter keeps it out now, the scope's reserved and
+its limit, which decide whether the next day lets it in; and the link to
+the scope's own scope. It reads the scopes through their budget and
+links fields, never their rows. Queue copies its answer so that work
+over its budget is not tried, and records a reference to each value, so
+a write to a scope reaches only the instances whose answer it can move.
+The remaining's number is exact while the scope holds what the instance
+reserved through it, which the scope operations keep.
 
 Lease. On a type that composes Lease, a reservation is made under the
 active lease and lives as long as it: reserve is refused while no lease
@@ -158,13 +166,26 @@ export interface Overrun {
   readonly escalated: boolean;
 }
 
+/** A value of a scope a checkReserve answer turns on, as a reference hears it: a JSON pointer into the scope's data, and the number it crosses. */
+export interface ScopeValue {
+  readonly path: string;
+  readonly crosses?: number;
+}
+
+/** An enclosing scope a checkReserve answer read, and the values of it the answer turns on. */
+export interface ScopeRead {
+  readonly schema: string;
+  readonly id: string;
+  readonly hears: readonly ScopeValue[];
+}
+
 /** What checkReserve answers. */
 export interface ReserveCheck {
   readonly fits: boolean;
   /** When it does not fit, the start of the next UTC day if that alone makes it fit; null otherwise. */
   readonly until: number | null;
   /** The enclosing scopes the answer read, innermost first. */
-  readonly scopes: ReadonlyArray<{ readonly schema: string; readonly id: string }>;
+  readonly scopes: readonly ScopeRead[];
 }
 
 const NAME = 'Budget';
@@ -610,17 +631,32 @@ function escalate(context: OperationContext<BudgetConfig>): boolean {
   }
 }
 
+// hear adds a value to what an answer turns on at a scope, once.
+function hear(scope: { hears: ScopeValue[] }, value: ScopeValue): void {
+  if (!scope.hears.some((one) => one.path === value.path && one.crosses === value.crosses)) {
+    scope.hears.push(value);
+  }
+}
+
 // checkReserve answers whether a plan would fit now: here, after the own
 // reservation of an ended lease is settled as reserve settles it first,
 // and at each scope up the chain, read through its budget and links
 // fields, less what that settlement releases there. When it does not
 // fit, until is the next UTC day's start if the daily meters starting
-// again make it fit.
+// again make it fit. Each scope comes with the values of it the answer
+// turns on: its remaining crosses the amount less the release exactly
+// when the reservation's fit there flips; where a daily meter keeps it
+// out now, its reserved crossing the limit less the amount and the
+// release, or a new limit, flips whether the next day lets it in; and its
+// own scope link moves the chain. Where the release is not settled yet,
+// each number is given as it is now and as the settlement leaves it: a
+// Lease or Queue operation settles it in Budget's afterChange, which may
+// run after another behavior has read this answer in the same write.
 function checkReserve(view: InstanceView<BudgetConfig>, plan: ReadonlyArray<[string, number]>): ReserveCheck {
   const lease = leaseOf(view);
   const active = lease?.active === true ? lease.token : undefined;
-  const scopes: Target[] = [];
-  const listed = new Set<string>();
+  const scopes: Array<{ schema: string; id: string; hears: ScopeValue[] }> = [];
+  const listed = new Map<string, { schema: string; id: string; hears: ScopeValue[] }>();
   let fits = true;
   let later = true;
   for (const [meter, amount] of plan) {
@@ -649,21 +685,36 @@ function checkReserve(view: InstanceView<BudgetConfig>, plan: ReadonlyArray<[str
       if (record === undefined) {
         break;
       }
-      if (!listed.has(targetKey(at))) {
-        listed.add(targetKey(at));
-        scopes.push({ schema: at.schema, id: at.id });
+      let scope = listed.get(targetKey(at));
+      if (scope === undefined) {
+        scope = { schema: at.schema, id: at.id, hears: [] };
+        listed.set(targetKey(at), scope);
+        scopes.push(scope);
       }
       const theirs = own((view.schemas.config(at.schema, NAME) as { meters?: Readonly<Record<string, { scope?: string; reset?: string }>> } | undefined)?.meters, meter);
       const counted = own(record.data.budget as Readonly<Record<string, MeterRecord>> | undefined, meter);
       if (theirs === undefined || counted === undefined) {
         break;
       }
+      for (const unsettled of released > 0 ? [released, 0] : [0]) {
+        hear(scope, { path: `/budget/${meter}/remaining`, crosses: amount - unsettled });
+      }
       if (counted.limit !== null) {
         const held = Math.max(0, counted.reserved - released);
-        fits &&= counted.used + held + amount <= counted.limit;
+        const now = counted.used + held + amount <= counted.limit;
+        fits &&= now;
         later &&= (theirs.reset === 'daily' ? 0 : counted.used) + held + amount <= counted.limit;
+        if (theirs.reset === 'daily' && !now) {
+          for (const unsettled of released > 0 ? [released, 0] : [0]) {
+            hear(scope, { path: `/budget/${meter}/reserved`, crosses: counted.limit - amount + unsettled + 1 });
+          }
+          hear(scope, { path: `/budget/${meter}/limit` });
+        }
       }
       const link = theirs.scope;
+      if (link !== undefined) {
+        hear(scope, { path: `/links/${link}` });
+      }
       const next = link === undefined ? undefined : own(record.data.links as Readonly<Record<string, Target>> | undefined, link);
       target = next === undefined ? undefined : { schema: next.schema, id: next.id };
     }

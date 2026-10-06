@@ -17,10 +17,12 @@ the links field reports whether the target has moved past it (stale),
 read through the target's revision field as the caller.
 
 Each link is also a reference the engine records, under the link's
-name. A required link is given at create, which refuses an instance
-without it, can be moved and not unlinked, and the delete of the target
-it points at is refused by guardReference, whoever the caller: an
-instance always holds it. An optional link's target can be deleted:
+name, which hears the target's delete alone: no other change of the
+target asks Links anything, so a target thousands of instances link to
+costs its writes none of them. A required link is given at create, which
+refuses an instance without it, can be moved and not unlinked, and the
+delete of the target it points at is refused by guardReference, whoever
+the caller: an instance always holds it. An optional link's target can be deleted:
 afterReferenceChange unlinks it on each instance that points at it, as
 the caller, and that instance's own event records it. Deleting an
 instance deletes its links.
@@ -191,7 +193,7 @@ function setLink(
        created_by = excluded.created_by, created_at = excluded.created_at`,
     [...key(context), name, link.schema, id, revision ?? null, context.principal.subject, context.now]
   );
-  context.references.add(link.schema, id, name);
+  context.references.add(link.schema, id, name, 'delete');
   return { name, schema: link.schema, id, ...(revision === undefined ? {} : { revision }) };
 }
 

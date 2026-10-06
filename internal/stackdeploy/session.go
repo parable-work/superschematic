@@ -137,27 +137,30 @@ func (s *session) request(ctx context.Context, env *ir.ResolvedEnvironment) (reg
 // provider, such as a DNS platform's API token.
 type Credential = registry.Credential
 
-// CredentialsOf returns the platform credentials a run of env needs, each
-// secret once. Bootstrap creates and asks for each, and plan, deploy,
-// destroy and outputs hand each to the provisioner. It is the one place
-// the operations learn of them.
-//
-// TODO(D45): return env.DNS.Credentials, the credentials the DNS platform
-// resolves into environment.json, once the Cloudflare DNS platform's
-// ir.DNSCredential lands; it is a one-line change. Until then an
-// environment needs none.
-func CredentialsOf(*ir.ResolvedEnvironment) []Credential {
-	return nil
+// CredentialsOf returns the platform credentials a run of env needs, in
+// the order the environment names them: the credentials its DNS platform
+// resolved into environment.json (`dns.credentials`, section 6.9).
+// Bootstrap creates and asks for each, and plan, deploy, destroy and
+// outputs hand each to the provisioner. It is the one place the
+// operations learn of them.
+func CredentialsOf(env *ir.ResolvedEnvironment) []Credential {
+	if env == nil || env.DNS == nil {
+		return nil
+	}
+	var out []Credential
+	for _, c := range env.DNS.Credentials {
+		if c != nil {
+			out = append(out, Credential{Secret: c.Secret, Env: c.Env, Description: c.Description})
+		}
+	}
+	return out
 }
-
-// credentialsOf is CredentialsOf; a test replaces it.
-var credentialsOf = CredentialsOf
 
 // credentials returns the environment's credentials, each secret once.
 func (s *session) credentials() []Credential {
 	var out []Credential
 	seen := map[string]bool{}
-	for _, c := range credentialsOf(s.env) {
+	for _, c := range CredentialsOf(s.env) {
 		if !seen[c.Secret] {
 			seen[c.Secret] = true
 			out = append(out, c)

@@ -7,8 +7,8 @@ sidebar:
 
 An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The installed
-binary (`cmd/superschematic`) passes the official ones, the gcp target and
-the Pulumi provisioner, and the core alone
+binary (`cmd/superschematic`) passes the official ones (the gcp target, the
+Cloudflare DNS platform and the Pulumi provisioner), and the core alone
 (`internal/cmd/superschematic-core`) passes none. Everything project-specific
 registers here: kinds, decorators, scalar catalogs, documents, generators,
 build-all hooks, auth providers, checks, OpenAPI hooks, tool hooks,
@@ -360,12 +360,38 @@ return r.RegisterScalars(Name, catalog)
 
 - `rows` holds every scalar the schemas may use: acme copies the core rows
   from `registry.CoreScalars()` and adds its own.
+- A row whose `Primitive` the loader reads as the object language primitive
+  (`Object`, `JSON`, `Type`, `jsonb`, or a spelling it does not know) needs
+  a `JSONSchemaType` of `object`, `array` or `any`, which becomes the
+  scalar's `json_schema` mapping and says what JSON it holds, and with
+  `object` or `array`, no pattern and no length, which are rules on a
+  string. `RegisterScalars` refuses a catalog with a row that does not,
+  and names the row; for an unknown spelling, it names the primitive and
+  the spellings it may have meant
+  ([JSON-valued scalars](/superschematic/reference/json-scalars/#a-scalar-of-your-own-that-holds-json)).
 - A field of an upload scalar is a multipart file part in the generated
   APIs and SDKs. `Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>` lowers
   the limit for one field; the loader checks it after hydration, so it
-  needs the upload declared here.
+  needs the upload declared here. An upload row's `Primitive` is `String`:
+  `RegisterScalars` refuses an upload scalar whose primitive reads as
+  object.
 - The TypeScript brand (`string & { readonly __brand: "Acme.Photo" }`) can
-  live in the extension's authoring package, as acme's does.
+  live in the extension's authoring package, as acme's does. Name that
+  package for the brand's namespace, so `format --to=ts` imports the
+  namespace from it and not from superscalar:
+
+  ```go
+  named, err := registry.ScalarCatalogWithNpmPackages(catalog, map[string]string{"Acme": "@acme/schema"})
+  if err != nil {
+      return err
+  }
+  return r.RegisterScalars(Name, named)
+  ```
+
+  The key is a namespace, the part of a scalar's name before its first
+  dot. Without it, `format --to=ts` refuses a schema with an `Acme`
+  scalar, since an import of `Acme` from superscalar would not compile.
+  The wrapper composes with the other two in any order.
 
 A scalar whose decode loses something a write must refuse, such as a
 repeated key in a JSON object, can name a raw-body check: a Go function the

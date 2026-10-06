@@ -39,9 +39,9 @@ The core registers four schema kinds (DB, API, General, Stack), one auth provide
 generator, auth provider or command that only one deployment needs lives in
 an extension: a Go package you pass to `cli.New`. The `superschematic`
 binary you install (`cmd/superschematic`) is the core with the official
-extensions linked: the gcp target and the Pulumi provisioner. The core with
-none, `internal/cmd/superschematic-core`, is what the repository's checks
-build to prove the core works alone.
+extensions linked: the gcp target, the Cloudflare DNS platform and the
+Pulumi provisioner. The core with none, `internal/cmd/superschematic-core`,
+is what the repository's checks build to prove the core works alone.
 
 `examples/acme-schematic` is a complete downstream example. The
 [write an extension](/superschematic/extending/write-an-extension/) guide walks

@@ -71,6 +71,37 @@ func TestLanguagePrimitive_String(t *testing.T) {
 	}
 }
 
+// TestCatalogLanguagePrimitive reads a catalog row's primitive as the loader
+// hydrates it: superscalar's spellings and their aliases, without case, and
+// a spelling it does not know as object, reported as unknown.
+func TestCatalogLanguagePrimitive(t *testing.T) {
+	cases := []struct {
+		primitive string
+		want      LanguagePrimitive
+		known     bool
+	}{
+		{"String", LanguageString, true},
+		{" str ", LanguageString, true},
+		{"Int", LanguageNumber, true},
+		{"Float", LanguageNumber, true},
+		{"int64", LanguageNumber, true},
+		{"Bool", LanguageBoolean, true},
+		{"Boolean", LanguageBoolean, true},
+		{"Type", LanguageObject, true},
+		{"JSON", LanguageObject, true},
+		{"Object", LanguageObject, true},
+		{"jsonb", LanguageObject, true},
+		{"Uuid", LanguageObject, false},
+		{"", LanguageObject, false},
+	}
+	for _, tc := range cases {
+		got, known := CatalogLanguagePrimitive(tc.primitive)
+		if got != tc.want || known != tc.known {
+			t.Errorf("CatalogLanguagePrimitive(%q) = %q, %v; want %q, %v", tc.primitive, got, known, tc.want, tc.known)
+		}
+	}
+}
+
 // TestScalarDef_IsAnyJSON keys the any-JSON rule off the json_schema type
 // mapping: the catalog's primitive for Generic.JSON is String, and an
 // object-shaped scalar (json_schema "object" or "array") is not any JSON.

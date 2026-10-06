@@ -698,11 +698,11 @@ the zone is refused. Resolution writes the API token the provider reads,
 as a secret name (`<stack>-cloudflare-dns-<zone>`, dots as underscores),
 never a value.
 
-The installed binary does not link the Cloudflare extension, and the
-deploy commands do not read its token yet. To resolve and render a stack
-whose DNS is on Cloudflare, build a binary that links it, with its
-provider pin, and set `CLOUDFLARE_API_TOKEN` in the environment the
-provisioner runs in:
+The installed binary links the Cloudflare extension, with its provider
+pin. `stack bootstrap` asks for the token and stores it in the target's
+secret store, and `plan`, `deploy`, `destroy` and `outputs` set
+`CLOUDFLARE_API_TOKEN` from it for each run. A distribution of your own
+links it the same way:
 
 ```go
 cli.New(cli.Config{Name: "superschematic"},

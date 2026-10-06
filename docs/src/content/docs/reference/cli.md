@@ -21,9 +21,9 @@ carries extensions.
 The core has seven commands: `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors` and the `stack` group, beside
 cobra's own `help` and `completion`. The installed `superschematic` links
-the official extensions (the gcp target and the Pulumi provisioner), which
-add none. The migration runner, `superschematic-migrate`, is a binary of
-its own ([The runner](/superschematic/reference/migrations/#the-runner)).
+the official extensions (the gcp target, the Cloudflare DNS platform and
+the Pulumi provisioner), which add none. The migration runner,
+`superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)).
 
 ## `build <service-dir>`
 
@@ -386,7 +386,11 @@ extension's kind, decorators, documents or behaviors converts between JSON
 and YAML with its extension data. The TypeScript writer cannot render an
 extension's decorators: converting such a file to `ts` fails and names the
 extension slot instead of dropping it. It writes a type's behaviors as
-`@behavior` decorators.
+`@behavior` decorators. It imports each scalar namespace from the npm
+package the linked extension's scalar catalog names for it (`Acme` from
+`@acme/schema`), and the others from superscalar. A file with a scalar
+that superscalar does not have, in a namespace no catalog names a package
+for, fails to convert to `ts`, since the import would not resolve.
 
 ## `behaviors --out <dir>`
 

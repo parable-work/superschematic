@@ -124,12 +124,26 @@ resources:
                     secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
                     version: latest
             image: us-east1-docker.pkg.dev/acme-prod/shop/orders
+            livenessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /healthz
+                port: 8080
+              periodSeconds: 15
+              timeoutSeconds: 5
             ports:
               containerPort: 8080
             resources:
               limits:
                 cpu: "1"
                 memory: 1Gi
+            startupProbe:
+              failureThreshold: 24
+              httpGet:
+                path: /readyz
+                port: 8080
+              periodSeconds: 5
+              timeoutSeconds: 4
             volumeMounts:
               - mountPath: /cloudsql
                 name: cloudsql
@@ -482,12 +496,26 @@ resources:
                     secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
                     version: latest
             image: us-east1-docker.pkg.dev/acme-prod/shop/shop-api
+            livenessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /healthz
+                port: 8080
+              periodSeconds: 15
+              timeoutSeconds: 5
             ports:
               containerPort: 8080
             resources:
               limits:
                 cpu: "1"
                 memory: 512Mi
+            startupProbe:
+              failureThreshold: 24
+              httpGet:
+                path: /readyz
+                port: 8080
+              periodSeconds: 5
+              timeoutSeconds: 4
             volumeMounts:
               - mountPath: /cloudsql
                 name: cloudsql

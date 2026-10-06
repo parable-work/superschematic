@@ -352,7 +352,8 @@ function scalarDefinition(document: Document, name: string): ScalarDefinition {
   };
 }
 
-// languagePrimitiveOf is loader.languagePrimitiveFromScalarMetadata.
+// languagePrimitiveOf is ir.CatalogLanguagePrimitive: the language primitive
+// the Go loader gives a scalar it fills in from a catalog row.
 function languagePrimitiveOf(primitive: string): string {
   switch (primitive.trim().toLowerCase()) {
     case 'string':

@@ -56,6 +56,12 @@ scalars the shop uses become:
 - The scalar decides the SQL column type too: `Contact.Email` is `CITEXT`,
   which compares case-insensitively. [Database tables](/superschematic/guides/database-tables/)
   has the list.
+- For a JSON value with no fixed shape, use `Generic.JSON`; for one with
+  known fields, an object type. A scalar a schema file declares with the
+  `object` language primitive must say which JSON it holds in
+  `typeMappings.json_schema` (`object`, `array` or `any`), or the build
+  refuses it. [JSON-valued scalars](/superschematic/reference/json-scalars/#a-scalar-of-your-own-that-holds-json)
+  has the rule.
 
 ### Branded values in TypeScript
 

@@ -278,6 +278,31 @@ const seeds: Record<number, Seed> = {
       checkOperationEvents(engine, 4, 'define');
     },
   },
+  // Version 7 recorded references that hear every change of their target,
+  // with no column to say otherwise.
+  7: {
+    write(storage) {
+      storage.run(
+        `INSERT INTO engine_references (namespace, target_schema, target_id, source_schema, source_id, behavior, key)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Item', 'i1', 'Note', 'n1', 'test.Holder', 'desk']
+      );
+    },
+    check(engine) {
+      // The reference still hears every change: an update of i1 runs the
+      // holder's hook, which notes it, and it lists with no hears.
+      publishItem(engine, [{ name: 'test.Counter' }]);
+      const note = schemaDocument('Note', [{ name: 'title', typeRef: { name: 'string' } }]) as { types: { Note: Record<string, unknown> } };
+      note.types.Note.behaviors = [{ name: 'test.Holder' }];
+      engine.schemas.define(alice, note);
+      engine.schemas.publish(alice, 'Note');
+      engine.instances.create(alice, 'Note', { title: 'First' }, { id: 'n1' });
+      engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'holding'), [{ schema: 'Item', id: 'i1', key: 'desk' }]);
+      engine.instances.update(alice, 'Item', 'i1', { title: 'Oak desk' });
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'notes'), ['update Item i1']);
+    },
+  },
 };
 
 // checkOperationEvents publishes a schema with a behavior on a migrated file,
@@ -304,8 +329,8 @@ function checkOperationEvents(engine: Engine, last: number, kind = 'update'): vo
 
 // The indexes and triggers of engine_events that the code relies on: the
 // instance index a one-instance read names (INDEXED BY), the namespace,
-// schema and publish ranges, and the append-only triggers. The last
-// migration rebuilds the table, which drops its indexes and triggers.
+// schema and publish ranges, and the append-only triggers. Migration 7
+// rebuilds the table, which drops its indexes and triggers.
 const EVENT_LOG_OBJECTS = [
   'index engine_events_instance',
   'index engine_events_namespace',

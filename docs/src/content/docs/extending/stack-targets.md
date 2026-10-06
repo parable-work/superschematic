@@ -179,9 +179,10 @@ declare with different schemas is refused.
 runs, each an `ir.DNSCredential` with the secret's name, the environment
 variable and what the engineer enters. Resolution writes them into
 `environment.json` under `dns.credentials`. No value ever enters the
-graph. The `stack` commands do not read them yet: bootstrap and deploy
-take their credentials from `stackdeploy.CredentialsOf`, which returns
-none until it reads `dns.credentials`.
+graph. The `stack` commands read them through `stackdeploy.CredentialsOf`:
+bootstrap asks for each and stores it in the target's secret store, and
+`plan`, `deploy`, `destroy` and `outputs` hand each to the provisioner for
+that run.
 
 ## A provisioner
 

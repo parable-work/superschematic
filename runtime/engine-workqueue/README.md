@@ -307,13 +307,13 @@ counts them.
 
 | | |
 | --- | --- |
-| Config | `claim`: `{ from, to }`, the Workflow states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field of the type; `match`, the type's own top-level scalar fields `claimNext` may filter on; `maxCandidates` (1 to 1000; 100 when absent). Requires `Workflow` and `Lease` |
+| Config | `claim`: `{ from, to }`, the Workflow states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field of the type; `match`, the type's own top-level scalar fields `claimNext` may filter on; `maxCandidates` (1 to 1000; 100 when absent); `excludeStale`, pinned links of the type's `Links` (1 to 16). Requires `Workflow` and `Lease` |
 | Fields | none |
 | Operations | `claim({ ttlMs? })` -> `{ id, token, expiresAt, heartbeatMs }`, writes; `refresh()` -> `{}`, writes; schema-level `claimNext({ match?, assignedOnly?, ttlMs? })` -> `{ claimed }`, the claim or null, writes; schema-level `countClaimable({ match?, assignedOnly? })` -> `{ count }`, read-only. A `match` value is a value or a list of values |
 | Guards | Lease's `acquire` by anything but Queue's own claim: `vetoed` (`claim_required`), so the lease of a claimable instance is taken only by claiming it |
-| Refusals | `claim` of an instance whose status is not one of `claim.from` (`not_claimable`, details `{ status, from }`), or that a blocker holds up (`blocked`), and whatever Lease's `acquire`, Budget's `reserve`, Workflow's `transition` and the instance's guards refuse; `claimNext` and `countClaimable` with a `match` field the config does not name, or `assignedOnly` on a type without Assignment (`invalid_argument`); `claimNext` whose every candidate's claim was `forbidden` to the caller (that `forbidden`). Each code is a veto's (`vetoed`) |
-| Events | `claim`'s operation event carries the lease and the status; a blocker's change appends a `refresh` event on each instance it holds up, and an enclosing budget scope's change one on each instance whose exclusion it moves |
-| `configChange` | `claim`, `priorityField`, `match` and `maxCandidates` may change. Not added to a schema with instances, which would have no copies for `claimNext` to find them by, and not removed from one |
+| Refusals | `claim` of an instance whose status is not one of `claim.from` (`not_claimable`, details `{ status, from }`), that a blocker holds up (`blocked`), or one of whose `excludeStale` links is pinned to a revision its target has moved past (`stale_link`, details `{ links }`), and whatever Lease's `acquire`, Budget's `reserve`, Workflow's `transition` and the instance's guards refuse; `claimNext` and `countClaimable` with a `match` field the config does not name, or `assignedOnly` on a type without Assignment (`invalid_argument`); `claimNext` whose every candidate's claim was `forbidden` to the caller (that `forbidden`). Each code is a veto's (`vetoed`) |
+| Events | `claim`'s operation event carries the lease and the status; a blocker's status change appends a `refresh` event on each instance it holds up, and an enclosing budget scope's change, or a pinned link's target's new revision, one on each instance whose exclusion it moves |
+| `configChange` | `claim`, `priorityField`, `match`, `maxCandidates` and `excludeStale` may change. Not added to a schema with instances, which would have no copies for `claimNext` to find them by, and not removed from one |
 
 ```json
 { "name": "Queue", "config": { "claim": { "from": ["queued"], "to": "running" }, "priorityField": "priority", "match": ["topic"] } }
@@ -321,8 +321,9 @@ counts them.
 
 `claim` reads its checks from the instance as it is. A lapsed lease is
 expired first, through Lease's `expire`, so the status `onExpiry` leaves
-is the one checked. The status must be one of `claim.from`, and, when
-the type composes `Dependencies`, its `blocked` field false. Then it
+is the one checked. The status must be one of `claim.from`, when the
+type composes `Dependencies` its `blocked` field false, and no link
+`excludeStale` names `stale` in its `links` field. Then it
 calls Lease's `acquire` for the caller, Budget's `reserve({})` when the
 type composes Budget (which reserves every meter's claim amount and
 vetoes a reservation that does not fit), and Workflow's `transition` to
@@ -341,7 +342,8 @@ current in the transaction of every change of the instance
 (`afterReferenceChange`, which invokes `refresh`). It copies facts, not
 booleans of the config, so a new version's `claim.from` or `maxExpiries`
 applies to every instance at once; a new `priorityField` orders an
-instance from its next change. A candidate is in a `claim.from` state,
+instance from its next change, and a new `excludeStale` keeps one out
+from its next change too. A candidate is in a `claim.from` state,
 not blocked, below Lease's `maxExpiries`, not excluded now, unassigned or
 assigned to the caller (only assigned to it with `assignedOnly`), and
 holds each `match` value, or one of a list, by JSON equality on the
@@ -365,42 +367,71 @@ claim it makes are one transaction under the file's write lock.
 ### Exclusion
 
 A claim is refused for more than its status and blockers. An instance
-over its budget, or exhausted, would be tried by every `claimNext` and
-refused, and enough of them at the head of the order (more than
-`maxCandidates`) would make `claimNext` return null while claimable work
-waits behind them. So for an instance that its status and blockers make a
-candidate, Queue copies until when it is excluded (`excluded_until`),
-which the candidate query compares with the time:
+over its budget, exhausted or pinned to an outdated spec would be tried
+by every `claimNext` and refused, and enough of them at the head of the
+order (more than `maxCandidates`) would make `claimNext` return null
+while claimable work waits behind them. So for an instance that its
+status and blockers make a candidate, Queue copies until when it is
+excluded (`excluded_until`), which the candidate query compares with the
+time:
 
 - with Retries on the type, while its `retries` field shows it exhausted:
   until a change;
+- while a link `excludeStale` names is `stale` in its `links` field, the
+  target having moved past the revision it pins: until a change, a new
+  `link` of it say;
 - with Budget on the type, while its `checkReserve` (Budget, below)
   says the reservation a claim makes does not fit, here or in an
   enclosing scope: until the start of the next UTC day when that day
   alone makes it fit, so an instance over a daily meter comes back with
   no write; else until a change.
 
-Queue records a reference to each enclosing scope `checkReserve` read,
-while the instance is a candidate but for its budget, so a scope's change
-in any schema (a reservation, a usage, a settlement, a new limit) runs
-its `afterReferenceChange`. That checks the instance's exclusion through
-`checkReserve`, as the principal who changed the scope, and invokes
-`refresh` only when the copy no longer matches. A scope's change costs a
-check of each instance waiting under it, and an event on each whose fit
-it moves. A change the instance's own write makes in a scope, its claim's
-reservation say, is left to that write (the context's `writing`): its own
-`afterChange` refreshes it.
+Work done against a spec that changed is not claimed until it is pinned
+to the spec's new revision, which a `revised` rule of `Reactions` can
+send it back to review for (`runtime/engine/README.md`):
 
-Queue records a reference to each blocker it reads through
-`Dependencies`' `listBlockers` too, so a blocker's change in any schema
-runs its `afterReferenceChange`, which invokes `refresh` on the dependent.
+```json
+{ "name": "Links", "config": { "links": { "spec": { "schema": "specs", "pinned": true } } } },
+{ "name": "Queue", "config": { "claim": { "from": ["queued"], "to": "running" }, "excludeStale": ["spec"] } }
+```
+
+What can move the copy, Queue hears through references, each hearing
+only what can move it ("What a reference hears" in
+`runtime/engine/README.md`), and only while the instance is a candidate
+but for its exclusion:
+
+| Reference | Hears | Key |
+| --- | --- | --- |
+| each blocker it reads through `Dependencies`' `listBlockers` | its `/status` | `''` |
+| each value of an enclosing scope `checkReserve` says its answer turns on | that value, across the number it gives | `budget <path> <number>` |
+| the target of each link `excludeStale` names, pinned to revision n | its `/revision`, across n + 1 | `stale <link>` |
+
+A blocker's status change invokes `refresh` on the dependent. A scope's
+or a target's change first checks the instance's exclusion, through
+`checkReserve` and the `retries` and `links` fields, as the principal who
+made the change, and invokes `refresh` only when the copy, or what it
+hears, no longer matches. So a write to a scope reaches only the
+instances whose fit it can flip, each of which checks itself, and appends
+a `refresh` event on the ones whose fit it does flip: with thousands of
+instances queued under one pool, a claim's reservation or a usage report
+that crosses no instance's amount reads none of them. A stale link's
+instance hears nothing more: only its own change, a new `link`, can let
+it back in. A change the instance's own write makes in a scope, its
+claim's reservation say, is left to that write (the context's `writing`):
+its own `afterChange` refreshes it.
+
 A create's `afterChange` runs after every `initialize`, so an instance a
-create gives blockers or a scope link (`Dependencies`' and `Links`'
-create parameters) has its copies and its references from its create
-event: it is never a candidate before its edges or its scope exist.
-Either change runs as the principal that made it, who needs `write` on
-the dependent's schema, and a change of a candidate needs `read` on the
-schemas of its blockers and scopes.
+create gives blockers, a scope link or a pinned link (`Dependencies`'
+and `Links`' create parameters) has its copies and its references from
+its create event: it is never a candidate before its edges or its scope
+exist. Each change runs as the principal that made it, who needs `write`
+on the dependent's schema, and a change of a candidate needs `read` on
+the schemas of its blockers, its scopes and its `excludeStale` links'
+targets.
+
+`excludeStale` reads `Links`' pins, and `Links` pins only revisions of
+`Revisions`: a link to a schema that composes `Branches` has no release
+to pin, so its staleness is not one Queue can read.
 
 ## Presence
 
@@ -625,7 +656,7 @@ points at.
 | --- | --- |
 | Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) or `limitField` (an integer field of the type), `reserve` (at least 1) and `reserveField` (an integer field of the type, whose positive value replaces `reserve`), `scope` (a link of the type's `Links` config) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`); `escalate` (`{ transition, from }`, needs `Workflow`) |
 | Fields | `budget`: by meter, `{ used, reserved, limit, remaining }`, `limit` and `remaining` null without a limit; `reserved` counts what the instance holds for the instances inside it |
-| Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `checkReserve({ meter?, amount? })` -> `{ fits, until, scopes }`, read-only; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`, each overrun `{ schema, id, used, limit, escalated }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All but `checkReserve` write |
+| Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `checkReserve({ meter?, amount? })` -> `{ fits, until, scopes }`, each scope `{ schema, id, hears }`, read-only; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`, each overrun `{ schema, id, used, limit, escalated }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All but `checkReserve` write |
 | Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed` (`scope_reserved`); a change of a meter's `limitField` without `limitPermission` is `forbidden` (`not_configured` when the config names none), and below what is used and reserved `vetoed` (`below_committed`) |
 | Refusals | `reserve` that does not fit here or in a scope (`over_limit`, details `{ meter, amount, remaining, limit, scope }`, `scope` the instance whose limit refused it), through a scope its link has moved from while the old one holds a reservation (`scope_moved`), and on a type with `Lease` without an active lease (`not_leased`); an unknown meter, an amount without a meter, a meter without a configured reservation and no amount (`invalid_argument`); `setLimit` without `limitPermission` (`forbidden`, or `not_configured` when the config names none) and below what is used and reserved (`below_committed`); a scope operation from an instance that does not draw the meter from the scope (`invalid_argument`) or for more than it reserved (`exceeds_reservation`). `recordUsage` is never refused for its amount. Each code is a veto's (`vetoed`) |
 | Events | each operation's event, on the instance and on every scope it reaches; an escalation's status in the event of the usage that caused it |
@@ -658,8 +689,27 @@ reservation of a lease that is no longer active as settled, as `reserve`
 settles it first, and asks for no lease. When it does not fit, `until`
 is the start of the next UTC day if the daily meters starting again make
 it fit with nothing else changing, else null; `scopes` lists the scopes
-it read, innermost first. Queue copies the answer, so work over its
-budget is not tried (Queue, "Exclusion"). The instance keeps its own
+it read, innermost first, each with `hears`, the values of it the answer
+turns on, in the form a reference hears them:
+
+- `/budget/<meter>/remaining`, crossing the amount less what the
+  settlement of an ended lease's reservation releases there: the
+  reservation fits at the scope exactly while the remaining is at or
+  above it, as long as the scope holds what the instance reserved
+  through it, which the scope operations keep;
+- where a daily meter keeps it out now, `/budget/<meter>/reserved`,
+  crossing the limit less the amount and the release, plus one, and
+  `/budget/<meter>/limit`: whether the next day lets it in;
+- `/links/<scope link>` of a scope that draws on its own scope: the
+  chain.
+
+Until an ended lease's reservation is settled, each number is given
+twice, as it is now and as the settlement leaves it, since a Lease or
+Queue operation settles it in Budget's `afterChange`, which may run after
+Queue has read the answer in the same write. Queue copies the answer and
+records a reference to each value, so work over its budget is not tried
+and a write to a scope reaches only the work whose fit it can flip
+(Queue, "Exclusion"). The instance keeps its own
 reservation apart from what it holds for others, so `settle` releases
 exactly what its claims reserved.
 

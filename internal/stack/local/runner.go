@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -104,7 +106,7 @@ func (execRunner) LookPath(name string) (string, error) { return exec.LookPath(n
 func (execRunner) Run(ctx context.Context, c Command) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
 	cmd.Dir = c.Dir
-	cmd.Env = c.Env
+	cmd.Env = environ(c)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -123,7 +125,7 @@ func (execRunner) Run(ctx context.Context, c Command) ([]byte, error) {
 func (execRunner) Start(c Command) (Process, error) {
 	cmd := exec.Command(c.Path, c.Args...)
 	cmd.Dir = c.Dir
-	cmd.Env = c.Env
+	cmd.Env = environ(c)
 	cmd.Stdout = c.Stdout
 	cmd.Stderr = c.Stderr
 	// A child that keeps the output pipes open after the process exits
@@ -139,6 +141,26 @@ func (execRunner) Start(c Command) (Process, error) {
 		close(p.done)
 	}()
 	return p, nil
+}
+
+// environ is the environment c runs in: c.Env, with PWD set to c.Dir, as a
+// shell's cd sets it. os/exec sets PWD itself only when Env is nil. Without
+// it, a child given the provisioner's own environment finds the
+// provisioner's PWD, which names another directory, and takes the physical
+// path of its own instead: `go build` then resolves a generated go.mod's
+// relative replace directives from that path, and one that leaves a
+// symlinked directory above the output root, such as macOS's /var or /tmp,
+// names a directory that does not exist.
+func environ(c Command) []string {
+	if c.Env == nil || c.Dir == "" {
+		return c.Env
+	}
+	dir, err := filepath.Abs(c.Dir)
+	if err != nil {
+		return c.Env
+	}
+	env := slices.DeleteFunc(slices.Clone(c.Env), func(kv string) bool { return strings.HasPrefix(kv, "PWD=") })
+	return append(env, "PWD="+dir)
 }
 
 func (execRunner) Get(ctx context.Context, url string) (int, error) {
