@@ -7,9 +7,10 @@ import type { Wrapped } from "@superschematic/schema";
 import type { ServiceHandle } from "@superschematic/schema-config";
 
 /**
- * The targets an environment may name. Empty here: each target's authoring
- * package augments it with the target's environment values and a settings
- * type per deployable kind, which `@environment` checks against.
+ * The targets an environment may name: the core's `local`, and each target
+ * whose authoring package augments it with the target's environment values
+ * and a settings type per deployable kind, which `@environment` checks
+ * against.
  *
  * ```ts
  * declare module "@superschematic/stack" {
@@ -19,8 +20,24 @@ import type { ServiceHandle } from "@superschematic/schema-config";
  * }
  * ```
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface Targets {}
+export interface Targets {
+  /** The core's target: every server a process, every database on one Postgres container. */
+  local: LocalTarget;
+}
+
+/**
+ * The core's `local` target, which `superschematic stack dev` runs
+ * (docs/stack-model.md, section 8.3). Its values set the image and the host
+ * port of the environment's Postgres container, a server's settings its
+ * port, and a database takes no settings. A port left out is derived from
+ * the stack, the environment and the server.
+ */
+export interface LocalTarget {
+  values: { postgresImage?: string; postgresPort?: number };
+  server: { port?: number };
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  database: {};
+}
 
 /** A target's name: a key of `Targets`. */
 export type TargetName = Extract<keyof Targets, string>;
