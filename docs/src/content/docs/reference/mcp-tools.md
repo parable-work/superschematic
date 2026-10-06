@@ -325,9 +325,16 @@ declaration) takes `params` alone. Three more list, describe and define
 schemas, and none publishes; two list the behaviors the engine runs and
 describe one by name (`list_behaviors`, `describe_behavior`), which every
 caller may call; and where a schema composes `Search`, one more,
-`search`, searches every such schema the caller may read. The engine
-writes empty guidance, takes the invocation policy and the vendor keys
-above as options, and takes a behavior operation's policy from its
+`search`, searches every such schema the caller may read. Where an SDK
+tool's guidance is its operation's `@docs`, the engine writes its own:
+fixed for its tools, a base for the operations every schema has, and
+what each behavior the type composes says under its config: the states
+a transition may move to and the permission a move needs, how often to
+renew a lease, what keeps work out of a claim, and the veto codes a call
+can meet, each led by its behavior's name. A create's `behaviors` argument shows the create
+parameters a behavior takes under its config, `Links`' link names with
+the required ones required. The engine takes the invocation policy and
+the vendor keys above as options, and takes a behavior operation's policy from its
 declaration, else the default: the core's behaviors (`Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
 `Branches`, and `Reactions`, `Constants` and `Variants`, which have no

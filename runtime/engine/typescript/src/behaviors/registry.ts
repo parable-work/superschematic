@@ -209,6 +209,8 @@ export class BehaviorRegistry {
       'validate',
       'checkedTypes',
       'instanceSchema',
+      'guidance',
+      'createParamsSchema',
       'afterChange',
       'guardReference',
       'afterReferenceChange',
@@ -216,6 +218,9 @@ export class BehaviorRegistry {
       if (implementation[hook] !== undefined && typeof implementation[hook] !== 'function') {
         problems.push(`${hook} is a function`);
       }
+    }
+    if (implementation.createParamsSchema !== undefined && declaration.createParamsSchema === undefined) {
+      problems.push('createParamsSchema narrows the create parameters its declaration takes, and its declaration takes none (no createParamsSchema)');
     }
     const migrations = implementation.migrations ?? [];
     const columns = checkMigrations(migrations, problems);

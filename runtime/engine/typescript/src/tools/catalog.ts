@@ -25,6 +25,14 @@ carries them. No tool publishes: a draft goes live only through an HTTP
 call the access policy governs, so an MCP client cannot put a schema
 live on its own.
 
+Each tool carries guidance, as an SDK tool carries its @docs guidance:
+the engine's own for its tools and for the operations every schema has,
+with what the schema's behaviors say about each operation under their
+configs (guidance.ts). The describe document carries it per operation,
+with each behavior's summary, and a create's behaviors argument shows
+the create parameters each behavior takes under its config when its
+implementation narrows them.
+
 Names follow the SDK generators: a tool's name is `<namespace>.<method>`,
 the namespace the schema name in kebab case (codegen.ToKebabCase) and the
 method the operation's name, as `order.create` or `line-item.addNote`. An
@@ -54,6 +62,7 @@ import type { SchemaCatalog, SchemaRecord, SchemaSummary } from '../registry/cat
 import { SCHEMA_NAME } from '../registry/document.js';
 import type { ComposedBehavior, SchemaRegistry } from '../registry/registry.js';
 import { behaviorDocument, behaviorSummary, type BehaviorDocument, type BehaviorSummary } from './behaviors.js';
+import { engineGuidance, versionGuidance, type EngineTool, type ToolGuidance, type VersionGuidance } from './guidance.js';
 import type { BuiltinTool, ResolvedToolOptions } from './options.js';
 import {
   ANY_JSON_TYPES,
@@ -100,6 +109,8 @@ export interface DescribedBehavior {
   description?: string;
   /** The type's config of it, as the schema holds it; {} when it gives none. */
   config: unknown;
+  /** What it does on the type under the config, as its guidance says; absent for a behavior that gives none. */
+  summary?: string;
   fields: Array<{ name: string; description?: string }>;
   operations: string[];
   /** The codes its vetoes carry, as its declaration lists them. */
@@ -122,6 +133,8 @@ export interface DescribedOperation {
   result: JSONSchemaValue;
   /** Its tool's name in the tools document. */
   tool: string;
+  /** Its tool's guidance, as the tools document writes it. */
+  guidance: ToolGuidance;
   /** The invocation policy, under the policy's key. */
   [policyKey: string]: unknown;
 }
@@ -141,7 +154,7 @@ export interface ToolDefinition {
   lifecycle: string;
   visibility: string;
   audience: string;
-  guidance: { useWhen: string; doNotUseWhen: string; success: string; errors: Array<{ code: string; description: string; commonCorrection: string }> };
+  guidance: ToolGuidance;
   replay: { mode: string; idempotencyKeyPointers: string[]; expectedRevisionPointers: string[] } | null;
   description: string;
   namespace: string;
@@ -223,7 +236,6 @@ interface ToolSpec {
 }
 
 const TOOL_SCHEMA = 'https://json-schema.org/draft/2020-12/schema';
-const EMPTY_GUIDANCE = (): ToolDefinition['guidance'] => ({ useWhen: '', doNotUseWhen: '', success: '', errors: [] });
 
 /** A version's argument schemas: its instance type's fields, and what its behaviors hold them to in each form. */
 interface InstanceSchemas {
@@ -235,6 +247,8 @@ interface InstanceSchemas {
 export class ToolCatalog {
   // The argument schemas of each published version, which never changes.
   private readonly instanceSchemas = new Map<string, InstanceSchemas>();
+  // What each published version's behaviors say about it (guidance.ts).
+  private readonly guidance = new Map<string, VersionGuidance>();
 
   constructor(
     private readonly namespaces: Namespaces,
@@ -293,6 +307,7 @@ export class ToolCatalog {
     const policyKey = this.options.invocationPolicy.key;
     const type = (record.document.types ?? {})[record.instanceType];
     const description = type?.description || record.document.description;
+    const said = this.guidanceOf(record);
     return {
       namespace,
       name: record.name,
@@ -306,6 +321,7 @@ export class ToolCatalog {
         name: bound.name,
         ...(bound.declaration.description ? { description: bound.declaration.description } : {}),
         config: bound.config,
+        ...(said.summaries.has(bound.name) ? { summary: said.summaries.get(bound.name) as string } : {}),
         fields: (bound.declaration.fields ?? []).map((field) => ({
           name: field.name,
           ...(field.description ? { description: field.description } : {}),
@@ -325,6 +341,7 @@ export class ToolCatalog {
         params: renderArguments(this.arguments(tool), this.options.keys.scalar),
         result: this.resultSchema(tool, behaviors),
         tool: tool.name,
+        guidance: this.toolGuidance(tool),
       })),
     };
   }
@@ -671,7 +688,7 @@ export class ToolCatalog {
   // policy refuses the principal is hidden with that reason.
   private definition(principal: Principal, namespace: string, tool: ToolSpec): ToolDefinition {
     const keys = this.options.keys;
-    const guidance = EMPTY_GUIDANCE();
+    const guidance = this.toolGuidance(tool);
     const refusal = tool.hidden === undefined ? this.refusal(principal, namespace, tool) : undefined;
     const hidden = tool.hidden ?? refusal;
     const mcp: ToolMCPRecord =
@@ -683,7 +700,7 @@ export class ToolCatalog {
             handle: tool.handle,
             description: tool.description,
             [this.options.invocationPolicy.key]: tool.policy,
-            ...(keys.guidance !== '' ? { _meta: { [keys.guidance]: EMPTY_GUIDANCE() } } : {}),
+            ...(keys.guidance !== '' ? { _meta: { [keys.guidance]: this.toolGuidance(tool) } } : {}),
           };
     const args = this.arguments(tool);
     return {
@@ -763,7 +780,7 @@ export class ToolCatalog {
         ];
         const takers = tool.createParams ?? [];
         if (takers.length > 0) {
-          properties.push(['behaviors', { raw: createParamsOf(takers) }]);
+          properties.push(['behaviors', { raw: createParamsOf(takers, this.guidanceOf(tool.schema as SchemaRecord).createParams) }]);
         }
         return schema(properties, ['data']);
       }
@@ -851,8 +868,32 @@ export class ToolCatalog {
     return rules.instance.length > 0 ? { ...schema, allOf: [...rules.instance] } : schema;
   }
 
+  // toolGuidance is a tool's guidance: an engine tool's own, or what the
+  // engine and the schema's behaviors say about the operation.
+  private toolGuidance(tool: ToolSpec): ToolGuidance {
+    if (!tool.schema) {
+      return engineGuidance(tool.kind as EngineTool);
+    }
+    const said = this.guidanceOf(tool.schema).operations.get(tool.methodName);
+    if (!said) {
+      throw new Error(`no guidance for ${tool.name}, an operation of the version`);
+    }
+    return jsonCopyOf(said);
+  }
+
+  // guidanceOf is what a version's behaviors say about it, computed once.
+  private guidanceOf(record: SchemaRecord): VersionGuidance {
+    const key = versionKey(record);
+    let cached = this.guidance.get(key);
+    if (!cached) {
+      cached = versionGuidance(record.name, this.catalog.runtimeOf(record).composition);
+      this.guidance.set(key, cached);
+    }
+    return cached;
+  }
+
   private fieldsOf(record: SchemaRecord): InstanceSchemas {
-    const key = `${record.namespace}\u0000${record.name}\u0000${String(record.version)}\u0000${record.hash}`;
+    const key = versionKey(record);
     let cached = this.instanceSchemas.get(key);
     if (!cached) {
       const fields = new FieldSchemas(record.document);
@@ -966,13 +1007,14 @@ export class ToolCatalog {
 
 /**
  * createParamsOf is a create's behaviors argument: by behavior name, the
- * createParamsSchema of each behavior that declares one, as its
- * declaration holds it.
+ * create parameters of each behavior that declares a createParamsSchema:
+ * what its implementation narrows them to under its config, else the
+ * declaration's.
  */
-function createParamsOf(behaviors: readonly ComposedBehavior[]): JSONSchemaObject {
+function createParamsOf(behaviors: readonly ComposedBehavior[], narrowed: ReadonlyMap<string, unknown>): JSONSchemaObject {
   const properties: Record<string, unknown> = {};
   for (const behavior of behaviors) {
-    properties[behavior.name] = behavior.declaration.createParamsSchema;
+    properties[behavior.name] = narrowed.get(behavior.name) ?? behavior.declaration.createParamsSchema;
   }
   return {
     type: 'object',
@@ -980,6 +1022,18 @@ function createParamsOf(behaviors: readonly ComposedBehavior[]): JSONSchemaObjec
     additionalProperties: false,
     properties,
   };
+}
+
+// versionKey names a published version, which never changes, in the
+// catalog's caches.
+function versionKey(record: SchemaRecord): string {
+  return `${record.namespace}\u0000${record.name}\u0000${String(record.version)}\u0000${record.hash}`;
+}
+
+// jsonCopyOf copies a cached guidance, so a caller that changes what it
+// gets changes nothing the next caller reads.
+function jsonCopyOf(guidance: ToolGuidance): ToolGuidance {
+  return JSON.parse(JSON.stringify(guidance)) as ToolGuidance;
 }
 
 // paramsRequired is whether an operation's parameters must hold a member:
