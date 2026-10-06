@@ -8,14 +8,17 @@ use crate::tree::Tree;
 
 /// The canonical document the hash covers: for each kind with live rows,
 /// `{"<kind>": [{"entityKey": ..., "content": {...}}, ...]}` with rows sorted
-/// by entity key and only content columns kept, less every one whose value
-/// is null. A content column the row lacks reads as null (`Row::content`),
-/// so a null column and an absent one hash the same, and a column a
-/// descriptor adds, which every row written before it lacks or holds null,
-/// moves no hash, as a kind it adds moves none. Only the row's own members
-/// are left out: a null inside a `json` value is content. Tombstone rows are
-/// left out, as an absent row is. [`content_hash`] writes it with every
-/// object's keys sorted and no whitespace.
+/// by entity key and only content columns kept, less each content column
+/// the descriptor declares whose value is null. A declared content column
+/// the row lacks reads as null (`Row::content`), so its null and its absence
+/// hash the same, and a column a descriptor adds, which every row written
+/// before it lacks or holds null, moves no hash, as a kind it adds moves
+/// none. A content column the descriptor does not declare is hashed as the
+/// row holds it, null included, as compare, merge and diff read it, so two
+/// trees hash the same exactly when their diff is empty. Only the row's own
+/// members are left out: a null inside a `json` value is content. Tombstone
+/// rows are left out, as an absent row is. [`content_hash`] writes it with
+/// every object's keys sorted and no whitespace.
 pub fn canonical(graph: &Graph, tree: &Tree) -> Value {
     let mut out = Map::new();
     for (kind, rows) in graph.kinds.iter().zip(&tree.kinds) {
@@ -30,7 +33,9 @@ pub fn canonical(graph: &Graph, tree: &Tree) -> Value {
                 let content: Map<String, Value> = row
                     .content(kind)
                     .into_iter()
-                    .filter(|(_, value)| !value.is_null())
+                    .filter(|(column, value)| {
+                        !(value.is_null() && kind.content_columns().contains(column))
+                    })
                     .collect();
                 serde_json::json!({ "entityKey": row.key, "content": content })
             })
@@ -177,11 +182,59 @@ mod tests {
             ),
             absent
         );
-        // A content column the descriptor does not declare is left out when null too.
-        assert_eq!(
+        // A content column the descriptor does not declare is hashed as the
+        // row holds it, so its null is content, as diff reads it.
+        assert_ne!(
             hash(&descriptor, &step(json!({"title": "Boil", "aside": null}))),
             absent
         );
+    }
+
+    /// Whether `diff` from `from` to `to` finds no change.
+    fn no_change(descriptor: &Value, from: &Value, to: &Value) -> bool {
+        let input = json!({ "descriptor": descriptor, "from": from, "to": to }).to_string();
+        let output = run(Op::Diff, input.as_bytes()).expect("diff");
+        output["changes"].as_array().expect("changes").is_empty()
+    }
+
+    #[test]
+    fn two_trees_hash_the_same_exactly_when_their_diff_is_empty() {
+        let descriptor = descriptor(&COLUMNS);
+        let boil = step(json!({"title": "Boil"}));
+        let pairs = [
+            // A declared content column: null and absent are one value.
+            (boil.clone(), step(json!({"title": "Boil", "note": null}))),
+            (
+                boil.clone(),
+                step(json!({"title": "Boil", "note": null, "extras": null})),
+            ),
+            (boil.clone(), step(json!({"title": "Boil", "note": ""}))),
+            // A column the descriptor does not declare: null is a value.
+            (boil.clone(), step(json!({"title": "Boil", "aside": null}))),
+            (boil.clone(), step(json!({"title": "Boil", "aside": 1}))),
+            (
+                step(json!({"title": "Boil", "aside": null})),
+                step(json!({"title": "Boil", "aside": null})),
+            ),
+            // A null inside a json value is content.
+            (
+                step(json!({"title": "Boil", "extras": {}})),
+                step(json!({"title": "Boil", "extras": {"salt": null}})),
+            ),
+            (
+                step(json!({"title": "Boil", "extras": []})),
+                step(json!({"title": "Boil", "extras": [null]})),
+            ),
+            // A row whose every content column is null is still a row.
+            (json!({}), step(json!({"title": null}))),
+        ];
+        for (from, to) in &pairs {
+            assert_eq!(
+                hash(&descriptor, from) == hash(&descriptor, to),
+                no_change(&descriptor, from, to),
+                "{from} -> {to}"
+            );
+        }
     }
 
     #[test]
