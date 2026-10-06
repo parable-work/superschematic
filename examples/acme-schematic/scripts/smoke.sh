@@ -148,7 +148,7 @@ go build -o "$OUT/acme-schematic" ./cmd/acme-schematic
 
 echo "==> describe: the registry the acme binary assembles"
 "$OUT/acme-schematic" describe "$SCHEMAS" | tee "$OUT/describe.txt"
-grep -q '^kinds: API, Catalog, DB, General$' "$OUT/describe.txt"
+grep -q '^kinds: API, Catalog, DB, General, Stack$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
@@ -272,7 +272,7 @@ if "$OUT/superschematic" build "$SCHEMAS/services/shop-catalog" --naming "$OUT/s
   echo "ERROR: the core-only binary built a Catalog service" >&2
   exit 1
 fi
-grep -q 'unknown kind "Catalog" (registered kinds: API, DB, General)' "$OUT/core-kind.log"
+grep -q 'unknown kind "Catalog" (registered kinds: API, DB, General, Stack)' "$OUT/core-kind.log"
 if "$OUT/superschematic" build "$SCHEMAS/services/shop-db" --out "$OUT/core-dist" >"$OUT/core-auth.log" 2>&1; then
   echo "ERROR: the core-only binary accepted auth_provider = \"apikey\"" >&2
   exit 1

@@ -223,7 +223,7 @@ func TestOutputsFile(t *testing.T) {
 	if err != nil || !bytes.Equal(again, data) {
 		t.Errorf("outputs file does not round-trip: %v\n%s\n%s", err, data, again)
 	}
-	if back.Stack != "Shop" || back.Environment != "Preview" || back.Parameters["pr"] != "7" {
+	if back.Stack != "shop-stack" || back.Environment != "Preview" || back.Parameters["pr"] != "7" {
 		t.Errorf("read back %+v", back)
 	}
 	if _, err := bindings.UnmarshalOutputs([]byte(`{"version": 2, "resources": {}}`)); err == nil || !strings.Contains(err.Error(), "version 2") {

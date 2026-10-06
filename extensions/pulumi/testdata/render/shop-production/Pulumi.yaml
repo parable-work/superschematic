@@ -1,9 +1,9 @@
 # Rendered by superschematic from the resource graph of environment Production
-# of stack Shop. Do not edit: change the stack and render it again.
+# of stack shop-stack. Do not edit: change the stack and render it again.
 
-name: shop
+name: shop-stack
 runtime: yaml
-description: Environment Production of stack Shop
+description: Environment Production of stack shop-stack
 resources:
   # phase infrastructure; owners Orders
   Orders-account:

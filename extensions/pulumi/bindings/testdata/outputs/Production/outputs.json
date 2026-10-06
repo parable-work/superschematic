@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "stack": "Shop",
+  "stack": "shop-stack",
   "environment": "Production",
   "resources": {
     "Orders.account": {

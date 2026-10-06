@@ -40,7 +40,7 @@ kind:
 
 ## A kind decides what a schema means
 
-The core registers three kinds. The kind decides what a plain abstract
+The core registers four kinds. The kind decides what a plain abstract
 class becomes, which authoring packages a schema may import, which other
 kinds it may reference, and which generators run, in order.
 
@@ -49,6 +49,7 @@ kinds it may reference, and which generators run, in order.
 | DB | a table | `@superschematic/db` | General | `sql`, `orm`, `types` |
 | API | a request or response type; with `@source`, a view of a table | `@superschematic/api` | DB, General | `types`, `api`, `sdks` |
 | General | a plain type | neither | General | `types`, `envConfig` |
+| Stack | a declaration of what runs where: the stack, a deployable or an environment | `@superschematic/stack` | none; it names services by their handles | `stack` |
 
 Every kind may import `@superschematic/schema` (wrappers such as
 `Nullable` and `Default`, and decorators that apply everywhere),

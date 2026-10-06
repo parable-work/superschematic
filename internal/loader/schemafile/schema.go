@@ -208,7 +208,9 @@ func addMCPInvocationProperty(defs map[string]any, policy registry.ToolInvocatio
 // omitted when empty, which is how the readers store {} (see
 // ir.CanonicalizeBehaviors), so its default is {}. A pointer keeps its zero
 // value and has no default, and neither does a struct, which the encoder
-// never omits. OperationMCP's encoder omits its keys as its struct tags say.
+// never omits. An omitempty interface (an environment's literal env value)
+// is omitted when nil, so its default is null. OperationMCP's encoder omits
+// its keys as its struct tags say.
 func addEncoderDefaults(defs map[string]any) error {
 	seen := map[reflect.Type]bool{}
 	var visit func(t reflect.Type) error
@@ -274,6 +276,8 @@ func omittedValue(t reflect.Type) (any, bool) {
 		return []any{}, true
 	case reflect.Map:
 		return map[string]any{}, true
+	case reflect.Interface:
+		return nil, true
 	}
 	return nil, false
 }
