@@ -267,7 +267,7 @@ export abstract class Dev {}
   target: "gcp",
   gcp: { project: "acme-staging", region: "us-east1" },
   domain: "staging.acme.dev",
-  dns: { cloudflare: { zone: "acme.dev" } },
+  dns: { cloudflare: { zone: "acme.dev", zoneId: "023e105f4ecef8ad9ca31a8372d0c353" } },
 })
 export abstract class Staging {}
 
@@ -892,12 +892,17 @@ the core registers the local target); every other is an extension's.
   connector for one edge kind between the same two platforms.
 - `RegisterTarget(TargetSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a values or resource type schema that does not
-  compile, a resource type another target registered with a different
-  schema, and a policy rule without a name or a check, or with a repeated
-  name.
+  compile, a resource type another target or a DNS platform registered
+  with a different schema, and a policy rule without a name or a check, or
+  with a repeated name.
 - `RegisterDNSPlatform(DNSPlatformSpec)` refuses a malformed or repeated
-  name, the reserved name `manual`, a values schema that does not compile
-  and a missing `Lower`.
+  name, the reserved name `manual`, a values or resource type schema that
+  does not compile, a resource type a target or another DNS platform
+  registered with a different schema, and a missing `Lower`. Its
+  `ResourceTypes` are the schemas of the types its `Lower` emits, for a DNS
+  platform of another provider than the target's, and its `Credentials`
+  name the secrets its provider reads when the provisioner runs (section
+  6.9).
 - `RegisterProvisioner(ProvisionerSpec)` refuses a malformed or repeated
   name and a missing implementation.
 
@@ -939,15 +944,54 @@ same provisioner run as the rest of the environment.
 A DNS platform registers a `DNSPlatformSpec`: the JSON Schema of an
 environment's values for it (a zone) and a pure `Lower` from the records
 to resources. It is a spec of its own, not a `PlatformSpec`, because it
-lowers records rather than a deployable.
+lowers records rather than a deployable. The spec also holds:
+
+- `ResourceTypes`, the schemas of the resource types `Lower` emits, which a
+  DNS platform of another provider than the target's brings itself. They
+  register as a target's do (section 6.4), under the same rule: one schema
+  per type, whoever registers it.
+- `Credentials`, the secrets the platform's provider reads when the
+  provisioner runs, such as an API token. Each names a secret in the
+  target's secret store, the environment variable the provider reads it
+  from, and what the engineer enters. Resolution writes them into
+  `environment.json` under `dns.credentials`, even before any server is
+  exposed. The target's bootstrap asks for each and stores it, and a plan,
+  apply or destroy reads it and sets the variable for that run of the
+  provisioner. No value reaches the resource graph, the rendered program
+  or a file.
 
 v1 has two DNS platforms:
 
 - **Cloud DNS**, the gcp target's default. It writes into the managed zone
   in the environment's project that holds the domain.
-- **Cloudflare DNS.** It writes into the named zone, with an API token the
-  engineer enters at bootstrap. Records are DNS-only by default; proxying
-  through Cloudflare is a setting.
+- **Cloudflare DNS**, `cloudflare` in `extensions/cloudflare`. Its values
+  are `zone`, the name of the zone that holds the domain; `zoneId`, the
+  zone's identifier; and `proxied`, false by default. It refuses a domain
+  or a record outside the zone, and a record type other than A, AAAA,
+  CNAME and TXT. Each record is a `cloudflare:index/dnsRecord:DnsRecord`
+  of pulumi-cloudflare 6.22.0, whose schema the extension pins, named by
+  its full name:
+  - records are DNS-only by default, with a TTL of 300 seconds;
+  - `proxied: true` proxies each host's A, AAAA and CNAME records, with
+    Cloudflare's automatic TTL. It never proxies a TXT record, or a name
+    whose first label begins with an underscore, such as a certificate's
+    `_acme-challenge` record, which must answer with its own value;
+  - TXT content is written as quoted character strings of at most 255
+    bytes, as Cloudflare stores it, and a trailing dot is dropped from a
+    name and from a literal CNAME target.
+
+  Its one credential is an API token with the DNS Edit permission on the
+  zone, which the provider reads from `CLOUDFLARE_API_TOKEN`. Its secret
+  is `<stack>-cloudflare-dns-<zone>`, the zone's dots as underscores
+  (`shop-cloudflare-dns-acme_dev`). A zone's name holds no underscore, so
+  two zones never share a secret, and a stack's environments in one zone
+  share the token.
+
+  The zone id is a value rather than looked up by the zone's name. The
+  lookup is a function call (`cloudflare:index/getZone:getZone`), which
+  the resource graph and the Pulumi YAML renderer cannot express, and it
+  would make every plan depend on Cloudflare's API. The id is on the
+  zone's Overview page and is not a secret.
 
 An environment whose domain has no DNS platform the provisioner can write
 gets `manual`, and `stack plan` prints the records to create.
@@ -983,9 +1027,9 @@ every model check reports before anything is connected or lowered:
 5. It runs the graph checks of validation level 3: every dependency and
    referenced output names a node, every referenced parameter is
    declared, there is no cycle, every node's properties validate against
-   the schema a registered target holds for its type, and every inherited
-   node is a node of the same type in the parent environment, which it
-   resolves for the check.
+   the schema a registered target or DNS platform holds for its type, and
+   every inherited node is a node of the same type in the parent
+   environment, which it resolves for the check.
 6. It orders the deploy (section 5.3). A node lands in its phase, or in a
    later step when one of its dependencies does. A server's own rollout
    nodes must land in its wave, and a database's nodes in infrastructure,
@@ -1033,7 +1077,8 @@ production and a parameterized preview environment.
   an environment the production defaults (section 7.5) and policy rules
   (section 7.6) apply to;
 - `domain`, which is optional, and its DNS platform: Cloud DNS by default,
-  or Cloudflare with a zone and an API token (section 6.9). Cloud DNS
+  or Cloudflare with the zone's name (`zone`) and identifier (`zoneId`),
+  and an API token that bootstrap asks for (section 6.9). Cloud DNS
   writes into the managed zone that holds the domain. The zone is named
   after the domain with its dots as hyphens unless `zone` names it, and
   lives in the environment's project unless `project` names another;
@@ -2000,8 +2045,10 @@ registrations.
   binding generator (sections 6.5 and 6.6). Built: it registers provisioner
   `pulumi`, its `bindings` package is the generator, and it joins
   `make test` and CI.
-- **`extensions/cloudflare`**: the Cloudflare DNS platform in v1, and
-  Workers and D1 later.
+- **`extensions/cloudflare`**, a Go module of its own: the Cloudflare DNS
+  platform and its pinned pulumi-cloudflare schemas (sections 6.4 and
+  6.9), kept current by the gcp target's tool, which both share through
+  `stack/providerschema`. Built. Workers and D1 come later.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
   Built: it is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},

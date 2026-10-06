@@ -45,7 +45,8 @@ export type { BlockerRecord, DependenciesConfig, DependentRecord } from './depen
 export type { LinkRecord, LinkSpec, LinksConfig } from './links.js';
 export { MAX_ROLLUP_READ } from './rollups.js';
 export type { RollupFunction, RollupOver, RollupSpec, RollupsConfig } from './rollups.js';
-export type { SearchConfig, SearchHit, SnippetPart } from './search.js';
+export { RRF_K, RRF_WINDOW, SEARCH_SCHEMAS_PARAMS, SIMILAR_TERMS, searchSchemas } from './search.js';
+export type { SchemaSearchHit, SearchConfig, SearchHit, SearchVectors, SnippetPart } from './search.js';
 export type { ReactionsConfig, ReactionsRule, ReactionsTerminal, ReactionsThen, ReactionsWhen } from './reactions.js';
 export type { ConstantsConfig } from './constants.js';
 export type { VariantsConfig } from './variants.js';

@@ -52,8 +52,10 @@ or one the schema's config gives, or not at all on a schema whose config
 turns them off. Each runs in its own transaction with what the runner
 records for it, so its writes and that record commit together, and it
 changes state only through the operations it invokes and the instances
-it creates. A schedule may also write the behavior's own tables, where
-the write changes nothing an operation returns (BehaviorSchedule, D32).
+it creates. A schedule, and a writing schema-level operation, may also
+write the behavior's own tables, where the write changes nothing an
+operation returns but what a search ranks (BehaviorSchedule, D32 and D16,
+amended).
 
 A migration and afterConfigChange act for no principal: their SQL
 reaches the behavior's own tables only (TableWriter), without the
@@ -393,13 +395,17 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
 /**
  * A schema-level operation's context: the schema as a whole, with no
  * instance. Its SQL reads the behavior's tables and its columns across the
- * schema's instances (sql.instances()) and writes nothing, and no event is
- * appended for it: it changes state only through the operations it
- * invokes (instances.invoke) and, when it writes, the instances it creates
- * (instances.create), whose events record what they change.
+ * schema's instances (sql.instances()), and no event is appended for it:
+ * it changes what a read of an instance returns only through the
+ * operations it invokes (instances.invoke) and, when it writes, the
+ * instances it creates (instances.create), whose events record what they
+ * change. A writing one's SQL also writes the behavior's own tables
+ * (sql.run, on sql.table(name)), in the call's transaction, under the rule
+ * a schedule's writes keep (BehaviorSchedule). A read-only one's run()
+ * refuses.
  */
 export interface SchemaContext<Config> extends BehaviorScope<Config> {
-  readonly sql: SqlReader;
+  readonly sql: SqlWriter;
 }
 
 /**
@@ -433,7 +439,7 @@ export interface ReactionContext<Config> extends WorkContext<Config> {
  * (sql.table(name)), in the run's transaction, as the runner's principal,
  * so the run's writes roll back with it when it throws; the relation over
  * the instances (sql.instances()) stays read-only, as in every context.
- * Such a write must change nothing an operation returns (BehaviorSchedule).
+ * Such a write keeps BehaviorSchedule's rule.
  */
 export interface ScheduleContext<Config> extends WorkContext<Config> {
   readonly sql: SqlWriter;
@@ -470,10 +476,14 @@ export interface BehaviorReactions<Config> {
  * (ScheduleContext.sql), and such a write must change nothing an operation
  * returns: history that no commit or snapshot pins, rows that no operation
  * can read any more, and data that only makes a read cheaper, such as a
- * snapshot. Discarding an idle draft, which a read shows, is a change an
- * operation makes, so a run invokes that operation on each instance. The
- * engine cannot tell one write from the other: keeping to the rule is the
- * behavior's part.
+ * snapshot. One kind of write may change what an operation returns: an
+ * index derived from the instances' own fields, which the log records,
+ * such as Search's vectors, which changes only what a search ranks and in
+ * what order, never an instance a read returns. Discarding an idle draft,
+ * which a read shows, is a change an operation makes, so a run invokes
+ * that operation on each instance. A writing schema-level operation's
+ * direct writes keep the same rule. The engine cannot tell one write from
+ * the other: keeping to the rule is the behavior's part.
  */
 export interface BehaviorSchedule<Config> {
   /**

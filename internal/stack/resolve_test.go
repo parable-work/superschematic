@@ -796,6 +796,102 @@ func (*noDNS) Register(r *registry.Registry) error {
 	})
 }
 
+// TestDNSPlatformOfAnotherProvider: a DNS platform that brings the schema
+// of its own resource type has its records checked against it, and the
+// credentials it names reach environment.json, even with no record to
+// write; credentials that do not name a secret and a variable fail.
+func TestDNSPlatformOfAnotherProvider(t *testing.T) {
+	place := func(s *ir.Stack, values map[string]any) {
+		s.Environments[0].DNS = &ir.DNSPlacement{Platform: "other.dns", Values: values}
+	}
+	reg := assemble(t, &otherDNS{})
+	s, services := shop()
+	place(s, map[string]any{"zone": "acme.dev"})
+	env := mustResolve(t, reg, s, services, "Staging")
+	record := env.Resources.Resource("dns.shop-api")
+	if record == nil || record.Type != "other:dns/record:Record" || record.Properties["zone"] != "acme.dev" {
+		t.Fatalf("record = %+v, want the other provider's record in zone acme.dev", record)
+	}
+	want := []*ir.DNSCredential{{Secret: "shop-stack-other-acme.dev", Env: "OTHER_TOKEN", Description: "a token for acme.dev"}}
+	if got, _ := json.Marshal(env.DNS.Credentials); string(got) != string(mustMarshal(t, want)) {
+		t.Errorf("credentials = %s, want %s", got, mustMarshal(t, want))
+	}
+
+	// No exposed server, so no record: the credential is still named, for
+	// bootstrap to ask for before the first server is exposed.
+	s, services = shop()
+	place(s, map[string]any{"zone": "acme.dev"})
+	s.Expose = nil
+	env = mustResolve(t, reg, s, services, "Staging")
+	if len(env.DNS.Records) != 0 || len(env.DNS.Credentials) != 1 {
+		t.Errorf("dns = %+v, want no record and one credential", env.DNS)
+	}
+
+	s, services = shop()
+	place(s, map[string]any{"zone": 7.0})
+	_, errs := resolve(t, reg, s, services, "Staging")
+	mustFail(t, errs, stack.CodeGraph, "resource dns.shop-api (other:dns/record:Record)", "zone")
+
+	for _, tc := range []struct {
+		creds []ir.DNSCredential
+		want  string
+	}{
+		{[]ir.DNSCredential{{Env: "OTHER_TOKEN"}}, "DNS platform other.dns names a credential with no secret"},
+		{[]ir.DNSCredential{{Secret: "s", Env: "OTHER-TOKEN"}}, `reads secret s from environment variable "OTHER-TOKEN", which is not a variable name`},
+		{[]ir.DNSCredential{{Secret: "s", Env: "A"}, {Secret: "t", Env: "A"}}, "names secret t or environment variable A for two credentials"},
+	} {
+		reg := assemble(t, &otherDNS{creds: tc.creds})
+		s, services := shop()
+		place(s, map[string]any{"zone": "acme.dev"})
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeLowering, tc.want)
+	}
+}
+
+// otherDNS registers DNS platform other.dns, which writes records of a
+// provider no target registers, with the schema of its record type, and
+// names creds as its credentials, or by default a token per zone.
+type otherDNS struct{ creds []ir.DNSCredential }
+
+func (*otherDNS) Name() string { return "otherdns" }
+func (o *otherDNS) Register(r *registry.Registry) error {
+	return r.RegisterDNSPlatform(registry.DNSPlatformSpec{
+		Name:   "other.dns",
+		Values: json.RawMessage(`{"type": "object", "properties": {"zone": {}}, "additionalProperties": false}`),
+		Lower: func(ctx registry.DNSContext) ([]*ir.Resource, error) {
+			var out []*ir.Resource
+			for _, rec := range ctx.Records {
+				out = append(out, &ir.Resource{ID: "dns." + rec.Deployable, Type: "other:dns/record:Record", Properties: map[string]any{
+					"zone": ctx.Values["zone"], "name": rec.Name, "content": rec.Value,
+				}})
+			}
+			return out, nil
+		},
+		ResourceTypes: map[string]json.RawMessage{"other:dns/record:Record": json.RawMessage(`{
+		  "type": "object", "required": ["zone", "name", "content"], "additionalProperties": false,
+		  "properties": {"zone": {"type": "string"}, "name": {"type": "string"}, "content": {"type": "string"}}}`)},
+		Credentials: func(ctx registry.DNSContext) []ir.DNSCredential {
+			if o.creds != nil {
+				return o.creds
+			}
+			zone, _ := ctx.Values["zone"].(string)
+			if len(ctx.Records) > 0 {
+				panic("Credentials sees records")
+			}
+			return []ir.DNSCredential{{Secret: ctx.Environment.Stack + "-other-" + zone, Env: "OTHER_TOKEN", Description: "a token for " + zone}}
+		},
+	})
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 // TestResolveIsDeterministic: the same stack gives the same bytes,
 // whatever order the services and settings come in.
 func TestResolveIsDeterministic(t *testing.T) {
@@ -989,7 +1085,7 @@ func TestGraphChecks(t *testing.T) {
 		}, code: stack.CodeGraph, want: "the address of shop-api references output url of resource svc"},
 		{name: "unknown type", lower: func(registry.PlatformContext) []*ir.Resource {
 			return []*ir.Resource{{ID: "svc", Type: "broken:other"}}
-		}, code: stack.CodeGraph, want: "resource svc has type broken:other, which no registered target has a schema for"},
+		}, code: stack.CodeGraph, want: "resource svc has type broken:other, which no registered target or DNS platform has a schema for"},
 		{name: "properties fail the type's schema", lower: func(registry.PlatformContext) []*ir.Resource {
 			return []*ir.Resource{thing("svc", map[string]any{"size": "large"})}
 		}, code: stack.CodeGraph, want: "resource svc (broken:thing)"},

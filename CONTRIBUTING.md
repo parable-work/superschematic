@@ -251,7 +251,8 @@ The Go modules are versioned by tags, one per module because each is its own
 module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
 `runtime/http/go/vX.Y.Z`, `runtime/versiongraph/go/vX.Y.Z`,
 `runtime/migrate/go/vX.Y.Z`, `extensions/gcp/vX.Y.Z`,
-`extensions/pulumi/vX.Y.Z`, `extensions/topcoat/vX.Y.Z` and
+`extensions/cloudflare/vX.Y.Z`, `extensions/pulumi/vX.Y.Z`,
+`extensions/topcoat/vX.Y.Z` and
 `cmd/superschematic/vX.Y.Z` (`bump_version.py go-modules` lists them, and
 a test fails when a module is missing). The `require`
 lines between them carry the release version so a consumer at a tag resolves

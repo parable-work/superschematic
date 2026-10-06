@@ -23,8 +23,9 @@ has no instance to fence and ignores the header; its body carries
 A schema-level behavior operation, which has no instance, has a route of
 its own under the schema; it sends no ETag, since it names no instance.
 Besides the instances and the event log, the routes serve a schema's
-describe document and the namespace's tools document (tools/catalog.ts);
-the MCP endpoint is the ./mcp entry point's.
+describe document, the namespace's tools document (tools/catalog.ts) and
+a search across the namespace's schemas (engine.search); the MCP
+endpoint is the ./mcp entry point's.
 */
 
 import { Hono } from 'hono';
@@ -87,6 +88,7 @@ const OPERATION = `${INSTANCE}/operations/{operation}`;
 const SCHEMA_OPERATION = `${SCHEMA}/operations/{operation}`;
 const EVENTS = '/namespaces/{namespace}/events';
 const TOOLS = '/namespaces/{namespace}/tools';
+const SEARCH = '/namespaces/{namespace}/search';
 
 const PATH_PARAMS: Record<string, ParamSpec> = {
   namespace: { name: 'namespace', kind: 'string', required: true },
@@ -260,6 +262,14 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
   );
 
   route(spec('listTools', 'GET', TOOLS), (ctx, { path }) => engine.tools.manifest(principalOf(ctx), { namespace: path.namespace as string }));
+
+  // A search across the namespace's schemas that compose Search: the body
+  // is its parameters, which a vector makes too long for a query string.
+  route(spec('searchSchemas', 'POST', SEARCH, body), (ctx, { path, input }) => {
+    const refused = mediaTypeRefusal(ctx, JSON_MEDIA_TYPE);
+    if (refused) return refused;
+    return engine.search(principalOf(ctx), input, { namespace: path.namespace as string });
+  });
 
   // The event log: a JSON page, or with Accept: text/event-stream the
   // stream. A manual route, so the handler owns the streaming response;

@@ -616,7 +616,9 @@ notes_list_proposals
 ```
 
 The schema tools name no schema until they are called, so everyone lists
-them and the policy answers the call. No tool publishes: a draft that
+them and the policy answers the call. Where a schema composes `Search`,
+one more tool, `search`, searches every such schema the caller may read
+([Engine behaviors](/superschematic/guides/engine-behaviors/#searching-every-schema)). No tool publishes: a draft that
 `define_schema` stores goes live only through the HTTP publish route.
 
 An MCP client connects to `http://127.0.0.1:8787/api/namespaces/default/mcp`
