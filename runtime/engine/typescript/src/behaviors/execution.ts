@@ -46,9 +46,10 @@ the instance store implements: reads, invokes, creates and references
 there ask the access policy as the chain's principal (D16, amended), and
 so does each statement of the behavior's SQL that names the relation over
 the schema's instances (sql.instances(), storage.ts). A schema-level
-operation runs in a SchemaExecution, with the same reach and no instance.
-The runner's work, a reaction or a schedule run, runs in a WorkExecution:
-a schema-level context whose invokes and creates write, as the runner's
+operation runs in a SchemaExecution, with the same reach and no instance;
+a writing one's SQL also writes the behavior's own tables. The runner's
+work, a reaction or a schedule run, runs in a WorkExecution: a
+schema-level context whose invokes and creates write, as the runner's
 principal, on a chain whose cause the events it writes record. A
 schedule's SQL also writes the behavior's own tables, in the run's
 transaction (D32); a reaction's writes nothing.
@@ -665,6 +666,9 @@ export class WorkExecution {
 /**
  * A schema-level operation's run: the operation's behavior on the schema
  * as a whole, with no instance, no instance guard and no event of its own.
+ * A writing one's SQL writes the behavior's own tables, in the call's
+ * transaction, as a schedule run's does (D16, amended: a write without an
+ * event); a read-only one's only reads.
  */
 export class SchemaExecution {
   constructor(
@@ -682,7 +686,7 @@ export class SchemaExecution {
       const bound = this.runtime.composition.bound(operation.behavior.name) as BoundBehavior;
       const context: SchemaContext<unknown> = Object.freeze({
         ...scopeMembers(this.chain, this.reach, this.runtime, bound, this.schema, this.version, operation.writes),
-        sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, 'read'),
+        sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, operation.writes ? 'write' : 'read'),
       });
       const result: unknown = declaredVetoes(this.runtime.composition, () =>
         (operation.handler as SchemaOperationHandler<unknown>).call(bound.behavior.implementation.schemaOperations, context, params)

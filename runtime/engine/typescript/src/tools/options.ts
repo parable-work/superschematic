@@ -38,16 +38,16 @@ export interface ToolKeys {
   readonly parameters: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
 }
 
-/** The operations every schema has, and the engine's tools for writing schemas. */
-export type BuiltinTool = 'create' | 'get' | 'list' | 'update' | 'delete' | 'listSchemas' | 'describeSchema' | 'defineSchema';
+/** The operations every schema has, the engine's tools for writing schemas, and its search across them. */
+export type BuiltinTool = 'create' | 'get' | 'list' | 'update' | 'delete' | 'listSchemas' | 'describeSchema' | 'defineSchema' | 'search';
 
-export const BUILTIN_TOOLS: readonly BuiltinTool[] = ['create', 'get', 'list', 'update', 'delete', 'listSchemas', 'describeSchema', 'defineSchema'];
+export const BUILTIN_TOOLS: readonly BuiltinTool[] = ['create', 'get', 'list', 'update', 'delete', 'listSchemas', 'describeSchema', 'defineSchema', 'search'];
 
 /** EngineOptions.tools. */
 export interface ToolOptions {
   /** The core's by default: invocationPolicy, auto or ask, auto. */
   invocationPolicy?: InvocationPolicy;
-  /** The policy of a built-in operation or schema tool; the policy's default when absent. */
+  /** The policy of a built-in operation or engine tool; the policy's default when absent. */
   invocation?: Partial<Record<BuiltinTool, string>>;
   /** Each absent key is the core's: x-superschematic-scalar, superschematic/operation-guidance, none. */
   keys?: Partial<ToolKeys>;
