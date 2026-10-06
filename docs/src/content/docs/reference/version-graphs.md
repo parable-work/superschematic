@@ -190,14 +190,15 @@ row as it was given; each row `diff` and `merge` return, which an engine
 writes back, carries every declared content column, `null` where its input
 lacked one, so a revert to a commit written before the gain clears a value
 the column holds. The hash leaves out a declared content column that is
-`null`, as it leaves out one a row lacks, so a gained column moves no hash:
-a commit written before the gain materializes to the hash it recorded. A
-column the descriptor does not declare is hashed as the row holds it, as
-`diff` reads it, and a `null` inside a `json` value is content. A column added with a `DEFAULT` is outside the
-rule, since Postgres gives its existing rows the default, a value, while
-the old images lack it. A refused input returns
-`{"error": {"code", "message"}}` with a stable code. The contract,
-with the descriptor's members, every rule, the error codes and the C ABI, is
+`null`, as it leaves out one a row lacks, so a gained column moves no
+hash: a commit written before the gain materializes to the hash it
+recorded. A column the descriptor does not declare is hashed as the row
+holds it, as `diff` reads it, and a `null` inside a `json` value is
+content. A column added with a `DEFAULT` is outside the rule, since
+Postgres gives its existing rows the default, a value, while the old
+images lack it. A refused input returns `{"error": {"code", "message"}}`
+with a stable code. The contract, with the descriptor's members, every
+rule, the error codes and the C ABI, is
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md).
 Its vectors in `runtime/versiongraph/testdata/vectors` are the executable
 form: the Rust tests, the Go binding, the TypeScript package's tests and the

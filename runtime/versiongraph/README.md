@@ -389,23 +389,24 @@ insignificant whitespace, numbers as written) of
 ```
 
 with each kind's live rows sorted by entity key. The content holds each
-content column the descriptor declares whose value is not `null`: a
-declared content column that is `null` is left out, and so is one the row
-lacks, which the core reads as `null`. So a row that lacks a declared
-content column hashes as the row with it `null`, a ref's composed tree and
-its head commit's tree hash the same whichever rows carry the column, and a
-column a kind gains moves no hash: each row written before it lacks it or
-holds it `null`, so under the descriptor that declares it a tree hashes as
-it did under the descriptor before, and a commit written before the gain
-materializes to the hash it recorded. A content column the row carries that
-the descriptor does not declare is hashed as the row holds it, `null`
-included, as compare, merge and diff read it, so two trees hash the same
-exactly when `diff` finds no change between them. A value moves the hash, a
-`DEFAULT` Postgres writes into the existing rows included. Only a row's own
-members are left out: a `null` inside a `json` value is content, and a live
-row whose every content column is `null` still hashes as a row. Tombstone
-rows are left out, as are kinds with no live rows, so a delete hashes as an
-absence and a kind added to the descriptor does not move existing hashes.
+content column the descriptor declares whose value is not `null`, and each
+content column the row carries that the descriptor does not declare, as the
+row holds it. A declared content column that is `null` is left out, and so
+is one the row lacks, which the core reads as `null`. So a row that lacks a
+declared content column hashes as the row with it `null`, a ref's composed
+tree and its head commit's tree hash the same whichever rows carry the
+column, and a column a kind gains moves no hash: each row written before it
+lacks it or holds it `null`, so under the descriptor that declares it a
+tree hashes as it did under the descriptor before, and a commit written
+before the gain materializes to the hash it recorded. An undeclared
+column's `null` is content, as compare, merge and diff read it, so two
+trees hash the same exactly when `diff` finds no change between them. A
+value moves the hash, a `DEFAULT` Postgres writes into the existing rows
+included. Only a row's own members are left out: a `null` inside a `json`
+value is content, and a live row whose every content column is `null` still
+hashes as a row. Tombstone rows are left out, as are kinds with no live
+rows, so a delete hashes as an absence and a kind added to the descriptor
+does not move existing hashes.
 
 ### validate
 
