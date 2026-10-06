@@ -310,6 +310,23 @@ for (const driver of drivers) {
       }
     });
 
+    test('an extension JSON scalar, as format --to=json writes it, is defined and published', () => {
+      // cli/testdata/format/ext-json-scalar.schema.json is what format
+      // --to=json writes of a TypeScript service whose extension catalog
+      // gives Ext.Doc the Object primitive and the json_schema mapping
+      // object; the Go test that writes it keeps it current. The engine
+      // knows only the builtin catalog, so it reads Ext.Doc as written.
+      const engine = open();
+      const text = readFileSync(new URL('../../../../cli/testdata/format/ext-json-scalar.schema.json', import.meta.url), 'utf8');
+      engine.schemas.define(alice, text);
+      assert.equal(engine.schemas.publish(alice, 'ext-json-scalar').version, 1);
+      assert.deepEqual(engine.schemas.validate(alice, 'ext-json-scalar', { payload: { a: 1 }, meta: [1, 'b'] }), []);
+      assert.deepEqual(
+        engine.schemas.validate(alice, 'ext-json-scalar', { payload: [1], meta: 7 }).map((issue) => [issue.path, issue.rule]),
+        [['payload', 'type']]
+      );
+    });
+
     test('with the core meta-schema, the loader itself refuses a behavior the core does not declare', () => {
       const engine = open();
       const document = clone(orderDocument()) as { types: { Order: Record<string, unknown> } };

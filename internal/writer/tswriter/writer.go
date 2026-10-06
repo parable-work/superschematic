@@ -23,9 +23,9 @@ import (
 	"sort"
 	"strings"
 
-	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -45,6 +45,13 @@ type Context struct {
 	// Base is this document's own extension-free schema file base, used to
 	// compute relative import paths.
 	Base string
+
+	// Scalars is the scalar catalog the document was read with. A scalar
+	// the document declares may carry what its row says, such as the
+	// json_schema mapping the TypeScript form records of an extension's
+	// JSON scalar, and the TypeScript form leaves that to the catalog. Nil
+	// is the core catalog.
+	Scalars registry.ScalarCatalog
 }
 
 // Write renders a document as TypeScript schema source.
@@ -218,18 +225,24 @@ func (e *emitter) checkScalars() {
 		bare := *def
 		bare.Name = ""
 		bare.LanguagePrimitive = ""
-		stripScalarLibHydratedMetadata(name, &bare)
+		stripScalarLibHydratedMetadata(name, &bare, e.ctx.Scalars)
 		if !reflect.DeepEqual(bare, ir.ScalarDef{}) {
 			e.failf("scalar %s: declares metadata beyond its language primitive, which TypeScript schemas cannot express (scalar metadata lives in superscalar)", name)
 		}
 	}
 }
 
-func stripScalarLibHydratedMetadata(name string, def *ir.ScalarDef) {
+// stripScalarLibHydratedMetadata clears what def holds of its catalog row,
+// which the TypeScript form does not write: the row comes from catalog, or
+// from the core table when catalog is nil.
+func stripScalarLibHydratedMetadata(name string, def *ir.ScalarDef, catalog registry.ScalarCatalog) {
 	if def == nil {
 		return
 	}
-	metadata, ok := scalars.ScalarMetadataByCanonical[name]
+	if catalog == nil {
+		catalog = registry.CoreScalars()
+	}
+	metadata, ok := catalog.Scalar(name)
 	if !ok {
 		return
 	}
@@ -240,7 +253,7 @@ func stripScalarLibHydratedMetadata(name string, def *ir.ScalarDef) {
 	if def.Primitive == metadata.Primitive {
 		def.Primitive = ""
 	}
-	if def.LanguagePrimitive == scalarLibLanguagePrimitive(metadata.Primitive) {
+	if lp, _ := ir.CatalogLanguagePrimitive(metadata.Primitive); def.LanguagePrimitive == lp {
 		def.LanguagePrimitive = ""
 	}
 	if def.MaxLength == metadata.MaxLength {
@@ -299,21 +312,6 @@ func equalOptionalInt64(left, right *int64) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
-}
-
-func scalarLibLanguagePrimitive(primitive string) ir.LanguagePrimitive {
-	switch strings.ToLower(strings.TrimSpace(primitive)) {
-	case "string", "str":
-		return ir.LanguageString
-	case "number", "float", "float64", "int", "int32", "int64", "integer":
-		return ir.LanguageNumber
-	case "bool", "boolean":
-		return ir.LanguageBoolean
-	case "type", "object", "json", "jsonb":
-		return ir.LanguageObject
-	default:
-		return ir.LanguageObject
-	}
 }
 
 // sortedTypes returns type names topologically sorted so heritage, @source

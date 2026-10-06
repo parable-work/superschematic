@@ -15,6 +15,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/writer/jsonwriter"
 	"github.com/parable-work/superschematic/internal/writer/tswriter"
 	"github.com/parable-work/superschematic/internal/writer/yamlwriter"
@@ -61,13 +62,21 @@ func (f Format) Extension() string {
 // of the per-file readers: the output decodes (or walks) back to a document
 // with equal IR content, including comment metadata.
 func Write(doc *schemafile.Document, format Format) ([]byte, error) {
+	return WriteWith(doc, format, nil)
+}
+
+// WriteWith is Write for a document read with catalog, the registry's scalar
+// catalog: the TypeScript writer leaves what a declared scalar holds of its
+// row to that catalog, as it leaves the core table's to the core. A nil
+// catalog is the core's.
+func WriteWith(doc *schemafile.Document, format Format, catalog registry.ScalarCatalog) ([]byte, error) {
 	switch format {
 	case FormatJSON:
 		return jsonwriter.Write(doc)
 	case FormatYAML:
 		return yamlwriter.Write(doc)
 	case FormatTS:
-		return tswriter.Write(doc)
+		return tswriter.WriteContext(doc, &tswriter.Context{Scalars: catalog})
 	}
 	return nil, fmt.Errorf("unknown format %q", format)
 }

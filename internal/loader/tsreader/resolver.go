@@ -432,7 +432,8 @@ func (w *walker) scalarBrand(t *checkerType) (string, bool) {
 
 // registerScalar records a ScalarDef the first time a brand is referenced.
 // The walker only knows the brand identity and the host-language backing; the
-// scalar registry owns the rich metadata (patterns, normalization, mappings).
+// scalar registry owns the rich metadata (patterns, normalization, mappings),
+// which the loader hydrates.
 func (w *walker) registerScalar(brand string, t *checkerType) {
 	if _, ok := w.schema.Scalars[brand]; ok {
 		return
@@ -440,8 +441,31 @@ func (w *walker) registerScalar(brand string, t *checkerType) {
 	w.schema.Scalars[brand] = &ir.ScalarDef{
 		Name:              brand,
 		LanguagePrimitive: languagePrimitiveOf(t),
-		TypeMappings:      scalarSQLTypeMapping(brand),
+		TypeMappings:      w.scalarTypeMappings(brand),
 	}
+}
+
+// scalarTypeMappings is what a brand records of its catalog row before the
+// loader hydrates it: the core table's SQL type, and, from the registry's
+// catalog, the json_schema type mapping when it says which JSON the scalar
+// holds (object, array or any). A document written from the TypeScript form
+// (format --to=json) then carries that mapping, so a reader that knows only
+// the builtin catalog, as the engine does, holds an extension's JSON scalar
+// to JSON and does not refuse it (D14, amended).
+func (w *walker) scalarTypeMappings(brand string) map[string]string {
+	mappings := scalarSQLTypeMapping(brand)
+	row, ok := w.reg.Scalars().Scalar(brand)
+	if !ok {
+		return mappings
+	}
+	switch row.JSONSchemaType {
+	case ir.JSONSchemaObjectType, ir.JSONSchemaArrayType, ir.JSONSchemaAnyType:
+		if mappings == nil {
+			mappings = make(map[string]string, 1)
+		}
+		mappings["json_schema"] = row.JSONSchemaType
+	}
+	return mappings
 }
 
 func scalarSQLTypeMapping(brand string) map[string]string {
