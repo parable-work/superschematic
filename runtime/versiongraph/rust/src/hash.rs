@@ -154,6 +154,16 @@ mod tests {
             canonical(&descriptor(&COLUMNS), &tree),
             json!({"step": [{"entityKey": "k1", "content": {"title": "Boil", "extras": {"salt": null}}}]})
         );
+        // A live row whose every content column is null is still a row.
+        let empty = step(json!({"title": null}));
+        assert_eq!(
+            canonical(&descriptor(&COLUMNS), &empty),
+            json!({"step": [{"entityKey": "k1", "content": {}}]})
+        );
+        assert_ne!(
+            hash(&descriptor(&COLUMNS), &empty),
+            hash(&descriptor(&COLUMNS), &json!({}))
+        );
     }
 
     #[test]
