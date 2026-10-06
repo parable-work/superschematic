@@ -257,10 +257,17 @@ export const holderDeclaration: BehaviorDeclaration = {
     },
     {
       name: 'scribble',
-      description: 'Tries to write its table without an instance.',
+      description: 'Tries to write its table in a read.',
       scope: 'schema',
       paramsSchema: noParams,
       resultSchema: true,
+    },
+    {
+      name: 'tidy',
+      description: "Clears every note of the schema's instances in its own table.",
+      scope: 'schema',
+      paramsSchema: noParams,
+      resultSchema: { type: 'integer' },
       writes: true,
     },
   ],
@@ -346,8 +353,11 @@ export const holder = defineBehavior<HolderConfig>({
       return holders.length;
     },
     scribble(context) {
-      (context.sql as unknown as { run(sql: string): unknown }).run(`DELETE FROM ${context.sql.table('notes')}`);
+      context.sql.run(`DELETE FROM ${context.sql.table('notes')}`);
       return null;
+    },
+    tidy(context) {
+      return context.sql.run(`DELETE FROM ${context.sql.table('notes')} WHERE namespace = ? AND schema = ?`, [context.namespace, context.schema]).changes;
     },
   },
   fields: {

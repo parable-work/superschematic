@@ -167,6 +167,18 @@ export interface SearchConfig {
   readonly fields: readonly string[];
   /** A weight per indexed field, which multiplies that field's part of a match's score; 1 for a field it does not name. */
   readonly weights?: Readonly<Record<string, number>>;
+  /** A vector per instance, which an outside embedder computes from the indexed fields' text; none when absent. */
+  readonly vectors?: SearchVectorsConfig;
+}
+
+/** Search's vectors: what an embedder computes them with, and who may settle them. */
+export interface SearchVectorsConfig {
+  /** How many numbers a vector holds, 1 to 4096. */
+  readonly dimensions: number;
+  /** A label for the embedding model, which the engine only compares: a new one makes every vector stale. */
+  readonly model: string;
+  /** The permission an embedder needs to settle vectors. */
+  readonly permission: string;
 }
 
 /** Reactions' config. */

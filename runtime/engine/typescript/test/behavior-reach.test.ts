@@ -584,7 +584,7 @@ for (const driver of drivers) {
       const schema = thrown(() => engine.instances.invokeSchema(alice, 'Note', 'hold', { schema: 'Item', id: 'i1' }), EngineError);
       assert.deepEqual([schema.code, schema.message], ['not_found', "Note's hold is an instance operation: call it on an instance"]);
       const unknown = thrown(() => engine.instances.invokeSchema(alice, 'Note', 'nothing'), EngineError);
-      assert.equal(unknown.message, "schema Note has no schema-level operation nothing (its behaviors' schema-level operations: holders, releaseAll, scribble)");
+      assert.equal(unknown.message, "schema Note has no schema-level operation nothing (its behaviors' schema-level operations: holders, releaseAll, scribble, tidy)");
       assert.equal(thrown(() => engine.instances.invokeSchema(alice, 'Note', 'holders', { schema: 'Item' }), OperationParamsError).code, 'invalid_argument');
       assert.equal(thrown(() => engine.instances.invokeSchema(bob, 'Note', 'releaseAll', { schema: 'Item', id: 'i1' }), EngineError).code, 'forbidden');
     });
@@ -600,8 +600,19 @@ for (const driver of drivers) {
         ['operation', 'Note', 'n2', 'release'],
       ]);
       assert.deepEqual(engine.instances.invokeSchema(alice, 'Note', 'holders', { schema: 'Item', id: 'i1' }), []);
+    });
+
+    test("a writing one writes its behavior's own tables in the call's transaction, with no event; a read-only one cannot", () => {
+      const engine = world();
+      engine.instances.invoke(alice, 'Note', 'n1', 'note', { kind: 'update', schema: 'Item', id: 'i1' });
+      engine.instances.invoke(alice, 'Note', 'n2', 'note', { kind: 'update', schema: 'Item', id: 'i1' });
       const scribble = thrown(() => engine.instances.invokeSchema(alice, 'Note', 'scribble'), BehaviorError);
       assert.equal(scribble.message, 'behavior test.Holder: a read cannot run a statement that writes; run() is for writes');
+      const from = lastCursor(engine);
+      const seq = engine.instances.get(alice, 'Note', 'n1')?.seq;
+      assert.equal(engine.instances.invokeSchema(alice, 'Note', 'tidy'), 2);
+      assert.deepEqual([eventsOf(engine, from), engine.instances.get(alice, 'Note', 'n1')?.seq], [[], seq]);
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'notes'), []);
     });
   });
 

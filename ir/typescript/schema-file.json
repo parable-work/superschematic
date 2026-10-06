@@ -1481,7 +1481,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "fields": {
-                    "description": "The type's own top-level fields to index, by JSON key, each a string or a scalar whose values are strings; at most 16. Their order is the order a snippet's field is chosen in when two match equally.",
+                    "description": "The type's own top-level fields to index, by JSON key, each a string or a scalar whose values are strings; at most 16. Their order is the order a snippet's field is chosen in when two match equally, and the order an embedder's text joins them in.",
                     "items": {
                       "minLength": 1,
                       "type": "string"
@@ -1490,6 +1490,35 @@
                     "minItems": 1,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "vectors": {
+                    "additionalProperties": false,
+                    "description": "Keeps a vector per instance, which an outside embedder computes from the indexed fields' text, for vector and hybrid search. A version that changes the model or the dimensions makes every vector stale.",
+                    "properties": {
+                      "dimensions": {
+                        "description": "How many numbers a vector holds.",
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "model": {
+                        "description": "A label for the embedding model the vectors come from, which the engine only compares: an embedder computes with it, and a query vector may name it.",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "permission": {
+                        "description": "The permission an embedder needs to settle vectors.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "dimensions",
+                      "model",
+                      "permission"
+                    ],
+                    "type": "object"
                   },
                   "weights": {
                     "additionalProperties": {

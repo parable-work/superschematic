@@ -1,0 +1,19 @@
+{
+  "package": "cloudflare",
+  "version": "6.22.0",
+  "sources": [
+    {
+      "name": "schema.json",
+      "url": "https://raw.githubusercontent.com/pulumi/pulumi-cloudflare/v6.22.0/provider/cmd/pulumi-resource-cloudflare/schema.json",
+      "sha256": "6b6287900efd9b7f494fbb813171561cfd1ab0e71ca169e71bbbc94099146868"
+    },
+    {
+      "name": "bridge-metadata.json",
+      "url": "https://raw.githubusercontent.com/pulumi/pulumi-cloudflare/v6.22.0/provider/cmd/pulumi-resource-cloudflare/bridge-metadata.json",
+      "sha256": "cca5def047f75f062ee7afaf9ad6ca7812baea0c28c1655d9a5e5e41a026d98c"
+    }
+  ],
+  "types": [
+    "cloudflare:index/dnsRecord:DnsRecord"
+  ]
+}

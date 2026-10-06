@@ -9,7 +9,9 @@
 # personal token, because a tag pushed with the workflow token would not start
 # a workflow. The Go sub-module tags (ir/vX.Y.Z, runtime/schema/go/vX.Y.Z,
 # runtime/http/go/vX.Y.Z, runtime/versiongraph/go/vX.Y.Z,
-# runtime/migrate/go/vX.Y.Z) are not cut here:
+# runtime/migrate/go/vX.Y.Z, extensions/gcp/vX.Y.Z,
+# extensions/cloudflare/vX.Y.Z, extensions/pulumi/vX.Y.Z,
+# extensions/topcoat/vX.Y.Z, cmd/superschematic/vX.Y.Z) are not cut here:
 # go-module-tag.yml cuts them at the same commit when this tag lands. See
 # CONTRIBUTING.md, "Releases".
 set -euo pipefail

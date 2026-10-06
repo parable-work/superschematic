@@ -30,23 +30,31 @@ and a Go SDK. The build refuses the config without it.
 
 ## Install the CLI
 
-Nothing is published yet. From `v0.1.0-alpha.1`:
+The CLI is `superschematic`: the core with the official extensions linked,
+the gcp target and the Pulumi provisioner. It is the Go module
+`github.com/parable-work/superschematic/cmd/superschematic`.
 
-```
-go install github.com/parable-work/superschematic/cmd/superschematic@v0.1.0-alpha.1
-```
+`go install github.com/parable-work/superschematic/cmd/superschematic@<version>`
+does not work. Every Go module in this repository carries `replace`
+directives, to its sibling modules and to the TypeScript compiler fork the
+frontend pins, and a release keeps them. `go install` at a version refuses
+a module that has any.
 
-A consumer at that tag still needs `CGO_LDFLAGS` from
-`scripts/superscalar-dep.sh --print` until superscalar publishes its own
-module tags. Until the first tag, build from a checkout:
+Nothing is published yet. From `v0.1.0-alpha.1`, each release attaches the
+binary for linux and darwin on x64 and arm64, as
+`superschematic_<version>_<platform>.tar.gz` (`linux-x64`, `linux-arm64`,
+`darwin-x64`, `darwin-arm64`). Until then, build it from a checkout:
 
 ```
 export GOTOOLCHAIN=go1.26.4
 eval "$(scripts/superscalar-dep.sh --export)"
-go build -trimpath -buildvcs=false -o bin/superschematic ./cmd/superschematic
+cd cmd/superschematic
+go build -trimpath -buildvcs=false -o ../../bin/superschematic .
 ```
 
-`make setup && make build` does the same.
+`make setup && make build` does the same. The binary links superscalar's
+static archive, so it runs without `CGO_LDFLAGS`; compiling the Go code it
+generates still needs them (above).
 
 ## Write a schema
 
