@@ -3755,3 +3755,24 @@ token secret and stores its value, and the deploy hands it to the
 provisioner in `CLOUDFLARE_API_TOKEN`.
 
 The rule is reversible until the first release.
+
+### D30, amended: a server some environment places on Cloud SQL links the Cloud SQL connector
+
+The amendment on the server entrypoint left the Cloud SQL connector
+unbuilt, and the entrypoint refused a Cloud SQL configuration at startup.
+Building it (`docs/stack-model.md`, sections 7.4 and 8.1) settled where
+Google's modules may go.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Only a server whose database some environment of the stack connects with a `cloudSql` value links the connector: it gets a generated `cloudsql.go` beside `main.go`, and its `go.mod` requires `cloud.google.com/go/cloudsqlconn`. The `server` generator resolves every environment, as `stack` does, to find those servers; the servers themselves still need no environment. Such a server connects either form in one binary, and any other refuses a Cloud SQL configuration at startup and says to build the stack again. | The connector in every Go server, which pulls Google's auth, Admin API and gRPC modules into servers that only ever run locally or on another cloud. A package in the Go HTTP runtime, whose module every generated module requires, so its Google requirements would reach every module graph. A build tag or a flag, which a person keeps in step with the environments by hand. Deciding by the target's name, which misses another target whose connector derives the same value. |
+| The pool dials through one `cloudsqlconn.Dialer` per server, with IAM database authentication and lazy refresh, and logs in as the IAM user with no password and no TLS of its own, the instance's connection name standing as its host. The dialer, which reads the application default credentials, is built when the first Cloud SQL database connects; each pool still connects on first use, and `/readyz` pings through it. | A dialer per database, which repeats the credentials and the key. Background refresh, which Cloud Run starves by throttling an instance's CPU between requests. The Cloud SQL Auth Proxy beside the server, a second process each service configures and runs. |
+
+Status: built. servergen's goldens hold a stack with a Cloud SQL
+environment and a local one, and one with only a local environment, whose
+servers require no Google module. `TestCloudSQLEntrypointConnectsBothWays`
+builds the first's server, runs a test of its `cloudSQLConfig` against a
+fake Postgres in its module, and starts the binary on a connection string
+and on a Cloud SQL configuration whose credentials reach nothing.
+
+The rule is reversible until the first release.

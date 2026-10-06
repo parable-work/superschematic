@@ -70,6 +70,7 @@ which builds `shop-db` first and then `shop-api`.
 - schemas/dist/api/shop-api/ the Go module example.com/acme/api/shop-api
   - interfaces.go what you implement
   - routes.go Config and RegisterRoutes
+  - deps.go Deps and Constructor, what an implementation is built from
   - middleware.go the session and principal stores, request middleware
   - errors.go NotFoundError and the other problem responses
   - openapi.json
@@ -107,6 +108,15 @@ holds the API's configuration, the ORM of its `authDb` and a logger, and
 <Snippet file="testdata/generated/api/shop-api/deps.go" symbol={['Deps', 'Constructor']} />
 
 <Snippet file="go/shop-api/implementation.go" symbol="New" />
+
+The example writes its implementation and wires its server by hand. To
+start one, `superschematic build --scaffold schemas/services/shop-api`
+writes `go/shop-api/implementation.go`, whose `New(deps Deps)` builds
+every namespace from the generated `Deps` (here a `Config` with the
+connection to `shop-db`, the `shop-db` ORM and a logger) and whose methods
+answer 501 until you write them. A stack's build scaffolds it with no flag
+and writes the server's entrypoint, which calls `New`
+([Start an implementation](/superschematic/guides/api-routes/#start-an-implementation)).
 
 ## Say who the caller is
 

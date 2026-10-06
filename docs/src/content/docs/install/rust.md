@@ -29,7 +29,11 @@ A types crate whose schema declares a
 [version graph](/superschematic/reference/version-graphs/#use-the-engine-from-rust)
 depends on the engine `superschematic-versiongraph-engine`, also
 unpublished; `[paths].versiongraph_rust` points it at
-`runtime/versiongraph/rust-engine` in a checkout.
+`runtime/versiongraph/rust-engine` in a checkout. Its Postgres adapter's
+client is the default `tokio-postgres` feature, and its SQLite adapter's,
+over rusqlite with a bundled SQLite, the `rusqlite` feature, which is off
+by default
+([The engine and its adapters](/superschematic/reference/version-graphs/#the-engine-and-its-adapters)).
 
 ## Install
 
@@ -101,7 +105,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Structs derive `Serialize` and `Deserialize`. JSON field names stay as the
 schema spelled them (`amountCents`); Rust fields are snake_case
-(`amount_cents`). Scalars are aliases onto the `superscalar` crate.
+(`amount_cents`). A name that is a Rust keyword is a raw identifier
+(`r#type`), except `crate`, `self`, `Self` and `super`, which cannot be and
+take a trailing underscore (`self_`). The SDK's methods and fields and the
+server's argument fields follow the same rule. Scalars are aliases onto
+the `superscalar` crate.
 
 A `Generic.JSON` field is a `serde_json::Value` that decodes through
 superscalar's lossless adapter
@@ -172,14 +180,13 @@ let sdk = CatalogSdk::new(ClientConfig {
     base_url: "https://api.example.com".to_string(),
     timeout_ms: Some(30_000),
     auth_token: Some(token.to_string()),
-    auth_token_provider: None,
-    refresh_auth_token: None,
-    auth_header: None,
+    ..ClientConfig::default()
 })?;
 ```
 
-`auth_token` is static. `auth_token_provider` / `refresh_auth_token` cover
-per-request tokens and a one-shot refresh on 401. Each namespace is a
+`ClientConfig::with_base_url(url, token, timeout_ms)` builds the same
+config. `auth_token` is static. `auth_token_provider` /
+`refresh_auth_token` cover per-request tokens and a one-shot refresh on 401. Each namespace is a
 field of the SDK struct: `ProductQueries` and `ProductMutations` both live
 on `sdk.product`, so a call is `sdk.product.get_product(id, None).await`.
 
@@ -370,9 +377,12 @@ When an operation declares `@requireService` or `@allowService` (D37),
 the crate also has `Implementations.service_authenticator`, an
 `Arc<dyn ServiceAuthenticator>`. It reads the calling service from
 `Service-Authorization`; `JwtServiceAuthenticator::new(config)` is the
-standard one, over the callee config the stack writes. Every route of
-such a crate runs the service step after the body limit and before the
-end-user check, and the handler puts the caller on `ctx.service_caller`.
+standard one, over a `ServiceAuthConfig`, the JSON the Go and TypeScript
+runtimes read too
+([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
+Every route of such a crate runs the service step after the body limit
+and before the end-user check, and the handler puts the caller on
+`ctx.service_caller`.
 A service listed by an `@allowService` operation stands in for the end
 user, so there `ctx.principal` may be `None`. The refusals are 401
 `service_unauthorized`, 403 `service_forbidden` and 503
@@ -393,9 +403,9 @@ route's body; a route without it keeps axum's default. `@timeout` answers
 504 and drops the handler's future.
 
 A route's steps run in the Go server's order: the webhook verifier, the
-rate limit, the body limit, the permission check, then the timeout around
-the handler. Each refusal, and each `ApiError` an implementation returns,
-is an RFC 9457 problem (`application/problem+json`) as the Go and
+rate limit, the body limit, the service step when the crate has one, the
+permission check, then the timeout around the handler. Each refusal, and
+each `ApiError` an implementation returns, is an RFC 9457 problem (`application/problem+json`) as the Go and
 TypeScript servers write it: `type`, `title`, `status`, `detail` (the
 error's message), `code` (`unauthorized`, `forbidden`,
 `payload_too_large`, `too_many_requests`, `gateway_timeout`, or the
@@ -495,3 +505,8 @@ operation that needs none it hands the implementation none, as the route
 does. `ApiError` implements `std::error::Error`, so `?` carries a refusal
 into the caller's own error type. The crate re-exports the runtime as
 `runtime`.
+
+`admit` applies the end-user rule only. An in-process caller is the
+service's own code, with no service credential to present, so an
+operation's `@requireService` or `@allowService` clause is not checked
+there: a `@requireService` operation is not refused in-process.

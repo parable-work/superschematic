@@ -17,12 +17,14 @@ parses the same way in generated Go, TypeScript, Python and Rust.
 ```
 schema source (.schema.ts | .schema.json | .schema.yaml)
   -> superschematic build
-     -> sql/         Postgres DDL
+     -> sql/         Postgres DDL, and SQLite DDL when a DB asks for it
      -> orm/         Go repositories
      -> api/         Go chi router, middleware, OpenAPI; or a Rust axum crate;
                      or a TypeScript Hono router package
      -> types/       Go, TypeScript, Python, Rust
      -> sdk/         TypeScript, Go, Python, Rust clients
+     -> stack/       one environment.json per environment of a Stack service
+     -> server/      a Go entrypoint and Dockerfile per server that stack runs
 ```
 
 Status: pre-release. The first tag is `v0.1.0-alpha.1`. Until it is cut,
@@ -55,7 +57,15 @@ lists every command and flag.
 A DB table can keep every version of its rows
 ([versioned tables](/superschematic/reference/versioned-tables/)), and a
 tree of such tables can be branched, committed and merged as a whole
-([version graphs](/superschematic/reference/version-graphs/)).
+([version graphs](/superschematic/reference/version-graphs/)). A database
+that already holds data changes through an offline plan between two
+versions of its schema
+([schema migrations](/superschematic/reference/migrations/)).
+
+A Stack service declares which services run where, in which
+environments. `superschematic stack dev` runs an environment on your
+machine, and `stack deploy` applies one to Google Cloud
+([stacks and deploys](/superschematic/guides/stacks/)).
 
 ## Where to start
 
@@ -70,15 +80,19 @@ tree of such tables can be branched, committed and merged as a whole
 5. The guides, one per area: [modeling types](/superschematic/guides/modeling-types/),
    [database tables](/superschematic/guides/database-tables/),
    [API routes](/superschematic/guides/api-routes/),
-   [auth and permissions](/superschematic/guides/auth-and-permissions/) and
+   [auth and permissions](/superschematic/guides/auth-and-permissions/),
    [client SDKs](/superschematic/guides/client-sdks/) in Go, TypeScript,
-   Python and Rust, and [the engine](/superschematic/guides/engine/), which
-   runs a schema with no generated code, with its
+   Python and Rust, [stacks and deploys](/superschematic/guides/stacks/),
+   [the engine](/superschematic/guides/engine/), which runs a schema with
+   no generated code, with its
    [behaviors](/superschematic/guides/engine-behaviors/) and
-   [work queues](/superschematic/guides/work-queues/).
+   [work queues](/superschematic/guides/work-queues/), and
+   [pages with Topcoat](/superschematic/guides/topcoat/), which call a Rust
+   API in-process.
 
 The tutorial's code is `examples/acme-shop`, and the engine guide's is
-`examples/engine-notes`. CI builds and tests both on every pull request.
+`examples/engine-notes`. CI builds and tests both in the release
+candidate run on `main` twice a day.
 
 For what the generated code offers in one language, see the language
 pages: [Go](/superschematic/install/go/),

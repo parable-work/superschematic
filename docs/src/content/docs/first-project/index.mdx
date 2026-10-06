@@ -31,7 +31,11 @@ is quoted from it, and `examples/acme-shop/scripts/check.sh` builds it
 with the core binary, compiles the generated Go, type-checks the
 generated TypeScript and runs the tests in Go, TypeScript, Python and
 Rust. `shop-orders` is not part of the tutorial; the
-[guides](/superschematic/guides/modeling-types/) use it.
+[guides](/superschematic/guides/modeling-types/) use it. They serve it in
+Go, and again with the generated
+[Rust server](/superschematic/guides/api-routes/#the-rust-server), whose
+implementations a [Topcoat app](/superschematic/guides/topcoat/) also
+calls from its pages.
 
 <FileTree>
 - examples/acme-shop/
@@ -51,6 +55,8 @@ Rust. `shop-orders` is not part of the tutorial; the
   - typescript/ the TypeScript service, a client and tests
   - python/ a client and tests
   - rust/ a client and tests
+  - rust-server/ shop-orders on the generated Rust server, for the guides
+  - topcoat/ a Topcoat app over the Rust server's implementations, for the guides
   - testdata/generated/ copies of the generated files these pages quote
   - scripts/
     - check.sh

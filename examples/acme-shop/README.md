@@ -1,7 +1,9 @@
 # acme-shop
 
 The project the docs site's tutorial and guides build: a small shop,
-generated with the core superschematic binary and no extension. The
+generated with the core superschematic binary and no extension, except
+for the Topcoat app's crate, which `superschematic-topcoat` (the core with
+`extensions/topcoat` linked) writes. The
 "Start here", "Your first project" and "Guides" pages of the
 [docs site](https://parable-work.github.io/superschematic/) quote these
 files; `examples/acme-schematic` is the same shop extended with its own
@@ -47,13 +49,16 @@ packages, builds the Rust client, builds `shop-orders` with its API in
 Rust into `schemas/dist-rust` and the Rust server on it, runs the tests in
 all four languages (the Go tests run each language's client against the Go
 server and against the Rust server, and, when Docker runs, `stack dev` on
-`shop-stack`, calling each API over Postgres), and fails
+`shop-stack`, calling each API over Postgres), builds `schemas/dist-rust`
+again with `superschematic-topcoat` and runs the Topcoat app's tests, and fails
 when a file under `testdata/generated/` differs from the run. `make setup`
 stands up everything it uses, the Python schema runtime's uv environment
 included; the Rust client and server fetch their crates on their first
 build. `UPDATE=1` rewrites `testdata/generated/`
 instead; check the docs pages that quote a changed file. The `acme` job in
-`.github/workflows/ci.yml` runs it, in the full tier.
+`.github/workflows/ci.yml` runs it in CI's full tier: in the release
+candidate run on `main` twice a day and before every release, not on pull
+requests (D40).
 
 The Go tests serve each API in-process over the ORM's no-op database;
 only `TestStackDevRunsTheShop` needs Postgres, which `stack dev` runs in

@@ -40,18 +40,9 @@ func Generate(c registry.GenerateContext) error {
 	if err != nil {
 		return err
 	}
-	var resolved []*ir.ResolvedEnvironment
-	var failures []error
-	for _, env := range st.Environments {
-		out, err := stack.Resolve(c.Registry, stack.Input{Stack: st, Services: services, Environment: env.Name})
-		if err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		resolved = append(resolved, out)
-	}
-	if len(failures) > 0 {
-		return errors.Join(failures...)
+	resolved, err := Resolve(c, st, services)
+	if err != nil {
+		return err
 	}
 	dir := OutDir(c.Options.OutputRoot, st.Name)
 	if err := os.RemoveAll(dir); err != nil {
@@ -68,6 +59,26 @@ func Generate(c registry.GenerateContext) error {
 	}
 	c.Done(Name, dir)
 	return nil
+}
+
+// Resolve resolves every environment of st over services, in declaration
+// order. When any fails to resolve it returns none of them, and every
+// failing environment's problems together.
+func Resolve(c registry.GenerateContext, st *ir.Stack, services []stack.Service) ([]*ir.ResolvedEnvironment, error) {
+	var resolved []*ir.ResolvedEnvironment
+	var failures []error
+	for _, env := range st.Environments {
+		out, err := stack.Resolve(c.Registry, stack.Input{Stack: st, Services: services, Environment: env.Name})
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		resolved = append(resolved, out)
+	}
+	if len(failures) > 0 {
+		return nil, errors.Join(failures...)
+	}
+	return resolved, nil
 }
 
 // Services loads the facts of every service st reaches, as resolution
