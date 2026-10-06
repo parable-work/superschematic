@@ -41,6 +41,7 @@ func init() {
 		newStackBootstrapCmd,
 		newStackSecretsCmd,
 		newStackPlanCmd,
+		newStackBuildCmd,
 		newStackDeployCmd,
 		newStackDestroyCmd,
 		newStackOutputsCmd,
@@ -280,6 +281,13 @@ func (c *deployContext) options(cmd *cobra.Command, params map[string]string) st
 		Dir:      c.dir,
 		Log:      cmd.ErrOrStderr(),
 	}
+}
+
+// sources says where the stack's build wrote each server's Dockerfile, and
+// every image's build context: the repository root, the parent of the
+// schemas root (docs/stack-model.md, section 8.2).
+func (c *deployContext) sources() *stackdeploy.Sources {
+	return &stackdeploy.Sources{OutputRoot: c.project.outputRoot, RepositoryRoot: filepath.Dir(c.project.schemasRoot)}
 }
 
 // digests returns the IR digest of each service the stack reaches:
@@ -565,7 +573,7 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 		}
 	}
 	if len(r.Unpinned) > 0 {
-		fmt.Fprintf(&b, "\nServers with no image yet, planned at their repository: %s (deploy them with --image)\n", strings.Join(r.Unpinned, ", "))
+		fmt.Fprintf(&b, "\nServers with no image yet, planned at their repository: %s (deploy builds them, or takes them with --image)\n", strings.Join(r.Unpinned, ", "))
 	}
 	if len(r.MissingSecrets) > 0 {
 		fmt.Fprintf(&b, "\nSecrets with no value: %s (stack secrets set %s)\n", strings.Join(r.MissingSecrets, ", "), environment)
@@ -582,6 +590,81 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 	return err
 }
 
+// --- build ---
+
+func newStackBuildCmd(a *app) *cobra.Command {
+	flags := &stackFlags{}
+	var servers []string
+	var force bool
+	var out, format string
+	cmd := &cobra.Command{
+		Use:   "build <environment>",
+		Short: "Build the images of an environment's servers without deploying them",
+		Long: `build builds, through the environment's target (Cloud Build on gcp), the
+image of each server whose build context changed since the image the
+deploy manifest records, as stack deploy would, and deploys nothing. Each
+Go server builds from the Dockerfile superschematic build-all writes at
+<output-root>/server/<stack>/<server>/, with the repository root as its
+context, cut down by the Dockerfile.dockerignore beside it.
+
+It prints each image as a stack deploy --image flag; --format json prints
+the result, and --out writes it to a file. --server builds the servers it
+names only, and --force builds a server whose context did not change. A
+build writes no deploy manifest.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if format != "text" && format != "json" {
+				return fmt.Errorf("--format %q: want text or json", format)
+			}
+			params, err := parseParams(flags.params)
+			if err != nil {
+				return err
+			}
+			c, err := openDeployContext(cmd, a, flags, args[0], false)
+			if err != nil {
+				return err
+			}
+			defer c.close()
+			result, err := stackdeploy.Build(cmd.Context(), stackdeploy.BuildOptions{
+				Options: c.options(cmd, params),
+				Sources: *c.sources(),
+				Servers: servers,
+				Force:   force,
+			})
+			if err != nil {
+				return err
+			}
+			data, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				return err
+			}
+			data = append(data, '\n')
+			if out != "" {
+				if err := os.WriteFile(out, data, 0o644); err != nil {
+					return fmt.Errorf("writing --out: %w", err)
+				}
+			}
+			w := cmd.OutOrStdout()
+			if format == "json" {
+				_, err = w.Write(data)
+				return err
+			}
+			for _, flag := range result.ImageFlags() {
+				if _, err := fmt.Fprintf(w, "--image %s\n", flag); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	flags.register(cmd, true)
+	cmd.Flags().StringArrayVar(&servers, "server", nil, "build this server only (repeatable)")
+	cmd.Flags().BoolVar(&force, "force", false, "build a server whose context did not change")
+	cmd.Flags().StringVar(&out, "out", "", "write the result as JSON to this file")
+	cmd.Flags().StringVar(&format, "format", "text", "print --image flags (text) or the result as json")
+	return cmd
+}
+
 // --- deploy ---
 
 func newStackDeployCmd(a *app) *cobra.Command {
@@ -589,6 +672,7 @@ func newStackDeployCmd(a *app) *cobra.Command {
 	gate := &gateFlags{}
 	var images []string
 	var expect string
+	var noBuild bool
 	cmd := &cobra.Command{
 		Use:   "deploy <environment>",
 		Short: "Deploy an environment in deploy order",
@@ -600,9 +684,12 @@ it ready; the contract phases; exposure. Then it writes the deploy
 manifest to the target's state: the resolved environment, the IR digest of
 each service, the image of each server and each database's schema.
 
-Each server's image is given by digest with --image, or kept from the
-manifest. Every secret needs a value before the first step after
-infrastructure; at a terminal, deploy asks for each one missing. A
+Each server's image is given by digest with --image, or built through
+the target (Cloud Build on gcp) from the Dockerfile superschematic
+build-all wrote for it when its build context changed since the image the
+manifest records, or kept from the manifest. The builds run before
+anything changes. --no-build builds nothing. Every secret needs a value
+before the first step after infrastructure; at a terminal, deploy asks for each one missing. A
 migration hazard of a --fail-on class stops the deploy unless --allow
 names it, and --expect refuses migration plans other than the ones stack
 plan --out wrote.
@@ -644,9 +731,14 @@ schema between the phases, and the next deploy plans from it.`,
 			if err != nil {
 				return err
 			}
+			var src *stackdeploy.Sources
+			if !noBuild {
+				src = c.sources()
+			}
 			m, err := stackdeploy.Deploy(cmd.Context(), stackdeploy.DeployOptions{
 				Options:  c.options(cmd, params),
 				Images:   imgs,
+				Sources:  src,
 				Planner:  c.planner(),
 				Services: digests,
 				Gate:     g,
@@ -664,6 +756,7 @@ schema between the phases, and the next deploy plans from it.`,
 	gate.register(cmd)
 	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's image: <server>=<repository>@sha256:<digest> (repeatable)")
 	cmd.Flags().StringVar(&expect, "expect", "", "a plan stack plan --out wrote: refuse migration plans other than its")
+	cmd.Flags().BoolVar(&noBuild, "no-build", false, "build no image: take each server's from --image or the manifest")
 	return cmd
 }
 

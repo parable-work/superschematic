@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,9 +17,16 @@ type DeployOptions struct {
 	Options
 
 	// Images are the images of the servers the deploy rolls out, by
-	// server (ParseImages). A server without one keeps the image the
-	// manifest records; a server with neither is refused.
+	// server (ParseImages). A server without one is built when Sources is
+	// set and its context changed, and keeps the image the manifest
+	// records otherwise; a server with none of them is refused.
 	Images map[string]string
+
+	// Sources, when set, says where the stack's build wrote each server's
+	// Dockerfile, and the deploy builds through the target's ImageBuilder
+	// the image of each server Images names none for whose context
+	// changed since the image the manifest records. Nil builds nothing.
+	Sources *Sources
 
 	// Planner plans each database's migration. Required when the
 	// environment has a database.
@@ -48,10 +55,12 @@ type DeployOptions struct {
 // Deploy deploys a run (docs/stack-model.md, section 11.2) and returns the
 // manifest it wrote:
 //
-//  1. it reads the manifest of the previous deploy, pins each server's
-//     image (PinImages) and plans each database's migration from the
-//     schema the manifest records, then checks the plans against the gate
-//     and, when given, against the plans `stack plan` showed;
+//  1. it reads the manifest of the previous deploy, decides where each
+//     server's image comes from (--image, a build, the manifest) and plans
+//     each database's migration from the schema the manifest records, then
+//     checks the plans against the gate and, when given, against the plans
+//     `stack plan` showed; then it builds the images it decided to build
+//     and pins each server's image (PinImages);
 //  2. it runs the deploy order a step at a time: the provisioner applies
 //     the infrastructure; every secret then needs a value; the target's
 //     migration runner runs the expand phase of each plan (first finishing
@@ -85,25 +94,20 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 		return nil, err
 	}
 
-	images := map[string]string{}
-	if prev != nil {
-		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.Kind == ir.DeployableServer {
-				images[server] = image
-			}
-		}
+	if _, err := checkImages(s.env, o.Images); err != nil {
+		return nil, err
 	}
-	maps.Copy(images, o.Images)
-	missing, err := checkImages(s.env, images)
+	images, err := s.planImages(prev, o.Images, o.Sources, nil, false)
+	defer images.cleanup()
+	if err != nil {
+		return nil, err
+	}
+	missing, err := checkImages(s.env, images.wanted())
 	if err != nil {
 		return nil, err
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("no image for server %s: the manifest records none, so pass --image <server>=<repository>@sha256:<digest> for each", strings.Join(missing, ", "))
-	}
-	pinned, err := PinImages(s.env, images)
-	if err != nil {
-		return nil, err
+		return nil, errors.New(describeMissing(missing, o.Sources != nil && s.target.Builder != nil))
 	}
 
 	plans, pending, err := planMigrations(s.env, prev, o.Planner)
@@ -120,11 +124,18 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 		return nil, fmt.Errorf("environment %s has migrations to run, and target %s has no migration runner", s.env.Environment, s.target.Name)
 	}
 
+	if err := s.runBuilds(ctx, images); err != nil {
+		return nil, err
+	}
+	pinned, err := PinImages(s.env, images.images)
+	if err != nil {
+		return nil, err
+	}
 	req, err := s.request(ctx, pinned)
 	if err != nil {
 		return nil, err
 	}
-	d := &deploy{session: s, opts: o, now: now, req: req, images: images, plans: plans, pending: pending}
+	d := &deploy{session: s, opts: o, now: now, req: req, images: images.images, contexts: images.contexts, plans: plans, pending: pending}
 	d.manifest = nextManifest(prev, s.run, o.Services)
 	if err := d.checkpoint(ctx, ""); err != nil {
 		return nil, err
@@ -163,6 +174,7 @@ type deploy struct {
 	now      func() time.Time
 	req      registry.ProvisionRequest
 	images   map[string]string
+	contexts map[string]string
 	plans    []*DatabasePlan
 	pending  map[string][]*PendingMigration
 	manifest *Manifest
@@ -189,10 +201,7 @@ func (d *deploy) step(ctx context.Context, step *ir.DeployStep) error {
 			return err
 		}
 		for _, server := range step.Deployables {
-			if d.manifest.Images == nil {
-				d.manifest.Images = map[string]string{}
-			}
-			d.manifest.Images[server] = d.images[server]
+			d.manifest.setImage(server, d.images[server], d.contexts[server])
 		}
 		return nil
 	case ir.StepMigrate:
@@ -232,18 +241,30 @@ func (d *deploy) finishPending(ctx context.Context, database string) error {
 	return nil
 }
 
-// migrate runs one phase of the new plans on database.
+// migrate runs one phase of the new plans on database: each plan with
+// steps in the phase, and in the expand phase each plan whose connecting
+// servers changed since the runner last ran on its DB service, so the
+// runner can give a new server its privileges before the server rolls out
+// and take a removed one's back before its database user goes (D46).
 func (d *deploy) migrate(ctx context.Context, database string, phase ir.MigrationPhase) error {
 	var plans []*DatabasePlan
 	for _, plan := range d.plans {
 		if plan.Database != database {
 			continue
 		}
-		if plan.Steps(phase) == 0 {
+		var servers []string
+		if prev := d.manifest.applied(database, plan.Service); prev != nil {
+			servers = prev.Servers
+		}
+		changed := d.target.Migrations != nil && phase == ir.MigrationExpand &&
+			!slices.Equal(servers, connecting(d.env, database, plan.Service))
+		if plan.Steps(phase) == 0 && !changed {
 			// Nothing to run: the database holds what the phase would
 			// leave, so record it.
 			if phase == ir.MigrationExpand || plan.ContractSteps > 0 {
-				d.manifest.setApplied(database, plan.Service, plan.after(phase))
+				applied := plan.after(phase)
+				applied.Servers = servers
+				d.manifest.setApplied(database, plan.Service, applied)
 			}
 			continue
 		}
@@ -255,14 +276,33 @@ func (d *deploy) migrate(ctx context.Context, database string, phase ir.Migratio
 	return d.runPhase(ctx, database, phase, plans)
 }
 
+// connecting returns the servers whose sql edges reach service on
+// database, sorted.
+func connecting(env *ir.ResolvedEnvironment, database, service string) []string {
+	var out []string
+	for _, e := range env.Edges {
+		if e.Kind == ir.EdgeSQL && e.To == database && e.Service.Name == service && !slices.Contains(out, e.From) {
+			out = append(out, e.From)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // runPhase runs one phase of plans on database, and records the schema it
-// leaves; when the runner fails, it records each plan's phase as pending
-// on the schema the database held before.
+// leaves and the servers the runner saw connect; when the runner fails,
+// it records each plan's phase as pending on the schema the database
+// held before.
 func (d *deploy) runPhase(ctx context.Context, database string, phase ir.MigrationPhase, plans []*DatabasePlan) error {
 	req := registry.MigrationRequest{Run: d.run, Database: database, Phase: phase, Log: d.log}
 	var names []string
 	for _, plan := range plans {
-		req.Plans = append(req.Plans, registry.MigrationPlan{Service: plan.Service, Plan: plan.Document})
+		req.Plans = append(req.Plans, registry.MigrationPlan{
+			Service: plan.Service,
+			Plan:    plan.Document,
+			Steps:   plan.Steps(phase),
+			Servers: connecting(d.env, database, plan.Service),
+		})
 		names = append(names, plan.Service)
 	}
 	d.logf("  migrate %s: %s phase of %s", database, phase, strings.Join(names, ", "))
@@ -282,7 +322,9 @@ func (d *deploy) runPhase(ctx context.Context, database string, phase ir.Migrati
 		return err
 	}
 	for _, plan := range plans {
-		d.manifest.setApplied(database, plan.Service, plan.after(phase))
+		applied := plan.after(phase)
+		applied.Servers = connecting(d.env, database, plan.Service)
+		d.manifest.setApplied(database, plan.Service, applied)
 	}
 	return nil
 }
