@@ -7,9 +7,19 @@ package {{ toPackageName .SchemaName }}
 
 import (
 	"context"
+{{- if .HasEncryptedEndpoints }}
+	"errors"
+{{- end }}
+{{- if .IsPublic }}
+	"net/http"
+{{- end }}
+{{- if or .HasFilterableEndpoints .HasEncryptedEndpoints }}
+{{ end }}
 {{- if .HasFilterableEndpoints }}
-
 	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
+{{- end }}
+{{- if .HasEncryptedEndpoints }}
+	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 {{- end }}
 
 	api "{{ .ModulePath }}"
@@ -34,6 +44,40 @@ func New(deps api.Deps) (api.Implementations, error) {
 }
 
 var _ api.Constructor = New
+{{- if .IsPublic }}
+
+// AuthMiddleware authenticates the end user on the protected routes of
+// {{ .SchemaName }}. The server's entrypoint passes it to the generated
+// Config.AuthMiddleware. The scaffold's refuses every request with 401:
+// verify the request's credential with your identity provider, put the
+// principal on the request context as your auth provider's routes read it
+// (with the session provider, api.ContextWithPrincipalID and
+// api.ContextWithRoles), then call next.
+func AuthMiddleware(deps api.Deps) (func(http.Handler) http.Handler, error) {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			api.RespondError(w, r, http.StatusUnauthorized, "Authentication required")
+		})
+	}, nil
+}
+{{- end }}
+{{- if .HasEncryptedEndpoints }}
+
+// PayloadDecryptor decrypts the request bodies of {{ .SchemaName }}'s encrypted
+// operations. The server's entrypoint passes it to the generated
+// Config.PayloadDecryptor. The scaffold's decrypts nothing, so each encrypted
+// operation is refused until it returns your key service's decryptor.
+func PayloadDecryptor(deps api.Deps) (runtimemiddleware.PayloadDecryptor, error) {
+	return noDecryptor{}, nil
+}
+
+// noDecryptor refuses every payload.
+type noDecryptor struct{}
+
+func (noDecryptor) Decrypt(context.Context, string) ([]byte, error) {
+	return nil, errors.New("{{ .SchemaName }} has no payload decryptor yet")
+}
+{{- end }}
 {{- range .Namespaces }}
 {{- $namespace := . }}
 
