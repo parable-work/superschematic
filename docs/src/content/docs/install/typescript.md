@@ -100,7 +100,11 @@ version graph and no path breaks the install of every types package
 beside it. The version-graph package loads from its `dist/`: build it in
 the checkout first (`bun install && bun run build` in
 `runtime/versiongraph/typescript`, which needs cargo with the
-`wasm32-unknown-unknown` target).
+`wasm32-unknown-unknown` target). Its engine runs as `Engine`, whose
+operations return promises, or `SyncEngine`, over a driver that blocks,
+and keeps a graph in Postgres (`pg`) or SQLite (`node:sqlite` or
+`bun:sqlite`); see
+[The engine and its adapters](/superschematic/reference/version-graphs/#the-engine-and-its-adapters).
 
 Run `bun install` in `schemas/dist/types/typescript` or in any package
 under it, and again after each build. Every install writes the one
@@ -315,6 +319,19 @@ the same way and then handed to `options.manualRoutes.<operation>` with the
 Hono context, for a streaming response or anything else the JSON router
 cannot express. The config needs neither `public` nor `authDb` for this
 server: those wire the Go server's auth middleware to an auth store.
+`ctx.bearerToken` holds the token of a `Bearer` `Authorization` header;
+any other scheme, such as an API key, reaches `authenticate` untouched in
+`ctx.headers`.
+
+`authenticateService`, beside `authenticate`, establishes a calling
+service from its `Service-Authorization` credential
+([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
+`serviceAuthenticator(config)` from `@superschematic/http-runtime` is the
+standard one. With it, every route verifies a credential that is present
+and puts the caller on `ctx.serviceCaller`, and a route with an
+`@requireService` or `@allowService` clause admits by it, after the body
+limit and before `authenticate`. Without it, such a route answers 401
+`service_unauthorized`.
 
 Two kinds of operation must be `@manualRouteRegistration`, and the build
 fails with the operation named when one is not:

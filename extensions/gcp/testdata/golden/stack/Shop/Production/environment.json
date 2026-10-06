@@ -323,6 +323,7 @@
         "id": "Orders.database-user.shop-db",
         "type": "gcp:sql/user:User",
         "properties": {
+          "deletionPolicy": "ABANDON",
           "instance": {
             "$output": {
               "resource": "shop-db.instance",
@@ -922,6 +923,7 @@
         "id": "shop-api.database-user.shop-db",
         "type": "gcp:sql/user:User",
         "properties": {
+          "deletionPolicy": "ABANDON",
           "instance": {
             "$output": {
               "resource": "shop-db.instance",
@@ -1300,6 +1302,32 @@
         "owners": [
           "shop-db"
         ]
+      },
+      {
+        "id": "shop-db.migrator",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "databaseRoles": [
+            "cloudsqlsuperuser"
+          ],
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "shop-migrator@acme-prod.iam",
+          "project": "acme-prod",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "shop-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
       }
     ]
   },
@@ -1325,7 +1353,8 @@
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.trace-agent",
         "shop-db.database.shop-db",
-        "shop-db.instance"
+        "shop-db.instance",
+        "shop-db.migrator"
       ]
     },
     {

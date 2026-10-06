@@ -72,6 +72,7 @@ type Extension struct {
 	Secrets     *FakeSecrets
 	Migrations  *FakeMigrations
 	Bootstrap   *FakeBootstrap
+	Builder     *FakeBuilder
 }
 
 // Name is the extension's name.
@@ -94,8 +95,12 @@ func (e *Extension) Register(r *registry.Registry) error {
 	if e.Bootstrap == nil {
 		e.Bootstrap = &FakeBootstrap{}
 	}
+	if e.Builder == nil {
+		e.Builder = &FakeBuilder{}
+	}
 	e.Migrations.log = e.Provisioner
 	e.Bootstrap.log = e.Provisioner
+	e.Builder.log = e.Provisioner
 	server := func(name string, languages ...string) registry.PlatformSpec {
 		return registry.PlatformSpec{
 			Name:      name,
@@ -181,6 +186,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Secrets:    e.Secrets,
 		Bootstrap:  e.Bootstrap,
 		Migrations: e.Migrations,
+		Builder:    e.Builder,
 	})
 }
 

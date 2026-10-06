@@ -1,14 +1,12 @@
-// Package shop is the Go side of the acme-shop example: it implements the
-// shop-api routes superschematic generates, over the generated shop-db ORM.
-package shop
+package shopapi
 
 import (
 	"context"
 	"errors"
 
-	shopapi "example.com/acme/api/shop-api"
+	api "example.com/acme/api/shop-api"
 	orm "example.com/acme/orm/shop-db"
-	api "example.com/acme/types/go/shop-api"
+	types "example.com/acme/types/go/shop-api"
 	db "example.com/acme/types/go/shop-db"
 )
 
@@ -18,12 +16,12 @@ type Products struct {
 	DB orm.DatabaseInterface
 }
 
-var _ shopapi.ProductImplementation = (*Products)(nil)
+var _ api.ProductImplementation = (*Products)(nil)
 
-func (p *Products) GetProduct(ctx context.Context, id api.IdentityUUID) (*api.ProductView, error) {
+func (p *Products) GetProduct(ctx context.Context, id types.IdentityUUID) (*types.ProductView, error) {
 	row, err := p.DB.GetProductRepository().GetOne(ctx, id, nil)
 	if errors.Is(err, orm.ErrNotFound) {
-		return nil, shopapi.NotFoundError("product", err)
+		return nil, api.NotFoundError("product", err)
 	}
 	if err != nil {
 		return nil, err
@@ -32,7 +30,7 @@ func (p *Products) GetProduct(ctx context.Context, id api.IdentityUUID) (*api.Pr
 	return &view, nil
 }
 
-func (p *Products) ListProducts(ctx context.Context, inStock bool) ([]api.ProductView, error) {
+func (p *Products) ListProducts(ctx context.Context, inStock bool) ([]types.ProductView, error) {
 	var filter *orm.ProductFilter
 	if inStock {
 		filter = &orm.ProductFilter{InStock: &orm.BoolFilter{Eq: &inStock}}
@@ -43,14 +41,14 @@ func (p *Products) ListProducts(ctx context.Context, inStock bool) ([]api.Produc
 	if err != nil {
 		return nil, err
 	}
-	views := make([]api.ProductView, 0, len(rows))
+	views := make([]types.ProductView, 0, len(rows))
 	for _, row := range rows {
 		views = append(views, productView(row))
 	}
 	return views, nil
 }
 
-func (p *Products) CreateProduct(ctx context.Context, input *api.CreateProductInput) (*api.ProductView, error) {
+func (p *Products) CreateProduct(ctx context.Context, input *types.CreateProductInput) (*types.ProductView, error) {
 	row, err := p.DB.GetProductRepository().CreateOne(ctx, &db.Product{
 		Sku:        input.Sku,
 		Name:       input.Name,
@@ -66,8 +64,8 @@ func (p *Products) CreateProduct(ctx context.Context, input *api.CreateProductIn
 
 // productView copies the columns a caller may see from a Product row. Both
 // types hold the same superscalar scalars, so no field needs converting.
-func productView(row *db.Product) api.ProductView {
-	view := api.ProductView{
+func productView(row *db.Product) types.ProductView {
+	view := types.ProductView{
 		Sku:        row.Sku,
 		Name:       row.Name,
 		PriceCents: row.PriceCents,

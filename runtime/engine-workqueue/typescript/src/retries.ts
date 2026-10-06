@@ -84,6 +84,7 @@ import {
 } from '@superschematic/engine';
 
 import declaration from './declarations/Retries.behavior.json' with { type: 'json' };
+import { retriesGuidance } from './guidance/retries.js';
 
 /** A failure class: a cap of failures with an optional hint for the next attempt, or terminal. */
 export type RetryClass = { readonly attempts: number; readonly hint?: string } | 'terminal';
@@ -303,6 +304,8 @@ function limitsGuard(view: InstanceView<RetriesConfig>, after: Readonly<Record<s
 
 export const retries = defineBehavior<RetriesConfig>({
   declaration,
+
+  guidance: retriesGuidance,
 
   // The configSchema holds the shape; this holds the config to the type:
   // its fields and its Workflow's states.

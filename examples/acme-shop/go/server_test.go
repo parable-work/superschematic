@@ -9,11 +9,14 @@ import (
 	"testing"
 	"time"
 
+	shopapi "example.com/acme/api/shop-api"
 	orm "example.com/acme/orm/shop-db"
 	sdk "example.com/acme/sdk/go/shop-api"
 	"example.com/acme/sdk/go/shop-api/namespaces"
 	"example.com/acme/shop"
+	shopapiimpl "example.com/acme/shop/shop-api"
 	types "example.com/acme/types/go/shop-api"
+	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
 	"go.uber.org/zap"
 )
@@ -50,21 +53,42 @@ func (staffRoles) ListRolesForPrincipal(context.Context, string) ([]session.Role
 	return []session.Role{{ID: "staff", Name: "Staff", Permissions: []string{"products"}}}, nil
 }
 
+// productsServer serves shop-api in-process, as its server's generated
+// entrypoint does: the implementation New builds from its Deps, and the
+// generated routes on a router. The ORM is the generated no-op database,
+// so no Postgres is needed: lists are empty, a get is not found, and a
+// create returns what it was given. auth stands in for the stores in
+// shop-db.
+func productsServer(t *testing.T, auth shop.Auth) *httptest.Server {
+	t.Helper()
+	deps := shopapi.Deps{DB: orm.NewNoOpDatabase(), Logger: zap.NewNop()}
+	implementations, err := shopapiimpl.New(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := chi.NewRouter()
+	err = shopapi.RegisterRoutes(router, shopapi.Config{
+		DB:              deps.DB,
+		Logger:          deps.Logger,
+		AuthMiddleware:  auth.Middleware,
+		Implementations: implementations,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+	return server
+}
+
 // The generated Go SDK calls the generated Go server, which calls Products.
-// The ORM is the generated no-op database, so no Postgres is needed: lists
-// are empty, a get is not found, and a create returns what it was given.
 func TestTheSDKCallsTheGeneratedServer(t *testing.T) {
-	handler, err := shop.NewHandler(orm.NewNoOpDatabase(), zap.NewNop(), shop.Auth{
+	server := productsServer(t, shop.Auth{
 		Validate:   verifyJWT,
 		Sessions:   fakeSessions{},
 		Principals: fakePrincipals{},
 		Roles:      staffRoles{},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(handler)
-	defer server.Close()
 	ctx := context.Background()
 
 	client, err := sdk.New(sdk.SDKConfig{
@@ -122,17 +146,12 @@ func TestTheSDKCallsTheGeneratedServer(t *testing.T) {
 // The server checks what it receives as the SDK checks what it sends, and
 // serves its OpenAPI document without a caller.
 func TestTheServerValidatesAndDescribesItself(t *testing.T) {
-	handler, err := shop.NewHandler(orm.NewNoOpDatabase(), zap.NewNop(), shop.Auth{
+	server := productsServer(t, shop.Auth{
 		Validate:   verifyJWT,
 		Sessions:   fakeSessions{},
 		Principals: fakePrincipals{},
 		Roles:      staffRoles{},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(handler)
-	defer server.Close()
 
 	request, _ := http.NewRequest(http.MethodPost, server.URL+"/api/products",
 		strings.NewReader(`{"sku": "tea", "name": "Tea", "priceCents": -1}`))

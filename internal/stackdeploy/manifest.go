@@ -68,6 +68,12 @@ type Manifest struct {
 	// finish keeps the image the previous deploy recorded.
 	Images map[string]string `json:"images,omitempty"`
 
+	// Contexts holds, by server, the digest of the build context each
+	// image of Images was built from, when a deploy built it (Context): a
+	// deploy builds the server's image again only when its context's
+	// digest differs. An image given with --image has none.
+	Contexts map[string]string `json:"contexts,omitempty"`
+
 	// Databases holds the schema each database holds, by database
 	// deployable and then by the DB service it hosts.
 	Databases map[string]map[string]*AppliedSchema `json:"databases,omitempty"`
@@ -89,6 +95,13 @@ type AppliedSchema struct {
 	// The next deploy finishes that phase first, since the runner resumes
 	// it and refuses any other plan until it does.
 	Pending *PendingMigration `json:"pending,omitempty"`
+
+	// Servers are the servers that connected to the DB service when the
+	// migration runner last ran on it, sorted. A runner that owns the
+	// database's privileges gave each what it reads and writes (D46), so a
+	// deploy runs the expand phase of a DB service whose connecting
+	// servers changed even when its plan has no expand steps.
+	Servers []string `json:"servers,omitempty"`
 }
 
 // PendingMigration is one phase of one plan that did not finish.
@@ -168,6 +181,23 @@ func (m *Manifest) setApplied(database, service string, applied *AppliedSchema) 
 	m.Databases[database][service] = applied
 }
 
+// setImage records the image a server runs, and the context a deploy
+// built it from, or none.
+func (m *Manifest) setImage(server, image, context string) {
+	if m.Images == nil {
+		m.Images = map[string]string{}
+	}
+	m.Images[server] = image
+	if context == "" {
+		delete(m.Contexts, server)
+		return
+	}
+	if m.Contexts == nil {
+		m.Contexts = map[string]string{}
+	}
+	m.Contexts[server] = context
+}
+
 // readManifest returns the run's manifest, or nil when the run was never
 // deployed. It refuses a manifest of another run.
 func readManifest(ctx context.Context, store registry.StateStore, run registry.Run) (*Manifest, error) {
@@ -210,10 +240,7 @@ func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *
 		switch d.Kind {
 		case ir.DeployableServer:
 			if image, ok := prev.Images[d.Name]; ok {
-				if m.Images == nil {
-					m.Images = map[string]string{}
-				}
-				m.Images[d.Name] = image
+				m.setImage(d.Name, image, prev.Contexts[d.Name])
 			}
 		case ir.DeployableDatabase:
 			for _, svc := range d.Services {

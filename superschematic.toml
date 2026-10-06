@@ -105,3 +105,17 @@ versiongraph_rust = "runtime/versiongraph/rust-engine"
 versiongraph_python = "runtime/versiongraph/python"
 http_runtime_go = "runtime/http/go"
 http_runtime_rust = "runtime/http/rust"
+
+# How the config fields an API's edges derive in a stack are named: its
+# database connection, and the endpoint of each API it `calls`. {SERVICE} is
+# the DB or called API service's name in upper snake case.
+[derived_fields]
+database = "{SERVICE}_DATABASE"
+service = "{SERVICE}_SERVICE"
+
+# Where a stack's build and `build --scaffold` write a missing API
+# implementation, per language, relative to the repository root, and where a
+# server's generated entrypoint imports it from. {service} is the service's
+# name.
+[implementation_paths]
+go = "go/{service}"

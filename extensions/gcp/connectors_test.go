@@ -84,7 +84,7 @@ func TestSQLConnectorGrants(t *testing.T) {
 	}
 	user := node(t, env, "shop-api.database-user.shop-db")
 	wantJSON(t, "database user", user.Properties,
-		`{"instance":{"$output":{"resource":"shop-db.instance","name":"name"}},"name":"shop-api@acme-staging.iam","project":"acme-staging","type":"CLOUD_IAM_SERVICE_ACCOUNT"}`)
+		`{"deletionPolicy":"ABANDON","instance":{"$output":{"resource":"shop-db.instance","name":"name"}},"name":"shop-api@acme-staging.iam","project":"acme-staging","type":"CLOUD_IAM_SERVICE_ACCOUNT"}`)
 	if !slices.Contains(user.DependsOn, "shop-api.account") {
 		t.Errorf("the database user depends on %v, which lacks the account it names", user.DependsOn)
 	}

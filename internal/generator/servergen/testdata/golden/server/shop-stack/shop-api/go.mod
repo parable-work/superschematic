@@ -3,11 +3,12 @@
 // The module of server shop-api of stack shop-stack. It requires each
 // generated module, runtime module and implementation module the server
 // builds from, and a replace points each at its directory. superschematic
-// writes no go.sum, so fill it before the first build:
+// writes no go.sum, so build with -mod=mod, which fills it:
 //
-//	go mod tidy && go build .
+//	go build -mod=mod .
 //
-// or build with GOFLAGS=-mod=mod.
+// go mod tidy also resolves the imports of the implementations' tests,
+// which this go.mod does not replace.
 
 module example.com/schemas/server/shop-stack/shop-api
 

@@ -1,6 +1,6 @@
 ---
 title: Deploy extension
-description: Map a schema's @envVars fields to a Helm values file with the reference deploy extension.
+description: Map a schema's @envVars fields to a Helm values file with the reference deploy extension, a worked example of a document extension.
 sidebar:
   order: 2
 ---
@@ -8,10 +8,25 @@ sidebar:
 `extensions/deploy` is the reference document extension. It registers one
 sidecar, `deploy.values.yaml`, that maps a schema's `@envVars` fields to a
 Kubernetes container env list. It has no chart templates, repository URLs
-or cloud-specific resources. Use it as the starting point for a deployment
-integration of your own.
+or cloud-specific resources. Use it as the starting point for a document
+extension of your own.
 
 The package imports only `registry`, the same as an out-of-tree extension.
+
+## Beside the stack model
+
+This extension predates the [stack model](/superschematic/guides/stacks/)
+and is not part of it. To deploy a schema tree, declare a Stack service:
+its environments set each server's `@envVars` values in `settings`, and
+the connection strings and service addresses that this document makes you
+write per environment are derived from `authDb` and `calls`. The two do
+not read each other.
+
+What remains for this extension is a Helm chart you maintain, since no
+target deploys to Kubernetes yet, and its role as a worked example of a
+document extension. It is not linked into the installed `superschematic`:
+link it in a binary of your own, as below. The stack model's design plans
+to rewrite it over the stack model or retire it.
 
 ## Link it
 
@@ -69,9 +84,9 @@ export abstract class ExampleConfig {
 Against the schema's `@envVars` type:
 
 - every key is a declared field
-- every `@secret` field is a `secretRef`, never an inline value
-- every required field with no `@default` is set, per environment when the
-  document declares environments, otherwise in the base layer
+- every `Secret<T>` field is a `secretRef`, never an inline value
+- every required field with no `Default<T, V>` is set, per environment
+  when the document declares environments, otherwise in the base layer
 
 The static JSON Schema (`Schema` in `deploy.go`) runs at load time and
 covers shape. The three checks need the schema and run at generate time.

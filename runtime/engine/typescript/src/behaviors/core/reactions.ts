@@ -93,6 +93,7 @@ import type { EngineEvent, OperationChange } from '../../events/log.js';
 import { mergePatch } from '../../instances/patch.js';
 import { BehaviorConfigError, defineBehavior, type FrozenJSON, type ReactionContext } from '../behavior.js';
 import declaration from './declarations/Reactions.behavior.json' with { type: 'json' };
+import { reactionsGuidance } from './guidance/reactions.js';
 import { MAX_ROLLUP_READ } from './rollups.js';
 import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
@@ -534,6 +535,8 @@ function resolve(
 
 export const reactions = defineBehavior<ReactionsConfig>({
   declaration,
+
+  guidance: reactionsGuidance,
 
   // The configSchema holds the shape; this holds the rules to the type's
   // Workflow, Links and Rollups.

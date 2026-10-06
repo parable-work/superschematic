@@ -1,6 +1,6 @@
 ---
 title: Serve and call it from Go
-description: Declare the product API, implement the generated Go server over the ORM, and call it with the generated Go SDK.
+description: Declare the product API, implement the generated Go server over the ORM, run it with stack dev, and call it with the generated Go SDK.
 sidebar:
   order: 3
 ---
@@ -10,8 +10,9 @@ import Snippet from '../../../components/Snippet.astro';
 
 Shop staff add products and shoppers browse them. `shop-api` declares
 those routes over the `Product` table. superschematic generates the Go
-server, which routes, decodes, validates and checks permissions, and a Go
-SDK to call it. You write the business logic and say who the caller is.
+server, which routes, decodes, validates and checks permissions, its
+`main`, and a Go SDK to call it. You write the business logic and say who
+the caller is.
 
 ## Declare the API
 
@@ -69,6 +70,7 @@ which builds `shop-db` first and then `shop-api`.
 - schemas/dist/api/shop-api/ the Go module example.com/acme/api/shop-api
   - interfaces.go what you implement
   - routes.go Config and RegisterRoutes
+  - deps.go Deps and Constructor, what an implementation is built from
   - middleware.go the session and principal stores, request middleware
   - errors.go NotFoundError and the other problem responses
   - openapi.json
@@ -82,24 +84,49 @@ the server asks for one implementation with all three methods:
 
 <Snippet file="testdata/generated/api/shop-api/interfaces.go" symbol="ProductImplementation" />
 
-`examples/acme-shop/go` implements it over the ORM:
+The implementation of an API is a Go package at a path the naming file's
+`[implementation_paths]` table gives, `go/{service}` from the parent of
+the schemas root by default, so `shop-api`'s is `examples/acme-shop/go/shop-api`.
+A stack's build writes a scaffold there when the package is missing, each
+method answering 501, and never touches it again. The example implements
+it over the ORM:
 
-<Snippet file="go/products.go" symbol={['Products', 'Products.GetProduct', 'Products.ListProducts']} />
+<Snippet file="go/shop-api/products.go" symbol={['Products', 'Products.GetProduct', 'Products.ListProducts']} />
 
 The server has already decoded and validated the arguments, so a method
-only does the work. An error from `shopapi.NotFoundError` answers 404, and
-the other constructors in `errors.go` (`BadRequestError`,
-`ConflictError`, `ForbiddenError` and more) answer their own statuses. Any
-other error is logged and answers 500 with a generic message, so no
-internal detail reaches the caller.
+only does the work. The implementation imports the generated package as
+`api`. An error from `api.NotFoundError` answers 404, and the other
+constructors in `errors.go` (`BadRequestError`, `ConflictError`,
+`ForbiddenError` and more) answer their own statuses. Any other error is
+logged and answers 500 with a generic message, so no internal detail
+reaches the caller.
+
+The build also writes what the implementation is built from. `Deps`
+holds the API's configuration, the ORM of its `authDb` and a logger, and
+`Constructor` is the signature of the package's `New`:
+
+<Snippet file="testdata/generated/api/shop-api/deps.go" symbol={['Deps', 'Constructor']} />
+
+<Snippet file="go/shop-api/implementation.go" symbol="New" />
+
+The example writes its implementation and wires its server by hand. To
+start one, `superschematic build --scaffold schemas/services/shop-api`
+writes `go/shop-api/implementation.go`, whose `New(deps Deps)` builds
+every namespace from the generated `Deps` (here a `Config` with the
+connection to `shop-db`, the `shop-db` ORM and a logger) and whose methods
+answer 501 until you write them. A stack's build scaffolds it with no flag
+and writes the server's entrypoint, which calls `New`
+([Start an implementation](/superschematic/guides/api-routes/#start-an-implementation)).
 
 ## Say who the caller is
 
-The server needs an `AuthMiddleware` that puts the caller on the request
+The server needs an auth middleware that puts the caller on the request
 context. With the `session` provider, the generated
-`shopapi.NewSessionStore(db)` and `shopapi.NewPrincipalStore(db)` look the
+`api.NewSessionStore(db)` and `api.NewPrincipalStore(db)` look the
 session and the user up in `shop-db`. Your code verifies the bearer token
-and says which roles the user holds, since the shop has no role table:
+and says which roles the user holds, since the shop has no role table.
+`examples/acme-shop/go/auth.go` holds the shop's `Auth`, which `shop-api`
+and `shop-orders` share:
 
 <Snippet file="go/auth.go" symbol={['TokenValidator', 'Auth', 'Auth.Middleware']} />
 
@@ -107,30 +134,67 @@ and says which roles the user holds, since the shop has no role table:
 checks its `@requirePermission` list against the roles and answers 403
 when none covers it.
 
-## Mount the server
+The package's `AuthMiddleware` builds it from the same `Deps`. The shop's
+tokens are opaque: a token is its session's `jti`, which
+`shop.SessionToken` hands to the session store, and `shop.Roles` gives
+every signed-in user one role that covers every route:
 
-`RegisterRoutes` mounts every route on a chi router. `Config.Validate`
-refuses a missing database, logger, auth middleware or implementation:
+<Snippet file="go/shop-api/implementation.go" symbol="AuthMiddleware" />
 
-<Snippet file="go/server.go" symbol="NewHandler" />
+## Run it
 
-In a real service, `main` connects to Postgres and wires in the generated
-stores. The example compiles this as a Go example function but does not
-run it:
+You write no `main`. A stack, a service of the kind `Stack`, says what
+runs and where. `shop-stack` deploys `shop-api` and `shop-orders`, each on
+a server of its own, and its `Dev` environment runs them on the `local`
+target:
 
-<Snippet file="go/example_test.go" symbol="Example" />
+<Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
-The server also answers `GET /api/openapi.json` with the OpenAPI document
-and `GET /api/docs` with a page that renders it, without a caller.
+With Docker running and the migration runner, `superschematic-migrate`, on
+your `PATH` (see [the runner](/superschematic/reference/migrations/#the-runner)),
+run it from `examples/acme-shop`:
+
+```sh
+superschematic stack dev
+```
+
+`stack dev` builds the stack and each service it deploys, with their
+dependencies, then:
+
+- writes each server's entrypoint, a Go module under
+  `schemas/dist/server/shop-stack/`, whose `main` reads its configuration
+  from the environment, connects to the database, calls `New` and
+  `AuthMiddleware` with the server's `Deps`, and serves the routes beside
+  `/healthz` and `/readyz`;
+- starts Postgres in a container, with a database for `shop-db` migrated
+  to its schema;
+- builds each server and starts it, waiting until it answers `/readyz`,
+  then prints where each one is reached.
+
+Nothing in the project names a port or a connection string. The build
+derives them and writes the environment it resolved to
+`schemas/dist/stack/shop-stack/Dev/environment.json`, where each server's
+bindings are the configuration it is started with:
+
+<Snippet file="testdata/generated/stack/shop-stack/Dev/environment.json" from={'"name": "shop-api",'} to={'"edge": "sql:shop-api->shop-db"'} />
+
+Ctrl-C stops the servers and the container, which keeps its data for the
+next run; `--remove-database` removes it too. The routes answer a caller
+with a session in `shop-db`. `TestStackDevRunsTheShop`, in
+`examples/acme-shop/go/stack_dev_test.go`, runs `stack dev`, signs a user in
+through the ORM, and calls both APIs through their SDKs. The
+[CLI reference](/superschematic/reference/cli/#stack-dev-stack-service-dir)
+lists the flags.
 
 ## Call it from Go
 
 The generated SDK is the module `example.com/acme/sdk/go/shop-api`. Its
 client has one field per namespace, and each method takes the same
-arguments as the route. The example's test drives the SDK against the
-server in-process, with the ORM's no-op database in place of Postgres:
+arguments as the route. The example's tests serve the API in-process, as
+the entrypoint does, with the ORM's no-op database in place of Postgres
+and the `Auth` over fake stores, and drive it through the SDK:
 
-<Snippet file="go/server_test.go" symbol="TestTheSDKCallsTheGeneratedServer" />
+<Snippet file="go/server_test.go" symbol={['productsServer', 'TestTheSDKCallsTheGeneratedServer']} />
 
 - `AuthConfig.Token` sends `Authorization: Bearer <token>`. `GetToken`
   resolves a token per request, with the request's context, when no static
@@ -148,8 +212,8 @@ server in-process, with the ORM's no-op database in place of Postgres:
   one: `*sdk.AuthenticationError` for 401, `*sdk.AuthorizationError` for
   403.
 
-Run it from `examples/acme-shop/go` after building the schemas, with the
-flags from
+Run the tests from `examples/acme-shop/go` after building the schemas,
+with the flags from
 [Prerequisites](/superschematic/start/prerequisites/#compile-generated-go-code)
 exported:
 

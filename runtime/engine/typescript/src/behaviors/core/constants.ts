@@ -25,6 +25,7 @@ what the instance holds.
 import { jsonEqual } from '../../instances/patch.js';
 import { BehaviorConfigError, defineBehavior, type FrozenJSON } from '../behavior.js';
 import declaration from './declarations/Constants.behavior.json' with { type: 'json' };
+import { constantsGuidance } from './guidance/constants.js';
 
 /** Constants' config, parsed. */
 export interface ConstantsConfig {
@@ -42,6 +43,8 @@ function valueOf(data: FrozenJSON, field: string): unknown {
 
 export const constants = defineBehavior<ConstantsConfig>({
   declaration,
+
+  guidance: constantsGuidance,
 
   // The configSchema holds the shape; this holds the fields to the type's own.
   parseConfig(json, target) {

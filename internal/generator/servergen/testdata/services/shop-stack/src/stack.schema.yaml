@@ -1,6 +1,8 @@
 # Two servers: Storefront, declared, serves shop-orders and shop-reviews;
 # shop-api, which Storefront calls, runs on a default server of its own.
-# The entrypoints need no environment, so the stack declares none.
+# Its one environment, Local, runs on the local target, whose sql edges
+# derive a connection string, so no entrypoint links the Cloud SQL
+# connector.
 kind: Stack
 types:
   Shop:
@@ -20,3 +22,8 @@ types:
       serves:
         - { name: shop-orders, kind: API }
         - { name: shop-reviews, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

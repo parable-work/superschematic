@@ -1,0 +1,36 @@
+{
+  "kind": "General",
+  "name": "workers",
+  "description": "A worker process, which beats while it runs. A worker that misses its deadline is missing, and the leases its principal holds on jobs are released, so its jobs go back in the queue.",
+  "types": {
+    "Worker": {
+      "name": "Worker",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["active", "missing"],
+            "transitions": [
+              { "from": "active", "to": "missing" },
+              { "from": "missing", "to": "active" }
+            ]
+          }
+        },
+        {
+          "name": "Presence",
+          "config": {
+            "ttlMs": 15000,
+            "principalField": "subject",
+            "onMissed": { "transition": "missing", "from": ["active"] },
+            "onBeat": { "transition": "active", "from": ["missing"] },
+            "releaseLeases": ["jobs"]
+          }
+        }
+      ],
+      "fields": [
+        { "name": "subject", "description": "The principal the worker runs as.", "typeRef": { "name": "string" }, "required": true }
+      ]
+    }
+  }
+}

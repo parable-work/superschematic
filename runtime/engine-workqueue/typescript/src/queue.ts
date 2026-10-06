@@ -92,6 +92,7 @@ import {
 } from '@superschematic/engine';
 
 import declaration from './declarations/Queue.behavior.json' with { type: 'json' };
+import { queueGuidance } from './guidance/queue.js';
 
 /** The most instances one claimNext tries when the config gives no maxCandidates. */
 export const DEFAULT_MAX_CANDIDATES = 100;
@@ -471,6 +472,8 @@ function staleOf(config: QueueConfig, links: unknown): string[] {
 
 export const queue = defineBehavior<QueueConfig>({
   declaration,
+
+  guidance: queueGuidance,
 
   // The configSchema holds the shape; this holds the claim to the type's
   // Workflow, the field names to its fields and excludeStale to its

@@ -388,6 +388,7 @@
         "id": "Orders.database-user.shop-db",
         "type": "gcp:sql/user:User",
         "properties": {
+          "deletionPolicy": "ABANDON",
           "instance": {
             "$output": {
               "resource": "shop-db.instance",
@@ -1108,6 +1109,7 @@
         "id": "shop-api.database-user.shop-db",
         "type": "gcp:sql/user:User",
         "properties": {
+          "deletionPolicy": "ABANDON",
           "instance": {
             "$output": {
               "resource": "shop-db.instance",
@@ -1573,6 +1575,33 @@
             "tier": "db-custom-1-3840"
           }
         },
+        "phase": "infrastructure",
+        "inherited": true,
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-db.migrator",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "databaseRoles": [
+            "cloudsqlsuperuser"
+          ],
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "shop-migrator@acme-staging.iam",
+          "project": "acme-staging",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "shop-db.instance"
+        ],
         "phase": "infrastructure",
         "inherited": true,
         "owners": [

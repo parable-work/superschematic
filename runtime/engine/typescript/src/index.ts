@@ -68,6 +68,7 @@ export { ENGINE_OWNER, engineMigrations } from './migrations.js';
 export { BehaviorConfigError, RELATION_COLUMNS, defineBehavior } from './behaviors/behavior.js';
 export type {
   AnyBehaviorImplementation,
+  BehaviorGuidance,
   BehaviorImplementation,
   BehaviorMigration,
   BehaviorReactions,
@@ -82,10 +83,13 @@ export type {
   ConfigTypeField,
   ConfigTypes,
   CreateInstanceOptions,
+  DescribeTarget,
+  DescribedTypeOperation,
   FieldReader,
   FrozenJSON,
   GuardAnswer,
   GuardRequest,
+  GuidanceError,
   InstanceChange,
   InstanceContext,
   InstanceSchemaForm,
@@ -93,6 +97,7 @@ export type {
   Instances,
   InstancesInvokeOptions,
   OperationContext,
+  OperationGuidance,
   OperationHandler,
   PublishContext,
   ReactionContext,
@@ -211,6 +216,7 @@ export type {
   ToolTarget,
 } from './tools/catalog.js';
 export type { BehaviorDocument, BehaviorOperationDocument, BehaviorSummary } from './tools/behaviors.js';
+export type { ToolGuidance } from './tools/guidance.js';
 export { BUILTIN_TOOLS, DEFAULT_INVOCATION_POLICY, DEFAULT_TOOL_KEYS, resolveToolOptions } from './tools/options.js';
 export type { BuiltinTool, InvocationPolicy, ResolvedToolOptions, ToolKeys, ToolOptions } from './tools/options.js';
 export { ANY_JSON_TYPES, typeArguments } from './tools/schema.js';

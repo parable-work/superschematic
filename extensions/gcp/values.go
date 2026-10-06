@@ -32,6 +32,7 @@ const (
 
 	// The types of the bootstrap graph (BootstrapEnvironment).
 	TypeRepository               = "gcp:artifactregistry/repository:Repository"
+	TypeRepositoryIAMMember      = "gcp:artifactregistry/repositoryIamMember:RepositoryIamMember"
 	TypeServiceAccountIAMMember  = "gcp:serviceaccount/iAMMember:IAMMember"
 	TypeBucketIAMMember          = "gcp:storage/bucketIAMMember:BucketIAMMember"
 	TypeCryptoKeyIAMMember       = "gcp:kms/cryptoKeyIAMMember:CryptoKeyIAMMember"

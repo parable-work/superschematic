@@ -318,12 +318,25 @@ func serve(ctx context.Context, stop context.CancelFunc, logger *zap.Logger, dra
 }
 {{- if .Databases }}
 
+{{ if .CloudSQL -}}
+// connect builds the pool of the database field named field, which the
+// environment sets as field_URL, a connection string, or as a Cloud SQL
+// connector configuration, which connectCloudSQL connects (cloudsql.go).
+// The pool connects when it is first used.
+{{ else -}}
 // connect builds the pool of the database field named field, which the
 // environment sets as field_URL, a connection string. The pool connects
-// when it is first used.
+// when it is first used. No environment places a database of the server
+// on Cloud SQL, so it does not link the Cloud SQL connector, and a Cloud
+// SQL connector configuration is refused.
+{{ end -}}
 func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpool.Pool, error) {
 	if db.CloudSQL != nil {
-		return nil, fmt.Errorf("%s is a Cloud SQL connector configuration, which this entrypoint does not connect yet; set %s_URL", field, field)
+{{- if .CloudSQL }}
+		return connectCloudSQL(ctx, field, *db.CloudSQL)
+{{- else }}
+		return nil, fmt.Errorf("%s is a Cloud SQL connector configuration, which server {{ .Name }} does not link: no environment of stack {{ .Stack }} placed its databases on Cloud SQL when it was built; set %s_URL, or build the stack again", field, field)
+{{- end }}
 	}
 	pool, err := pgxpool.New(ctx, db.URL)
 	if err != nil {

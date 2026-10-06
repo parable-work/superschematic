@@ -115,6 +115,7 @@ import {
 } from '@superschematic/engine';
 
 import declaration from './declarations/Budget.behavior.json' with { type: 'json' };
+import { budgetGuidance } from './guidance/budget.js';
 
 /** One meter of a Budget config, parsed. */
 export interface BudgetMeter {
@@ -802,6 +803,8 @@ function checkEscalate(target: ConfigTarget, rule: BudgetTransition): void {
 
 export const budget = defineBehavior<BudgetConfig>({
   declaration,
+
+  guidance: budgetGuidance,
 
   // The configSchema holds the shape; this holds the config to the type:
   // its fields, its Links config and the schemas its scopes point at.
