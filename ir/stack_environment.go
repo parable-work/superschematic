@@ -261,9 +261,32 @@ type ResolvedDNS struct {
 	// Values are the DNS platform's values (a zone).
 	Values map[string]any `json:"values,omitempty"`
 
+	// Credentials are the secrets the DNS platform's provider reads when
+	// the provisioner writes the records, in the order the platform names
+	// them.
+	Credentials []*DNSCredential `json:"credentials,omitempty"`
+
 	// Records are the records exposure needs, in the neutral shape the
 	// DNS platform lowers, sorted by deployable and then as produced.
 	Records []*DNSRecord `json:"records,omitempty"`
+}
+
+// DNSCredential is a secret a DNS platform's provider reads when the
+// provisioner runs, such as an API token scoped to the zone (section 6.9).
+// The target's bootstrap asks the engineer for it and stores it in the
+// target's secret store under Secret, readable by the accounts that plan
+// and deploy. A run reads it there and hands its value to the provisioner
+// in the environment variable Env, so the value never reaches the resource
+// graph or a file.
+type DNSCredential struct {
+	// Secret is the secret's name in the target's secret store.
+	Secret string `json:"secret"`
+
+	// Env is the environment variable the provider reads it from.
+	Env string `json:"env"`
+
+	// Description says what the engineer enters, for bootstrap's prompt.
+	Description string `json:"description"`
 }
 
 // DNSRecord is one record in a neutral shape (section 6.9).

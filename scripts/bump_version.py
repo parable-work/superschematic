@@ -76,6 +76,8 @@ Version sites (relative to the repository root):
                                       .../superschematic/ir vX.Y.Z
   extensions/gcp/go.mod               require .../superschematic vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
+  extensions/cloudflare/go.mod        require .../superschematic vX.Y.Z and
+                                      .../superschematic/ir vX.Y.Z
   extensions/pulumi/go.mod            require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z and
                                       .../extensions/gcp vX.Y.Z (its tests')
@@ -128,6 +130,7 @@ GO_MODULES = [
     "runtime/migrate/go",
     "",
     "extensions/gcp",
+    "extensions/cloudflare",
     "extensions/pulumi",
     "extensions/topcoat",
     "cmd/superschematic",
@@ -424,7 +427,7 @@ def sites():
     # The extension modules and the installed binary, for the same reason,
     # and because each is tagged: a consumer at a tag resolves its siblings
     # from theirs.
-    for ext in ("gcp", "topcoat"):
+    for ext in ("gcp", "cloudflare", "topcoat"):
         out.append(
             (
                 ROOT / "extensions" / ext / "go.mod",

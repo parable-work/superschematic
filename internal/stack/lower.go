@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -99,14 +100,24 @@ func (r *resolver) lowerDNS(out *ir.ResolvedEnvironment, records []*ir.DNSRecord
 		dns.Platform = ir.ManualDNS
 	}
 	out.DNS = dns
-	if dns.Platform == ir.ManualDNS || len(records) == 0 {
+	if dns.Platform == ir.ManualDNS {
 		return
 	}
 	spec, _ := r.reg.DNSPlatform(dns.Platform)
-	ctx := registry.DNSContext{Environment: r.stackEnvironment(), Values: deepCopy(dns.Values).(map[string]any)}
-	if ctx.Values == nil {
-		ctx.Values = map[string]any{}
+	newContext := func() registry.DNSContext {
+		ctx := registry.DNSContext{Environment: r.stackEnvironment(), Values: deepCopy(dns.Values).(map[string]any)}
+		if ctx.Values == nil {
+			ctx.Values = map[string]any{}
+		}
+		return ctx
 	}
+	if spec.Credentials != nil {
+		dns.Credentials = r.dnsCredentials(spec.Name, spec.Credentials(newContext()))
+	}
+	if len(records) == 0 {
+		return
+	}
+	ctx := newContext()
 	for _, rec := range records {
 		copied := *rec
 		copied.Name = deepCopy(rec.Name)
@@ -119,6 +130,32 @@ func (r *resolver) lowerDNS(out *ir.ResolvedEnvironment, records []*ir.DNSRecord
 		return
 	}
 	r.produce("dns", ir.PhaseExposure, resources)
+}
+
+// envVarPattern is an environment variable's name, as a shell spells one.
+var envVarPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// dnsCredentials checks the credentials a DNS platform names: each names a
+// secret and an environment variable, and no two name the same of either,
+// since a run sets one variable from one secret.
+func (r *resolver) dnsCredentials(platform string, creds []ir.DNSCredential) []*ir.DNSCredential {
+	var out []*ir.DNSCredential
+	secrets, envs := map[string]bool{}, map[string]bool{}
+	for _, c := range creds {
+		switch {
+		case c.Secret == "":
+			r.fail(CodeLowering, "DNS platform %s names a credential with no secret", platform)
+		case !envVarPattern.MatchString(c.Env):
+			r.fail(CodeLowering, "DNS platform %s reads secret %s from environment variable %q, which is not a variable name", platform, c.Secret, c.Env)
+		case secrets[c.Secret] || envs[c.Env]:
+			r.fail(CodeLowering, "DNS platform %s names secret %s or environment variable %s for two credentials", platform, c.Secret, c.Env)
+		default:
+			secrets[c.Secret], envs[c.Env] = true, true
+			copied := c
+			out = append(out, &copied)
+		}
+	}
+	return out
 }
 
 // mergeResources builds the graph from the produced resources. Two
@@ -224,7 +261,7 @@ func (r *resolver) checkGraph(out *ir.ResolvedEnvironment) {
 		ok, err := r.reg.ValidateResource(res)
 		switch {
 		case !ok:
-			r.fail(CodeGraph, "resource %s has type %s, which no registered target has a schema for", res.ID, res.Type)
+			r.fail(CodeGraph, "resource %s has type %s, which no registered target or DNS platform has a schema for", res.ID, res.Type)
 		case err != nil:
 			r.fail(CodeGraph, "resource %s (%s): %v", res.ID, res.Type, err)
 		}
