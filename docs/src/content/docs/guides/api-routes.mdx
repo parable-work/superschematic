@@ -99,7 +99,7 @@ table's field of the same name. A field with no column behind it is
 
 <Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['OrderLineView', 'OrderView']} />
 
-<Snippet file="go/orders.go" symbol="orderView" />
+<Snippet file="go/shop-orders/orders.go" symbol="orderView" />
 
 ## Errors
 
@@ -114,12 +114,12 @@ whose `detail` is the message:
 - Any other error is logged and answers 500 with a generic message, so no
   internal detail reaches the caller.
 
-<Snippet file="go/orders.go" symbol="Orders.CancelOrder" />
+<Snippet file="go/shop-orders/orders.go" symbol="Orders.CancelOrder" />
 
 A write that breaks a unique index fails in Postgres with code `23505`. The
 review service turns it into a 409:
 
-<Snippet file="go/orders.go" symbol="Reviews.WriteReview" />
+<Snippet file="go/shop-orders/orders.go" symbol="Reviews.WriteReview" />
 
 ## Encrypted payloads
 

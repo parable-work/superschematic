@@ -3584,7 +3584,9 @@ and its amendment on `Deps` left both to the build. Building them for Go
 
 OpenTelemetry export, the Cloud SQL connector and the entrypoints of
 TypeScript and Rust servers are not built. `examples/acme-shop` keeps its
-hand wiring until a later change moves it onto the entrypoint.
+implementations at `go/{service}`, which the entrypoints of its
+`shop-stack` import, and `stack dev` runs it (`docs/stack-model.md`,
+section 14, milestone 1).
 
 The rule is reversible until the first release.
 

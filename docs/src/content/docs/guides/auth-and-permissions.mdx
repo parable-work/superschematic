@@ -71,8 +71,10 @@ does for API keys; see [Write an extension](/superschematic/extending/write-an-e
 
 The Go server's `Config.AuthMiddleware` runs before every protected route.
 It puts the caller's id and roles on the request context; the generated
-routes read them. With the `session` provider, your middleware verifies the
-bearer token, then resolves it through the generated stores:
+routes read them. The implementation's `AuthMiddleware(deps)` returns it,
+and the server's generated entrypoint passes it to `Config`. With the
+`session` provider, your middleware verifies the bearer token, then
+resolves it through the generated stores:
 
 <Snippet file="go/auth.go" symbol={['Auth', 'Auth.Middleware', 'Auth.resolve']} />
 
@@ -85,9 +87,10 @@ roles, each with its permissions. `session.RequireAuth` answers 401 when no
 caller was found, before any route runs.
 
 The ORM keeps its own idea of the acting user, which a soft delete records.
-The orders service sets it from the caller after authentication:
+The orders service builds its `Auth` over the generated stores from its
+`Deps`, and sets the acting user from the caller after authentication:
 
-<Snippet file="go/orders.go" symbol="NewOrdersHandler" />
+<Snippet file="go/shop-orders/implementation.go" symbol={['AuthMiddleware', 'Authenticate']} />
 
 ## Say who the caller is: TypeScript
 

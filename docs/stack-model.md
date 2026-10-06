@@ -224,8 +224,9 @@ second form covers each of its variables, and any member a later contract
 adds. The resolver applies the same rule (`field-collision`).
 
 The generated entrypoint (section 8.1) reads these fields, so application
-code never names an environment variable. `examples/acme-shop/go/example_test.go`
-connecting with `os.Getenv("DATABASE_URL")` is the code this replaces.
+code never names an environment variable. It replaces a hand-written
+`main` that connects with `os.Getenv("DATABASE_URL")`, as
+`examples/acme-shop` did before its stack.
 
 ## 4. Authoring
 
@@ -1439,8 +1440,7 @@ found with no declaration:
 
 Outside a stack the scaffold stays opt-in. Nothing imports the package
 but a server's generated `main` (section 8.1), and a build of a tree whose
-Go code lives elsewhere, such as `examples/acme-shop`, would gain a stub
-package beside it.
+Go code lives elsewhere would gain a stub package beside it.
 
 A server that serves several APIs calls each one's constructor with that
 API's `Deps`, built from the server's shared connections and clients.
@@ -2088,9 +2088,9 @@ registrations.
    derives the service-auth field; the Cloud SQL connector; OpenTelemetry
    export; then `Deps`, the constructor signature, the scaffold and the
    entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
-   hand wiring until a later change moves it onto the entrypoint, which
-   moves the code its docs pages quote (`go/products.go`, `go/orders.go`,
-   `NewHandler`).
+   implementations at the scaffold layout, `go/shop-api` and
+   `go/shop-orders`, which the entrypoints of its `shop-stack` import
+   (section 14, milestone 1).
 5. **Config and build plan.** `calls` is in the schema config, beside
    `authDb`, in the TypeScript type and the data-form schema, valid on an
    API config and naming API services. It is a build-order edge for the
@@ -2191,7 +2191,21 @@ model, or retired, when it lands.
 1. **Wiring with no cloud.** Derived config fields, the Go entrypoint, the
    `local` target and `stack dev`. Done when acme-shop runs end to end and
    nothing in `examples/acme-shop` writes a connection string, a URL or a
-   port by hand.
+   port by hand. Done: `examples/acme-shop`'s `shop-stack` deploys
+   `shop-api` and `shop-orders`, each on a default Go server, and its `Dev`
+   environment is on the `local` target. Their implementations sit at
+   `go/shop-api` and `go/shop-orders` behind `Deps`, with no `main` and no
+   connection code. `TestStackDevRunsTheShop` (`examples/acme-shop/go`)
+   runs `superschematic stack dev`, which starts Postgres with `shop-db`
+   migrated and both servers on their generated entrypoints; it waits for
+   each `/readyz`, signs a user in through the ORM, calls `CreateProduct`
+   and `ListProducts` and then `PlaceOrder` through the generated Go SDKs,
+   and stops the stack with `--remove-database`. Every URL, port and
+   connection string it uses comes from the resolved `environment.json`.
+   `scripts/check.sh` runs it in the full tier. What stays hand-written
+   runs outside the stack: the Topcoat app's listen address, the Rust
+   server's (port 0, which it prints), and the in-process base URL of the
+   TypeScript storefront's tests.
 2. **Model, resolver and seams.** The Stack kind, environments,
    `environment.json`, the registry specs, and levels 1 to 3 in CI.
    Done when a test extension adds a platform and a provisioner with no
