@@ -1,0 +1,207 @@
+{
+  "token": "cloudflare:index/dnsRecord:DnsRecord",
+  "terraform": {
+    "type": "cloudflare_dns_record",
+    "renames": {
+      "data.digestType": "digest_type",
+      "data.keyTag": "key_tag",
+      "data.latDegrees": "lat_degrees",
+      "data.latDirection": "lat_direction",
+      "data.latMinutes": "lat_minutes",
+      "data.latSeconds": "lat_seconds",
+      "data.longDegrees": "long_degrees",
+      "data.longDirection": "long_direction",
+      "data.longMinutes": "long_minutes",
+      "data.longSeconds": "long_seconds",
+      "data.matchingType": "matching_type",
+      "data.precisionHorz": "precision_horz",
+      "data.precisionVert": "precision_vert",
+      "data.publicKey": "public_key",
+      "includeShadowMetadata": "include_shadow_metadata",
+      "privateRouting": "private_routing",
+      "settings.flattenCname": "flatten_cname",
+      "settings.ipv4Only": "ipv4_only",
+      "settings.ipv6Only": "ipv6_only",
+      "zoneId": "zone_id"
+    }
+  },
+  "inputProperties": {
+    "comment": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "data": {
+      "$ref": "#/types/cloudflare:index/DnsRecordData:DnsRecordData"
+    },
+    "includeShadowMetadata": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "priority": {
+      "type": "number"
+    },
+    "privateRouting": {
+      "type": "boolean"
+    },
+    "proxied": {
+      "type": "boolean"
+    },
+    "settings": {
+      "$ref": "#/types/cloudflare:index/DnsRecordSettings:DnsRecordSettings"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ttl": {
+      "type": "number"
+    },
+    "type": {
+      "type": "string"
+    },
+    "zoneId": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "name",
+    "ttl",
+    "type",
+    "zoneId"
+  ],
+  "types": {
+    "cloudflare:index/DnsRecordData:DnsRecordData": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "number"
+        },
+        "altitude": {
+          "type": "number"
+        },
+        "certificate": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "digestType": {
+          "type": "number"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "flags": {
+          "$ref": "pulumi.json#/Any"
+        },
+        "keyTag": {
+          "type": "number"
+        },
+        "latDegrees": {
+          "type": "number"
+        },
+        "latDirection": {
+          "type": "string"
+        },
+        "latMinutes": {
+          "type": "number"
+        },
+        "latSeconds": {
+          "type": "number"
+        },
+        "longDegrees": {
+          "type": "number"
+        },
+        "longDirection": {
+          "type": "string"
+        },
+        "longMinutes": {
+          "type": "number"
+        },
+        "longSeconds": {
+          "type": "number"
+        },
+        "matchingType": {
+          "type": "number"
+        },
+        "order": {
+          "type": "number"
+        },
+        "port": {
+          "type": "number"
+        },
+        "precisionHorz": {
+          "type": "number"
+        },
+        "precisionVert": {
+          "type": "number"
+        },
+        "preference": {
+          "type": "number"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "protocol": {
+          "type": "number"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "regex": {
+          "type": "string"
+        },
+        "replacement": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "number"
+        },
+        "service": {
+          "type": "string"
+        },
+        "size": {
+          "type": "number"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "number"
+        },
+        "usage": {
+          "type": "number"
+        },
+        "value": {
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      }
+    },
+    "cloudflare:index/DnsRecordSettings:DnsRecordSettings": {
+      "type": "object",
+      "properties": {
+        "flattenCname": {
+          "type": "boolean"
+        },
+        "ipv4Only": {
+          "type": "boolean"
+        },
+        "ipv6Only": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

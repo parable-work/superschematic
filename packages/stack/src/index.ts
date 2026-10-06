@@ -119,7 +119,7 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
   readonly target?: T;
   /** Where exposed servers are reached. */
   readonly domain?: string;
-  /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone } }`. */
+  /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
   /** Settings per deployable; `of` is a service handle or a declared deployable's class. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };

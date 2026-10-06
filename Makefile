@@ -26,7 +26,7 @@ export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages.
 export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp extensions/pulumi extensions/topcoat cmd/superschematic
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
 
 # Two programs, one CLI (docs/stack-model.md, section 13). BIN is the binary
 # a release ships and a user installs: cmd/superschematic, a Go module of its
@@ -46,7 +46,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
-        gcp-schemas gcp-schemas-check ts python rust \
+        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check ts python rust \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke scrub versions clean
 
@@ -125,6 +125,17 @@ gcp-schemas:
 
 gcp-schemas-check:
 	cd extensions/gcp && go run ./internal/tools/providerschemas -check
+
+# The Cloudflare extension's pinned provider schemas (extensions/cloudflare/
+# schemas), from the pulumi-cloudflare release its pulumi-cloudflare.json
+# pins, by the same tool (stack/providerschema/pintool). Move the pin with
+# `cd extensions/cloudflare && go run ./internal/tools/providerschemas
+# -version X.Y.Z` and update cloudflare.ProviderVersion to match.
+cloudflare-schemas:
+	cd extensions/cloudflare && go run ./internal/tools/providerschemas
+
+cloudflare-schemas-check:
+	cd extensions/cloudflare && go run ./internal/tools/providerschemas -check
 
 # The engine and the work-queue package implement the core's behaviors over
 # a copy of each declaration (internal/registry/behaviors), which the core
