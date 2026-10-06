@@ -180,21 +180,17 @@ func (s *Schema) validateOperationSet(cfg *validateConfig, set *OperationSet) []
 // TypeScript brand carries only the scalar's name until then. Run it once
 // the scalars are hydrated.
 //
-// It checks that every scalar whose language primitive is object says which
-// JSON it holds through its json_schema type mapping (ObjectScalarJSONError):
-// a data-form scalar written by name and primitive only is a catalog
-// reference, which only hydration fills in. And it checks
+// It checks that the validators hold every scalar whose language primitive
+// is object to JSON (ScalarDef.ObjectJSONError): a data-form scalar written
+// by name and primitive only is a catalog reference, which only hydration
+// fills in. And it checks
 // Validate<T, { uploadMaxBytes }> on every field of a type and every
 // operation: the bound is positive and the field is a single file-upload
 // scalar, one whose ScalarDef carries FileUpload metadata.
 func (s *Schema) ValidateHydrated() []error {
 	var errs []error
 	for _, name := range sortedStringMapKeys(s.Scalars) {
-		def := s.Scalars[name]
-		if def == nil {
-			continue
-		}
-		if err := ObjectScalarJSONError(name, def.LanguagePrimitive, def.TypeMappings["json_schema"]); err != nil {
+		if err := s.Scalars[name].ObjectJSONError(); err != nil {
 			errs = append(errs, err)
 		}
 	}

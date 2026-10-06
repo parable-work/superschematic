@@ -37,10 +37,11 @@ type ScalarCatalog interface {
 //
 // A row whose primitive the loader reads as the object language primitive
 // (ir.CatalogLanguagePrimitive, which reads a spelling it does not know as
-// object too) must say which JSON the scalar holds: its JSONSchemaType,
-// which becomes the scalar's json_schema type mapping, is "object", "array"
-// or "any" (ir.ObjectScalarJSONError). A catalog with a row that does not
-// is refused, with every such row named.
+// object too) must be one the validators hold to JSON
+// (ir.ScalarDef.ObjectJSONError): its JSONSchemaType, which becomes the
+// scalar's json_schema type mapping, is "any", or "object" or "array" with
+// no pattern and no length, and it is not a file-upload scalar. A catalog
+// with a row that is not is refused, with every such row named.
 func (r *Registry) RegisterScalars(owner string, catalog ScalarCatalog) error {
 	if err := r.registrable("scalar catalog"); err != nil {
 		return err
@@ -64,10 +65,14 @@ func (r *Registry) RegisterScalars(owner string, catalog ScalarCatalog) error {
 }
 
 // checkObjectScalarRows refuses each row of catalog the loader would hydrate
-// into an object scalar that does not say which JSON it holds. A row whose
-// primitive the loader does not know is named with that primitive, since
-// the loader reads it as object without saying so.
+// into an object scalar the validators do not hold to JSON: the row read as
+// the loader fills a ScalarDef in from it, its upload metadata included
+// (ir.ScalarDef.ObjectJSONError). A row whose primitive the loader does not
+// know gets a message of its own, which names that primitive and the
+// spellings it may have meant: the loader reads it as object without saying
+// so.
 func checkObjectScalarRows(owner string, catalog ScalarCatalog) error {
+	uploads, declaresUploads := catalog.(UploadCatalog)
 	var errs []error
 	for _, name := range catalog.Names() {
 		row, ok := catalog.Scalar(name)
@@ -75,13 +80,27 @@ func checkObjectScalarRows(owner string, catalog ScalarCatalog) error {
 			continue
 		}
 		primitive, known := ir.CatalogLanguagePrimitive(row.Primitive)
-		err := ir.ObjectScalarJSONError(name, primitive, row.JSONSchemaType)
+		def := &ir.ScalarDef{
+			Name:              name,
+			LanguagePrimitive: primitive,
+			Pattern:           row.Pattern,
+			MinLength:         row.MinLength,
+			MaxLength:         row.MaxLength,
+			TypeMappings:      map[string]string{"json_schema": row.JSONSchemaType},
+		}
+		if declaresUploads {
+			if upload, ok := uploads.Upload(name); ok {
+				def.FileUpload = &upload.FileUpload
+			}
+		}
+		err := def.ObjectJSONError()
 		switch {
 		case err == nil:
 		case known:
 			errs = append(errs, fmt.Errorf("registry: %s's scalar catalog: %w", owner, err))
 		default:
-			errs = append(errs, fmt.Errorf("registry: %s's scalar catalog: %s has primitive %q, which the loader does not know and reads as object: %w", owner, name, row.Primitive, err))
+			errs = append(errs, fmt.Errorf("registry: %s's scalar catalog: scalar %s has primitive %q, which the loader does not know and reads as object, so the validators check its values as strings: "+
+				"spell the primitive String, Int, Float or Bool, or, for a scalar that holds JSON, Object with a JSONSchemaType of object, array or any", owner, name, row.Primitive))
 		}
 	}
 	return errors.Join(errs...)

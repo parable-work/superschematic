@@ -122,21 +122,69 @@ func TestRegisterScalarsRefusesObjectRowWithoutJSONMapping(t *testing.T) {
 }
 
 // TestRegisterScalarsNamesAnUnknownPrimitive: the loader reads a primitive
-// it does not know as object, so a row with one and no JSON mapping gets the
-// object scalar refusal, which names the primitive the row wrote. With a
-// JSON mapping it is an object scalar and registers, as before.
+// it does not know as object, so a row with one and no JSON mapping is
+// refused with a message of its own: it names the scalar once, the
+// primitive the row wrote, and the spellings it may have meant. With a JSON
+// mapping it is an object scalar and registers, as before.
 func TestRegisterScalarsNamesAnUnknownPrimitive(t *testing.T) {
 	row := &scalars.ScalarMetadata{CanonicalName: "Acme.Id", Symbol: "AcmeId", Primitive: "Uuid"}
 	err := New(naming.Default()).RegisterScalars("acme", ScalarCatalogOf(map[string]*scalars.ScalarMetadata{"Acme.Id": row}))
-	want := `registry: acme's scalar catalog: Acme.Id has primitive "Uuid", which the loader does not know and reads as object: scalar Acme.Id has language primitive object but no json_schema type mapping`
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("RegisterScalars: err = %v, want %q", err, want)
+	want := `registry: acme's scalar catalog: scalar Acme.Id has primitive "Uuid", which the loader does not know and reads as object, so the validators check its values as strings: ` +
+		`spell the primitive String, Int, Float or Bool, or, for a scalar that holds JSON, Object with a JSONSchemaType of object, array or any`
+	if err == nil || err.Error() != want {
+		t.Fatalf("RegisterScalars: err = %v\nwant %s", err, want)
 	}
 
 	mapped := *row
 	mapped.JSONSchemaType = "object"
 	if err := New(naming.Default()).RegisterScalars("acme", ScalarCatalogOf(map[string]*scalars.ScalarMetadata{"Acme.Id": &mapped})); err != nil {
 		t.Fatalf("RegisterScalars with a JSON mapping: %v", err)
+	}
+}
+
+// TestRegisterScalarsJudgesARowAsTheValidatorsDo: a row is read as the
+// loader fills a scalar in from it. An object row whose JSONSchemaType is
+// object or array but which has a pattern or a length, rules on a string,
+// is refused with them named, and so is an object row the catalog declares
+// as a file upload, which takes the String primitive. Geo.Location, whose
+// row has a pattern and the String primitive, is no object scalar.
+func TestRegisterScalarsJudgesARowAsTheValidatorsDo(t *testing.T) {
+	rows := map[string]*scalars.ScalarMetadata{
+		"Geo.Location": scalars.ScalarMetadataByCanonical["Geo.Location"],
+		"Acme.Blob":    {CanonicalName: "Acme.Blob", Symbol: "AcmeBlob", Primitive: "Object", JSONSchemaType: "object", MaxLength: 10},
+		"Media.Photo":  {CanonicalName: "Media.Photo", Symbol: "MediaPhoto", Primitive: "Object"},
+	}
+	catalog, err := ScalarCatalogWithUploads(ScalarCatalogOf(rows), map[string]ScalarUpload{
+		"Media.Photo": {FileUpload: ir.FileUploadConfig{MaxSize: 1024}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := New(naming.Default())
+	err = reg.RegisterScalars("acme", catalog)
+	if err == nil {
+		t.Fatal("RegisterScalars accepted object rows the validators check as strings")
+	}
+	for _, want := range []string{
+		"registry: acme's scalar catalog: scalar Acme.Blob has language primitive object and json_schema type mapping object, but its maxLength 10 is a rule on a string, so the validators check its values as strings: drop the maxLength",
+		"registry: acme's scalar catalog: scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
+			"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not say %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "Geo.Location") {
+		t.Errorf("error %q names Geo.Location, which has the String primitive", err.Error())
+	}
+	if reg.scalars != nil {
+		t.Fatal("a refused catalog was installed")
+	}
+
+	rows["Acme.Blob"] = &scalars.ScalarMetadata{CanonicalName: "Acme.Blob", Symbol: "AcmeBlob", Primitive: "Object", JSONSchemaType: "object"}
+	rows["Media.Photo"] = &scalars.ScalarMetadata{CanonicalName: "Media.Photo", Symbol: "MediaPhoto", Primitive: "String"}
+	if err := New(naming.Default()).RegisterScalars("acme", catalog); err != nil {
+		t.Fatalf("RegisterScalars with the length dropped and the upload a string: %v", err)
 	}
 }
 

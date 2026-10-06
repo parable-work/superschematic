@@ -151,27 +151,63 @@ func (s *ScalarDef) StructuredJSONType() string {
 	return ""
 }
 
-// ObjectScalarJSONError returns the error for a scalar whose language
-// primitive is object and whose json_schema type mapping is not "object",
-// "array" or "any", and nil for any other scalar. The validators read which
-// JSON a scalar holds only from that mapping (IsAnyJSON,
-// StructuredJSONType), so without one the schema runtimes and the engine
-// would check the scalar as a string while every generated type holds an
-// object. The loader refuses such a scalar once the catalog has filled it
-// in (Schema.ValidateHydrated), the registry refuses such a catalog row
+// ObjectJSONError returns the error for a scalar whose language primitive is
+// object but which the validators do not hold to JSON, and nil for any
+// other scalar. The validators read which JSON a scalar holds only through
+// IsAnyJSON and StructuredJSONType, so such a scalar is checked as a string
+// by the schema runtimes and the engine while every generated type holds an
+// object. The loader refuses it once the catalog has filled it in
+// (Schema.ValidateHydrated), the registry refuses such a catalog row
 // (RegisterScalars), and the engine refuses such a document at define and
-// publish, each with this message.
-func ObjectScalarJSONError(name string, primitive LanguagePrimitive, jsonSchemaType string) error {
-	if primitive != LanguageObject {
+// publish, each with this message. ir/testdata/object_scalar_errors.json
+// holds the messages, which the engine's tests read too.
+//
+// The message fits the cause: an upload scalar takes the string primitive;
+// a json_schema mapping of object or array with a pattern or a length,
+// which are rules on a string, is not structured JSON until they go; any
+// other scalar says which JSON it holds, uses Generic.JSON, or becomes a
+// nested object type.
+func (s *ScalarDef) ObjectJSONError() error {
+	if s == nil || s.LanguagePrimitive != LanguageObject || s.IsAnyJSON() || s.StructuredJSONType() != "" {
 		return nil
 	}
-	switch jsonSchemaType {
-	case JSONSchemaObjectType, JSONSchemaArrayType, JSONSchemaAnyType:
-		return nil
+	if s.FileUpload != nil {
+		return fmt.Errorf("scalar %s is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: "+
+			"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)", s.Name)
+	}
+	switch jsonType := s.TypeMappings["json_schema"]; jsonType {
+	case JSONSchemaObjectType, JSONSchemaArrayType:
+		var rules, names []string
+		if s.Pattern != "" {
+			rules = append(rules, fmt.Sprintf("pattern %q", s.Pattern))
+			names = append(names, "pattern")
+		}
+		if s.MinLength > 0 {
+			rules = append(rules, fmt.Sprintf("minLength %d", s.MinLength))
+			names = append(names, "minLength")
+		}
+		if s.MaxLength > 0 {
+			rules = append(rules, fmt.Sprintf("maxLength %d", s.MaxLength))
+			names = append(names, "maxLength")
+		}
+		verb := "is a rule"
+		if len(rules) > 1 {
+			verb = "are rules"
+		}
+		return fmt.Errorf("scalar %s has language primitive object and json_schema type mapping %s, but its %s %s on a string, so the validators check its values as strings: drop the %s",
+			s.Name, jsonType, joinList(rules), verb, joinList(names))
 	}
 	return fmt.Errorf("scalar %s has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds: "+
 		"add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row), "+
-		"use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type", name)
+		"use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type", s.Name)
+}
+
+// joinList joins items as a sentence lists them: "a", "a and b", "a, b and c".
+func joinList(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 // CatalogLanguagePrimitive is the language primitive the loader gives a

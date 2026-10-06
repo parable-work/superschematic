@@ -1,6 +1,9 @@
 package ir
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -33,8 +36,7 @@ func TestValidateHydrated_UploadMaxBytesRequiresPositiveFileUploadScalar(t *test
 	limit := int64(64 * 1024 * 1024)
 	s := newTestSchema()
 	// The String primitive, as every upload row in a catalog here has it
-	// (Acme.Photo, Media.Photo): an object one would need a json_schema
-	// mapping (TestValidateHydrated_ObjectScalarSaysWhichJSON).
+	// (Acme.Photo, Media.Photo): ObjectJSONError refuses an object one.
 	s.Scalars["Media.File"] = &ScalarDef{
 		Name:              "Media.File",
 		LanguagePrimitive: LanguageString,
@@ -68,46 +70,70 @@ func TestValidateHydrated_UploadMaxBytesRequiresPositiveFileUploadScalar(t *test
 	}
 }
 
-// TestValidateHydrated_ObjectScalarSaysWhichJSON: a scalar whose language
-// primitive is object is refused unless its json_schema type mapping says
-// which JSON it holds (object, array or any), with a message that names the
-// scalar and the three routes. A mapping that names another type is refused
-// too, and a scalar of any other primitive needs no mapping.
+// objectScalarCases are ir/testdata/object_scalar_errors.json: scalars with
+// the object language primitive and the error each one gets. The engine's
+// tests read the same file, so the two messages cannot drift.
+func objectScalarCases(t *testing.T) []struct {
+	Case   string     `json:"case"`
+	Scalar *ScalarDef `json:"scalar"`
+	Error  *string    `json:"error"`
+} {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "object_scalar_errors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Cases []struct {
+			Case   string     `json:"case"`
+			Scalar *ScalarDef `json:"scalar"`
+			Error  *string    `json:"error"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Cases) == 0 {
+		t.Fatal("object_scalar_errors.json has no cases")
+	}
+	return file.Cases
+}
+
+// TestScalarDef_ObjectJSONError: an object scalar the validators do not
+// hold to JSON (IsAnyJSON, StructuredJSONType) gets the message its cause
+// calls for, word for word, and any other scalar none.
+func TestScalarDef_ObjectJSONError(t *testing.T) {
+	for _, tc := range objectScalarCases(t) {
+		t.Run(tc.Case, func(t *testing.T) {
+			err := tc.Scalar.ObjectJSONError()
+			switch {
+			case tc.Error == nil && err != nil:
+				t.Fatalf("ObjectJSONError() = %v, want none", err)
+			case tc.Error != nil && (err == nil || err.Error() != *tc.Error):
+				t.Fatalf("ObjectJSONError() = %v\nwant %s", err, *tc.Error)
+			}
+		})
+	}
+}
+
+// TestValidateHydrated_ObjectScalarSaysWhichJSON: ValidateHydrated reports
+// each object scalar ObjectJSONError refuses, and passes the others.
 func TestValidateHydrated_ObjectScalarSaysWhichJSON(t *testing.T) {
-	s := newTestSchema()
-	s.Scalars["Acme.Blob"] = &ScalarDef{Name: "Acme.Blob", LanguagePrimitive: LanguageObject, Description: "An opaque payload"}
-	errs := s.ValidateHydrated()
-	if len(errs) != 1 {
-		t.Fatalf("ValidateHydrated() = %v, want one error for Acme.Blob", errs)
-	}
-	for _, want := range []string{
-		"scalar Acme.Blob has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds",
-		"add typeMappings: { json_schema: object } (or array or any",
-		"use the catalog's Generic.JSON for free-form JSON",
-		"model a value with known fields as a nested object type",
-	} {
-		if !strings.Contains(errs[0].Error(), want) {
-			t.Errorf("error %q does not say %q", errs[0], want)
-		}
-	}
-
-	for _, jsonType := range []string{"object", "array", "any"} {
-		s.Scalars["Acme.Blob"].TypeMappings = map[string]string{"json_schema": jsonType, "sql": "JSONB"}
-		if errs := s.ValidateHydrated(); len(errs) != 0 {
-			t.Errorf("json_schema %s: ValidateHydrated() = %v, want none", jsonType, errs)
-		}
-	}
-	s.Scalars["Acme.Blob"].TypeMappings = map[string]string{"json_schema": "string"}
-	if errs := s.ValidateHydrated(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "scalar Acme.Blob has language primitive object") {
-		t.Errorf("json_schema string: ValidateHydrated() = %v, want the Acme.Blob error", errs)
-	}
-
-	delete(s.Scalars, "Acme.Blob")
-	for _, primitive := range []LanguagePrimitive{LanguageString, LanguageNumber, LanguageBoolean} {
-		s.Scalars["Acme.Plain"] = &ScalarDef{Name: "Acme.Plain", LanguagePrimitive: primitive}
-		if errs := s.ValidateHydrated(); len(errs) != 0 {
-			t.Errorf("%s scalar with no mapping: ValidateHydrated() = %v, want none", primitive, errs)
-		}
+	for _, tc := range objectScalarCases(t) {
+		t.Run(tc.Case, func(t *testing.T) {
+			s := newTestSchema()
+			s.Scalars[tc.Scalar.Name] = tc.Scalar
+			errs := s.ValidateHydrated()
+			if tc.Error == nil {
+				if len(errs) != 0 {
+					t.Fatalf("ValidateHydrated() = %v, want none", errs)
+				}
+				return
+			}
+			if len(errs) != 1 || errs[0].Error() != *tc.Error {
+				t.Fatalf("ValidateHydrated() = %v, want the one error %q", errs, *tc.Error)
+			}
+		})
 	}
 }
 

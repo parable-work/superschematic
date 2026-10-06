@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1244,19 +1245,16 @@ func TestHydrateScalarsKeepsInlineDataFormScalar(t *testing.T) {
 
 // objectScalarService lays out a data-form service, in JSON or YAML, whose
 // Widget.payload is of the scalar name, which the file declares with the
-// object language primitive, and with description and a json_schema type
-// mapping when they are not empty.
-func objectScalarService(t *testing.T, form, name, description, jsonSchema string) string {
+// object language primitive and fields (a description, typeMappings, a
+// length, a fileUpload, ...).
+func objectScalarService(t *testing.T, form, name string, fields map[string]any) string {
 	t.Helper()
+	scalar := map[string]any{"name": name, "languagePrimitive": "object"}
+	for key, value := range fields {
+		scalar[key] = value
+	}
 	switch form {
 	case "json":
-		scalar := map[string]any{"name": name, "languagePrimitive": "object"}
-		if description != "" {
-			scalar["description"] = description
-		}
-		if jsonSchema != "" {
-			scalar["typeMappings"] = map[string]string{"json_schema": jsonSchema}
-		}
 		text, err := json.MarshalIndent(map[string]any{
 			"scalars": map[string]any{name: scalar},
 			"types": map[string]any{"Widget": map[string]any{
@@ -1273,16 +1271,23 @@ func objectScalarService(t *testing.T, form, name, description, jsonSchema strin
 			"src/widget.schema.json": string(text),
 		})
 	case "yaml":
-		scalar := "  " + name + ":\n    name: " + name + "\n    languagePrimitive: object\n"
-		if description != "" {
-			scalar += "    description: " + description + "\n"
+		keys := make([]string, 0, len(scalar))
+		for key := range scalar {
+			keys = append(keys, key)
 		}
-		if jsonSchema != "" {
-			scalar += "    typeMappings:\n      json_schema: " + jsonSchema + "\n"
+		sort.Strings(keys)
+		var lines strings.Builder
+		for _, key := range keys {
+			// A JSON value is a YAML flow value.
+			value, err := json.Marshal(scalar[key])
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines.WriteString("    " + key + ": " + string(value) + "\n")
 		}
 		return writeService(t, map[string]string{
 			"schema.config.yaml": "name: temp-service\nkind: General\noutputs: {}\n",
-			"src/widget.schema.yaml": "scalars:\n" + scalar +
+			"src/widget.schema.yaml": "scalars:\n  " + name + ":\n" + lines.String() +
 				"types:\n" +
 				"  Widget:\n" +
 				"    name: Widget\n" +
@@ -1304,7 +1309,7 @@ func objectScalarService(t *testing.T, form, name, description, jsonSchema strin
 func TestLoadServiceRefusesObjectScalarWithoutJSONMapping(t *testing.T) {
 	for _, form := range []string{"json", "yaml"} {
 		t.Run(form, func(t *testing.T) {
-			_, err := LoadService(objectScalarService(t, form, "Acme.Blob", "An opaque payload", ""))
+			_, err := LoadService(objectScalarService(t, form, "Acme.Blob", map[string]any{"description": "An opaque payload"}))
 			if err == nil {
 				t.Fatal("LoadService accepted an object scalar that does not say which JSON it holds")
 			}
@@ -1329,13 +1334,54 @@ func TestLoadServiceTakesObjectScalarThatSaysWhichJSON(t *testing.T) {
 	for _, form := range []string{"json", "yaml"} {
 		for _, jsonType := range []string{"object", "array", "any"} {
 			t.Run(form+"/"+jsonType, func(t *testing.T) {
-				schema, err := LoadService(objectScalarService(t, form, "Acme.Blob", "An opaque payload", jsonType))
+				schema, err := LoadService(objectScalarService(t, form, "Acme.Blob", map[string]any{
+					"description":  "An opaque payload",
+					"typeMappings": map[string]string{"json_schema": jsonType},
+				}))
 				if err != nil {
 					t.Fatalf("LoadService: %v", err)
 				}
 				def := schema.Scalars["Acme.Blob"]
 				if def == nil || def.LanguagePrimitive != ir.LanguageObject || def.TypeMappings["json_schema"] != jsonType {
 					t.Fatalf("Acme.Blob = %+v, want the object primitive and json_schema %s", def, jsonType)
+				}
+			})
+		}
+	}
+}
+
+// TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString: the loader
+// judges an object scalar as the validators read it. A json_schema mapping
+// of object with a length, a rule on a string, is no JSON object to them,
+// and an upload scalar with the object primitive is checked as a string:
+// each is refused, with the length or the string primitive named.
+func TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString(t *testing.T) {
+	cases := []struct {
+		name   string
+		scalar string
+		fields map[string]any
+		want   string
+	}{
+		{
+			name:   "a length",
+			scalar: "Acme.Blob",
+			fields: map[string]any{"description": "An opaque payload", "maxLength": 10, "typeMappings": map[string]string{"json_schema": "object"}},
+			want:   "temp-service: scalar Acme.Blob has language primitive object and json_schema type mapping object, but its maxLength 10 is a rule on a string, so the validators check its values as strings: drop the maxLength",
+		},
+		{
+			name:   "an upload",
+			scalar: "Media.Photo",
+			fields: map[string]any{"fileUpload": map[string]any{"maxSize": 1048576, "allowedTypes": []string{"image/png"}, "category": "image"}},
+			want: "temp-service: scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
+				"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
+		},
+	}
+	for _, form := range []string{"json", "yaml"} {
+		for _, tc := range cases {
+			t.Run(form+"/"+tc.name, func(t *testing.T) {
+				_, err := LoadService(objectScalarService(t, form, tc.scalar, tc.fields))
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("LoadService: err = %v\nwant %s", err, tc.want)
 				}
 			})
 		}
@@ -1357,7 +1403,7 @@ func TestLoadServiceHydratesObjectCatalogReferences(t *testing.T) {
 	for _, form := range []string{"json", "yaml"} {
 		for name, jsonType := range want {
 			t.Run(form+"/"+name, func(t *testing.T) {
-				schema, err := LoadService(objectScalarService(t, form, name, "", ""))
+				schema, err := LoadService(objectScalarService(t, form, name, nil))
 				if err != nil {
 					t.Fatalf("LoadService: %v", err)
 				}
