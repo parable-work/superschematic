@@ -863,7 +863,9 @@ last part is not built: the Stack IR has no field for the program yet.
 ### 6.7 Registry surface
 
 There are five specs, registered like the others in section 3 of
-`docs/extension-model.md`. The core registers none of them.
+`docs/extension-model.md`. The core registers one target, `local`, with
+its platforms, connectors and provisioner (section 8.3, and D30, amended:
+the core registers the local target); every other is an extension's.
 
 - `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a server platform without languages or a
