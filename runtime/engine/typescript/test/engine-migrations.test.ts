@@ -235,6 +235,31 @@ const seeds: Record<number, Seed> = {
       );
     },
   },
+  // Version 6 recorded references that hear every change of their target,
+  // with no column to say otherwise.
+  6: {
+    write(storage) {
+      storage.run(
+        `INSERT INTO engine_references (namespace, target_schema, target_id, source_schema, source_id, behavior, key)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Item', 'i1', 'Note', 'n1', 'test.Holder', 'desk']
+      );
+    },
+    check(engine) {
+      // The reference still hears every change: an update of i1 runs the
+      // holder's hook, which notes it, and it lists with no hears.
+      publishItem(engine, [{ name: 'test.Counter' }]);
+      const note = schemaDocument('Note', [{ name: 'title', typeRef: { name: 'string' } }]) as { types: { Note: Record<string, unknown> } };
+      note.types.Note.behaviors = [{ name: 'test.Holder' }];
+      engine.schemas.define(alice, note);
+      engine.schemas.publish(alice, 'Note');
+      engine.instances.create(alice, 'Note', { title: 'First' }, { id: 'n1' });
+      engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'holding'), [{ schema: 'Item', id: 'i1', key: 'desk' }]);
+      engine.instances.update(alice, 'Item', 'i1', { title: 'Oak desk' });
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'notes'), ['update Item i1']);
+    },
+  },
 };
 
 // checkOperationEvents publishes a schema with a behavior on a migrated file,

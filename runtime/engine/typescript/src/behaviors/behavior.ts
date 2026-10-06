@@ -290,6 +290,16 @@ export interface Schemas {
   readable(schema: string): boolean;
 }
 
+/**
+ * What a reference hears of its target besides its delete: 'delete', the
+ * delete alone; or one value of the target, at a JSON pointer into its
+ * record's data (its own fields and its behaviors' fields), heard when a
+ * change moves it, or, with crosses, when a change moves it across that
+ * number. A value's side of crosses is one of three: not a number, below
+ * it, or at or above it.
+ */
+export type ReferenceHears = 'delete' | { readonly path: string; readonly crosses?: number };
+
 /** A reference a behavior recorded from its instance to another. */
 export interface Reference {
   /** The referenced instance's schema, looked up from the namespace. */
@@ -298,6 +308,8 @@ export interface Reference {
   readonly id: string;
   /** The behavior's own label for the reference, '' when it gives none. */
   readonly key: string;
+  /** What it hears of the target; every change when absent. */
+  readonly hears?: ReferenceHears;
 }
 
 /** The references a behavior recorded from its instance: its own only. */
@@ -310,15 +322,19 @@ export interface ReferenceReader {
  * Records references, so the engine can find this instance when a
  * referenced one changes or goes: the behavior's guardReference and
  * afterReferenceChange run then. A reference is the behavior's, from this
- * instance, and is dropped when this instance is deleted.
+ * instance, and is dropped when this instance is deleted. One that hears
+ * less than every change (hears) is asked by guardReference before a
+ * delete only, and runs afterReferenceChange after a change it hears and
+ * after a delete.
  */
 export interface References extends ReferenceReader {
   /**
    * Records a reference to an instance of the namespace. It asks the
    * access policy for read on the schema, and throws not_found when there
-   * is no such instance. Recording one that exists changes nothing.
+   * is no such instance. Recording one that exists records what it hears
+   * now, and changes nothing else.
    */
-  add(schema: string, id: string, key?: string): void;
+  add(schema: string, id: string, key?: string, hears?: ReferenceHears): void;
   /** Removes a reference; false when there was none. */
   remove(schema: string, id: string, key?: string): boolean;
 }
@@ -1001,17 +1017,20 @@ export interface BehaviorImplementation<Config = unknown> {
    * referencing instance's. It runs with the referenced instance's own
    * guards, after them, for each reference; the first veto wins
    * (BehaviorVetoError, vetoed). Its request carries no precondition: the
-   * caller's preconditions are for the referenced instance's behaviors.
+   * caller's preconditions are for the referenced instance's behaviors. A
+   * reference that hears less than every change is asked before a delete
+   * only.
    */
   guardReference?(view: InstanceView<Config>, reference: Reference, request: GuardRequest): GuardAnswer;
 
   /**
    * Runs after an update, a delete or a writing operation of an instance
    * the behavior's instance refers to, once that change and its event are
-   * done, in the same transaction, for each reference. After a delete it
-   * must remove the reference, through an operation of the referencing
-   * instance it invokes: a reference to a deleted instance left behind is
-   * a BehaviorError, which rolls the delete back.
+   * done, in the same transaction, for each reference that hears the
+   * change: every one after a delete. After a delete it must remove the
+   * reference, through an operation of the referencing instance it
+   * invokes: a reference to a deleted instance left behind is a
+   * BehaviorError, which rolls the delete back.
    */
   afterReferenceChange?(context: ReferenceContext<Config>, reference: Reference, change: InstanceChange): void;
 

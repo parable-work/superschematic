@@ -938,6 +938,17 @@
                     ],
                     "type": "object"
                   },
+                  "excludeStale": {
+                    "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
+                    "items": {
+                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                      "type": "string"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
                   "match": {
                     "description": "The type's own top-level scalar fields claimNext and countClaimable may filter on, by equality with a value or membership in a list of values.",
                     "items": {
@@ -1011,7 +1022,7 @@
                         },
                         "when": {
                           "additionalProperties": false,
-                          "description": "What sets the rule off: one of enters, allTerminal and anyTerminal.",
+                          "description": "What sets the rule off: one of enters, allTerminal, anyTerminal, holds and revised.",
                           "maxProperties": 1,
                           "minProperties": 1,
                           "properties": {
@@ -1088,6 +1099,26 @@
                               "description": "A state of the type's Workflow: the rule fires when the instance's status becomes it, by a create or a transition.",
                               "minLength": 1,
                               "type": "string"
+                            },
+                            "holds": {
+                              "description": "An all or any rollup of the type's Rollups config: the rule fires on an instance when an instance of the rollup's schema changes, links, unlinks or goes, and that change makes the rollup hold: it holds after it, and would not with that instance as it was before it, the other linked instances as they are when the rule runs.",
+                              "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                              "type": "string"
+                            },
+                            "revised": {
+                              "additionalProperties": false,
+                              "description": "The rule fires on an instance when the instance its link points to gains a new revision of Revisions, or, when its schema composes Branches, a new release (releaseCommit). For a pinned link, only an instance the new revision leaves stale.",
+                              "properties": {
+                                "link": {
+                                  "description": "A link of the type's Links config.",
+                                  "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "link"
+                              ],
+                              "type": "object"
                             }
                           },
                           "type": "object"

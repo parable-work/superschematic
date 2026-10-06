@@ -100,6 +100,7 @@ import type {
   Reference,
   ReactionContext,
   ReferenceContext,
+  ReferenceHears,
   References,
   ScheduleContext,
   SchemaContext,
@@ -577,9 +578,9 @@ export class Execution {
       }
     };
     return Object.freeze({
-      add: (schema: string, id: string, key = '') => {
+      add: (schema: string, id: string, key = '', hears?: ReferenceHears) => {
         writing('add');
-        this.reach.addReference(this.chain, source, reference(name, schema, id, key));
+        this.reach.addReference(this.chain, source, reference(name, schema, id, key, hears));
       },
       remove: (schema: string, id: string, key = '') => {
         writing('remove');
@@ -850,13 +851,40 @@ function can(chain: Chain, behavior: string, permission: string): boolean {
   return answer === true;
 }
 
-function reference(behavior: string, schema: string, id: string, key: string): Reference {
+function reference(behavior: string, schema: string, id: string, key: string, hears?: ReferenceHears): Reference {
   checkName(behavior, 'references', 'schema', schema);
   checkName(behavior, 'references', 'id', id);
   if (typeof key !== 'string') {
     throw new BehaviorError(behavior, 'a reference key is a string');
   }
-  return { schema, id, key };
+  return hears === undefined ? { schema, id, key } : { schema, id, key, hears: checkHears(behavior, hears) };
+}
+
+// checkHears holds what a reference hears to its two forms: 'delete', or
+// a JSON pointer to one value of the target, with a finite number to cross.
+function checkHears(behavior: string, hears: unknown): ReferenceHears {
+  if (hears === 'delete') {
+    return hears;
+  }
+  const refuse = (what: string): BehaviorError =>
+    new BehaviorError(behavior, `references.add: hears is 'delete' or { path, crosses? }, ${what}`);
+  if (typeof hears !== 'object' || hears === null || Array.isArray(hears)) {
+    throw refuse(`not ${JSON.stringify(hears) ?? String(hears)}`);
+  }
+  const { path, crosses, ...rest } = hears as { path?: unknown; crosses?: unknown };
+  if (Object.keys(rest).length > 0) {
+    throw refuse(`with no other member (${Object.keys(rest).join(', ')})`);
+  }
+  if (typeof path !== 'string' || !/^(\/([^~/]|~[01])*)+$/.test(path)) {
+    throw refuse(`its path a JSON pointer to a member of the target's data, not ${JSON.stringify(path) ?? String(path)}`);
+  }
+  if (crosses === undefined) {
+    return { path };
+  }
+  if (typeof crosses !== 'number' || !Number.isFinite(crosses)) {
+    throw refuse(`its crosses a finite number, not ${JSON.stringify(crosses) ?? String(crosses)}`);
+  }
+  return { path, crosses };
 }
 
 function checkName(behavior: string, what: string, name: string, value: unknown): void {

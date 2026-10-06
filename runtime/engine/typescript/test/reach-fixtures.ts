@@ -2,7 +2,7 @@
 // invokes other instances and schema-level operations, and a holder that
 // records references to them, hears of their changes and has schema-level
 // operations.
-import { EngineError, defineBehavior, type BehaviorDeclaration, type FrozenJSON } from '../dist/index.js';
+import { EngineError, defineBehavior, type BehaviorDeclaration, type FrozenJSON, type ReferenceHears } from '../dist/index.js';
 
 const noParams = { type: 'object', additionalProperties: false } as const;
 const target = {
@@ -211,7 +211,8 @@ export const holderDeclaration: BehaviorDeclaration = {
   operations: [
     {
       name: 'hold',
-      paramsSchema: { type: 'object', additionalProperties: false, required: ['schema', 'id'], properties: { ...target, key: { type: 'string' } } },
+      description: 'Holds an instance, under a key, hearing what hears says of it: every change when absent.',
+      paramsSchema: { type: 'object', additionalProperties: false, required: ['schema', 'id'], properties: { ...target, key: { type: 'string' }, hears: {} } },
       resultSchema: true,
       writes: true,
     },
@@ -288,7 +289,7 @@ export const holder = defineBehavior<HolderConfig>({
   operations: {
     hold(context, params) {
       const k = (params.key as string | undefined) ?? '';
-      context.references.add(params.schema as string, params.id as string, k);
+      context.references.add(params.schema as string, params.id as string, k, params.hears as ReferenceHears | undefined);
       context.sql.run(`INSERT INTO ${context.sql.table('holds')} VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`, [
         ...key(context),
         params.schema as string,

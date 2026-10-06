@@ -46,7 +46,7 @@ export type { LinkRecord, LinkSpec, LinksConfig } from './links.js';
 export { MAX_ROLLUP_READ } from './rollups.js';
 export type { RollupFunction, RollupOver, RollupSpec, RollupsConfig } from './rollups.js';
 export type { SearchConfig, SearchHit, SnippetPart } from './search.js';
-export type { ReactionsConfig, ReactionsRule, ReactionsTerminal, ReactionsThen, ReactionsWhen } from './reactions.js';
+export type { ReactionsConfig, ReactionsRevisedLink, ReactionsRollup, ReactionsRule, ReactionsTerminal, ReactionsThen, ReactionsWhen } from './reactions.js';
 export type { ConstantsConfig } from './constants.js';
 export type { VariantsConfig } from './variants.js';
 export { ACTOR_NAMESPACE, DEFAULT_PRIMARY, ROLE_COLUMNS, ROOT_NAMESPACE, uuidV5 } from './branches.js';

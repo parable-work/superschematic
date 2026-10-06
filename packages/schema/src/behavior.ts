@@ -181,7 +181,7 @@ export interface ReactionRule {
   readonly then: ReactionThen;
 }
 
-/** What sets a rule off: one of enters, allTerminal and anyTerminal. */
+/** What sets a rule off: one of enters, allTerminal, anyTerminal, holds and revised. */
 export type ReactionWhen =
   | {
       /** A state of the type's Workflow: the rule fires when the instance's status becomes it, by a create or a transition. */
@@ -204,6 +204,24 @@ export type ReactionWhen =
        * one.
        */
       readonly anyTerminal: ReactionSource & { readonly outcomes: readonly WorkflowOutcome[] };
+    }
+  | {
+      /**
+       * An all or any rollup of the type's Rollups config: the rule fires
+       * on an instance when a change of an instance of the rollup's schema
+       * makes the rollup hold over at least one linked instance, judged with
+       * the other linked instances as they are when the rule runs.
+       */
+      readonly holds: string;
+    }
+  | {
+      /**
+       * The rule fires on an instance when the instance its link points to
+       * gains a new revision of Revisions, or, when its schema composes
+       * Branches, a new release; for a pinned link, only on an instance the
+       * new revision leaves stale.
+       */
+      readonly revised: { readonly link: string };
     };
 
 /** The instances an allTerminal or anyTerminal rule hears. */
@@ -354,6 +372,12 @@ export interface QueueConfig {
   readonly match?: readonly string[];
   /** The most instances one claimNext tries; 100 when absent. */
   readonly maxCandidates?: number;
+  /**
+   * Pinned links of the type's Links config: an instance one of which is
+   * pinned to a revision its target has moved past is not claimed, and is
+   * no candidate until a change of it lets it back in.
+   */
+  readonly excludeStale?: readonly string[];
 }
 
 /** Presence's config. */

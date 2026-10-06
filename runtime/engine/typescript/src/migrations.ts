@@ -26,7 +26,9 @@ engine_references holds the references behaviors record from one
 instance to another in the same namespace (instances/references.ts): by
 target, for the guards and hooks a change of the target runs, and by
 source, for a behavior's own list and for dropping them when the source
-is deleted.
+is deleted. hears and crosses say what a reference hears of its target
+(null for every change), and engine_references_hears finds the ones a
+change of the target moves without reading the rest.
 
 engine_subscriptions and engine_schedules are the runner's
 (runner/runner.ts): one row per behavior's reactions on a schema in a
@@ -237,6 +239,19 @@ ALTER TABLE engine_events ADD COLUMN cause_behavior TEXT;
 ALTER TABLE engine_events ADD COLUMN cause_event INTEGER;
 ALTER TABLE engine_events ADD COLUMN cause_schedule TEXT;
 ALTER TABLE engine_events ADD COLUMN depth INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0);
+`);
+      },
+    },
+    {
+      version: 7,
+      name: 'what a reference hears',
+      // A reference recorded before hears every change, as it did.
+      up(storage) {
+        storage.exec(`
+ALTER TABLE engine_references ADD COLUMN hears TEXT;
+ALTER TABLE engine_references ADD COLUMN crosses REAL;
+
+CREATE INDEX engine_references_hears ON engine_references (namespace, target_schema, target_id, hears, crosses);
 `);
       },
     },

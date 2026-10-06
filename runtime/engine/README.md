@@ -83,7 +83,7 @@ processes on the busy timeout, but the engine keeps per-process state
 (the cache of each version's validator and behaviors) that nothing
 coordinates across processes.
 
-The engine's tables, as its six migrations leave them:
+The engine's tables, as its seven migrations leave them:
 
 ```sql
 -- Every schema document by namespace, name and version. Version 0 is the
@@ -169,9 +169,15 @@ CREATE TABLE engine_references (
   source_id     TEXT NOT NULL,
   behavior      TEXT NOT NULL,
   key           TEXT NOT NULL,
+  -- What it hears (migration 7): null for every change, 'delete', or a
+  -- JSON pointer into the target's data, with the number it crosses.
+  hears         TEXT,
+  crosses       REAL,
   PRIMARY KEY (namespace, target_schema, target_id, source_schema, source_id, behavior, key)
 ) STRICT;
 CREATE INDEX engine_references_source ON engine_references (namespace, source_schema, source_id, behavior);
+-- The references a change of a target moves, without the rest.
+CREATE INDEX engine_references_hears ON engine_references (namespace, target_schema, target_id, hears, crosses);
 
 -- The runner's subscriptions ("The runner"): a behavior's reactions on a
 -- schema in a namespace, the cursor of the last event they handled or
@@ -1170,7 +1176,7 @@ the engine, so it hears when that instance changes or goes:
 ```ts
 context.references.add('Spec', params.id, 'spec');   // asks read on Spec; not_found without the instance
 context.references.remove('Spec', old, 'spec');      // true when there was one
-context.references.list();                           // [{ schema, id, key }], in the order recorded
+context.references.list();                           // [{ schema, id, key, hears? }], in the order recorded
 ```
 
 A reference is the behavior's, from its instance, to an instance of the
@@ -1199,6 +1205,45 @@ references. A reference from an instance to itself is never asked about,
 since the behavior's own guard and `afterChange` see that instance's
 changes. The hooks act as the caller: one who may not write the
 referencing schema cannot delete an instance a hook must clear.
+
+#### What a reference hears
+
+A reference hears every change of its target unless it says otherwise,
+with a fourth argument (`ReferenceHears`):
+
+```ts
+context.references.add('Spec', id, 'spec', 'delete');                                       // the delete alone
+context.references.add('Step', id, '', { path: '/status' });                                // a move of the status
+context.references.add('Pool', id, 'cpu', { path: '/budget/cpu/remaining', crosses: 10 }); // a move across 10
+```
+
+| `hears` | `afterReferenceChange` runs after | `guardReference` is asked before |
+| --- | --- | --- |
+| absent | every update, delete and writing operation | every update, delete and writing operation |
+| `'delete'` | the delete | the delete |
+| `{ path }` | a change that moves the value at `path`, and the delete | the delete |
+| `{ path, crosses }` | a change that moves the value across `crosses`, and the delete | the delete |
+
+- `path` is a JSON pointer into the target's record data, its own
+  fields and its behaviors' fields as a read with every field returns
+  them, such as `/budget/cpu/remaining`. A value moves when it is not
+  the same JSON before and after the change; a member that comes or goes
+  moves too.
+- A value's side of `crosses` is one of three: not a number (absent,
+  null, a string), below the number, or at or above it. A change moves
+  it across when the side before differs from the side after, so a value
+  that becomes a number or stops being one crosses every number.
+- Recording a reference again, by schema, id and key, records what it
+  hears now and keeps its place in the order. `list()` returns `hears`
+  for a reference that has it.
+- The engine compares the target's record before and after the change,
+  which it computes for the event's patch anyway, and reads only the
+  references that hear it, through an index led by the target, `hears`
+  and `crosses`: a target with thousands of references on one value,
+  each with its own number, costs a change the references whose number
+  it crosses. `Links` and `Dependencies` record theirs with `'delete'`,
+  since only a target's delete asks anything of them; Queue's hear the
+  values its copies turn on (`runtime/engine-workqueue/README.md`).
 
 ### Schema-level operations
 
@@ -1672,7 +1717,7 @@ Blockers between instances, which hold up the type's Workflow.
 | Create parameters | `{ blockers?: [{ schema?, id }] }`, at most 500: the instance's blockers from its create, each added with `addBlocker`'s checks, against the Workflow's initial state: open until it finishes by `satisfiedBy`, and refused while open when the initial state is gated and no transition leaves it |
 | Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed` (`blocked`), naming the open blockers, details `{ blockers: [{ schema, id, status? }] }` |
 | Refusals | `addBlocker`: the instance itself, a schema the config does not list, one without Workflow, an instance that does not exist (`invalid_argument`); a blocker already added (`already_blocking`), an edge that would close a cycle (`cycle`), an open blocker of an instance in a gated state no transition leaves (`gated`), all `vetoed`. A create's blockers: the same, at `/behaviors/Dependencies/blockers/<i>/schema` or `/id` (`invalid_argument`), or `vetoed` with action `create`, the same code and details `{ path: '/behaviors/Dependencies/blockers/<i>' }`. `removeBlocker` of an instance that does not block it (`invalid_argument`). At define, a gated state the type's Workflow lacks (`invalid_schema`) |
-| Deletes | deleting a blocker removes its edges: its reference hook invokes `removeBlocker` on each dependent, as the caller, each with its own event. Deleting a dependent deletes its edges |
+| Deletes | deleting a blocker removes its edges: its reference, which hears the blocker's delete alone, invokes `removeBlocker` on each dependent, as the caller, each with its own event. Deleting a dependent deletes its edges |
 | Events | `addBlocker`'s and `removeBlocker`'s operation events carry `blocked` when it changes |
 | `configChange` | `schemas`, `gatedStates` and `satisfiedBy` may change (edges made before stay); added to a schema with instances, which start with none; not removed from one, since its edges and references would stay behind |
 
@@ -1737,7 +1782,7 @@ Typed links from the instance to instances of other schemas, or its own.
 | Create parameters | `{ <name>: id }` or `{ <name>: { id, revision? } }`: the links the instance holds from its create, each set with `link`'s checks; every required link is among them |
 | Guards | the delete of an instance a required link points at, whoever the caller: `vetoed` (`required_target`, by `guardReference`) |
 | Refusals | a name the config does not give, a target that does not exist, a `revision` for a link that is not pinned or past the target's latest, a pinned link whose schema does not compose Revisions (`invalid_argument`); a target with no revision yet (`no_revision`), unlinking a required link (`required_link`), both `vetoed`; unlinking a link the instance does not hold (`invalid_argument`). A create without a required link, and a create's link that `link` would refuse, at `/behaviors/Links` or `/behaviors/Links/<name>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` |
-| Deletes | an optional link's target's delete unlinks it: its reference hook invokes `unlink` on each instance that points at it, as the caller, each with its own event. Deleting an instance deletes its links |
+| Deletes | an optional link's target's delete unlinks it: its reference, which hears the target's delete alone, invokes `unlink` on each instance that points at it, as the caller, each with its own event; no other change of a target asks Links anything. Deleting an instance deletes its links |
 | Events | a create's event carries the links it gives; `link`'s and `unlink`'s operation events carry `links` |
 | `configChange` | every link keeps its name and schema; `pinned` may change, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is; added to a schema with instances, which start with none, unless a link is required; not removed from one |
 
@@ -1943,16 +1988,17 @@ Rules that move Workflow statuses after a change commits.
 
 | | |
 | --- | --- |
-| Config | `rules`: one to 64, each one `when` and one `then`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }` or `{ anyTerminal: { schema, link, outcomes } }`; `outcomes` is a list of `success`, `failure` and `neutral`. `then` is `{ transition: <state>, link? }`. Requires `Workflow` |
+| Config | `rules`: one to 64, each one `when` and one `then`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `outcomes` is a list of `success`, `failure` and `neutral`. `then` is `{ transition: <state>, link? }`. Requires `Workflow` |
 | Fields, operations | none |
-| Reactions | `enters`: the instance's status became the state, by a create or a transition. `allTerminal`: an instance of `schema` that links to this one through `link` changed or went, and every instance linking here through it is in a terminal state of its own schema's Workflow, with an outcome `outcomes` lists when it is given, at least one. `anyTerminal`: an instance of `schema` that links here through `link` entered a terminal state whose outcome `outcomes` lists, by a create or a transition, or was linked here while in one. `then` moves this instance, or the one its `link` points to, to the state |
-| Refusals at define | a state the type's Workflow lacks, in `enters` or in a `then` on the instance itself; a `then.link` the type's Links lacks, or Links absent; an `allTerminal` or `anyTerminal` on the type's own schema whose link does not point at it; a `then` on the instance itself that no transition of its Workflow allows; `enters` rules on the instance itself whose states cycle |
-| Failures at run | a target schema without Workflow, a state its Workflow lacks, an `allTerminal` or `anyTerminal` schema without Workflow or that does not link here through `link`: the subscription retries, then halts |
+| Reactions | `enters`: the instance's status became the state, by a create or a transition. `allTerminal`: an instance of `schema` that links to this one through `link` changed or went, and every instance linking here through it is in a terminal state of its own schema's Workflow, with an outcome `outcomes` lists when it is given, at least one. `anyTerminal`: an instance of `schema` that links here through `link` entered a terminal state whose outcome `outcomes` lists, by a create or a transition, or was linked here while in one. `holds`: a change of an instance of the rollup's schema made an `all` or `any` rollup of the type's `Rollups` hold over at least one linked instance. `revised`: the instance `link` points to gained a revision of `Revisions`, or a release of `Branches`. `then` moves this instance, or the one its `link` points to, to the state |
+| Refusals at define | a state the type's Workflow lacks, in `enters` or in a `then` on the instance itself; a `then.link` or a `revised` link the type's Links lacks, or Links absent; a `holds` rollup the type's Rollups lacks, one that is not an `all` or an `any`, or Rollups absent; an `allTerminal` or `anyTerminal` on the type's own schema whose link does not point at it; a `then` on the instance itself that no transition of its Workflow allows; `enters` rules on the instance itself whose states cycle |
+| Failures at run | a target schema without Workflow, a state its Workflow lacks, an `allTerminal` or `anyTerminal` schema without Workflow or that does not link here through `link`, a `revised` link to a schema that composes neither Revisions nor Branches: the subscription retries, then halts |
 | Events | each move is Workflow's `transition` operation event on the target, actor the runner's principal, `cause` the event that set it off |
 | `configChange` | any; added to and removed from a schema with instances, since it keeps no state |
 
 The rules run in order on each event the subscription hears: the
-schema's own events, and those of each `allTerminal` and `anyTerminal`
+schema's own events, those of each `allTerminal` and `anyTerminal`
+schema, of each `holds` rollup's schema and of each `revised` link's
 schema. An `allTerminal` rule looks at the instance the event's instance
 links to now and, after a delete or a change of its links, the one it
 linked to before (`before`), and finds the instances linking there with
@@ -2000,6 +2046,75 @@ Rules on the instance itself chain, an `enters` rule's move being an
 event the next rule can enter on, and their cycles are refused at
 define. Rules across instances can chain without bound in data, a task
 whose parent's parent is a task, say; the runner's depth limit stops them.
+
+`holds` names an `all` or `any` rollup of the type's `Rollups` and fires
+on the edge from not holding to holding. An event of the rollup's schema
+sets it off on the instance its instance links to through the rollup's
+link, now and before the event, when the event is what makes the
+rollup hold:
+
+- it holds now, over the linked instances as they are when the rule
+  runs, so an event a later change has undone fires nothing;
+- it holds with the event's instance as the event left it, the others as
+  they are now, so the fire is the event's that made the edge, not an
+  earlier event of the same instance the runner handles later;
+- it does not hold with that instance as it was before the event
+  (`before`), linked here or not and in its status then.
+
+A rollup that held already does not fire again until it has stopped
+holding, whatever its linked instances do meanwhile: a run whose
+`any`-of-failures rollup fired, retried by hand, is not failed again by a
+second failed step while the first is still failed. The value is the
+rollup's, read as `Rollups` reads it: one `listLinked` page of at most
+`MAX_ROLLUP_READ` (500), their statuses, and the linked schema's
+Workflow; past the bound it does not hold. One rule differs from the
+rollup's own value: an `all` over no instance holds for `Rollups`' gate,
+but sets no rule off, as `allTerminal` needs one instance, so deleting or
+unlinking the last instance that kept it from holding fires nothing.
+Two events the runner handles together after both committed, the last
+two steps passing say, can each find the edge, as the others are read
+now; the second finds the target in the state already and leaves it.
+
+```json
+{ "name": "Rollups", "config": { "rollups": {
+    "stepsPassed": { "schema": "steps", "link": "run", "function": "all", "outcomes": ["success"] },
+    "stepFailed": { "schema": "steps", "link": "run", "function": "any", "outcomes": ["failure"] } } } },
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "holds": "stepsPassed" }, "then": { "transition": "completed" } },
+    { "when": { "holds": "stepFailed" }, "then": { "transition": "failed" } } ] } }
+```
+
+A `holds` rule hears only the rollup's schema, so a move of the instance
+itself sets one off only through another instance that links to it: up
+a tree of the type's own schema, each parent completing as its last
+subtask does, one depth further each step, which the runner's depth
+limit stops. `parseConfig` refuses nothing more for it.
+
+`revised` names a link of the type's `Links` and fires on each instance
+whose link points at an instance that gains a revision or a release:
+
+- a revision of `Revisions`: an update or an operation event of the
+  target whose change carries `revision`, an approval say; a comment or
+  a transition carries none;
+- a release, when the target's schema composes `Branches`: its
+  `releaseCommit` operation event.
+
+The instances it moves are the ones `Links`' `listLinked` finds on the
+type's own schema pointing at the event's instance, as the runner's
+principal. For a pinned link and a revision, only the ones the target
+has moved past (`stale: true`), so one linked to the new revision before
+the runner hears it is left alone; an unpinned link moves every one at
+each revision. A typical use moves work whose spec changed back to
+review:
+
+```json
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "revised": { "link": "spec" } }, "then": { "transition": "review" } } ] } }
+```
+
+No transition makes a revision or a release, so a `revised` rule never
+sets itself off; its moves chain only through other rules, which the
+depth limit stops.
 
 #### Constants
 

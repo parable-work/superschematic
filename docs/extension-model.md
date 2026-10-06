@@ -935,13 +935,13 @@ engine; without them the engine refuses a schema that composes one.
 | `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
-| `Reactions` | `rules` (each a `when`, `enters`, `allTerminal` or `anyTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
+| `Reactions` | `rules` (each a `when`, `enters`, `allTerminal`, `anyTerminal`, `holds` or `revised`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 | `Constants` | `fields`, `permission`; required | none | none |
 | `Variants` | `field`, `by`, `types` (by a value of `by`, a type of the document); required | none | none |
 | `Branches` | `kinds` (by name: `type`, a type of the document, `parent` (`key`, `of`), `order`, `singleton`, `units`, `retentionDays`), `primary`, `snapshotEvery`, `sweep` (`intervalMs`, `discardGrace`, `pruneBatch`, `abandonAfter`); required | none | `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`, and the read-only `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history` |
 | `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`; optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
-| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
+| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`, `excludeStale`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
 | `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required; `@superschematic/engine-workqueue` | `presence` | `beat`, `miss` |
 | `Blueprint` | `schema`, `parentLink`, `keyField`, one of `steps` (by key: `after`, `when`, `data`) and `from` (`link`, `field`), `copyFields`, `copyLinks`; required; `@superschematic/engine-workqueue` | `blueprint` | none |
 | `Budget` | `meters` (by name: `limit` or `limitField`, `reserve` and `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`), `escalate` (`transition`, `from`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
@@ -966,8 +966,8 @@ TypeScript twin to the same IR as well.
 
 `Reactions` declares a config and nothing else: the engine's runner
 applies its rules after a change commits (D16, amended), and a rule's
-links and states are checked by the engine, which sees the type's
-Workflow and Links configs. `make cli-smoke` loads
+links, rollups and states are checked by the engine, which sees the
+type's Workflow, Links and Rollups configs. `make cli-smoke` loads
 `fixture-reactions-json`, whose projects start, finish and fail their
 parent, and its TypeScript twin loads to the same IR.
 
