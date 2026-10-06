@@ -188,10 +188,7 @@
         "properties": {
           "algorithm": "Ed25519",
           "callee": "shop-api",
-          "caller": "Orders",
-          "serves": [
-            "shop-orders"
-          ]
+          "caller": "Orders"
         },
         "phase": "infrastructure",
         "owners": [

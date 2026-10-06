@@ -720,18 +720,8 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		if err != nil {
 			return fmt.Errorf("local: server %s: %w", s.Deployable, err)
 		}
-		if len(s.ServiceAuth) > 0 {
-			config, err := serviceAuth(s, prog, keys)
-			if err != nil {
-				return fmt.Errorf("local: server %s: %w", s.Deployable, err)
-			}
-			env = append(env, ServiceAuthVariable+"="+config)
-		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
-		// Each module stands alone: a go.work above the output root does
-		// not list it.
-		buildEnv := append(os.Environ(), "GOWORK=off")
-		if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv}); err != nil {
+		if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv()}); err != nil {
 			return fmt.Errorf("local: build server %s: %w", s.Deployable, err)
 		}
 		builds = append(builds, built{server: s, binary: binary, module: module, env: env})
@@ -765,6 +755,23 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		p.printf("%s is ready at %s", b.server.Deployable, b.server.URL)
 	}
 	return nil
+}
+
+// buildEnv is the environment `go build` runs a server module in. Each
+// module stands alone, so a go.work above the output root, which does not
+// list it, is off. The build writes no go.sum, so the module's own go.mod
+// and go.sum may change: -mod=mod replaces any -mod in GOFLAGS. Only the
+// server module's files change, never the implementation packages it
+// requires.
+func buildEnv() []string {
+	var flags []string
+	for _, flag := range strings.Fields(os.Getenv("GOFLAGS")) {
+		if !strings.HasPrefix(flag, "-mod=") {
+			flags = append(flags, flag)
+		}
+	}
+	flags = append(flags, "-mod=mod")
+	return append(os.Environ(), "GOWORK=off", "GOFLAGS="+strings.Join(flags, " "))
 }
 
 // waitReady probes a server's readiness path until it answers 200.

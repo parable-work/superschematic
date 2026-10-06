@@ -3,6 +3,8 @@ package local_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -98,11 +100,11 @@ func copyFakeServer(t *testing.T, dir string) {
 // database, builds and runs two fake server modules that honour the
 // entrypoint's contract with their resolved environments, waits for
 // /readyz, and reads back the variables a server received. The caller
-// signs a token with the key its derived field names, and the callee's
-// service-auth config verifies it with the HTTP runtime's serviceauth
-// package, as a generated server will (D37). Run again, it reuses the
-// container, which kept its data, and migrates to the next model. Purge
-// removes the container.
+// signs a token with the HTTP runtime's serviceauth.SignedToken from its
+// derived credential variables, and the token verifies against the public
+// key of the edge's key pair (D37). Run again, it reuses the container,
+// which kept its data, and migrates to the next model. Purge removes the
+// container.
 func TestLocalStackRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: the local stack runs Docker, Postgres and a server")
@@ -170,8 +172,6 @@ func TestLocalStackRuns(t *testing.T) {
 	for _, server := range []string{"ledger-api", "ledger-worker"} {
 		copyFakeServer(t, filepath.Join(outputRoot, local.ModulePath(stackName, server)))
 	}
-	// The build may add the fake server's own lines to its go.sum.
-	t.Setenv("GOFLAGS", "-mod=mod")
 	dir := filepath.Join(root, "program")
 	writeModel := func(plan string) {
 		t.Helper()
@@ -260,30 +260,22 @@ func TestLocalStackRuns(t *testing.T) {
 		t.Errorf("output lacks the server's prefixed line:\n%s", out)
 	}
 
-	// The worker signs a token with its edge's key, and ledger-api's
-	// service-auth config admits it as the worker; a request with no
-	// credential has no caller.
-	resp, err = http.Get(local.ServerURL(workerPort) + "/call/LEDGER_API_SERVICE")
+	// The worker signs a token with its edge's key, which verifies against
+	// the key pair's public key, for ledger-api as the worker.
+	resp, err = http.Get(local.ServerURL(workerPort) + "/token/LEDGER_API_SERVICE")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	token, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	var caller struct {
-		Deployable string   `json:"deployable"`
-		Serves     []string `json:"serves"`
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the worker's token: %d %s", resp.StatusCode, token)
 	}
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &caller) != nil || caller.Deployable != "ledger-worker" || strings.Join(caller.Serves, ",") != "ledger-worker" {
-		t.Errorf("the worker's call to ledger-api answered %d %s, want 200 and the caller ledger-worker", resp.StatusCode, body)
-	}
-	resp, err = http.Get(local.ServerURL(apiPort) + "/whoami")
+	outputs, err := prov.Outputs(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("a call to ledger-api with no credential answered %d, want 401", resp.StatusCode)
-	}
+	checkToken(t, string(token), fmt.Sprint(outputs["ledger-worker.calls.ledger-api.key"]["publicJwk"]), "ledger-worker", "ledger-api")
 
 	// Destroy stops the server and the container, which keeps its data;
 	// the next run starts it again and migrates to the next model.
@@ -304,5 +296,54 @@ func TestLocalStackRuns(t *testing.T) {
 	}
 	if err := exec.Command("docker", "container", "inspect", container).Run(); err == nil {
 		t.Errorf("container %s is still there after Purge", container)
+	}
+}
+
+// checkToken checks a compact JWS as D37 says the callee does: its header's
+// alg is EdDSA and its kid the key's, its signature verifies with the
+// public JWK, iss and sub are the caller, aud the callee, and exp is 300
+// seconds after iat.
+func checkToken(t *testing.T, token, publicJWK, caller, callee string) {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("token %q is not a compact JWS", token)
+	}
+	var key local.JWK
+	if err := json.Unmarshal([]byte(publicJWK), &key); err != nil {
+		t.Fatalf("public key: %v", err)
+	}
+	decode := func(part string, v any) {
+		t.Helper()
+		data, err := base64.RawURLEncoding.DecodeString(part)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != nil {
+			if err := json.Unmarshal(data, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var header struct{ Alg, Kid string }
+	var claims struct {
+		Iss, Sub, Aud string
+		Iat, Exp      int64
+	}
+	decode(parts[0], &header)
+	decode(parts[1], &claims)
+	x, err := base64.RawURLEncoding.DecodeString(key.X)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ed25519.Verify(x, []byte(parts[0]+"."+parts[1]), signature) {
+		t.Error("the token's signature does not verify with the edge's public key")
+	}
+	if header.Alg != "EdDSA" || header.Kid != key.Kid || claims.Iss != caller || claims.Sub != caller || claims.Aud != callee || claims.Exp-claims.Iat != 300 {
+		t.Errorf("token header %+v, claims %+v; want EdDSA with the key's kid, iss and sub %s, aud %s, five minutes", header, claims, caller, callee)
 	}
 }

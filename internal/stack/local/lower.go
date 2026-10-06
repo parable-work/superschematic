@@ -39,21 +39,10 @@ const (
 	// generated entrypoint reads it (docs/stack-model.md, section 8.1).
 	PortVariable = "PORT"
 
-	// ServiceAuthVariable is the environment variable that holds a
-	// server's service-auth config when an http edge reaches it: the JSON
-	// of the HTTP runtimes' serviceauth.Config, an issuer per calling
-	// server with the public key of the edge's key pair (D37). The
-	// generated entrypoint builds its ServiceAuthenticator from it.
-	ServiceAuthVariable = "SERVICE_AUTH"
-
 	// KeyAlgorithm is the algorithm of an edge's key pair; TokenAlgorithm
 	// is the alg its tokens carry and the callee accepts (D37).
 	KeyAlgorithm   = "Ed25519"
 	TokenAlgorithm = "EdDSA"
-
-	// TokenLifetime is the most a signed token's exp may be after its iat,
-	// in seconds: the 5 minutes the caller's source signs for (D37).
-	TokenLifetime = 300
 
 	// ReadinessPath is the path the generated entrypoint answers once it
 	// is ready; HealthPath once it runs.
@@ -279,11 +268,8 @@ func lowerProcess(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	var env []any
 	claim := func(name string) error {
-		switch name {
-		case PortVariable:
+		if name == PortVariable {
 			return fmt.Errorf("config field %s is the variable the local platform sets to the server's port; set the port with the server's port setting instead", PortVariable)
-		case ServiceAuthVariable:
-			return fmt.Errorf("config field %s is the variable the local platform sets to the server's service-auth config; name the field otherwise", ServiceAuthVariable)
 		}
 		return nil
 	}
@@ -349,8 +335,12 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 // is the callee's. The edge's key pair is a node the provisioner generates
 // into the environment's state directory, so the derived key is a
 // reference to its private key, which the provisioner resolves when it
-// starts the caller and which no file under the output root holds. The
-// callee's service-auth config takes the public key from the same node.
+// starts the caller and which no file under the output root holds.
+//
+// The callee does not get the public key yet. Which config field carries a
+// callee's verification keys is for the connectors and the generated
+// entrypoint to define together; the node's publicJwk output is what this
+// connector will give it.
 //
 // A server that calls an API it serves itself reaches it on its own
 // loopback URL, with no key and no credential, as on every target.
@@ -358,10 +348,6 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
 	if from.Name == to.Name {
 		return registry.Connected{Value: ir.ServiceEndpoint{URL: to.Address}}, nil
-	}
-	serves := make([]any, len(from.Services))
-	for i, svc := range from.Services {
-		serves[i] = svc.Name
 	}
 	key := keyPairID(from.Name, to.Name)
 	return registry.Connected{
@@ -371,7 +357,6 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 			Properties: map[string]any{
 				"caller":    from.Name,
 				"callee":    to.Name,
-				"serves":    serves,
 				"algorithm": KeyAlgorithm,
 			},
 			Phase: ir.PhaseInfrastructure,
@@ -390,7 +375,7 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 
 // keyPairID is the ID of the key pair of the http edges from one server to
 // another. Two edges between the same servers, to two APIs the callee
-// serves, share it, so the callee's config holds one issuer per caller.
+// serves, share it: the caller is one issuer to the callee.
 func keyPairID(caller, callee string) string { return caller + ".calls." + callee + ".key" }
 
 // checkNoDomain refuses a domain: a local server is reached on loopback,

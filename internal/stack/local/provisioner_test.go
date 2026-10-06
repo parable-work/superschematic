@@ -149,13 +149,15 @@ func (p *fakeProcess) Stop(time.Duration) error {
 	return nil
 }
 
+// envValue is name's value in env: the last, as os/exec keeps it.
 func envValue(env []string, name string) string {
+	value := ""
 	for _, kv := range env {
 		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
-			return v
+			value = v
 		}
 	}
-	return ""
+	return value
 }
 
 // fixture is a resolved local environment with its program rendered, a
@@ -343,8 +345,10 @@ func TestApplyFromNothing(t *testing.T) {
 	// PORT.
 	for _, cmd := range f.runner.commands {
 		if strings.HasSuffix(cmd.Path, "/go") {
-			if !strings.HasPrefix(cmd.Dir, f.req.OutputRoot+string(filepath.Separator)+"server") || envValue(cmd.Env, "GOWORK") != "off" {
-				t.Errorf("go build in %s with GOWORK=%q, want the module under the output root with GOWORK=off", cmd.Dir, envValue(cmd.Env, "GOWORK"))
+			if !strings.HasPrefix(cmd.Dir, f.req.OutputRoot+string(filepath.Separator)+"server") || envValue(cmd.Env, "GOWORK") != "off" ||
+				!strings.HasSuffix(envValue(cmd.Env, "GOFLAGS"), "-mod=mod") {
+				t.Errorf("go build in %s with GOWORK=%q GOFLAGS=%q, want the module under the output root with GOWORK=off and -mod=mod",
+					cmd.Dir, envValue(cmd.Env, "GOWORK"), envValue(cmd.Env, "GOFLAGS"))
 			}
 		}
 	}
@@ -377,7 +381,7 @@ func TestApplyFromNothing(t *testing.T) {
 	if envValue(api, "SHOP_API_SERVICE_URL") != "" {
 		t.Error("shop-api got Orders' SHOP_API_SERVICE_URL")
 	}
-	checkServiceAuth(t, f, api, orders)
+	checkServiceCredential(t, f, api, orders)
 
 	// Each process's lines reach the output prefixed with its name, and
 	// the migration runner's with the schema it migrates.
@@ -697,12 +701,12 @@ func TestSecretsFile(t *testing.T) {
 	}
 }
 
-// checkServiceAuth checks the edge from Orders to shop-api: Orders signs
-// with the private key the provisioner generated into the state directory,
-// readable by its owner alone, and shop-api's service-auth config accepts
-// Orders as the issuer and caller of tokens signed with it, holding only
-// the public key.
-func checkServiceAuth(t *testing.T, f *fixture, api, orders []string) {
+// checkServiceCredential checks the edge from Orders to shop-api: Orders
+// signs with the private key the provisioner generated into the state
+// directory, readable by its owner alone, whose public half is the key
+// pair's output, and neither environment.json nor the program holds it.
+// shop-api gets no key yet: its service-auth field is not defined.
+func checkServiceCredential(t *testing.T, f *fixture, api, orders []string) {
 	t.Helper()
 	for name, want := range map[string]string{
 		"SHOP_API_SERVICE_CREDENTIAL_SOURCE":   "signed-token",
@@ -717,73 +721,58 @@ func checkServiceAuth(t *testing.T, f *fixture, api, orders []string) {
 	if err := json.Unmarshal([]byte(envValue(orders, "SHOP_API_SERVICE_CREDENTIAL_KEY")), &private); err != nil {
 		t.Fatalf("Orders' key: %v", err)
 	}
-	stateDir, _ := strings.CutPrefix(f.req.Backend.URL, "file://")
-	info, err := os.Stat(filepath.Join(stateDir, local.KeysDir, "Orders.calls.shop-api.key.jwk"))
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Errorf("key file: %v, mode %v; want one readable by its owner alone", err, info.Mode().Perm())
-	}
 	if private.D == "" || private.Kid != local.Thumbprint(private.X) {
 		t.Errorf("Orders' key = %+v, want a private JWK whose kid is its thumbprint", private)
 	}
-
-	var config struct {
-		Issuers []struct {
-			Issuer, Audience   string
-			Algorithms         []string
-			Keys               []local.JWK
-			MaxLifetimeSeconds int64
-			Callers            map[string]struct {
-				Deployable string
-				Serves     []string
-			}
+	for _, kv := range api {
+		if strings.Contains(kv, private.X) {
+			t.Errorf("shop-api got %s", kv)
 		}
 	}
-	if err := json.Unmarshal([]byte(envValue(api, local.ServiceAuthVariable)), &config); err != nil {
-		t.Fatalf("shop-api %s: %v", local.ServiceAuthVariable, err)
+	stateDir, _ := strings.CutPrefix(f.req.Backend.URL, "file://")
+	info, err := os.Stat(filepath.Join(stateDir, local.KeysDir, "Orders.calls.shop-api.key.jwk"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if envValue(orders, local.ServiceAuthVariable) != "" {
-		t.Error("Orders, which no edge reaches, got a service-auth config")
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("key file mode = %v, want one readable by its owner alone", info.Mode().Perm())
 	}
-	if len(config.Issuers) != 1 {
-		t.Fatalf("shop-api accepts %d issuers, want Orders alone", len(config.Issuers))
+
+	outputs, err := f.prov.Outputs(context.Background(), f.req)
+	if err != nil {
+		t.Fatal(err)
 	}
-	issuer := config.Issuers[0]
-	caller := issuer.Callers["Orders"]
-	if issuer.Issuer != "Orders" || issuer.Audience != "shop-api" || !slices.Equal(issuer.Algorithms, []string{"EdDSA"}) ||
-		issuer.MaxLifetimeSeconds != 300 || caller.Deployable != "Orders" || !slices.Equal(caller.Serves, []string{"shop-orders"}) {
-		t.Errorf("shop-api's issuer = %+v", issuer)
+	var public local.JWK
+	if err := json.Unmarshal([]byte(fmt.Sprint(outputs["Orders.calls.shop-api.key"]["publicJwk"])), &public); err != nil {
+		t.Fatalf("publicJwk output: %v", err)
 	}
-	if len(issuer.Keys) != 1 || issuer.Keys[0].D != "" || issuer.Keys[0].X != private.X || issuer.Keys[0].Kid != private.Kid {
-		t.Fatalf("shop-api's keys = %+v, want the public half of Orders' key", issuer.Keys)
+	if public.D != "" || public.X != private.X || public.Kid != private.Kid {
+		t.Fatalf("publicJwk output = %+v, want the public half of Orders' key", public)
 	}
 	seed, err := base64.RawURLEncoding.DecodeString(private.D)
 	if err != nil {
 		t.Fatal(err)
 	}
-	public, err := base64.RawURLEncoding.DecodeString(issuer.Keys[0].X)
+	x, err := base64.RawURLEncoding.DecodeString(public.X)
 	if err != nil {
 		t.Fatal(err)
 	}
 	message := []byte("header.claims")
-	if !ed25519.Verify(public, message, ed25519.Sign(ed25519.NewKeyFromSeed(seed), message)) {
-		t.Error("shop-api's public key does not verify what Orders' private key signs")
+	if !ed25519.Verify(x, message, ed25519.Sign(ed25519.NewKeyFromSeed(seed), message)) {
+		t.Error("the public key does not verify what Orders' private key signs")
 	}
 
-	// The program and the environment hold no private key.
-	for _, path := range []string{filepath.Join(f.req.Dir, local.ProgramFile)} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if bytes.Contains(data, []byte(private.D)) {
-			t.Errorf("%s holds the private key", path)
-		}
-	}
-	data, err := stack.Marshal(f.env)
+	program, err := os.ReadFile(filepath.Join(f.req.Dir, local.ProgramFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(data, []byte(private.D)) {
-		t.Error("environment.json holds the private key")
+	environment, err := stack.Marshal(f.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{local.ProgramFile: program, "environment.json": environment} {
+		if bytes.Contains(data, []byte(private.D)) {
+			t.Errorf("%s holds the private key", name)
+		}
 	}
 }

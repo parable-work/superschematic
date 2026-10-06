@@ -5,8 +5,8 @@
 // container, with a database per hosted DB schema, a sql edge derives a
 // connection string to that container, and an http edge the callee's
 // loopback URL with a service credential the caller signs with the edge's
-// Ed25519 key (D37), whose public half the callee's service-auth config
-// holds.
+// Ed25519 key (D37). Giving the callee the public key waits for the
+// service-auth field connectors and the entrypoint will share.
 //
 // The target registers like any other (Register), but the core registers
 // it, so a binary with no extension linked runs `stack dev`. Its resource
@@ -69,9 +69,9 @@ const (
 
 	// TypeKeyPair is an http edge's Ed25519 key pair. The provisioner
 	// generates it into the environment's state directory, never the
-	// output root: the caller signs its service credential with the
-	// private key, and the callee's service-auth config holds the public
-	// one.
+	// output root, and the caller signs its service credential with the
+	// private key. Its public key is an output, for the callee's
+	// service-auth field once there is one.
 	TypeKeyPair = "local:serviceauth/keyPair:KeyPair"
 
 	// TypeProcess is a server process built from its entrypoint module.
@@ -200,11 +200,10 @@ var resourceTypes = map[string]string{
 	}`,
 	TypeKeyPair: `{
 	  "type": "object",
-	  "required": ["caller", "callee", "serves", "algorithm"],
+	  "required": ["caller", "callee", "algorithm"],
 	  "properties": {
 	    "caller": {"type": "string", "minLength": 1},
 	    "callee": {"type": "string", "minLength": 1},
-	    "serves": {"type": "array", "items": {"type": "string", "minLength": 1}},
 	    "algorithm": {"enum": ["Ed25519"]}
 	  },
 	  "additionalProperties": false

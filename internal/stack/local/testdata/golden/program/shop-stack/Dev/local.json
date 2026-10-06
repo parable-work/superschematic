@@ -35,10 +35,7 @@
     {
       "id": "Orders.calls.shop-api.key",
       "caller": "Orders",
-      "callee": "shop-api",
-      "serves": [
-        "shop-orders"
-      ]
+      "callee": "shop-api"
     }
   ],
   "migrations": [
@@ -75,9 +72,6 @@
           "name": "STRIPE_KEY",
           "secret": "PaymentsSecrets.STRIPE_KEY"
         }
-      ],
-      "serviceAuth": [
-        "Orders.calls.shop-api.key"
       ]
     },
     {
