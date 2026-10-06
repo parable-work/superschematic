@@ -332,8 +332,14 @@ func (p *Provisioner) open(ctx context.Context, req registry.ProvisionRequest, c
 	if err != nil {
 		return r, err
 	}
+	// The CLI runs with the provisioner's environment, then the run's
+	// credentials, which the providers read (ProvisionRequest.Env). Both
+	// reach the CLI's process only, never a file.
 	vars := map[string]string{}
 	for k, v := range p.Env {
+		vars[k] = v
+	}
+	for k, v := range req.Env {
 		vars[k] = v
 	}
 	vars["PULUMI_BACKEND_URL"] = req.Backend.URL

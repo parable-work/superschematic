@@ -14,6 +14,7 @@
     }
   ],
   "types": [
+    "gcp:artifactregistry/repository:Repository",
     "gcp:certificatemanager/certificate:Certificate",
     "gcp:certificatemanager/certificateMap:CertificateMap",
     "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry",
@@ -31,12 +32,17 @@
     "gcp:compute/targetHttpsProxy:TargetHttpsProxy",
     "gcp:compute/uRLMap:URLMap",
     "gcp:dns/recordSet:RecordSet",
+    "gcp:iam/workloadIdentityPool:WorkloadIdentityPool",
+    "gcp:iam/workloadIdentityPoolProvider:WorkloadIdentityPoolProvider",
+    "gcp:kms/cryptoKeyIAMMember:CryptoKeyIAMMember",
     "gcp:projects/iAMMember:IAMMember",
     "gcp:secretmanager/secret:Secret",
     "gcp:secretmanager/secretIamMember:SecretIamMember",
     "gcp:serviceaccount/account:Account",
+    "gcp:serviceaccount/iAMMember:IAMMember",
     "gcp:sql/database:Database",
     "gcp:sql/databaseInstance:DatabaseInstance",
-    "gcp:sql/user:User"
+    "gcp:sql/user:User",
+    "gcp:storage/bucketIAMMember:BucketIAMMember"
   ]
 }

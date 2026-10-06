@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/stack/stacktest"
 
 	"github.com/parable-work/superschematic/extensions/gcp"
@@ -107,8 +108,19 @@ func TestRenames(t *testing.T) {
 // schema does not have.
 func TestNoDeprecatedProperties(t *testing.T) {
 	reg := assemble(t)
+	var envs []*ir.ResolvedEnvironment
 	for _, name := range []string{"Staging", "Production", "Preview"} {
-		env := resolve(t, reg, shop(), stacktest.AcmeShop(), name)
+		envs = append(envs, resolve(t, reg, shop(), stacktest.AcmeShop(), name))
+	}
+	checkNoDeprecated(t, "", envs)
+}
+
+// checkNoDeprecated walks every property every node of envs sets through
+// the pinned schema of its type.
+func checkNoDeprecated(t *testing.T, _ string, envs []*ir.ResolvedEnvironment) {
+	t.Helper()
+	for _, env := range envs {
+		name := env.Environment
 		for _, res := range env.Resources.Resources {
 			s, err := schemas.Load(res.Type)
 			if err != nil {
