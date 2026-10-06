@@ -8,8 +8,9 @@ name: ci
 # with the database tests against a Postgres container and the provisioner's
 # against the pulumi CLI,
 # gofmt, golangci-lint, scalar catalog, schema-file types and core behavior
-# declarations drift, CLI smoke over the fixture corpus with the core alone),
-# the acme example extension (smoke plus the no-core-edits check), the
+# declarations drift, CLI smoke over the fixture corpus with the core alone,
+# the migrations example), the acme example extension (smoke plus the
+# no-core-edits check), the
 # TypeScript authoring packages, schema runtime, http runtime, engine, the
 # engine's work-queue
 # package and the engine example, the
@@ -27,10 +28,11 @@ name: ci
 # checks, `go test -short` (which skips compiling and running generated
 # modules), the runtimes' and the version graph's own test suites, and the
 # docs build. The full tier adds the Go tests without -short, the CLI smoke,
-# the acme job, examples/engine-notes and every version-graph scenario
-# through the Go, Rust, TypeScript and Python engines. It runs when
-# release.yml calls this workflow: before every release, on a dry run, and
-# twice a day as the release candidate on main (release-candidate.yml).
+# examples/migrations, the acme job, examples/engine-notes,
+# examples/engine-jobs and every version-graph scenario through the Go,
+# Rust, TypeScript and Python engines. It runs when release.yml calls this
+# workflow: before every release, on a dry run, and twice a day as the
+# release candidate on main (release-candidate.yml).
 # A step or job that belongs to the full tier carries
 # `if: github.event_name != 'pull_request'`; under workflow_call,
 # github.event_name is the caller's event, never pull_request.
@@ -349,6 +351,19 @@ jobs:
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           make cli-smoke
 
+      # The docs site's schema migrations page quotes examples/migrations.
+      # This plans its DB service from v1 to v2 for Postgres and SQLite with
+      # the core alone, gates the plans on their hazards, applies them with
+      # superschematic-migrate to a SQLite file and to a database of its own
+      # on the Postgres above, and fails when an output the page quotes
+      # (examples/migrations/testdata/generated/) is stale.
+      - name: examples/migrations (plan, gate and apply a migration on SQLite and Postgres)
+        if: github.event_name != 'pull_request'
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: examples/migrations/scripts/check.sh
+
       - name: golangci-lint (root module)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         env:
@@ -651,6 +666,14 @@ jobs:
         # and takes seconds. End to end, so the full tier.
         if: github.event_name != 'pull_request'
         run: examples/engine-notes/scripts/check.sh
+
+      - name: examples/engine-jobs type-check + end to end (Node.js and Bun)
+        # The work-queue guide's example: the engine and the work-queue
+        # package rebuilt from the installs above, linked into the example,
+        # and its test run against a listening server under each runtime.
+        # End to end, so the full tier, as engine-notes is.
+        if: github.event_name != 'pull_request'
+        run: examples/engine-jobs/scripts/check.sh
 
   python:
     name: python (schema runtime)

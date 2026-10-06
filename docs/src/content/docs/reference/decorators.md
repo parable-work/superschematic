@@ -58,10 +58,10 @@ as their support lands in every generator.
 | `@requirePermission([...])` | method | the route needs a caller holding one of the permissions | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@requireOwnership` | method | the route needs a caller; your implementation checks ownership | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@publicRoute` | method | marks a route anyone may call, in an `Authenticated` set too; refused with `@auth`, `@requirePermission` or `@requireOwnership` | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
-| `@webhook` | method | an operation a third party calls; the Go and TypeScript SDKs leave it out | [API routes](/superschematic/guides/api-routes/#webhooks) |
-| `@hmacVerified({ provider })` | method | the Go server checks the request's signature with the provider's verifier | [API routes](/superschematic/guides/api-routes/#webhooks) |
-| `@requireService({ from? })` | class, method | only a listed service may call: the server of an API whose handle `from` lists, or without `from` any server with an edge to this API; with a user clause, it must forward an end user who meets it. A method's own replaces its class's, and an `@publicRoute` method takes none. No tool lists the operation, so its `@mcp` must be hidden | [Service auth](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#93-schema-surface) |
-| `@allowService({ from? })` | class, method | needs a user clause: an end user who meets it, or a listed service with no end user. Neither decorator goes with `@publicRoute`, `@webhook` or `@hmacVerified` | [Service auth](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#93-schema-surface) |
+| `@webhook` | method | an operation a third party calls; no SDK has a method or a tool for it | [API routes](/superschematic/guides/api-routes/#webhooks) |
+| `@hmacVerified({ provider })` | method | every server checks the request's signature with the provider's verifier first, before the rate limit, the body limit and the permission check | [API routes](/superschematic/guides/api-routes/#webhooks) |
+| `@requireService({ from? })` | class, method | only a listed service may call: the server of an API whose handle `from` lists, or without `from` any server with an edge to this API; with a user clause, it must forward an end user who meets it. A method's own replaces its class's, and an `@publicRoute` method takes none. No tool lists the operation, so its `@mcp` must be hidden | [Service callers](/superschematic/guides/auth-and-permissions/#service-callers) |
+| `@allowService({ from? })` | class, method | needs a user clause: an end user who meets it, or a listed service with no end user. Neither decorator goes with `@publicRoute`, `@webhook` or `@hmacVerified` | [Service callers](/superschematic/guides/auth-and-permissions/#service-callers) |
 | `@rateLimit`, `@bodyLimit`, `@timeout` | class, method | bound a route's requests per minute, body size and duration | [API routes](/superschematic/guides/api-routes/#traffic-controls) |
 | `@manualRouteRegistration` | method | the Go and Rust routers leave the route for your service to mount; the TypeScript router gates it and hands it to your handler | [TypeScript](/superschematic/install/typescript/#serve-a-generated-api), [Rust](/superschematic/install/rust/#serve-a-generated-api) |
 | `@docs`, `@icon` | method | the operation's documentation and icon | [Documentation](/superschematic/reference/documentation/) |
@@ -73,20 +73,21 @@ as their support lands in every generator.
 | --- | --- | --- |
 | `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
 | `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and `calls`, and for a decorator argument that names a service, such as the `from` of `@requireService` and `@allowService`; its type carries the kind (`ServiceHandle<"API">`). Each service's build writes its handle to `src/service.generated.ts`, which a config or a schema file imports from the service's package; an API's also carries its `@envVars` class | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
-| `@envVars` | on a class of a General schema: its fields are the service's environment variables, with a generated loader and `values-schema.json` | [Modeling types](/superschematic/guides/modeling-types/#environment-variables) |
+| `@envVars` | on a class of a General or API schema: its fields are the service's environment variables, with a generated loader and `values-schema.json`. On an API, it is the config of the API's server, and a stack's `env` binds its fields | [Modeling types](/superschematic/guides/modeling-types/#environment-variables), [Stacks](/superschematic/guides/stacks/#wire-the-services) |
 
 ## Stacks: `@superschematic/stack`
 
 A Stack service (`kind: SchemaKind.Stack`) declares what runs where over
-the services it names by their handles, and its build writes each
-environment, resolved, to `stack/<service>/<environment>/environment.json`.
-The stack takes its service's name. Each class of its schema carries one
-of these decorators and no fields.
+the services it names by their handles. Its build writes each
+environment, resolved, to `stack/<service>/<environment>/environment.json`,
+and each Go server's entrypoint and Dockerfile to
+`server/<service>/<server>/`. The stack takes its service's name. Each
+class of its schema carries one of these decorators and no fields.
 
 | Name | On | What it does | Covered in |
 | --- | --- | --- | --- |
-| `@stack({ deploy, expose })` | class | the stack's entry points, API and DB handles: every service they reach through `authDb`, DB dependencies and `calls` joins the stack. `expose` names what is reachable from outside, an API's handle or an `@server` class. One class per schema | [The Stack kind](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#41-the-stack-kind) |
-| `@server({ serves })` | class | one server for the APIs listed, in place of their default servers | [The Stack kind](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#41-the-stack-kind) |
-| `@database({ hosts })` | class | one database for the DB schemas listed, in place of their default databases | [The Stack kind](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#41-the-stack-kind) |
-| `@environment({ target, domain, dns, settings, parameters })` | class | an environment: the target, its values under the target's name (`gcp: { project, region }`), and settings per deployable, each `of` a handle or an `@server` or `@database` class, with `env` values that are literals or `{ parameter }`. A class that extends another `@environment` class inherits its values | [The Stack kind](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#41-the-stack-kind) |
-| `Targets` | interface | a target's package augments it with the target's values and a settings type per deployable kind; `@environment` checks the values, each settings element and its `env` against them | [Typed authoring](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#43-typed-authoring) |
+| `@stack({ deploy, expose })` | class | the stack's entry points, API and DB handles: every service they reach through `authDb`, DB dependencies and `calls` joins the stack. `expose` names what is reachable from outside, an API's handle or an `@server` class. One class per schema | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
+| `@server({ serves })` | class | one server for the APIs listed, in place of their default servers | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
+| `@database({ hosts })` | class | one database for the DB schemas listed, in place of their default databases | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
+| `@environment({ target, domain, dns, settings, parameters })` | class | an environment: the target, its values under the target's name (`local: { postgresImage, postgresPort }`, `gcp: { project, region, production }`), the domain and its DNS platform, and settings per deployable, each `of` a handle or an `@server` or `@database` class, with platform settings (a local server's `port`, a Cloud Run server's `minInstances`) and `env` values that are literals or `{ parameter }`. A class that extends another `@environment` class inherits its values | [Stacks](/superschematic/guides/stacks/#environments) |
+| `Targets` | interface | the targets `target` may name, each with its values and a settings type per deployable kind, which `@environment` checks the values, each settings element and its `env` against. It lists the core's `local` (`LocalTarget`); a target's package, or your stack, augments it with another, such as `gcp` | [Stacks](/superschematic/guides/stacks/#type-a-targets-values) |

@@ -124,6 +124,13 @@ the table DDL in `<out>/sql/<service>/`:
 | `projections/<pool>.<name>.arrow.json` | The view's Arrow schema in arrow-rs serde form: one field per column with its Arrow type, nullability and metadata, and schema metadata naming the view and its settings. |
 | `projections/<pool>.<name>.docs.json` | The view's address, description, settings, collapse key and columns (source, scalar or enum, SQL and Arrow type, nullability, description), for a catalog page. |
 
+A [migration plan](/superschematic/reference/migrations/) creates,
+replaces and drops the view too, as `viewOwner` when one is set, so a
+database that `superschematic-migrate` migrates gets the view from the plan
+rather than from the pair. A plan that drops the view, or changes the
+columns it publishes by name, type or order, marks that step
+`api-breaking`: the Arrow schema is the readers' contract.
+
 The view is created `WITH (security_barrier = true)`, so a function in a
 reader's query cannot observe rows the rules exclude. The view's comment
 and each column's comment come from the class and field comments. Column

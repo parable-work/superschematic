@@ -114,6 +114,14 @@ func TestDeployMember(t *testing.T) {
 	if !slices.Contains(calls, "migrate expand shop-db: shop-db") || slices.ContainsFunc(calls, func(c string) bool { return strings.Contains(c, "shop-db.instance") }) {
 		t.Errorf("the member's deploy ran:\n%s", strings.Join(calls, "\n"))
 	}
+	// The member's outputs file names its environment and parameter.
+	out, err := stackdeploy.Outputs(context.Background(), f.options(t, env, map[string]string{"pr": "7"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Environment != "Preview" || out.Parameters["pr"] != "7" || len(out.Resources) == 0 {
+		t.Errorf("the member's outputs file %+v", out)
+	}
 	if _, err := stackdeploy.Deploy(context.Background(), deployOptions(f, t, env, nil, &planner{to: 1}, images(1))); err == nil || !strings.Contains(err.Error(), "takes parameter pr") {
 		t.Errorf("a member without its parameter: %v", err)
 	}
@@ -375,8 +383,11 @@ func TestDestroyAndOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out["shop-api.service"]["id"] != "shop-api.service" {
-		t.Errorf("outputs %v", out)
+	if out.Version != stackdeploy.OutputsVersion || out.Stack != env.Stack || out.Environment != "Staging" || out.Parameters != nil {
+		t.Errorf("outputs file %+v", out)
+	}
+	if out.Resources["shop-api.service"]["id"] != "shop-api.service" {
+		t.Errorf("outputs %v", out.Resources)
 	}
 	if err := stackdeploy.Destroy(ctx, f.options(t, env, nil)); err != nil {
 		t.Fatal(err)

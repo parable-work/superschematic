@@ -50,11 +50,52 @@ route and typed arguments:
 
 <Snippet file="testdata/generated/api/shop-orders/interfaces.go" symbol="OrderImplementation" />
 
-To start an implementation, set `outputs.api.scaffoldsOutputDir` to a
-directory, relative to the service directory. The Go and Rust servers then
-write a stub implementation of each route there, and a later build never
-overwrites one that exists, so you edit the stubs in place; the build log
-says how many it created and skipped. The TypeScript server writes none.
+## Start an implementation
+
+Set `outputs.api.scaffoldsOutputDir` to a directory, relative to the
+service directory, and the Go and Rust servers write a stub implementation
+of each route there. A later build never overwrites one that exists, so
+you edit the stubs in place; the build log says how many it created and
+skipped. The TypeScript server writes none.
+
+A Go server also says what its implementation is built from. Its
+`deps.go` declares `Deps`, which holds:
+
+- `Config`, the API's `EnvConfig`: its `@envVars` settings and the fields
+  its edges derive
+  ([Derived fields](/superschematic/guides/modeling-types/#derived-fields)),
+  when it has either;
+- `DB`, the ORM of the API's database (its `authDb`, or its one DB
+  dependency), when it has one;
+- a Go SDK client of each API its config `calls`, in a field named after
+  that API (`ShopCatalog` for `shop-catalog`), so each callee generates a
+  Go SDK;
+- `Logger`, a zap logger.
+
+`Constructor`, `func(deps Deps) (Implementations, error)`, is the
+signature of the implementation's `New`. The implementation lives at the
+naming file's
+[`[implementation_paths]`](/superschematic/reference/naming/#implementation_paths),
+`go/<service>` from the parent of the schemas root by default, and a
+missing one is scaffolded there: by a
+[stack's](/superschematic/guides/stacks/) build for each API its servers
+serve, and by `build --scaffold` or `build-all --scaffold` for each Go API
+built ([CLI](/superschematic/reference/cli/#build-service-dir)). The
+scaffold is one `implementation.go` whose `New` asserts `Constructor` and
+whose methods answer 501 until you write them. A `public` API's scaffold
+also has `AuthMiddleware(deps)`, which refuses every request with 401, and
+an API with encrypted operations `PayloadDecryptor(deps)`, which decrypts
+nothing; replace both. A scaffold never overwrites a file, and a build
+without a stack or the flag writes no `implementation.go`.
+
+A stack's build also writes each Go server's entrypoint, which fills
+`Deps`, calls each implementation's `New`, and its `AuthMiddleware` and
+`PayloadDecryptor` where the API's `Config` takes them, and serves the
+result. Without a stack, your own
+`main` does that, as
+[the Go tutorial](/superschematic/first-project/go-api/#mount-the-server)
+does by hand. `Deps` and the entrypoint are not built for TypeScript and
+Rust servers yet.
 
 ## Arguments
 
@@ -169,7 +210,8 @@ Three decorators bound a route's use. On a class they apply to every route
 of the set; on a method, to that route.
 
 - `@rateLimit({ requestsPerMinute })` counts a client's requests to the
-  route, by IP address, and answers 429 past the limit for the minute. The
+  route, by IP address, and answers 429 past the limit for the minute,
+  with `Retry-After` and the code `too_many_requests`. The
   address is the connection's peer, not a forwarding header a client could
   write; behind a proxy you trust, each server takes the client IP from it
   as you tell it to (Go: chi's `ClientIPFromXFF` or `ClientIPFromHeader`
@@ -178,11 +220,15 @@ of the set; on a method, to that route.
 - `@bodyLimit({ megabytes })` answers 413 to a larger body before reading
   it.
 - `@timeout({ seconds })` cancels the request's context when the time runs
-  out.
+  out, and answers 504 with the code `gateway_timeout`.
 
+Each refusal is an RFC 9457 problem body, as an implementation's error is.
 The generated route table lists them as middleware on each route, in the
 order they run: the rate limit, the body limit, the permission check, then
-the timeout around the handler.
+the timeout around the handler. A server whose schema admits
+[service callers](/superschematic/guides/auth-and-permissions/#service-callers)
+runs its service step after the body limit and before the permission
+check.
 
 <Snippet file="testdata/generated/api/shop-orders/routes.go" from="createOrderPlaceOrderHandler(" to="Timeout(10*time.Second" />
 
@@ -198,7 +244,7 @@ decryptor, which in a deployment calls a key service. On such a route
 
 Each value is a whole number of at least 1; the build refuses 0, a
 negative number or a fraction. The TypeScript and Rust servers apply the
-same three and the permission check, in the same order
+same three, the service step and the permission check, in the same order
 ([TypeScript](/superschematic/install/typescript/#serve-a-generated-api),
 [Rust](/superschematic/install/rust/#serve-a-generated-api)).
 
@@ -239,8 +285,10 @@ Go with the verifier from `WebhookVerifiers`, in Rust with
 
 ## OpenAPI
 
-The build writes `api/<service>/openapi.json`, and the Go server serves it
-at `GET /api/openapi.json` with a browsable page at `GET /api/docs`. Each
+The build writes `api/<service>/openapi.json`, and the Go and Rust servers
+serve it at `GET /api/openapi.json` with a browsable page at
+`GET /api/docs`. The TypeScript router serves neither; its package exports
+the document as `<package>/openapi.json` for you to serve. Each
 schema comment becomes a description, and each constraint the matching
 JSON Schema keyword: `minLength`, `pattern`, `minimum`, and `minItems` and
 `maxItems` for `listMin` and `listMax`.
@@ -249,8 +297,8 @@ JSON Schema keyword: `minLength`, `pattern`, `minimum`, and `minItems` and
 
 The same schema served in TypeScript generates a
 [Hono](https://hono.dev) router with the same routes, argument rules,
-envelopes and traffic controls, and an `Implementations` object in place
-of the Go interfaces.
+envelopes, auth rules and traffic controls, and an `Implementations`
+object in place of the Go interfaces.
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/)
 walks one, and the [TypeScript page](/superschematic/install/typescript/#serve-a-generated-api)
 lists what it refuses.
@@ -258,10 +306,10 @@ lists what it refuses.
 ## The Rust server
 
 `outputs.api.language: "RUST"` generates an [axum](https://docs.rs/axum)
-crate with the same routes, argument rules, envelopes and traffic
-controls. Each namespace is a trait whose methods take one struct of the
-route's typed arguments, `<Namespace><Operation>Args`, and return its
-result type. The router decodes and checks every argument first, as the
+crate with the same routes, argument rules, envelopes, auth rules and
+traffic controls, and it serves the OpenAPI document. Each namespace is a
+trait whose methods take one struct of the route's typed arguments,
+`<Namespace><Operation>Args`, and return its result type. The router decodes and checks every argument first, as the
 TypeScript router does, and refuses a key an input type does not declare.
 The [Rust page](/superschematic/install/rust/#serve-a-generated-api)
 lists what it refuses.
@@ -273,6 +321,15 @@ builds the service with its API in Rust, into an output root of its own:
 ```bash
 superschematic build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders
 ```
+
+The router takes one `Implementations` value: an implementation of each
+namespace's trait, and the `Authenticator` that says who the caller is
+([Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-rust)).
+One shop serves both namespaces here:
+
+<Snippet file="rust-server/src/lib.rs" symbol={['Tokens', 'implementations']} />
+
+`main` serves the router on a local port:
 
 <Snippet file="rust-server/src/main.rs" symbol="main" />
 

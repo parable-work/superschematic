@@ -14,10 +14,23 @@ JSON catalog.
 
 It stays small on purpose: three constants, one struct, one `Register`
 function, one verify rule, one generator. A production version of the same
-kind would reference member services through their sentinels
-(`service({...})` values from the config package) instead of bare names
-and close the set of shared resource kinds. Both are
-`DecoratorSpec.Args` and `KindSpec.Verify` changes, not engine changes.
+kind would reference member services through their handles instead of
+bare names, as a decorator argument now can
+([A service as an argument](/superschematic/extending/write-an-extension/#a-service-as-an-argument)),
+and close the set of shared resource kinds. Both are `DecoratorSpec.Args`
+and `KindSpec.Verify` changes, not engine changes.
+
+## Not the stack model's platforms
+
+This `Platform` kind is a teaching example, unrelated to deploying. The
+[stack model](/superschematic/guides/stacks/) uses the word for something
+else: a platform there is a `registry.PlatformSpec` that runs one kind of
+deployable on one runtime, such as Cloud Run
+([Stack targets](/superschematic/extending/stack-targets/)). To group
+services into what runs together, declare a Stack service with `@server`
+and `@database`. This extension predates the stack model, is not linked
+into the installed `superschematic`, and the stack model's design plans
+to rewrite it over the stack model or retire it.
 
 ## Link it
 

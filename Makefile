@@ -48,7 +48,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check ts python rust \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
-        versiongraph-scenarios-python docs cli-smoke scrub versions clean
+        versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
 all: build test lint
 
@@ -160,6 +160,7 @@ ts:
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 	cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
+	examples/engine-jobs/scripts/check.sh
 
 # The version-graph core's Python binding: cargo test runs the binding's own
 # unit tests, uv builds the PyO3 extension with maturin into the package's
@@ -314,6 +315,15 @@ cli-smoke: $(CORE_BIN)
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 
+# examples/migrations: plans its DB service from v1 to v2 for Postgres and
+# SQLite with the core alone, gates the plans on their hazards, and applies
+# them with superschematic-migrate to a SQLite file, and to a database of
+# its own on the Postgres SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL names
+# when it is set. Needs sqlite3, and psql for Postgres. UPDATE=1 rewrites
+# the outputs the docs site quotes (testdata/generated/ there).
+example-migrations:
+	examples/migrations/scripts/check.sh
+
 # The extraction scrub: the only allowed maintainer mentions are the license
 # holder, the GitHub org in module paths and publisher registrations, and the
 # maintainer lines; source-tree identifiers, planning ids (wave, review and
@@ -328,7 +338,7 @@ versions:
 	python3 scripts/bump_version.py check
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
-test: go-test catalog-check schema-file-types-check behaviors-check ts python rust cli-smoke versions
+test: go-test catalog-check schema-file-types-check behaviors-check ts python rust cli-smoke example-migrations versions
 
 lint: go-vet go-fmt-check go-lint scrub
 
