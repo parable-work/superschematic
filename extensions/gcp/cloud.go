@@ -525,7 +525,7 @@ func (c *googleCloud) RunBuild(ctx context.Context, project, region string, spec
 		Steps: []*cloudbuildpb.BuildStep{{
 			Name: dockerStep,
 			Env:  []string{"DOCKER_BUILDKIT=1"},
-			Args: []string{"build", "--network=cloudbuild", "-f", spec.Dockerfile, "-t", spec.Image, "."},
+			Args: []string{"build", "-f", spec.Dockerfile, "-t", spec.Image, "."},
 		}},
 		Images:         []string{spec.Image},
 		ServiceAccount: "projects/" + project + "/serviceAccounts/" + spec.ServiceAccount,
