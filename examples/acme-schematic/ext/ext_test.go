@@ -346,6 +346,99 @@ func TestFieldDirectivesSurviveTheDataFormWriters(t *testing.T) {
 	}
 }
 
+// TestAcmePhotoRoundTripsThroughTypeScript: format --to=ts imports the
+// Acme namespace from @acme/schema, the package acme's scalar catalog names
+// for it, so a data-form Catalog schema with an Acme.Photo field, written to
+// TypeScript, loads back with the catalog's upload metadata and gives the
+// data form's types. Imported from superscalar, which has no Acme, it would
+// not compile. The schema is a Catalog's: @acme/schema's decorators are
+// all Catalog's, so another kind may not import it.
+func TestAcmePhotoRoundTripsThroughTypeScript(t *testing.T) {
+	reg, names := assemble(t)
+	config := `{"name": "album", "kind": "Catalog", "outputs": {}}`
+	jsonService := writeService(t, map[string]string{
+		"schema.config.json": config,
+		"src/album.schema.json": `{
+			"name": "album",
+			"kind": "Catalog",
+			"scalars": {
+				"Acme.Photo": {"name": "Acme.Photo", "languagePrimitive": "string"},
+				"Identity.Name": {"name": "Identity.Name", "languagePrimitive": "string"}
+			},
+			"types": {
+				"Album": {
+					"name": "Album",
+					"role": "EmbeddedStruct",
+					"fields": [
+						{"name": "title", "typeRef": {"name": "Identity.Name"}, "required": true},
+						{"name": "cover", "typeRef": {"name": "Acme.Photo"}, "required": true}
+					]
+				}
+			}
+		}`,
+	})
+	fromJSON, err := loader.LoadService(jsonService, loader.WithRegistry(reg), loader.WithNaming(names))
+	if err != nil {
+		t.Fatalf("LoadService(JSON): %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	cmd := cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"format", "--to=ts", "--stdout", filepath.Join(jsonService, "src", "album.schema.json")})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("format --to=ts: %v\n%s", err, errOut.String())
+	}
+	for _, line := range []string{`import { Acme } from "@acme/schema";`, `import { Identity } from "superscalar";`} {
+		if !strings.Contains(out.String(), line+"\n") {
+			t.Fatalf("format --to=ts wrote no %s:\n%s", line, out.String())
+		}
+	}
+
+	base, err := filepath.Abs(filepath.Join(schemasRoot, "tsconfig.base.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsconfig, err := json.Marshal(map[string]any{"extends": filepath.ToSlash(base), "include": []string{"src/**/*.ts"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsService := writeService(t, map[string]string{
+		"schema.config.json":  config,
+		"tsconfig.json":       string(tsconfig),
+		"src/album.schema.ts": out.String(),
+	})
+	fromTS, err := loader.LoadService(tsService, loader.WithRegistry(reg), loader.WithNaming(names))
+	if err != nil {
+		t.Fatalf("LoadService(TypeScript): %v\n%s", err, out.String())
+	}
+	if got, want := typesWithoutOwner(t, fromTS), typesWithoutOwner(t, fromJSON); got != want {
+		t.Fatalf("TypeScript types differ from the JSON load:\n got %s\nwant %s", got, want)
+	}
+	photo := fromTS.Scalars[ext.PhotoScalar]
+	if photo == nil || photo.FileUpload == nil || photo.FileUpload.MaxSize != ext.PhotoUpload.FileUpload.MaxSize {
+		t.Fatalf("%s = %+v, want the catalog's upload metadata", ext.PhotoScalar, photo)
+	}
+}
+
+// writeService writes files, keyed by slash path, into a new temporary
+// service directory and returns it.
+func writeService(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
 // typesWithoutOwner is the IR of a schema's types as JSON, without the
 // file each type came from.
 func typesWithoutOwner(t *testing.T, schema *ir.Schema) string {

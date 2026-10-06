@@ -201,7 +201,8 @@ superschematic --help
 ```
 
 `bin/superschematic` is the binary a release ships: the core with the
-official extensions linked, the gcp target and the Pulumi provisioner.
+official extensions linked, the gcp target, the Cloudflare DNS platform
+and the Pulumi provisioner.
 `go install github.com/parable-work/superschematic/cmd/superschematic@<version>`
 does not work, because the Go modules carry `replace` directives and `go
 install` at a version refuses them; build from a checkout as above, or
@@ -326,8 +327,9 @@ func main() {
 ```
 
 The installed `superschematic` (`cmd/superschematic`) is that call with the
-official extensions, the gcp target and the Pulumi provisioner, and the
-core alone (`internal/cmd/superschematic-core`) is the call with none. The
+official extensions (the gcp target, the Cloudflare DNS platform and the
+Pulumi provisioner), and the core alone
+(`internal/cmd/superschematic-core`) is the call with none. The
 naming file, `superschematic.toml` at
 the root of your schemas, gives the generated packages their module paths,
 npm scope and crate names. See
@@ -338,7 +340,7 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 
 | Path | What it is |
 | --- | --- |
-| [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, pulumi) linked |
+| [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, pulumi) linked |
 | [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
 | [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `migrate`, `format`, `json-schema`, `behaviors` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
@@ -351,16 +353,17 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | [`runtime/migrate/`](runtime/migrate/) | The migration runner: `superschematic-migrate` applies the plans `superschematic migrate plan` writes |
 | [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code |
 | [`runtime/engine-workqueue/`](runtime/engine-workqueue/) | `@superschematic/engine-workqueue`: claimable work for the engine |
-| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `pulumi`), `topcoat`, and example extensions and projects |
+| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`docs/`](docs/) | The docs site, the decision log and the extension design |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has ten Go modules: the root (the compiler), `ir`,
+The repository has eleven Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
 `runtime/migrate/go` (the migration runner), `extensions/gcp`,
-`extensions/pulumi`, `extensions/topcoat` and `cmd/superschematic` (the
-installed binary). Generated code imports the runtimes and the IR, never
-the compiler, and the root module never imports an extension.
+`extensions/cloudflare`, `extensions/pulumi`, `extensions/topcoat` and
+`cmd/superschematic` (the installed binary). Generated code imports the
+runtimes and the IR, never the compiler, and the root module never imports
+an extension.
 
 ## Development
 

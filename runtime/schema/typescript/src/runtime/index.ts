@@ -16,6 +16,9 @@ export {
   validateSchemaInput,
   validateSchemaType,
 } from './validation/validate';
+// Which JSON a scalar holds, as parse and validation read it: the engine
+// refuses an object scalar these do not hold to JSON (D14, amended).
+export { isAnyJSONScalar, structuredJSONType } from './validation/types';
 
 // Legacy validate entry points return `true | ValidationErrors`. Prefer the
 // facade `validateType` / `validateInput` (return `ValidationErrors` directly,
