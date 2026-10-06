@@ -657,7 +657,11 @@ last step finishes, the plan's model becomes the applied model.
 The runner refuses a plan whose `from` is not the database's applied model,
 naming both, unless the database is part-way through that same plan. Plan
 again from what the database recorded: `superschematic-migrate status
---model` prints it, and `migrate plan --from` takes it. A new plan is also
+--model` prints it, and `migrate plan --from` takes it. A database with no
+applied model has nothing for `status --model` to print: if it was built
+from `create.sql` or by hand, `adopt` the model it matches first
+([Adopt a database built from create.sql](#adopt-a-database-built-from-createsql)),
+and if it is empty, plan from an empty database. A new plan is also
 refused while another plan is in progress, unless it supersedes that plan's
 pending contract ([A failed rollout](#a-failed-rollout)).
 
