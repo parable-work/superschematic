@@ -161,6 +161,13 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider, mutateAPI ...fu
 // dbSchema is nil.
 func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *ir.Schema, mutateAPI ...func(*ir.Schema)) string {
 	t.Helper()
+	return buildPublicAPIOver(t, provider, "fixture-api", dbSchema, mutateAPI...)
+}
+
+// buildPublicAPIOver is buildFixtureAPIOver for apiService, any API fixture,
+// generated as a public API over fixture-db.
+func buildPublicAPIOver(t *testing.T, provider apigen.AuthProvider, apiService string, dbSchema *ir.Schema, mutateAPI ...func(*ir.Schema)) string {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -174,9 +181,9 @@ func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *i
 			t.Fatalf("load fixture-db: %v", err)
 		}
 	}
-	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
+	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, apiService))
 	if err != nil {
-		t.Fatalf("load fixture-api: %v", err)
+		t.Fatalf("load %s: %v", apiService, err)
 	}
 	for _, mutate := range mutateAPI {
 		mutate(apiSchema)
@@ -184,13 +191,13 @@ func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *i
 
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	dbTypesModule := "example.com/schemas/types/go/fixture-db"
-	apiTypesModule := "example.com/schemas/types/go/fixture-api"
+	apiTypesModule := "example.com/schemas/types/go/" + apiService
 
 	tempRoot := t.TempDir()
 	dbTypesDir := filepath.Join(tempRoot, "types", "go", "fixture-db")
-	apiTypesDir := filepath.Join(tempRoot, "types", "go", "fixture-api")
+	apiTypesDir := filepath.Join(tempRoot, "types", "go", apiService)
 	ormDir := filepath.Join(tempRoot, "orm", "fixture-db")
-	apiDir := filepath.Join(tempRoot, "api", "fixture-api")
+	apiDir := filepath.Join(tempRoot, "api", apiService)
 
 	dbTypesOutput, err := typegen.Generate(dbSchema, typegen.Options{
 		SchemaName: "fixture-db",
@@ -208,7 +215,7 @@ func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *i
 	}
 
 	apiTypesOutput, err := typegen.Generate(apiSchema, typegen.Options{
-		SchemaName: "fixture-api",
+		SchemaName: apiService,
 		ModulePath: apiTypesModule,
 		Dependencies: map[string]*ir.Schema{
 			"fixture-db": dbSchema,
@@ -219,13 +226,13 @@ func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *i
 		Clock: fixedClock,
 	})
 	if err != nil {
-		t.Fatalf("generate fixture-api types: %v", err)
+		t.Fatalf("generate %s types: %v", apiService, err)
 	}
 	if err := typegen.SetReplacePaths(apiTypesOutput, paths, apiTypesDir); err != nil {
-		t.Fatalf("set fixture-api types replace paths: %v", err)
+		t.Fatalf("set %s types replace paths: %v", apiService, err)
 	}
 	if err := typegen.WriteTypes(apiTypesOutput, apiTypesDir); err != nil {
-		t.Fatalf("write fixture-api types: %v", err)
+		t.Fatalf("write %s types: %v", apiService, err)
 	}
 
 	ormOutput, err := ormgen.Generate(dbSchema, ormgen.Options{
@@ -246,8 +253,8 @@ func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *i
 
 	apiOutput, err := apigen.Generate(apiSchema, apigen.Options{
 		Provider:       provider,
-		SchemaName:     "fixture-api",
-		ModulePath:     "example.com/schemas/api/fixture-api",
+		SchemaName:     apiService,
+		ModulePath:     "example.com/schemas/api/" + apiService,
 		TypesModule:    apiTypesModule,
 		IsPublic:       true,
 		UpstreamSchema: "fixture-db",
@@ -258,7 +265,7 @@ func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *i
 		t.Fatalf("generate api: %v", err)
 	}
 	if apiOutput == nil {
-		t.Fatal("expected API output for fixture-api")
+		t.Fatalf("expected API output for %s", apiService)
 	}
 	if err := apigen.SetReplacePaths(apiOutput, paths, apiDir); err != nil {
 		t.Fatalf("set api replace paths: %v", err)

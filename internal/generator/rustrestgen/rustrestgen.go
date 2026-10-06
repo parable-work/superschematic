@@ -65,9 +65,23 @@ type EndpointInfo struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
+	// ServiceCallers is the operation's effective @requireService or
+	// @allowService clause; nil without one. ServiceStep marks a route of a
+	// crate whose schema has a service clause anywhere: Implementations then
+	// has a service_authenticator, and every route verifies a service
+	// credential when the request carries one (D37).
+	ServiceCallers *ir.ServiceCallers
+	ServiceStep    bool
 	// Manual marks an operation declared @manualRouteRegistration, which the
 	// service mounts itself.
 	Manual bool
+}
+
+// AllowsService reports whether the route is @allowService: a listed
+// service caller stands in for the end user, so the handler may get no
+// principal.
+func (e EndpointInfo) AllowsService() bool {
+	return e.ServiceCallers != nil && e.ServiceCallers.Mode == ir.ServiceCallersAllow
 }
 
 // ConstName is the operation's OperationInfo constant in the crate's
@@ -135,23 +149,29 @@ func (e EndpointInfo) UsesTypes() bool {
 	return strings.Contains(e.OutputRustType, "types::")
 }
 
-// HasControls reports whether the route has a traffic control or needs a
-// caller: build_router applies RouteControls to it.
+// HasControls reports whether the route has a traffic control, needs a
+// caller or runs the service step: build_router applies RouteControls to
+// it.
 func (e EndpointInfo) HasControls() bool {
-	return e.RequiresAuth || e.RateLimit > 0 || e.BodyLimit > 0 || e.Timeout > 0
+	return e.RequiresAuth || e.ServiceStep || e.RateLimit > 0 || e.BodyLimit > 0 || e.Timeout > 0
 }
 
 // ControlCalls are the RouteControls builder calls of the route, in the
-// order a request meets them: the rate limit, the body limit, the
-// permission check, then the timeout around the handler. authenticator is
-// the Rust expression of the Arc<dyn Authenticator> the check uses.
-func (e EndpointInfo) ControlCalls(authenticator string) []string {
+// order a request meets them: the rate limit, the body limit, the service
+// step, the permission check, then the timeout around the handler.
+// authenticator and serviceAuthenticator are the Rust expressions of the
+// Arc<dyn Authenticator> and the Arc<dyn ServiceAuthenticator> the checks
+// use.
+func (e EndpointInfo) ControlCalls(authenticator, serviceAuthenticator string) []string {
 	var calls []string
 	if e.RateLimit > 0 {
 		calls = append(calls, fmt.Sprintf(".rate_limit(%d)", e.RateLimit))
 	}
 	if e.BodyLimit > 0 {
 		calls = append(calls, fmt.Sprintf(".body_limit_megabytes(%d)", e.BodyLimit))
+	}
+	if e.ServiceStep {
+		calls = append(calls, e.serviceCall(serviceAuthenticator))
 	}
 	if e.RequiresAuth {
 		perms := make([]string, len(e.RequiredPerms))
@@ -164,6 +184,25 @@ func (e EndpointInfo) ControlCalls(authenticator string) []string {
 		calls = append(calls, fmt.Sprintf(".timeout_seconds(%d)", e.Timeout))
 	}
 	return calls
+}
+
+// serviceCall is the route's service step: its @requireService or
+// @allowService rule with the APIs of its from, or, on a route without a
+// rule, identify_service, which verifies a credential that is present and
+// puts its caller on the request.
+func (e EndpointInfo) serviceCall(serviceAuthenticator string) string {
+	if e.ServiceCallers == nil {
+		return fmt.Sprintf(".identify_service(%s)", serviceAuthenticator)
+	}
+	from := make([]string, len(e.ServiceCallers.From))
+	for i, api := range e.ServiceCallers.From {
+		from[i] = rustString(api)
+	}
+	method := "require_service"
+	if e.AllowsService() {
+		method = "allow_service"
+	}
+	return fmt.Sprintf(".%s(%s, &[%s])", method, serviceAuthenticator, strings.Join(from, ", "))
 }
 
 // APIOutput contains generated Rust REST API metadata.
@@ -184,6 +223,10 @@ type APIOutput struct {
 	// HasControls reports whether an endpoint, manual ones included, has
 	// RouteControls.
 	HasControls bool
+	// HasServiceCallers reports whether an endpoint, manual ones included,
+	// has a service clause: Implementations then has a
+	// service_authenticator, and every route runs the service step (D37).
+	HasServiceCallers bool
 	// OpenAPIJSON is the service's OpenAPI document as apigen builds it
 	// for every server: written to openapi.json, embedded in src/openapi.rs
 	// and served at GET /api/openapi.json.
@@ -310,6 +353,15 @@ type Options struct {
 // RouteControls. The caller comes from Implementations.authenticator,
 // which the crate has when an operation needs one (D29).
 //
+// When an operation, a manual one included, has a service clause
+// (@requireService or @allowService), Implementations has a
+// service_authenticator and every route runs the service step between the
+// body limit and the permission check (D37): a route with a clause applies
+// it, and the others verify a service credential when one is present. A
+// listed caller on an @allowService route skips the permission check, so
+// its handler takes the principal as an Option. A schema without a service
+// clause generates the crate it did before.
+//
 // The endpoints and the OpenAPI document come from api, the apigen output
 // generator.Run builds once for the Go and TypeScript servers and every
 // SDK, with the service's dependencies, naming, OpenAPI and tool hooks and
@@ -334,6 +386,10 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		OpenAPIJSON: api.OpenAPISpecRaw,
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
+
+	for _, endpoint := range api.Endpoints {
+		output.HasServiceCallers = output.HasServiceCallers || endpoint.ServiceCallers != nil
+	}
 
 	namespaceSet := make(map[string]struct{})
 	webhookProviders := make(map[string]struct{})
@@ -387,6 +443,8 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 			RateLimit:        positive(endpoint.RateLimit),
 			BodyLimit:        positive(endpoint.BodyLimit),
 			Timeout:          positive(endpoint.Timeout),
+			ServiceCallers:   endpoint.ServiceCallers,
+			ServiceStep:      output.HasServiceCallers,
 			Manual:           endpoint.ManualRouteRegistration,
 		}
 		if info.WebhookProvider != "" {

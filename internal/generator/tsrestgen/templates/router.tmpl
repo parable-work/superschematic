@@ -64,6 +64,9 @@ export const operationSpecs = {
     outputIsArrayOfArrays: true,
 {{- end }}
     auth: { public: {{ .PublicRoute }}, required: {{ .RequiresAuth }}, permissions: {{ .PermsLiteral }} },
+{{- if .ServiceLiteral }}
+    service: {{ .ServiceLiteral }},
+{{- end }}
 {{- if .BodyLimitBytes }}
     bodyLimitBytes: {{ .BodyLimitBytes }},
 {{- end }}
@@ -103,10 +106,15 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
 {{- end }}
 }
 
-{{ if .WebhookProviders -}}
+{{ if or .WebhookProviders .HasServiceCallers -}}
 /**
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
+{{- if .WebhookProviders }}
  * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
+{{- end }}
+{{- if .HasServiceCallers }}
+ * Without options.authenticateService (serviceAuthenticator, say), every @requireService or @allowService operation answers 401 service_unauthorized.
+{{- end }}
  */
 {{ else -}}
 /** Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application. */

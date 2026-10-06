@@ -1295,7 +1295,7 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 			w.addErr(errorAtNode(m, "operation sets may only contain methods"))
 			continue
 		}
-		op, serr := w.operationFromMethod(m)
+		op, opDecorators, serr := w.operationFromMethod(m)
 		if serr != nil {
 			w.addErr(serr)
 			continue
@@ -1308,6 +1308,16 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 		if !op.Public {
 			op.Auth = op.Auth || auth
 		}
+		// The service clause that reaches the operation, its own or its
+		// set's, is refused at the method's own @requireService or
+		// @allowService, or at the method when it takes the set's.
+		if conflict, ok := verify.ServiceCallersConflict(set, op); ok {
+			at := m
+			if own := findDecorator(opDecorators, strings.TrimPrefix(conflict.Rule, "@")); own != nil && !conflict.FromSet {
+				at = own.node
+			}
+			w.addErr(errorAtNode(at, "%s", conflict.On(op.Name)))
+		}
 		set.Operations = append(set.Operations, op)
 	}
 
@@ -1315,16 +1325,17 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 }
 
 // operationFromMethod converts one method declaration into an operation
-// FieldDef. Every operation carries its HTTP method explicitly via @rest;
-// there is no Queries-versus-Mutations inference in v2.
-func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, *SchemaError) {
+// FieldDef, and returns the method's decorators for diagnostics that point
+// at one of them. Every operation carries its HTTP method explicitly via
+// @rest; there is no Queries-versus-Mutations inference in v2.
+func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, []decoratorRef, *SchemaError) {
 	method := m.AsMethodDeclaration()
 	if method.Type == nil {
-		return nil, errorAtNode(m, "operations must declare an explicit return type")
+		return nil, nil, errorAtNode(m, "operations must declare an explicit return type")
 	}
 	info, serr := w.resolveTypeNode(method.Type)
 	if serr != nil {
-		return nil, serr
+		return nil, nil, serr
 	}
 	w.recordReference(info)
 
@@ -1336,7 +1347,8 @@ func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, *SchemaError) {
 		Encrypted: info.encrypted,
 	}
 
-	for _, d := range w.decoratorsOf(m) {
+	decorators := w.decoratorsOf(m)
+	for _, d := range decorators {
 		serr := w.applyDecorator(d, registry.TargetOperation, registry.Node{Schema: w.schema, Field: op})
 		if serr == nil {
 			continue
@@ -1347,23 +1359,23 @@ func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, *SchemaError) {
 			w.addErr(serr)
 			continue
 		}
-		return nil, serr
+		return nil, nil, serr
 	}
 
 	if op.HTTPMethod == "" && !op.ManualRouteRegistration {
-		return nil, errorAtNode(m, "operation %s needs @rest(method, path?) or @manualRouteRegistration", op.Name)
+		return nil, nil, errorAtNode(m, "operation %s needs @rest(method, path?) or @manualRouteRegistration", op.Name)
 	}
 
 	if method.Parameters != nil {
 		for _, p := range method.Parameters.Nodes {
 			arg, serr := w.argumentFromParameter(p)
 			if serr != nil {
-				return nil, serr
+				return nil, nil, serr
 			}
 			op.Arguments = append(op.Arguments, arg)
 		}
 	}
-	return op, nil
+	return op, decorators, nil
 }
 
 // argumentFromParameter converts one method parameter into an ArgumentDef.

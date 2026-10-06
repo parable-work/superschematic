@@ -18,6 +18,8 @@ import type {
   Logger,
   PayloadEncryptionKey,
   HttpRequestOptions,
+  ForwardedUser,
+  RequestOptions,
 } from './types';
 
 export interface EncryptedPayloadEnvelope {
@@ -27,6 +29,50 @@ export interface EncryptedPayloadEnvelope {
   encryptedKey?: string;
   iv?: string;
 }
+
+/**
+ * Reads a method's last argument: an AbortSignal, which methods have always
+ * taken, or RequestOptions with a signal and the end user to forward.
+ */
+export function toRequestOptions(value: AbortSignal | RequestOptions | null | undefined): RequestOptions {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (isAbortSignal(value)) {
+    return { signal: value };
+  }
+  return { signal: value.signal, forward: value.forward };
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  if (typeof AbortSignal !== 'undefined' && value instanceof AbortSignal) {
+    return true;
+  }
+  // A signal from another realm or polyfill fails instanceof.
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'aborted' in value &&
+    typeof (value as AbortSignal).addEventListener === 'function'
+  );
+}
+
+/**
+ * The retries one call has spent: at most one end-user refresh and at most
+ * one fresh service credential.
+ */
+interface RequestAttempt {
+  userRefreshed: boolean;
+  serviceRetried: boolean;
+  /** Ask the service credential source for a fresh token on this attempt. */
+  freshServiceToken: boolean;
+}
+
+const FIRST_ATTEMPT: RequestAttempt = {
+  userRefreshed: false,
+  serviceRetried: false,
+  freshServiceToken: false,
+};
 
 /**
  * HTTP Client with authentication and error handling
@@ -230,7 +276,7 @@ export class HttpClient {
     method: string,
     path: string,
     options: HttpRequestOptions = {},
-    allowRefreshRetry: boolean = true,
+    attempt: RequestAttempt = FIRST_ATTEMPT,
     startMs: number = performance.now()
   ): Promise<T> {
     let requestConfig: RequestConfig = {
@@ -259,6 +305,11 @@ export class HttpClient {
     // failure interceptor, so callers saw NetworkError and onRequestComplete still
     // fired. Keep that contract: without this catch they escape raw and untracked.
     try {
+      if (options.forward) {
+        this.applyForwardedUser(requestConfig.headers, options.forward);
+      }
+
+      await this.applyServiceCredential(requestConfig.headers, attempt.freshServiceToken);
 
       if (this.config.requestInterceptor) {
         requestConfig = await this.config.requestInterceptor(requestConfig);
@@ -325,6 +376,27 @@ export class HttpClient {
       if (!response.ok) {
         this.logger.error('Response error:', response.status, requestConfig.url);
         const requestId = this.extractRequestId(responseHeaders);
+
+        if (response.status === 401 && this.problemCode(rawBody) === 'service_unauthorized') {
+          // The service credential was refused: ask its source for a fresh
+          // token once. The end-user refresh cannot help, so it does not run.
+          if (this.config.serviceCredential && !attempt.serviceRetried) {
+            this.logger.debug('Retrying request with a fresh service credential');
+            return this.request<T>(
+              requestConfig.method,
+              requestConfig.url,
+              {
+                headers: requestConfig.headers,
+                params: requestConfig.params,
+                data: requestConfig.data,
+                signal: requestConfig.signal,
+                forward: options.forward,
+              },
+              { ...attempt, serviceRetried: true, freshServiceToken: true },
+              startMs
+            );
+          }
+        }
 
         this.reportCompletion(requestConfig, startMs, response.status, true);
 
@@ -420,6 +492,60 @@ export class HttpClient {
     } finally {
       cleanup();
     }
+  }
+
+  /**
+   * Send the forwarded end user's token as Authorization, or no
+   * Authorization when the request being served has no end user.
+   */
+  private applyForwardedUser(headers: Record<string, string>, forward: ForwardedUser): void {
+    this.deleteHeaderIgnoreCase(headers, 'Authorization');
+    if (forward.bearerToken) {
+      headers['Authorization'] = `Bearer ${forward.bearerToken}`;
+    }
+  }
+
+  /**
+   * Send the service credential, `Bearer <token>`, in each configured header.
+   */
+  private async applyServiceCredential(
+    headers: Record<string, string>,
+    fresh: boolean
+  ): Promise<void> {
+    const credential = this.config.serviceCredential;
+    if (!credential) {
+      return;
+    }
+    const token = await credential.token(fresh);
+    const names = credential.headers?.length ? credential.headers : ['Service-Authorization'];
+    for (const name of names) {
+      this.deleteHeaderIgnoreCase(headers, name);
+      if (token) {
+        headers[name] = `Bearer ${token}`;
+      }
+    }
+  }
+
+  /**
+   * The problem code of an error body: `code` of an RFC 9457 problem, or
+   * `error.code` of the legacy `{ error: { code, message } }` envelope.
+   */
+  private problemCode(body: unknown): string | undefined {
+    if (typeof body !== 'object' || body === null) {
+      return undefined;
+    }
+    const code = (body as Record<string, unknown>).code;
+    if (typeof code === 'string') {
+      return code;
+    }
+    const envelope = (body as Record<string, unknown>).error;
+    if (typeof envelope === 'object' && envelope !== null) {
+      const envelopeCode = (envelope as Record<string, unknown>).code;
+      if (typeof envelopeCode === 'string') {
+        return envelopeCode;
+      }
+    }
+    return undefined;
   }
 
   /**

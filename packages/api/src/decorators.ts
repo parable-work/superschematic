@@ -16,6 +16,30 @@ export type HmacVerifiedConfig = {
   readonly provider: string;
 };
 
+/**
+ * An API service's handle: the sentinel an API service exports from its
+ * src/service.generated.ts, built by service() in
+ * @superschematic/schema-config. Every ServiceHandle<"API"> is one, and a
+ * handle of another kind is not. The shape is restated here because the
+ * authoring packages do not depend on one another.
+ */
+export type ServiceHandleRef = {
+  readonly __brand: "ServiceHandle";
+  readonly name: string;
+  readonly kind: "API";
+};
+
+/** The services an operation's service clause admits. */
+export type ServiceCallersConfig = {
+  /**
+   * API service handles: the servers that serve those APIs may call. Each
+   * must be an API service. Without from, every server with a calls edge
+   * to this API in the stack may; from narrows the edges, never widens
+   * them.
+   */
+  readonly from?: readonly ServiceHandleRef[];
+};
+
 export type DocsLifecycle = "draft" | "experimental" | "active" | "deprecated" | "retired";
 
 export type DocsVisibility = "public" | "internal" | "preview";
@@ -150,6 +174,26 @@ export const webhook: MethodDecorator = noopMethodDecorator;
 
 export function hmacVerified(_cfg: HmacVerifiedConfig): MethodDecorator {
   return noopMethodDecorator;
+}
+
+/**
+ * Only a listed service may call. With a user clause (@auth, an
+ * Authenticated set, @requirePermission, @requireOwnership), it must forward
+ * an end user who meets it; without one, no end user is looked at. On a
+ * class, every operation without its own clause that is not @publicRoute.
+ */
+export function requireService(_cfg?: ServiceCallersConfig): ClassDecorator & MethodDecorator {
+  return noopClassOrMethodDecorator;
+}
+
+/**
+ * Beside the operation's user clause, which it needs: an end user who meets
+ * the clause, or a listed service with no end user, which then stands in
+ * for the user. On a class, every operation without its own clause that is
+ * not @publicRoute.
+ */
+export function allowService(_cfg?: ServiceCallersConfig): ClassDecorator & MethodDecorator {
+  return noopClassOrMethodDecorator;
 }
 
 export function rateLimit(_cfg: RateLimitConfig): ClassDecorator & MethodDecorator {

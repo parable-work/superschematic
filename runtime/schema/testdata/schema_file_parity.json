@@ -160,6 +160,20 @@
       "error": "a non-boolean encrypted argument flag: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/arguments/0/encrypted': got string, want boolean"
     },
     {
+      "name": "a service clause on a set and an operation",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"StockOps\", \"serviceCallers\": {\"mode\": \"require\", \"from\": [\"orders-api\"]}, \"operations\": [\n\t\t{\"name\": \"release\", \"typeRef\": {\"name\": \"Order\"}, \"auth\": true, \"serviceCallers\": {\"mode\": \"allow\", \"from\": []}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"StockOps\",\"operations\":[{\"auth\":true,\"name\":\"release\",\"serviceCallers\":{\"mode\":\"allow\"},\"typeRef\":{\"name\":\"Order\"}}],\"serviceCallers\":{\"from\":[\"orders-api\"],\"mode\":\"require\"}}]}"
+    },
+    {
+      "name": "a service clause mode outside the enum",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"StockOps\", \"serviceCallers\": {\"mode\": \"sometimes\"}, \"operations\": []}",
+      "accept": false,
+      "error": "a service clause mode outside the enum: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/serviceCallers/mode': value must be one of 'require', 'allow'"
+    },
+    {
       "name": "visible tool without a policy gets the default",
       "registry": "core",
       "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"DELETE\", \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",

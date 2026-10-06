@@ -218,13 +218,31 @@ export const vectorCases: VectorCase[] = [
           `a ${gained.kind} image written after the gain, with ${gained.column}`,
           `SELECT 1 FROM ${t("member_history")} WHERE kind = '${gained.kind}' AND json_type(data, ${path}) = 'text'`,
         );
+        type Read = { contentHash?: string; tree?: Record<string, Record<string, unknown>[]> };
         const reads = JSON.parse(readFileSync(readsFile, "utf8")) as {
-          graphs: { commits: { readCommit: { contentHash: string }; materialize: { contentHash?: string } }[] }[];
+          graphs: {
+            graph: string;
+            commits: { readCommit: { id: string; message: string | null; contentHash: string }; materialize: Read }[];
+            roots: { released: Read & { release?: { commit: string } } }[];
+          }[];
         };
+        // A null content column hashes as an absent one, so every commit
+        // materializes to the hash it recorded, lunch among them: recorded
+        // before the gain, its images lack the gained column, which the
+        // fixture's descriptor declares.
+        for (const g of reads.graphs) {
+          for (const c of g.commits) {
+            assert.equal(c.materialize.contentHash, c.readCommit.contentHash, `${g.graph}: commit ${c.readCommit.message} materializes to the hash it recorded`);
+          }
+        }
+        const menu = reads.graphs.find((g) => g.graph === "menu")!;
+        const lunch = menu.commits.find((c) => c.readCommit.message === "lunch")!;
         assert.ok(
-          reads.graphs.some((g) => g.commits.some((c) => c.materialize.contentHash !== undefined && c.materialize.contentHash !== c.readCommit.contentHash)),
-          "typescript.json holds a commit recorded before the gain, which materializes to another hash",
+          lunch.materialize.tree?.[gained.kind]?.some((r) => !(gained.column in r)),
+          `typescript.json holds a commit recorded before the gain, whose ${gained.kind} image lacks ${gained.column}`,
         );
+        const released = menu.roots.map((r) => r.released).find((r) => r.release?.commit === lunch.readCommit.id);
+        assert.equal(released?.contentHash, lunch.readCommit.contentHash, "released, at lunch, gives the hash lunch recorded");
         const tastings = client.all(`SELECT data FROM ${t("member")} WHERE kind = 'tasting'`).map((r) => r["data"] as string);
         const tasting = kinds.find((k) => k.kind === "tasting")!;
         const roles = new Set([tasting.key, tasting.id, tasting.ref, tasting.root, tasting.tombstone, tasting.version]);
