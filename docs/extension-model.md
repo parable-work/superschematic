@@ -184,7 +184,7 @@ Each `Register*` method checks its own spec:
 | `RegisterCheck` | an empty name, no `Verify`, a duplicate name |
 | `RegisterOpenAPIHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
-| `RegisterScalars` | an empty owner, a nil catalog, a second catalog, a row whose primitive reads as object and whose `JSONSchemaType` is not `object`, `array` or `any` |
+| `RegisterScalars` | an empty owner, a nil catalog, a second catalog, a row whose primitive reads as object that the validators would check as a string: no `JSONSchemaType` of `object`, `array` or `any`, a pattern or a length beside `object` or `array`, or upload metadata |
 | `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
 | `RegisterPlatform`, `RegisterConnector`, `RegisterTarget`, `RegisterDNSPlatform`, `RegisterProvisioner` | the stack model's specs; `docs/stack-model.md`, section 6.7, lists what each refuses |
 | `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params or precondition schema that is not an object schema or does not set `"additionalProperties": false`, a create params schema that is not an object schema or whose `additionalProperties` is neither `false` nor a schema, an operation or field name that is malformed or repeats, an operation named like one every schema has, a veto code that is not lowercase snake case or repeats (section 3.16) |
@@ -528,13 +528,15 @@ needs the loader to accept its extra names and the generators to emit their
 symbols. One catalog per registry; a second registration is an error that
 names both owners. `registry.ScalarCatalogOf` wraps a metadata map as a
 catalog. A row whose primitive the loader reads as object
-(`ir.CatalogLanguagePrimitive`: `Object`, `JSON`, `Type`, or a spelling
-it does not know) must say which JSON the scalar holds, with a
-`JSONSchemaType` of `object`, `array` or `any`, and `RegisterScalars`
-refuses a catalog with a row that does not (`ir.ObjectScalarJSONError`).
-The loader holds every scalar to the same rule once it is hydrated
-(`ir.Schema.ValidateHydrated`), so a schema file's own scalar needs the
-mapping too (D14, amended: a scalar that holds JSON says which JSON).
+(`ir.CatalogLanguagePrimitive`: `Object`, `JSON`, `Type`, `jsonb`, or a
+spelling it does not know) must be one the validators hold to JSON: a
+`JSONSchemaType` of `any`, or of `object` or `array` with no pattern and
+no length, and no upload metadata. `RegisterScalars` reads each row as the
+loader hydrates it and refuses a catalog with a row that is not
+(`ir.ScalarDef.ObjectJSONError`). The loader holds every scalar to the
+same rule once it is hydrated (`ir.Schema.ValidateHydrated`), so a schema
+file's own scalar needs the mapping too (D14, amended: a scalar that holds
+JSON says which JSON).
 
 A `ScalarMetadata` row has no upload fields, and superscalar's core set has
 no upload scalar. A catalog that implements `UploadCatalog` declares its

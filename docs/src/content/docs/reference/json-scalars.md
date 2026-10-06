@@ -23,10 +23,11 @@ scalar's name
 
 A scalar whose language primitive is `object` says what JSON it holds
 through its `json_schema` type mapping: `object`, `array` or `any`. The
-validators take the mapping as the only sign that a scalar holds JSON.
-Without one, the schema runtimes and the engine would check its values as
-strings, while the generated Go, TypeScript, Python and Rust types hold an
-object
+validators take the mapping as the only sign that a scalar holds JSON, and
+a pattern or a length, which are rules on a string, cancels `object` or
+`array`, as it does for `Geo.Location`. Without one of them, the schema
+runtimes and the engine would check the scalar's values as strings, while
+the generated Go, TypeScript, Python and Rust types hold an object
 ([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-a-scalar-that-holds-json-says-which-json)).
 
 ```yaml
@@ -39,20 +40,32 @@ scalars:
       json_schema: object
 ```
 
-A build refuses an `object` scalar with no such mapping, and so do the
-engine, when a schema is defined or published, and `RegisterScalars`, for
-an extension's catalog row. The error names the scalar and gives three
-ways out:
+A build refuses an `object` scalar the validators would check as a string,
+and so do the engine, when a schema is defined or published, and
+`RegisterScalars`, for an extension's catalog row. The error names the
+scalar and says what to change:
 
-- Add `typeMappings: { json_schema: object }`, or `array`, or `any`. A
-  catalog row sets `JSONSchemaType`.
-- Use the catalog's `Generic.JSON` for free-form JSON.
-- Model a value with known fields as a nested object type.
+- With no such mapping: add `typeMappings: { json_schema: object }`, or
+  `array`, or `any` (a catalog row sets `JSONSchemaType`), use the
+  catalog's `Generic.JSON` for free-form JSON, or model a value with known
+  fields as a nested object type.
+- With `object` or `array` and a pattern or a length: drop the pattern or
+  the length.
+- For a file-upload scalar: give it the string primitive. Its value is a
+  file part, not JSON, and acme's `Acme.Photo` row has the `String`
+  primitive too.
 
-The loader checks a scalar after it fills it in from the catalog. A
-catalog scalar a schema names by name and `languagePrimitive: object`, the
-way `superschematic format --to=json` writes `Generic.JSON`, takes the
+The loader checks a scalar after it fills it in from the catalog, so a
+catalog scalar a schema names by name and `languagePrimitive: object`, as
+`superschematic format --to=json` writes `Generic.JSON`, takes the
 catalog's row, mapping included, and loads.
+
+The engine knows only the builtin catalog, so it reads any other scalar a
+document declares as the document writes it, and a document for the engine
+carries an extension scalar's full definition. `format --to=json` writes the
+`json_schema` mapping of a scalar the binary's catalog gives one of
+`object`, `array` or `any`, so the engine holds an extension's JSON scalar
+to JSON.
 
 ## What each target generates
 

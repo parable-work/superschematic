@@ -360,16 +360,20 @@ return r.RegisterScalars(Name, catalog)
 - `rows` holds every scalar the schemas may use: acme copies the core rows
   from `registry.CoreScalars()` and adds its own.
 - A row whose `Primitive` the loader reads as the object language primitive
-  (`Object`, `JSON`, `Type`, or a spelling it does not know) needs a
-  `JSONSchemaType` of `object`, `array` or `any`, which becomes the
-  scalar's `json_schema` mapping and says what JSON it holds.
-  `RegisterScalars` refuses a catalog with a row that has none, and names
-  the row; for an unknown spelling, it also names the primitive
+  (`Object`, `JSON`, `Type`, `jsonb`, or a spelling it does not know) needs
+  a `JSONSchemaType` of `object`, `array` or `any`, which becomes the
+  scalar's `json_schema` mapping and says what JSON it holds, and with
+  `object` or `array`, no pattern and no length, which are rules on a
+  string. `RegisterScalars` refuses a catalog with a row that does not,
+  and names the row; for an unknown spelling, it names the primitive and
+  the spellings it may have meant
   ([JSON-valued scalars](/superschematic/reference/json-scalars/#a-scalar-of-your-own-that-holds-json)).
 - A field of an upload scalar is a multipart file part in the generated
   APIs and SDKs. `Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>` lowers
   the limit for one field; the loader checks it after hydration, so it
-  needs the upload declared here.
+  needs the upload declared here. An upload row's `Primitive` is `String`:
+  `RegisterScalars` refuses an upload scalar whose primitive reads as
+  object.
 - The TypeScript brand (`string & { readonly __brand: "Acme.Photo" }`) can
   live in the extension's authoring package, as acme's does.
 
