@@ -1,6 +1,6 @@
 ---
 title: JSON-valued scalars
-description: The scalars whose value is not a string (Generic.JSON, Generic.StringMap, Embedding.Vector), what each target types them as, and how they are validated.
+description: The scalars whose value is not a string (Generic.JSON, Generic.StringMap, Embedding.Vector), what each target types them as, how they are validated, and what a scalar of your own that holds JSON declares.
 sidebar:
   order: 6
 ---
@@ -18,6 +18,56 @@ scalar's name
 | `Generic.StringMap` | `object` | A JSON object of string values, such as `{"region": "eu"}` |
 | `Embedding.Vector` | `array` | A JSON array of numbers, such as `[0.12, -0.5]` |
 | `Geo.Location` | `object` | Not settled: see [below](#geolocation) |
+
+## A scalar of your own that holds JSON
+
+A scalar whose language primitive is `object` says what JSON it holds
+through its `json_schema` type mapping: `object`, `array` or `any`. The
+validators take the mapping as the only sign that a scalar holds JSON, and
+a pattern or a length, which are rules on a string, cancels `object` or
+`array`, as it does for `Geo.Location`. Without one of them, the schema
+runtimes and the engine would check the scalar's values as strings, while
+the generated Go, TypeScript, Python and Rust types hold an object
+([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-a-scalar-that-holds-json-says-which-json)).
+
+```yaml
+scalars:
+  Acme.Settings:
+    name: Acme.Settings
+    description: A tenant's settings, as a JSON object
+    languagePrimitive: object
+    typeMappings:
+      json_schema: object
+```
+
+A build refuses an `object` scalar the validators would check as a string,
+and every `object` scalar that is a file upload, and so do the engine, when
+a schema is defined or published, and `RegisterScalars`, for an
+extension's catalog row. The error names the scalar and says what to
+change:
+
+- With no such mapping: add `typeMappings: { json_schema: object }`, or
+  `array`, or `any` (a catalog row sets `JSONSchemaType`), use the
+  catalog's `Generic.JSON` for free-form JSON, or model a value with known
+  fields as a nested object type.
+- With `object` or `array` and a pattern or a length: drop the pattern or
+  the length.
+- For a file-upload scalar, with a `json_schema` mapping or without: give
+  it the string primitive. Its value is a file part, not JSON, and acme's
+  `Acme.Photo` row has the `String` primitive too.
+
+The loader checks a scalar after it fills it in from the catalog, so a
+catalog scalar a schema names by name and `languagePrimitive: object`, as
+`superschematic format --to=json` writes `Generic.JSON`, takes the
+catalog's row, mapping included, and loads.
+
+The engine knows only the builtin catalog, so to any other scalar a
+document declares it applies only what the document writes.
+`superschematic format --to=json` writes such a scalar's name, its
+language primitive and, when the binary's catalog gives it `object`,
+`array` or `any`, its `json_schema` mapping, so the engine holds an
+extension's JSON scalar to JSON. It does not write the row's pattern,
+lengths or other rules, and the engine checks none of them.
 
 ## What each target generates
 

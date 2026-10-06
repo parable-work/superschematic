@@ -261,13 +261,14 @@ takes its lease and moves its status.
 
 | | |
 | --- | --- |
-| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100) |
+| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, pinned `Links` links |
 | Operations | `claim({ ttlMs? })`, `refresh()`, the schema-level `claimNext({ match?, assignedOnly?, ttlMs? })`, which returns `{ claimed }`, a claim or null, and the schema-level, read-only `countClaimable({ match?, assignedOnly? })`, which returns `{ count }` |
 | Guard | `Lease.acquire` other than through a claim is `vetoed` (`claim_required`), so a claimable instance's lease is taken only by claiming it |
 
 `claim` expires a lapsed lease first, then checks the status is one of
-`claim.from` and that no `Dependencies` blocker holds the instance up,
-then acquires the lease, reserves `Budget` when the type composes it, and
+`claim.from`, that no `Dependencies` blocker holds the instance up, and
+that no link `excludeStale` names is pinned to a revision its target has
+moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
 transitions to `claim.to`. A refusal at any step leaves nothing behind.
 
 A claim waits on blockers; a plain `transition` to `claim.to` does not,
@@ -280,8 +281,8 @@ dependent's `satisfiedBy` lists, a success by default
 
 `claimNext` tries candidates highest priority first (an instance with no
 priority last), then oldest, then by id, skipping work that is blocked,
-assigned to another principal, at `maxExpiries`, exhausted by `Retries`
-or over its `Budget`, and claims the first that succeeds; a claim
+assigned to another principal, at `maxExpiries`, exhausted by `Retries`,
+pinned to a superseded revision or over its `Budget`, and claims the first that succeeds; a claim
 refused to this caller (`vetoed`, `conflict` or `forbidden`) passes to
 the next. Calls are synchronous and the engine writes from one process,
 so two claims never interleave.
@@ -290,10 +291,18 @@ so two claims never interleave.
   ["search", "mail"] }` takes either topic, highest priority first across
   both.
 - **Over budget is not tried.** Queue copies Budget's `checkReserve`, and
-  hears the enclosing scopes it read, so a pool that runs out takes its
+  hears the values of the enclosing scopes it says its answer turns on,
+  each at the instance's own amount, so a pool that runs out takes its
   queued work out of the candidates, and a pool that frees up, or a new
   UTC day for a daily meter, puts it back. Work over its budget at the
-  head of the queue never hides claimable work behind it.
+  head of the queue never hides claimable work behind it, and a write to
+  a pool with thousands of jobs queued under it reaches only the jobs
+  whose amount its remaining crosses.
+- **Outdated work is not tried.** With `excludeStale: ["spec"]` and a
+  pinned `spec` link, a job whose spec has a newer revision than the one
+  it pins is out of the candidates, and `claim` refuses it, until it is
+  linked to the spec again. A `revised` rule of `Reactions` can send it
+  back to review ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
 - **Your own work.** `assignedOnly: true` takes only work assigned to
   the caller.
 - **How much is waiting.** `countClaimable` counts the candidates with
@@ -410,8 +419,9 @@ the enclosing scopes its `scope` link points at.
 
 - A claim reserves each meter's amount, the instance's `reserveField`
   or else `reserve`, and is refused when it does not fit (`over_limit`).
-  `checkReserve` says whether it would fit, without reserving; Queue
-  copies it, so `claimNext` does not try work over its budget.
+  `checkReserve` says whether it would fit, without reserving, and which
+  values of each scope its answer turns on; Queue copies it, so
+  `claimNext` does not try work over its budget.
 - `recordUsage` is never refused, since the usage has happened. It
   releases the part the reservation covered and reports any overrun;
   with `onExceeded`, the lease holder also gets a directive, and with

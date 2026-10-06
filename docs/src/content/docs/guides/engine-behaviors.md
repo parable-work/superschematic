@@ -560,7 +560,7 @@ Rules that move Workflow statuses after a change commits. They need
 
 | | |
 | --- | --- |
-| Config | `rules`: 1 to 64, each `{ when, then }`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }` or `{ anyTerminal: { schema, link, outcomes } }`; `then` is `{ transition: <state>, link? }` |
+| Config | `rules`: 1 to 64, each `{ when, then }`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `then` is `{ transition: <state>, link? }` |
 | Fields, operations | none |
 
 - `enters` fires when this instance's status becomes the state, by a
@@ -572,6 +572,13 @@ Rules that move Workflow statuses after a change commits. They need
 - `anyTerminal` fires when an instance of `schema` that links here
   through `link` enters a terminal state whose outcome `outcomes` lists,
   or is linked here while in one.
+- `holds` fires when a change of a linked instance makes an `all` or
+  `any` [rollup](#rollups) of this instance hold over at least one
+  instance: on the edge from not holding to holding, so not again while
+  it holds.
+- `revised` fires when the instance `link` points to gains a revision
+  of `Revisions`, or a release when its schema composes `Branches`; of a
+  pinned link, only on the instances the new revision leaves stale.
 - `then` moves this instance, or the one its `link` points to, to the
   state, through Workflow's `transition`, so every guard still runs.
 
@@ -610,12 +617,44 @@ a rule on the step that fails its run beside an `allTerminal` without
 `outcomes`: the two run in different subscriptions, and the last step
 failing could then complete the run or fail it, by which ran first.
 
+The same run can say it through rollups it already shows, with `holds`:
+
+```json
+{ "name": "Rollups", "config": { "rollups": {
+    "stepsPassed": { "schema": "steps", "link": "run", "function": "all", "outcomes": ["success"] },
+    "stepFailed": { "schema": "steps", "link": "run", "function": "any", "outcomes": ["failure"] } } } },
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "holds": "stepsPassed" }, "then": { "transition": "completed" } },
+    { "when": { "holds": "stepFailed" }, "then": { "transition": "failed" } } ] } }
+```
+
+`holds` fires once, when a step's change makes the rollup hold. A run
+retried by hand after one step failed is not failed again by a second
+failed step while the first is still failed; `anyTerminal` would fail it
+again. An `all` over no step sets nothing off, so removing a run's last
+unfinished step completes it only when a passed step is left.
+
+Work done against a spec goes back to review when the spec changes:
+
+```json
+{ "name": "Links", "config": { "links": { "spec": { "schema": "specs", "pinned": true } } } },
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "revised": { "link": "spec" } }, "then": { "transition": "review" } } ] } }
+```
+
+A new revision of a spec moves each work item pinned to an earlier one;
+an item linked again to the new revision before the runner gets to it
+stays where it is. With `Queue`'s `excludeStale` the same items are not
+claimed meanwhile ([Work queues](/superschematic/guides/work-queues/)).
+
 - A rule acts only where it can. A target already in the state, with no
   transition to it, or whose guards veto the move (an open blocker, say)
   is left alone.
-- States and links that do not exist, and `enters` rules that cycle, are
-  refused when the schema is defined.
-- Rules across instances can chain; the runner's `maxDepth` stops a loop.
+- States, links and rollups that do not exist, a `holds` rollup that is
+  not an `all` or an `any`, and `enters` rules that cycle, are refused
+  when the schema is defined.
+- Rules across instances can chain, a `holds` rule up a tree of tasks
+  say; the runner's `maxDepth` stops a loop.
 
 ## Constants and Variants
 
