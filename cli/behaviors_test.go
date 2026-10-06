@@ -315,7 +315,8 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	searchJSON := load(filepath.Join(loaderTestdata, "fixture-search-json")).Types["Note"]
 	require.Len(t, searchJSON.Behaviors, 1)
 	assert.Equal(t, "Search", searchJSON.Behaviors[0].Name)
-	assert.JSONEq(t, `{"fields": ["title", "body"], "weights": {"title": 3}}`, string(searchJSON.Behaviors[0].Config))
+	assert.JSONEq(t, `{"fields": ["title", "body"], "weights": {"title": 3},
+		"vectors": {"dimensions": 384, "model": "minilm-l6", "permission": "notes.embed"}}`, string(searchJSON.Behaviors[0].Config))
 	assert.Equal(t, searchJSON, load(filepath.Join(tsreaderTestdata, "fixture-search")).Types["Note"])
 
 	// Reactions, whose rules name a link, a schema and outcomes of a

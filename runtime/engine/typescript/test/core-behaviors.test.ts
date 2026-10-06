@@ -146,12 +146,13 @@ for (const driver of drivers) {
       });
     });
 
-    test('it runs the notes document: its title and body are searched, the title weighing more', () => {
+    test('it runs the notes document: its title and body are searched, the title weighing more, and its embedder pulls their text', () => {
       const engine = openTestEngine({ driver });
       engine.schemas.define(alice, notes);
       engine.schemas.publish(alice, 'notes');
+      const vectors = { dimensions: 384, model: 'minilm-l6', permission: 'notes.embed' };
       assert.deepEqual(engine.schemas.behaviors(alice, 'notes'), [
-        { name: 'Search', config: { fields: ['title', 'body'], weights: { title: 3 } }, declaration: engine.behaviors.declaration('Search') },
+        { name: 'Search', config: { fields: ['title', 'body'], weights: { title: 3 }, vectors }, declaration: engine.behaviors.declaration('Search') },
       ]);
       engine.instances.create(writer, 'notes', { title: 'Standup', body: 'The release slips a week.' }, { id: 'n1' });
       engine.instances.create(writer, 'notes', { title: 'Release plan', body: 'Dates and owners.' }, { id: 'n2' });
@@ -164,6 +165,8 @@ for (const driver of drivers) {
           ['n1', 'body'],
         ]
       );
+      const pulled = engine.instances.invokeSchema(writer, 'notes', 'staleEmbeddings', { limit: 1 }) as { model: string; items: Array<{ id: string; text: string }> };
+      assert.deepEqual([pulled.model, pulled.items.map((item) => [item.id, item.text])], ['minilm-l6', [['n1', 'Standup\n\nThe release slips a week.']]]);
       engine.instances.delete(writer, 'notes', 'n2');
       assert.deepEqual(engine.instances.invokeSchema(writer, 'notes', 'search', { query: 'release plan' }), { items: [], next: null });
     });
