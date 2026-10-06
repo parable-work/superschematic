@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -57,17 +58,34 @@ func (e *emitter) renderTypeName(name, owner string) string {
 }
 
 // renderScalar emits a namespaced scalar reference, importing its namespace
-// from the scalar library package. The writer has no options path, so the
-// package name is the process-wide value the CLI set (naming.Active).
+// from the package that exports it (scalarPackage).
 func (e *emitter) renderScalar(name, owner string) string {
-	scalarPkg := naming.Active().ScalarNpmPackage
 	i := strings.Index(name, ".")
 	if i <= 0 {
-		e.failf("%s: scalar %q is not namespaced; TypeScript schemas can only reference %s scalars", owner, name, scalarPkg)
+		e.failf("%s: scalar %q is not namespaced; TypeScript schemas can only reference %s scalars", owner, name, naming.Active().ScalarNpmPackage)
 		return name
 	}
-	e.importSymbol(scalarPkg, name[:i])
+	e.importSymbol(e.scalarPackage(name, name[:i], owner), name[:i])
 	return name
+}
+
+// scalarPackage returns the npm package a scalar's namespace is imported
+// from: the one the scalar catalog names for the namespace
+// (registry.NpmPackageCatalog), as an extension names the package its
+// brands live in, else the scalar library's. The writer has no options
+// path, so the library's name is the process-wide value the CLI set
+// (naming.Active). The library exports the core table's scalars and no
+// other, so a scalar outside it, in a namespace the catalog names no
+// package for, fails: an import from the library would not load.
+func (e *emitter) scalarPackage(name, namespace, owner string) string {
+	if pkg, ok := registry.NpmPackageOf(e.ctx.Scalars, namespace); ok {
+		return pkg
+	}
+	scalarPkg := naming.Active().ScalarNpmPackage
+	if _, core := registry.CoreScalars().Scalar(name); !core {
+		e.failf("%s: scalar %s is not one of %s's, and the scalar catalog names no npm package for its namespace %s; the extension that defines it names one with registry.ScalarCatalogWithNpmPackages", owner, name, scalarPkg, namespace)
+	}
+	return scalarPkg
 }
 
 // serviceNameForPackage derives the schema service name from a package name:

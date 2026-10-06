@@ -69,6 +69,9 @@ type (
 	// its request body before decoding it.
 	RawBodyCheckCatalog = registry.RawBodyCheckCatalog
 	ScalarRawBodyCheck  = registry.ScalarRawBodyCheck
+	// NpmPackageCatalog is a ScalarCatalog that names the npm package a
+	// TypeScript schema imports each of some of its namespaces from.
+	NpmPackageCatalog = registry.NpmPackageCatalog
 	// SchemaCatalogEntry is one discovered service's identity facts, the
 	// value type of LoadContext.Catalog.
 	SchemaCatalogEntry = registry.SchemaCatalogEntry
@@ -278,6 +281,13 @@ func ScalarCatalogWithUploads(catalog ScalarCatalog, uploads map[string]ScalarUp
 // catalog; see internal/registry.ScalarCatalogWithRawBodyChecks.
 func ScalarCatalogWithRawBodyChecks(catalog ScalarCatalog, checks map[string]ScalarRawBodyCheck) (RawBodyCheckCatalog, error) {
 	return registry.ScalarCatalogWithRawBodyChecks(catalog, checks)
+}
+
+// ScalarCatalogWithNpmPackages names the npm package that exports each
+// namespace of packages, keyed by namespace ({"Acme": "@acme/schema"}); see
+// internal/registry.ScalarCatalogWithNpmPackages.
+func ScalarCatalogWithNpmPackages(catalog ScalarCatalog, packages map[string]string) (NpmPackageCatalog, error) {
+	return registry.ScalarCatalogWithNpmPackages(catalog, packages)
 }
 
 // EnvConfigOf resolves schema's @envVars contract under the default naming
