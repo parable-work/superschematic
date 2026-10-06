@@ -1,0 +1,65 @@
+{
+  "description": "Scalars with the object language primitive, as a schema file declares them, and the error each one gets: null when the validators hold it to JSON. ir.ScalarDef.ObjectJSONError (the loader and RegisterScalars) and the engine's objectScalarIssue both read these cases, so their messages cannot drift.",
+  "cases": [
+    {
+      "case": "no json_schema mapping",
+      "scalar": { "name": "Acme.Blob", "languagePrimitive": "object", "description": "An opaque payload" },
+      "error": "scalar Acme.Blob has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds: add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row), use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type"
+    },
+    {
+      "case": "a json_schema mapping that is no JSON value",
+      "scalar": { "name": "Acme.Blob", "languagePrimitive": "object", "typeMappings": { "json_schema": "string", "sql": "JSONB" } },
+      "error": "scalar Acme.Blob has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds: add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row), use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type"
+    },
+    {
+      "case": "a JSON object",
+      "scalar": { "name": "Acme.Blob", "languagePrimitive": "object", "typeMappings": { "json_schema": "object" } },
+      "error": null
+    },
+    {
+      "case": "a JSON array",
+      "scalar": { "name": "Acme.Blob", "languagePrimitive": "object", "typeMappings": { "json_schema": "array" } },
+      "error": null
+    },
+    {
+      "case": "any JSON value",
+      "scalar": { "name": "Acme.Blob", "languagePrimitive": "object", "typeMappings": { "json_schema": "any" } },
+      "error": null
+    },
+    {
+      "case": "any JSON value with a pattern, which the any-JSON rule does not read",
+      "scalar": { "name": "Acme.Blob", "languagePrimitive": "object", "pattern": "^x$", "typeMappings": { "json_schema": "any" } },
+      "error": null
+    },
+    {
+      "case": "a JSON object with a length",
+      "scalar": { "name": "Acme.Blob", "languagePrimitive": "object", "maxLength": 10, "typeMappings": { "json_schema": "object" } },
+      "error": "scalar Acme.Blob has language primitive object and json_schema type mapping object, but its maxLength 10 is a rule on a string, so the validators check its values as strings: drop the maxLength"
+    },
+    {
+      "case": "a JSON array with a pattern and both lengths",
+      "scalar": { "name": "Acme.Blob", "languagePrimitive": "object", "pattern": "^\\[.*\\]$", "minLength": 2, "maxLength": 64, "typeMappings": { "json_schema": "array" } },
+      "error": "scalar Acme.Blob has language primitive object and json_schema type mapping array, but its pattern \"^\\\\[.*\\\\]$\", minLength 2 and maxLength 64 are rules on a string, so the validators check its values as strings: drop the pattern, minLength and maxLength"
+    },
+    {
+      "case": "a file-upload scalar",
+      "scalar": { "name": "Media.Photo", "languagePrimitive": "object", "fileUpload": { "maxSize": 1048576, "allowedTypes": ["image/png"], "category": "image" } },
+      "error": "scalar Media.Photo is a file-upload scalar with language primitive object: a file part is not JSON, so an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)"
+    },
+    {
+      "case": "a file-upload scalar with a json_schema mapping, which a file part does not follow",
+      "scalar": { "name": "Media.Photo", "languagePrimitive": "object", "typeMappings": { "json_schema": "object" }, "fileUpload": { "maxSize": 1048576 } },
+      "error": "scalar Media.Photo is a file-upload scalar with language primitive object: a file part is not JSON, so an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)"
+    },
+    {
+      "case": "a file-upload scalar with the string primitive",
+      "scalar": { "name": "Media.Photo", "languagePrimitive": "string", "fileUpload": { "maxSize": 1048576 } },
+      "error": null
+    },
+    {
+      "case": "a string scalar with no mapping",
+      "scalar": { "name": "Acme.Sku", "languagePrimitive": "string", "pattern": "^[A-Z]{3}$" },
+      "error": null
+    }
+  ]
+}

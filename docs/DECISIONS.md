@@ -1450,6 +1450,47 @@ declaration of its own.
 Generated guidance per behavior's tool and create parameters narrowed by
 a config are a later change.
 
+### D16, amended: a reference hears what can move its holder
+
+Queue kept an instance over its budget out of `claimNext` by copying
+Budget's `checkReserve` and recording a reference to each enclosing scope
+it read, and a reference heard every change of its target. So every
+reserve, usage report and settlement under a pool ran `checkReserve` for
+every instance queued under it: a pool with thousands of queued jobs paid
+that on every claim, quadratic over a run. Links' and Dependencies'
+references, which act only on a delete, were asked about every change of
+their targets as well, and a blocker's title edit appended a `refresh`
+event on each of its dependents. A reference now says what it hears, and
+a change reads only the references that hear it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `references.add(schema, id, key, hears)` takes what the reference hears (`ReferenceHears`): absent, every change, as before; `'delete'`, the delete alone; `{ path, crosses? }`, a JSON pointer into the target's data (its own fields and its behaviors' fields) and an optional number. One with a path runs `afterReferenceChange` after a change that moves the value, or with `crosses` moves it across the number, and after the delete. A value's side of the number is one of three: not a number, below it, at or above it. A reference that hears less than every change is asked by `guardReference` before a delete only. Recording a reference again records what it hears now and keeps its place. | A filter function the engine calls for each reference, which reads every reference to learn which; a waiting list in Budget's tables that the scope's `afterChange` reads, which makes Budget know Queue and writes the scope each time an instance starts waiting |
+| The engine compares the target's record before and after the change, which it computes for the event's patch anyway, lists the values that moved, and reads the references through an index led by the target, `hears` and `crosses` (engine migration 8): every one that hears every change, every one on a moved value, and of those with a number only the ones the move crosses. A delete reads every reference, as before. | Reading every reference and testing each in JavaScript, which is the per-instance cost this removes |
+| `Links` and `Dependencies` record their references with `'delete'`, since only a target's delete asks anything of them. Queue's reference to a blocker hears `/status`, the one value that moves whether the blocker is open. | Leaving them hearing every change, so a pool thousands of jobs link to costs each of its writes a guard and a hook per job |
+| Budget's `checkReserve` lists, with each scope it read, the values its answer turns on (`hears`): the meter's `remaining`, crossing the amount less what the settlement of an ended lease's reservation releases there, where the reservation fits exactly while the remaining is at or above it; where a daily meter keeps it out now, its `reserved`, crossing the limit less the amount and the release plus one, and its `limit`, which decide whether the next day lets it in; and the scope's own scope link. The remaining's number is exact while the scope holds what the instance reserved through it, which the scope operations keep. | Queue deriving the numbers from Budget's field and config, Budget's rule to know; hearing only the remaining, under which a daily pool whose reservations settle while its usage is high keeps its waiting work out past the next day |
+| Until an ended lease's reservation is settled, each number is given twice, as it is now and as the settlement leaves it: a Lease or Queue operation settles it in Budget's `afterChange`, which may run after Queue's has read the answer in the same write, and the scope's move then reaches Queue only with `writing` set. | One number, which such a write leaves off by the reservation, so the instance waits on a remaining the pool has already passed; requiring Budget before Queue in the type's list, a rule on the schema author for an order the engine keeps |
+| Queue records a reference to each value (`budget <path> <number>`), and a link's target's (below), and refreshes on one only when its exclusion, or what it hears, moved. So a write to a scope runs no check and no hook for an instance none of whose numbers it crosses; one whose number it crosses checks itself, and, when its exclusion moved, checks again in the `refresh` it invokes, which appends one event. A test queues 40 instances with two amounts under one pool and counts Budget's `checkReserve` calls and Queue's hooks. | Refreshing every instance a scope's write reaches, an event per queued instance per claim |
+
+### D16, amended: rules on a rollup that comes to hold and a revised link, and claims that wait for the newest revision
+
+`Reactions` heard terminal states only. A parent reacted to its children
+through `allTerminal` and `anyTerminal`, which restate what an `all` or
+`any` rollup computes, and nothing heard a spec change: work done against
+a spec that a newer revision superseded stayed where it was, and a queue
+went on handing it out. A rule now fires when a rollup comes to hold and
+when a link's target gains a revision or a release, and a queue keeps
+work pinned to a superseded revision out.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `when: { holds: <rollup> }` names an `all` or `any` rollup of the type's `Rollups`; `parseConfig` refuses a type without `Rollups`, a rollup it lacks and any other function. An event of the rollup's schema fires it on the instance the event's instance links to, now and before the event, when the rollup holds now, holds with that instance as the event left it, and does not hold with it as it was before the event (`before`), the other linked instances as they are when the rule runs. It fires on the edge from not holding to holding, and not again until the rollup has stopped holding. | Firing on every event while it holds, as `allTerminal` does, which fails a parent retried by hand again at the next failure; the event's instance as it is now, which credits the edge to an earlier event of it the runner handles later, at a depth the limit does not stop; remembering the last value, which a reaction cannot write without an event on the parent |
+| The value is the rollup's, read as `Rollups` reads it: one `listLinked` page of at most 500, their statuses, the linked schema's Workflow. One rule differs: an `all` over no instance, which holds for `Rollups`' gate, sets no rule off, as `allTerminal` needs one instance. Two events the runner handles together after both committed can each find the edge; the second finds the target in the state and leaves it. | The rollup's value as it is, under which deleting a run's last unfinished step completes it |
+| A `holds` rule hears only the rollup's schema, so the instance's own move sets one off only through another instance that links to it, up a tree of the type's own schema; the runner's depth limit stops such chains, and `parseConfig` refuses nothing more for them. | Refusing a rollup over the type's own schema, which is how a task completes as its subtasks do |
+| `when: { revised: { link } }` names a link of the type's `Links`. It fires on an update or an operation of the target whose change carries `revision`, of a schema that composes `Revisions`, and on a `releaseCommit` operation of one that composes `Branches`; a link to a schema with neither is a failure at run. It moves the instances `Links`' `listLinked` finds on the type's own schema, for a pinned link and a revision only the stale ones. No transition makes a revision or a release, so it never sets itself off. | Firing on every event of the target, which sends work back on a comment; every instance of a pinned link, which sends back work already pinned to the new revision; checking the target's schema at define, which need not be published yet, as the `Reactions` rows have it |
+| `Queue`'s `excludeStale` names pinned links of the type's `Links`, which `parseConfig` checks. While one is `stale` in the instance's `links` field, the instance is excluded until a change (`excluded_until`, as for Retries' exhaustion) and `claim` refuses it (`stale_link`, details `{ links }`). While none is, Queue hears each target's `/revision` crossing the pinned revision plus one, which the target's next revision does; once stale it hears nothing, since only its own new `link` lets it back in. A new `excludeStale` applies to an instance from its next change, as a new `priorityField` does. | A column of its own beside `blocked`, which the candidate query's index would read past; leaving the claim to `Links`, which has none to refuse |
+| `Links` pins revisions of `Revisions` only, so `excludeStale` cannot keep out work pinned to a `Branches` release; pinning one is a change to `Links` of its own. | |
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.
@@ -3609,3 +3650,105 @@ token secret and stores its value, and the deploy hands it to the
 provisioner in `CLOUDFLARE_API_TOKEN`.
 
 The rule is reversible until the first release.
+### D14, amended: a scalar that holds JSON says which JSON
+
+A validator decides that a scalar holds JSON only from its `json_schema`
+type mapping. In the TypeScript schema runtime, `isAnyJSONScalar` reads
+`any`, and `structuredJSONType` reads `object` or `array` for a scalar
+with no pattern and no length (amended above), as `ir.ScalarDef.IsAnyJSON`
+and `StructuredJSONType` do in Go. A scalar whose language primitive is
+`object` and that has no such mapping fell through to the string checks:
+the schema runtime refused an object value as not a string. The engine's
+describe rule wrote its type as `string`, and `Branches` classed it a
+string. The generated code held an object: tsgen typed it
+`Record<string, any>`, rustgen `serde_json::Value`, checked as an object,
+and pygen `dict`, and graphdesc classed it `json`. So the engine refused
+values every generated server accepts.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar whose language primitive is `object` is one the validators hold to JSON: `ir.ScalarDef.IsAnyJSON` or `StructuredJSONType` reads it, so its `json_schema` type mapping is `any`, or `object` or `array` with no pattern and no length. One that is not is refused when it is loaded or registered. With no such mapping, the message names the scalar and three routes: add `typeMappings: { json_schema: object }` (or `array` or `any`; `JSONSchemaType` in a catalog row), use the catalog's `Generic.JSON` for free-form JSON, or model a value with known fields as a nested object type. | Filling in `json_schema: object` at load, which silently picks "a JSON object" over "any JSON value" for a scalar that did not say; leaving it, which lets the engine refuse values every generated server accepts |
+| A mapping of `object` or `array` beside a pattern or a length, rules on a string, is refused with them named, and the message says to drop them: `StructuredJSONType` is empty for such a scalar, so the validators check its values as strings. | Judging the raw mapping, which took such a scalar and left the engine refusing `{"a": 1}` as "must be a string" |
+| An upload scalar (one with `FileUpload`) with the `object` primitive is refused with its own message, whatever its `json_schema` mapping: an upload scalar takes the string primitive, since a file part is no JSON. With `object` and no JSON mapping, tsgen, rustgen and pygen type it `Record<string, any>`, `serde_json::Value` and `Any` with no string check, while the runtimes and the engine check it as a string. Every upload row in the repository, acme's `Acme.Photo` among them, has the `String` primitive. | The three JSON routes, which do not fit a file part; taking an upload scalar that declares a JSON mapping, which would hold a file part to JSON |
+| The rule judges a scalar as the IR will carry it, once the catalog has filled it in. A catalog scalar a schema file names by name and the `object` primitive, as `format --to=json` writes `Generic.JSON`, takes its row, mapping included, and loads. | |
+| One rule with one message, `ir.ScalarDef.ObjectJSONError`, runs wherever a scalar definition enters. The loader runs it on every scalar in `ir.Schema.ValidateHydrated`, in every form. `RegisterScalars` runs it on each row of an extension's catalog, read as the loader hydrates it: the row's `JSONSchemaType`, pattern and lengths, and the catalog's upload metadata. The engine runs its twin, `objectScalarIssue`, in `readSchema`, on each scalar the document declares that the builtin catalog does not hold, so `define` and `publish` refuse such a document (D16). It reads the scalar as the schema runtime parses it, with the runtime's own `isAnyJSONScalar` and `structuredJSONType`, which the runtime now exports. The runtime keys a parsed scalar by its name, so the engine first refuses a scalar whose map key is not its name, with the Go data-form reader's message (`scalar map key "Acme.Blob" does not match the definition name "Acme.Other"`). `ir/testdata/object_scalar_errors.json` holds the cases and their messages, and the Go and engine tests both read it, so the wording cannot drift. | Teaching each runtime and describe rule to read a bare `object` as JSON, which puts one rule in several places that can drift |
+| The engine knows only the builtin catalog, so it reads every other scalar a document declares as the document writes it. The TypeScript form records, of each brand, the `json_schema` mapping the registry's catalog gives it when that is `object`, `array` or `any`, beside the core table's SQL type, so `format --to=json` writes an extension's JSON scalar with its mapping and the engine takes it. The written document carries no other rule of the row (pattern, lengths), and the engine applies only what it carries. The TypeScript writer leaves what a scalar holds of its row to the catalog the document was read with (`writer.WriteWith`), so converting the written JSON back to TypeScript runs with the extension linked instead of refusing the mapping. | Recording every mapping of every row, which changes each written document for what the builtin catalog already gives the engine |
+| The loader reads a row's primitive it does not know as `object`, as before (`ir.CatalogLanguagePrimitive`, which the loader, the registry, the TypeScript writer and the scalar catalog tool now share). Such a row the validators would check as a string is refused with a message of its own, which names the primitive the row wrote and suggests `String`, `Int`, `Float` or `Bool`, or `Object` with a `JSONSchemaType` of `any`, or of `object` or `array` with no pattern and no length: the route the rule takes for a scalar that holds JSON, so a row with an object mapping and a length is told of both. | A rule of its own for an unknown primitive, which would also refuse one with a JSON mapping that registers today |
+
+The schema runtime's schema-file loader, the TypeScript twin of the Go
+data-form reader, only decodes: the package exports `BUILTIN_SCALARS`, but
+the loader fills no scalar in from it, so it does not judge the rule. The
+engine does, after it. A program that reads a schema with the schema
+runtime directly (`parseSchemaIR`) still checks such a scalar as a string.
+
+Two scalars in the repository had the `object` primitive and no mapping,
+both file uploads: `Media.Photo` in apigen's `raw-body-check-api` fixture
+and `Media.File` in the IR's upload test. Both now have the string
+primitive, the one every catalog's upload rows have, and the routes golden
+is unchanged; apigen's upload tests, which build their IR directly, take
+the string primitive too. The other `object` scalars in the fixtures
+(`Generic.JSON`, `Generic.StringMap`, `Embedding.Vector`) are catalog
+references. The catalog's four JSON scalars have the `String` primitive
+and a mapping: `Generic.JSON` `any`, `Generic.StringMap` and
+`Geo.Location` `object`, `Embedding.Vector` `array`. `Geo.Location`'s
+string pattern still contradicts its mapping (amended above), but it has
+the `String` primitive, so this rule leaves it alone.
+
+`TestScalarDef_ObjectJSONError` and the engine's registry test hold each
+case of `object_scalar_errors.json` to its message.
+`TestLoadServiceRefusesObjectScalarWithoutJSONMapping`,
+`TestLoadServiceTakesObjectScalarThatSaysWhichJSON` and
+`TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString` load such
+scalars in JSON and YAML. `TestLoadServiceHydratesObjectCatalogReferences`
+loads the four catalog scalars written by name and the `object`
+primitive. `TestRegisterScalarsRefusesObjectRowWithoutJSONMapping`,
+`TestRegisterScalarsJudgesARowAsTheValidatorsDo` and
+`TestRegisterScalarsNamesAnUnknownPrimitive` register such rows. The
+engine's registry test refuses such a document at define, and at publish
+for a draft stored before the rule.
+`TestFormatCommand_TSToJSONWritesAnExtensionJSONScalarsMapping` writes
+`cli/testdata/format/ext-json-scalar.schema.json` from a TypeScript
+service with an extension's JSON scalar, and the engine's registry test
+defines and publishes that file.
+
+No release has shipped, so the rule is reversible until the first release.
+
+### D4, amended: a TypeScript schema imports an extension's scalars from the package its catalog names
+
+The TypeScript writer imported every scalar namespace from
+`scalar_npm_package`, superscalar. A schema with an extension's scalar,
+such as acme's `Acme.Photo` or the CLI tests' `Ext.Doc`, converted with
+`format --to=ts` to `import { Ext, Generic } from "superscalar"`, which
+does not compile: superscalar has no `Ext`. The loader reads a brand
+through whatever import a schema writes, so nothing in the repository
+recorded where an extension's brands live; acme's said so only in a
+comment.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar catalog names the npm package that exports a namespace of its brands, beside its rows, as it declares uploads and raw-body checks: `NpmPackageCatalog`, built with `registry.ScalarCatalogWithNpmPackages(catalog, {"Acme": "@acme/schema"})`. It composes with the other two wrappers in any order. The registry hands the catalog to the writer, as `writer.WriteWith` already did for the rows (D14, amended above). | A `[scalar_npm_packages]` naming table, which puts what an extension's Go code knows into each deployment's file; reading the package off the extension's decorators, which may come from several packages, or none |
+| The map is keyed by namespace, not by canonical name. A schema imports a namespace once, so every scalar of a namespace comes from one package; a key per namespace cannot say otherwise. The wrapper refuses a namespace no scalar of the catalog is in, so a canonical name given as a key fails, and a package that is empty, relative or absolute. | A key per scalar, which can split a namespace across packages and would need a refusal of its own |
+| The writer imports a namespace the catalog names no package for from `scalar_npm_package`, which exports the core table's namespaces. A scalar the core table does not have, in such a namespace, has no package the writer knows exports its brand, so the writer refuses the file and names the scalar, its namespace and the wrapper. That holds for a distribution that renames `scalar_npm_package` to a package of its own too: it names the package for each namespace it adds. | Writing the import from `scalar_npm_package` anyway, which leaves a file that does not compile, where the writer otherwise refuses what it cannot write; trusting a renamed `scalar_npm_package` to export every scalar, which the writer cannot check |
+
+acme's catalog names `@acme/schema` for `Acme`. The fixture service
+`fixture-ext-json-scalar` imports `Ext` from `@fixture/ext-scalars`, a
+package under `internal/loader/tsreader/testdata/packages` that the
+fixtures' tsconfig resolves, and the CLI tests' extension names it.
+
+Writing the acme test found that a schema of a kind other than Catalog
+cannot import `@acme/schema`, even for a brand alone: every decorator it
+declares is Catalog's, so verify refuses the import
+(`Registry.PackageAllowsKind`). The data forms take `Acme.Photo` in any
+kind. acme uses the scalar in its Catalog service only, and this leaves
+the rule as it is.
+
+`TestScalarCatalogWithNpmPackagesNamesANamespacesPackage`,
+`TestScalarCatalogWithNpmPackagesRejectsAnUnknownNamespaceAPathAndNilCatalog`
+and `TestNpmPackagesUploadsAndRawBodyChecksComposeInAnyOrder` cover the
+wrapper. `TestFormatCommand_JSONToTSImportsAnExtensionScalarFromItsPackage`
+writes `cli/testdata/format/ext-json-scalar.schema.json` to TypeScript,
+which is the fixture's source; loads it as a service of its own with the
+extension linked; converts it back to the same JSON; and checks that a
+catalog that names no package for `Ext` is refused. acme's
+`TestAcmePhotoRoundTripsThroughTypeScript` does the same for a Catalog
+schema with an `Acme.Photo` field, and its upload metadata survives.

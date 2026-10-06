@@ -34,7 +34,9 @@ edges exist. Its status then is its Workflow's initial state, so the
 same finished/open rule, satisfiedBy and the terminal gated state rule
 apply: an initial state that is gated and that no transition leaves
 takes no open blocker. Each edge is also a reference the engine records,
-so deleting a blocker runs afterReferenceChange on each dependent, which
+which hears the blocker's delete alone (blocked is computed at each
+read, so nothing else of the blocker needs hearing), so deleting a
+blocker runs afterReferenceChange on each dependent, which
 removes the edge with removeBlocker, as the caller: its own event
 records it. Deleting a dependent deletes its edges. Blockers are read as
 the caller, so a caller who may not read a blocker's schema cannot read
@@ -275,7 +277,7 @@ function addEdge(context: InstanceContext<DependenciesConfig>, params: Readonly<
     context.principal.subject,
     context.now,
   ]);
-  context.references.add(target.schema, target.id);
+  context.references.add(target.schema, target.id, '', 'delete');
   return blocker;
 }
 
