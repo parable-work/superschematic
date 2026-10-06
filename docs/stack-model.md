@@ -267,7 +267,7 @@ export abstract class Dev {}
   target: "gcp",
   gcp: { project: "acme-staging", region: "us-east1" },
   domain: "staging.acme.dev",
-  dns: { cloudflare: { zone: "acme.dev" } },
+  dns: { cloudflare: { zone: "acme.dev", zoneId: "023e105f4ecef8ad9ca31a8372d0c353" } },
 })
 export abstract class Staging {}
 
@@ -871,12 +871,17 @@ There are five specs, registered like the others in section 3 of
   connector for one edge kind between the same two platforms.
 - `RegisterTarget(TargetSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a values or resource type schema that does not
-  compile, a resource type another target registered with a different
-  schema, and a policy rule without a name or a check, or with a repeated
-  name.
+  compile, a resource type another target or a DNS platform registered
+  with a different schema, and a policy rule without a name or a check, or
+  with a repeated name.
 - `RegisterDNSPlatform(DNSPlatformSpec)` refuses a malformed or repeated
-  name, the reserved name `manual`, a values schema that does not compile
-  and a missing `Lower`.
+  name, the reserved name `manual`, a values or resource type schema that
+  does not compile, a resource type a target or another DNS platform
+  registered with a different schema, and a missing `Lower`. Its
+  `ResourceTypes` are the schemas of the types its `Lower` emits, for a DNS
+  platform of another provider than the target's, and its `Credentials`
+  name the secrets its provider reads when the provisioner runs (section
+  6.9).
 - `RegisterProvisioner(ProvisionerSpec)` refuses a malformed or repeated
   name and a missing implementation.
 
@@ -1001,9 +1006,9 @@ every model check reports before anything is connected or lowered:
 5. It runs the graph checks of validation level 3: every dependency and
    referenced output names a node, every referenced parameter is
    declared, there is no cycle, every node's properties validate against
-   the schema a registered target holds for its type, and every inherited
-   node is a node of the same type in the parent environment, which it
-   resolves for the check.
+   the schema a registered target or DNS platform holds for its type, and
+   every inherited node is a node of the same type in the parent
+   environment, which it resolves for the check.
 6. It orders the deploy (section 5.3). A node lands in its phase, or in a
    later step when one of its dependencies does. A server's own rollout
    nodes must land in its wave, and a database's nodes in infrastructure,
@@ -1049,7 +1054,8 @@ production and a parameterized preview environment.
   an environment the production defaults (section 7.5) and policy rules
   (section 7.6) apply to;
 - `domain`, which is optional, and its DNS platform: Cloud DNS by default,
-  or Cloudflare with a zone and an API token (section 6.9). Cloud DNS
+  or Cloudflare with the zone's name (`zone`) and identifier (`zoneId`),
+  and an API token that bootstrap asks for (section 6.9). Cloud DNS
   writes into the managed zone that holds the domain. The zone is named
   after the domain with its dots as hyphens unless `zone` names it, and
   lives in the environment's project unless `project` names another;
