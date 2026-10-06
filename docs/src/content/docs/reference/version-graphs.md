@@ -322,7 +322,7 @@ The Go package `github.com/parable-work/superschematic/runtime/versiongraph/go/c
 implements the Postgres rules, and the Postgres adapter normalizes every
 row it reads with it.
 
-## The engine and its Postgres adapter
+## The engine and its adapters
 
 The Go engine (package `engine` in `runtime/versiongraph/go`) implements
 every graph operation once: create a primary line, branch, save, commit,
@@ -339,14 +339,48 @@ snapshots and the release pointer, take the next sequence under a root
 lock, walk commits, read discarded refs and idle change sets, prune and
 take the sweep lock. It asks the adapter for one transaction per
 operation. Every language's engine has a Postgres adapter and a SQLite
-adapter ([Go](#the-go-sqlite-adapter), [TypeScript](#the-sqlite-adapter),
-[Rust](#use-the-engine-from-rust),
-[Python](#use-the-engine-from-python)); another database needs its own
-implementation of that interface.
+adapter; another database needs its own implementation of that
+interface.
 
-Package `postgres` is the Postgres adapter. It builds its statements at run
-time from the descriptor, reads live rows with `to_jsonb` and history
-images from their `data` column, and returns each as a canonical row. It
+| Language | Engine | Postgres adapter | SQLite adapter | Scenarios |
+| --- | --- | --- | --- | --- |
+| Go | package `engine`; each operation takes a `context.Context` | package `postgres`, over pgx (`postgres.Pgx`) | [package `sqlite`](#the-go-sqlite-adapter), over `database/sql` and a driver you pick | `make versiongraph-scenarios` |
+| TypeScript | [`Engine`](#use-the-engine-from-typescript), whose operations return promises, and `SyncEngine`, whose operations return their values | `PostgresAdapter`, over `pg` (`pgPool`, `pgClient`) | [`SqliteAdapter`](#the-typescript-sqlite-adapter), a `SyncStorage` over `node:sqlite` or `bun:sqlite` (`nodeSqlite`, `bunSqlite`) | `make versiongraph-scenarios-ts` |
+| Rust | [`Engine`](#use-the-engine-from-rust), `async` | `postgres::Adapter`, over tokio-postgres (`postgres::TokioPostgres`, the default `tokio-postgres` feature) | `sqlite::Adapter`, over rusqlite (`sqlite::Rusqlite`, the `rusqlite` feature) | `make versiongraph-scenarios-rust` |
+| Python | [`Engine`](#use-the-engine-from-python), synchronous | `PostgresAdapter`, over psycopg 3 (`psycopg_client`, the `postgres` extra) | `SqliteAdapter`, over the standard library's `sqlite3` (`sqlite_client`) | `make versiongraph-scenarios-python` |
+
+The Go, Rust and Python SQLite adapters port
+[the TypeScript one](#the-typescript-sqlite-adapter) statement for
+statement: one fixed layout of nine `STRICT` tables for every graph, in
+which a member row keeps its content in one JSON column, with the same
+stored forms and rules. The vectors in
+[`runtime/versiongraph/testdata/sqlite`](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/testdata/sqlite)
+hold each to the TypeScript one, so a file one language writes reads the
+same in every other. On a connection of its own, each begins a
+transaction with `BEGIN IMMEDIATE`, which takes the file's write lock;
+inside a transaction its caller holds, it runs as a savepoint, and the
+TypeScript adapter can also run with no transaction control at all, as
+D16's engine runs it. Each refuses a SQLite older than 3.37.0, the first
+with `STRICT` tables, one whose `json_each` and `json_extract` do not
+work, and a clock or a stored time more than 2^53 - 1 microseconds from
+the epoch, past which TypeScript reads a number inexactly.
+
+The layout is the adapter's own, not the tables sqlgen generates for a
+graph, which are Postgres tables: a DB service built for the `sqlite`
+dialect refuses `@versioned`
+([Schema migrations](/superschematic/reference/migrations/#refusals)).
+Create it with the adapter's `createTables` (`CreateTables`,
+`create_tables`), or run the statements its layout function returns from
+migrations of your own. Since a kind's content is one JSON column, a
+field a version adds needs no change to the tables: a live row reads it
+as `null`.
+
+### The Go Postgres adapter
+
+Package `postgres` is the Go engine's Postgres adapter. It builds its
+statements at run time from the descriptor, reads live rows with
+`to_jsonb` and history images from their `data` column, and returns each
+as a canonical row. It
 writes a canonical row through `jsonb_populate_record`, turning a UUID into
 the hyphenated form and a duration into interval text, and writes the ref,
 the root, the tombstone and the audit columns itself. It reaches Postgres
@@ -365,7 +399,7 @@ ref, err := eng.CreatePrimary(ctx, actor, root, "main")
 ### The Go SQLite adapter
 
 Package `sqlite` keeps a graph in a SQLite file. It is the TypeScript
-[SQLite adapter](#the-sqlite-adapter) ported statement for statement, with
+[SQLite adapter](#the-typescript-sqlite-adapter) ported statement for statement, with
 the same fixed layout, stored forms and rules, so a file one writes reads
 the same through the other. It reaches SQLite through a `Client` and
 `Conn` of the shape of package `postgres`'s, and `sqlite.DB`,
@@ -396,6 +430,10 @@ adapter, err := sqlite.New(descriptor, sqlite.Options{Graph: "recipe"})
 err = adapter.CreateTables(ctx, client)
 store, err := adapter.Storage(ctx, client)
 eng, err := engine.New(descriptor, store, engine.Options{SchemaEpoch: 1, SnapshotEvery: 32})
+```
+
+```
+make versiongraph-scenarios   # every scenario on SQLite, over a pool and inside a transaction the runner holds, the adapter's tests and the SQLite vectors; then every scenario through the Postgres adapter
 ```
 
 ### The primary line and the release pointer
@@ -449,10 +487,14 @@ empty has no entries to store, and reads as having no snapshot.
 ### Sweep
 
 `Sweep(options)` is one maintenance pass in one transaction, and nothing
-runs it unless a service does. It takes the graph's sweep lock (a
-transaction-scoped Postgres advisory lock keyed by the ref table); while
-another pass holds it, the pass does nothing and reports `Skipped`.
-Otherwise, in order, it:
+runs it unless a service does, or, for the graphs the engine's
+[`Branches`](/superschematic/guides/engine-behaviors/#branches) behavior
+keeps, the runner on a schema whose config gives `sweep`. It takes the
+graph's sweep lock: on Postgres a transaction-scoped advisory lock keyed
+by the ref table, and on SQLite the file's write lock, which the pass's
+own transaction holds, so the lock is always free there. While another
+pass holds it, the pass does nothing and reports `Skipped`. Otherwise, in
+order, it:
 
 1. discards every live change set with no write for `AbandonAfter`, when
    that is set (it is off by default), and leaves one that a write reaches
@@ -469,9 +511,9 @@ Otherwise, in order, it:
 It writes as `SweepOptions.Actor` and returns a `SweepReport` of what it
 did. `RunSweeper(ctx, interval, options, onPass)` runs a pass at once and
 then every `interval` until `ctx` is done; since each pass takes the lock,
-one replica sweeps at a time. Every language's adapter takes the lock
-under the same key, so sweepers written in different languages exclude
-each other too.
+one replica sweeps at a time. Every language's Postgres adapter takes the
+lock under the same key, so sweepers written in different languages
+exclude each other too.
 
 `engine.ErrorCode(err)` names an error with a code every language's engine
 shares (`version_conflict`, `ref_sealed`, `primary_merge_only`,
@@ -480,9 +522,14 @@ scenarios in `runtime/versiongraph/testdata/scenarios` run sequences of
 operations over canonical rows, with the expected trees, content hashes,
 conflicts and errors, against the fixture in
 `runtime/versiongraph/testdata/fixture`; the Go, TypeScript, Rust and
-Python engines run every one against Postgres, and the Go and TypeScript
-engines against SQLite too (`make versiongraph-scenarios` runs the Go
-engine's SQLite pass with or without a Postgres URL). Their format is in
+Python engines run every one on SQLite and on Postgres. A scenario names
+the roots it uses, gives each of its SQL steps a statement per backend,
+and may run a step on one backend only, as the steps that hold the sweep
+lock run on Postgres only. Each language's target (in the
+[table above](#the-engine-and-its-adapters)) runs the SQLite pass first,
+which needs no database server, and then the Postgres pass, which needs
+`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and fails without it.
+Their format is in
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#scenarios).
 
 ## The generated facade
@@ -659,11 +706,13 @@ missing, extra or misnamed in the types therefore fails it.
 ## Use the engine from TypeScript
 
 `@superschematic/versiongraph` also carries the TypeScript engine, its
-Postgres adapter and the base of the generated TypeScript facade. They port
-the Go engine and adapter rule for rule, pass the same
+Postgres and SQLite adapters and the base of the generated TypeScript
+facade. They port the Go engine and its Postgres adapter rule for rule,
+pass the same
 [scenarios](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/testdata/scenarios)
-against Postgres, and fail with the same error codes. Each has an entry
-point of its own, so the core's entry loads in a browser without them:
+on Postgres and on SQLite, and fail with the same error codes. Each has
+an entry point of its own, so the core's entry loads in a browser without
+them:
 
 | Entry | Holds |
 | --- | --- |
@@ -734,7 +783,7 @@ const engine = new SyncEngine(initSync(), descriptor, storage, { schemaEpoch: 1,
 const main = engine.createPrimary(actor, root, "main");
 ```
 
-### The SQLite adapter
+### The TypeScript SQLite adapter
 
 `SqliteAdapter` is a `SyncStorage` over SQLite, so a `SyncEngine` keeps a
 graph in a SQLite file under bun or Node. Where the Postgres adapters use
@@ -889,6 +938,10 @@ adapter.create_tables(&client).await?;
 let engine = Engine::new(descriptor, Arc::new(adapter.storage(client).await?), Options { schema_epoch: 1, ..Options::default() })?;
 ```
 
+```
+make versiongraph-scenarios-rust   # every scenario, the SQLite adapter's tests and the SQLite vectors on SQLite; then every scenario and canonical vector through the Postgres adapter
+```
+
 When a DB schema declares a graph and its Rust types are on, the types
 generator writes `src/versiongraph_<name>.rs` beside the types, and the
 crate depends on the engine
@@ -925,6 +978,8 @@ let tree = graph.materialize(&IdentityUUID::from_str(&merged.commit.unwrap().id)
 
 The Rust facade differs from the Go one where the languages do:
 
+- `RecipeGraph::postgres(client)` builds it over the engine's Postgres
+  adapter, and `RecipeGraph::new(storage)` over a `Storage` you give it.
 - Every write takes its actor as an argument; there is no context user.
   `sweep` and `run_sweeper` write as `SweepOptions::actor`, and
   `run_sweeper` stops when its `shutdown` future completes, and lets a
@@ -1063,7 +1118,7 @@ core refused.
 
 `SqliteAdapter` keeps a graph in a SQLite file with the standard library
 alone. It is the TypeScript SQLite adapter
-([above](#the-sqlite-adapter)), statement for statement and stored form
+([above](#the-typescript-sqlite-adapter)), statement for statement and stored form
 for stored form, so a file either writes the other reads.
 `sqlite_client(connection)` binds a `sqlite3.Connection` opened with
 `isolation_level=None` (or `autocommit=True` from Python 3.12), so the
@@ -1143,7 +1198,14 @@ SQLite ones among them, on the default Python and on 3.9.
   supported.
 - `schemaEpoch` is recorded and checked, but nothing transforms a commit
   from an older epoch.
-- The compiler emits DDL, not migrations.
+- A graph's Postgres tables migrate as other tables do
+  ([Schema migrations](/superschematic/reference/migrations/#versioned-tables-and-version-graphs)),
+  but nothing rewrites history: commits made before a member's content
+  columns change keep rows of the old shape.
+- The generated facades bind the Postgres adapter, except Rust's, whose
+  `new` takes any storage. On SQLite, run the engine over the SQLite
+  adapter directly.
 - Who may commit, seal, merge, tag or release is the application's policy.
   `Sweep` collects discarded drafts and prunes history, but nothing runs it
-  unless a service calls it or `RunSweeper`.
+  unless a service calls it or `RunSweeper`, or the engine's runner does
+  for a `Branches` schema whose config gives `sweep`.

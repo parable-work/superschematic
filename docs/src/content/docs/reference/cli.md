@@ -19,9 +19,11 @@ resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
 The core has seven commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors` and the `stack` group. The installed
-`superschematic` links the official extensions (the gcp target, the
-Cloudflare DNS platform and the Pulumi provisioner), which add none.
+`json-schema`, `format`, `behaviors` and the `stack` group, beside
+cobra's own `help` and `completion`. The installed `superschematic` links
+the official extensions (the gcp target, the Cloudflare DNS platform and
+the Pulumi provisioner), which add none. The migration runner,
+`superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)).
 
 ## `build <service-dir>`
 
@@ -202,7 +204,15 @@ service. With `--cache`, a service whose input hash matches a stamp and
 whose outputs still exist is skipped; a miss restores from the cache or
 rebuilds.
 
-The input hash covers a hash of the running binary, so rebuilding the
+A service's input hash covers its directory, the hashes of its
+`dependencies` and its `authDb`, and each API it `calls` without that
+API's own calls, so two APIs that call each other hash without a cycle.
+It also covers the naming file's resolved values except `[deps]`, the
+files `[cache] inputs` lists, the schemas root's `package.json` and
+`bun.lock`, and the `go`, `bun`, `rustc` and `cargo` versions on the
+`PATH`.
+
+The input hash covers a hash of the running binary too, so rebuilding the
 binary with different code invalidates every stamp and cache entry. Build
 it with `-trimpath -buildvcs=false`, as `make build` does, so a commit
 that changes no Go source keeps the same binary. A binary that links
@@ -350,7 +360,9 @@ belong to the file convert; service-level definitions that TypeScript
 cannot attribute to a file (enums, scalars) ride along with the
 service's first schema file.
 
-The converted file is written next to the input as
+The input's format comes from its extension: `.schema.ts`,
+`.schema.json`, or `.schema.yaml` or `.schema.yml`. Converting a file to
+its own format fails. The converted file is written next to the input as
 `<name>.schema.<format>`. An existing file is not overwritten without
 `--force`. `--stdout` prints the conversion instead.
 

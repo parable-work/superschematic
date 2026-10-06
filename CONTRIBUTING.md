@@ -241,7 +241,7 @@ PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
 (`superschematic-http-runtime`, and `superschematic-versiongraph`,
 `superschematic-versiongraph-engine` and
-`superschematic-versiongraph-python`, which are not published) and the ten
+`superschematic-versiongraph-python`, which are not published) and the eleven
 Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing
 that writes it. `bump_version.py check` fails when any site disagrees; CI

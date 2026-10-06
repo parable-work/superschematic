@@ -89,13 +89,20 @@ project like this one:
 4. the Go services' tests, which call the generated server through the
    generated Go SDK, then run the TypeScript, Python and Rust clients
    against the same server and compare what they print;
-5. the TypeScript service's tests, which call the router through the
+5. a build of `shop-orders` with its server in Rust
+   (`build --api-language RUST --out schemas/dist-rust`), and the same four
+   clients run against that server;
+6. the Topcoat app's tests, over the crate `superschematic-topcoat` writes
+   beside the Rust server;
+7. the TypeScript service's tests, which call the router through the
    generated TypeScript SDK;
-6. a byte comparison of the generated files and command output these pages
+8. `build-all --cache`, which must skip every service on a second run and
+   restore every service once `dist` is gone;
+9. a byte comparison of the generated files and command output these pages
    quote against their committed copies under `testdata/generated/`.
 
-It runs on every pull request to this repository, so the pages of this
-tutorial stay true.
+This repository's CI runs it in the release candidate run on `main` twice
+a day, and before every release, so the pages of this tutorial stay true.
 
 ## Where to go next
 
@@ -104,6 +111,16 @@ tutorial stay true.
     title="Guides"
     description="Types, tables, routes, auth and SDKs in depth, over the same shop."
     href="/superschematic/guides/modeling-types/"
+  />
+  <LinkCard
+    title="Serve it in Rust"
+    description="Build shop-orders with the generated Rust server, and call it from every SDK."
+    href="/superschematic/guides/api-routes/#the-rust-server"
+  />
+  <LinkCard
+    title="Pages with Topcoat"
+    description="Call the Rust server's operations from a Topcoat app's pages, by each route's rules."
+    href="/superschematic/guides/topcoat/"
   />
   <LinkCard
     title="Languages"

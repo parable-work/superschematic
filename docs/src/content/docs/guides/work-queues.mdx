@@ -192,7 +192,7 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 | Field | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }` |
 | Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder, notRenewedAfter? })` |
 | Schedule | `expire`, every `sweepMs`, on the runner |
-| Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, and principals with `overridePermission` |
+| Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, Queue's `refresh`, and principals with `overridePermission` |
 
 - **The token is a fencing counter, not a secret.** It advances at every
   acquire, release and expiry. A write presents it as Lease's
@@ -231,6 +231,15 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   after a time, whose own heartbeats show it alive.
 - **The sweep** needs the runner's principal to hold `read` and `write`
   on the schema and any permission an `onExpiry` transition names.
+- **Beside `Branches`.** A type composes `Lease` with the core's
+  [`Branches`](/superschematic/guides/engine-behaviors/#branches), whose
+  release-pointer operation is `releaseCommit`, so `release` stays
+  Lease's and ends the lease. The guard holds `Branches`' writes
+  (`save`, `commit`, `merge`, `releaseCommit` and the rest) to the
+  holder like any other writing operation, so a worker that holds a
+  recipe's lease edits, merges and releases its version graph while
+  others only read it. The token fences those writes as it fences the
+  rest.
 - **Heartbeats fill the log.** Each one is an operation event. A
   dashboard that streams the event log passes `exclude=heartbeat` and
   keeps its place past them without receiving one.
