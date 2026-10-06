@@ -151,8 +151,9 @@ are validated against.
 ## A binary is the core plus extensions
 
 The CLI is a library: a binary is `cli.New(cli.Config{...}, extensions...)`.
-`bin/superschematic` links the official extensions, the gcp target and
-the Pulumi provisioner, which add no schema kinds or generators. A project
+`bin/superschematic` links the official extensions, the gcp target, the
+Cloudflare DNS platform and the Pulumi provisioner, which add no schema
+kinds or generators. A project
 that needs its own kinds, decorators, generators or auth providers builds
 its own binary with an extension, and the rest of this site applies
 unchanged.

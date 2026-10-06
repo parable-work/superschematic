@@ -20,8 +20,8 @@ carries extensions.
 
 The core has seven commands: `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors` and the `stack` group. The installed
-`superschematic` links the official extensions (the gcp target and the
-Pulumi provisioner), which add none.
+`superschematic` links the official extensions (the gcp target, the
+Cloudflare DNS platform and the Pulumi provisioner), which add none.
 
 ## `build <service-dir>`
 
