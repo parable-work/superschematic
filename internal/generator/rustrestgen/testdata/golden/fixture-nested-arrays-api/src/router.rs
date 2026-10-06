@@ -12,9 +12,10 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use superschematic_http_runtime::schema::{self, Pattern};
 use superschematic_http_runtime::{
-    body_fields, error_response, input, json_body, openapi_router, operation_response,
-    path_is_percent_encoded, query_values, request_id_from_headers, request_ids, required_input,
-    ApiError, ParamKind, ParamSpec, QueryValues, RequestContext, RouterOptions, ScalarConstraints,
+    body_fields, check_input, error_response, input, json_body, openapi_router,
+    operation_response, path_is_percent_encoded, query_values, request_id_from_headers,
+    request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
+    RequestContext, RouterOptions, ScalarConstraints,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -87,6 +88,17 @@ fn decode_grid_save_grid(body: Option<Value>) -> Result<GridSaveGridArgs, ApiErr
     })
 }
 
+impl GridSaveGridArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        check_input(&self.input, types::validators::prepare_save_grid_input)?;
+        Ok(())
+    }
+}
+
 async fn handle_grid_save_grid(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
@@ -125,6 +137,17 @@ fn decode_grid_get_grid(captures: &HashMap<String, String>) -> Result<GridGetGri
     Ok(GridGetGridArgs {
         id: GRID_GET_GRID_ID.path(captures)?,
     })
+}
+
+impl GridGetGridArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        GRID_GET_GRID_ID.check_value(ParamLocation::Path, &self.id)?;
+        Ok(())
+    }
 }
 
 async fn handle_grid_get_grid(
@@ -175,6 +198,18 @@ fn decode_grid_grid_labels(captures: &HashMap<String, String>, query: &QueryValu
     })
 }
 
+impl GridGridLabelsArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        GRID_GRID_LABELS_ID.check_value(ParamLocation::Path, &self.id)?;
+        GRID_GRID_LABELS_LIMIT.check_value(ParamLocation::Query, &self.limit)?;
+        Ok(())
+    }
+}
+
 async fn handle_grid_grid_labels(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
@@ -221,6 +256,18 @@ fn decode_grid_replace_labels(captures: &HashMap<String, String>, body: Option<V
         id: GRID_REPLACE_LABELS_ID.path(captures)?,
         labels: GRID_REPLACE_LABELS_LABELS.body(body_fields(body.as_ref(), true)?)?,
     })
+}
+
+impl GridReplaceLabelsArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        GRID_REPLACE_LABELS_ID.check_value(ParamLocation::Path, &self.id)?;
+        GRID_REPLACE_LABELS_LABELS.check_value(ParamLocation::Body, &self.labels)?;
+        Ok(())
+    }
 }
 
 async fn handle_grid_replace_labels(

@@ -69,6 +69,20 @@
       "canonical": "[[\"2026-09-01T10:00:00.5Z\",\"2026-09-01T10:00:00Z\"]]"
     },
     {
+      "name": "year 0 before its leap day",
+      "class": "dateTime",
+      "sql": "'\"0000-01-01T00:00:00Z\"'::jsonb",
+      "postgres": "\"0000-01-01T00:00:00Z\"",
+      "canonical": "\"0000-01-01T00:00:00Z\""
+    },
+    {
+      "name": "an offset within year 0's January",
+      "class": "dateTime",
+      "sql": "'\"0000-01-01T00:00:00-01:00\"'::jsonb",
+      "postgres": "\"0000-01-01T00:00:00-01:00\"",
+      "canonical": "\"0000-01-01T01:00:00Z\""
+    },
+    {
       "name": "refuses infinity",
       "class": "dateTime",
       "sql": "'infinity'::timestamptz",
@@ -96,6 +110,13 @@
       "timeZone": "Etc/GMT+1",
       "postgres": "\"9999-12-31T23:30:00-01:00\"",
       "error": "UTC takes it to the year 10000"
+    },
+    {
+      "name": "refuses an instant before year 0 in UTC",
+      "class": "dateTime",
+      "sql": "'\"0000-01-01T00:30:00+01:00\"'::jsonb",
+      "postgres": "\"0000-01-01T00:30:00+01:00\"",
+      "error": "UTC takes it to the year before 0000"
     },
     {
       "name": "refuses a time without an offset",

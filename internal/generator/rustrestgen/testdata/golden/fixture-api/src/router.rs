@@ -13,9 +13,10 @@ use axum::Extension;
 use axum::Router;
 use superschematic_http_runtime::schema::{self, Pattern};
 use superschematic_http_runtime::{
-    body_fields, error_response, input, json_body, openapi_router, operation_response,
-    path_is_percent_encoded, query_values, request_id_from_headers, request_ids, required_input,
-    ApiError, ParamKind, ParamSpec, QueryValues, RequestContext, RouterOptions, ScalarConstraints,
+    body_fields, check_input, error_response, input, json_body, openapi_router,
+    operation_response, path_is_percent_encoded, query_values, request_id_from_headers,
+    request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
+    RequestContext, RouterOptions, ScalarConstraints,
 };
 use superschematic_http_runtime::Principal;
 use superschematic_http_runtime::RouteControls;
@@ -149,6 +150,18 @@ fn decode_tenant_list_tenants(query: &QueryValues) -> Result<TenantListTenantsAr
     })
 }
 
+impl TenantListTenantsArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        TENANT_LIST_TENANTS_IDS.check_value(ParamLocation::Query, &self.ids)?;
+        TENANT_LIST_TENANTS_STATUSES.check_value(ParamLocation::Query, &self.statuses)?;
+        Ok(())
+    }
+}
+
 async fn handle_tenant_list_tenants(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
@@ -182,6 +195,17 @@ fn decode_tenant_create_tenant(body: Option<Value>) -> Result<TenantCreateTenant
     Ok(TenantCreateTenantArgs {
         input: required_input(body, types::validators::parse_create_tenant_input)?,
     })
+}
+
+impl TenantCreateTenantArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        check_input(&self.input, types::validators::prepare_create_tenant_input)?;
+        Ok(())
+    }
 }
 
 async fn handle_tenant_create_tenant(
@@ -225,6 +249,18 @@ fn decode_tenant_get_tenant(captures: &HashMap<String, String>, query: &QueryVal
         id: TENANT_GET_TENANT_ID.path(captures)?,
         include_archived: TENANT_GET_TENANT_INCLUDE_ARCHIVED.query(query)?,
     })
+}
+
+impl TenantGetTenantArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        TENANT_GET_TENANT_ID.check_value(ParamLocation::Path, &self.id)?;
+        TENANT_GET_TENANT_INCLUDE_ARCHIVED.check_value(ParamLocation::Query, &self.include_archived)?;
+        Ok(())
+    }
 }
 
 async fn handle_tenant_get_tenant(
@@ -275,6 +311,18 @@ fn decode_tenant_update_secret(captures: &HashMap<String, String>, body: Option<
         id: TENANT_UPDATE_SECRET_ID.path(captures)?,
         secret: TENANT_UPDATE_SECRET_SECRET.body(body_fields(body.as_ref(), true)?)?,
     })
+}
+
+impl TenantUpdateSecretArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        TENANT_UPDATE_SECRET_ID.check_value(ParamLocation::Path, &self.id)?;
+        TENANT_UPDATE_SECRET_SECRET.check_value(ParamLocation::Body, &self.secret)?;
+        Ok(())
+    }
 }
 
 async fn handle_tenant_update_secret(

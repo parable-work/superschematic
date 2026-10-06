@@ -134,12 +134,26 @@ describe('generated fixture-api router', () => {
 
   test('bodies go through the generated strict parser: 400 on an invalid body, 200 on a valid one', async () => {
     const headers = { 'x-user': 'writer', 'content-type': 'application/json' };
-    // CreateTenantInput is not @strictJSON, so the fixture parser refuses a
-    // wrong type and a missing required field; unknown-field refusal is the
-    // strict contracts' behaviour and is covered by their own decoders.
+    // The router parses an input with the generated parse<Input>Json, which
+    // refuses a wrong type, a missing required field and an undeclared key.
     const wrongType = await app().request('/api/tenants', { method: 'POST', headers, body: '{"name":1}' });
     expect(wrongType.status).toBe(400);
-    expect(await wrongType.json()).toMatchObject({ status: 400, code: 'bad_request' });
+    // The generated parser's reason and field errors, as every server sends them.
+    const refused = await wrongType.json();
+    expect(refused).toMatchObject({
+      status: 400,
+      code: 'bad_request',
+      detail: 'Request body does not match the declared input',
+      details: { location: 'body', reason: 'validation failed' },
+    });
+    expect(refused.errors.name[0].validator).toBe('type');
+    expect(refused.errors.slug[0].validator).toBe('required');
+    const undeclared = await app().request('/api/tenants', { method: 'POST', headers, body: '{"name":"Acme","slug":"acme","plan":"pro"}' });
+    expect(undeclared.status).toBe(400);
+    expect(await undeclared.json()).toMatchObject({
+      details: { location: 'body', reason: 'unknown fields: plan' },
+      errors: { plan: [{ validator: 'unknown', message: 'unknown field' }] },
+    });
     const missingField = await app().request('/api/tenants', { method: 'POST', headers, body: '{"name":"Acme"}' });
     expect(missingField.status).toBe(400);
     const notJson = await app().request('/api/tenants', { method: 'POST', headers, body: '{nope' });

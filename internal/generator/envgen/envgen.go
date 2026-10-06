@@ -63,6 +63,56 @@ type ConfigOutput struct {
 	// HasDefaults indicates whether the config class declares at least one
 	// default value.
 	HasDefaults bool
+	// EnvConfig writes EnvConfig, the API's settings and derived fields
+	// together, and LoadEnvConfig: the config the Go API's Deps holds. Set
+	// by Options.Derived.
+	EnvConfig bool
+	// Derived are the config fields the API's edges derive in a stack
+	// (docs/stack-model.md, section 3.4): its database's, then one per
+	// calls entry. Set by Options.Derived.
+	Derived []DerivedField
+}
+
+// EnvConfigTypeName is the Go type that holds an API's settings and the
+// fields its edges derive.
+const EnvConfigTypeName = "EnvConfig"
+
+// DerivedField is a config field an edge derives: a database connection
+// or a service endpoint, which the platform sets and the loader reads from
+// one environment variable per member of the value.
+type DerivedField struct {
+	// Key is the field's name, which prefixes its variables
+	// (SHOP_DB_DATABASE).
+	Key string
+	// GoName is the EnvConfig field's name (ShopDbDatabase).
+	GoName string
+	// Kind is the edge's kind: sql for the database, http for a call.
+	Kind ir.EdgeKind
+	// Service is the DB service or the called API service.
+	Service string
+	// From is the config key the edge comes from: authDb, dependencies or
+	// calls.
+	From string
+	// Variables are the environment variables the field may be read from,
+	// one per member of its value.
+	Variables []string
+}
+
+// RuntimeType is the field's type in the Go HTTP runtime's stackconfig
+// package, whose Load<RuntimeType> reads it.
+func (f DerivedField) RuntimeType() string {
+	if f.Kind == ir.EdgeSQL {
+		return "Database"
+	}
+	return "Service"
+}
+
+// ContractType names the ir type of the value the field holds.
+func (f DerivedField) ContractType() string {
+	if f.Kind == ir.EdgeSQL {
+		return "DatabaseConnection"
+	}
+	return "ServiceEndpoint"
 }
 
 // ConfigField represents a single environment variable configuration field.
@@ -124,8 +174,16 @@ type Options struct {
 	Dependencies map[string]*ir.Schema
 
 	// Naming supplies the Go module root the config and types modules live
-	// under. Empty fields fall back to naming.Default().
+	// under, and the names of the derived fields. Empty fields fall back to
+	// naming.Default().
 	Naming naming.Naming
+
+	// Derived adds the config fields an API's edges derive, and EnvConfig,
+	// which joins them to the @envVars settings: what the Go API's Deps
+	// holds. The output then exists for an API with derived fields and no
+	// @envVars type. The TypeScript and Rust loaders do not read the
+	// derived fields yet, so only the Go API asks for them.
+	Derived bool
 }
 
 // Generate generates configuration code from an IR schema with @envVars directive.
@@ -147,8 +205,31 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 	dependencies := opts.Dependencies
 	names := opts.Naming.OrDefault()
 	envVarsType := findEnvVarsTypeIR(schema)
+	var derived []DerivedField
+	if opts.Derived {
+		var err error
+		if derived, err = derivedFields(schema, envVarsType, names); err != nil {
+			return nil, err
+		}
+	}
 	if envVarsType == nil {
-		return nil, nil
+		if len(derived) == 0 {
+			return nil, nil
+		}
+		return &ConfigOutput{
+			PackageName: toPackageName(schemaName),
+			SchemaName:  schemaName,
+			ModulePath:  names.GoAPIModule(schemaName),
+			TypesModule: names.GoTypesModule(schemaName),
+			Naming:      names,
+			Fields:      []ConfigField{},
+			Enums:       []codegen.EnumInfo{},
+			EnvConfig:   true,
+			Derived:     derived,
+		}, nil
+	}
+	if opts.Derived && envVarsType.Name == EnvConfigTypeName {
+		return nil, fmt.Errorf("envgen: the @envVars type of %s is named %s, the name of the generated config that embeds it; rename it", schemaName, EnvConfigTypeName)
 	}
 
 	allEnums := codegen.ExtractEnums(schema)
@@ -172,6 +253,8 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 		Naming:      names,
 		Fields:      []ConfigField{},
 		Enums:       []codegen.EnumInfo{},
+		EnvConfig:   opts.Derived,
+		Derived:     derived,
 	}
 
 	usedEnums := make(map[string]bool)
@@ -215,6 +298,35 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 	})
 
 	return output, nil
+}
+
+// derivedFields lists the config fields an API's edges derive, named by
+// the naming file's [derived_fields], and refuses an @envVars field that
+// collides with one: its name, or one of its variables'. The loader
+// refuses the collision first; this guards a schema built as IR.
+func derivedFields(schema *ir.Schema, envVarsType *ir.TypeDef, names naming.Naming) ([]DerivedField, error) {
+	var out []DerivedField
+	for _, f := range schema.DerivedConfigFields(names.DerivedFields.FieldNames()) {
+		field := DerivedField{
+			Key:     f.Name,
+			GoName:  toEnvGoName(f.Name),
+			Kind:    f.Kind,
+			Service: f.Service,
+			From:    f.From,
+		}
+		for _, path := range ir.DerivedMembers(f.Kind) {
+			field.Variables = append(field.Variables, ir.DerivedVariableName(f.Name, path))
+		}
+		if envVarsType != nil {
+			for _, setting := range envVarsType.Fields {
+				if ir.DerivedFieldClaims(f.Name, setting.Name) {
+					return nil, fmt.Errorf("envgen: %s: @envVars field %s of %s collides with %s, the config field its %s %s derives", schema.Name, setting.Name, envVarsType.Name, f.Name, f.From, f.Service)
+				}
+			}
+		}
+		out = append(out, field)
+	}
+	return out, nil
 }
 
 // extractConfigFieldIR extracts configuration field information from an IR FieldDef.
@@ -545,6 +657,7 @@ func templateFuncs() template.FuncMap {
 		"assignsPointer":    assignsPointer,
 		"isNamed":           isNamedConfigField,
 		"primitiveAssign":   primitiveAssignExpr,
+		"envConfigType":     func() string { return EnvConfigTypeName },
 	}
 }
 

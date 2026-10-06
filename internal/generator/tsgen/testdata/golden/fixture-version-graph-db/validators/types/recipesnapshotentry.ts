@@ -8,6 +8,7 @@ import {
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { RecipeSnapshotEntry, RecipeCommit } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
@@ -129,12 +130,15 @@ function parseRecipeSnapshotEntryInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseRecipeSnapshotEntry ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseRecipeSnapshotEntry ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseRecipeSnapshotEntry ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseRecipeSnapshotEntry ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -146,8 +150,14 @@ function parseRecipeSnapshotEntryInput(
       (fieldName) => !RecipeSnapshotEntryKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseRecipeSnapshotEntry ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseRecipeSnapshotEntry ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -155,8 +165,10 @@ function parseRecipeSnapshotEntryInput(
   const typedCandidate = candidate as unknown as RecipeSnapshotEntry;
   const validationResult = validateRecipeSnapshotEntry(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseRecipeSnapshotEntry ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseRecipeSnapshotEntry ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

@@ -52,14 +52,14 @@ func TestAcceptance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := stack.EnvironmentPath(out, "Shop", env.Name); path != want {
+			if want := stack.EnvironmentPath(out, "shop-stack", env.Name); path != want {
 				t.Fatalf("written to %s, want %s", path, want)
 			}
 			got, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			golden := stack.EnvironmentPath(goldenRoot, "Shop", env.Name)
+			golden := stack.EnvironmentPath(goldenRoot, "shop-stack", env.Name)
 			if *update {
 				if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
 					t.Fatal(err)
@@ -100,7 +100,7 @@ func TestAcceptance(t *testing.T) {
 				params[p] = "123"
 			}
 			req := registry.ProvisionRequest{Environment: back, Parameters: params, Dir: filepath.Join(out, "program", env.Name)}
-			if err := spec.Provisioner.Render(back.Resources, req.Dir); err != nil {
+			if err := spec.Provisioner.Render(back, req.Dir); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := spec.Provisioner.Plan(context.Background(), req); err != nil {

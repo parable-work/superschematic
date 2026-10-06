@@ -1,0 +1,392 @@
+{
+  "token": "gcp:dns/recordSet:RecordSet",
+  "terraform": {
+    "type": "google_dns_record_set",
+    "renames": {
+      "deletionPolicy": "deletion_policy",
+      "managedZone": "managed_zone",
+      "routingPolicy": "routing_policy",
+      "routingPolicy.enableGeoFencing": "enable_geo_fencing",
+      "routingPolicy.geos": "geo",
+      "routingPolicy.geos.healthCheckedTargets": "health_checked_targets",
+      "routingPolicy.geos.healthCheckedTargets.externalEndpoints": "external_endpoints",
+      "routingPolicy.geos.healthCheckedTargets.internalLoadBalancers": "internal_load_balancers",
+      "routingPolicy.geos.healthCheckedTargets.internalLoadBalancers.ipAddress": "ip_address",
+      "routingPolicy.geos.healthCheckedTargets.internalLoadBalancers.ipProtocol": "ip_protocol",
+      "routingPolicy.geos.healthCheckedTargets.internalLoadBalancers.loadBalancerType": "load_balancer_type",
+      "routingPolicy.geos.healthCheckedTargets.internalLoadBalancers.networkUrl": "network_url",
+      "routingPolicy.healthCheck": "health_check",
+      "routingPolicy.primaryBackup": "primary_backup",
+      "routingPolicy.primaryBackup.backupGeos": "backup_geo",
+      "routingPolicy.primaryBackup.backupGeos.healthCheckedTargets": "health_checked_targets",
+      "routingPolicy.primaryBackup.backupGeos.healthCheckedTargets.externalEndpoints": "external_endpoints",
+      "routingPolicy.primaryBackup.backupGeos.healthCheckedTargets.internalLoadBalancers": "internal_load_balancers",
+      "routingPolicy.primaryBackup.backupGeos.healthCheckedTargets.internalLoadBalancers.ipAddress": "ip_address",
+      "routingPolicy.primaryBackup.backupGeos.healthCheckedTargets.internalLoadBalancers.ipProtocol": "ip_protocol",
+      "routingPolicy.primaryBackup.backupGeos.healthCheckedTargets.internalLoadBalancers.loadBalancerType": "load_balancer_type",
+      "routingPolicy.primaryBackup.backupGeos.healthCheckedTargets.internalLoadBalancers.networkUrl": "network_url",
+      "routingPolicy.primaryBackup.enableGeoFencingForBackups": "enable_geo_fencing_for_backups",
+      "routingPolicy.primaryBackup.primary.externalEndpoints": "external_endpoints",
+      "routingPolicy.primaryBackup.primary.internalLoadBalancers": "internal_load_balancers",
+      "routingPolicy.primaryBackup.primary.internalLoadBalancers.ipAddress": "ip_address",
+      "routingPolicy.primaryBackup.primary.internalLoadBalancers.ipProtocol": "ip_protocol",
+      "routingPolicy.primaryBackup.primary.internalLoadBalancers.loadBalancerType": "load_balancer_type",
+      "routingPolicy.primaryBackup.primary.internalLoadBalancers.networkUrl": "network_url",
+      "routingPolicy.primaryBackup.trickleRatio": "trickle_ratio",
+      "routingPolicy.wrrs": "wrr",
+      "routingPolicy.wrrs.healthCheckedTargets": "health_checked_targets",
+      "routingPolicy.wrrs.healthCheckedTargets.externalEndpoints": "external_endpoints",
+      "routingPolicy.wrrs.healthCheckedTargets.internalLoadBalancers": "internal_load_balancers",
+      "routingPolicy.wrrs.healthCheckedTargets.internalLoadBalancers.ipAddress": "ip_address",
+      "routingPolicy.wrrs.healthCheckedTargets.internalLoadBalancers.ipProtocol": "ip_protocol",
+      "routingPolicy.wrrs.healthCheckedTargets.internalLoadBalancers.loadBalancerType": "load_balancer_type",
+      "routingPolicy.wrrs.healthCheckedTargets.internalLoadBalancers.networkUrl": "network_url"
+    }
+  },
+  "inputProperties": {
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "managedZone": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "routingPolicy": {
+      "$ref": "#/types/gcp:dns/RecordSetRoutingPolicy:RecordSetRoutingPolicy"
+    },
+    "rrdatas": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ttl": {
+      "type": "integer"
+    },
+    "type": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "managedZone",
+    "name",
+    "type"
+  ],
+  "types": {
+    "gcp:dns/RecordSetRoutingPolicy:RecordSetRoutingPolicy": {
+      "type": "object",
+      "properties": {
+        "enableGeoFencing": {
+          "type": "boolean"
+        },
+        "geos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyGeo:RecordSetRoutingPolicyGeo"
+          }
+        },
+        "healthCheck": {
+          "type": "string"
+        },
+        "primaryBackup": {
+          "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyPrimaryBackup:RecordSetRoutingPolicyPrimaryBackup"
+        },
+        "wrrs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyWrr:RecordSetRoutingPolicyWrr"
+          }
+        }
+      }
+    },
+    "gcp:dns/RecordSetRoutingPolicyGeo:RecordSetRoutingPolicyGeo": {
+      "type": "object",
+      "properties": {
+        "healthCheckedTargets": {
+          "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyGeoHealthCheckedTargets:RecordSetRoutingPolicyGeoHealthCheckedTargets"
+        },
+        "location": {
+          "type": "string"
+        },
+        "rrdatas": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "location"
+      ]
+    },
+    "gcp:dns/RecordSetRoutingPolicyGeoHealthCheckedTargets:RecordSetRoutingPolicyGeoHealthCheckedTargets": {
+      "type": "object",
+      "properties": {
+        "externalEndpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "internalLoadBalancers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyGeoHealthCheckedTargetsInternalLoadBalancer:RecordSetRoutingPolicyGeoHealthCheckedTargetsInternalLoadBalancer"
+          }
+        }
+      }
+    },
+    "gcp:dns/RecordSetRoutingPolicyGeoHealthCheckedTargetsInternalLoadBalancer:RecordSetRoutingPolicyGeoHealthCheckedTargetsInternalLoadBalancer": {
+      "type": "object",
+      "properties": {
+        "ipAddress": {
+          "type": "string"
+        },
+        "ipProtocol": {
+          "type": "string"
+        },
+        "loadBalancerType": {
+          "type": "string"
+        },
+        "networkUrl": {
+          "type": "string"
+        },
+        "port": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ipAddress",
+        "ipProtocol",
+        "networkUrl",
+        "port",
+        "project"
+      ]
+    },
+    "gcp:dns/RecordSetRoutingPolicyPrimaryBackup:RecordSetRoutingPolicyPrimaryBackup": {
+      "type": "object",
+      "properties": {
+        "backupGeos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyPrimaryBackupBackupGeo:RecordSetRoutingPolicyPrimaryBackupBackupGeo"
+          }
+        },
+        "enableGeoFencingForBackups": {
+          "type": "boolean"
+        },
+        "primary": {
+          "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyPrimaryBackupPrimary:RecordSetRoutingPolicyPrimaryBackupPrimary"
+        },
+        "trickleRatio": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "backupGeos",
+        "primary"
+      ]
+    },
+    "gcp:dns/RecordSetRoutingPolicyPrimaryBackupBackupGeo:RecordSetRoutingPolicyPrimaryBackupBackupGeo": {
+      "type": "object",
+      "properties": {
+        "healthCheckedTargets": {
+          "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyPrimaryBackupBackupGeoHealthCheckedTargets:RecordSetRoutingPolicyPrimaryBackupBackupGeoHealthCheckedTargets"
+        },
+        "location": {
+          "type": "string"
+        },
+        "rrdatas": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "location"
+      ]
+    },
+    "gcp:dns/RecordSetRoutingPolicyPrimaryBackupBackupGeoHealthCheckedTargets:RecordSetRoutingPolicyPrimaryBackupBackupGeoHealthCheckedTargets": {
+      "type": "object",
+      "properties": {
+        "externalEndpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "internalLoadBalancers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyPrimaryBackupBackupGeoHealthCheckedTargetsInternalLoadBalancer:RecordSetRoutingPolicyPrimaryBackupBackupGeoHealthCheckedTargetsInternalLoadBalancer"
+          }
+        }
+      }
+    },
+    "gcp:dns/RecordSetRoutingPolicyPrimaryBackupBackupGeoHealthCheckedTargetsInternalLoadBalancer:RecordSetRoutingPolicyPrimaryBackupBackupGeoHealthCheckedTargetsInternalLoadBalancer": {
+      "type": "object",
+      "properties": {
+        "ipAddress": {
+          "type": "string"
+        },
+        "ipProtocol": {
+          "type": "string"
+        },
+        "loadBalancerType": {
+          "type": "string"
+        },
+        "networkUrl": {
+          "type": "string"
+        },
+        "port": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ipAddress",
+        "ipProtocol",
+        "networkUrl",
+        "port",
+        "project"
+      ]
+    },
+    "gcp:dns/RecordSetRoutingPolicyPrimaryBackupPrimary:RecordSetRoutingPolicyPrimaryBackupPrimary": {
+      "type": "object",
+      "properties": {
+        "externalEndpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "internalLoadBalancers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyPrimaryBackupPrimaryInternalLoadBalancer:RecordSetRoutingPolicyPrimaryBackupPrimaryInternalLoadBalancer"
+          }
+        }
+      }
+    },
+    "gcp:dns/RecordSetRoutingPolicyPrimaryBackupPrimaryInternalLoadBalancer:RecordSetRoutingPolicyPrimaryBackupPrimaryInternalLoadBalancer": {
+      "type": "object",
+      "properties": {
+        "ipAddress": {
+          "type": "string"
+        },
+        "ipProtocol": {
+          "type": "string"
+        },
+        "loadBalancerType": {
+          "type": "string"
+        },
+        "networkUrl": {
+          "type": "string"
+        },
+        "port": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ipAddress",
+        "ipProtocol",
+        "networkUrl",
+        "port",
+        "project"
+      ]
+    },
+    "gcp:dns/RecordSetRoutingPolicyWrr:RecordSetRoutingPolicyWrr": {
+      "type": "object",
+      "properties": {
+        "healthCheckedTargets": {
+          "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyWrrHealthCheckedTargets:RecordSetRoutingPolicyWrrHealthCheckedTargets"
+        },
+        "rrdatas": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "weight"
+      ]
+    },
+    "gcp:dns/RecordSetRoutingPolicyWrrHealthCheckedTargets:RecordSetRoutingPolicyWrrHealthCheckedTargets": {
+      "type": "object",
+      "properties": {
+        "externalEndpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "internalLoadBalancers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:dns/RecordSetRoutingPolicyWrrHealthCheckedTargetsInternalLoadBalancer:RecordSetRoutingPolicyWrrHealthCheckedTargetsInternalLoadBalancer"
+          }
+        }
+      }
+    },
+    "gcp:dns/RecordSetRoutingPolicyWrrHealthCheckedTargetsInternalLoadBalancer:RecordSetRoutingPolicyWrrHealthCheckedTargetsInternalLoadBalancer": {
+      "type": "object",
+      "properties": {
+        "ipAddress": {
+          "type": "string"
+        },
+        "ipProtocol": {
+          "type": "string"
+        },
+        "loadBalancerType": {
+          "type": "string"
+        },
+        "networkUrl": {
+          "type": "string"
+        },
+        "port": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ipAddress",
+        "ipProtocol",
+        "networkUrl",
+        "port",
+        "project"
+      ]
+    }
+  }
+}

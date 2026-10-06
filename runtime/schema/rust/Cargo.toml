@@ -2,7 +2,7 @@
 name = "superschematic-schema-runtime"
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.95.0"
+rust-version = "1.99.0"
 authors = ["Parable Work, Inc."]
 description = "Validation helpers the generated Rust types crates call"
 license = "Apache-2.0"

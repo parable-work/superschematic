@@ -11,7 +11,9 @@ import (
 
 // configService writes a service beside the tsreader fixtures, whose
 // tsconfig base maps @schemas/<dir> to each fixture's src/index.ts, with the
-// given schema.config.ts.
+// given schema.config.ts. src/helpers.ts holds a type, a function and a
+// const that is not a sentinel, for a config to import from a module of its
+// own.
 func configService(t *testing.T, config string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp(filepath.Join("testdata", "services"), "fixture-config-imports-")
@@ -24,6 +26,7 @@ func configService(t *testing.T, config string) string {
 		"package.json":        `{ "name": "@schemas/` + filepath.Base(dir) + `", "private": true }`,
 		"schema.config.ts":    config,
 		"src/probe.schema.ts": "export enum Probe {\n  Ok = \"ok\"\n}\n",
+		"src/helpers.ts":      "export type Shape = { name: string };\nexport function helper(): string {\n  return \"probe\";\n}\nexport const notASentinel = 1;\n",
 	} {
 		path := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -40,7 +43,9 @@ const configTail = `export default defineConfig({ name: "probe", kind: SchemaKin
 `
 
 // TestConfigImportRule: a schema.config.ts imports the config package, under
-// any binding form, and other services' sentinels; nothing else (D34).
+// any binding form, and other services' sentinels by name as values; each
+// other form is refused at the import with a message that says what it is
+// (D34).
 func TestConfigImportRule(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -53,14 +58,38 @@ const FixtureDb = Db;`, ""},
 		{"the config package as a namespace", `import * as config from "@superschematic/schema-config";
 import { FixtureDb } from "@schemas/fixture-db";
 const _unused = config.SchemaKind.API;`, ""},
-		{"a schema class", `import { FixtureDb, Tenant } from "@schemas/fixture-db";`, `imports Tenant from "@schemas/fixture-db", which is neither from @superschematic/schema-config nor a service sentinel`},
+		{"a type of the config package", `import { type ServiceHandle } from "@superschematic/schema-config";
+import { FixtureDb } from "@schemas/fixture-db";
+const _db: ServiceHandle = FixtureDb;`, ""},
+		{"a schema class", `import { FixtureDb, Tenant } from "@schemas/fixture-db";`,
+			`schema.config.ts imports Tenant from "@schemas/fixture-db", which is a class, not a service sentinel; a config imports only @superschematic/schema-config and other services' sentinels (D34)`},
+		{"an enum", `import { FixtureDb, TenantStatus } from "@schemas/fixture-db";`,
+			`imports TenantStatus from "@schemas/fixture-db", which is an enum, not a service sentinel`},
 		{"a type", `import { FixtureDb } from "@schemas/fixture-db";
-import type { Tenant } from "@schemas/fixture-db";`, `imports Tenant from "@schemas/fixture-db"`},
+import { type Shape } from "./src/helpers";`,
+			`imports Shape from "./src/helpers" as a type only; a config names a sentinel as a value`},
+		{"a type alias imported as a value", `import { FixtureDb } from "@schemas/fixture-db";
+import { Shape } from "./src/helpers";`,
+			`imports Shape from "./src/helpers", which is a type, not a service sentinel`},
+		{"a sentinel as a type only", `import type { FixtureDb as Handle } from "@schemas/fixture-db";
+import { FixtureDb } from "@schemas/fixture-db";`,
+			`imports Handle from "@schemas/fixture-db" as a type only`},
+		{"a function", `import { FixtureDb } from "@schemas/fixture-db";
+import { helper } from "./src/helpers";`,
+			`imports helper from "./src/helpers", which is a function, not a service sentinel`},
+		{"a const that is not a sentinel", `import { FixtureDb } from "@schemas/fixture-db";
+import { notASentinel } from "./src/helpers";`,
+			`imports notASentinel from "./src/helpers", which is a value, not a service sentinel`},
+		{"a default import", `import FixtureDb from "@schemas/fixture-db";`,
+			`schema.config.ts imports FixtureDb from "@schemas/fixture-db" as a default import; a sentinel is a named export`},
 		{"a sibling as a namespace", `import * as db from "@schemas/fixture-db";
-const FixtureDb = db.FixtureDb;`, `imports db from "@schemas/fixture-db", which is neither`},
+const FixtureDb = db.FixtureDb;`,
+			`imports db from "@schemas/fixture-db", which is a namespace of another module, not a service sentinel`},
 		{"a side effect", `import "@schemas/fixture-db";
-import { FixtureDb } from "@schemas/fixture-db";`, `may not import "@schemas/fixture-db" for its side effects`},
-		{"a name that does not resolve", `import { FixtureDb, Missing } from "@schemas/fixture-db";`, `imports Missing from "@schemas/fixture-db", which does not resolve`},
+import { FixtureDb } from "@schemas/fixture-db";`,
+			`schema.config.ts may not import "@schemas/fixture-db" for its side effects; a config imports only`},
+		{"a name that does not resolve", `import { FixtureDb, Missing } from "@schemas/fixture-db";`,
+			`imports Missing from "@schemas/fixture-db", which does not resolve`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := configService(t, `import { defineConfig, SchemaKind } from "@superschematic/schema-config";

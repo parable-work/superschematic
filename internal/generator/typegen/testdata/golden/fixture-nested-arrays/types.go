@@ -413,6 +413,13 @@ func (t *Drawing) MaskSecrets() *Drawing {
 	return masked
 }
 
+// JSONFieldNames are the keys Drawing's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Drawing) JSONFieldNames() []string {
+	return []string{"labels", "shades", "polygons", "samples"}
+}
+
 // Validate validates all fields in Drawing
 func (t *Drawing) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -707,6 +714,13 @@ func (t *Point) MaskSecrets() *Point {
 	masked.Y = t.Y
 
 	return masked
+}
+
+// JSONFieldNames are the keys Point's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Point) JSONFieldNames() []string {
+	return []string{"x", "y"}
 }
 
 // Validate validates all fields in Point

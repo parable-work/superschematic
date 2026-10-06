@@ -17,7 +17,8 @@
       "@superschematic/api": ["api/src/index.ts"],
       "@superschematic/db": ["db/src/index.ts"],
       "@superschematic/schema": ["schema/src/index.ts"],
-      "@superschematic/schema-config": ["schema-config/src/index.ts"]
+      "@superschematic/schema-config": ["schema-config/src/index.ts"],
+      "@superschematic/stack": ["stack/src/index.ts"]
     }
   },
   "exclude": [

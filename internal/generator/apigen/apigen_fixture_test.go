@@ -104,6 +104,7 @@ func checkFixtureAPIGolden(t *testing.T, provider apigen.AuthProvider, golden st
 		"response.go",
 		"context.go",
 		"constants.go",
+		"deps.go",
 	}
 
 	entries, err := os.ReadDir(outDir)

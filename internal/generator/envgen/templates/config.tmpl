@@ -5,16 +5,24 @@ package {{ .PackageName }}
 
 import (
 	"errors"
+{{- if .TypeName }}
 	"fmt"
 	"os"
 	"strconv"
 {{- if or .HasScalars .HasNamed }}
 	"strings"
 {{- end }}
+{{- end }}
 
 	"github.com/joho/godotenv"
+{{- if .Derived }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
+{{- end }}
+{{- if .TypeName }}
 	types "{{ .TypesModule }}"
+{{- end }}
 )
+{{- if .TypeName }}
 
 {{- if .Enums }}
 
@@ -319,5 +327,74 @@ func formatValidationError(envVar string, value string, validationErrs []types.V
 	}
 
 	return fmt.Errorf("environment variable %s=%q is invalid: %s", envVar, value, strings.Join(messages, "; "))
+}
+{{- end }}
+{{- end }}
+{{- if .EnvConfig }}
+
+// ===========================================================================
+// {{ envConfigType }} - Settings and Derived Fields
+// ===========================================================================
+
+{{ if not .Derived -}}
+// {{ envConfigType }} is the API's configuration: the settings of its @envVars
+// type. Deps holds it.
+{{- else if .TypeName -}}
+// {{ envConfigType }} is the API's configuration: the settings of its @envVars
+// type, and a field per edge a stack derives for it (docs/stack-model.md,
+// section 3.4). A platform sets each derived field as one environment
+// variable per member of its value: the field's name, an underscore and the
+// member's path in upper snake case. Deps holds it.
+{{- else -}}
+// {{ envConfigType }} is the API's configuration: a field per edge a stack
+// derives for it (docs/stack-model.md, section 3.4). A platform sets each
+// derived field as one environment variable per member of its value: the
+// field's name, an underscore and the member's path in upper snake case.
+// Deps holds it.
+{{- end }}
+type {{ envConfigType }} struct {
+{{- if .TypeName }}
+	{{ .TypeName }}
+{{ end }}
+{{- range $i, $field := .Derived }}
+{{- if $i }}
+{{ end }}
+{{- if eq .Kind "sql" }}
+	// {{ .GoName }} is the connection to {{ .Service }}, the API's database:
+	// its {{ if eq .From "authDb" }}authDb{{ else }}one DB-kind dependency{{ end }}. It is read from {{ .Key }}_*.
+{{- else }}
+	// {{ .GoName }} is the endpoint of {{ .Service }}, which the API calls.
+	// It is read from {{ .Key }}_*.
+{{- end }}
+	{{ .GoName }} stackconfig.{{ .RuntimeType }}
+{{- end }}
+}
+
+// Load{{ envConfigType }} loads the API's configuration from environment variables.
+// Returns an error naming every field that is missing or invalid.
+func Load{{ envConfigType }}() (*{{ envConfigType }}, error) {
+	cfg := &{{ envConfigType }}{}
+	var errs []error
+{{- if .TypeName }}
+	if settings, err := LoadConfig(); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.{{ .TypeName }} = *settings
+	}
+{{- else }}
+	// Try to load .env file (ignore if not found)
+	_ = godotenv.Load()
+{{- end }}
+{{- range .Derived }}
+	if v, err := stackconfig.Load{{ .RuntimeType }}("{{ .Key }}"); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.{{ .GoName }} = v
+	}
+{{- end }}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return cfg, nil
 }
 {{- end }}

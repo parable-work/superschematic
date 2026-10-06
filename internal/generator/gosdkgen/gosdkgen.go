@@ -265,6 +265,12 @@ type FileUploadField struct {
 	Required bool
 }
 
+// ClientTypeName is the root client type of a service's Go SDK, which its
+// New returns: ShopApiSDK for shop-api.
+func ClientTypeName(schemaName string) string {
+	return goutil.GoPublicIdentifier(schemaName) + "SDK"
+}
+
 // Generate generates Go SDK metadata from API output.
 func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
@@ -287,7 +293,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 		ModulePath:    modulePath,
 		PackageName:   packageName,
 		TypesModule:   apiOutput.TypesModule,
-		SDKStructName: goutil.GoPublicIdentifier(apiOutput.SchemaName) + "SDK",
+		SDKStructName: ClientTypeName(apiOutput.SchemaName),
 		HasAuth:       hasAuth,
 		Naming:        names,
 		Runtime: RuntimeSurface{

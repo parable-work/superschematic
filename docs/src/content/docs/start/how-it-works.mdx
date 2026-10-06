@@ -40,7 +40,7 @@ kind:
 
 ## A kind decides what a schema means
 
-The core registers three kinds. The kind decides what a plain abstract
+The core registers four kinds. The kind decides what a plain abstract
 class becomes, which authoring packages a schema may import, which other
 kinds it may reference, and which generators run, in order.
 
@@ -49,6 +49,7 @@ kinds it may reference, and which generators run, in order.
 | DB | a table | `@superschematic/db` | General | `sql`, `orm`, `types` |
 | API | a request or response type; with `@source`, a view of a table | `@superschematic/api` | DB, General | `types`, `api`, `sdks` |
 | General | a plain type | neither | General | `types`, `envConfig` |
+| Stack | a declaration of what runs where: the stack, a deployable or an environment | `@superschematic/stack` | none; it names services by their handles | `stack` |
 
 Every kind may import `@superschematic/schema` (wrappers such as
 `Nullable` and `Default`, and decorators that apply everywhere),
@@ -108,17 +109,26 @@ A service may use another's types:
   depend on each other's packages.
 - On an API marked `public: true`, `authDb` names the DB schema whose
   `User` and `Session` tables the Go server's auth provider reads.
-- On an API, `calls` names the other APIs its implementation calls. Each
-  callee builds before its caller, so two APIs cannot call each other yet.
+- On an API, `calls` names the other APIs its implementation calls. The
+  generated `Deps` holds a client of each, so each callee's SDK builds
+  before the caller's server, and two APIs may call each other.
 
 In a TypeScript config each is a handle: the sentinel the named service's
 build writes, imported from its package (`import { ShopDb } from
 "@acme/shop-db"`), or `service({ name, kind })`, which the JSON and YAML
 forms write as `{ name, kind }`. A config imports nothing else but
-`@superschematic/schema-config`, and a handle's kind must be the kind of
+`@superschematic/schema-config`: a class, a type or a module's namespace
+fails to load, in every build command. A handle's kind must be the kind of
 the service it names. `build-all` builds every service in dependency
 order. `build --with-deps` builds one service and what it depends on.
 Both check each handle's kind first.
+
+A schema file can import a handle too, and pass it to a decorator that
+takes one, such as an extension's. That references the service without
+ordering the build: `build-all --cache` rebuilds the schema when the
+referenced service, or a service its config reaches, changes, and two
+services may name each other. A decorator that takes a handle only as a
+name declares so, and that handle adds nothing.
 
 ## The IR is the contract
 
@@ -133,8 +143,8 @@ superschematic build schemas/services/shop-common --emit-ir | jq .types.Price
 <Snippet file="testdata/generated/logs/price-ir.json" />
 
 When a generator's output surprises you, the IR shows what it was given.
-It also records the references the config makes: `authDb`,
-`dependencies` and `calls`.
+It also records the references the config makes, `authDb`,
+`dependencies` and `calls`, and those its decorators make, `references`.
 `superschematic json-schema` prints the JSON Schema the JSON and YAML forms
 are validated against.
 

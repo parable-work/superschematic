@@ -469,6 +469,13 @@ func (t *Auditable) MaskSecrets() *Auditable {
 	return masked
 }
 
+// JSONFieldNames are the keys Auditable's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Auditable) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt"}
+}
+
 // Validate validates all fields in Auditable
 func (t *Auditable) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -782,6 +789,13 @@ func (t *Tenant) MaskSecrets() *Tenant {
 	masked.Version = t.Version
 
 	return masked
+}
+
+// JSONFieldNames are the keys Tenant's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Tenant) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "name", "slug", "email", "status", "isActive", "seatCount", "metadata", "users", "_version"}
 }
 
 // Validate validates all fields in Tenant
@@ -1111,6 +1125,13 @@ func (t *TenantUser) MaskSecrets() *TenantUser {
 	masked.Version = t.Version
 
 	return masked
+}
+
+// JSONFieldNames are the keys TenantUser's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*TenantUser) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "tenant", "displayName", "deletedAt", "deletedBy", "_version"}
 }
 
 // Validate validates all fields in TenantUser

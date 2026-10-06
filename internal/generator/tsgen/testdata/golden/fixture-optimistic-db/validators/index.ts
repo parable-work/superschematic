@@ -15,3 +15,4 @@ export {
 export * from './scalars';
 
 export * from './types';
+export { ParseError } from './errors';

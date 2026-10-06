@@ -14,6 +14,7 @@ depends on a generated type.
 | `routing` | route registration and handler adapter scaffolding |
 | `session` | the core auth provider's runtime: session store, middleware and permission checks |
 | `filterparse` | list-endpoint filter expression parsing |
+| `stackconfig` | the config fields an API's edges derive in a stack: a database connection and a service endpoint, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4) |
 | `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path; and a list argument of a `GET` operation from the query string (`QueryList`), with the same rules |
 
 The generated API package keeps `Config`, `Implementations`, the route table,

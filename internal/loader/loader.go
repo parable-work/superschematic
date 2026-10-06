@@ -109,7 +109,9 @@ func WithSchemaCatalog(catalog map[string]registry.SchemaCatalogEntry) Option {
 	}
 }
 
-// WithTSProgramCache enables the build-all shared TypeScript program.
+// WithTSProgramCache enables the build-all shared TypeScript program. Build
+// the cache over every service HasTSFrontend reports; a service it does not
+// cover loads through its own program.
 func WithTSProgramCache(cache *tsreader.ProgramCache) Option {
 	return func(o *loadOptions) {
 		o.tsProgramCache = cache
@@ -136,13 +138,10 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	}); err != nil {
 		return nil, nil, err
 	}
-	_, tsConfigErr := os.Stat(filepath.Join(servicePath, "schema.config.ts"))
-	hasTSFrontend := len(tsFiles) > 0 || tsConfigErr == nil
-
 	var schema *ir.Schema
 	var cfg *schemaconfig.SchemaConfig
 	var vin verify.Input
-	if hasTSFrontend {
+	if runsTSFrontend(servicePath, tsFiles) {
 		// The TypeScript frontend owns its program, config read, walk, and
 		// validation; cross-service imports land in schema.Imports.
 		var tsInput *verify.Input
@@ -290,8 +289,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings print to [WarningWriter], errors fail the load. A schema
-// that verifies has its version graphs expanded into ordinary types, and
-// any scalar only the generated fields use is hydrated from the registry.
+// that verifies has its version graphs expanded into ordinary types, any
+// scalar only the generated fields use is hydrated from the registry, and
+// the services its stack declarations name join its references (D41).
 func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
@@ -308,6 +308,11 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}
+	}
+	// The data forms write a stack's declarations as typed fields, which
+	// the TypeScript form's handle recording never sees.
+	for _, ref := range ir.StackReferences(schema) {
+		schema.AddReference(ref)
 	}
 	return schema, nil
 }
@@ -453,6 +458,28 @@ func languagePrimitiveFromScalarMetadata(primitive string) ir.LanguagePrimitive 
 // classifySchemaFiles walks src/ and returns the JSON/YAML schema files and
 // the TypeScript schema files (each sorted, slash-normalized, relative to
 // the service directory).
+// HasTSFrontend reports whether loading servicePath runs the TypeScript
+// frontend: the service has a schema.config.ts or a src/**/*.schema.ts file,
+// whatever format its config is in. A shared program (WithTSProgramCache)
+// must be built over every such service it serves.
+func HasTSFrontend(servicePath string) (bool, error) {
+	_, tsFiles, err := classifySchemaFiles(servicePath)
+	if err != nil {
+		return false, err
+	}
+	return runsTSFrontend(servicePath, tsFiles), nil
+}
+
+// runsTSFrontend is HasTSFrontend over the service's classified TypeScript
+// schema files.
+func runsTSFrontend(servicePath string, tsFiles []string) bool {
+	if len(tsFiles) > 0 {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(servicePath, "schema.config.ts"))
+	return err == nil
+}
+
 func classifySchemaFiles(servicePath string) (dataFiles, tsFiles []string, err error) {
 	srcDir := filepath.Join(servicePath, "src")
 	walkErr := filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {

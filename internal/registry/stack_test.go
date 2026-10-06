@@ -33,7 +33,7 @@ func connect(ConnectorContext) (Connected, error) { return Connected{Value: "x"}
 
 type nopProvisioner struct{}
 
-func (nopProvisioner) Render(*ir.ResourceGraph, string) error { return nil }
+func (nopProvisioner) Render(*ir.ResolvedEnvironment, string) error { return nil }
 func (nopProvisioner) Plan(context.Context, ProvisionRequest) ([]PlannedChange, error) {
 	return nil, nil
 }
@@ -370,7 +370,7 @@ func TestStackSpecsFailAfterFinalize(t *testing.T) {
 	if err := reg.RegisterTarget(TargetSpec{Name: "fake", Platforms: map[ir.DeployableKind]string{ir.DeployableServer: "fake.run"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig"} {
+	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}

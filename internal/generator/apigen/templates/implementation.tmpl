@@ -1,0 +1,53 @@
+// Package {{ toPackageName .SchemaName }} implements the {{ .SchemaName }} API.
+//
+// superschematic wrote this package once, as a scaffold, because it was
+// missing. It never writes it again: the package is yours. Each method
+// answers 501 Not Implemented until you implement it.
+package {{ toPackageName .SchemaName }}
+
+import (
+	"context"
+{{- if .HasFilterableEndpoints }}
+
+	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
+{{- end }}
+
+	api "{{ .ModulePath }}"
+{{- if .NeedsTypesImport }}
+	types "{{ .TypesModule }}"
+{{- end }}
+)
+
+// New builds the implementation of {{ .SchemaName }} from its dependencies. Its
+// signature is the generated one, api.Constructor.
+func New(deps api.Deps) (api.Implementations, error) {
+	return api.Implementations{
+{{- range .Namespaces }}
+		{{ toGoName . }}: &{{ toGoName . }}{deps: deps},
+{{- end }}
+{{- if .HasWebhookHMACEndpoints }}
+		// WebhookVerifiers verifies each @hmacVerified provider's requests:
+		// {{ join .RequiredWebhookProviders ", " }}. The server does not start until each has one.
+		WebhookVerifiers: map[string]api.WebhookVerifier{},
+{{- end }}
+	}, nil
+}
+
+var _ api.Constructor = New
+{{- range .Namespaces }}
+{{- $namespace := . }}
+
+// {{ toGoName . }} implements api.{{ toGoName . }}Implementation.
+type {{ toGoName . }} struct {
+	deps api.Deps
+}
+{{- range $.Endpoints }}
+{{- if eq .Namespace $namespace }}
+
+// {{ .ShortImplName }} handles {{ .Method }} {{ .Path }}.
+func (impl *{{ toGoName $namespace }}) {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .OutputIsArray }}{{ .OutputGoListType }}{{- else }}*{{ .OutputGoType }}{{- end }}, error) {
+	return nil, api.NotImplementedError("{{ toGoName $namespace }}.{{ .ShortImplName }}")
+}
+{{- end }}
+{{- end }}
+{{- end }}

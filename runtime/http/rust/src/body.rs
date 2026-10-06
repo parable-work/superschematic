@@ -13,8 +13,8 @@ use serde_json::Value;
 
 /// The request body as JSON. An empty body is `None`, which an operation
 /// without a required input or argument takes; a body that is not JSON is
-/// 400, and one axum could not read (over its size limit, say) is its
-/// status.
+/// 400, "Request body is not valid JSON" as every generated server says,
+/// and one axum could not read (over its size limit, say) is its status.
 pub fn json_body(body: Result<Bytes, BytesRejection>) -> Result<Option<Value>, ApiError> {
     let bytes = body.map_err(|rejection| {
         let status = rejection.status();
@@ -25,7 +25,7 @@ pub fn json_body(body: Result<Bytes, BytesRejection>) -> Result<Option<Value>, A
     }
     serde_json::from_slice(&bytes)
         .map(Some)
-        .map_err(|err| ApiError::bad_request(format!("The request body is not valid JSON: {err}")))
+        .map_err(|_| ApiError::bad_request("Request body is not valid JSON"))
 }
 
 /// The query string's keys and values, every occurrence in order. A query
@@ -61,11 +61,6 @@ mod tests {
         let err = json_body(Ok(Bytes::from_static(b"{nope"))).unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
         assert_eq!(err.code, "bad_request");
-        assert!(
-            err.message
-                .starts_with("The request body is not valid JSON"),
-            "{}",
-            err.message
-        );
+        assert_eq!(err.message, "Request body is not valid JSON");
     }
 }

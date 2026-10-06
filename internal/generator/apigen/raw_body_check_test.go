@@ -103,17 +103,17 @@ func TestWriteAPIGoldenRawBodyChecks(t *testing.T) {
 		// saveNote: the JSON body.
 		"\t\t// Decoding keeps the last of two equal keys, so check\n\t\t// the raw body first.\n" +
 			"\t\tif keyErrors := jsonkeys.DuplicateKeyErrors(rawInput, \"body\", \"meta\"); keyErrors.HasErrors() {\n" +
-			"\t\t\tRespondValidationErrors(w, r, keyErrors)\n\t\t\treturn\n\t\t}\n" +
+			"\t\t\tRespondInputRefusal(w, r, bodyargs.Mismatch(\"validation failed\", keyErrors))\n\t\t\treturn\n\t\t}\n" +
 			"\t\tif err := json.Unmarshal(rawInput, &input); err != nil {",
 		// attachPhoto: a JSON body.
 		"\t\t\t// Decoding keeps the last of two equal keys, so check\n\t\t\t// the raw body first.\n" +
 			"\t\t\tif keyErrors := jsonkeys.DuplicateKeyErrors(rawInput, \"caption\"); keyErrors.HasErrors() {\n" +
-			"\t\t\t\tRespondValidationErrors(w, r, keyErrors)\n\t\t\t\treturn\n\t\t\t}\n" +
+			"\t\t\t\tRespondInputRefusal(w, r, bodyargs.Mismatch(\"validation failed\", keyErrors))\n\t\t\t\treturn\n\t\t\t}\n" +
 			"\t\t\tif err := json.Unmarshal(rawInput, &input); err != nil {",
 		// attachPhoto: the data part of a multipart form.
 		"\t\t\tif dataField != \"\" {\n" +
 			"\t\t\t\tif keyErrors := jsonkeys.DuplicateKeyErrors([]byte(dataField), \"caption\"); keyErrors.HasErrors() {\n" +
-			"\t\t\t\t\tRespondValidationErrors(w, r, keyErrors)\n\t\t\t\t\treturn\n\t\t\t\t}\n" +
+			"\t\t\t\t\tRespondInputRefusal(w, r, bodyargs.Mismatch(\"validation failed\", keyErrors))\n\t\t\t\t\treturn\n\t\t\t\t}\n" +
 			"\t\t\t\tif err := json.Unmarshal([]byte(dataField), &input); err != nil {",
 	} {
 		if !strings.Contains(string(routes), want) {
@@ -196,7 +196,7 @@ func TestChecksOfSeveralScalarsAreOneCallPerCheck(t *testing.T) {
 	routes := writeRoutes(t, output)
 	for _, want := range []string{
 		"\t\t}\n\t\tif checkErrors := text.LabelErrors(rawInput, \"label\", \"slug\"); checkErrors.HasErrors() {\n" +
-			"\t\t\tRespondValidationErrors(w, r, checkErrors)\n\t\t\treturn\n\t\t}\n" +
+			"\t\t\tRespondInputRefusal(w, r, bodyargs.Mismatch(\"validation failed\", checkErrors))\n\t\t\treturn\n\t\t}\n" +
 			"\t\t// Decoding keeps the last of two equal keys, so check\n",
 		`text "example.com/checks/text"`,
 	} {
