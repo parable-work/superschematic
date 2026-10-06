@@ -77,4 +77,8 @@ make versiongraph-scenarios-rust             # from the repository root: every s
 The Postgres tests read `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and
 skip without it; `make versiongraph-scenarios-rust` fails without it. Each
 test creates a schema of its own, applies `../testdata/fixture/create.sql`
-and drops the schema after.
+and drops the schema after. The sweeper's tests run side by side and hold
+and take the graph's sweep lock, an advisory lock, which Postgres keys to
+the database rather than the schema, so each creates its schema in a
+database of its own and drops the database after; the variable's role must
+be able to create databases.

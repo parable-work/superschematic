@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/internal/testdb"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/postgres"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/storage"
 )
@@ -104,15 +105,28 @@ func (c noStatements) Exec(_ context.Context, sql string, _ ...any) (int64, erro
 	return 0, nil
 }
 
-// connect opens a connection whose search path is a schema of its own that
-// holds the fixture's DDL, and returns a second connection to the same
-// schema.
-func connect(t *testing.T) (*pgx.Conn, *pgx.Conn) {
+// databaseURL is the Postgres the tests run against. The test skips without
+// it.
+func databaseURL(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to run the Postgres adapter against Postgres")
 	}
+	return dsn
+}
+
+// connect opens a connection whose search path is a schema of its own that
+// holds the fixture's DDL, and returns a second connection to the same
+// schema.
+func connect(t *testing.T) (*pgx.Conn, *pgx.Conn) {
+	t.Helper()
+	return connectTo(t, databaseURL(t))
+}
+
+// connectTo is connect in the database dsn names.
+func connectTo(t *testing.T, dsn string) (*pgx.Conn, *pgx.Conn) {
+	t.Helper()
 	ctx := context.Background()
 	createSQL, err := os.ReadFile(filepath.Join(fixtureDir, "create.sql"))
 	if err != nil {
@@ -251,9 +265,10 @@ func TestPruneKeepsPinnedImages(t *testing.T) {
 
 // TestSweepLockIsHeldByOneTransaction: while one transaction holds the
 // graph's sweep lock, another does not get it and does not wait; once the
-// first ends, the lock is free.
+// first ends, the lock is free. It runs in a database of its own (package
+// testdb), where no other test's lock or sweep reaches it.
 func TestSweepLockIsHeldByOneTransaction(t *testing.T) {
-	first, second := connect(t)
+	first, second := connectTo(t, testdb.New(t, databaseURL(t)))
 	ctx := context.Background()
 	a := adapter(t)
 	holder, other := a.Storage(postgres.Pgx(first)), a.Storage(postgres.Pgx(second))

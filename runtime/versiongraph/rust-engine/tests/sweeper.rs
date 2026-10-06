@@ -1,6 +1,9 @@
 //! The sweeper against Postgres: it skips while another transaction holds
 //! the graph's sweep lock, and a pass leaves an idle change set that a write
-//! reaches while the pass runs.
+//! reaches while the pass runs. The tests that hold or take the lock run
+//! side by side, each in a database of its own
+//! ([`support::Schema::create_in_own_database`]), where the other's lock
+//! does not reach it.
 
 mod support;
 
@@ -46,7 +49,7 @@ async fn run_sweeper_skips_while_the_lock_is_held() {
     let Some(dsn) = support::database("run_sweeper_skips_while_the_lock_is_held") else {
         return;
     };
-    let schema = support::Schema::create(&dsn, "vg_rust_sweeper").await;
+    let schema = support::Schema::create_in_own_database(&dsn, "vg_rust_sweeper").await;
     let adapter = support::adapter();
     let holder_store = schema.storage(&adapter).await;
     let mut holder = holder_store.begin().await.expect("begin");
@@ -121,7 +124,7 @@ async fn sweep_skips_an_idle_draft_written_during_the_pass() {
     let Some(dsn) = support::database("sweep_skips_an_idle_draft_written_during_the_pass") else {
         return;
     };
-    let schema = support::Schema::create(&dsn, "vg_rust_sweeper").await;
+    let schema = support::Schema::create_in_own_database(&dsn, "vg_rust_sweeper").await;
     let adapter = support::adapter();
     let store = schema.storage(&adapter).await;
     let engine = engine(store.clone());

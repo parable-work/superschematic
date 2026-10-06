@@ -733,7 +733,13 @@ make versiongraph-scenarios-python  # every scenario and canonical vector throug
 
 The scenarios, the adapter's tests and the canonical vectors' Postgres
 check run against the Postgres that
-`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names, and skip without it;
+`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names, each in a schema of
+its own, and skip without it. The sweep lock is an advisory lock, and
+Postgres keys an advisory lock to the database, not to a schema, so the Go
+and Rust tests that hold or take it while other tests run beside them
+(`go test` runs packages side by side, and a Rust test binary runs its
+tests side by side) each create a database of their own and drop it after;
+the variable's role must be able to create databases.
 `make versiongraph-scenarios`, `make versiongraph-scenarios-ts`,
 `make versiongraph-scenarios-rust` and `make versiongraph-scenarios-python`
 fail without it. The scenarios on SQLite and the SQLite adapter's tests

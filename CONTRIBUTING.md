@@ -161,9 +161,12 @@ The test packages share that database in parallel, and an extension belongs
 to the whole database, so a test that applies a generated `create.sql` in a
 schema of its own applies the copy `internal/pgtest` prepares, which creates
 the extensions in `public` under an advisory lock first.
-The canonical-row vectors' check against Postgres
-(`runtime/versiongraph/go/canonical`) skips unless
-`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names one; it only reads.
+The version-graph runtimes' Postgres tests, the canonical-row vectors'
+check among them (`runtime/versiongraph/go/canonical`), skip unless
+`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names one. The Go and Rust
+ones that hold or take a graph's sweep lock while other tests run beside
+them create a database of their own, so that role must be able to create
+databases (`runtime/versiongraph/README.md`, "Build and test").
 CI runs them against a `postgres:16-alpine` container. Locally a throwaway
 container is enough:
 
