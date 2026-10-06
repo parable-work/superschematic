@@ -36,8 +36,8 @@ The generated Go `Parse<Symbol>` reads the value's JSON text:
 ## Validation
 
 For `Generic.StringMap` and `Embedding.Vector`, every validator (the Go,
-TypeScript and Python schema runtimes and the generated Go, TypeScript and
-Python validators) follows one rule:
+TypeScript and Python schema runtimes and the generated Go, TypeScript,
+Python and Rust validators) follows one rule:
 
 - The JSON object (for `Generic.StringMap`) or JSON array (for
   `Embedding.Vector`) is a value. So is an empty one.
@@ -57,7 +57,9 @@ Python validators) follows one rule:
 
 The typed decoders take only the object or array: the generated Go types,
 the Go API routes and the TypeScript API server answer the JSON text with
-`type`, or fail to decode it. The generated Python types read the JSON text
+`type`, or fail to decode it. The generated Rust validators pass the JSON
+text, and `parse_<type>` then fails to decode it, since serde reads the
+field as a map or a vector. The generated Python types read the JSON text
 into the value, and so does the Python SDK, which types a body argument of
 either scalar as the types package's alias and sends the object or array
 the text holds.

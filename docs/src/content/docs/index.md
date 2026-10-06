@@ -17,12 +17,13 @@ parses the same way in generated Go, TypeScript, Python and Rust.
 ```
 schema source (.schema.ts | .schema.json | .schema.yaml)
   -> superschematic build
-     -> sql/         Postgres DDL
+     -> sql/         Postgres DDL, and SQLite DDL when a DB asks for it
      -> orm/         Go repositories
      -> api/         Go chi router, middleware, OpenAPI; or a Rust axum crate;
                      or a TypeScript Hono router package
      -> types/       Go, TypeScript, Python, Rust
      -> sdk/         TypeScript, Go, Python, Rust clients
+     -> stack/       one environment.json per environment of a Stack service
 ```
 
 Status: pre-release. The first tag is `v0.1.0-alpha.1`. Until it is cut,
@@ -78,7 +79,8 @@ tree of such tables can be branched, committed and merged as a whole
    [work queues](/superschematic/guides/work-queues/).
 
 The tutorial's code is `examples/acme-shop`, and the engine guide's is
-`examples/engine-notes`. CI builds and tests both on every pull request.
+`examples/engine-notes`. CI builds and tests both in the release
+candidate run on `main` twice a day.
 
 For what the generated code offers in one language, see the language
 pages: [Go](/superschematic/install/go/),

@@ -6,9 +6,11 @@ sidebar:
 ---
 
 `superschematic.toml` sits at the schemas root (the parent of `services/`).
-`build` and `build-all` load it from there, or from `--naming`. `format`
-walks up from the file you pass and loads the first one it finds.
-`json-schema` has no service directory; it uses the built-in defaults
+`build`, `build-all` and `migrate plan` load it from there, or from
+`--naming`; `migrate plan` loads the previous version's from that
+version's own schemas root when it has one. `format` walks up from the
+file you pass and loads the first one it finds. `json-schema` and
+`behaviors` have no service directory; they use the built-in defaults
 unless you pass `--naming`.
 
 A missing file is `Default()`. A key left out keeps its default. An
@@ -349,8 +351,8 @@ and hashes no extra files.
 
 Default: unset (XDG cache directory, under `superschematic/build`)
 
-Build cache directory. `~` expands. `SUPERSCHEMATIC_BUILD_CACHE_DIR` and
-`--cache-root` override it, in that order.
+Build cache directory. `~` expands. `SUPERSCHEMATIC_BUILD_CACHE_DIR`
+overrides it, and `--cache-root` overrides both.
 
 ### `cache.inputs`
 

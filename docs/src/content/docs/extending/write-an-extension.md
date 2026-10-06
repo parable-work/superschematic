@@ -1,6 +1,6 @@
 ---
 title: Write an extension
-description: Add a kind, decorator, document, generator, auth provider or command without editing the core, walking through examples/acme-schematic.
+description: Add a kind, decorator, document, generator, auth provider, behavior, deploy target or command without editing the core, walking through examples/acme-schematic.
 sidebar:
   order: 1
 ---
@@ -10,12 +10,13 @@ optionally, `cli.CommandProvider`. You pass it to `cli.New`. The installed
 binary (`cmd/superschematic`) passes the official ones, the gcp target and
 the Pulumi provisioner, and the core alone
 (`internal/cmd/superschematic-core`) passes none. Everything project-specific
-registers here: kinds, decorators, documents, generators, build-all
-hooks, auth providers, checks, OpenAPI hooks, tool hooks, behaviors and
-extra commands.
+registers here: kinds, decorators, scalar catalogs, documents, generators,
+build-all hooks, auth providers, checks, OpenAPI hooks, tool hooks,
+behaviors, deploy targets and extra commands.
 
 `examples/acme-schematic` is the acceptance test of this model. It adds one
-of each surface without editing a file under the core, and
+of each surface but the deploy ones, which the official extensions show,
+without editing a file under the core, and
 `scripts/check_second_decorator.sh` proves that adding one more decorator
 stays that way. This page walks those surfaces. When this page and the
 example disagree, the example is the authority.
@@ -503,8 +504,9 @@ r.RegisterCheck(registry.CheckSpec{
 })
 ```
 
-An OpenAPI hook edits the document the `api` generator builds, before it is
-written to `openapi.json` and embedded in `openapi.go`. It gets the document
+An OpenAPI hook edits the document the `api` generator builds, before
+every server's build writes it to `openapi.json` (and the Go server embeds
+it in `openapi.go`, the Rust server in `src/openapi.rs`). It gets the document
 as decoded JSON (`map[string]any`, `[]any`, `json.Number`). Hooks run in
 registration order:
 
@@ -850,11 +852,33 @@ whole example, and its smoke runs it. The
 [engine guide](/superschematic/guides/engine/) serves three of the core's
 behaviors in `examples/engine-notes`.
 
+## A deploy target
+
+A stack deploys a schema tree through a target, and the target's resources
+through a provisioner (D30 in `docs/DECISIONS.md`; section 6 of
+`docs/stack-model.md` is the design). The official extensions are the
+examples: `extensions/gcp` registers the `gcp` target with its platforms,
+connectors and Cloud DNS platform, `extensions/cloudflare` a DNS platform,
+and `extensions/pulumi` the provisioner. Five registrations make up the
+surface, each spec carrying the extension's `Name()`:
+
+| Registration | Adds |
+| --- | --- |
+| `RegisterPlatform(registry.PlatformSpec)` | one deployable kind (`server` or `database`) on one runtime, such as Cloud Run or Cloud SQL: the server languages or SQL dialects it runs, the JSON Schema of a deployable's settings there, its name and address in an environment, and a pure `Lower` to its resources |
+| `RegisterConnector(registry.ConnectorSpec)` | one edge kind (`sql` or `http`) between two platforms: a pure `Connect` that returns the edge's resources, such as an IAM grant, and the value of the config field the edge derives |
+| `RegisterTarget(registry.TargetSpec)` | a platform per deployable kind, the JSON Schema of an environment's values, the default DNS platform, the provisioner, the properties schema of each resource type its platforms emit, and policy rules over the resolved resource graph |
+| `RegisterDNSPlatform(registry.DNSPlatformSpec)` | a DNS provider for an environment's domain records, which need not be the target's provider: its values schema, a pure `Lower` from records to resources, the schemas of the resource types it brings, and the credentials its provider reads |
+| `RegisterProvisioner(registry.ProvisionerSpec)` | a tool that applies a resolved environment: `Render` writes the tool's program where a person can read it, and `Plan`, `Apply`, `Destroy` and `Outputs` run it |
+
+Resolution checks every resource against the schema of its type, so a
+target checks in the provider schemas it emits from a pinned provider
+version, as the gcp target does with pulumi-gcp's.
+
 ## A command
 
-`cli.New` returns `build`, `build-all`, `json-schema`, `format` and
-`behaviors`. An extension that implements `cli.CommandProvider` contributes
-more:
+`cli.New` returns `build`, `build-all`, `migrate`, `json-schema`, `format`
+and `behaviors`. An extension that implements `cli.CommandProvider`
+contributes more:
 
 ```go
 func (Extension) Commands() []*cobra.Command {

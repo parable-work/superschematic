@@ -151,7 +151,10 @@ Each package declares the same type:
   </TabItem>
   <TabItem label="Rust">
     <Snippet file="testdata/generated/types/rust/shop-common/src/types.rs" symbol="Price" />
-    A serde struct, with the JSON names as renames.
+    A serde struct, with the JSON names as renames. The crate's
+    `validators` module has `validate_price`, which checks a JSON value by
+    the same rules as the other languages, and `parse_price`, which also
+    fills defaults and decodes it.
   </TabItem>
 </Tabs>
 

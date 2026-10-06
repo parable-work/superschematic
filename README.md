@@ -8,11 +8,12 @@ value the same way.
 ```
 schema source (.schema.ts | .schema.json | .schema.yaml)
   -> superschematic build
-     -> sql/         Postgres DDL
+     -> sql/         Postgres DDL, and SQLite DDL when a DB asks for it
      -> orm/         Go repositories
      -> api/         a Go (chi), Rust (axum) or TypeScript (Hono) server, and OpenAPI
      -> types/       Go, TypeScript, Python, Rust
      -> sdk/         Go, TypeScript, Python, Rust clients, and MCP tool documents
+     -> stack/       one environment.json per environment a Stack service declares
 ```
 
 superschematic is pre-release: build it from this checkout (see
@@ -56,7 +57,8 @@ SDK refuses the request the server would refuse.
 ## A quick look
 
 These files are trimmed from [`examples/acme-shop`](examples/acme-shop/), a
-small shop that CI builds and tests on every pull request.
+small shop that CI builds and tests end to end in the release candidate run
+on `main` twice a day.
 
 A **General** schema declares plain types, shared by other services:
 
@@ -307,7 +309,7 @@ records every design decision (cited as D1, D2, ... in code and commits).
 
 ## Extending superschematic
 
-The core knows three schema kinds (DB, API and General), one auth provider
+The core knows four schema kinds (DB, API, General and Stack), one auth provider
 (`session`) and superscalar's generic scalar set. Everything specific to
 one organization lives in an extension: a Go package that registers kinds,
 decorators, documents, generators, auth providers, build hooks, behaviors
@@ -343,22 +345,23 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
-| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config}` |
+| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config,stack}` |
 | [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python, and the helpers the generated Rust validators call |
 | [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
 | [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
 | [`runtime/migrate/`](runtime/migrate/) | The migration runner: `superschematic-migrate` applies the plans `superschematic migrate plan` writes |
 | [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code |
 | [`runtime/engine-workqueue/`](runtime/engine-workqueue/) | `@superschematic/engine-workqueue`: claimable work for the engine |
-| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `pulumi`), `topcoat`, and example extensions and projects |
+| [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
+| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `pulumi`), `cloudflare`, `topcoat`, and example extensions and projects |
 | [`docs/`](docs/) | The docs site, the decision log and the extension design |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has ten Go modules: the root (the compiler), `ir`,
+The repository has eleven Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
 `runtime/migrate/go` (the migration runner), `extensions/gcp`,
-`extensions/pulumi`, `extensions/topcoat` and `cmd/superschematic` (the
-installed binary). Generated code imports the runtimes and the IR, never
+`extensions/pulumi`, `extensions/cloudflare`, `extensions/topcoat` and
+`cmd/superschematic` (the installed binary). Generated code imports the runtimes and the IR, never
 the compiler, and the root module never imports an extension.
 
 ## Development

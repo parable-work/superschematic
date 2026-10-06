@@ -133,12 +133,27 @@ its lines and checks the country code:
 | `listMin`, `listMax` | lists (`Validate<T[], { ... }>`); `[]` satisfies a required list |
 | `uploadMaxBytes` | file-upload scalars |
 
+`minLength`, `maxLength`, `listMin`, `listMax` and `uploadMaxBytes` are
+whole numbers. A fraction fails the load and names the key and the value
+(`Validate maxLength must be a finite JavaScript-safe integer literal, got 2.5`)
+rather than being cut to a whole number. A pattern's `\s` is ASCII
+whitespace in Go, Python and Rust, and Unicode whitespace in TypeScript,
+so the validators differ only on a non-ASCII space.
+
 The generated validators check them: `Validate()` in Go, `validate<Type>`
 and the parsers in TypeScript, `validate_all()` in Python, and
 `validators::validate_<type>` and `validators::parse_<type>` in Rust. A
 failure names the rule it broke:
 
 <Snippet file="go/types_test.go" symbol="ExampleShippingAddress_Validate" />
+
+A field, list element or map value whose object type another service
+declares is checked by that service's own generated validator, in every
+language, and its errors sit under the field's path. `shop-orders`'
+`PlaceOrderInput.shippingAddress` is a `shop-db` `ShippingAddress`, so
+every server refuses its bad `country` the same way. A dependency's type
+that its package generates no validator for (one that is not a table, a
+view, an embedded struct or an input type) is checked for presence only.
 
 The generated servers check every request against them and answer 400,
 and every generated SDK checks an input before it sends it. The database
@@ -207,7 +222,7 @@ payload with an extra `colour` key, in each language:
 
 ## Environment variables
 
-A General schema can declare a service's configuration. Put `@envVars`,
+A General or API schema can declare a service's configuration. Put `@envVars`,
 from `@superschematic/schema-config`, on one class; each field is one
 environment variable, named as the field is:
 
@@ -249,6 +264,25 @@ the variables (types, defaults and which are required), with an
 and secrets. Deployment tooling can check a values file against it; the
 [deploy extension](/superschematic/extending/deploy/) is one that maps
 the same fields to Helm values.
+
+### Derived fields
+
+Some of an API's configuration comes from its edges rather than from
+settings: the connection to its database (its `authDb`, or its one DB
+dependency) and the endpoint of each API it `calls`. A stack's platform
+sets each of these derived fields, as one environment variable per member
+of its value: `SHOP_DB_DATABASE_URL`, `SHOP_API_SERVICE_URL`. The naming
+file's [`[derived_fields]`](/superschematic/reference/naming/#derived_fields)
+names them, `{SERVICE}_DATABASE` and `{SERVICE}_SERVICE` by default. An
+`@envVars` field named after one, or after one of its variables, fails the
+load, since the platform would set it twice.
+
+The Go API server gets `EnvConfig`, which embeds the `@envVars` class and
+adds a field per derived value, and `LoadEnvConfig()`, which reads both and
+reports every problem at once. The generated `Deps`, which your
+implementation's `New(deps Deps)` takes, holds it as `Config`, beside the
+ORM of the API's database, a client of each API it calls and a logger. The
+TypeScript and Rust loaders do not read derived fields yet.
 
 ## Secrets
 
