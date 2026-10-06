@@ -441,6 +441,13 @@ func (t *Board) MaskSecrets() *Board {
 	return masked
 }
 
+// JSONFieldNames are the keys Board's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Board) JSONFieldNames() []string {
+	return []string{"id", "labels", "states", "walls", "scores"}
+}
+
 // Validate validates all fields in Board
 func (t *Board) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -741,6 +748,13 @@ func (t *BoardPoint) MaskSecrets() *BoardPoint {
 	masked.Y = t.Y
 
 	return masked
+}
+
+// JSONFieldNames are the keys BoardPoint's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*BoardPoint) JSONFieldNames() []string {
+	return []string{"x", "y"}
 }
 
 // Validate validates all fields in BoardPoint

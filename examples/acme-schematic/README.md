@@ -186,9 +186,9 @@ r.RegisterKind(registry.KindSpec{
   (`Money`, say) is in.
 
 A schema declares the kind with `kind: "Catalog"` in `schema.config.ts`.
-`SchemaKind` is a closed enum of the core three; `defineConfig` also takes
+`SchemaKind` is a closed enum of the core four; `defineConfig` also takes
 any string, and the registry validates it. The core-only binary rejects the
-file with `unknown kind "Catalog" (registered kinds: API, DB, General)`,
+file with `unknown kind "Catalog" (registered kinds: API, DB, General, Stack)`,
 which is one of the smoke's assertions.
 
 ## A generator

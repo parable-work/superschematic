@@ -21,6 +21,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
 	example.com/acme/schemas/orm/fixture-db v0.0.0-00010101000000-000000000000
+	github.com/joho/godotenv v1.5.1
 	example.com/acme/schemas/types/go/fixture-api v0.0.0-00010101000000-000000000000
 	example.com/acme/http-runtime v0.0.0-00010101000000-000000000000
 	example.com/acme/scalars v1.0.0

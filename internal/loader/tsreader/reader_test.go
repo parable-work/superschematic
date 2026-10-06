@@ -267,3 +267,35 @@ func TestProgramCacheMatchesPerServiceLoads(t *testing.T) {
 		})
 	}
 }
+
+// TestProgramCacheSkipsUncoveredService: a service the shared program was
+// not built over loads through its own program. From the shared one it
+// classified no schema files and loaded with no types and no error.
+func TestProgramCacheSkipsUncoveredService(t *testing.T) {
+	cache := NewProgramCache([]string{filepath.Join("testdata", "services", "fixture-db")})
+	t.Cleanup(cache.Close)
+
+	serviceDir := filepath.Join("testdata", "services", "fixture-json-config")
+	want, _, err := LoadService(serviceDir)
+	if err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	if len(want.Types) == 0 {
+		t.Fatal("fixture-json-config loads no types on its own; the test needs some")
+	}
+	got, _, _, err := LoadServiceWithConfig(serviceDir, WithProgramCache(cache))
+	if err != nil {
+		t.Fatalf("LoadServiceWithConfig(shared): %v", err)
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("uncovered service IR differs from per-service load")
+	}
+}

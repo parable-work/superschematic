@@ -482,6 +482,13 @@ func (t *GridView) MaskSecrets() *GridView {
 	return masked
 }
 
+// JSONFieldNames are the keys GridView's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*GridView) JSONFieldNames() []string {
+	return []string{"id", "labels", "shades", "polygons", "weights"}
+}
+
 // Validate validates all fields in GridView
 func (t *GridView) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -784,6 +791,13 @@ func (t *Point) MaskSecrets() *Point {
 	return masked
 }
 
+// JSONFieldNames are the keys Point's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Point) JSONFieldNames() []string {
+	return []string{"x", "y"}
+}
+
 // Validate validates all fields in Point
 func (t *Point) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -1059,6 +1073,13 @@ func (t *SaveGridInput) MaskSecrets() *SaveGridInput {
 	}
 
 	return masked
+}
+
+// JSONFieldNames are the keys SaveGridInput's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*SaveGridInput) JSONFieldNames() []string {
+	return []string{"labels", "shades", "polygons", "weights"}
 }
 
 // Validate validates all fields in SaveGridInput

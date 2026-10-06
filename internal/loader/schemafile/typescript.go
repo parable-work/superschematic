@@ -278,6 +278,26 @@ func (d *declarations) typeOf(schema any, at string) (string, error) {
 		}
 		return name, nil
 	}
+	if variants, ok := node["oneOf"]; ok {
+		// One of several JSON types: a Go any written with
+		// jsonschema:"oneof_type=...", such as a literal env value.
+		if err := onlyKeys(node, at, "oneOf", "description", "title", "default"); err != nil {
+			return "", err
+		}
+		list, _ := variants.([]any)
+		if len(list) == 0 {
+			return "", fmt.Errorf("%s: a oneOf must list schemas", at)
+		}
+		types := make([]string, len(list))
+		for i, variant := range list {
+			typ, err := d.typeOf(variant, fmt.Sprintf("%s/oneOf/%d", at, i))
+			if err != nil {
+				return "", err
+			}
+			types[i] = typ
+		}
+		return strings.Join(types, " | "), nil
+	}
 	if err := onlyKeys(node, at, "type", "enum", "const", "items", "additionalProperties", "description", "title", "default"); err != nil {
 		return "", err
 	}

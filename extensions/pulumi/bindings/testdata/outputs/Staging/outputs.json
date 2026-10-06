@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Staging",
+  "resources": {
+    "Orders.account": {
+      "email": "staging:Orders.account.email",
+      "id": "staging:Orders.account.id"
+    },
+    "Orders.invokes.shop-api": {
+      "id": "staging:Orders.invokes.shop-api.id"
+    },
+    "Orders.reads.PaymentsSecrets.STRIPE_KEY": {
+      "id": "staging:Orders.reads.PaymentsSecrets.STRIPE_KEY.id"
+    },
+    "Orders.service": {
+      "id": "staging:Orders.service.id",
+      "url": "staging:Orders.service.url"
+    },
+    "Orders.sql.shop-db": {
+      "id": "staging:Orders.sql.shop-db.id"
+    },
+    "dns.shop-api.1": {
+      "id": "staging:dns.shop-api.1.id"
+    },
+    "secret.PaymentsSecrets.STRIPE_KEY": {
+      "id": "staging:secret.PaymentsSecrets.STRIPE_KEY.id"
+    },
+    "shop-api.account": {
+      "email": "staging:shop-api.account.email",
+      "id": "staging:shop-api.account.id"
+    },
+    "shop-api.reads.PaymentsSecrets.STRIPE_KEY": {
+      "id": "staging:shop-api.reads.PaymentsSecrets.STRIPE_KEY.id"
+    },
+    "shop-api.route": {
+      "id": "staging:shop-api.route.id",
+      "target": "staging:shop-api.route.target"
+    },
+    "shop-api.service": {
+      "id": "staging:shop-api.service.id",
+      "url": "staging:shop-api.service.url"
+    },
+    "shop-api.sql.shop-db": {
+      "id": "staging:shop-api.sql.shop-db.id"
+    },
+    "shop-db.database.shop-db": {
+      "id": "staging:shop-db.database.shop-db.id",
+      "name": "staging:shop-db.database.shop-db.name"
+    },
+    "shop-db.instance": {
+      "connectionName": "staging:shop-db.instance.connectionName",
+      "id": "staging:shop-db.instance.id",
+      "name": "staging:shop-db.instance.name"
+    }
+  }
+}

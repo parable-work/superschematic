@@ -338,6 +338,9 @@ operation. Every language's engine has a Postgres adapter, and the
 TypeScript and Rust engines have a SQLite adapter too
 ([below](#the-sqlite-adapter)); another database needs its own
 implementation of that interface.
+([below](#the-sqlite-adapter)), as the Python engine does
+([Use the engine from Python](#use-the-engine-from-python)); another
+database needs its own implementation of that interface.
 
 Package `postgres` is the Postgres adapter. It builds its statements at run
 time from the descriptor, reads live rows with `to_jsonb` and history
@@ -953,11 +956,12 @@ job runs them too.
 
 ## Use the engine from Python
 
-The same package carries the Python engine, its Postgres adapter and the
-base of the generated Python facade. They port the Go engine and adapter
-rule for rule, pass the same
+The same package carries the Python engine, its Postgres and SQLite
+adapters and the base of the generated Python facade. They port the Go
+engine and adapter, and the TypeScript SQLite adapter, rule for rule, pass
+the same
 [scenarios](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/testdata/scenarios)
-against Postgres, and fail with the same error codes:
+against Postgres and SQLite, and fail with the same error codes:
 
 | Module | Holds |
 | --- | --- |
@@ -966,6 +970,7 @@ against Postgres, and fail with the same error codes:
 | `superschematic_versiongraph.errors` | The named errors and `error_code`. |
 | `superschematic_versiongraph.canonical` | The canonical rules (`canonical_row`, `canonical_value`), over the exact JSON codec in `superschematic_versiongraph.exactjson`. |
 | `superschematic_versiongraph.postgres` | `PostgresAdapter`, its `Client` protocol, and `psycopg_client`, which binds psycopg 3. |
+| `superschematic_versiongraph.sqlite` | `SqliteAdapter`, `sqlite_layout`, its `Client` protocol, and `sqlite_client`, which binds the standard library's `sqlite3`. |
 | `superschematic_versiongraph.facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
 The operations are synchronous: each runs in one transaction and returns
@@ -1012,6 +1017,30 @@ the scenario files name (`VersionConflictError` is a `NotFoundError`, as
 in Go); `error_code(err)` returns it, or the core's code for an input the
 core refused.
 
+`SqliteAdapter` keeps a graph in a SQLite file with the standard library
+alone. It is the TypeScript SQLite adapter
+([above](#the-sqlite-adapter)), statement for statement and stored form
+for stored form, so a file either writes the other reads.
+`sqlite_client(connection)` binds a `sqlite3.Connection` opened with
+`isolation_level=None` (or `autocommit=True` from Python 3.12), so the
+module begins no transaction on its own: the client begins each with
+`BEGIN IMMEDIATE`, and runs one begun inside another, or while the caller
+holds a transaction on the connection, as a savepoint of it. It turns the
+connection's foreign keys on and refuses a SQLite older than 3.37.0, the
+first with `STRICT` tables. A transaction's clock is the system's, in whole
+microseconds, unless `clock` gives another.
+
+```python
+import sqlite3
+from superschematic_versiongraph.engine import Engine
+from superschematic_versiongraph.sqlite import SqliteAdapter, sqlite_client
+
+client = sqlite_client(sqlite3.connect("recipes.sqlite", isolation_level=None))
+adapter = SqliteAdapter(descriptor, graph="recipe")
+adapter.create_tables(client)
+engine = Engine(descriptor, adapter.storage(client), schema_epoch=1, snapshot_every=32)
+```
+
 When a schema declares a graph and its Python types are on, pygen writes
 `<module>/versiongraph_<name>.py` beside the types, and the package
 depends on the distribution the naming key
@@ -1051,12 +1080,14 @@ is no Python ORM, so refs, commits and release pointers come back as the
 engine's `Ref`, `Commit` and `Release`.
 
 ```
-make versiongraph-scenarios-python   # every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
+make versiongraph-scenarios-python   # every scenario, the SQLite adapter's tests and the SQLite vectors on SQLite; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
 ```
 
-The target needs `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and fails
-without it; CI runs it in the versiongraph job. `make python` runs the
-engine's tests that need no database, on the default Python and on 3.9.
+The SQLite pass needs no database server. The Postgres pass needs
+`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL`, and the target fails
+without it once the SQLite pass has run; CI runs it in the versiongraph
+job. `make python` runs the engine's tests that need no database, the
+SQLite ones among them, on the default Python and on 3.9.
 
 ## Limits
 

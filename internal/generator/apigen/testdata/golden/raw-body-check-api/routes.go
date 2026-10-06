@@ -15,6 +15,7 @@ import (
 	jsonkeys "example.com/checks/jsonkeys"
 	types "example.com/schemas/types/go/raw-body-check-api"
 	"github.com/go-chi/chi/v5"
+	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	"go.uber.org/zap"
@@ -149,31 +150,29 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 // Save a note; returns its title.
 func createNoteSaveNoteHandler(impl NoteImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Parse and validate input
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
 		var input types.SaveNoteInput
-		var rawInput json.RawMessage
-		if err := json.NewDecoder(r.Body).Decode(&rawInput); err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
-			return
-		}
-		if string(rawInput) == "null" {
-			RespondError(w, r, gohttp.StatusBadRequest, "input is required")
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
 			return
 		}
 		// Decoding keeps the last of two equal keys, so check
 		// the raw body first.
 		if keyErrors := jsonkeys.DuplicateKeyErrors(rawInput, "body", "meta"); keyErrors.HasErrors() {
-			RespondValidationErrors(w, r, keyErrors)
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", keyErrors))
 			return
 		}
 		if err := json.Unmarshal(rawInput, &input); err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			RespondInputRefusal(w, r, bodyargs.Mismatch("does not match the declared type", nil))
 			return
 		}
 
 		// Validate input
 		if validationErrors := input.Validate(); validationErrors.HasErrors() {
-			RespondValidationErrors(w, r, validationErrors)
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
 			return
 		}
 
@@ -218,23 +217,19 @@ func createNoteAttachPhotoHandler(impl NoteImplementation) gohttp.HandlerFunc {
 		var files map[string]*FileUploadData
 		contentType := r.Header.Get("Content-Type")
 		if strings.Contains(contentType, "application/json") {
-			var rawInput json.RawMessage
-			if err := json.NewDecoder(r.Body).Decode(&rawInput); err != nil {
-				RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
-				return
-			}
-			if string(rawInput) == "null" {
-				RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+			if refusal != nil {
+				RespondInputRefusal(w, r, refusal)
 				return
 			}
 			// Decoding keeps the last of two equal keys, so check
 			// the raw body first.
 			if keyErrors := jsonkeys.DuplicateKeyErrors(rawInput, "caption"); keyErrors.HasErrors() {
-				RespondValidationErrors(w, r, keyErrors)
+				RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", keyErrors))
 				return
 			}
 			if err := json.Unmarshal(rawInput, &input); err != nil {
-				RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+				RespondInputRefusal(w, r, bodyargs.Mismatch("does not match the declared type", nil))
 				return
 			}
 			files = nil
@@ -277,7 +272,7 @@ func createNoteAttachPhotoHandler(impl NoteImplementation) gohttp.HandlerFunc {
 			dataField := r.FormValue("data")
 			if dataField != "" {
 				if keyErrors := jsonkeys.DuplicateKeyErrors([]byte(dataField), "caption"); keyErrors.HasErrors() {
-					RespondValidationErrors(w, r, keyErrors)
+					RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", keyErrors))
 					return
 				}
 				if err := json.Unmarshal([]byte(dataField), &input); err != nil {
@@ -288,7 +283,7 @@ func createNoteAttachPhotoHandler(impl NoteImplementation) gohttp.HandlerFunc {
 		}
 		// Validate input (excluding file upload fields which are handled separately)
 		if validationErrors := input.Validate(); validationErrors.HasErrors() {
-			RespondValidationErrors(w, r, validationErrors)
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
 			return
 		}
 

@@ -1,0 +1,87 @@
+{
+  "token": "gcp:compute/network:Network",
+  "terraform": {
+    "type": "google_compute_network",
+    "renames": {
+      "autoCreateSubnetworks": "auto_create_subnetworks",
+      "bgpAlwaysCompareMed": "bgp_always_compare_med",
+      "bgpBestPathSelectionMode": "bgp_best_path_selection_mode",
+      "bgpInterRegionCost": "bgp_inter_region_cost",
+      "deleteBgpAlwaysCompareMed": "delete_bgp_always_compare_med",
+      "deleteDefaultRoutesOnCreate": "delete_default_routes_on_create",
+      "deletionPolicy": "deletion_policy",
+      "enableUlaInternalIpv6": "enable_ula_internal_ipv6",
+      "internalIpv6Range": "internal_ipv6_range",
+      "networkFirewallPolicyEnforcementOrder": "network_firewall_policy_enforcement_order",
+      "networkProfile": "network_profile",
+      "params.resourceManagerTags": "resource_manager_tags",
+      "routingMode": "routing_mode"
+    }
+  },
+  "inputProperties": {
+    "autoCreateSubnetworks": {
+      "type": "boolean"
+    },
+    "bgpAlwaysCompareMed": {
+      "type": "boolean"
+    },
+    "bgpBestPathSelectionMode": {
+      "type": "string"
+    },
+    "bgpInterRegionCost": {
+      "type": "string"
+    },
+    "deleteBgpAlwaysCompareMed": {
+      "type": "boolean"
+    },
+    "deleteDefaultRoutesOnCreate": {
+      "type": "boolean"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "enableUlaInternalIpv6": {
+      "type": "boolean"
+    },
+    "internalIpv6Range": {
+      "type": "string"
+    },
+    "mtu": {
+      "type": "integer"
+    },
+    "name": {
+      "type": "string"
+    },
+    "networkFirewallPolicyEnforcementOrder": {
+      "type": "string"
+    },
+    "networkProfile": {
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/types/gcp:compute/NetworkParams:NetworkParams"
+    },
+    "project": {
+      "type": "string"
+    },
+    "routingMode": {
+      "type": "string"
+    }
+  },
+  "types": {
+    "gcp:compute/NetworkParams:NetworkParams": {
+      "type": "object",
+      "properties": {
+        "resourceManagerTags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Production",
+  "resources": {
+    "Orders.account": {
+      "email": "production:Orders.account.email",
+      "id": "production:Orders.account.id"
+    },
+    "Orders.invokes.shop-api": {
+      "id": "production:Orders.invokes.shop-api.id"
+    },
+    "Orders.reads.PaymentsSecrets.STRIPE_KEY": {
+      "id": "production:Orders.reads.PaymentsSecrets.STRIPE_KEY.id"
+    },
+    "Orders.service": {
+      "id": "production:Orders.service.id",
+      "url": "production:Orders.service.url"
+    },
+    "Orders.sql.shop-db": {
+      "id": "production:Orders.sql.shop-db.id"
+    },
+    "dns.shop-api.1": {
+      "id": "production:dns.shop-api.1.id"
+    },
+    "secret.PaymentsSecrets.STRIPE_KEY": {
+      "id": "production:secret.PaymentsSecrets.STRIPE_KEY.id"
+    },
+    "shop-api.account": {
+      "email": "production:shop-api.account.email",
+      "id": "production:shop-api.account.id"
+    },
+    "shop-api.reads.PaymentsSecrets.STRIPE_KEY": {
+      "id": "production:shop-api.reads.PaymentsSecrets.STRIPE_KEY.id"
+    },
+    "shop-api.route": {
+      "id": "production:shop-api.route.id",
+      "target": "production:shop-api.route.target"
+    },
+    "shop-api.service": {
+      "id": "production:shop-api.service.id",
+      "url": "production:shop-api.service.url"
+    },
+    "shop-api.sql.shop-db": {
+      "id": "production:shop-api.sql.shop-db.id"
+    },
+    "shop-db.database.shop-db": {
+      "id": "production:shop-db.database.shop-db.id",
+      "name": "production:shop-db.database.shop-db.name"
+    },
+    "shop-db.instance": {
+      "connectionName": "production:shop-db.instance.connectionName",
+      "id": "production:shop-db.instance.id",
+      "name": "production:shop-db.instance.name"
+    }
+  }
+}

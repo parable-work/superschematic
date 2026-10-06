@@ -35,8 +35,17 @@ const createOrder: OperationSpec = {
   queryParams: [],
   bodyParams: [],
   input: {
+    // As a generated parser refuses: a ParseError's reason and field
+    // errors for an undeclared key, a plain error otherwise.
     parse: value => {
-      if (typeof value !== 'object' || value === null || typeof (value as { name?: unknown }).name !== 'string') {
+      const unknown = Object.keys(value as object).filter(key => key !== 'name');
+      if (unknown.length > 0) {
+        throw Object.assign(new Error('unknown fields'), {
+          reason: `unknown fields: ${unknown.join(', ')}`,
+          errors: Object.fromEntries(unknown.map(key => [key, [{ validator: 'unknown', message: 'unknown field' }]])),
+        });
+      }
+      if (typeof (value as { name?: unknown }).name !== 'string') {
         throw new Error('name required');
       }
       return value;
@@ -188,7 +197,17 @@ describe('mountOperation', () => {
     expect((await created.json()).data).toEqual({ created: { name: 'x' } });
     const invalid = await build().request('/api/orders', { method: 'POST', headers: { 'x-user': 'writer' }, body: '{"nope":1}' });
     expect(invalid.status).toBe(400);
-    expect(await invalid.json()).toMatchObject({ status: 400, code: 'bad_request' });
+    expect(await invalid.json()).toMatchObject({
+      status: 400,
+      code: 'bad_request',
+      detail: 'Request body does not match the declared input',
+      details: { location: 'body', reason: 'unknown fields: nope' },
+      errors: { nope: [{ validator: 'unknown', message: 'unknown field' }] },
+    });
+    const wrongType = await build().request('/api/orders', { method: 'POST', headers: { 'x-user': 'writer' }, body: '{"name":1}' });
+    const refused = await wrongType.json();
+    expect(refused).toMatchObject({ status: 400, details: { location: 'body', reason: 'does not match the declared type' } });
+    expect(refused.errors).toBeUndefined();
     const missing = await build().request('/api/orders', { method: 'POST', headers: { 'x-user': 'writer' } });
     expect(missing.status).toBe(400);
     const oversize = await build().request('/api/orders', { method: 'POST', headers: { 'x-user': 'writer' }, body: JSON.stringify({ name: 'x'.repeat(100) }) });

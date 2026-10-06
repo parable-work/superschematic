@@ -203,7 +203,12 @@ one `SDKError::Config`:
 An API schema with `outputs.api` set to `language: "RUST"` writes the
 axum server crate `schemas-<name>-api` under `schemas/dist/api/<name>`. It
 needs `outputs.types` for Rust too: the crate depends on the types crate,
-and the build refuses the config without it.
+and the build refuses the config without it. `superschematic build
+--api-language RUST` builds one service's server in Rust whatever its
+config says; give it its own `--out`, so the two servers do not share an
+output root. The acme-shop example's `rust-server` crate serves its
+shop-orders service that way
+([The Rust server](/superschematic/guides/api-routes/#the-rust-server)).
 
 `build_router` mounts every operation except those declared
 `@manualRouteRegistration`, as the Go server's `RegisterRoutes` leaves
@@ -253,7 +258,7 @@ fails is a 400 problem whose `details` name it: `location` (`path`,
 server.
 
 An input is parsed by its type's `parse_<type>` with undeclared top-level
-keys refused, as the TypeScript server refuses them. A body the type
+keys refused, as the Go and TypeScript servers refuse them. A body the type
 refuses is a 400 problem, "Request body does not match the declared
 input", whose `details.reason` says why and whose top-level `errors`
 holds each field's errors by path, the member the Go server writes and

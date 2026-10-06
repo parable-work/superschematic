@@ -284,6 +284,22 @@ type ProvisionRequest struct {
 
 	// Dir is where Render wrote the program.
 	Dir string
+
+	// Backend is where the provisioner keeps the environment's state, as
+	// the target's bootstrap created it.
+	Backend StateBackend
+}
+
+// StateBackend is where a provisioner keeps an environment's state, and
+// how it encrypts the secrets in it (section 6.5).
+type StateBackend struct {
+	// URL locates the state: a gs:// bucket for the gcp target, a file://
+	// directory in tests.
+	URL string
+
+	// SecretsProvider encrypts the secrets in the state: a gcpkms:// key
+	// for the gcp target, passphrase in tests.
+	SecretsProvider string
 }
 
 // PlannedChange is one resource a plan would change.
@@ -300,9 +316,10 @@ type PlannedChange struct {
 // (section 6.5). Plan, Apply and Destroy run with credentials, against a
 // state backend the target's bootstrap created.
 type Provisioner interface {
-	// Render writes the tool's program for the graph into dir, where a
-	// person can read it.
-	Render(graph *ir.ResourceGraph, dir string) error
+	// Render writes the tool's program for the environment's resource
+	// graph into dir, where a person can read it. The program also exports
+	// every output the environment references, so Outputs can read them.
+	Render(env *ir.ResolvedEnvironment, dir string) error
 
 	// Plan returns the changes applying the environment would make.
 	Plan(ctx context.Context, req ProvisionRequest) ([]PlannedChange, error)

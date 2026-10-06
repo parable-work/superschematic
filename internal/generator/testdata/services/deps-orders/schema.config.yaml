@@ -1,0 +1,15 @@
+# Takes its database from its one DB-kind dependency and calls deps-catalog,
+# which calls it back. Its @envVars type holds one setting beside the
+# fields the two edges derive.
+name: deps-orders
+kind: API
+dependencies:
+  - { name: deps-db, kind: DB }
+calls:
+  - { name: deps-catalog, kind: API }
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }
+  sdk:
+    go: { enabled: true }

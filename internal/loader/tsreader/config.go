@@ -151,10 +151,11 @@ func (w *walker) constInitializer(node *astNode) *astNode {
 // binding a config imports is either declared in the config package, under
 // whatever specifier resolves to it, or a service sentinel: a const whose
 // initializer is a service(...) call, in another service's
-// service.generated.ts. A schema class, a type, a namespace of any other
-// module and a side-effect import are refused at the import, so the
-// commands that read configs (build, build-all, build --with-deps) accept
-// the same ones.
+// service.generated.ts, imported by name as a value. A default import, a
+// type-only import, a schema class, a type, a namespace of any other module
+// and a side-effect import are refused at the import, with a message that
+// says which, so the commands that read configs (build, build-all,
+// build --with-deps) accept the same ones.
 func checkConfigImports(w *walker, file *astSourceFile) *SchemaError {
 	for _, stmt := range file.Statements.Nodes {
 		if stmt.Kind != kindImportDeclaration {
@@ -166,33 +167,39 @@ func checkConfigImports(w *walker, file *astSourceFile) *SchemaError {
 			spec = decl.ModuleSpecifier.Text()
 		}
 		if decl.ImportClause == nil {
-			return errorAtNode(stmt, "schema.config.ts may not import %q for its side effects; a config imports only %s and other services' sentinels", spec, configPackage)
+			return errorAtNode(stmt, "schema.config.ts may not import %q for its side effects; %s", spec, configImportRule)
 		}
-		var bindings []*astNode
 		if name := decl.ImportClause.Name(); name != nil {
-			bindings = append(bindings, name)
+			return errorAtNode(name, "schema.config.ts imports %s from %q as a default import; a sentinel is a named export, and %s", name.Text(), spec, configImportRule)
 		}
-		if named := decl.ImportClause.AsImportClause().NamedBindings; named != nil {
-			switch named.Kind {
-			case kindNamespaceImport:
-				bindings = append(bindings, named.Name())
-			case kindNamedImports:
-				for _, element := range named.AsNamedImports().Elements.Nodes {
-					bindings = append(bindings, element.Name())
-				}
-			}
+		typeOnly := decl.ImportClause.IsTypeOnly()
+		named := decl.ImportClause.AsImportClause().NamedBindings
+		if named == nil {
+			continue
 		}
-		for _, binding := range bindings {
-			if serr := w.checkConfigBinding(binding, spec); serr != nil {
+		switch named.Kind {
+		case kindNamespaceImport:
+			if serr := w.checkConfigBinding(named.Name(), spec, typeOnly); serr != nil {
 				return serr
+			}
+		case kindNamedImports:
+			for _, element := range named.AsNamedImports().Elements.Nodes {
+				if serr := w.checkConfigBinding(element.Name(), spec, typeOnly || element.IsTypeOnly()); serr != nil {
+					return serr
+				}
 			}
 		}
 	}
 	return nil
 }
 
-// checkConfigBinding checks one imported name of a schema.config.ts.
-func (w *walker) checkConfigBinding(binding *astNode, spec string) *SchemaError {
+// configImportRule ends every refusal of a config import.
+const configImportRule = "a config imports only " + configPackage + " and other services' sentinels (D34)"
+
+// checkConfigBinding checks one imported name of a schema.config.ts. A
+// binding of the config package passes under any form; anything else must be
+// a sentinel imported as a value.
+func (w *walker) checkConfigBinding(binding *astNode, spec string, typeOnly bool) *SchemaError {
 	sym := w.checker.GetSymbolAtLocation(binding)
 	if sym != nil {
 		sym = w.checker.SkipAlias(sym)
@@ -200,13 +207,36 @@ func (w *walker) checkConfigBinding(binding *astNode, spec string) *SchemaError 
 	if sym == nil || len(sym.Declarations) == 0 {
 		return errorAtNode(binding, "schema.config.ts imports %s from %q, which does not resolve", binding.Text(), spec)
 	}
-	if id, ok := w.identityOfSymbol(sym); ok && id.pkg == configPackage {
+	// A named binding resolves to its declaration in the config package
+	// through any re-export; a namespace resolves to the module imported,
+	// which may be a [package_aliases] alias of it.
+	if id, ok := w.identityOfSymbol(sym); ok && w.reg.Naming().DeclaringPackage(id.pkg) == configPackage {
 		return nil
+	}
+	if typeOnly {
+		return errorAtNode(binding, "schema.config.ts imports %s from %q as a type only; a config names a sentinel as a value, and %s", binding.Text(), spec, configImportRule)
 	}
 	if w.isSentinel(sym) {
 		return nil
 	}
-	return errorAtNode(binding, "schema.config.ts imports %s from %q, which is neither from %s nor a service sentinel; a config imports only the config package and other services' handles (D34)", binding.Text(), spec, configPackage)
+	return errorAtNode(binding, "schema.config.ts imports %s from %q, which is %s, not a service sentinel; %s", binding.Text(), spec, importedThing(sym), configImportRule)
+}
+
+// importedThing names what a refused import resolves to.
+func importedThing(sym *astSymbol) string {
+	switch {
+	case sym.Flags&symbolFlagsModule != 0:
+		return "a namespace of another module"
+	case sym.Flags&symbolFlagsClass != 0:
+		return "a class"
+	case sym.Flags&symbolFlagsEnum != 0:
+		return "an enum"
+	case sym.Flags&(symbolFlagsInterface|symbolFlagsTypeAlias) != 0:
+		return "a type"
+	case sym.Flags&symbolFlagsFunction != 0:
+		return "a function"
+	}
+	return "a value"
 }
 
 // isSentinel reports whether sym is a service sentinel: a const in a

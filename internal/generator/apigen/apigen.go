@@ -315,6 +315,11 @@ type APIOutput struct {
 	// the dispatch layer before WriteAPI.
 	EnvConfig *envgen.ConfigOutput `json:"-"`
 
+	// Deps is what the generated Deps holds beside the config and the
+	// logger. Generate sets the upstream auth schema's ORM for a public
+	// API; the dispatch layer sets the rest with SetDeps before WriteAPI.
+	Deps DepsInfo `json:"-"`
+
 	// Naming supplies the module root and runtime module paths the templates
 	// import; the SDK generators derive their package names from it.
 	Naming naming.Naming
@@ -353,12 +358,12 @@ func (o *APIOutput) HasConstants() bool {
 	return o.IsPublic && o.UUIDTypeExpr != ""
 }
 
-// HasBodyArgs reports whether a route decodes body arguments or a list
-// argument of a GET operation, so routes.go imports the HTTP runtime's
-// bodyargs package.
+// HasBodyArgs reports whether a route decodes body arguments, a list
+// argument of a GET operation or an input type, so routes.go imports the
+// HTTP runtime's bodyargs package.
 func (o *APIOutput) HasBodyArgs() bool {
 	for _, endpoint := range o.Endpoints {
-		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 {
+		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 || endpoint.HasInput {
 			return true
 		}
 	}
@@ -601,6 +606,11 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	}
 	output.IndirectModules = goutil.UniqueModules([]string{output.TypesModule}, []string{upstreamTypesModule})
 	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
+	if opts.IsPublic && opts.UpstreamSchema != "" {
+		// The upstream auth schema is the API's database (resolveUpstreamAuth
+		// reads authDb, or the one DB-kind dependency, as Deps does).
+		output.Deps = DepsInfo{Database: opts.UpstreamSchema, ORMModule: ormModule, VersionGraph: output.UpstreamVersionGraph}
+	}
 	auth, err := opts.Provider.Analyze(schema, opts.UpstreamIR)
 	if err != nil {
 		return nil, fmt.Errorf("apigen: auth provider %s: %w", opts.Provider.Name(), err)
@@ -1026,6 +1036,10 @@ func endpointNeedsTypesImport(endpoint *EndpointInfo) bool {
 
 // declaresVersionGraph reports whether schema (nil for none) declares a
 // @versionGraph root.
+// DeclaresVersionGraph reports whether a schema declares a version graph,
+// which its Go ORM imports the version-graph core's binding for.
+func DeclaresVersionGraph(schema *ir.Schema) bool { return declaresVersionGraph(schema) }
+
 func declaresVersionGraph(schema *ir.Schema) bool {
 	if schema == nil {
 		return false

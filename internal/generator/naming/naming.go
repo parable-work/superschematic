@@ -31,6 +31,8 @@ import (
 	"sync"
 
 	"github.com/BurntSushi/toml"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // FileName is the configuration file read from the schemas root.
@@ -188,6 +190,73 @@ type Naming struct {
 	// Deps is the [deps] table: where build-all also writes the dependency
 	// graph of the generated packages.
 	Deps DepsConfig `toml:"deps"`
+
+	// DerivedFields is the [derived_fields] table: how the config fields
+	// an API's edges derive are named.
+	DerivedFields DerivedFieldsConfig `toml:"derived_fields"`
+
+	// ImplementationPaths is the [implementation_paths] table: where each
+	// API service's implementation lives, per language.
+	ImplementationPaths ImplementationPathsConfig `toml:"implementation_paths"`
+}
+
+// DerivedFieldsConfig is the [derived_fields] table of superschematic.toml:
+// a template per edge kind that names the config field the edge derives
+// (docs/stack-model.md, section 3.4). `{SERVICE}` stands for the DB or
+// called API service's name in upper snake case, and the rest of a
+// template holds upper-case letters, digits and underscores. The envgen
+// loaders and the stack resolver name the fields by it.
+type DerivedFieldsConfig struct {
+	// Database names an API's database field: "{SERVICE}_DATABASE".
+	Database string `toml:"database"`
+	// Service names the field of an API it calls: "{SERVICE}_SERVICE".
+	Service string `toml:"service"`
+}
+
+// FieldNames returns the templates as the IR's rule takes them.
+func (d DerivedFieldsConfig) FieldNames() ir.DerivedFieldNames {
+	return ir.DerivedFieldNames{Database: d.Database, Service: d.Service}
+}
+
+// ImplementationPathsConfig is the [implementation_paths] table of
+// superschematic.toml: where each API service's implementation lives, per
+// language, as a path from the repository root (the parent of the schemas
+// root) in which `{service}` stands for the service's name
+// (docs/stack-model.md, section 8.5). The build scaffolds a missing
+// implementation there.
+type ImplementationPathsConfig struct {
+	// Go is the Go implementation's package directory: "go/{service}".
+	Go string `toml:"go"`
+}
+
+// ServicePathPlaceholder is what an implementation path template replaces
+// with the service's name.
+const ServicePathPlaceholder = "{service}"
+
+// GoImplementationDir resolves the Go implementation path of service
+// against repoRoot.
+func (n Naming) GoImplementationDir(repoRoot, service string) string {
+	template := n.ImplementationPaths.Go
+	if template == "" {
+		template = Default().ImplementationPaths.Go
+	}
+	return filepath.Join(repoRoot, filepath.FromSlash(strings.ReplaceAll(template, ServicePathPlaceholder, service)))
+}
+
+// check refuses an absolute template, which GoImplementationDir would join
+// under the root, and one without the service, which would put every
+// service's implementation in one package.
+func (c ImplementationPathsConfig) check() error {
+	if c.Go == "" {
+		return nil
+	}
+	if isAbsPath(c.Go) {
+		return fmt.Errorf("implementation_paths.go %q is an absolute path: it is relative to the parent of the schemas root", c.Go)
+	}
+	if !strings.Contains(c.Go, ServicePathPlaceholder) {
+		return fmt.Errorf("implementation_paths.go %q does not contain %s: each API service has a package of its own", c.Go, ServicePathPlaceholder)
+	}
+	return nil
 }
 
 // DepsConfig is the [deps] table of superschematic.toml. The zero value
@@ -430,6 +499,13 @@ func Default() Naming {
 		MetadataKeyPrefix:        "superschematic.",
 		HistoryActorSetting:      "superschematic.history_actor_id",
 		AuthProvider:             "session",
+		DerivedFields: DerivedFieldsConfig{
+			Database: ir.DefaultDatabaseField,
+			Service:  ir.DefaultServiceField,
+		},
+		ImplementationPaths: ImplementationPathsConfig{
+			Go: "go/" + ServicePathPlaceholder,
+		},
 		AuthoringPackages: []string{
 			"@superschematic/api",
 			"@superschematic/db",
@@ -479,6 +555,9 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.MetadataKeyPrefix, d.MetadataKeyPrefix)
 	fill(&n.HistoryActorSetting, d.HistoryActorSetting)
 	fill(&n.AuthProvider, d.AuthProvider)
+	fill(&n.DerivedFields.Database, d.DerivedFields.Database)
+	fill(&n.DerivedFields.Service, d.DerivedFields.Service)
+	fill(&n.ImplementationPaths.Go, d.ImplementationPaths.Go)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
 		// The default list names the default scalar package; a fork that
@@ -742,6 +821,12 @@ func Parse(data []byte, name string) (Naming, error) {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if err := n.Cache.checkRelative(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.DerivedFields.FieldNames().Validate(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.ImplementationPaths.check(); err != nil {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	n = n.OrDefault()
