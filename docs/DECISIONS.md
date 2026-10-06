@@ -3414,3 +3414,43 @@ two servers for real when Docker is there; `cli`'s
 `TestStackDevRunsALocalEnvironment` runs `stack dev` itself.
 
 The rule is reversible until the first release.
+
+## D45. A deploy runs the deploy order as one targeted update per step, with migrations between, over four target seams
+
+D30 left the cloud half of the `stack` commands to design: how a deploy
+maps the deploy order (`docs/stack-model.md`, section 5.3) onto a
+provisioner, where the deploy manifest lives (section 11.2), how images
+reach the graph, what a target provides for bootstrap and secrets, and what
+a failed deploy leaves. Building `bootstrap`, `secrets set`, `plan`,
+`deploy`, `destroy` and `outputs` settled them.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each step of the deploy order is one targeted update of the provisioner's whole program: the step's nodes are the targets, and the last step that holds nodes updates everything, which deletes what the graph dropped. Each migration phase runs between two updates, outside the graph, through the target's migration runner, which runs the D27 plan documents. The program, and its state, stay one per run. | A graph subset per phase, a Pulumi stack each, read across stack references: more stacks and state, and a node that changes phase moves between stacks, which deletes and creates it. Migration jobs as graph nodes, such as a Cloud Run job whose run token is the plan's hash, with the contract a node after the rollout: the graph would depend on the baseline the manifest records, so `environment.json` would stop being a function of the schemas, and a failed job would leave the runner's state in the provisioner's. |
+| A target carries four deploy seams on its `TargetSpec`: `State` (the provisioner's state backend and each run's manifest), `Secrets` (set, exists, list and get, keyed by a secret's identity or a credential's secret name), `Bootstrap` and `Migrations`. `RegisterTarget` refuses `State`, `Bootstrap` or `Migrations` without a provisioner, and `Bootstrap` or `Migrations` without `State`. A target with none resolves and does not deploy. | A registration per seam, which a target would have to name back; one `Deployer` interface holding all four, which a target that stores secrets but runs no migrations could not register in part |
+| The deploy manifest lives in the target's state store, beside the provisioner's state: on gcp, the versioned state bucket, under `superschematic/manifests/<stack>/<run>.json`. The deploy writes it after every step, with the step it reached and a status (`deploying`, `deployed`, `failed` with the step and the error), so a deploy that died says how far it got, and the bucket keeps every version. It holds the resolved environment as resolved, the IR digest of each service, each server's image and each database's applied model. | The provisioner's stack outputs or config, which tie the manifest to Pulumi and hold no model; a file committed to the repository, a commit per deploy; the runner's state table alone, which records the model but not the images |
+| Images enter a deploy as parameters of the run, `--image <server>=<repository>@sha256:<digest>`; a server given none keeps the image the manifest records, and one with neither is refused. A platform writes a server's image into the graph as its repository path, and the deploy pins it: every string property of the server's own nodes equal to the repository becomes `<repository>@<digest>`, in a copy of the environment the provisioner renders. | Images as environment parameters the graph references, which resolution would have to declare and every golden would change for; an image field on the resolved deployable, the same golden churn; building the images in the deploy, which waits for the generated Dockerfile (section 8.2) |
+| A failed rollout runs no contract, and the manifest records the model between the plan's phases, from which the next deploy plans, superseding the pending contract (D27, amended). A failed migration phase is recorded as pending on the model the database held before it, with its plan; the next deploy finishes that phase first, as the runner requires, then plans from where it ends. A server whose wave did not finish keeps its previous image in the manifest. | An `abandon` step; leaving the recovery to a person reading the runner's status |
+| Every secret needs a value before the first step after infrastructure. The secret's storage is a node of the environment's graph, so a first deploy creates it, then asks for each missing value at a terminal, or stops and names them, for `stack secrets set`. | `secrets set` creating the secret itself, which the graph's node would then fail to create; secrets out of the graph, which would leave their accessor grants without the node they name |
+| A platform credential, such as a DNS platform's API token, is a secret name, the environment variable its provider reads and a description, from one function (`stackdeploy.CredentialsOf`) that bootstrap, plan, deploy, destroy and outputs read. Bootstrap creates its secret directly, readable by the deploying accounts only, and asks for its value; each run reads it with its own account and hands it to the provisioner in `ProvisionRequest.Env`, which reaches the tool's process for that run only. | Credentials declared on the DNS platform's spec, when the secret's name follows the zone, which resolution knows; the credential as provisioner config, which writes ciphertext into the stack's settings file; the credential's secret in the bootstrap graph, which the next environment's bootstrap in the same project would delete |
+| gcp bootstrap creates the state bucket and key directly, then applies its graph (the Artifact Registry repository, the `deployer` and read-only `planner` accounts, their use of the state, Workload Identity Federation for the GitHub repository) in a Pulumi project of its own with a stack per GCP project. The network stays in the environment's graph, where the edges decide it (section 7.2). Google Cloud is reached through an interface over the client libraries, which tests replace. | A bootstrap per environment, which would have two environments in one project own the same accounts; the network in bootstrap, created whether or not a server calls another |
+| A deploy refuses a migration hazard of a `--fail-on` class, every class by default, that no `--allow` names, and `--expect` refuses plans other than the ones `stack plan --out` showed. Acknowledgments are flags until the generated CI decides where a pull request keeps them. | No default gate, which lets a drop through unread |
+
+Status: built. The seams are in `internal/registry/stack_deploy.go`, the
+deploy in `internal/stackdeploy` with its public face in `stack`, and the
+commands in `cli/stack_deploy.go`; `stack/stacktest`'s fake target carries
+every seam, and `TestDeployRandom` in `extensions/pulumi` deploys through
+the real provisioner against a `file://` backend. The gcp target has
+bootstrap, the Secret Manager store and the state bucket. The local target
+carries no deploy seam: `stack dev` runs it, the cloud commands refuse a
+local environment and point to it, and `secrets set` writes a local
+environment's `secrets.env` through a store the CLI hands the operation,
+since the file sits under the schemas root, which a registry does not
+know. Not built: the
+gcp migration runner, a Cloud Run job running `superschematic-migrate`, so
+a gcp deploy with a migration to run is refused; `CredentialsOf` returns
+none until the Cloudflare DNS platform resolves its credentials into
+`environment.json`; image builds; and a lock that keeps two deploys of one
+run apart beyond the provisioner's and the runner's own.
+
+The rule is reversible until the first release.

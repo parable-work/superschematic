@@ -482,6 +482,109 @@ same from run to run:
 export abstract class Dev {}
 ```
 
+## `stack bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and `outputs`
+
+The cloud half of the `stack` group bootstraps, plans, deploys and
+destroys the environments a Stack service declares
+(`docs/stack-model.md`, sections 7.3, 11.1 and 11.2). Each command loads
+the stack, resolves one environment as the `stack` generator does, and
+drives the environment's target and provisioner. A binary deploys to a
+target only when it links the target's extension and the provisioner's
+(`gcp.Extension{}`, `pulumi.Extension{...}`). An environment on the
+`local` target runs with `stack dev`; `plan`, `deploy`, `bootstrap`,
+`destroy` and `outputs` refuse it, and `secrets set` writes its
+`secrets.env`.
+
+Each of these commands takes these flags:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
+| `--naming` | `<stack>/../../superschematic.toml` | naming config file |
+| `--program-dir` | `<schemas-root>/dist/program/<stack>/<environment>` | where to render the provisioner's program |
+| `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `deploy`, `destroy` and `outputs` take it |
+
+### `stack bootstrap <environment>`
+
+Prepare the cloud project the environment deploys to, with an owner's
+credentials, once; it is safe to run again. On gcp it enables the APIs,
+creates the state bucket and its KMS key, applies the Artifact Registry
+repository, the `deployer` and `planner` accounts and Workload Identity
+Federation for the GitHub repository, and creates the secret of each
+platform credential the environment needs. Then it asks for each
+credential with no value, with the terminal's echo off.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--repository` | read from the git remote `origin` | the GitHub repository the CI runs in, `owner/name` |
+
+### `stack secrets set <environment> [Type.FIELD]`
+
+Ask for the value of every secret of the environment that has none, and
+every platform credential, with the terminal's echo off, and store each in
+the target's secret store (Secret Manager on gcp), or, for a local
+environment, in the `secrets.env` `stack dev` reads. Name one secret, by
+the type that declares it and its field, to replace its value. It needs a
+terminal. On a fresh cloud environment, deploy first: its infrastructure
+step creates each secret's storage.
+
+```
+superschematic stack secrets set Staging
+superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
+```
+
+### `stack plan <environment>`
+
+Show what `stack deploy` would do, changing nothing: the provisioner's plan
+of every resource, with each server's image pinned, and each database's
+migration plan from the schema the deploy manifest records. It also lists
+the secrets with no value, the servers with no image yet, the migration
+phases a failed deploy left part-way, and the records to create by hand
+for a domain no DNS platform holds. It exits 1 after printing when a plan
+has a hazard of a `--fail-on` class that no `--allow` names.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--image` | the manifest's | a server's image, `<server>=<repository>@sha256:<digest>`; repeatable |
+| `--fail-on` | `all` | hazard classes, comma-separated, `all`, or `none` |
+| `--allow` | none | a hazard id to acknowledge; repeatable |
+| `--out` | none | write the plan as JSON, for `stack deploy --expect` |
+| `--format` | `text` | print the plan as `text` or `json` |
+
+### `stack deploy <environment>`
+
+Deploy the environment in deploy order: infrastructure, each database's
+`expand` phase, the servers wave by wave, callees first, the `contract`
+phases, exposure. The deploy manifest records each step. Every secret
+needs a value before the first step after infrastructure; at a terminal
+the deploy asks for each one missing. A rollout that fails runs no
+`contract` step, and the next deploy plans from the schema between the
+phases.
+
+```
+superschematic stack deploy Staging --image shop-api=us-east1-docker.pkg.dev/acme-staging/shop/shop-api@sha256:...
+superschematic stack plan Preview --param pr=123 --out plan.json
+superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'destructive:table/order/column/total'
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--image` | the manifest's | a server's image, `<server>=<repository>@sha256:<digest>`; repeatable. A server with neither is refused |
+| `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
+| `--allow` | none | a hazard id to acknowledge; repeatable |
+| `--expect` | none | a plan `stack plan --out` wrote: refuse migration plans other than its |
+
+### `stack destroy <environment>`
+
+Remove every resource of the run and its deploy manifest. It asks for the
+run's name at a terminal unless `--yes`, and refuses without either.
+
+### `stack outputs <environment>`
+
+Print the outputs of the run's applied resources as JSON, by node ID and
+output name, leaving out secret ones. `--out` writes them to a file, the
+`outputs.json` the bindings generator reads.
+
 ## Extension commands
 
 An extension that implements `cli.CommandProvider` adds its commands to

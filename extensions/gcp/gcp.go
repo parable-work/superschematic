@@ -62,15 +62,29 @@ const (
 // this version, so what resolution validated is what applies.
 const ProviderVersion = "9.37.1"
 
-// Extension is the gcp extension.
-type Extension struct{}
+// Extension is the gcp extension. Its zero value is the one a
+// distribution links.
+type Extension struct {
+	// Cloud is what bootstrap, the secret store and the state store call
+	// on Google Cloud. Nil uses NewCloud's, over the client libraries,
+	// made on first use; tests pass a fake.
+	Cloud Cloud
+
+	// Migrations runs the migration plans of the target's databases
+	// between a deploy's steps. Nil runs none, so a deploy with a
+	// migration to run is refused: the migration job (section 8.4) is not
+	// built yet.
+	Migrations registry.MigrationRunner
+}
 
 // Name is the extension's name.
 func (Extension) Name() string { return Name }
 
 // Register adds the gcp target, its platforms, connectors and DNS
-// platform, and the pinned schema of every resource type they emit.
-func (Extension) Register(r *registry.Registry) error {
+// platform, the pinned schema of every resource type they and bootstrap
+// emit, and the target's deploy seams: the state bucket, Secret Manager
+// and bootstrap.
+func (e Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		{
 			Name:      CloudRun,
@@ -129,6 +143,10 @@ func (Extension) Register(r *registry.Registry) error {
 			{Name: PolicyHighAvailability, Check: checkHighAvailability},
 			{Name: PolicyNothingPublic, Check: checkNothingPublic},
 		},
+		State:      stateStore{ext: e},
+		Secrets:    secretStore{ext: e},
+		Bootstrap:  bootstrapper{ext: e},
+		Migrations: e.Migrations,
 	})
 }
 

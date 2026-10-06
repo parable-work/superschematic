@@ -1,0 +1,163 @@
+{
+  "token": "gcp:iam/workloadIdentityPoolProvider:WorkloadIdentityPoolProvider",
+  "terraform": {
+    "type": "google_iam_workload_identity_pool_provider",
+    "renames": {
+      "attributeCondition": "attribute_condition",
+      "attributeMapping": "attribute_mapping",
+      "aws.accountId": "account_id",
+      "deletionPolicy": "deletion_policy",
+      "displayName": "display_name",
+      "oidc.allowedAudiences": "allowed_audiences",
+      "oidc.issuerUri": "issuer_uri",
+      "oidc.jwksJson": "jwks_json",
+      "saml.idpMetadataXml": "idp_metadata_xml",
+      "workloadIdentityPoolId": "workload_identity_pool_id",
+      "workloadIdentityPoolProviderId": "workload_identity_pool_provider_id",
+      "x509.trustStore": "trust_store",
+      "x509.trustStore.intermediateCas": "intermediate_cas",
+      "x509.trustStore.intermediateCas.pemCertificate": "pem_certificate",
+      "x509.trustStore.trustAnchors": "trust_anchors",
+      "x509.trustStore.trustAnchors.pemCertificate": "pem_certificate"
+    }
+  },
+  "inputProperties": {
+    "attributeCondition": {
+      "type": "string"
+    },
+    "attributeMapping": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "aws": {
+      "$ref": "#/types/gcp:iam/WorkloadIdentityPoolProviderAws:WorkloadIdentityPoolProviderAws"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "disabled": {
+      "type": "boolean"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "oidc": {
+      "$ref": "#/types/gcp:iam/WorkloadIdentityPoolProviderOidc:WorkloadIdentityPoolProviderOidc"
+    },
+    "project": {
+      "type": "string"
+    },
+    "saml": {
+      "$ref": "#/types/gcp:iam/WorkloadIdentityPoolProviderSaml:WorkloadIdentityPoolProviderSaml"
+    },
+    "workloadIdentityPoolId": {
+      "type": "string"
+    },
+    "workloadIdentityPoolProviderId": {
+      "type": "string"
+    },
+    "x509": {
+      "$ref": "#/types/gcp:iam/WorkloadIdentityPoolProviderX509:WorkloadIdentityPoolProviderX509"
+    }
+  },
+  "requiredInputs": [
+    "workloadIdentityPoolId",
+    "workloadIdentityPoolProviderId"
+  ],
+  "types": {
+    "gcp:iam/WorkloadIdentityPoolProviderAws:WorkloadIdentityPoolProviderAws": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId"
+      ]
+    },
+    "gcp:iam/WorkloadIdentityPoolProviderOidc:WorkloadIdentityPoolProviderOidc": {
+      "type": "object",
+      "properties": {
+        "allowedAudiences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "issuerUri": {
+          "type": "string"
+        },
+        "jwksJson": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issuerUri"
+      ]
+    },
+    "gcp:iam/WorkloadIdentityPoolProviderSaml:WorkloadIdentityPoolProviderSaml": {
+      "type": "object",
+      "properties": {
+        "idpMetadataXml": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idpMetadataXml"
+      ]
+    },
+    "gcp:iam/WorkloadIdentityPoolProviderX509:WorkloadIdentityPoolProviderX509": {
+      "type": "object",
+      "properties": {
+        "trustStore": {
+          "$ref": "#/types/gcp:iam/WorkloadIdentityPoolProviderX509TrustStore:WorkloadIdentityPoolProviderX509TrustStore"
+        }
+      },
+      "required": [
+        "trustStore"
+      ]
+    },
+    "gcp:iam/WorkloadIdentityPoolProviderX509TrustStore:WorkloadIdentityPoolProviderX509TrustStore": {
+      "type": "object",
+      "properties": {
+        "intermediateCas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:iam/WorkloadIdentityPoolProviderX509TrustStoreIntermediateCa:WorkloadIdentityPoolProviderX509TrustStoreIntermediateCa"
+          }
+        },
+        "trustAnchors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:iam/WorkloadIdentityPoolProviderX509TrustStoreTrustAnchor:WorkloadIdentityPoolProviderX509TrustStoreTrustAnchor"
+          }
+        }
+      },
+      "required": [
+        "trustAnchors"
+      ]
+    },
+    "gcp:iam/WorkloadIdentityPoolProviderX509TrustStoreIntermediateCa:WorkloadIdentityPoolProviderX509TrustStoreIntermediateCa": {
+      "type": "object",
+      "properties": {
+        "pemCertificate": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:iam/WorkloadIdentityPoolProviderX509TrustStoreTrustAnchor:WorkloadIdentityPoolProviderX509TrustStoreTrustAnchor": {
+      "type": "object",
+      "properties": {
+        "pemCertificate": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

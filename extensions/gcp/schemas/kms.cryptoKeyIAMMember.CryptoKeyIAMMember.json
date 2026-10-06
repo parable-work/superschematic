@@ -1,0 +1,48 @@
+{
+  "token": "gcp:kms/cryptoKeyIAMMember:CryptoKeyIAMMember",
+  "terraform": {
+    "type": "google_kms_crypto_key_iam_member",
+    "renames": {
+      "cryptoKeyId": "crypto_key_id"
+    }
+  },
+  "inputProperties": {
+    "condition": {
+      "$ref": "#/types/gcp:kms/CryptoKeyIAMMemberCondition:CryptoKeyIAMMemberCondition"
+    },
+    "cryptoKeyId": {
+      "type": "string"
+    },
+    "member": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "cryptoKeyId",
+    "member",
+    "role"
+  ],
+  "types": {
+    "gcp:kms/CryptoKeyIAMMemberCondition:CryptoKeyIAMMemberCondition": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression",
+        "title"
+      ]
+    }
+  }
+}
