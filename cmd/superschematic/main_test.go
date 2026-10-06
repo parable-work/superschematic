@@ -8,16 +8,14 @@ import (
 
 	"github.com/parable-work/superschematic/registry"
 
-	"github.com/parable-work/superschematic/extensions/cloudflare"
 	"github.com/parable-work/superschematic/extensions/gcp"
 	"github.com/parable-work/superschematic/extensions/pulumi"
 )
 
 // TestEveryTargetApplies holds the binary to what section 13 of
-// docs/stack-model.md promises: it links the official targets and DNS
-// platforms, and the provisioner each target names is linked too. The
-// pulumi provisioner pins the gcp and cloudflare providers at the releases
-// whose schemas the gcp target and the Cloudflare DNS platform check their
+// docs/stack-model.md promises: it links the official targets, and the
+// provisioner each target names is linked too. The pulumi provisioner pins
+// the gcp provider at the release whose schemas the gcp target checks its
 // resources against, so that what resolution validated is what applies.
 func TestEveryTargetApplies(t *testing.T) {
 	reg, err := registry.Assemble(registry.DefaultNaming(), extensions()...)
@@ -26,9 +24,6 @@ func TestEveryTargetApplies(t *testing.T) {
 	}
 	if _, ok := reg.Target(gcp.Target); !ok {
 		t.Errorf("the binary does not register the %s target (targets: %v)", gcp.Target, reg.Targets())
-	}
-	if _, ok := reg.DNSPlatform(cloudflare.DNS); !ok {
-		t.Errorf("the binary does not register the %s DNS platform (DNS platforms: %v)", cloudflare.DNS, reg.DNSPlatforms())
 	}
 	for _, name := range reg.Targets() {
 		target, _ := reg.Target(name)
@@ -51,9 +46,6 @@ func TestEveryTargetApplies(t *testing.T) {
 	}
 	if got := p.ProviderVersions["gcp"]; got != gcp.ProviderVersion {
 		t.Errorf("pulumi pins the gcp provider at %q; the gcp target's schemas are pulumi-gcp %s", got, gcp.ProviderVersion)
-	}
-	if got := p.ProviderVersions[cloudflare.Package]; got != cloudflare.ProviderVersion {
-		t.Errorf("pulumi pins the cloudflare provider at %q; the Cloudflare DNS platform's schemas are pulumi-cloudflare %s", got, cloudflare.ProviderVersion)
 	}
 }
 
