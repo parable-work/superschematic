@@ -34,9 +34,10 @@ package's tests run every core vector, and package `canonical`, the Rust
 engine's module `canonical` and the Python package's module `canonical`
 run every canonical vector. The scenarios are the engines' contract: the
 Go, TypeScript, Rust and Python engines run every one through their
-Postgres adapters, and the TypeScript engine runs every one through its
-SQLite adapter too. The SQLite vectors are the SQLite adapters' contract,
-which the TypeScript package's tests check. The package's
+Postgres adapters, and the TypeScript, Go and Python engines run every
+one through their SQLite adapters too. The SQLite vectors are the SQLite
+adapters' contract, which the TypeScript package's, the Go module's and
+the Python package's tests check. The package's
 types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
@@ -469,8 +470,9 @@ Postgres adapter are the modules `engine`, `storage` and `postgres` of
 `python/superschematic_versiongraph`. Every Postgres adapter takes the
 sweep lock under the same key, so sweepers in different languages exclude
 each other. The TypeScript package also has a SQLite adapter,
-`typescript/src/sqlite.ts`, which `SyncEngine` runs over (below).
-The Python package has one too, `python/superschematic_versiongraph/sqlite.py`.
+`typescript/src/sqlite.ts`, which `SyncEngine` runs over (below), and
+so do the Go module, in package `sqlite`, and the Python package, in
+`python/superschematic_versiongraph/sqlite.py`.
 
 Every id an engine takes or returns is a UUID in its canonical form. Each
 write takes an actor, and each write through a ref the ref's expected
