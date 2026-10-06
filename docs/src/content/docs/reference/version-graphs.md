@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres and SQLite adapters with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine, its SQLite adapter and the generated facade from TypeScript, the Rust engine and facade, and the core, the engine, its SQLite adapter and the generated facade from Python.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres and SQLite adapters with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine, its SQLite adapter and the generated facade from TypeScript, the Rust engine, its SQLite adapter and facade, and the core, the engine, its SQLite adapter and the generated facade from Python.
 sidebar:
   order: 8
 ---
@@ -334,9 +334,9 @@ history images by `(id, _version)`, read and write commits, patches,
 snapshots and the release pointer, take the next sequence under a root
 lock, walk commits, read discarded refs and idle change sets, prune and
 take the sweep lock. It asks the adapter for one transaction per
-operation. Every language's engine has a Postgres adapter, and the Go,
-TypeScript and Python engines have a SQLite adapter too
-([Go](#the-go-sqlite-adapter), [TypeScript](#the-sqlite-adapter),
+operation. Every language's engine has a Postgres adapter and a SQLite
+adapter ([Go](#the-go-sqlite-adapter), [TypeScript](#the-sqlite-adapter),
+[Rust](#use-the-engine-from-rust),
 [Python](#use-the-engine-from-python)); another database needs its own
 implementation of that interface.
 
@@ -791,9 +791,9 @@ refuses a SQLite older than 3.37.0 (`minSqliteVersion`, the first with
 implements `SqliteClient` (`run`, `get` and `all` with numbered `?1`
 parameters, and `exec`), whose errors carry SQLite's extended result code
 in `code`. The Go adapter is package `sqlite`
-([above](#the-go-sqlite-adapter)), and Python's is in
-[Use the engine from Python](#use-the-engine-from-python); Rust's is
-still to come.
+([above](#the-go-sqlite-adapter)), the Rust engine has the same adapter
+([below](#use-the-engine-from-rust)), and Python's is in
+[Use the engine from Python](#use-the-engine-from-python).
 The vectors in
 [`runtime/versiongraph/testdata/sqlite`](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/testdata/sqlite)
 hold every language's adapter to this one: the layout's statements, a
@@ -858,6 +858,32 @@ default (the `tokio-postgres` feature). A service that runs operations side
 by side, or inside a transaction it holds, implements `Client` over its own
 pool or transaction. Every scenario runs through it against Postgres
 (`make versiongraph-scenarios-rust`).
+
+Its SQLite adapter (`sqlite::Adapter`) is the TypeScript one's port: the
+same fixed layout, statements and stored forms, so a file one writes the
+other reads. It reaches SQLite through `sqlite::Client`, a two-trait seam
+whose errors carry SQLite's extended result code; `sqlite::Rusqlite` binds
+one rusqlite connection, with the SQLite rusqlite bundles, behind the
+`rusqlite` feature, which is off by default. A transaction begins with
+`BEGIN IMMEDIATE`, or as a savepoint inside a transaction the caller holds
+on the connection, and a transaction a dropped operation left is rolled
+back at once. rusqlite's calls are synchronous, so each statement blocks
+the executor while SQLite runs it. The adapter refuses a SQLite older than
+3.37.0, and one without working `json_each` and `json_extract`. Every
+scenario runs through it too, with no database server; it reads the SQLite
+vectors' database, which the TypeScript adapter wrote, as they say it
+reads, and the script that wrote it, run through the Rust adapter, writes
+the same file byte for byte.
+
+```rust
+use std::sync::Arc;
+use superschematic_versiongraph_engine::{sqlite, Engine, Options};
+
+let client = sqlite::Rusqlite::new(rusqlite::Connection::open("recipes.sqlite")?);
+let adapter = Arc::new(sqlite::Adapter::new(descriptor, sqlite::Options { graph: "recipe".into(), ..Default::default() })?);
+adapter.create_tables(&client).await?;
+let engine = Engine::new(descriptor, Arc::new(adapter.storage(client).await?), Options { schema_epoch: 1, ..Options::default() })?;
+```
 
 When a DB schema declares a graph and its Rust types are on, the types
 generator writes `src/versiongraph_<name>.rs` beside the types, and the
