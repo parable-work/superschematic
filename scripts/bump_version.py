@@ -85,7 +85,8 @@ Version sites (relative to the repository root):
                                       .../superschematic/ir vX.Y.Z
   cmd/superschematic/go.mod           require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
-                                      .../extensions/gcp vX.Y.Z and
+                                      .../extensions/gcp vX.Y.Z,
+                                      .../extensions/cloudflare vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
 
 The Go requires carry the release version so a consumer at a tag resolves
@@ -456,6 +457,7 @@ def sites():
                 (go_require_pattern(GO_MODULE), 1),
                 (go_require_pattern(GO_MODULE + "/ir"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
             ],
             "gomod",
