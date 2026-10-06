@@ -143,6 +143,15 @@ type Connected struct {
 	// Value is the derived binding's value: what fills the edge's config
 	// field on the From server.
 	Value any
+
+	// Callee is what an http edge between two servers gives the callee:
+	// how it verifies the caller's service credential, an
+	// ir.ServiceAuthIssuer whose one caller is From, with the APIs From
+	// serves (D37). Resolution merges the entries of the edges to an API
+	// into the API's callers field when an operation of the API has a
+	// service clause, and refuses an edge to such an API without one. A
+	// call within one server carries no credential and has none.
+	Callee any
 }
 
 // ConnectorSpec realizes one edge kind between two platforms (section 6.2).

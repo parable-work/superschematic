@@ -4,7 +4,9 @@
 // Dockerfile. main.go loads each served API's config, connects one pool per
 // database, builds one SDK client per API called, builds each API's
 // implementation from its Deps and mounts every API's routes on one
-// handler beside /healthz and /readyz. The generator package plans what
+// handler beside /healthz and /readyz. A server that serves an API with a
+// service clause also gets serviceauth.go, which builds that API's
+// service authenticator from its callers field (section 9.2). The generator package plans what
 // each server serves from the stack and the APIs' Go server outputs;
 // this package turns that plan into files.
 package servergen
@@ -45,6 +47,7 @@ const RustVersion = "1.99.0"
 // The files of an entrypoint module.
 const (
 	MainFile         = "main.go"
+	ServiceAuthFile  = "serviceauth.go"
 	ModFile          = "go.mod"
 	DockerFile       = "Dockerfile"
 	DockerIgnoreFile = "Dockerfile.dockerignore"
@@ -218,6 +221,10 @@ type API struct {
 	Encrypted   bool
 	ServiceAuth bool
 
+	// CallersField is the API's callers field, which its service
+	// authenticator verifies callers against, when ServiceAuth is set.
+	CallersField string
+
 	// Database is the ORM Deps.DB holds, nil without one.
 	Database *Database
 
@@ -286,7 +293,8 @@ var reserved = []string{
 	"chi", "chimiddleware", "context", "dependency", "dispatch", "draining", "err", "errors", "fmt", "handler", "http", "json",
 	"logger", "main", "net", "newHandler", "os", "pgxpool", "run", "runtimemiddleware", "serve", "served", "serviceCredential",
 	"signal", "stackconfig", "stop", "atomic", "syscall", "time", "writeJSON", "zap", "connect", "ctx", "api", "apis",
-	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers",
+	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers", "callersFields", "field",
+	"verifier",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -369,6 +377,9 @@ func Plan(in Input) (*Server, error) {
 			Public:      o.IsPublic,
 			Encrypted:   o.HasEncryptedEndpoints,
 			ServiceAuth: o.HasServiceCallers,
+		}
+		if o.HasServiceCallers {
+			apis[i].CallersField = ir.CallersField(o.SchemaName)
 		}
 	}
 	databases := map[string]*Database{}
@@ -584,7 +595,8 @@ func checkRoutes(in Input) error {
 	return nil
 }
 
-// Write writes the entrypoint module into dir: main.go, go.mod, and the
+// Write writes the entrypoint module into dir: main.go, go.mod,
+// serviceauth.go when a served API has a service clause, and the
 // Dockerfile with its ignore file when s.Docker is planned.
 func Write(s *Server, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -594,6 +606,9 @@ func Write(s *Server, dir string) error {
 	files := []struct{ template, name string }{
 		{"main.go.tmpl", MainFile},
 		{"go.mod.tmpl", ModFile},
+	}
+	if slices.ContainsFunc(s.APIs, func(a *API) bool { return a.ServiceAuth }) {
+		files = append(files, struct{ template, name string }{"serviceauth.go.tmpl", ServiceAuthFile})
 	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.tmpl", DockerIgnoreFile})

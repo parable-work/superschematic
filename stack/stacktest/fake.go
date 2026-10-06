@@ -40,6 +40,10 @@ const (
 	SQLConnector  = "fake.run-sql"
 	HTTPConnector = "fake.run-run"
 
+	// FakeIssuer is the issuer of the fake target's service credentials,
+	// which a callee's callers field names.
+	FakeIssuer = "https://issuer.fake.test"
+
 	// PolicyPublic refuses a public resource of a deployable that is not
 	// exposed; PolicyHighAvailability refuses a database that is not
 	// highly available in an environment whose values set production.
@@ -388,26 +392,42 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 }
 
 // connectHTTP grants the caller's account the invoker role on the callee
-// and derives the callee's address, with an ID token for it as the
-// service credential. A server that calls an API it serves itself reaches
-// it over loopback, needs no grant and sends no credential.
+// and derives the callee's address, with an ID token as the service
+// credential. Its audience is the callee's name, which the callee's
+// callers field can hold, as it could not hold an output of the callee's
+// own service. The callee gets FakeIssuer, whose tokens name the caller by
+// its account's email. A server that calls an API it serves itself
+// reaches it over loopback, needs no grant and sends no credential.
 func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 	if ctx.From.Name == ctx.To.Name {
 		return registry.Connected{Value: ir.ServiceEndpoint{URL: "http://127.0.0.1:8080"}}, nil
 	}
+	serves := make([]string, len(ctx.From.Services))
+	for i, ref := range ctx.From.Services {
+		serves[i] = ref.Name
+	}
+	account := ir.Output{Resource: ctx.From.Name + ".account", Name: "email"}
 	return registry.Connected{
 		Resources: []*ir.Resource{{
 			ID:   ctx.From.Name + ".invokes." + ctx.Edge.Service.Name,
 			Type: TypeGrant,
 			Properties: map[string]any{
 				"role":     "run.invoker",
-				"member":   ir.Output{Resource: ctx.From.Name + ".account", Name: "email"},
+				"member":   account,
 				"resource": ir.Output{Resource: ctx.To.Name + ".service", Name: "id"},
 			},
 		}},
 		Value: ir.ServiceEndpoint{
 			URL:        ctx.To.Address,
-			Credential: &ir.ServiceCredential{Source: ir.CredentialGoogleIDToken, Audience: ctx.To.Address},
+			Credential: &ir.ServiceCredential{Source: ir.CredentialGoogleIDToken, Audience: ctx.To.ResourceName},
+		},
+		Callee: ir.ServiceAuthIssuer{
+			Issuer:       FakeIssuer,
+			Audience:     ctx.To.ResourceName,
+			Algorithms:   []string{ir.AlgorithmRS256},
+			JWKSURL:      FakeIssuer + "/keys",
+			SubjectClaim: "email",
+			Callers:      []ir.ServiceAuthCaller{{Subject: account, Deployable: ctx.From.Name, Serves: serves}},
 		},
 	}, nil
 }

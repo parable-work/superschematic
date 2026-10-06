@@ -83,12 +83,7 @@
           "source": "derived",
           "value": {
             "credential": {
-              "audience": {
-                "$output": {
-                  "resource": "shop-api.service",
-                  "name": "uri"
-                }
-              },
+              "audience": "//run.googleapis.com/projects/acme-prod/locations/us-east1/services/shop-api",
               "source": "google-id-token"
             },
             "url": {
@@ -408,6 +403,9 @@
         "id": "Orders.service",
         "type": "gcp:cloudrunv2/service:Service",
         "properties": {
+          "customAudiences": [
+            "//run.googleapis.com/projects/acme-prod/locations/us-east1/services/orders"
+          ],
           "deletionProtection": false,
           "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
           "invokerIamDisabled": false,
@@ -428,12 +426,7 @@
                   },
                   {
                     "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
-                    "value": {
-                      "$output": {
-                        "resource": "shop-api.service",
-                        "name": "uri"
-                      }
-                    }
+                    "value": "//run.googleapis.com/projects/acme-prod/locations/us-east1/services/shop-api"
                   },
                   {
                     "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
@@ -1083,6 +1076,9 @@
         "id": "shop-api.service",
         "type": "gcp:cloudrunv2/service:Service",
         "properties": {
+          "customAudiences": [
+            "//run.googleapis.com/projects/acme-prod/locations/us-east1/services/shop-api"
+          ],
           "deletionProtection": false,
           "ingress": "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER",
           "invokerIamDisabled": true,
