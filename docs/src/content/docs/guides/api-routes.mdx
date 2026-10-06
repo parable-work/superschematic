@@ -91,11 +91,13 @@ without a stack or the flag writes no `implementation.go`.
 A stack's build also writes each Go server's entrypoint, which fills
 `Deps`, calls each implementation's `New`, and its `AuthMiddleware` and
 `PayloadDecryptor` where the API's `Config` takes them, and serves the
-result. Without a stack, your own
-`main` does that, as
-[the Go tutorial](/superschematic/first-project/go-api/#mount-the-server)
-does by hand. `Deps` and the entrypoint are not built for TypeScript and
-Rust servers yet.
+result, as
+[the Go tutorial](/superschematic/first-project/go-api/#run-it) shows for
+acme-shop. Without a stack, your own `main` does that, as the tutorial's
+tests do in-process
+([Call it from Go](/superschematic/first-project/go-api/#call-it-from-go)).
+`Deps` and the entrypoint are not built for TypeScript and Rust servers
+yet.
 
 ## Arguments
 
