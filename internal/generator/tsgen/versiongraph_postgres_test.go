@@ -25,7 +25,11 @@ import (
 // (a merge's message and tag, a release and a rollback, released, a rebase
 // with a conflict and without, and a sweep) through its typed methods. It
 // is the TypeScript counterpart of the ORM generator's
-// TestVersionGraphShellOnPostgres.
+// TestVersionGraphShellOnPostgres. The test file creates a database of its
+// own there and drops it after: the graph's sweep lock is an advisory lock,
+// which Postgres keys to the database, and go test runs pygen's, rustgen's
+// and ormgen's facade tests, which sweep the same graph, beside this one.
+// The variable's role must be able to create databases.
 func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -153,7 +157,11 @@ import { RecipeGraph, RecipeGraphDescriptor, RecipeGraphSnapshotEvery } from "./
 import { RecipeEntityKind, RecipePatchOperation, Verdict, type Step, type Tasting } from "./types";
 
 const dsn = process.env.SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL!;
-const schema = "vg_facade_ts_" + process.pid + "_" + Date.now();
+// A database of its own: the graph's sweep lock is an advisory lock, which
+// Postgres keys to the database, not to a schema. go test runs the other
+// languages' facade tests beside this one, and in a database they shared,
+// their sweeps would make this one's skip.
+const database = "vg_facade_ts_" + process.pid + "_" + Date.now();
 const actor = "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90";
 const admin = new pg.Client({ connectionString: dsn });
 let pool: pg.Pool;
@@ -161,14 +169,16 @@ let roots = 0;
 
 beforeAll(async () => {
   await admin.connect();
-  await admin.query("CREATE SCHEMA " + schema);
-  pool = new pg.Pool({ connectionString: dsn, options: "-c search_path=" + schema + ",public" });
+  await admin.query("CREATE DATABASE " + database);
+  const url = new URL(dsn);
+  url.pathname = "/" + database;
+  pool = new pg.Pool({ connectionString: url.href });
   await pool.query(readFileSync("CREATE_SQL", "utf8"));
 });
 
 afterAll(async () => {
   await pool.end();
-  await admin.query("DROP SCHEMA " + schema + " CASCADE");
+  await admin.query("DROP DATABASE IF EXISTS " + database + " WITH (FORCE)");
   await admin.end();
 });
 
