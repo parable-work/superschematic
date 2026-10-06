@@ -918,15 +918,54 @@ same provisioner run as the rest of the environment.
 A DNS platform registers a `DNSPlatformSpec`: the JSON Schema of an
 environment's values for it (a zone) and a pure `Lower` from the records
 to resources. It is a spec of its own, not a `PlatformSpec`, because it
-lowers records rather than a deployable.
+lowers records rather than a deployable. The spec also holds:
+
+- `ResourceTypes`, the schemas of the resource types `Lower` emits, which a
+  DNS platform of another provider than the target's brings itself. They
+  register as a target's do (section 6.4), under the same rule: one schema
+  per type, whoever registers it.
+- `Credentials`, the secrets the platform's provider reads when the
+  provisioner runs, such as an API token. Each names a secret in the
+  target's secret store, the environment variable the provider reads it
+  from, and what the engineer enters. Resolution writes them into
+  `environment.json` under `dns.credentials`, even before any server is
+  exposed. The target's bootstrap asks for each and stores it, and a plan,
+  apply or destroy reads it and sets the variable for that run of the
+  provisioner. No value reaches the resource graph, the rendered program
+  or a file.
 
 v1 has two DNS platforms:
 
 - **Cloud DNS**, the gcp target's default. It writes into the managed zone
   in the environment's project that holds the domain.
-- **Cloudflare DNS.** It writes into the named zone, with an API token the
-  engineer enters at bootstrap. Records are DNS-only by default; proxying
-  through Cloudflare is a setting.
+- **Cloudflare DNS**, `cloudflare` in `extensions/cloudflare`. Its values
+  are `zone`, the name of the zone that holds the domain; `zoneId`, the
+  zone's identifier; and `proxied`, false by default. It refuses a domain
+  or a record outside the zone, and a record type other than A, AAAA,
+  CNAME and TXT. Each record is a `cloudflare:index/dnsRecord:DnsRecord`
+  of pulumi-cloudflare 6.22.0, whose schema the extension pins, named by
+  its full name:
+  - records are DNS-only by default, with a TTL of 300 seconds;
+  - `proxied: true` proxies each host's A, AAAA and CNAME records, with
+    Cloudflare's automatic TTL. It never proxies a TXT record, or a name
+    whose first label begins with an underscore, such as a certificate's
+    `_acme-challenge` record, which must answer with its own value;
+  - TXT content is written as quoted character strings of at most 255
+    bytes, as Cloudflare stores it, and a trailing dot is dropped from a
+    name and from a literal CNAME target.
+
+  Its one credential is an API token with the DNS Edit permission on the
+  zone, which the provider reads from `CLOUDFLARE_API_TOKEN`. Its secret
+  is `<stack>-cloudflare-dns-<zone>`, the zone's dots as underscores
+  (`shop-cloudflare-dns-acme_dev`). A zone's name holds no underscore, so
+  two zones never share a secret, and a stack's environments in one zone
+  share the token.
+
+  The zone id is a value rather than looked up by the zone's name. The
+  lookup is a function call (`cloudflare:index/getZone:getZone`), which
+  the resource graph and the Pulumi YAML renderer cannot express, and it
+  would make every plan depend on Cloudflare's API. The id is on the
+  zone's Overview page and is not a secret.
 
 An environment whose domain has no DNS platform the provisioner can write
 gets `manual`, and `stack plan` prints the records to create.
@@ -1796,8 +1835,10 @@ registrations.
   binding generator (sections 6.5 and 6.6). Built: it registers provisioner
   `pulumi`, its `bindings` package is the generator, and it joins
   `make test` and CI.
-- **`extensions/cloudflare`**: the Cloudflare DNS platform in v1, and
-  Workers and D1 later.
+- **`extensions/cloudflare`**, a Go module of its own: the Cloudflare DNS
+  platform and its pinned pulumi-cloudflare schemas (sections 6.4 and
+  6.9), kept current by the gcp target's tool, which both share through
+  `stack/providerschema`. Built. Workers and D1 come later.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
   It is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},

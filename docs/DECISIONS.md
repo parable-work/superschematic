@@ -3306,3 +3306,27 @@ and YAML with no `dependencies` and gets the same three references, and
 stack reaches after the stack's depfile is written, as a build writes it.
 The stackgen fixtures and the sketch in section 4.1 of
 `docs/stack-model.md` no longer list `dependencies`.
+
+### D30, amended: a DNS platform brings its own resource types and names its provider's credentials
+
+Building the Cloudflare DNS platform (`extensions/cloudflare`,
+`docs/stack-model.md`, section 6.9) put a DNS platform of one provider
+beside a target of another for the first time. Only targets registered
+resource type schemas, so resolution refused every Cloudflare record, and
+the provider needs an API token that no part of the model named.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `DNSPlatformSpec.ResourceTypes` registers the schemas of the types a DNS platform emits, as a target's do, under one rule: one schema per type, whether a target or a DNS platform registers it. A target still registers the types of its own platforms, connectors and default DNS platform. | A Cloudflare target registered only to carry the schemas; resolution passing a node whose type no target registered |
+| `DNSPlatformSpec.Credentials` names the secrets a DNS platform's provider reads when the provisioner runs: for each, a secret in the target's secret store, the environment variable the provider reads, and what the engineer enters. Resolution writes them into `environment.json` under `dns.credentials`, even before a server is exposed. The target's bootstrap asks for each and stores it; a plan, apply or destroy reads it and sets the variable for that run. No value reaches the graph, the rendered program or a file. | The provider's `apiToken` in the program's configuration, which writes the token, encrypted, beside the program; a target's bootstrap that knows Cloudflare by name, which ties every target to each DNS platform |
+| Cloudflare DNS takes the zone's identifier as a value, `zoneId`, beside its name, `zone`. | Looking the zone up by name, which is a function call the resource graph and the Pulumi renderer cannot express, and which would make every plan depend on Cloudflare's API |
+| Proxying is a DNS value of the environment, `proxied`, false by default. It proxies each host's A, AAAA and CNAME records, never a TXT record or a name whose first label begins with an underscore, such as a certificate's `_acme-challenge` record. | A per-server setting, which the server's platform would have to declare and the DNS platform cannot see; proxying validation records, which then answer with Cloudflare's addresses |
+| The token's secret is `<stack>-cloudflare-dns-<zone>`, the zone's dots as underscores, and the provider reads it from `CLOUDFLARE_API_TOKEN`. A stack's environments in one zone share it. | A secret per environment, which asks for a token per environment in one zone; the zone's dots as hyphens, which `a-b.dev` and `a.b.dev` would share |
+| The pinned-schema format and its tool live in the root module, `stack/providerschema` and `stack/providerschema/pintool`, for every extension that pins a Pulumi provider. Each extension keeps its command in `internal/tools/providerschemas`, and the pin file `pulumi-<package>.json` names the package, which names the repository the tool fetches from. | A copy of the tool per extension; one extension module requiring another's |
+
+Status: built. `extensions/cloudflare` pins pulumi-cloudflare 6.22.0, whose
+record type is `cloudflare:index/dnsRecord:DnsRecord` (the 6.0 release
+renamed `cloudflare:index/record:Record`), and its goldens resolve the
+`stack/stacktest` shop stack with its domains on Cloudflare, DNS-only and
+proxied. The target's bootstrap and the deploy that read
+`dns.credentials` are not built.

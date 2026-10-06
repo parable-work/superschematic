@@ -17,8 +17,7 @@ const TypeRecord = "cloudflare:index/dnsRecord:DnsRecord"
 
 // TokenEnv is the environment variable the provider reads its API token
 // from. A run sets it from the secret TokenSecret names; the token never
-// enters the resource graph, the rendered program or the stack's state
-// configuration.
+// enters the resource graph, the rendered program or a file.
 const TokenEnv = "CLOUDFLARE_API_TOKEN"
 
 const (

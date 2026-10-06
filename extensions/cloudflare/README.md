@@ -60,9 +60,9 @@ The zone itself is not created: it holds the domain before the stack does.
 ## The API token
 
 The provider reads a Cloudflare API token from `CLOUDFLARE_API_TOKEN`. The
-token never enters the resource graph, the rendered program, the state's
-configuration or a file. The DNS platform names it as a credential, which
-resolution writes into `environment.json`:
+token never enters the resource graph, the rendered program or a file.
+The DNS platform names it as a credential, which resolution writes into
+`environment.json`:
 
 ```json
 "dns": {
