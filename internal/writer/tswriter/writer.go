@@ -49,8 +49,9 @@ type Context struct {
 	// Scalars is the scalar catalog the document was read with. A scalar
 	// the document declares may carry what its row says, such as the
 	// json_schema mapping the TypeScript form records of an extension's
-	// JSON scalar, and the TypeScript form leaves that to the catalog. Nil
-	// is the core catalog.
+	// JSON scalar, and the TypeScript form leaves that to the catalog. The
+	// catalog also names the npm package an extension's namespace is
+	// imported from (registry.NpmPackageCatalog). Nil is the core catalog.
 	Scalars registry.ScalarCatalog
 }
 

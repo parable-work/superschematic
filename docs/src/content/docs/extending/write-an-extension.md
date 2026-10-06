@@ -375,7 +375,22 @@ return r.RegisterScalars(Name, catalog)
   `RegisterScalars` refuses an upload scalar whose primitive reads as
   object.
 - The TypeScript brand (`string & { readonly __brand: "Acme.Photo" }`) can
-  live in the extension's authoring package, as acme's does.
+  live in the extension's authoring package, as acme's does. Name that
+  package for the brand's namespace, so `format --to=ts` imports the
+  namespace from it and not from superscalar:
+
+  ```go
+  named, err := registry.ScalarCatalogWithNpmPackages(catalog, map[string]string{"Acme": "@acme/schema"})
+  if err != nil {
+      return err
+  }
+  return r.RegisterScalars(Name, named)
+  ```
+
+  The key is a namespace, the part of a scalar's name before its first
+  dot. Without it, `format --to=ts` refuses a schema with an `Acme`
+  scalar, since an import of `Acme` from superscalar would not compile.
+  The wrapper composes with the other two in any order.
 
 A scalar whose decode loses something a write must refuse, such as a
 repeated key in a JSON object, can name a raw-body check: a Go function the

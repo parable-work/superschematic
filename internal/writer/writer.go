@@ -67,8 +67,9 @@ func Write(doc *schemafile.Document, format Format) ([]byte, error) {
 
 // WriteWith is Write for a document read with catalog, the registry's scalar
 // catalog: the TypeScript writer leaves what a declared scalar holds of its
-// row to that catalog, as it leaves the core table's to the core. A nil
-// catalog is the core's.
+// row to that catalog, as it leaves the core table's to the core, and
+// imports each scalar namespace from the npm package the catalog names for
+// it. A nil catalog is the core's.
 func WriteWith(doc *schemafile.Document, format Format, catalog registry.ScalarCatalog) ([]byte, error) {
 	switch format {
 	case FormatJSON:

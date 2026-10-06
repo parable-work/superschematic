@@ -392,3 +392,121 @@ func TestRawBodyChecksIsNilForACatalogThatDeclaresNone(t *testing.T) {
 		t.Fatalf("RawBodyChecks() over the core catalog = %v, want nil", lookup)
 	}
 }
+
+func TestScalarCatalogWithNpmPackagesNamesANamespacesPackage(t *testing.T) {
+	rows := map[string]*scalars.ScalarMetadata{
+		"Generic.JSON": scalars.ScalarMetadataByCanonical["Generic.JSON"],
+		"Acme.Photo":   {CanonicalName: "Acme.Photo", Symbol: "AcmePhoto", Primitive: "String"},
+	}
+	packages := map[string]string{"Acme": "@acme/schema"}
+	catalog, err := ScalarCatalogWithNpmPackages(ScalarCatalogOf(rows), packages)
+	if err != nil {
+		t.Fatalf("ScalarCatalogWithNpmPackages: %v", err)
+	}
+	if got := catalog.Names(); !reflect.DeepEqual(got, []string{"Acme.Photo", "Generic.JSON"}) {
+		t.Fatalf("Names() = %v, want the wrapped catalog's", got)
+	}
+	if pkg, ok := catalog.NpmPackage("Acme"); !ok || pkg != "@acme/schema" {
+		t.Fatalf("NpmPackage(Acme) = %q, %v; want @acme/schema", pkg, ok)
+	}
+	if pkg, ok := catalog.NpmPackage("Generic"); ok {
+		t.Fatalf("NpmPackage(Generic) = %q; want none, so the writer falls back to the scalar library", pkg)
+	}
+	if pkg, ok := NpmPackageOf(catalog, "Acme"); !ok || pkg != "@acme/schema" {
+		t.Fatalf("NpmPackageOf(catalog, Acme) = %q, %v; want @acme/schema", pkg, ok)
+	}
+	for name, other := range map[string]ScalarCatalog{"nil": nil, "core": CoreScalars()} {
+		if pkg, ok := NpmPackageOf(other, "Acme"); ok {
+			t.Fatalf("NpmPackageOf(%s, Acme) = %q; want none", name, pkg)
+		}
+	}
+
+	// The catalog keeps its own copy of the map.
+	packages["Generic"] = "@acme/scalars"
+	if _, ok := catalog.NpmPackage("Generic"); ok {
+		t.Fatal("an edit to the declaring map reached the catalog")
+	}
+}
+
+func TestScalarCatalogWithNpmPackagesRejectsAnUnknownNamespaceAPathAndNilCatalog(t *testing.T) {
+	rows := map[string]*scalars.ScalarMetadata{
+		"Acme.Photo": {CanonicalName: "Acme.Photo", Symbol: "AcmePhoto", Primitive: "String"},
+	}
+	for _, c := range []struct {
+		packages map[string]string
+		want     []string
+	}{
+		{map[string]string{"Media": "@acme/schema"}, []string{`namespace "Media"`, "no scalar of the catalog"}},
+		// A key is a namespace, not a canonical name.
+		{map[string]string{"Acme.Photo": "@acme/schema"}, []string{`namespace "Acme.Photo"`, "no scalar of the catalog"}},
+		{map[string]string{"Acme": "./scalars"}, []string{"namespace Acme", `"./scalars" is not an npm package name`}},
+		{map[string]string{"Acme": "/srv/scalars"}, []string{"namespace Acme", `"/srv/scalars" is not an npm package name`}},
+		{map[string]string{"Acme": ""}, []string{"namespace Acme", `"" is not an npm package name`}},
+	} {
+		_, err := ScalarCatalogWithNpmPackages(ScalarCatalogOf(rows), c.packages)
+		if err == nil {
+			t.Fatalf("%v: no error", c.packages)
+		}
+		for _, want := range c.want {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%v: err = %v, want it to contain %q", c.packages, err, want)
+			}
+		}
+	}
+	if _, err := ScalarCatalogWithNpmPackages(nil, map[string]string{"Acme": "@acme/schema"}); err == nil || !strings.Contains(err.Error(), "nil scalar catalog") {
+		t.Fatalf("nil catalog: err = %v", err)
+	}
+}
+
+// TestNpmPackagesUploadsAndRawBodyChecksComposeInAnyOrder: a distribution
+// whose scalars live in its own package, with an upload scalar and a
+// checked scalar, wraps its catalog three times, and the outermost wrapper
+// answers for all three, whichever order it wrapped them in.
+func TestNpmPackagesUploadsAndRawBodyChecksComposeInAnyOrder(t *testing.T) {
+	rows := map[string]*scalars.ScalarMetadata{
+		"Generic.JSON": scalars.ScalarMetadataByCanonical["Generic.JSON"],
+		"Media.Photo":  {CanonicalName: "Media.Photo", Symbol: "MediaPhoto", Primitive: "String"},
+	}
+	wraps := map[string]func(ScalarCatalog) (ScalarCatalog, error){
+		"packages": func(c ScalarCatalog) (ScalarCatalog, error) {
+			return ScalarCatalogWithNpmPackages(c, map[string]string{"Media": "@media/scalars"})
+		},
+		"uploads": func(c ScalarCatalog) (ScalarCatalog, error) {
+			return ScalarCatalogWithUploads(c, map[string]ScalarUpload{"Media.Photo": {FileUpload: ir.FileUploadConfig{MaxSize: 1024}}})
+		},
+		"checks": func(c ScalarCatalog) (ScalarCatalog, error) {
+			return ScalarCatalogWithRawBodyChecks(c, map[string]ScalarRawBodyCheck{"Generic.JSON": jsonKeysCheck})
+		},
+	}
+	for _, order := range [][]string{
+		{"packages", "uploads", "checks"}, {"packages", "checks", "uploads"},
+		{"uploads", "packages", "checks"}, {"uploads", "checks", "packages"},
+		{"checks", "packages", "uploads"}, {"checks", "uploads", "packages"},
+	} {
+		name := strings.Join(order, " then ")
+		catalog := ScalarCatalogOf(rows)
+		for _, wrap := range order {
+			var err error
+			if catalog, err = wraps[wrap](catalog); err != nil {
+				t.Fatalf("%s: %s: %v", name, wrap, err)
+			}
+		}
+		reg := New(naming.Default())
+		if err := reg.RegisterScalars("acme", catalog); err != nil {
+			t.Fatalf("%s: RegisterScalars: %v", name, err)
+		}
+		if pkg, ok := NpmPackageOf(reg.Scalars(), "Media"); !ok || pkg != "@media/scalars" {
+			t.Errorf("%s: NpmPackage(Media) = %q, %v", name, pkg, ok)
+		}
+		declaresUploads, ok := reg.Scalars().(UploadCatalog)
+		if !ok {
+			t.Fatalf("%s: not an UploadCatalog", name)
+		}
+		if upload, ok := declaresUploads.Upload("Media.Photo"); !ok || upload.FileUpload.MaxSize != 1024 {
+			t.Errorf("%s: Upload(Media.Photo) = %+v, %v", name, upload, ok)
+		}
+		if check, ok := reg.RawBodyChecks().RawBodyCheck("Generic.JSON"); !ok || check != jsonKeysCheck {
+			t.Errorf("%s: RawBodyCheck(Generic.JSON) = %+v, %v", name, check, ok)
+		}
+	}
+}
