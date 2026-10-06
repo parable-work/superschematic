@@ -5,6 +5,8 @@ sidebar:
   order: 9
 ---
 
+import Snippet from '../../../components/Snippet.astro';
+
 `create.sql` builds a DB service's database from nothing. A database that
 already holds data changes through a migration plan: the ordered steps that
 take it from one version of the schema to the next. `superschematic migrate
@@ -122,26 +124,38 @@ an acknowledgment survives a rebase.
 ### Rename a column
 
 A rename reads as a drop and an add until `--rename` says otherwise.
-Renaming `Order.total` to `Order.amount` in the schema and planning:
+`examples/migrations` holds two versions of a `tasks-db` service, `v1/`
+and `v2/`; the second renames `Task.title` to `Task.summary` and drops
+`Comment.legacyId`, among other changes. Planning it with a gate on
+destructive hazards, from `examples/migrations`:
 
 ```sh
-superschematic migrate plan schemas/services/shop-db --from-ref origin/main --fail-on destructive
+superschematic migrate plan v2/schemas/services/tasks-db --from v1/schemas/services/tasks-db \
+  --fail-on destructive
 ```
 
-fails on `destructive:table/order/column/total`: the plan adds `amount` and
-drops `total` with its data. The drop's reason says that `amount` has the
-same type, nullability and default, so the two may be one rename. Saying
-so makes it one:
+prints the plan, then stops on two hazards:
+
+<Snippet example="migrations" file="testdata/generated/logs/fail-on-without-rename.txt" />
+
+The plan adds `summary` and drops `title` with its data. The drop's reason
+says that `summary` has the same type, nullability and default, so the two
+may be one rename. Saying so makes it one:
 
 ```sh
-superschematic migrate plan schemas/services/shop-db --from-ref origin/main --fail-on destructive \
-  --rename order.total=order.amount
+superschematic migrate plan v2/schemas/services/tasks-db --from v1/schemas/services/tasks-db \
+  --fail-on destructive --rename task.title=task.summary
 ```
 
-Now the plan renames the column in place, and the destructive hazard is
-gone. The rename is `compat`: a server built from the previous version
-still names `total`. The [Renames](#renames) section says what a rename
-carries with it.
+Now the plan renames the column in place, and the hazard on `title` is
+gone:
+
+<Snippet example="migrations" file="testdata/generated/plan.postgres.sql" />
+
+The rename is `compat`: a server built from the previous version still
+names `title`. The drop of `legacy_id` is meant, and stops the plan until
+`--allow 'destructive:table/comment/column/legacy_id'` acknowledges it. The
+[Renames](#renames) section says what a rename carries with it.
 
 ### Adopt a database built from create.sql
 
@@ -468,17 +482,15 @@ A list is `TEXT` whatever its element, so the model also records what each
 element holds (`"element"`): `TEXT`, `INTEGER`, `REAL` or `NUMERIC` as
 SQLite stores the element's type, `BOOLEAN`, `JSON` for a JSON value, or
 `BLOB` for bytes. A change of it rebuilds the table, and the copy converts
-each element of the array, in order. For a list of text that becomes a
-list of integers, the plan writes this on one line:
+each element of the array, in order. In `examples/migrations`,
+`Task.remindBefore` changes from a list of text to a list of integers, and
+the rebuild copies `task` with:
 
-```sql
-CASE WHEN "product"."items" IS NOT NULL THEN (
-  SELECT json_group_array(CAST("_element"."value" AS INTEGER) ORDER BY "_element"."key")
-  FROM json_each("product"."items") AS "_element"
-) END
-```
+<Snippet example="migrations" file="testdata/generated/plan.sqlite.sql" from={'INSERT INTO "_new_task"'} to={'FROM "task";'} />
 
-A `NULL` list stays `NULL`, and an empty list stays `[]`.
+The `CASE` casts each element of the array that `json_each` reads, in the
+order of its `key`, and `json_group_array` builds the new array. A `NULL`
+list stays `NULL`, and an empty list stays `[]`.
 
 | Element change | Each element | Hazard |
 | --- | --- | --- |

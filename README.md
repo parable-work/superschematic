@@ -270,7 +270,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [JSON-valued scalars](docs/src/content/docs/reference/json-scalars.md): `Generic.JSON`, `Generic.StringMap` and `Embedding.Vector`.
 - [Versioned tables](docs/src/content/docs/reference/versioned-tables.md): `@versioned` and `@optimistic`, history tables and fenced writes.
 - [Version graphs](docs/src/content/docs/reference/version-graphs.md): branch, commit and merge a tree of tables, with engines in Go, TypeScript, Rust and Python.
-- [Schema migrations](docs/src/content/docs/reference/migrations.md): plan a database's change between two versions of a schema with `migrate plan`, its hazards, and the runner that applies it.
+- [Schema migrations](docs/src/content/docs/reference/migrations.mdx): plan a database's change between two versions of a schema with `migrate plan`, its hazards, and the runner that applies it.
 
 **Extending**
 
@@ -303,6 +303,7 @@ records every design decision (cited as D1, D2, ... in code and commits).
 | [`examples/acme-schematic`](examples/acme-schematic/) | The same shop with an extension that adds a kind, decorators, a generator, an auth provider, a behavior and commands, without editing the core | `examples/acme-schematic/scripts/smoke.sh` |
 | [`examples/engine-notes`](examples/engine-notes/) | A notes server on the engine: workflow, comments and revisions over HTTP, an event stream and MCP | `examples/engine-notes/scripts/check.sh` |
 | [`examples/engine-jobs`](examples/engine-jobs/) | A job runner on the engine and its work-queue behaviors: workers that claim jobs under leases over HTTP, retries, budgets, a missed worker's jobs put back, and batches whose steps run in order and settle them | `examples/engine-jobs/scripts/check.sh` |
+| [`examples/migrations`](examples/migrations/) | Two versions of a DB service: `migrate plan` between them for Postgres and SQLite, its phases and hazards, and `superschematic-migrate` applying it to a database with rows | `examples/migrations/scripts/check.sh` |
 | [`extensions/deploy`](extensions/deploy/), [`extensions/platform`](extensions/platform/) | Two small extensions: Helm values from `@envVars`, and a kind that groups services | `go test ./extensions/...` |
 | [`extensions/topcoat`](extensions/topcoat/) | A Go module of its own: for a Rust API, a crate a [Topcoat](https://github.com/tokio-rs/topcoat) app calls the operations through in-process, by each route's rules, with records of their results | `cd extensions/topcoat && go test ./...` |
 
