@@ -18,8 +18,8 @@ set. Extensions that implement `cli.CommandProvider` add subcommands at
 resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
-The core binary has six commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format` and `behaviors`.
+The core binary has seven commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors` and the `stack` group.
 
 ## `build <service-dir>`
 
@@ -411,6 +411,74 @@ implement them: `Workflow`, `Comments`, `Revisions`, `Dependencies`,
 @superschematic/engine-workqueue` (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
+
+## `stack dev [<stack-service-dir>]`
+
+Run an environment of a stack on the `local` target until Ctrl-C. The
+design is section 8.3 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md).
+
+1. Build the Stack service and every service it reaches, each with its
+   dependencies, as `build --with-deps` builds one service; the stack
+   builds last.
+2. Read the environment the build resolved to
+   `<out>/stack/<stack>/<environment>/environment.json`: `--environment`,
+   or the stack's one environment on the local target.
+3. Start the environment's Postgres container,
+   `superschematic-<stack>-<environment>-postgres`, published on
+   127.0.0.1 only, and create a database per DB schema it hosts.
+4. Migrate each database to its schema's model: a plan from the model the
+   database recorded, applied with `superschematic-migrate`, expand and
+   contract back to back. The runner must be on `PATH`, or named by
+   `SUPERSCHEMATIC_MIGRATE`; [Schema migrations](/superschematic/reference/migrations/)
+   says how to install it.
+5. Build each server's entrypoint module at `<out>/server/<stack>/<server>`
+   with `go build`, start it with its resolved config and `PORT`, callees
+   first, and wait until it answers `/readyz`. Each line a server prints is
+   printed with its name in front.
+
+Dev stays in the foreground until Ctrl-C or until a server exits, then
+stops the servers, callers first, and the container, which keeps its data
+for the next run. `--remove-database` removes the container and its data
+instead.
+
+A secret a server reads comes from
+`<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
+line per secret, `<Type>.<FIELD>=<value>`, such as
+`PaymentsSecrets.STRIPE_KEY=sk_test_...`. A value that is not plain is a Go
+quoted string. The `.superschematic` directory ignores itself in git, and
+also holds the Ed25519 key pair each server signs its calls to another
+with; no secret and no private key reaches the output root.
+
+Without a directory, dev runs the working directory when it is a Stack
+service, else the one Stack service under `./schemas/services`. It needs
+Docker and Go.
+
+```
+superschematic stack dev ./schemas/services/shop-stack
+superschematic stack dev ./schemas/services/shop-stack --environment Dev --remove-database
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
+| `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
+| `--remove-database` | false | on exit, remove the Postgres container and its data instead of stopping it |
+| `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
+
+A local environment sets the container's image and host port with its
+values, and a server's port with its settings; a port it leaves out comes
+from a hash of the stack, the environment and the server, so it stays the
+same from run to run:
+
+```ts
+@environment({
+  target: "local",
+  local: { postgresImage: "postgres:16-alpine", postgresPort: 55432 },
+  settings: [{ of: ShopApi, port: 8080 }],
+})
+export abstract class Dev {}
+```
 
 ## Extension commands
 
