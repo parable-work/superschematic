@@ -56,8 +56,19 @@ calls `engine.runner.start()`:
 
 <Snippet example="engine-jobs" file="src/server.ts" symbol="openJobs" />
 
-The runner's principal needs what its sweeps and reactions do: `write`
-on each schema they change, and the permissions their configs name.
+Two permissions are easy to miss:
+
+- **The runner reads what it sweeps.** Its principal needs `write` on
+  each schema its sweeps and reactions change and the permissions their
+  configs name, and also `read` on each schema a sweep reads. Without
+  `read`, every run fails `forbidden` and is retried with the backoff;
+  `engine.runner.status()` shows the schedule `retrying` with the error.
+- **Defining reads the schemas a config names.** Presence's
+  `releaseLeases`, Blueprint's `schema`, a Budget meter's `scope` and the
+  core's `Rollups` are checked against the live version of the schema
+  they name when you define or publish, as you, so you need `read` on it;
+  otherwise the define is `forbidden`. The example's server defines as a
+  principal that holds `jobs.read` for this.
 
 <Snippet example="engine-jobs" file="src/auth.ts" symbol="runner" />
 
@@ -218,8 +229,8 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 - **A gone holder.** `expireHolder` expires every lease one principal
   holds and returns the ids; `notRenewedAfter` spares a lease renewed
   after a time, whose own heartbeats show it alive.
-- **The sweep** needs the runner's principal to hold `write` on the
-  schema and any permission an `onExpiry` transition names.
+- **The sweep** needs the runner's principal to hold `read` and `write`
+  on the schema and any permission an `onExpiry` transition names.
 - **Heartbeats fill the log.** Each one is an operation event. A
   dashboard that streams the event log passes `exclude=heartbeat` and
   keeps its place past them without receiving one.
@@ -322,13 +333,17 @@ export abstract class Worker {
 A worker that misses its deadline is marked `missed`, moved to
 `missing`, and the leases its principal holds on the `releaseLeases`
 schemas are expired through `Lease.expireHolder`, so its jobs go back in
-the queue even if their own leases had time left. A lease renewed after
-the worker's last beat is spared: its heartbeats show the process
-holding it is alive, and it expires on its own if they stop. Keep lease
-heartbeats at most the presence `ttlMs` apart. The miss records the ids
-it expired in `presence.released`, which its event carries. The
-runner's principal needs Lease's `overridePermission` on those schemas.
-A later `beat` clears the miss.
+the queue even if their own leases had time left. A lease acquired or
+renewed strictly after the worker's last beat is spared: its heartbeats
+show the process holding it is alive, and it expires on its own if they
+stop. A lease taken in the same millisecond as the beat is not spared.
+Keep lease heartbeats at most the presence `ttlMs` apart. The miss
+records the ids it expired in `presence.released`, which its event
+carries. The runner's principal needs `read` and `write` on the worker
+schema, which the sweep reads (`workers.read` in the example), and
+`read` and Lease's `overridePermission` on each `releaseLeases` schema.
+Without `read`, the sweep fails `forbidden` and keeps retrying. A later
+`beat` clears the miss.
 
 The example's test shows it on a clock it moves, with a worker
 `ttlMs` of 15 seconds and a lease of 30:
