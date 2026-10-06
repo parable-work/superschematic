@@ -1,0 +1,336 @@
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Pinned",
+  "target": "local",
+  "provisioner": "local",
+  "values": {
+    "postgresImage": "postgres:17-alpine",
+    "postgresPort": 55432
+  },
+  "deployables": [
+    {
+      "name": "Orders",
+      "kind": "server",
+      "declared": true,
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "settings": {
+        "port": 8081
+      },
+      "resourceName": "orders",
+      "address": "http://127.0.0.1:8081",
+      "bindings": [
+        {
+          "field": "FULFILLMENT_REGION",
+          "source": "literal",
+          "value": "eu"
+        },
+        {
+          "field": "MAX_LINE_ITEMS",
+          "source": "literal",
+          "value": "50",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "url": "http://127.0.0.1:8080"
+          },
+          "edge": "http:Orders->shop-api"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:55432/shop_db?sslmode=disable"
+          },
+          "edge": "sql:Orders->shop-db"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "name": "shop-api",
+      "kind": "server",
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "exposed": true,
+      "settings": {
+        "port": 8080
+      },
+      "resourceName": "shop-api",
+      "address": "http://127.0.0.1:8080",
+      "bindings": [
+        {
+          "field": "LOG_LEVEL",
+          "source": "literal",
+          "value": "debug"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:55432/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-api->shop-db"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "name": "shop-db",
+      "kind": "database",
+      "platform": "local.postgres",
+      "services": [
+        {
+          "name": "shop-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "postgres",
+      "resourceName": "shop-db",
+      "address": "127.0.0.1:55432"
+    }
+  ],
+  "edges": [
+    {
+      "id": "http:Orders->shop-api",
+      "kind": "http",
+      "from": "Orders",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "local.process-process",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "sql:Orders->shop-db",
+      "kind": "sql",
+      "from": "Orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-api->shop-db",
+      "kind": "sql",
+      "from": "shop-api",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    }
+  ],
+  "secrets": [
+    {
+      "id": "PaymentsSecrets.STRIPE_KEY",
+      "type": "PaymentsSecrets",
+      "field": "STRIPE_KEY",
+      "readers": [
+        "Orders",
+        "shop-api"
+      ]
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "Orders.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "FULFILLMENT_REGION",
+              "value": "eu"
+            },
+            {
+              "name": "MAX_LINE_ITEMS",
+              "value": "50"
+            },
+            {
+              "name": "SHOP_API_SERVICE_URL",
+              "value": "http://127.0.0.1:8080"
+            },
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:55432/shop_db?sslmode=disable"
+            },
+            {
+              "name": "STRIPE_KEY",
+              "secret": "PaymentsSecrets.STRIPE_KEY"
+            }
+          ],
+          "language": "go",
+          "module": "server/shop-stack/Orders",
+          "name": "orders",
+          "port": 8081,
+          "readiness": "/readyz"
+        },
+        "phase": "rollout",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "postgres.container",
+        "type": "local:docker/container:Container",
+        "properties": {
+          "env": [
+            {
+              "name": "POSTGRES_HOST_AUTH_METHOD",
+              "value": "trust"
+            }
+          ],
+          "image": "postgres:17-alpine",
+          "labels": {
+            "superschematic.environment": "Pinned",
+            "superschematic.stack": "shop-stack"
+          },
+          "name": "superschematic-shop-stack-pinned-postgres",
+          "ports": [
+            {
+              "containerPort": 5432,
+              "host": "127.0.0.1",
+              "hostPort": 55432
+            }
+          ]
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-api.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "LOG_LEVEL",
+              "value": "debug"
+            },
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:55432/shop_db?sslmode=disable"
+            },
+            {
+              "name": "STRIPE_KEY",
+              "secret": "PaymentsSecrets.STRIPE_KEY"
+            }
+          ],
+          "language": "go",
+          "module": "server/shop-stack/shop-api",
+          "name": "shop-api",
+          "port": 8080,
+          "readiness": "/readyz"
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-db.database.shop-db",
+        "type": "local:postgres/database:Database",
+        "properties": {
+          "container": {
+            "$output": {
+              "resource": "postgres.container",
+              "name": "name"
+            }
+          },
+          "name": "shop_db",
+          "service": "shop-db",
+          "url": "postgres://postgres@127.0.0.1:55432/shop_db?sslmode=disable"
+        },
+        "dependsOn": [
+          "postgres.container"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "postgres.container",
+        "shop-db.database.shop-db"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "shop-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "shop-api"
+      ],
+      "resources": [
+        "shop-api.process"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 2,
+      "deployables": [
+        "Orders"
+      ],
+      "resources": [
+        "Orders.process"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "shop-db"
+      ]
+    }
+  ]
+}
