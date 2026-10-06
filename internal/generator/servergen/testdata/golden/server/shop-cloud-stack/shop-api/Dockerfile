@@ -41,7 +41,7 @@ RUN lib="third_party/superscalar/go/lib/linux_$(go env GOARCH)" \
 WORKDIR /src/schemas/dist/server/shop-cloud-stack/shop-api
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go mod tidy && go build -trimpath -o /out/server .
+    go build -mod=mod -trimpath -o /out/server .
 
 FROM gcr.io/distroless/cc-debian13:nonroot
 COPY --from=build /out/server /server

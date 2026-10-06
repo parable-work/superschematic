@@ -24,8 +24,10 @@ import (
 //     project of its own (`<stack>-bootstrap`, a stack per GCP project):
 //     the Artifact Registry repository named after the stack, the
 //     `deployer` and read-only `planner` service accounts with their
-//     roles, their use of the state bucket and key, and Workload Identity
-//     Federation for the GitHub repository the git remote names;
+//     roles, their use of the state bucket and key, the `builder` account
+//     image builds run as and the `migrator` account the migration job
+//     runs as, and Workload Identity Federation for the GitHub repository
+//     the git remote names;
 //  4. it creates each platform credential's secret directly, readable by
 //     `deployer` and `planner` only. Environments may share a credential,
 //     and the bootstrap graph of one would delete another's, so the secret
@@ -38,24 +40,27 @@ import (
 // apiServices are the APIs every environment's deploy uses: the
 // bootstrap's own (Service Usage, Resource Manager, IAM and its
 // credentials and token exchange for Workload Identity Federation,
-// Storage and KMS for the state, Artifact Registry for the images) and
-// Secret Manager.
+// Storage and KMS for the state, Artifact Registry for the images), Cloud
+// Build and Cloud Logging for the image builds, and Secret Manager.
 var apiServices = []string{
 	"artifactregistry.googleapis.com",
+	"cloudbuild.googleapis.com",
 	"cloudkms.googleapis.com",
 	"cloudresourcemanager.googleapis.com",
 	"iam.googleapis.com",
 	"iamcredentials.googleapis.com",
+	"logging.googleapis.com",
 	"secretmanager.googleapis.com",
 	"serviceusage.googleapis.com",
 	"storage.googleapis.com",
 	"sts.googleapis.com",
 }
 
-// graphServices are the APIs a resource type's module needs.
+// graphServices are the APIs a resource type's module needs. A database
+// needs Cloud Run too, for its migration job.
 var graphServices = map[string][]string{
 	"gcp:cloudrunv2/":         {"run.googleapis.com", "cloudtrace.googleapis.com"},
-	"gcp:sql/":                {"sqladmin.googleapis.com"},
+	"gcp:sql/":                {"sqladmin.googleapis.com", "run.googleapis.com"},
 	"gcp:compute/":            {"compute.googleapis.com"},
 	"gcp:certificatemanager/": {"certificatemanager.googleapis.com"},
 	"gcp:dns/":                {"dns.googleapis.com"},
@@ -80,10 +85,12 @@ func servicesFor(env *ir.ResolvedEnvironment) []string {
 // The roles of the two accounts that run the generated CI (section 11.3).
 var (
 	// deployerRoles let `deployer` apply every resource the gcp target
-	// emits, push images and enable APIs.
+	// emits, push images, run image builds and migration jobs, and enable
+	// APIs.
 	deployerRoles = []string{
 		"roles/artifactregistry.writer",
 		"roles/certificatemanager.owner",
+		"roles/cloudbuild.builds.editor",
 		"roles/cloudsql.admin",
 		"roles/compute.loadBalancerAdmin",
 		"roles/compute.networkAdmin",
@@ -113,7 +120,29 @@ var (
 		"deployer": {"roles/storage.objectAdmin", "roles/cloudkms.cryptoKeyEncrypterDecrypter"},
 		"planner":  {"roles/storage.objectUser", "roles/cloudkms.cryptoKeyEncrypterDecrypter"},
 	}
+
+	// builderRoles let `builder`, which a Cloud Build build runs as, write
+	// its logs. It pushes to the stack's repository only, and reads only
+	// the build contexts in the state bucket (stateReaders).
+	builderRoles = []string{"roles/logging.logWriter"}
+
+	// migratorRoles let `migrator`, which the migration job runs as, reach
+	// a Cloud SQL instance through the connector and log in to it with
+	// IAM. It reads only the job documents and plans in the state bucket.
+	migratorRoles = []string{"roles/cloudsql.client", "roles/cloudsql.instanceUser"}
+
+	// stateReaders are the prefixes of the state bucket the accounts that
+	// run builds and jobs read, and nothing else of it: not Pulumi's
+	// state, nor the manifests.
+	stateReaders = map[string]string{
+		"builder":  buildPrefix,
+		"migrator": migrationPrefix,
+	}
 )
+
+// accountRoles are the bootstrap's accounts, in the order the graph names
+// them.
+var accountRoles = []string{"deployer", "planner", "builder", "migrator"}
 
 // githubIssuer is the OIDC issuer of GitHub Actions' tokens.
 const githubIssuer = "https://token.actions.githubusercontent.com"
@@ -143,7 +172,7 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, repository string) (*ir.R
 		return nil, err
 	}
 	stack := kebab(env.Stack)
-	for _, role := range []string{"deployer", "planner"} {
+	for _, role := range accountRoles {
 		if id := accountID(env.Stack, role); len(id) > 30 {
 			return nil, fmt.Errorf("gcp: the service account id %s is %d characters, and GCP allows 30; name the stack with at most %d", id, len(id), 30-len(role)-1)
 		}
@@ -195,6 +224,38 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, repository string) (*ir.R
 			})
 		}
 	}
+	for _, role := range []string{"builder", "migrator"} {
+		member := ir.Output{Resource: role, Name: "member"}
+		add(role, TypeAccount, map[string]any{
+			"project":     v.project,
+			"accountId":   accountID(env.Stack, role),
+			"displayName": fmt.Sprintf("%s %s", env.Stack, role),
+		})
+		roles := builderRoles
+		if role == "migrator" {
+			roles = migratorRoles
+		}
+		for _, r := range roles {
+			add(role+".role."+roleKey(r), TypeProjectIAMMember, map[string]any{"project": v.project, "role": r, "member": member})
+		}
+		prefix := stateReaders[role]
+		add(role+".state", TypeBucketIAMMember, map[string]any{
+			"bucket": stateBucket(v.project),
+			"role":   "roles/storage.objectViewer",
+			"member": member,
+			"condition": map[string]any{
+				"title":      "Objects under " + prefix,
+				"expression": fmt.Sprintf(`resource.name.startsWith("projects/_/buckets/%s/objects/%s")`, stateBucket(v.project), prefix),
+			},
+		})
+	}
+	add("builder.repository", TypeRepositoryIAMMember, map[string]any{
+		"project":    v.project,
+		"location":   v.region,
+		"repository": ir.Output{Resource: "repository", Name: "name"},
+		"role":       "roles/artifactregistry.writer",
+		"member":     ir.Output{Resource: "builder", Name: "member"},
+	})
 	if repository != "" {
 		add("github", TypeWorkloadIdentityPool, map[string]any{
 			"project":                v.project,

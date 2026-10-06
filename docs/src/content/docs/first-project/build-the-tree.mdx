@@ -25,7 +25,9 @@ summary lines.
 
 The order comes from the configs: `shop-api` and `shop-orders` name
 `shop-db` as their `authDb`, and `shop-storefront` lists `shop-common` in
-its `dependencies`, so each builds after the service it needs. Every
+its `dependencies`, so each builds after the service it needs. The stack,
+`shop-stack`, builds after the APIs it deploys: its build resolves its
+environments and writes each server's entrypoint. Every
 service loads through one TypeScript program, which is faster than a build
 per service.
 `--parallel` builds services that do not depend on each other at the same
@@ -67,9 +69,14 @@ superschematic build-all --cache schemas/services
 
 <Snippet file="testdata/generated/logs/build-all-cache.txt" />
 
-After `rm -rf schemas/dist`, the same command restores each service:
+After `rm -rf schemas/dist`, the same command restores each service but
+the stack:
 
 <Snippet file="testdata/generated/logs/build-all-restore.txt" />
+
+A stack's key covers the services its schema names, `shop-api` and
+`shop-orders`, which its build records under `schemas/dist`. With that
+record gone, it builds once more, and the cache keeps the result.
 
 The cache lives in your XDG cache directory; `--cache-root`, `SUPERSCHEMATIC_BUILD_CACHE_DIR` or
 `[cache] root` in the naming file move it. Because the key covers the
@@ -88,7 +95,9 @@ project like this one:
    SDK;
 4. the Go services' tests, which call the generated server through the
    generated Go SDK, then run the TypeScript, Python and Rust clients
-   against the same server and compare what they print;
+   against the same server and compare what they print; with Docker,
+   one runs `superschematic stack dev` and calls both APIs on the
+   generated entrypoints, over Postgres;
 5. a build of `shop-orders` with its server in Rust
    (`build --api-language RUST --out schemas/dist-rust`), and the same four
    clients run against that server;
@@ -96,8 +105,9 @@ project like this one:
    beside the Rust server;
 7. the TypeScript service's tests, which call the router through the
    generated TypeScript SDK;
-8. `build-all --cache`, which must skip every service on a second run and
-   restore every service once `dist` is gone;
+8. `build-all --cache`, which must skip every service on a second run and,
+   once `dist` is gone, restore every service but the stack, which builds
+   once more;
 9. a byte comparison of the generated files and command output these pages
    quote against their committed copies under `testdata/generated/`.
 

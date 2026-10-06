@@ -691,6 +691,17 @@ caller may read ([Engine behaviors](/superschematic/guides/engine-behaviors/#sea
 No tool publishes: a draft that `define_schema` stores goes live only
 through the HTTP publish route.
 
+Each tool's `_meta` carries guidance under
+`superschematic/operation-guidance`, in the members an SDK tool's
+`@docs` fills: when to call it, when to call another, what it returns,
+and the vetoes it can meet with the usual correction. The engine
+computes it from the behaviors' configs. `notes_transition`'s `useWhen`
+reads "Use to move status from draft to review; from review to draft or
+published; from published to archived. The moves review to published
+and published to archived need permission notes.publish; without it the
+call is forbidden.", and `notes_propose`'s names `notes.review`, the
+permission an approval needs.
+
 An MCP client connects to `http://127.0.0.1:8787/api/namespaces/default/mcp`
 with the header `Authorization: Bearer <token>`. The end-to-end test uses
 the official TypeScript client:

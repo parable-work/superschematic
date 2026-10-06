@@ -224,8 +224,9 @@ second form covers each of its variables, and any member a later contract
 adds. The resolver applies the same rule (`field-collision`).
 
 The generated entrypoint (section 8.1) reads these fields, so application
-code never names an environment variable. `examples/acme-shop/go/example_test.go`
-connecting with `os.Getenv("DATABASE_URL")` is the code this replaces.
+code never names an environment variable. It replaces a hand-written
+`main` that connects with `os.Getenv("DATABASE_URL")`, as
+`examples/acme-shop` did before its stack.
 
 ## 4. Authoring
 
@@ -1090,11 +1091,12 @@ change reads as a diff.
 
 ## 7. The gcp target
 
-`extensions/gcp` builds this section, apart from image builds and the
-migration job: the target, its Cloud Run and Cloud SQL platforms, their
-connectors, the Cloud DNS platform, the policy rules, the pinned provider
-schemas (section 6.4), at pulumi-gcp 9.37.1, and bootstrap with the
-target's Secret Manager store and state bucket (section 7.3). Its golden
+`extensions/gcp` builds this section: the target, its Cloud Run and Cloud
+SQL platforms, their connectors, the Cloud DNS platform, the policy
+rules, the pinned provider schemas (section 6.4), at pulumi-gcp 9.37.1,
+bootstrap with the target's Secret Manager store and state bucket
+(section 7.3), image builds on Cloud Build, and the migration job
+(section 8.4, D46). Its golden
 environments resolve the acme-shop stack of section 4.1 in a staging, a
 production and a parameterized preview environment.
 
@@ -1151,10 +1153,11 @@ owner credentials (application default credentials), and is safe to run
 again: each step creates what is missing and leaves the rest.
 
 1. It enables the APIs the deploy and the environment's graph use: those
-   of the state, the images, the accounts and Workload Identity
+   of the state, the images and their builds (Artifact Registry, Cloud
+   Build and Cloud Logging), the accounts and Workload Identity
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager and Cloud DNS as the graph's resource types need
-   them.
+   them, Cloud Run with any database for its migration job.
 2. It creates the state bucket and the KMS key directly, since Pulumi needs
    them before it can run: the bucket `<project>-superschematic-state`,
    with uniform access, public access prevention and object versioning,
@@ -1171,7 +1174,18 @@ again: each step creates what is missing and leaves the rest.
      and its use of the state bucket and the key. `planner` reads every
      resource and IAM policy a preview refreshes and sees whether a secret
      has a value, without reading one; it writes objects in the bucket,
-     since a preview takes the stack's lock;
+     since a preview takes the stack's lock. `deployer` also runs Cloud
+     Build builds and the migration job, as the next two accounts;
+   - a `builder` account, `<stack>-builder`, that image builds run as
+     (section 11.2): it pushes to the stack's repository, writes its
+     logs, and reads the build contexts in the state bucket, under
+     `superschematic/builds/`, and nothing else of it;
+   - a `migrator` account, `<stack>-migrator`, that the migration job runs
+     as (section 8.4): it holds the Cloud SQL client and instance user
+     roles, and reads the job documents and plans in the state bucket,
+     under `superschematic/migrations/`, and nothing else of it. Its IAM
+     database user is a node of the environment's graph, on each Cloud
+     SQL instance, since an instance is not there at bootstrap;
    - Workload Identity Federation for the GitHub repository the git remote
      names: a pool, a provider for GitHub Actions' tokens that admits only
      that repository, and the right of both accounts to be used from it.
@@ -1212,8 +1226,7 @@ needs it rather than in the background, since Cloud Run throttles an
 instance's CPU between requests (section 8.1). A TypeScript server gets no
 entrypoint yet. A Rust server's sql edge fails to lower until the derived
 value has a password form. An IAM database user starts with no privileges
-in its database; granting them belongs to the migration job (section 8.4),
-which is not built.
+in its database; the migration job grants them (section 8.4, D46).
 
 ### 7.5 Defaults
 
@@ -1299,9 +1312,10 @@ to compile at level 2 of section 10.
 
 `go.mod` requires each generated module, runtime module and
 implementation module the server builds from, and a replace points each
-at its directory. superschematic writes no `go.sum`: `go mod tidy` fills
-it before the first `go build .`, or the build runs with
-`GOFLAGS=-mod=mod`.
+at its directory. superschematic writes no `go.sum`: the build runs with
+`-mod=mod`, which fills it. `go mod tidy` would also resolve the imports
+of the tests of the implementation's module, such as an SDK a test calls
+its API through, which the server's `go.mod` does not replace.
 
 Only a server that some environment places on Cloud SQL links the Cloud
 SQL connector, whose Google modules (auth, the Admin API client, gRPC)
@@ -1346,7 +1360,7 @@ stages:
   version graph's archive when a database the server connects to declares
   a version graph;
 - a Go stage, on the Go release `tools.env` pins, puts each archive where
-  its binding's cgo flags look, then tidies and builds the server;
+  its binding's cgo flags look, then builds the server with `-mod=mod`;
 - the binary runs on distroless `cc`, which holds the glibc and libgcc
   the archives need and nothing else, as a non-root user.
 
@@ -1434,6 +1448,51 @@ them: `superschematic migrate plan` and the `superschematic-migrate` runner
 - a check that a plan does not drop or retype a column that an `@source`
   view of a deployed API reads.
 
+The apply step on GCP is built (D46). Each phase a deploy runs on a
+database is one execution of the stack's Cloud Run job, `<stack>-migrate`,
+through the target's `Migrations` seam:
+
+1. The runner writes each plan with steps in the phase, and a job document
+   that names them, into the state bucket, under
+   `superschematic/migrations/<stack>/<run>/`. The document names the
+   Cloud SQL instance, the database of each DB service on it, the plan and
+   the IAM database users of the servers that connect.
+2. It creates or updates the job to run the runner's image as the
+   `migrator` account (section 7.3), with one task, no retry and an hour to
+   finish, and runs it once with the document's `gs://` URL as its
+   argument, `superschematic-migrate job --job <url>`. It waits for the
+   execution, and a failed one fails the step with the execution's name
+   and logs.
+3. The job reads the document and the plans through Cloud Storage's API,
+   and reaches each database through the Cloud SQL Go connector, with IAM
+   database authentication as the migrator's IAM database user, so there
+   is no password. The Cloud SQL platform gives each instance that user,
+   with the `cloudsqlsuperuser` role, which owns the databases the
+   platform creates, so the migrator creates the tables and owns them.
+
+The job owns the database's privileges. After each phase's steps, it gives
+every server that connects to the DB service, by its IAM database user,
+USAGE on the schemas that hold the migrator's objects, SELECT, INSERT,
+UPDATE and DELETE on its tables, SELECT on its views and USAGE and SELECT
+on its sequences, leaving out the runner's state tables, and takes every
+such privilege back from a user it gave them to that no longer connects,
+all in one transaction. The grant is table-level DML, not what each API
+reads. The deploy manifest records the servers each DB service's job saw
+connect, and a deploy runs the expand phase of a DB service whose servers
+changed even when its plan has no steps, before the new server rolls out
+and before a removed server's user goes. Since Postgres drops no role that
+holds privileges, an IAM database user's node abandons the user when it
+goes.
+
+The runner's image is built once per release, with Cloud Build, from a
+generated Dockerfile that installs the runner with `go install` from its
+module at the release's tag, which the Go checksum database verifies,
+onto distroless static. `runtime/migrate/go` carries no `replace`
+directive, so `go install` takes it. The release is the one the binary is
+part of; a binary built from a checkout names none, and
+`SUPERSCHEMATIC_MIGRATE_IMAGE` names an image of the runner by digest in
+its place. The local target runs the runner on the host (section 8.3).
+
 ### 8.5 Where the implementation lives
 
 The unit of implementation is the API service, not the server. Each API
@@ -1489,8 +1548,7 @@ found with no declaration:
 
 Outside a stack the scaffold stays opt-in. Nothing imports the package
 but a server's generated `main` (section 8.1), and a build of a tree whose
-Go code lives elsewhere, such as `examples/acme-shop`, would gain a stub
-package beside it.
+Go code lives elsewhere would gain a stub package beside it.
 
 A server that serves several APIs calls each one's constructor with that
 API's `Deps`, built from the server's shared connections and clients.
@@ -1942,7 +2000,7 @@ request adds an edge and grants `run.invoker`".
 ### 11.1 Commands
 
 The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
-`dev`, `plan`, `deploy`, `destroy` and `outputs`. Targets and provisioners
+`dev`, `plan`, `build`, `deploy`, `destroy` and `outputs`. Targets and provisioners
 plug into it; they add no commands of their own. `stack dev` runs a local
 environment (section 8.3).
 
@@ -1953,15 +2011,17 @@ and reads the `environment.json` the build writes, it resolves the
 environment as the `stack` generator does, without a build, so `plan`
 never reads a stale one. The provisioner's program goes to
 `<schemas-root>/dist/program/<stack>/<environment>`, or `--program-dir`.
-`plan`, `deploy`, `bootstrap`, `destroy` and `outputs` refuse a local
-environment, which `stack dev` runs, and `secrets set` writes its
+`plan`, `build`, `deploy`, `bootstrap`, `destroy` and `outputs` refuse a
+local environment, which `stack dev` runs, and `secrets set` writes its
 `secrets.env`. A command
 that works on one run of a parameterized environment takes each
 parameter's value as `--param pr=123`. `bootstrap`, `secrets set`,
-`plan`, `deploy`, `destroy` and `outputs` are built, in
+`plan`, `build`, `deploy`, `destroy` and `outputs` are built, in
 `cli/stack_deploy.go` over `internal/stackdeploy`, whose public face is in
-`stack`; the reference page "CLI" lists their flags. A target plugs into
-them through four seams on its `TargetSpec` (D45):
+`stack`; the reference page "CLI" lists their flags. `build` builds the
+images a deploy would build (section 11.2) and deploys nothing: it prints
+each as an `--image` flag and writes no manifest. A target plugs into
+them through five seams on its `TargetSpec` (D45, D46):
 
 - `State`, a state store: the provisioner's state backend for an
   environment, and each run's deploy manifest;
@@ -1969,7 +2029,11 @@ them through four seams on its `TargetSpec` (D45):
   identity (section 4.2) or a credential's secret name;
 - `Bootstrap`, the bootstrap of section 7.3;
 - `Migrations`, a migration runner, which runs one phase of a database's
-  plans where `superschematic-migrate` reaches the database.
+  plans where `superschematic-migrate` reaches the database, and gives the
+  servers that connect their privileges (section 8.4);
+- `Builder`, an image builder: a build request is a server, its
+  Dockerfile and its build context, which the deploy writes as an
+  archive, and the result is the image by digest. Cloud Build on gcp.
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -1985,37 +2049,59 @@ file.
 
 `stack deploy <environment>`:
 
-1. takes the images of the servers it rolls out, by digest
-   (`--image shop-api=<repository>@sha256:<digest>`), and keeps the image
-   the manifest records for every other server. A server with neither is
-   refused. A platform writes a server's image into the graph as its
-   repository path, and the deploy pins it: every string property of the
-   server's own nodes equal to the repository becomes
-   `<repository>@<digest>`, so the program the provisioner renders names
-   each image by digest. The deploy does not build the images yet: each
-   server's generated Dockerfile (section 8.2) builds one, and the deploy
-   takes its digest;
+1. decides each server's image: the one `--image` names, by digest
+   (`--image shop-api=<repository>@sha256:<digest>`); else a build, when
+   the target builds images and the server has the Dockerfile the stack's
+   build writes (section 8.2), unless its build context is the one the
+   image the manifest records was built from; else the image the manifest
+   records. A server with none of them is refused, and `--no-build`
+   builds nothing;
 2. plans each database's migration from the model the manifest records
    (D27), with the readers of the schemas root as the readers after the
    rollout, refuses a hazard of a `--fail-on` class (every class by
    default) that no `--allow` acknowledges, and with `--expect` refuses
    plans other than the ones `stack plan --out` wrote;
-3. applies infrastructure;
-4. needs a value for every secret (section 4.2);
-5. runs each database's `expand` steps (`superschematic-migrate apply
+3. builds the images it decided to build, through the target's
+   `Builder`, before anything changes, and pins every image. A platform
+   writes a server's image into the graph as its repository path, and the
+   deploy pins it: every string property of the server's own nodes equal
+   to the repository becomes `<repository>@<digest>`, so the program the
+   provisioner renders names each image by digest;
+4. applies infrastructure;
+5. needs a value for every secret (section 4.2);
+6. runs each database's `expand` steps (`superschematic-migrate apply
    --phase expand`), which keep the servers of the previous version
-   working;
-6. rolls servers callee first, a wave at a time, each wave returning once
+   working, and the runner then gives the servers that connect their
+   privileges; a DB service whose connecting servers changed runs its
+   expand phase even with no steps (section 8.4);
+7. rolls servers callee first, a wave at a time, each wave returning once
    the platform reports its servers ready: Cloud Run's provider waits for
    the revision's `Ready` condition, which the startup probe on `/readyz`
    holds back until the server's databases answer (section 7.2);
-7. runs the plan's `contract` steps (`--phase contract`), the drops and
+8. runs the plan's `contract` steps (`--phase contract`), the drops and
    tightenings that the previous version's servers could not survive, once
    none of them runs;
-8. applies exposure;
-9. writes a deploy manifest to the state bucket after every step and at
-   the end: the resolved environment, the IR digest of each service, the
-   image of each server and each database's applied model.
+9. applies exposure;
+10. writes a deploy manifest to the state bucket after every step and at
+    the end: the resolved environment, the IR digest of each service, the
+    image of each server with the digest of the build context the deploy
+    built it from, and each database's applied model with the servers
+    its runner last saw connect.
+
+A build context is the repository root as the server's
+`Dockerfile.dockerignore` cuts it down, read by BuildKit's rules, written
+as a gzipped tarball whose entries carry no time, owner or mode but the
+executable bit, so the same files give the same archive on any machine.
+The digest of its tar stream decides whether the server changed: it
+covers the server's entrypoint module, the generated and runtime modules,
+the implementations and the superscalar checkout the image builds from,
+and nothing the ignore file leaves out. On gcp the builder uploads the
+archive to the state bucket, under `superschematic/builds/`, and runs a
+Cloud Build build of the Dockerfile with BuildKit, as the `builder`
+account (section 7.3), which pushes to the stack's repository with the tag
+`context-<digest>`. A tag that exists is not built again, so a `stack
+build` before a deploy, or a deploy that failed after its builds, saves
+the next deploy the build.
 
 Each step of the deploy order is one targeted update of the provisioner's
 program (section 6.5), and each migration phase runs between two updates
@@ -2031,7 +2117,10 @@ drop still wanted is in its own `contract` (D27, amended). A migration
 phase that fails is recorded in the manifest as pending, on the model the
 database held before it, and the next deploy finishes that phase first, as
 the runner requires, then plans from where it ends. A server whose wave
-did not finish keeps the image the previous deploy recorded.
+did not finish keeps the image the previous deploy recorded, and the
+context it was built from, so the next deploy builds it again, or finds
+the image the failed deploy built. A build that fails stops the deploy
+before it changes anything.
 
 The manifest is the migration baseline, the record of what is running, and
 the starting point for a rollback. The manifest records where the last
@@ -2047,9 +2136,9 @@ destroy` removes a run's resources and its manifest, and `stack outputs`
 prints the run's outputs file, or writes it with `--out`, which the
 bindings generator reads (section 6.6).
 
-Not built: the gcp target's migration runner, a Cloud Run job that runs
-`superschematic-migrate` (section 8.4). Until it lands, a gcp deploy with a
-migration to run is refused before it applies anything.
+`stack plan` builds nothing: it plans each server at the image `--image`
+names or the manifest records, and lists a server with neither among the
+servers with no image yet.
 
 ### 11.3 Generated CI
 
@@ -2140,9 +2229,9 @@ registrations.
    connector derives the service-auth field; OpenTelemetry
    export; then `Deps`, the constructor signature, the scaffold and the
    entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
-   hand wiring until a later change moves it onto the entrypoint, which
-   moves the code its docs pages quote (`go/products.go`, `go/orders.go`,
-   `NewHandler`).
+   implementations at the scaffold layout, `go/shop-api` and
+   `go/shop-orders`, which the entrypoints of its `shop-stack` import
+   (section 14, milestone 1).
 5. **Config and build plan.** `calls` is in the schema config, beside
    `authDb`, in the TypeScript type and the data-form schema, valid on an
    API config and naming API services. It is a build-order edge for the
@@ -2168,13 +2257,18 @@ registrations.
    from the service's IR and its config's outputs, and
    `registry.Options.LoadDependencyConfig`, which every build sets, gives
    it each config. Landed too: the deploy seams on `TargetSpec` (`State`,
-   `Secrets`, `Bootstrap` and `Migrations`), `ProvisionRequest.Env` for a
-   run's credentials, and the deploy that drives them in deploy order
-   (`internal/stackdeploy`, section 11.2), which `stack/stacktest`'s fake
-   target carries too; the gcp target's bootstrap, Secret Manager store and
-   state bucket (section 7.3), and `stackdeploy.CredentialsOf` reading
-   the credentials a DNS platform resolves into `dns.credentials`. Next:
-   the gcp migration runner.
+   `Secrets`, `Bootstrap`, `Migrations` and `Builder`),
+   `ProvisionRequest.Env` for a run's credentials, and the deploy that
+   drives them in deploy order (`internal/stackdeploy`, section 11.2),
+   with the build contexts it writes and the builds it skips, which
+   `stack/stacktest`'s fake target carries too; the gcp target's
+   bootstrap, Secret Manager store and state bucket (section 7.3), its
+   image builds on Cloud Build, its migration runner, a Cloud Run job
+   that runs `superschematic-migrate job` on Cloud SQL and owns the
+   servers' privileges (section 8.4, D46), and `stackdeploy.CredentialsOf`
+   reading the credentials a DNS platform resolves into
+   `dns.credentials`. Next: a deploy lock beyond the provisioner's and
+   the runner's, and the generated CI of section 11.3.
 8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
    and `bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and
    `outputs` (section 11).
@@ -2188,7 +2282,7 @@ registrations.
   pinned provider schemas with the tool that keeps them current (sections
   6.4 and 7), and its bootstrap, secret store and state store over Google
   Cloud's client libraries (section 7.3), which stay out of the root
-  module. Its migration runner is to come.
+  module, and its image builder and migration runner (D46).
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
   binding generator (sections 6.5 and 6.6). Built: it registers provisioner
   `pulumi`, its `bindings` package is the generator, and it joins
@@ -2242,7 +2336,21 @@ model, or retired, when it lands.
 1. **Wiring with no cloud.** Derived config fields, the Go entrypoint, the
    `local` target and `stack dev`. Done when acme-shop runs end to end and
    nothing in `examples/acme-shop` writes a connection string, a URL or a
-   port by hand.
+   port by hand. Done: `examples/acme-shop`'s `shop-stack` deploys
+   `shop-api` and `shop-orders`, each on a default Go server, and its `Dev`
+   environment is on the `local` target. Their implementations sit at
+   `go/shop-api` and `go/shop-orders` behind `Deps`, with no `main` and no
+   connection code. `TestStackDevRunsTheShop` (`examples/acme-shop/go`)
+   runs `superschematic stack dev`, which starts Postgres with `shop-db`
+   migrated and both servers on their generated entrypoints; it waits for
+   each `/readyz`, signs a user in through the ORM, calls `CreateProduct`
+   and `ListProducts` and then `PlaceOrder` through the generated Go SDKs,
+   and stops the stack with `--remove-database`. Every URL, port and
+   connection string it uses comes from the resolved `environment.json`.
+   `scripts/check.sh` runs it in the full tier. What stays hand-written
+   runs outside the stack: the Topcoat app's listen address, the Rust
+   server's (port 0, which it prints), and the in-process base URL of the
+   TypeScript storefront's tests.
 2. **Model, resolver and seams.** The Stack kind, environments,
    `environment.json`, the registry specs, and levels 1 to 3 in CI.
    Done when a test extension adds a platform and a provisioner with no

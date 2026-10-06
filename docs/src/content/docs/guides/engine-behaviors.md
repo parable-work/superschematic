@@ -51,6 +51,15 @@ and invocation policy, and its veto codes. An MCP client calls
 a draft with `define_schema`. Every caller may read them
 ([the behavior catalog](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#the-behavior-catalog)).
 
+Once a type composes behaviors, each says what its config means where
+a client picks a tool. The describe document gives each behavior's
+summary beside its config, and every tool of the type carries guidance
+in the members an SDK tool's `@docs` fills (`useWhen`, `doNotUseWhen`,
+`success`, `errors`), in its MCP `_meta` too: `transition`'s names the
+moves from each state, the permission each needs and the vetoes it can
+meet, `blocked` from `Dependencies` among them
+([guidance](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#guidance)).
+
 ## Compose a behavior
 
 A type composes behaviors in its `behaviors` list, each with its config.
@@ -139,7 +148,9 @@ create tool (`tasks_create`) takes them as its `behaviors` argument:
 ```
 
 - Each behavior declares what it takes (`createParamsSchema`), and the
-  describe document and the create tool show it.
+  describe document and the create tool show it as the type's config
+  narrows it: `Links`' parameters name the type's links, with the
+  required ones required.
 - A parameter is held to the same checks as the operation it stands in
   for (`link`, `addBlocker`). A refusal is `invalid_argument` (400), with
   each issue at a JSON pointer such as `/behaviors/Links/project`, or
@@ -408,7 +419,7 @@ count of tasks, its tasks by status, whether they have all finished.
 | --- | --- |
 | Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`; `countBy`, `sum`, `min` and `max` take a `field`; only `all` and `any` take `gatedStates` and `outcomes` |
 | Field | `rollups`: `{ <name>: value }`, computed at each read |
-| Guard | a transition into a state an `all` or `any` rollup gates is `vetoed` unless the rollup holds |
+| Guard | a transition into a state an `all` or `any` rollup gates is `vetoed` (`not_held`) unless the rollup holds, with the rollup and its counts in `details.details` |
 
 On a `projects` schema, with the `tasks` schema linking to it through
 `project`:

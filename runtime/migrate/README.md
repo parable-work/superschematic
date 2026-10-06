@@ -273,6 +273,55 @@ plan is in progress, and prints the hash it replaces.
 
 Exit codes: 0 done, 1 refused or failed, 2 usage.
 
+## Jobs
+
+```
+superschematic-migrate job --job job.json|gs://<bucket>/<object>
+```
+
+Runs a job document: one phase of the plans of the DB services one
+database server hosts, then the privileges of the servers that connect to
+each (D46 in `docs/DECISIONS.md`). A deploy on a cloud target writes the
+document and the plans beside it, and a job on the target runs it: on gcp,
+a Cloud Run job, which reads both from the state bucket.
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `version` | integer | `1`. |
+| `phase` | string | `expand`, `contract` or `all`: the phase of each plan to run. |
+| `cloudSql` | object | Optional. `instance`, the Cloud SQL instance's connection name (`project:region:name`), and `user`, the IAM database user to connect as: a service account's email without `.gserviceaccount.com`. |
+| `databases` | array | The DB services, in order. |
+
+A database:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `service` | string | The DB service. |
+| `database` | string | With `cloudSql`: the database's name on the instance. |
+| `databaseUrl` | string | Without `cloudSql`: the database's URL, as `--database-url` takes it. |
+| `plan` | string | Optional. The plan whose phase to run: a path or a `gs://` URL, read relative to the job document's. |
+| `privileges` | object | Optional. `readWrite`, the roles that read and write the DB service's tables. |
+
+With `cloudSql`, the runner reaches each database through the Cloud SQL Go
+connector, which dials the instance by its connection name over TLS with
+an ephemeral certificate and logs in with IAM database authentication as
+the account the job runs as, so there is no password. A `gs://` document
+is read with application default credentials, or from
+`$STORAGE_EMULATOR_HOST` when it is set, as Google's client libraries do.
+
+After the plan's phase, `privileges` gives each `readWrite` role USAGE on
+the schemas that hold the database's objects, where the job's user may
+give it, SELECT, INSERT, UPDATE and DELETE on its tables, SELECT on its
+views, and USAGE and SELECT on its sequences: the objects the user owns,
+or a role it inherits owns, outside the system schemas and the runner's
+state tables, which no extension owns. Then it takes every privilege on
+those objects and schemas back from any other role the user gave them to,
+all in one transaction, so the roles listed are the roles that hold them.
+An empty `readWrite` takes every such grant back. Only the Postgres
+driver gives privileges.
+
+Exit codes: 0 done, 1 refused or failed, 2 usage.
+
 ## Layout
 
 | Path | What it holds |
@@ -281,6 +330,7 @@ Exit codes: 0 done, 1 refused or failed, 2 usage.
 | `go/postgres/` | The Postgres driver, over one pgx connection |
 | `go/sqlite/` | The SQLite driver, over `modernc.org/sqlite`, which is pure Go |
 | `go/d1/` | The D1 driver, over Cloudflare's REST API |
+| `go/cloudsql/` | The Postgres driver's dialer of a Cloud SQL instance, through the Cloud SQL Go connector |
 | `go/cmd/superschematic-migrate/` | The binary |
 | `go/internal/testdb/` | A database of its own for each test |
 | `go/internal/d1fake/` | A fake D1 REST API over a SQLite file, for the tests |

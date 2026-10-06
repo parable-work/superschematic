@@ -8,10 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	shoporders "example.com/acme/api/shop-orders"
 	orm "example.com/acme/orm/shop-db"
 	sdk "example.com/acme/sdk/go/shop-orders"
 	"example.com/acme/shop"
+	shopordersimpl "example.com/acme/shop/shop-orders"
 	types "example.com/acme/types/go/shop-orders"
+	"github.com/go-chi/chi/v5"
 	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
 	"go.uber.org/zap"
@@ -24,20 +27,32 @@ func (g grants) ListRolesForPrincipal(context.Context, string) ([]session.Role, 
 	return []session.Role{{ID: "role", Name: "Role", Permissions: g}}, nil
 }
 
-// ordersServer serves shop-orders over the no-op database, with every
-// signed-in caller holding the given permissions.
+// ordersServer serves shop-orders in-process over the no-op database, as
+// productsServer serves shop-api, with every signed-in caller holding the
+// given permissions.
 func ordersServer(t *testing.T, permissions ...string) *httptest.Server {
 	t.Helper()
-	handler, err := shop.NewOrdersHandler(orm.NewNoOpDatabase(), zap.NewNop(), shop.Auth{
-		Validate:   verifyJWT,
-		Sessions:   fakeSessions{},
-		Principals: fakePrincipals{},
-		Roles:      grants(permissions),
+	deps := shoporders.Deps{DB: orm.NewNoOpDatabase(), Logger: zap.NewNop()}
+	implementations, err := shopordersimpl.New(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := chi.NewRouter()
+	err = shoporders.RegisterRoutes(router, shoporders.Config{
+		DB:     deps.DB,
+		Logger: deps.Logger,
+		AuthMiddleware: shopordersimpl.Authenticate(shop.Auth{
+			Validate:   verifyJWT,
+			Sessions:   fakeSessions{},
+			Principals: fakePrincipals{},
+			Roles:      grants(permissions),
+		}),
+		Implementations: implementations,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	return server
 }

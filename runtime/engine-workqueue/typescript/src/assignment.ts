@@ -26,6 +26,7 @@ were added again.
 import { BehaviorVetoError, EngineError, defineBehavior, type BehaviorScope, type InstanceView } from '@superschematic/engine';
 
 import declaration from './declarations/Assignment.behavior.json' with { type: 'json' };
+import { assignmentGuidance } from './guidance/assignment.js';
 
 /** Assignment's config. */
 export interface AssignmentConfig {
@@ -67,6 +68,8 @@ function refused(view: InstanceView<AssignmentConfig>, operation: string, what: 
 
 export const assignment = defineBehavior<AssignmentConfig>({
   declaration,
+
+  guidance: assignmentGuidance,
 
   configChange(before, after) {
     if (before !== undefined && after === undefined) {

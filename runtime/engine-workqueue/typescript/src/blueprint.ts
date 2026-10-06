@@ -95,6 +95,7 @@ import {
 } from '@superschematic/engine';
 
 import declaration from './declarations/Blueprint.behavior.json' with { type: 'json' };
+import { blueprintGuidance } from './guidance/blueprint.js';
 
 /** The most steps a map holds: the most children one stamp creates. */
 export const MAX_STEPS = 500;
@@ -550,6 +551,8 @@ function stampFrom(context: InstanceContext<BlueprintConfig>, from: { link: stri
 
 export const blueprint = defineBehavior<BlueprintConfig>({
   declaration,
+
+  guidance: blueprintGuidance,
 
   // The configSchema holds the shape; this holds the config to this type,
   // the child schema and the definition's, as the header says.

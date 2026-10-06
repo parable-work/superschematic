@@ -44,6 +44,7 @@ import { jsonEqual, mergePatch } from '../../instances/patch.js';
 import type { Row } from '../../storage/driver.js';
 import { defineBehavior, type FrozenJSON, type InstanceContext, type InstanceView, type ValueReader } from '../behavior.js';
 import declaration from './declarations/Revisions.behavior.json' with { type: 'json' };
+import { revisionsGuidance } from './guidance/revisions.js';
 import { page, pageRequest } from '../paging.js';
 
 /** Revisions' config. */
@@ -176,6 +177,8 @@ function settle(context: InstanceContext<RevisionsConfig>, id: number, state: Pr
 
 export const revisions = defineBehavior<RevisionsConfig>({
   declaration,
+
+  guidance: revisionsGuidance,
 
   configChange(before, after) {
     if (before !== undefined && after === undefined) {

@@ -173,7 +173,12 @@ describe('the describe document', () => {
     const argumentsOf = (name: string) => operationOf(engine, 'Step', name).params.properties as Record<string, any>;
     const create = argumentsOf('create');
     assert.deepEqual(create.data.allOf, rules);
-    assert.deepEqual(create.behaviors.properties, { Links: linksDeclaration?.createParamsSchema });
+    // Links' create parameters as its config takes them: parent alone, optional, with no revision.
+    assert.notDeepEqual(create.behaviors.properties.Links, linksDeclaration?.createParamsSchema);
+    assert.deepEqual(
+      [Object.keys(create.behaviors.properties.Links.properties), create.behaviors.properties.Links.required, create.behaviors.properties.Links.additionalProperties],
+      [['parent'], undefined, false]
+    );
     assert.equal(create.preconditions, undefined, 'a create has nothing to fence');
     const update = argumentsOf('update');
     assert.equal((update.patch.allOf as unknown[]).length, 3);

@@ -661,7 +661,23 @@ describe("the core's behaviors", () => {
     );
     const behaviors = (tools[0].inputSchema.properties as Record<string, { properties: Record<string, unknown> }>).behaviors;
     assert.deepEqual(Object.keys(behaviors.properties), ['Dependencies', 'Links']);
-    assert.deepEqual(behaviors.properties.Links, engine.behaviors.declaration('Links')?.createParamsSchema);
+    // The create parameters the config takes: a property per link, the required one required.
+    const links = behaviors.properties.Links as { properties: Record<string, { properties: Record<string, unknown> }>; required: string[]; additionalProperties: boolean };
+    assert.deepEqual([Object.keys(links.properties), links.required, links.additionalProperties], [['parent', 'project', 'spec'], ['project'], false]);
+    assert.deepEqual(Object.keys(links.properties.spec.properties), ['id', 'revision'], 'a pinned link takes a revision');
+    assert.deepEqual(Object.keys(links.properties.project.properties), ['id']);
+    // Each tool's _meta carries its guidance under the guidance key, from the config.
+    const guidance = (name: string) =>
+      (tools.find((tool) => tool.name === name)?._meta as Record<string, { useWhen: string; doNotUseWhen: string; errors: Array<{ code: string }> }>)[
+        'superschematic/operation-guidance'
+      ];
+    assert.match(guidance('tasks_transition').useWhen, /from todo to doing or dropped; from doing to done or dropped/);
+    assert.deepEqual(
+      guidance('tasks_transition').errors.map((error) => error.code),
+      ['transition_not_allowed', 'already_in_state', 'terminal_state', 'no_status', 'blocked']
+    );
+    assert.match(guidance('tasks_create').useWhen, /project is required/);
+    assert.deepEqual(guidance('tasks_unlink').errors.map((error) => error.code), ['required_link']);
     // A create gives the required project, and build's parent and blocker, in one event.
     const missing = problemOf(await call(client, 'tasks_create', { id: 'build', data: { title: 'Build' } }));
     assert.deepEqual([missing.status, missing.code, missing.details.issues], [400, 'invalid_argument', [{ path: '/behaviors/Links', message: 'link project is required, so a create of tasks gives it' }]]);
@@ -711,7 +727,10 @@ describe("the core's behaviors", () => {
     const read = await call(reader, 'projects_get', { id: 'launch' });
     assert.deepEqual((read.structuredContent as { data: Record<string, unknown> }).data.rollups, { tasks: 1, tasksByStatus: { todo: 1 }, tasksFinished: false });
     const gated = problemOf(await call(client, 'projects_transition', { id: 'launch', params: { to: 'done' } }));
-    assert.deepEqual([gated.status, gated.code, gated.details.behavior], [409, 'vetoed', 'Rollups']);
+    assert.deepEqual(
+      [gated.status, gated.code, gated.details.behavior, gated.details.code, gated.details.details],
+      [409, 'vetoed', 'Rollups', 'not_held', { rollup: 'tasksFinished', to: 'done', over: false, linked: 1, counted: 0 }]
+    );
     await call(client, 'tasks_transition', { id: 'plan', params: { to: 'dropped' } });
     const again = await call(reader, 'projects_get', { id: 'launch' });
     assert.deepEqual((again.structuredContent as { data: Record<string, unknown> }).data.rollups, { tasks: 1, tasksByStatus: { dropped: 1 }, tasksFinished: true });

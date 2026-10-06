@@ -171,6 +171,14 @@ The example's worker reads any `Lease` veto as the job being gone:
 
 <Snippet example="engine-jobs" file="src/worker.ts" symbol="leaseGone" />
 
+An agent that works the queue over MCP reads the same from the tools:
+each tool's guidance, in its `_meta`, says what the job's config means
+for it. `jobs_heartbeat`'s says to call it at least every 10 seconds
+with the token; `jobs_claim_next`'s names the order, the `topic` match
+and what keeps a job out; each write's `errors` list the codes a call
+can meet, Lease's `held_by_another`, `token_stale` and `lapsed` among
+them.
+
 A worker that dies stops renewing. Once its lease passes `expiresAt`, or
 the job's `timeLimitMs`, the runner's `expire` sweep clears the holder,
 advances the token, counts the expiry, settles the budget reservation

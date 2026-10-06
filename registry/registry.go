@@ -148,8 +148,9 @@ type (
 	// keeps its provisioner's state backend and each Run's deploy
 	// manifest, its SecretStore the values of secrets and platform
 	// Credentials, its Bootstrapper prepares a cloud project
-	// (BootstrapRequest), and its MigrationRunner runs MigrationPlans
-	// (MigrationRequest) between the deploy's steps.
+	// (BootstrapRequest), its MigrationRunner runs MigrationPlans
+	// (MigrationRequest) between the deploy's steps, and its ImageBuilder
+	// builds a server's image (BuildRequest) before them.
 	Run              = registry.Run
 	StateStore       = registry.StateStore
 	SecretStore      = registry.SecretStore
@@ -158,6 +159,8 @@ type (
 	MigrationRunner  = registry.MigrationRunner
 	MigrationRequest = registry.MigrationRequest
 	MigrationPlan    = registry.MigrationPlan
+	ImageBuilder     = registry.ImageBuilder
+	BuildRequest     = registry.BuildRequest
 	Credential       = registry.Credential
 
 	Naming             = registry.Naming
