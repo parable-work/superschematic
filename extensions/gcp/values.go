@@ -29,6 +29,14 @@ const (
 	TypeCertificateMap      = "gcp:certificatemanager/certificateMap:CertificateMap"
 	TypeCertificateMapEntry = "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry"
 	TypeRecordSet           = "gcp:dns/recordSet:RecordSet"
+
+	// The types of the bootstrap graph (BootstrapEnvironment).
+	TypeRepository               = "gcp:artifactregistry/repository:Repository"
+	TypeServiceAccountIAMMember  = "gcp:serviceaccount/iAMMember:IAMMember"
+	TypeBucketIAMMember          = "gcp:storage/bucketIAMMember:BucketIAMMember"
+	TypeCryptoKeyIAMMember       = "gcp:kms/cryptoKeyIAMMember:CryptoKeyIAMMember"
+	TypeWorkloadIdentityPool     = "gcp:iam/workloadIdentityPool:WorkloadIdentityPool"
+	TypeWorkloadIdentityProvider = "gcp:iam/workloadIdentityPoolProvider:WorkloadIdentityPoolProvider"
 )
 
 // targetValues is the schema of an environment's gcp values: the project

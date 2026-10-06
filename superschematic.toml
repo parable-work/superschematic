@@ -113,7 +113,9 @@ http_runtime_rust = "runtime/http/rust"
 database = "{SERVICE}_DATABASE"
 service = "{SERVICE}_SERVICE"
 
-# Where `build --scaffold` writes a missing API implementation, per language,
-# relative to the repository root. {service} is the service's name.
+# Where a stack's build and `build --scaffold` write a missing API
+# implementation, per language, relative to the repository root, and where a
+# server's generated entrypoint imports it from. {service} is the service's
+# name.
 [implementation_paths]
 go = "go/{service}"

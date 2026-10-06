@@ -1,12 +1,13 @@
 // A behavior's can(): where its config names a permission, the engine's
 // PermissionMatcher decides whether the principal holds it (D16). The
-// default is the HTTP runtime's rule; a deployment passes its own.
+// default is the HTTP runtime's rule; a deployment passes its own. A
+// service standing in for an end user holds none (D37).
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { hasAnyPermission } from '@superschematic/http-runtime';
 
-import { BehaviorError, BehaviorVetoError, defineBehavior, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
+import { BehaviorError, BehaviorVetoError, defineBehavior, servicePrincipal, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
 import { openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, openTestEngine, thrown } from './helpers.ts';
 
@@ -117,6 +118,28 @@ for (const driver of drivers) {
       const engine = open();
       engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'a' });
       assert.match(thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'askEmpty'), BehaviorError).message, /can\(\) takes a permission/);
+    });
+
+    test("a service standing in for an end user holds no permission whatever the matcher says; one acting for an end user holds the end user's", () => {
+      const asked: Array<readonly string[]> = [];
+      const generous = open({
+        permissionMatcher: (held) => {
+          asked.push(held);
+          return true;
+        },
+      });
+      generous.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'a' });
+      const worker = { deployable: 'worker', serves: [], subject: 'sa-1' };
+      const veto = thrown(() => generous.instances.invoke(servicePrincipal(worker), 'Item', 'a', 'open'), BehaviorVetoError);
+      assert.equal(veto.reason, 'opening it needs orders.approve');
+      assert.deepEqual(asked, [], 'the matcher is not asked for a service standing in');
+
+      const engine = open();
+      engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'a' });
+      engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'b' });
+      const service = { ...worker, standsIn: false };
+      assert.equal(engine.instances.invoke({ ...holding('orders'), service }, 'Item', 'a', 'open'), true);
+      thrown(() => engine.instances.invoke({ ...holding(), service }, 'Item', 'b', 'open'), BehaviorVetoError);
     });
 
     test('a matcher that is not a function is refused when the engine opens', () => {

@@ -1,0 +1,49 @@
+name: shop-api
+kind: API
+types:
+  ShopApiConfig:
+    name: ShopApiConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: LOG_LEVEL
+        typeRef: { name: string }
+        required: true
+        default: "info"
+  ProductView:
+    name: ProductView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: ProductQueries
+    operations:
+      - name: getProduct
+        typeRef: { name: ProductView }
+        required: true
+        httpMethod: GET
+        restPath: products/{id}
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+  - name: ProductMutations
+    operations:
+      - name: renameProduct
+        typeRef: { name: ProductView }
+        required: true
+        auth: true
+        httpMethod: PUT
+        restPath: products/{id}/name
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: name
+            typeRef: { name: string }
+            required: true

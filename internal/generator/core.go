@@ -3,8 +3,10 @@ package generator
 import (
 	"encoding/json"
 
+	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/stack/local"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -26,10 +28,14 @@ const typesGenerator = "types"
 // ormGenerator is the name of the core generator of the Go ORM.
 const ormGenerator = "orm"
 
-// RegisterCore adds the core generators to reg. The kinds are registered by
-// registry.New; this half lives here because the generator closures call
-// the dispatch methods of this package. Core registers no documents and no
-// build-all hooks; extensions do.
+// RegisterCore adds the core generators to reg, and the core's one target,
+// `local`, with its platforms, connectors and provisioner
+// (internal/stack/local), which a binary with no extension linked runs
+// `stack dev` on. The kinds are registered by registry.New; this half lives
+// here because the generator closures call the dispatch methods of this
+// package, and the local target's provisioner plans migrations with
+// sqlmigrate, which registry cannot import. Core registers no documents and
+// no build-all hooks; extensions do.
 //
 // Registration order fixes Registry.OutputKeys: types, sql, api, sdk is the
 // order the ParseOutputs error lists.
@@ -132,13 +138,28 @@ func RegisterCore(reg *registry.Registry) error {
 				return run{c}.measure("output.stack", func() error { return stackgen.Generate(c) })
 			},
 		},
+		{
+			// The Go entrypoint of each server of the stack, a module with
+			// its Dockerfile at server/<stack>/<server>, and the scaffold of
+			// each served API's implementation that is missing
+			// (docs/stack-model.md, sections 8.1, 8.2 and 8.5).
+			Name:  serverGenerator,
+			Kinds: []string{string(ir.SchemaKindStack)},
+			Dirs: func(c registry.GenerateContext) []string {
+				return []string{servergen.StackDir(c.Options.OutputRoot, c.Config.Name)}
+			},
+			Generate: func(c registry.GenerateContext) error {
+				r := run{c}
+				return r.measure("output.server", r.generateServers)
+			},
+		},
 	}
 	for _, spec := range specs {
 		if err := reg.RegisterGenerator(spec); err != nil {
 			return err
 		}
 	}
-	return nil
+	return local.Register(reg)
 }
 
 // envLoaderLanguage picks the language of the standalone env-var loader

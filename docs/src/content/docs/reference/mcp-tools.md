@@ -328,7 +328,9 @@ name, and where one takes create parameters, as `Links` and
 `Dependencies` do, the create tool takes `behaviors`
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#create-parameters)).
 Three more list, describe and define
-schemas, and none publishes; where a schema composes `Search`, a fourth,
+schemas, and none publishes; two list the behaviors the engine runs and
+describe one by name (`list_behaviors`, `describe_behavior`), which every
+caller may call; and where a schema composes `Search`, one more,
 `search`, searches every such schema the caller may read. The engine
 writes empty guidance, takes the invocation policy and the vendor keys
 above as options, and takes a behavior operation's policy from its

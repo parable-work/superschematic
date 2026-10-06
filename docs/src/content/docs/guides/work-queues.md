@@ -238,6 +238,14 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   recipe's lease edits, merges and releases its version graph while
   others only read it. The token fences those writes as it fences the
   rest.
+- **Heartbeats fill the log.** Each one is an operation event. A
+  dashboard that streams the event log passes `exclude=heartbeat` and
+  keeps its place past them without receiving one.
+- **A worker fleet as a service.** A fleet that calls the engine with a
+  service credential and no end user (D37) is one principal,
+  `service:<deployable>`, which holds no permissions: give it what it may
+  do in the access policy, and fence its processes from each other with
+  the token.
 
 ## Assignment
 
