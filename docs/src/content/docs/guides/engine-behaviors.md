@@ -641,8 +641,9 @@ shows how a behavior of your own judges the fields a write stores.
 D32 in `docs/DECISIONS.md`). Rows of the kinds its config names live on
 refs: a primary line, which each instance gets when it is created, and
 drafts of it, which only a merge brings back. A tagged commit of the
-primary line is released, and a rollback is a release of an earlier
-one. The instance's own fields stay outside the graph. The graph lives
+primary line is released with `releaseCommit`, the version graph's
+release, and a rollback is a release of an earlier one. The instance's
+own fields stay outside the graph. The graph lives
 in the behavior's own tables, through the version graph's SQLite
 adapter, in the transaction of the operation that writes it.
 
@@ -701,12 +702,12 @@ const { ref } = call("save", {
 });
 const { ref: committed } = call("commit", { ref: ref.id, version: ref.version, message: "chili" });
 const merged = call("merge", { source: committed.id, target: main.id, targetVersion: main.version, tag: true });
-call("release", { commit: merged.commit.id, version: 0 });  // 0: the first release
-call("released");                                           // { release, tree, contentHash, findings }
+call("releaseCommit", { commit: merged.commit.id, version: 0 });  // 0: the first release
+call("released");                                                 // { release, tree, contentHash, findings }
 ```
 
 - **Operations.** `branch`, `save`, `commit`, `seal`, `merge`, `rebase`,
-  `revert`, `release` and `discard` write; `refs`, `releases` (the
+  `revert`, `releaseCommit` and `discard` write; `refs`, `releases` (the
   release log), `compose`, `materialize`, `released`, `diff` and
   `history` read. Each is an operation of the instance, so the access
   policy is asked `write` or `read` with its name, and who may merge or
@@ -755,8 +756,9 @@ call("released");                                           // { release, tree, 
   before returns another `contentHash` than the one the commit stored and
   `history` returns; `nothing_to_commit`, which compares trees, holds.
 - **Deleting.** Deleting an instance deletes its graph.
-- **Lease.** A type cannot compose `Branches` with `Lease`, whose
-  `release` operation shares a name.
+- **Lease.** The operation that points the release pointer is
+  `releaseCommit`, not `release`, because `Lease` has `release`, so a
+  type composes both.
 
 ## Where to go next
 

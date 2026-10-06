@@ -2695,7 +2695,7 @@ Status: phases 1 to 5 are built, `Branches` last
 
 ### D32, amended: Branches as it was built
 
-Building `Branches` settled five points that the entry above left open
+Building `Branches` settled six points that the entry above left open
 or put otherwise.
 
 | Decision | Alternatives not taken |
@@ -2705,6 +2705,7 @@ or put otherwise.
 | `configChange` decides per kind: removing a kind, or changing its type, parent, order, singleton or a field's unit, is refused. `primary`, `snapshotEvery`, `sweep` and a retention may change, and a unit may be given a field the old type lacked, of which no stored row holds a value. | Refusing every change but a kind's fields and a retention, which freezes the sweep and the primary line's name for good |
 | `discard` refuses an instance's primary line, with the veto `primary_line`: the instance gets no other, so once discarded it would have no live ref to branch from. | Discarding it as the version graph engine allows |
 | `branch`'s `fromRef` is optional: left out, the draft branches from the instance's primary line. An instance created before its schema composed `Branches` gets its primary line at its first write, and every other writing operation names a ref or a commit it has none of, so its first `branch` makes the line, as the caller, and a draft of it, even where `Branches` is the schema's only writing behavior. | Only an update or another behavior's write, a dead end where `Branches` is the only writing behavior; creating each older instance's line in `afterConfigChange`, which the `Branches` rows rule out since it acts for no principal while a ref records its creator; a separate operation that only creates the line |
+| The operation that points the release pointer is `releaseCommit`, where the `Branches` row names `release`: `Lease` already has `release`, and D16 refuses two behaviors on one type that add an operation of one name, so a type could not compose `Branches` with `Lease`. It is the version graph's release under another name, with its parameters, result and refusals; `releases` and `released` keep their names. | Keeping `release`, so no type composes `Branches` with `Lease`; renaming `Lease`'s `release`, the standard term for ending a lease, which `Lease` had first; qualifying operations by behavior, which reverses D16's one namespace of operation names in routes, tools, SDKs and access-policy names |
 
 ### D32, amended: a partial row and an absent content column
 
