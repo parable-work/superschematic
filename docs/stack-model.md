@@ -1090,11 +1090,12 @@ change reads as a diff.
 
 ## 7. The gcp target
 
-`extensions/gcp` builds this section, apart from image builds and the
-migration job: the target, its Cloud Run and Cloud SQL platforms, their
-connectors, the Cloud DNS platform, the policy rules, the pinned provider
-schemas (section 6.4), at pulumi-gcp 9.37.1, and bootstrap with the
-target's Secret Manager store and state bucket (section 7.3). Its golden
+`extensions/gcp` builds this section: the target, its Cloud Run and Cloud
+SQL platforms, their connectors, the Cloud DNS platform, the policy
+rules, the pinned provider schemas (section 6.4), at pulumi-gcp 9.37.1,
+bootstrap with the target's Secret Manager store and state bucket
+(section 7.3), image builds on Cloud Build, and the migration job
+(section 8.4, D46). Its golden
 environments resolve the acme-shop stack of section 4.1 in a staging, a
 production and a parameterized preview environment.
 
@@ -1224,8 +1225,7 @@ needs it rather than in the background, since Cloud Run throttles an
 instance's CPU between requests (section 8.1). A TypeScript server gets no
 entrypoint yet. A Rust server's sql edge fails to lower until the derived
 value has a password form. An IAM database user starts with no privileges
-in its database; granting them belongs to the migration job (section 8.4),
-which is not built.
+in its database; the migration job grants them (section 8.4, D46).
 
 ### 7.5 Defaults
 
@@ -2281,7 +2281,7 @@ registrations.
   pinned provider schemas with the tool that keeps them current (sections
   6.4 and 7), and its bootstrap, secret store and state store over Google
   Cloud's client libraries (section 7.3), which stay out of the root
-  module. Its migration runner is to come.
+  module, and its image builder and migration runner (D46).
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
   binding generator (sections 6.5 and 6.6). Built: it registers provisioner
   `pulumi`, its `bindings` package is the generator, and it joins
