@@ -301,9 +301,14 @@ for (const driver of drivers) {
       assert.ok(subscriptions(engine).every((subscription) => subscription.state === 'active' && subscription.failure === null));
     });
 
-    test('allTerminal with [success] and anyTerminal with [failure] never complete a run with a failed step, whatever order the events and rules come in', () => {
+    describe('allTerminal with [success] and anyTerminal with [failure] never complete a run with a failed step, whatever order the events and rules come in', () => {
       // A rule on the step that fails its run too, which runs in the steps' own subscription.
       const failTheRun = { when: { enters: 'failed' }, then: { link: 'run', transition: 'failed' } };
+      // One test per combination, each with its own engine: as one test, the
+      // sixteen took ~5 s on a GitHub-hosted runner, bun's default timeout. A
+      // { timeout } option is no fix: node:test, and bun's, enforce it with a
+      // timer, which cannot fire while a synchronous test runs, so it would
+      // leave this one with no limit.
       for (const rules of [
         [completeWhenStepsPass, failWhenAStepFails],
         [failWhenAStepFails, completeWhenStepsPass],
@@ -311,27 +316,34 @@ for (const driver of drivers) {
         for (const stepRules of [undefined, [failTheRun]]) {
           for (const lastStep of ['passed', 'failed']) {
             for (const eager of [true, false]) {
-              const label = JSON.stringify({ rules: rules.map((rule) => Object.keys(rule.when)[0]), stepRules: stepRules !== undefined, lastStep, eager });
-              const engine = open();
-              publish(engine, runs(rules));
-              publish(engine, steps(stepRules));
-              engine.instances.create(alice, 'Run', { title: 'r1' }, { id: 'r1' });
-              for (const id of ['s1', 's2']) {
-                engine.instances.create(alice, 'Step', { title: id }, { id });
-                engine.instances.invoke(alice, 'Step', id, 'link', { name: 'run', id: 'r1' });
-                move(engine, 'Step', id, 'doing');
-              }
-              const settle = () => (eager ? engine.runner.runDue() : undefined);
-              settle();
-              move(engine, 'Step', 's1', lastStep === 'passed' ? 'failed' : 'passed');
-              settle();
-              move(engine, 'Step', 's2', lastStep);
-              engine.runner.runDue();
-              const moves = engine.events
-                .read(alice, { schema: 'Run', instanceId: 'r1' })
-                .events.filter((event) => event.kind === 'operation')
-                .map((event) => (event.change as OperationChange).params);
-              assert.deepEqual(moves, [{ to: 'failed' }], label);
+              const name = [
+                `${Object.keys(rules[0].when)[0]} first`,
+                stepRules === undefined ? 'no step rule' : 'a step rule fails the run too',
+                `the ${lastStep} step moves last`,
+                eager ? 'the runner runs between moves' : 'the runner runs once',
+              ].join(', ');
+              test(name, () => {
+                const engine = open();
+                publish(engine, runs(rules));
+                publish(engine, steps(stepRules));
+                engine.instances.create(alice, 'Run', { title: 'r1' }, { id: 'r1' });
+                for (const id of ['s1', 's2']) {
+                  engine.instances.create(alice, 'Step', { title: id }, { id });
+                  engine.instances.invoke(alice, 'Step', id, 'link', { name: 'run', id: 'r1' });
+                  move(engine, 'Step', id, 'doing');
+                }
+                const settle = () => (eager ? engine.runner.runDue() : undefined);
+                settle();
+                move(engine, 'Step', 's1', lastStep === 'passed' ? 'failed' : 'passed');
+                settle();
+                move(engine, 'Step', 's2', lastStep);
+                engine.runner.runDue();
+                const moves = engine.events
+                  .read(alice, { schema: 'Run', instanceId: 'r1' })
+                  .events.filter((event) => event.kind === 'operation')
+                  .map((event) => (event.change as OperationChange).params);
+                assert.deepEqual(moves, [{ to: 'failed' }]);
+              });
             }
           }
         }

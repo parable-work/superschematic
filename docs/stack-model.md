@@ -1871,10 +1871,15 @@ registrations.
 - **`extensions/cloudflare`**: the Cloudflare DNS platform in v1, and
   Workers and D1 later.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
-  It is a distribution of the core and the official extensions, by
+  Built: it is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
-  pulumi.Extension{}, ...)`. An engineer installs one binary and gets every
-  official target.
+  pulumi.Extension{ProviderVersions: map[string]string{"gcp":
+  gcp.ProviderVersion}})`, so the provisioner installs the gcp provider at
+  the release whose schemas the target checks against.
+  `extensions/cloudflare` joins the list when it lands. An engineer
+  installs one binary and gets every official target. `extensions/topcoat`
+  is not linked (D44); its own binary links it. A release builds this
+  binary and tags the module with the others.
 
 The Pulumi SDK and the GCP client libraries stay out of the root module, as
 the compiler keeps its TypeScript parser out of the runtimes. The root
@@ -1882,9 +1887,16 @@ module never depends on an extension module.
 
 The installed binary is no longer the core-only program. Goal 2 of
 `docs/extension-model.md` still holds: `cli.New(cli.Config{})` is the
-core-only program, and the tests that prove the core works with no
-extension linked run it. A downstream distribution links whichever
-official extensions it wants beside its own, in the same way.
+core-only program, `internal/cmd/superschematic-core` in the root module.
+It is never shipped, and `internal/` says so: it is not a second binary to
+install. The checks that prove the core works with no extension linked
+run it (`make cli-smoke`, the examples' scripts), and so does `make
+behaviors`, which needs only the core. A downstream distribution links
+whichever official extensions it wants beside its own, in the same way.
+Every module keeps its `replace` directives in a release, and `go install`
+at a version refuses a module that has any, so
+`go install .../cmd/superschematic@<version>` does not work: the binary
+comes from a release's download or from `make build` in a checkout.
 
 Not taken:
 

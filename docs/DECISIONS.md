@@ -3371,6 +3371,22 @@ should be stays open.
 
 The rule is reversible until the first release.
 
+### D30, amended: the installed binary links the official extensions, and the core alone moves under `internal/`
+
+Section 13 of `docs/stack-model.md` makes the installed binary a
+distribution of the core and the official extensions. Building it settled
+where the core-only program goes and how the binary ships.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `cmd/superschematic` is a Go module of its own whose `main` is `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{}, pulumi.Extension{ProviderVersions: {"gcp": gcp.ProviderVersion}})`. `make build` and `release.yml` build it. `extensions/topcoat` is not linked (D44). | Linking topcoat too, for a framework before 1.0; leaving the pin out, so the provisioner installs whatever gcp plugin is newest |
+| The core with no extension linked, `cli.New(cli.Config{})`, is `internal/cmd/superschematic-core` in the root module. `make cli-smoke`, `make behaviors` and the examples' scripts run it; nothing ships it. | `cmd/superschematic-core`, which reads as a second binary to install, the choice section 13 rules out; keeping the core at `cmd/superschematic` and the distribution at another path, which would ship the core |
+| Every extension module and `cmd/superschematic` is tagged with the others, and its requires of its siblings are version sites. A release keeps the `replace` directives, so `go install .../cmd/superschematic@<version>` does not work: the binary comes from a release's download or from a checkout. | Dropping the `replace` lines in the release pull request, which would tag a tree CI never built and would still leave the replace of the TypeScript compiler fork that the root module needs |
+
+`extensions/pulumi`'s render goldens now include the gcp target's three
+golden environments, rendered with the gcp provider pinned as the binary
+pins it (`testdata/render/gcp-shop-*`).
+
 ### D30, amended: the core registers the local target, with a resource vocabulary of its own
 
 D30 names `local` beside `gcp`, and section 8.3 of `docs/stack-model.md`

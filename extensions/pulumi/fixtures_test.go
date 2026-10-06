@@ -1,6 +1,8 @@
 package pulumi_test
 
 import (
+	"os"
+	"path/filepath"
 	"sort"
 	"testing"
 
@@ -20,6 +22,28 @@ func shopEnvironment(t *testing.T, name string) *ir.ResolvedEnvironment {
 		t.Fatal(err)
 	}
 	env, err := stack.Resolve(reg, stack.Input{Stack: stacktest.Shop(), Services: stacktest.AcmeShop(), Environment: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+// gcpGoldenRoot is the output root of extensions/gcp's golden
+// environment.json files. go.mod's replace directive puts that module
+// beside this one, so the path is the module's own.
+var gcpGoldenRoot = filepath.Join("..", "gcp", "testdata", "golden")
+
+// gcpEnvironment reads an environment of the shop stack on the gcp target
+// as extensions/gcp's TestGolden resolves and checks it: the shop's
+// services on Cloud Run and Cloud SQL, every node checked against the
+// pinned pulumi-gcp schemas.
+func gcpEnvironment(t *testing.T, name string) *ir.ResolvedEnvironment {
+	t.Helper()
+	data, err := os.ReadFile(stack.EnvironmentPath(gcpGoldenRoot, "Shop", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := stack.Unmarshal(data)
 	if err != nil {
 		t.Fatal(err)
 	}
