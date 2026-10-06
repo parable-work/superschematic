@@ -695,7 +695,7 @@ with a tasting of every value class, a tombstone, a DELETE image that
 names the actor of the unset that removed its row, and a kind that gains a
 content column partway, so its earlier rows read the column as `null`, its
 earlier images lack it, and a commit recorded before the gain materializes
-to another hash than the one it recorded. `typescript.json` is
+to the hash it recorded. `typescript.json` is
 what that file reads back as through an adapter opened with each graph's
 name: each ref's `readRef`, rows, `compose` and `history`, each commit's
 `readCommit`, `materialize`, patches and snapshot, each root's `released`,
