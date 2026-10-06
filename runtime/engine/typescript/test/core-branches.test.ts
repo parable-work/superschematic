@@ -762,7 +762,7 @@ for (const driver of drivers) {
     test("after a new version adds a field to a kind's type, materialize of a commit made before returns the contentHash history stored", () => {
       const { engine, soup } = opened();
       const first = soup.change('first', { step: { upsert: [boil, stir] } });
-      soup.invoke('release', { commit: first.id, version: 0 });
+      soup.invoke('releaseCommit', { commit: first.id, version: 0 });
       const draft = soup.branch('draft');
       const drafted = soup.commit(soup.save(draft, { cover: { upsert: [{ photoUrl: 'soup.jpg' }] } }).ref).commit as Commit;
       const stored = (ref: Ref) => soup.invoke<{ commits: Commit[] }>('history', { ref: ref.id }).commits.map((commit) => [commit.id, commit.contentHash]);
