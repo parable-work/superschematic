@@ -145,6 +145,15 @@ func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
 	}
 
+	// Branches and Lease compose on one type: Branches points the release
+	// pointer with releaseCommit and Lease ends a lease with release, so no
+	// operation name is added twice.
+	branches := ir.BehaviorRef{Name: "Branches", Config: json.RawMessage(`{"kinds":{"step":{"type":"Step"}}}`)}
+	r = Run(behaviorSchema(branches, ir.BehaviorRef{Name: "Lease"}), Input{Registry: core})
+	if got := errorStrings(r); len(got) != 0 {
+		t.Fatalf("Branches and Lease: errors = %v, want none", got)
+	}
+
 	schema := behaviorSchema(workflow)
 	schema.Types["Item"].Fields = append(schema.Types["Item"].Fields, &ir.FieldDef{Name: "status", TypeRef: ir.TypeRef{Name: "string"}})
 	r = Run(schema, Input{Registry: core})
