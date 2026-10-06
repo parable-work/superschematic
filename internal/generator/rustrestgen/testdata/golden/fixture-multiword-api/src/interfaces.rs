@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The arguments of pool-search.rebuildIndex (`POST /api/pool-search/indexes`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct PoolSearchRebuildIndexArgs {
     /// The request body.
@@ -17,7 +18,8 @@ pub struct PoolSearchRebuildIndexArgs {
 }
 
 /// The arguments of pool-search.getIndex (`GET /api/pool-search/indexes/{id}`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct PoolSearchGetIndexArgs {
     /// The `id` path parameter.

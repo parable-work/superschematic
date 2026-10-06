@@ -21,7 +21,8 @@ use std::sync::Arc;
 {{- if .HasArgs }}
 
 /// The arguments of {{ .Namespace }}.{{ .Name }} (`{{ toUpper .Method }} {{ .Path }}`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct {{ .ArgsName }} {
 {{- range .PathArgs }}

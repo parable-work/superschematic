@@ -11,7 +11,7 @@
 //   go run ./internal/tools/schemafiletypes
 
 /** A schema kind: one of the core's, or one a registry adds. */
-export type SchemaKind = 'API' | 'DB' | 'General' | (string & {});
+export type SchemaKind = 'API' | 'DB' | 'General' | 'Stack' | (string & {});
 
 /**
  * Extension data, keyed by extension name. On a type, a field, an operation
@@ -67,6 +67,27 @@ export interface BehaviorRef {
   name: string;
 }
 
+export interface DNSPlacement {
+  platform: string;
+  values?: { [key: string]: unknown };
+}
+
+export interface DatabaseDecl {
+  hosts: ServiceRef[];
+}
+
+export interface DeployableRef {
+  deployable?: string;
+  service?: ServiceRef;
+}
+
+export interface DeployableSettings {
+  env?: { [key: string]: EnvValue };
+  of: DeployableRef;
+  platform?: string;
+  values?: { [key: string]: unknown };
+}
+
 export interface Document {
   comment?: string;
   description?: string;
@@ -105,6 +126,20 @@ export interface EnumValueDef {
   description?: string;
   name: string;
   serializedAs?: string;
+}
+
+export interface EnvValue {
+  parameter?: string;
+  value?: string | number | boolean;
+}
+
+export interface EnvironmentDecl {
+  dns?: DNSPlacement;
+  domain?: string;
+  parameters?: string[];
+  settings?: DeployableSettings[];
+  target?: string;
+  values?: { [key: string]: unknown };
 }
 
 export interface FieldDef {
@@ -416,8 +451,12 @@ export interface ScalarFile {
   typeMappings?: { [key: string]: string };
 }
 
+export interface ServerDecl {
+  serves: ServiceRef[];
+}
+
 export interface ServiceRef {
-  kind: 'API' | 'DB' | 'General';
+  kind: 'API' | 'DB' | 'General' | 'Stack';
   name: string;
 }
 
@@ -425,6 +464,11 @@ export interface SourceRef {
   omittedFromSource?: string[];
   target: string;
   virtual?: string[];
+}
+
+export interface StackDecl {
+  deploy?: ServiceRef[];
+  expose?: DeployableRef[];
 }
 
 export interface TraitConfigSchema {
@@ -444,9 +488,11 @@ export interface TypeDef {
    */
   behaviors?: BehaviorRef[];
   comment?: string;
+  database?: DatabaseDecl;
   denyUnknownFields?: boolean;
   description?: string;
   envVars?: boolean;
+  environment?: EnvironmentDecl;
   extends?: string;
   extensions?: Extensions;
   fields?: FieldDef[];
@@ -462,7 +508,9 @@ export interface TypeDef {
   projection?: ProjectionDef;
   rawHeritage?: RawHeritage;
   role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection';
+  server?: ServerDecl;
   source?: SourceRef;
+  stack?: StackDecl;
   strictJSON?: boolean;
   traitConfig?: TraitConfigSchema;
   versionGraph?: VersionGraphConfig;

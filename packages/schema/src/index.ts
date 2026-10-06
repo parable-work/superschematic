@@ -19,6 +19,7 @@ export type {
   Secret,
   Validate,
   ValidateConfig,
+  Wrapped,
 } from "./wrappers";
 export { behavior } from "./behavior";
 export type {

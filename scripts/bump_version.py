@@ -53,6 +53,9 @@ Version sites (relative to the repository root):
   examples/acme-shop/rust-server/Cargo.lock
                                       the superschematic-http-runtime and
                                       superschematic-schema-runtime packages
+  examples/acme-shop/topcoat/Cargo.lock
+                                      the superschematic-http-runtime and
+                                      superschematic-schema-runtime packages
   runtime/schema/rust/Cargo.toml      [package] version
   runtime/schema/rust/Cargo.lock      the superschematic-schema-runtime package
   runtime/versiongraph/rust/Cargo.toml
@@ -297,16 +300,17 @@ def sites():
             "semver",
         )
     )
-    out.append(
-        (
-            ROOT / "examples" / "acme-shop" / "rust-server" / "Cargo.lock",
-            [
-                (r'(\[\[package\]\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1),
-                (r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1),
-            ],
-            "semver",
+    for app in ("rust-server", "topcoat"):
+        out.append(
+            (
+                ROOT / "examples" / "acme-shop" / app / "Cargo.lock",
+                [
+                    (r'(\[\[package\]\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1),
+                    (r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1),
+                ],
+                "semver",
+            )
         )
-    )
     out.append(
         (
             ROOT / "runtime" / "schema" / "rust" / "Cargo.toml",

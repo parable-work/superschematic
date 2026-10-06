@@ -12,9 +12,10 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use superschematic_http_runtime::schema::{self, Pattern};
 use superschematic_http_runtime::{
-    body_fields, error_response, input, json_body, openapi_router, operation_response,
-    path_is_percent_encoded, query_values, request_id_from_headers, request_ids, required_input,
-    ApiError, ParamKind, ParamSpec, QueryValues, RequestContext, RouterOptions, ScalarConstraints,
+    body_fields, check_input, error_response, input, json_body, openapi_router,
+    operation_response, path_is_percent_encoded, query_values, request_id_from_headers,
+    request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
+    RequestContext, RouterOptions, ScalarConstraints,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -81,6 +82,17 @@ fn decode_pool_search_rebuild_index(body: Option<Value>) -> Result<PoolSearchReb
     })
 }
 
+impl PoolSearchRebuildIndexArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        check_input(&self.input, types::validators::prepare_rebuild_pool_search_index_input)?;
+        Ok(())
+    }
+}
+
 async fn handle_pool_search_rebuild_index(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
@@ -119,6 +131,17 @@ fn decode_pool_search_get_index(captures: &HashMap<String, String>) -> Result<Po
     Ok(PoolSearchGetIndexArgs {
         id: POOL_SEARCH_GET_INDEX_ID.path(captures)?,
     })
+}
+
+impl PoolSearchGetIndexArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        POOL_SEARCH_GET_INDEX_ID.check_value(ParamLocation::Path, &self.id)?;
+        Ok(())
+    }
 }
 
 async fn handle_pool_search_get_index(
