@@ -1250,12 +1250,13 @@ last build wrote, and a TypeScript or Rust server gets no entrypoint yet.
   seconds to finish.
 
 An API whose operations have a service clause also takes a service
-authenticator, a `serviceauth.Verifier` over the service-auth field of
-section 3.4. No connector derives that field yet, so until one does the
-entrypoint's `serviceAuthenticator` refuses to start such a server, rather
-than answer every service caller 401. OpenTelemetry export is not set up:
-the runtime records spans through the global tracer, and an exporter
-would add the OTLP client's dependencies to every server.
+authenticator, a `serviceauth.Verifier` over the API's callers field
+(section 9.2), which `serviceAuthenticator` in `serviceauth.go`, beside
+`main.go`, builds with `stackconfig.LoadCallers`. The server refuses to
+start without the field, and where no other server calls the API it starts
+with no issuers and refuses every service credential. OpenTelemetry export
+is not set up: the runtime records spans through the global tracer, and an
+exporter would add the OTLP client's dependencies to every server.
 
 The engineer writes the implementation of each served API, and nothing else
 (section 8.5). The entrypoint calls each implementation's constructor with
@@ -1355,11 +1356,6 @@ until the TypeScript and Rust entrypoints exist.
 
 Not built:
 
-- The callee's half of service auth. Which config field gives a callee
-  its verification keys is for the connectors and the generated entrypoint
-  to define together, in one change; the key pair node's `publicJwk`
-  output is what the local connector will put there. Until then the
-  entrypoint does not start a server whose API has a service clause.
 - Key rotation: a local key pair lasts until its file is removed.
 - Restarting a server that exits: `stack dev` stops the environment.
 
@@ -1483,19 +1479,72 @@ Service auth answers which deployable is calling, at two layers:
 The service credential is a short-lived JWT on every v1 platform, so one
 verifier in each runtime reads all of them. It knows JWTs and keys, not
 clouds; what is specific to a platform is data the connector writes into
-the callee's config (section 3.4).
+the callee's callers field (below).
 
 | Platform | The caller sends | Lifetime | The callee checks |
 | --- | --- | --- | --- |
-| Cloud Run | a Google ID token whose audience is the callee's URL, from the metadata server | 1 hour; fetched again 5 minutes before it expires | RS256 against Google's keys; `iss` `https://accounts.google.com` or `accounts.google.com`; `aud`; `exp`; the caller's service account by its unique id in `sub` |
+| Cloud Run | a Google ID token, from the metadata server, whose audience is the callee's custom audience: its full resource name, `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, which the callee's service lists | 1 hour; fetched again 5 minutes before it expires | RS256 against Google's keys; `iss` `https://accounts.google.com` or `accounts.google.com`; `aud`; `exp`; the caller's service account by its email in `email` |
 | Kubernetes | a projected service account token whose audience is the callee, read from the file the kubelet keeps current | 10 minutes, the shortest Kubernetes allows; the kubelet replaces it at 80% of that, and the caller reads the file again each minute | the signature against the issuer's keys; `iss`; `aud`; `exp`; the caller's service account in `sub` |
 | local, and the generic connector (section 6.2) | a token the caller signs with the edge's Ed25519 key | 5 minutes | the signature against the edge's public keys; `iss`; `aud`; `exp` |
 
-The callee's config holds, for each inbound edge, the issuer, the keys or
-where to fetch them, the audience, the claim that names the caller, and the
-deployable each caller identity is, with the APIs it serves. An identity
-the config does not list is no caller, whatever signed its token. The
-Kubernetes platform reads the issuer's keys from the API server's
+**The callers field.** The callee's config holds, for each API it serves
+with a service clause, a callers field: `<API>_CALLERS` (`SHOP_API_CALLERS`),
+the API's name in upper snake case and `_CALLERS`, which begins with no
+other derived field's name, so a server that serves an API and calls it
+holds both. Its value, `ir.ServiceAuth` in `ir/service_auth.go`, lists the
+issuers the API's server accepts, each with:
+
+- `issuer` and `issuerAliases`, the `iss` values it writes;
+- `audience`, which the token's `aud` must hold, and `algorithms`;
+- `jwksUrl`, where its keys are, or `keys`, each a public JWK's JSON or a
+  reference to an output that holds one;
+- `subjectClaim`, the claim that names the caller, `sub` when unset, and
+  `maxLifetimeSeconds`, the longest a token may live;
+- `callers`: each a `subject`, the claim's value, the `deployable` it is,
+  and the APIs that deployable `serves`, which a route's `from` is checked
+  against.
+
+An identity the field does not list is no caller, whatever signed its
+token. The value is the runtimes' `serviceauth` config, with two changes:
+the callers are a list, since a subject may be a reference, rather than a
+map keyed by subject; and a key is its JWK's JSON, since it may be an
+output.
+
+The connector of each http edge between two servers gives the callee an
+issuer that lists the edge's caller alone (`Connected.Callee`). Resolution
+checks it against the contract (`ir.CheckServiceAuthIssuer`), with the
+edge's caller as its deployable and that caller's APIs as what it serves,
+and refuses an edge to an API with a service clause whose connector gives
+none (`lowering`). It merges the entries of the edges to an API by issuer:
+two entries that name one issuer must agree on all but their callers. The
+binding names the API (`callersOf`) and the edges it comes from. An API no
+other server calls gets the field with no issuers, so its server starts
+and refuses every service credential.
+
+| Connector | Issuer | Keys | Audience | Caller |
+| --- | --- | --- | --- | --- |
+| local | the caller's deployable | the edge's key pair's `publicJwk` output | the callee's deployable | the caller's deployable in `sub`; a token lives at most 300 seconds |
+| gcp | `https://accounts.google.com`, alias `accounts.google.com` | `https://www.googleapis.com/oauth2/v3/certs` | the callee's custom audience | the caller's service account, `<service>@<project>.iam.gserviceaccount.com`, in `email` |
+
+In environment variables the field follows section 3.4's encoding, with
+two rules it adds: a list of objects is a variable that holds the list's
+length, and each object's members follow the list's name and the
+object's index; and a whole number is its decimal
+(`SHOP_API_CALLERS_ISSUERS=1`, `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`,
+`SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK`). No issuers is
+`SHOP_API_CALLERS_ISSUERS=0`. The Go runtime reads it with
+`stackconfig.LoadCallers`, which refuses a variable under the field's name
+that is no member, and the generated entrypoint builds the API's
+`serviceauth.Verifier` from it (section 8.1).
+
+Every Cloud Run service lists its full resource name as a custom
+audience, and a caller asks the metadata server for a token for it. The
+service's `run.app` URL is an output of the service, which its own
+callers field cannot reference without the service depending on itself;
+the resource name is composed from names, so the caller's credential and
+the callee's field both hold it.
+
+The Kubernetes platform reads the issuer's keys from the API server's
 `/openid/v1/jwks`, which default RBAC lets any service account read, with
 the server's own token.
 
@@ -1546,8 +1595,9 @@ generates, not a secret a person enters (section 4.2): the private key goes
 into the caller's secret store, the public key into the callee's config.
 
 The `local` target uses the same tokens. `stack dev` generates a key pair
-per edge into the gitignored local file, so a local stack runs the code
-path a deployed one does.
+per edge into the gitignored local file, and the callee's callers field
+references its public key, so a local stack runs the code path a deployed
+one does.
 
 Not taken:
 
@@ -1576,6 +1626,18 @@ Not taken:
   `jsonwebtoken`, and WebCrypto in Node.js 22.13, Bun and Workers.
 - No service auth locally, or a header that names the caller unsigned. It
   leaves a code path only production runs, and a mode that could ship.
+- One callers field per server, the union over its inbound edges. Without
+  `from`, a route lists every server with a `calls` edge to its API, and a
+  server whose edge reaches one API of the callee would pass a route of
+  another.
+- The callee's `run.app` URL as the audience on Cloud Run, an output of
+  the callee's own service.
+- The caller's unique id in `sub` on Cloud Run, which D37 first chose. It
+  is an output of the caller's account node, which every callee's config
+  would reference; the email is a name resolution composes, and the
+  account it names is the environment's own.
+- The field as one JSON document in one variable, which section 3.4
+  refuses for every derived field.
 
 ### 9.3 Schema surface
 
@@ -1732,9 +1794,10 @@ credential. It refuses a credential it cannot verify with 401, code
 `service_unauthorized`, and a verified identity that is no caller of this
 server with 403, code `service_forbidden`. A failure that is not the
 caller's, such as keys it cannot fetch, answers 503. Each runtime ships one
-implementation over the config of section 9.2, which the generated
-entrypoint builds; a deployment with a credential that config cannot
-express passes its own.
+implementation over the config of section 9.2, which the generated Go
+entrypoint builds from the API's callers field (section 8.1), and the
+TypeScript and Rust entrypoints will when they exist; a deployment with a
+credential that config cannot express passes its own.
 
 A route runs its steps in this order:
 
@@ -1847,6 +1910,24 @@ the decorators unchanged byte for byte. The SDK tests check the retry: one
 fresh service token on `service_unauthorized`, and the end-user refresh
 left alone.
 
+The callers field has its own tests:
+
+- `ir` checks the contract and its variables, and the resolver's tests
+  check the merge by issuer, an API no server calls, a call within one
+  server, the collisions, and each way a connector's entry can break the
+  contract;
+- the local and gcp targets' goldens resolve the shop with an
+  `@requireService` and an `@allowService` operation on shop-api, which
+  Orders calls (`stacktest.RequireServiceShop` and `AllowServiceShop`);
+- `stackconfig.LoadCallers` reads the variables into a verifier config
+  that admits a token signed with the edge's key, and servergen's golden
+  and compiled tests cover `serviceauth.go`;
+- `cli`'s `TestStackDevVerifiesServiceCallers` runs three Go servers with
+  `stack dev`: the caller's call is admitted with its end user forwarded,
+  a request with no credential, from a server with no edge, or for
+  another audience is 401 `service_unauthorized`, and a caller the
+  route's `from` leaves out is 403 `service_forbidden`.
+
 ### 9.9 Open
 
 - A deployable that serves no API, such as a job (section 3.1), has no
@@ -1867,6 +1948,15 @@ left alone.
   HTTP clients do not trust. Until the Kubernetes platform lands, a
   deployment passes a key fetcher or HTTP client that trusts it; the
   platform may add a CA to the callee config instead.
+- A call between two APIs one server serves stays on loopback and carries
+  no service credential, so a `@requireService` operation the other API
+  calls refuses it with 401, though resolution's check (section 9.3)
+  counts the call as admitted. The call could carry a token the server
+  signs for itself, or the check could leave such calls out.
+- The callers field of a server outside a stack. `values-schema.json`
+  does not list it, since its variables depend on the environment's
+  edges, so a deployment that sets its own config writes the variables by
+  hand.
 
 ## 10. Validation and simulation
 
