@@ -12,13 +12,19 @@ meta-schema. On top of the loader, the engine requires:
 - field types the schema runtime validates: a builtin primitive, a scalar,
   an enum or a type of the document, alone, as a list or a list of lists.
   A union or a map is refused, since the runtime checks neither;
+- a scalar the document declares and the builtin catalog does not hold
+  says which JSON it holds when its language primitive is `object`: its
+  `json_schema` type mapping is `object`, `array` or `any`, as the Go
+  loader requires of a scalar once the catalog has filled it in
+  (objectScalarIssue). The runtime reads which JSON a scalar holds only
+  from that mapping;
 - behaviors the engine has implementations for, composed as the compiler's
   loader requires (behaviors/composition.ts), which the caller checks
   through readSchema's compose argument.
 */
 
 import { BUILTIN_SCALARS, SchemaFileError, type LoadedSchemaFile, type SchemaFileLoader } from '@superschematic/schema-runtime';
-import type { Document, FieldDef, TypeDef, TypeRef } from '@superschematic/schema-ir/schema-file';
+import type { Document, FieldDef, ScalarDef, TypeDef, TypeRef } from '@superschematic/schema-ir/schema-file';
 
 import { EngineError, SchemaDocumentError, type SchemaIssue } from '../errors.js';
 
@@ -98,6 +104,14 @@ export function readSchema(
       path: '/operationSets',
       message: 'a schema declares no operations; the engine serves create, get, list, update and delete, and behaviors add their own',
     });
+  }
+  // A catalog scalar is the catalog's, whatever the document declares for
+  // it, and no builtin row is an object scalar without a JSON mapping.
+  for (const [scalarName, scalar] of Object.entries(runtimeDocument(document).scalars ?? {})) {
+    const issue = objectScalarIssue(scalarName, scalar);
+    if (issue) {
+      issues.push({ path: pointer('scalars', scalarName), message: issue });
+    }
   }
   const types = document.types ?? {};
   const instanceType = name === undefined ? undefined : instanceTypeOf(document, name);
@@ -224,6 +238,29 @@ export function runtimeDocument(document: Document): Document {
     return document;
   }
   return { ...document, scalars: Object.fromEntries(own.map((name) => [name, scalars[name]])) };
+}
+
+// The json_schema type mappings that say which JSON a scalar holds: a JSON
+// object, a JSON array, or any JSON value.
+const JSON_SCHEMA_TYPES = new Set(['object', 'array', 'any']);
+
+/**
+ * objectScalarIssue is the Go IR's ObjectScalarJSONError: why a scalar
+ * whose language primitive is object and whose json_schema type mapping is
+ * not object, array or any is refused, or undefined for any other scalar.
+ * The schema runtime holds a scalar's values to a JSON object, a JSON array
+ * or any JSON value only by that mapping, and checks every other one as a
+ * string, while every generated type holds the scalar as an object.
+ */
+export function objectScalarIssue(name: string, scalar: ScalarDef): string | undefined {
+  if (scalar.languagePrimitive !== 'object' || JSON_SCHEMA_TYPES.has(scalar.typeMappings?.json_schema ?? '')) {
+    return undefined;
+  }
+  return (
+    `scalar ${name} has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds: ` +
+    'add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row), ' +
+    "use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type"
+  );
 }
 
 /** pointer writes a JSON pointer from its tokens. */

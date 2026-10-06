@@ -239,6 +239,54 @@ for (const driver of drivers) {
       assert.equal(engine.schemas.define(alice, orderDocument()).name, 'Order');
     });
 
+    test('an object scalar the document declares says which JSON it holds, or define and publish refuse it', () => {
+      const engine = open();
+      const blob = (name: string, typeMappings?: Record<string, string>) =>
+        schemaDocument(name, [{ name: 'payload', typeRef: { name: 'Acme.Blob' } }], {
+          scalars: { 'Acme.Blob': { name: 'Acme.Blob', languagePrimitive: 'object', ...(typeMappings ? { typeMappings } : {}) } },
+        });
+      const refused = [
+        {
+          path: '/scalars/Acme.Blob',
+          message:
+            'scalar Acme.Blob has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds: ' +
+            'add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row), ' +
+            "use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type",
+        },
+      ];
+      assert.deepEqual(issuesOf(() => engine.schemas.define(alice, blob('Reading'))), refused);
+      assert.deepEqual(issuesOf(() => engine.schemas.define(alice, blob('Reading', { json_schema: 'string', sql: 'JSONB' }))), refused);
+      assert.deepEqual(engine.schemas.list(alice), []);
+
+      // A draft an engine stored before the rule is refused at publish,
+      // which loads it again.
+      const { canonical } = loadSchemaFile(JSON.stringify(blob('Reading')));
+      engine.storage.run(
+        'INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by) VALUES (?, ?, 0, ?, ?, ?, ?)',
+        ['default', 'Reading', canonical, createHash('sha256').update(canonical).digest('hex'), 1, 'alice']
+      );
+      assert.deepEqual(issuesOf(() => engine.schemas.publish(alice, 'Reading')), refused);
+      assert.equal(engine.schemas.live(alice, 'Reading'), undefined);
+
+      // With the mapping, the schema runtime holds the value to that JSON.
+      for (const [name, jsonType, value, wrong] of [
+        ['ObjectBlob', 'object', { a: [1, 'b'] }, [1]],
+        ['ArrayBlob', 'array', [1, 'b'], { a: 1 }],
+        ['AnyBlob', 'any', 'text', undefined],
+      ] as const) {
+        engine.schemas.define(alice, blob(name, { json_schema: jsonType }));
+        assert.equal(engine.schemas.publish(alice, name).version, 1, name);
+        assert.deepEqual(engine.schemas.validate(alice, name, { payload: value }), [], name);
+        if (wrong !== undefined) {
+          assert.deepEqual(
+            engine.schemas.validate(alice, name, { payload: wrong }).map((issue) => [issue.path, issue.rule]),
+            [['payload', 'type']],
+            name
+          );
+        }
+      }
+    });
+
     test('with the core meta-schema, the loader itself refuses a behavior the core does not declare', () => {
       const engine = open();
       const document = clone(orderDocument()) as { types: { Order: Record<string, unknown> } };
