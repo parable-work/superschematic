@@ -27,10 +27,11 @@ name: ci
 # checks, `go test -short` (which skips compiling and running generated
 # modules), the runtimes' and the version graph's own test suites, and the
 # docs build. The full tier adds the Go tests without -short, the CLI smoke,
-# the acme job, examples/engine-notes and every version-graph scenario
-# through the Go, Rust, TypeScript and Python engines. It runs when
-# release.yml calls this workflow: before every release, on a dry run, and
-# twice a day as the release candidate on main (release-candidate.yml).
+# the acme job, examples/engine-notes, examples/engine-jobs and every
+# version-graph scenario through the Go, Rust, TypeScript and Python
+# engines. It runs when release.yml calls this workflow: before every
+# release, on a dry run, and twice a day as the release candidate on main
+# (release-candidate.yml).
 # A step or job that belongs to the full tier carries
 # `if: github.event_name != 'pull_request'`; under workflow_call,
 # github.event_name is the caller's event, never pull_request.
@@ -651,6 +652,14 @@ jobs:
         # and takes seconds. End to end, so the full tier.
         if: github.event_name != 'pull_request'
         run: examples/engine-notes/scripts/check.sh
+
+      - name: examples/engine-jobs type-check + end to end (Node.js and Bun)
+        # The work-queue guide's example: the engine and the work-queue
+        # package rebuilt from the installs above, linked into the example,
+        # and its test run against a listening server under each runtime.
+        # End to end, so the full tier, as engine-notes is.
+        if: github.event_name != 'pull_request'
+        run: examples/engine-jobs/scripts/check.sh
 
   python:
     name: python (schema runtime)

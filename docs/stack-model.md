@@ -848,10 +848,37 @@ has one value per environment and one field per deployable
 read it over Pulumi stack references; scripts and CI read it over the
 outputs file.
 
+The outputs file, `outputs.json`, is the core's: `stack outputs
+<environment> --out <file>` writes one run's (section 11.1), and stdout
+without `--out` gets the same bytes. It is a versioned JSON object:
+
+```json
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Preview",
+  "parameters": { "pr": "123" },
+  "resources": {
+    "shop-api.service": { "url": "https://shop-api-pr-123-3kq7x2-ue.a.run.app" }
+  }
+}
+```
+
+`version` is the format's version, 1 today, and a reader refuses any
+other; `stack` and `environment` name the environment the run applied;
+`parameters`, present only for a member of a parameterized environment,
+are the run's values; and `resources` holds what the provisioner's
+`Outputs` read, by node ID and output name, without the secret ones. The
+type is `stack.RunOutputs`, with `stack.UnmarshalOutputs` to read one and
+`stack.NewOutputs` to make one; `stack.Outputs` returns it from Go.
+
 `extensions/pulumi/bindings` is the generator. It reads each environment's
-`environment.json` and its outputs file, `outputs.json`, which holds what
-`Outputs` read for one run by node ID and output name. It writes two
-packages:
+`environment.json` and the outputs file beside it; its `Outputs`,
+`NewOutputs`, `UnmarshalOutputs`, `OutputsVersion` and `OutputsFile`
+forward to the core's. A build writes
+`<output-root>/stack/<stack>/<environment>/environment.json`, and `stack
+outputs <environment> --out` with that directory and `outputs.json` puts
+the run's file beside it. It writes two packages:
 
 - **The values** (`shopstack`). `Environment` has a field per deployable,
   and a value per applied environment (`Staging`). A deployable's field
@@ -2017,7 +2044,8 @@ prints both, with the secrets that have no value, the servers with no
 image yet, and the records to create by hand for a `manual` domain. It
 changes nothing, so the read-only `planner` account runs it. `stack
 destroy` removes a run's resources and its manifest, and `stack outputs`
-prints the outputs the bindings read (section 6.6).
+prints the run's outputs file, or writes it with `--out`, which the
+bindings generator reads (section 6.6).
 
 Not built: the gcp target's migration runner, a Cloud Run job that runs
 `superschematic-migrate` (section 8.4). Until it lands, a gcp deploy with a

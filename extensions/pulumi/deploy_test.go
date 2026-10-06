@@ -307,7 +307,7 @@ func TestDeployRandom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, _ := out["api.revision"]["result"].(string)
+	first, _ := out.Resources["api.revision"]["result"].(string)
 	if len(first) != 8 {
 		t.Fatalf("api.revision.result is %q", first)
 	}
@@ -333,7 +333,7 @@ func TestDeployRandom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second, _ := out["api.revision"]["result"].(string); second == first || len(second) != 8 {
+	if second, _ := out.Resources["api.revision"]["result"].(string); second == first || len(second) != 8 {
 		t.Errorf("api.revision.result went from %q to %q", first, second)
 	}
 
