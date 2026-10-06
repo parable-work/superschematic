@@ -357,7 +357,7 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 		}
 
 		scalar.Description = metadata.Description
-		scalar.LanguagePrimitive = languagePrimitiveFromScalarMetadata(metadata.Primitive)
+		scalar.LanguagePrimitive, _ = ir.CatalogLanguagePrimitive(metadata.Primitive)
 		scalar.Primitive = metadata.Primitive
 		scalar.MaxLength = metadata.MaxLength
 		scalar.MinLength = metadata.MinLength
@@ -413,7 +413,10 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 // validateHydrated runs the IR checks that read hydrated scalar metadata
 // (ir.Schema.ValidateHydrated). Every form reaches it after
 // hydrateScalarsFromRegistry, so a scalar the catalog declares as a file
-// upload is one by the time Validate<T, { uploadMaxBytes }> is checked.
+// upload is one by the time Validate<T, { uploadMaxBytes }> is checked, and
+// an object scalar is judged by the json_schema mapping it will carry: a
+// catalog reference written by name and the object primitive, such as
+// Generic.JSON in the form format --to=json writes, has the catalog's.
 func validateHydrated(schema *ir.Schema) error {
 	var errs []error
 	for _, e := range schema.ValidateHydrated() {
@@ -438,21 +441,6 @@ func isCatalogReference(def *ir.ScalarDef) bool {
 // mapping for the scalar.
 func isRustTypeExpression(rustType string) bool {
 	return rustType != "" && !strings.ContainsAny(rustType, "{};")
-}
-
-func languagePrimitiveFromScalarMetadata(primitive string) ir.LanguagePrimitive {
-	switch strings.ToLower(strings.TrimSpace(primitive)) {
-	case "string", "str":
-		return ir.LanguageString
-	case "number", "float", "float64", "int", "int32", "int64", "integer":
-		return ir.LanguageNumber
-	case "bool", "boolean":
-		return ir.LanguageBoolean
-	case "type", "object", "json", "jsonb":
-		return ir.LanguageObject
-	default:
-		return ir.LanguageObject
-	}
 }
 
 // classifySchemaFiles walks src/ and returns the JSON/YAML schema files and

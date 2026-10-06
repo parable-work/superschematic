@@ -3628,3 +3628,106 @@ TypeScript and Rust servers are not built. `examples/acme-shop` keeps its
 hand wiring until a later change moves it onto the entrypoint.
 
 The rule is reversible until the first release.
+
+### D14, amended: a scalar that holds JSON says which JSON
+
+A validator decides that a scalar holds JSON only from its `json_schema`
+type mapping. In the TypeScript schema runtime, `isAnyJSONScalar` reads
+`any`, and `structuredJSONType` reads `object` or `array` for a scalar
+with no pattern and no length (amended above), as `ir.ScalarDef.IsAnyJSON`
+and `StructuredJSONType` do in Go. A scalar whose language primitive is
+`object` and that has no such mapping fell through to the string checks:
+the schema runtime refused an object value as not a string. The engine's
+describe rule wrote its type as `string`, and `Branches` classed it a
+string. The generated code held an object: tsgen typed it
+`Record<string, any>`, rustgen `serde_json::Value`, checked as an object,
+and pygen `dict`, and graphdesc classed it `json`. So the engine refused
+values every generated server accepts.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar whose language primitive is `object` is one the validators hold to JSON: `ir.ScalarDef.IsAnyJSON` or `StructuredJSONType` reads it, so its `json_schema` type mapping is `any`, or `object` or `array` with no pattern and no length. One that is not is refused when it is loaded or registered. With no such mapping, the message names the scalar and three routes: add `typeMappings: { json_schema: object }` (or `array` or `any`; `JSONSchemaType` in a catalog row), use the catalog's `Generic.JSON` for free-form JSON, or model a value with known fields as a nested object type. | Filling in `json_schema: object` at load, which silently picks "a JSON object" over "any JSON value" for a scalar that did not say; leaving it, which lets the engine refuse values every generated server accepts |
+| A mapping of `object` or `array` beside a pattern or a length, rules on a string, is refused with them named, and the message says to drop them: `StructuredJSONType` is empty for such a scalar, so the validators check its values as strings. | Judging the raw mapping, which took such a scalar and left the engine refusing `{"a": 1}` as "must be a string" |
+| An upload scalar (one with `FileUpload`) with the `object` primitive is refused with its own message, whatever its `json_schema` mapping: an upload scalar takes the string primitive, since a file part is no JSON. With `object` and no JSON mapping, tsgen, rustgen and pygen type it `Record<string, any>`, `serde_json::Value` and `Any` with no string check, while the runtimes and the engine check it as a string. Every upload row in the repository, acme's `Acme.Photo` among them, has the `String` primitive. | The three JSON routes, which do not fit a file part; taking an upload scalar that declares a JSON mapping, which would hold a file part to JSON |
+| The rule judges a scalar as the IR will carry it, once the catalog has filled it in. A catalog scalar a schema file names by name and the `object` primitive, as `format --to=json` writes `Generic.JSON`, takes its row, mapping included, and loads. | |
+| One rule with one message, `ir.ScalarDef.ObjectJSONError`, runs wherever a scalar definition enters. The loader runs it on every scalar in `ir.Schema.ValidateHydrated`, in every form. `RegisterScalars` runs it on each row of an extension's catalog, read as the loader hydrates it: the row's `JSONSchemaType`, pattern and lengths, and the catalog's upload metadata. The engine runs its twin, `objectScalarIssue`, in `readSchema`, on each scalar the document declares that the builtin catalog does not hold, so `define` and `publish` refuse such a document (D16). It reads the scalar as the schema runtime parses it, with the runtime's own `isAnyJSONScalar` and `structuredJSONType`, which the runtime now exports. The runtime keys a parsed scalar by its name, so the engine first refuses a scalar whose map key is not its name, with the Go data-form reader's message (`scalar map key "Acme.Blob" does not match the definition name "Acme.Other"`). `ir/testdata/object_scalar_errors.json` holds the cases and their messages, and the Go and engine tests both read it, so the wording cannot drift. | Teaching each runtime and describe rule to read a bare `object` as JSON, which puts one rule in several places that can drift |
+| The engine knows only the builtin catalog, so it reads every other scalar a document declares as the document writes it. The TypeScript form records, of each brand, the `json_schema` mapping the registry's catalog gives it when that is `object`, `array` or `any`, beside the core table's SQL type, so `format --to=json` writes an extension's JSON scalar with its mapping and the engine takes it. The written document carries no other rule of the row (pattern, lengths), and the engine applies only what it carries. The TypeScript writer leaves what a scalar holds of its row to the catalog the document was read with (`writer.WriteWith`), so converting the written JSON back to TypeScript runs with the extension linked instead of refusing the mapping. | Recording every mapping of every row, which changes each written document for what the builtin catalog already gives the engine |
+| The loader reads a row's primitive it does not know as `object`, as before (`ir.CatalogLanguagePrimitive`, which the loader, the registry, the TypeScript writer and the scalar catalog tool now share). Such a row the validators would check as a string is refused with a message of its own, which names the primitive the row wrote and suggests `String`, `Int`, `Float` or `Bool`, or `Object` with a `JSONSchemaType` of `any`, or of `object` or `array` with no pattern and no length: the route the rule takes for a scalar that holds JSON, so a row with an object mapping and a length is told of both. | A rule of its own for an unknown primitive, which would also refuse one with a JSON mapping that registers today |
+
+The schema runtime's schema-file loader, the TypeScript twin of the Go
+data-form reader, only decodes: the package exports `BUILTIN_SCALARS`, but
+the loader fills no scalar in from it, so it does not judge the rule. The
+engine does, after it. A program that reads a schema with the schema
+runtime directly (`parseSchemaIR`) still checks such a scalar as a string.
+
+Two scalars in the repository had the `object` primitive and no mapping,
+both file uploads: `Media.Photo` in apigen's `raw-body-check-api` fixture
+and `Media.File` in the IR's upload test. Both now have the string
+primitive, the one every catalog's upload rows have, and the routes golden
+is unchanged; apigen's upload tests, which build their IR directly, take
+the string primitive too. The other `object` scalars in the fixtures
+(`Generic.JSON`, `Generic.StringMap`, `Embedding.Vector`) are catalog
+references. The catalog's four JSON scalars have the `String` primitive
+and a mapping: `Generic.JSON` `any`, `Generic.StringMap` and
+`Geo.Location` `object`, `Embedding.Vector` `array`. `Geo.Location`'s
+string pattern still contradicts its mapping (amended above), but it has
+the `String` primitive, so this rule leaves it alone.
+
+`TestScalarDef_ObjectJSONError` and the engine's registry test hold each
+case of `object_scalar_errors.json` to its message.
+`TestLoadServiceRefusesObjectScalarWithoutJSONMapping`,
+`TestLoadServiceTakesObjectScalarThatSaysWhichJSON` and
+`TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString` load such
+scalars in JSON and YAML. `TestLoadServiceHydratesObjectCatalogReferences`
+loads the four catalog scalars written by name and the `object`
+primitive. `TestRegisterScalarsRefusesObjectRowWithoutJSONMapping`,
+`TestRegisterScalarsJudgesARowAsTheValidatorsDo` and
+`TestRegisterScalarsNamesAnUnknownPrimitive` register such rows. The
+engine's registry test refuses such a document at define, and at publish
+for a draft stored before the rule.
+`TestFormatCommand_TSToJSONWritesAnExtensionJSONScalarsMapping` writes
+`cli/testdata/format/ext-json-scalar.schema.json` from a TypeScript
+service with an extension's JSON scalar, and the engine's registry test
+defines and publishes that file.
+
+No release has shipped, so the rule is reversible until the first release.
+
+### D4, amended: a TypeScript schema imports an extension's scalars from the package its catalog names
+
+The TypeScript writer imported every scalar namespace from
+`scalar_npm_package`, superscalar. A schema with an extension's scalar,
+such as acme's `Acme.Photo` or the CLI tests' `Ext.Doc`, converted with
+`format --to=ts` to `import { Ext, Generic } from "superscalar"`, which
+does not compile: superscalar has no `Ext`. The loader reads a brand
+through whatever import a schema writes, so nothing in the repository
+recorded where an extension's brands live; acme's said so only in a
+comment.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar catalog names the npm package that exports a namespace of its brands, beside its rows, as it declares uploads and raw-body checks: `NpmPackageCatalog`, built with `registry.ScalarCatalogWithNpmPackages(catalog, {"Acme": "@acme/schema"})`. It composes with the other two wrappers in any order. The registry hands the catalog to the writer, as `writer.WriteWith` already did for the rows (D14, amended above). | A `[scalar_npm_packages]` naming table, which puts what an extension's Go code knows into each deployment's file; reading the package off the extension's decorators, which may come from several packages, or none |
+| The map is keyed by namespace, not by canonical name. A schema imports a namespace once, so every scalar of a namespace comes from one package; a key per namespace cannot say otherwise. The wrapper refuses a namespace no scalar of the catalog is in, so a canonical name given as a key fails, and a package that is empty, relative or absolute. | A key per scalar, which can split a namespace across packages and would need a refusal of its own |
+| The writer imports a namespace the catalog names no package for from `scalar_npm_package`, which exports the core table's namespaces. A scalar the core table does not have, in such a namespace, has no package the writer knows exports its brand, so the writer refuses the file and names the scalar, its namespace and the wrapper. That holds for a distribution that renames `scalar_npm_package` to a package of its own too: it names the package for each namespace it adds. | Writing the import from `scalar_npm_package` anyway, which leaves a file that does not compile, where the writer otherwise refuses what it cannot write; trusting a renamed `scalar_npm_package` to export every scalar, which the writer cannot check |
+
+acme's catalog names `@acme/schema` for `Acme`. The fixture service
+`fixture-ext-json-scalar` imports `Ext` from `@fixture/ext-scalars`, a
+package under `internal/loader/tsreader/testdata/packages` that the
+fixtures' tsconfig resolves, and the CLI tests' extension names it.
+
+Writing the acme test found that a schema of a kind other than Catalog
+cannot import `@acme/schema`, even for a brand alone: every decorator it
+declares is Catalog's, so verify refuses the import
+(`Registry.PackageAllowsKind`). The data forms take `Acme.Photo` in any
+kind. acme uses the scalar in its Catalog service only, and this leaves
+the rule as it is.
+
+`TestScalarCatalogWithNpmPackagesNamesANamespacesPackage`,
+`TestScalarCatalogWithNpmPackagesRejectsAnUnknownNamespaceAPathAndNilCatalog`
+and `TestNpmPackagesUploadsAndRawBodyChecksComposeInAnyOrder` cover the
+wrapper. `TestFormatCommand_JSONToTSImportsAnExtensionScalarFromItsPackage`
+writes `cli/testdata/format/ext-json-scalar.schema.json` to TypeScript,
+which is the fixture's source; loads it as a service of its own with the
+extension linked; converts it back to the same JSON; and checks that a
+catalog that names no package for `Ext` is refused. acme's
+`TestAcmePhotoRoundTripsThroughTypeScript` does the same for a Catalog
+schema with an `Acme.Photo` field, and its upload metadata survives.

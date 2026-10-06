@@ -1,0 +1,44 @@
+{
+  "name": "ext-json-scalar",
+  "kind": "General",
+  "scalars": {
+    "Ext.Doc": {
+      "name": "Ext.Doc",
+      "languagePrimitive": "object",
+      "typeMappings": {
+        "json_schema": "object"
+      }
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "languagePrimitive": "object",
+      "typeMappings": {
+        "json_schema": "any",
+        "sql": "JSONB"
+      }
+    }
+  },
+  "types": {
+    "Reading": {
+      "name": "Reading",
+      "comment": "A reading: a payload of the extension's JSON object scalar, and free-form\nmetadata.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "payload",
+          "typeRef": {
+            "name": "Ext.Doc"
+          },
+          "required": true
+        },
+        {
+          "name": "meta",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true
+        }
+      ]
+    }
+  }
+}
