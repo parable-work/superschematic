@@ -3,15 +3,16 @@
 // Postgres, ALTER TABLE ... ADD COLUMN and a descriptor that declares it;
 // on SQLite, the descriptor alone). The rows written before the gain read
 // the column as null, and their history images lack it on both backends.
-// The core reads a content column a row lacks as null, so the gain moves no
-// comparison, patch or merge: a ref and its head commit hash the same, a
-// save of a row as its base has it is nothing to commit, a side that never
-// touched the column merges with one that sets it, a rebase of a draft
-// branched before the gain moves it onto work written after it, an edit
-// against a delete settled by taking the edit of a row written before the
-// gain clears the column on the target, a revert to a commit written before
-// the gain takes a value off the column, and both backends give the same
-// trees and hashes.
+// The core reads a content column a row lacks as null, and hashes a null one
+// as an absent one, so the gain moves no hash, comparison, patch or merge: a
+// commit written before the gain materializes to the hash it recorded, a ref
+// and its head commit hash the same, a save of a row as its base has it is
+// nothing to commit, a side that never touched the column merges with one
+// that sets it, a rebase of a draft branched before the gain moves it onto
+// work written after it, an edit against a delete settled by taking the edit
+// of a row written before the gain clears the column on the target, a revert
+// to a commit written before the gain takes a value off the column, and both
+// backends give the same trees and hashes.
 import { expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import {
@@ -186,13 +187,15 @@ async function run(open: () => Promise<Backend>): Promise<Observed> {
     const images = rows(materialized.tree)["utensil"]!;
     expect(live.map((row) => row["color"])).toEqual([null, null]);
     expect(images.map((row) => "color" in row)).toEqual([false, false]);
-    // A ref and its head commit hash the same.
+    // A ref and its head commit hash the same, and the commit, written before
+    // the gain, materializes to the hash it recorded: color is content under
+    // the gained descriptor, null or absent in each row, and a null content
+    // column hashes as an absent one. Its tree hashes the same under the
+    // descriptor it was recorded with, since its images are as stored.
     expect(composed.contentHash).toBe(materialized.contentHash);
-    // The commit's recorded hash still equals its materialized tree's, under
-    // the descriptor it was recorded with, since its images are as stored.
-    // Under the gained descriptor color is content, null in each row, so the
-    // same tree hashes as every tree written after the gain does.
+    expect(materialized.contentHash).toBe(recorded.contentHash);
     expect(core.contentHash({ descriptor: JSON.parse(descriptor), tree: rows(materialized.tree) }).contentHash).toBe(recorded.contentHash);
+    expect(core.contentHash({ descriptor: JSON.parse(gained), tree: rows(composed.tree) }).contentHash).toBe(recorded.contentHash);
 
     // A save of a row as its base holds it is nothing to commit.
     let same = await graph.branch(cook, main.id, "same");
