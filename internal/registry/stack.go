@@ -213,6 +213,25 @@ type TargetSpec struct {
 	// Policies are the target's rules over the resource graph.
 	Policies []PolicyRule
 
+	// State keeps the target's deploy state: the provisioner's state
+	// backend and each run's deploy manifest (section 11.2). Plan, deploy,
+	// destroy and outputs need it; a target without it resolves but does
+	// not deploy.
+	State StateStore
+
+	// Secrets stores the values of its environments' secrets and of their
+	// DNS platforms' credentials (section 4.2). Nil stores none.
+	Secrets SecretStore
+
+	// Bootstrap prepares a cloud project for the target's environments
+	// (section 7.3). Nil needs no bootstrap.
+	Bootstrap Bootstrapper
+
+	// Migrations runs migration plans on the target's databases between
+	// the deploy's steps (section 5.3). Nil runs none, and a deploy that
+	// has a migration to run on the target is refused.
+	Migrations MigrationRunner
+
 	compiledValues *validator.Schema
 }
 
@@ -258,6 +277,11 @@ type DNSPlatformSpec struct {
 	// Lower returns the records' resources. It is pure.
 	Lower func(DNSContext) ([]*ir.Resource, error)
 
+	// Credentials are the secrets the platform needs to write records,
+	// such as an API token, which bootstrap asks for and stores in the
+	// target's secret store (section 7.3).
+	Credentials []Credential
+
 	compiledValues *validator.Schema
 }
 
@@ -288,6 +312,12 @@ type ProvisionRequest struct {
 	// Backend is where the provisioner keeps the environment's state, as
 	// the target's bootstrap created it.
 	Backend StateBackend
+
+	// Env holds the platform credentials the run needs, keyed by the
+	// environment variable their provider reads (Credential.Env). The
+	// provisioner hands them to its tool's process and never writes them
+	// to a file.
+	Env map[string]string
 }
 
 // StateBackend is where a provisioner keeps an environment's state, and
@@ -501,8 +531,10 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 // RegisterTarget adds a target. It refuses a malformed or duplicate name,
 // an unknown deployable kind or an empty platform name in Platforms, a
 // values schema or resource type schema that does not compile, a resource
-// type another target registered with a different schema, and a policy rule
-// without a name or Check, or with a repeated name. Finalize checks that
+// type another target registered with a different schema, a policy rule
+// without a name or Check, or with a repeated name, and a deploy seam it
+// cannot use: State, Bootstrap or Migrations without a provisioner, and
+// Bootstrap or Migrations without State. Finalize checks that
 // the platforms, the DNS platform and the provisioner it names are
 // registered.
 func (r *Registry) RegisterTarget(spec TargetSpec) error {
@@ -545,6 +577,9 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 		seenRules[rule.Name] = true
 	}
 	spec.Policies = append([]PolicyRule(nil), spec.Policies...)
+	if err := checkDeploySeams(spec); err != nil {
+		return err
+	}
 	types := map[string]resourceType{}
 	for _, typ := range keysOf(spec.ResourceTypes) {
 		schema := spec.ResourceTypes[typ]
@@ -578,7 +613,9 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 
 // RegisterDNSPlatform adds a DNS platform. It refuses a malformed or
 // duplicate name, the reserved name ir.ManualDNS, a values schema that does
-// not compile and a missing Lower.
+// not compile, a missing Lower, and a credential whose name is not upper
+// snake case or repeats, that has no description, or whose Env is not an
+// environment variable's name.
 func (r *Registry) RegisterDNSPlatform(spec DNSPlatformSpec) error {
 	if err := r.registrable("DNS platform " + spec.Name); err != nil {
 		return err
@@ -595,6 +632,10 @@ func (r *Registry) RegisterDNSPlatform(spec DNSPlatformSpec) error {
 	if spec.Lower == nil {
 		return fmt.Errorf("registry: DNS platform %q has no Lower function", spec.Name)
 	}
+	if err := checkCredentials(spec.Name, spec.Credentials); err != nil {
+		return err
+	}
+	spec.Credentials = append([]Credential(nil), spec.Credentials...)
 	if len(spec.Values) > 0 {
 		compiled, err := compileSchema(spec.Values, "superschematic://dns-platforms/"+spec.Name+"/values.json")
 		if err != nil {

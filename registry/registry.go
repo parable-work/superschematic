@@ -140,6 +140,23 @@ type (
 	PlannedChange    = registry.PlannedChange
 	StackEnvironment = registry.StackEnvironment
 
+	// The seams the cloud half of the `stack` commands drives
+	// (docs/stack-model.md, sections 7.3 and 11): a target's StateStore
+	// keeps its provisioner's state backend and each Run's deploy
+	// manifest, its SecretStore the values of secrets and DNS platform
+	// Credentials, its Bootstrapper prepares a cloud project
+	// (BootstrapRequest), and its MigrationRunner runs MigrationPlans
+	// (MigrationRequest) between the deploy's steps.
+	Run              = registry.Run
+	StateStore       = registry.StateStore
+	SecretStore      = registry.SecretStore
+	Bootstrapper     = registry.Bootstrapper
+	BootstrapRequest = registry.BootstrapRequest
+	MigrationRunner  = registry.MigrationRunner
+	MigrationRequest = registry.MigrationRequest
+	MigrationPlan    = registry.MigrationPlan
+	Credential       = registry.Credential
+
 	Naming             = registry.Naming
 	Options            = registry.Options
 	Result             = registry.Result
@@ -185,6 +202,18 @@ const (
 	ToolInvocationAuto       = apigen.ToolInvocationAuto
 	ToolInvocationAsk        = apigen.ToolInvocationAsk
 )
+
+// ErrNoManifest is what a StateStore's ReadManifest wraps for a run that
+// was never deployed; ErrSecretNotCreated is what a SecretStore's Set
+// wraps when the secret's storage does not exist yet.
+var (
+	ErrNoManifest       = registry.ErrNoManifest
+	ErrSecretNotCreated = registry.ErrSecretNotCreated
+)
+
+// CredentialID is the identity a DNS platform's credential is stored
+// under; see internal/registry.CredentialID.
+func CredentialID(platform, name string) string { return registry.CredentialID(platform, name) }
 
 // DefaultToolInvocationPolicy returns the core's invocation policy:
 // invocationPolicy, auto or ask, auto by default.
