@@ -1,7 +1,9 @@
 /*
 The event log: one append-only table, engine_events. Each change appends
 one event in the transaction that makes it: an instance's create, update
-and delete, a writing behavior operation on it, and a schema's publish.
+and delete, a writing behavior operation on it, a schema's publish, and
+the define of a draft, which carries the draft's hash and not its
+document, so a reviewer watching the log learns a draft waits.
 An event has a global cursor, which orders the whole log, and an
 instance's events also a per-instance sequence, 1, 2, 3, ... across its
 life, a re-create after a delete included. A delete appends an event and
@@ -13,9 +15,18 @@ schema and instance. A namespace that looks schema names up in a shared
 namespace also reads the shared namespace's publish events, since the
 schemas it reaches change with them; they keep the shared namespace as
 theirs. The principal needs `read` on each event's schema in the
-namespace it reads; without a schema filter, events of schemas it may not
-read are skipped, so a page can hold fewer events than its limit while
-more follow.
+namespace it reads, a define's included: the draft route already shows
+the draft to a reader. Without a schema filter, events of schemas it may
+not read are skipped, so a page can hold fewer events than its limit
+while more follow.
+
+A read can also keep only some kinds, only the operations of some
+behaviors, or leave out operations by name (a lease's heartbeats, say).
+Those filters run on the page a read scans, as the access check does, so
+a page still scans at most its limit and its next cursor is past every
+event it scanned, kept or not: a reader that resumes from it neither
+sees a dropped event again nor scans it again. A read from `head` starts
+at the log's last event and returns none, only that cursor.
 
 Each commit that appends events notifies the engine's watchers after it
 commits (notifier.ts), which is how a stream and the runner learn the
@@ -24,10 +35,13 @@ log grew.
 An event the runner's work wrote (runner/runner.ts) records its cause:
 the behavior whose reaction or schedule wrote it, the event it reacted
 to or the schedule that ran, and its depth, one more than its cause's.
-A caller's change has none.
+A caller's change has none. An event a service's call wrote (D37)
+records the service's deployable beside the actor, the end user it acted
+for or, standing in for one, its own subject.
 */
 
 import { checkPrincipal, type Access, type Principal } from '../access.js';
+import { BEHAVIOR_NAME } from '../behaviors/declaration.js';
 import { EngineError } from '../errors.js';
 import type { Namespaces } from '../namespaces.js';
 import { pageSize } from '../paging.js';
@@ -36,7 +50,10 @@ import type { Row, SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { notifierOf, type EventNotifier, type EventWatcher } from './notifier.js';
 
-export type EventKind = 'create' | 'update' | 'delete' | 'operation' | 'publish';
+export type EventKind = 'create' | 'update' | 'delete' | 'operation' | 'publish' | 'define';
+
+/** Every event kind, in the order the log's reference lists them. */
+export const EVENT_KINDS: readonly EventKind[] = ['create', 'update', 'delete', 'operation', 'publish', 'define'];
 
 /** Why the runner's work wrote an event: a reaction to an event, or a schedule. */
 export interface EventCause {
@@ -55,24 +72,26 @@ export interface EngineEvent {
   /** The global cursor: every later event has a higher one. */
   cursor: number;
   kind: EventKind;
-  /** The instance's namespace; for a publish, the namespace that holds the schema. */
+  /** The instance's namespace; for a publish or a define, the namespace that holds the schema. */
   namespace: string;
   schema: string;
-  /** Null for a publish. */
+  /** Null for a publish and a define. */
   instanceId: string | null;
-  /** The instance's sequence, 1 for its first event; null for a publish. */
+  /** The instance's sequence, 1 for its first event; null for a publish and a define. */
   seq: number | null;
-  /** The schema version the change was made with. */
-  version: number;
+  /** The schema version the change was made with, or the one a publish made live; null for a define, whose draft has none. */
+  version: number | null;
   /** The subject of the principal that made the change. */
   actor: string;
+  /** The deployable of the service whose call made the change (D37); absent for a call no service made. */
+  service?: string;
   /** When, in epoch milliseconds. */
   at: number;
   /**
    * create: the instance, its behaviors' fields included; update: a merge
    * patch of the instance, the caller's patch and any change its
    * behaviors' fields took; operation: an OperationChange; delete: null;
-   * publish: the schema document.
+   * publish: the schema document; define: a DefineChange.
    */
   change: unknown;
   /** What caused it, for an event a reaction or a schedule wrote; absent for a caller's change. */
@@ -94,16 +113,32 @@ export interface OperationChange {
   patch: Record<string, unknown>;
 }
 
+/** The change of a define event: the draft's hash, not its document, which the draft route serves. */
+export interface DefineChange {
+  /** The SHA-256 of the draft's canonical JSON, hex, as its record's hash. */
+  hash: string;
+}
+
 export interface ReadEventsOptions {
   /** `default` when absent. */
   namespace?: string;
   schema?: string;
   /** Only this instance's events; needs schema. */
   instanceId?: string;
-  /** Events after this cursor; 0, the start of the log, when absent. */
-  after?: number;
+  /**
+   * Events after this cursor; 0, the start of the log, when absent;
+   * `head`, the log's last event, for an empty page whose next is that
+   * cursor.
+   */
+  after?: number | 'head';
   /** How many events to scan, 50 by default and at most 500. */
   limit?: number;
+  /** Only events of these kinds; at least one. */
+  kinds?: readonly EventKind[];
+  /** Only operation events of these behaviors, by name; at least one. */
+  behaviors?: readonly string[];
+  /** No operation events of operations by these names (`heartbeat`). */
+  exclude?: readonly string[];
 }
 
 /** One page of the log. */
@@ -122,8 +157,11 @@ export interface NewEvent {
   schema: string;
   instanceId: string | null;
   seq: number | null;
-  version: number;
+  /** Null for a define. */
+  version: number | null;
   actor: string;
+  /** The deployable of the calling service, when a service made the call. */
+  service?: string;
   at: number;
   /** The change as JSON text, or null. */
   change: string | null;
@@ -140,8 +178,8 @@ export function appendEvent(storage: Storage, event: NewEvent): number {
   const cause = event.cause;
   const result = storage.run(
     `INSERT INTO engine_events
-       (kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, cause_schedule, depth)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       event.kind,
       event.namespace,
@@ -150,6 +188,7 @@ export function appendEvent(storage: Storage, event: NewEvent): number {
       event.seq,
       event.version,
       event.actor,
+      event.service ?? null,
       event.at,
       event.change,
       cause?.behavior ?? null,
@@ -168,6 +207,11 @@ export function appendEvent(storage: Storage, event: NewEvent): number {
   return cursor;
 }
 
+/** actorOf is who an event records as making a change: the principal's subject and, for a service's call, its deployable. */
+export function actorOf(principal: Principal): { actor: string; service?: string } {
+  return principal.service === undefined ? { actor: principal.subject } : { actor: principal.subject, service: principal.service.deployable };
+}
+
 /** nextSeq returns the sequence an instance's next event takes. */
 export function nextSeq(storage: Storage, namespace: string, schema: string, instanceId: string): number {
   const row = storage.get(
@@ -178,7 +222,7 @@ export function nextSeq(storage: Storage, namespace: string, schema: string, ins
 }
 
 /** The engine_events columns toEvent reads. */
-export const EVENT_COLUMNS = 'cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, cause_schedule, depth';
+export const EVENT_COLUMNS = 'cursor, kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth';
 
 export class EventLog {
   private readonly notifier: EventNotifier;
@@ -191,30 +235,39 @@ export class EventLog {
     this.notifier = notifierOf(storage);
   }
 
-  /** read returns the page of events after a cursor that the principal may read. */
+  /**
+   * read returns the page of events after a cursor that the principal may
+   * read and the filters keep. From `head` it returns no events, and the
+   * log's last cursor as next.
+   */
   read(principal: Principal, options: ReadEventsOptions = {}): EventPage {
     checkPrincipal(principal);
     const namespace = this.namespaces.resolve(options.namespace);
-    const after = options.after ?? 0;
-    if (!Number.isSafeInteger(after) || after < 0) {
-      throw new EngineError('invalid_argument', `an event cursor is a non-negative integer, got ${String(after)}`);
+    const fromHead = options.after === 'head';
+    const after = fromHead ? 0 : (options.after ?? 0);
+    if (typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0) {
+      throw new EngineError('invalid_argument', `an event cursor is a non-negative integer or head, got ${String(after)}`);
     }
     const limit = pageSize(options.limit);
+    const keeps = eventFilter(options);
     if (options.schema !== undefined) {
       checkSchemaName(options.schema);
       this.access.require(principal, 'read', namespace, options.schema);
     }
+    if (options.instanceId !== undefined && options.schema === undefined) {
+      throw new EngineError('invalid_argument', 'reading one instance\'s events needs its schema');
+    }
+    if (fromHead) {
+      return { events: [], next: this.head(), more: false };
+    }
     let rows: Row[];
     if (options.instanceId !== undefined) {
-      if (options.schema === undefined) {
-        throw new EngineError('invalid_argument', 'reading one instance\'s events needs its schema');
-      }
       // One instance's events come from its own index, in sequence order,
       // which is their cursor order; the read scans that instance only.
       rows = this.storage.all(
         `SELECT ${EVENT_COLUMNS} FROM engine_events INDEXED BY engine_events_instance
          WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor > ? ORDER BY seq LIMIT ?`,
-        [namespace, options.schema, options.instanceId, after, limit + 1]
+        [namespace, options.schema as string, options.instanceId, after, limit + 1]
       );
     } else {
       rows = this.namespaceRows(namespace, options.schema, after, limit + 1);
@@ -223,18 +276,29 @@ export class EventLog {
     const readable = new Map<string, boolean>();
     const events: EngineEvent[] = [];
     for (const row of scanned) {
-      const schema = String(row.schema);
+      const event = keeps(row);
+      if (event === undefined) {
+        continue;
+      }
+      const schema = event.schema;
       let allowed = readable.get(schema);
       if (allowed === undefined) {
         allowed = options.schema !== undefined || this.access.allows(principal, 'read', namespace, schema);
         readable.set(schema, allowed);
       }
       if (allowed) {
-        events.push(toEvent(row));
+        events.push(event);
       }
     }
+    // Next is past every event scanned, kept or not.
     const last = scanned[scanned.length - 1];
     return { events, next: last ? Number(last.cursor) : after, more: rows.length > limit };
+  }
+
+  /** head returns the cursor of the log's last event, 0 for an empty log. */
+  head(): number {
+    const row = this.storage.get('SELECT MAX(cursor) AS head FROM engine_events');
+    return row?.head === null || row?.head === undefined ? 0 : Number(row.head);
   }
 
   /**
@@ -278,6 +342,64 @@ export class EventLog {
   }
 }
 
+const OPERATION_NAME = /^[a-z][A-Za-z0-9]*$/;
+
+/**
+ * eventFilter checks a read's kinds, behaviors and exclude and returns
+ * what keeps a scanned row: its event, or undefined for one a filter
+ * drops. Kinds are compared before the change is parsed.
+ */
+function eventFilter(options: ReadEventsOptions): (row: Row) => EngineEvent | undefined {
+  const kinds = filterList(options.kinds, 'kinds', 'event kinds', (kind) => EVENT_KINDS.includes(kind as EventKind), `one of ${EVENT_KINDS.join(', ')}`);
+  const behaviors = filterList(options.behaviors, 'behaviors', 'behavior names', (name) => BEHAVIOR_NAME.test(name), 'a behavior name');
+  const exclude = filterList(options.exclude, 'exclude', 'operation names', (name) => OPERATION_NAME.test(name), 'an operation name, camelCase', true);
+  return (row) => {
+    const kind = String(row.kind) as EventKind;
+    if (kinds !== undefined && !kinds.has(kind)) {
+      return undefined;
+    }
+    if (kind !== 'operation' && behaviors !== undefined) {
+      return undefined;
+    }
+    const event = toEvent(row);
+    if (kind === 'operation') {
+      const change = event.change as OperationChange;
+      if ((behaviors !== undefined && !behaviors.has(change.behavior)) || exclude?.has(change.operation)) {
+        return undefined;
+      }
+    }
+    return event;
+  };
+}
+
+// filterList checks one of a read's filters: absent, or a list of names
+// each the predicate takes; an empty list keeps nothing, so only exclude,
+// which drops nothing then, may be empty.
+function filterList(
+  value: readonly string[] | undefined,
+  key: string,
+  what: string,
+  valid: (name: string) => boolean,
+  rule: string,
+  emptyAllowed = false
+): Set<string> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new EngineError('invalid_argument', `${key} is a list of ${what}`);
+  }
+  if (value.length === 0 && !emptyAllowed) {
+    throw new EngineError('invalid_argument', `${key} lists no ${what}, so it would keep no event; leave it out to keep every one`);
+  }
+  for (const name of value) {
+    if (typeof name !== 'string' || !valid(name)) {
+      throw new EngineError('invalid_argument', `${key}: ${JSON.stringify(name)} is not ${rule}`);
+    }
+  }
+  return value.length === 0 ? undefined : new Set(value);
+}
+
 /** toEvent reads an engine_events row of EVENT_COLUMNS. */
 export function toEvent(row: Row): EngineEvent {
   const event: EngineEvent = {
@@ -287,8 +409,9 @@ export function toEvent(row: Row): EngineEvent {
     schema: String(row.schema),
     instanceId: row.instance_id === null ? null : String(row.instance_id),
     seq: row.seq === null ? null : Number(row.seq),
-    version: Number(row.version),
+    version: row.version === null ? null : Number(row.version),
     actor: String(row.actor),
+    ...(row.service === null || row.service === undefined ? {} : { service: String(row.service) }),
     at: Number(row.at),
     change: row.change === null ? null : (JSON.parse(String(row.change)) as unknown),
   };

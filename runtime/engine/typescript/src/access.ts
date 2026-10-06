@@ -12,6 +12,14 @@ Principal has the shape of the HTTP runtime's (@superschematic/http-runtime),
 so a principal its Authenticator returns can be passed on as it is. This
 entry point does not import that package, which brings Hono as a peer
 dependency; only the engine's ./http entry point does (http/app.ts).
+
+A call a service makes (D37) carries the calling service in `service`,
+beside the end user it acts for, whose subject and permissions the
+principal keeps. A service that brings no end user stands in for one: its
+principal's subject names the service (`service:<deployable>`,
+servicePrincipal) and it holds no permissions, since services hold none
+(D37). The policy and the behaviors see the service through the
+principal, and a behavior's can() is false for a service standing in.
 */
 
 import { EngineError } from './errors.js';
@@ -23,6 +31,43 @@ export interface Principal {
   readonly permissions: readonly string[];
   /** Verified claims for the policy's own checks. */
   readonly claims?: Readonly<Record<string, unknown>>;
+  /**
+   * The service that made the call (D37): beside the end user it acts
+   * for, or standing in for one. Absent for a call no service made.
+   */
+  readonly service?: PrincipalService;
+}
+
+/** The calling service of a principal: the HTTP runtime's ServiceCaller, and whether it stands in for an end user. */
+export interface PrincipalService {
+  /** The calling deployable's name. */
+  readonly deployable: string;
+  /** The API services it serves. */
+  readonly serves: readonly string[];
+  /** Its credential's subject at its issuer. */
+  readonly subject: string;
+  /**
+   * True when no end user came with the call: the principal is the
+   * service's own (servicePrincipal), with no permissions. False when the
+   * principal is the end user the service acts for.
+   */
+  readonly standsIn: boolean;
+}
+
+/** The prefix of a service's subject when it stands in for an end user. */
+export const SERVICE_SUBJECT_PREFIX = 'service:';
+
+/**
+ * servicePrincipal is the principal of a service that brings no end user
+ * and so stands in for one (D37): its subject is `service:<deployable>`,
+ * apart from any end user's, and it holds no permissions.
+ */
+export function servicePrincipal(caller: { readonly deployable: string; readonly serves: readonly string[]; readonly subject: string }): Principal {
+  return {
+    subject: `${SERVICE_SUBJECT_PREFIX}${caller.deployable}`,
+    permissions: [],
+    service: { deployable: caller.deployable, serves: [...caller.serves], subject: caller.subject, standsIn: true },
+  };
 }
 
 export type Action = 'read' | 'write' | 'define' | 'publish';
@@ -45,7 +90,11 @@ export type AccessPolicy = (request: AccessRequest) => boolean;
 /** allowAll allows everything: for tests and local use. */
 export const allowAll: AccessPolicy = () => true;
 
-/** checkPrincipal refuses a call without a principal that names its subject. */
+/**
+ * checkPrincipal refuses a call without a principal that names its
+ * subject, and one whose service is malformed or, standing in for an end
+ * user, holds permissions.
+ */
 export function checkPrincipal(principal: Principal): void {
   if (
     typeof principal !== 'object' ||
@@ -55,6 +104,29 @@ export function checkPrincipal(principal: Principal): void {
   ) {
     throw new EngineError('invalid_argument', 'an engine call needs a principal with a subject');
   }
+  const service: unknown = principal.service;
+  if (service === undefined) {
+    return;
+  }
+  const { deployable, serves, subject, standsIn } = (typeof service === 'object' && service !== null ? service : {}) as Partial<PrincipalService>;
+  if (
+    typeof deployable !== 'string' ||
+    deployable === '' ||
+    !Array.isArray(serves) ||
+    !serves.every((api) => typeof api === 'string') ||
+    typeof subject !== 'string' ||
+    typeof standsIn !== 'boolean'
+  ) {
+    throw new EngineError('invalid_argument', "a principal's service is { deployable, serves, subject, standsIn }");
+  }
+  if (standsIn && (!Array.isArray(principal.permissions) || principal.permissions.length > 0)) {
+    throw new EngineError('invalid_argument', `service ${deployable} stands in for an end user and holds no permissions (D37)`);
+  }
+}
+
+/** standsIn reports whether a principal is a service standing in for an end user. */
+export function standsIn(principal: Principal): boolean {
+  return principal.service?.standsIn === true;
 }
 
 /** Access asks the deployment's policy and throws forbidden on a refusal. */

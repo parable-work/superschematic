@@ -7,6 +7,7 @@ before it touches the catalog (catalog.ts), which holds the rules.
 import { checkPrincipal, type Access, type Principal } from '../access.js';
 import type { BehaviorDeclaration } from '../behaviors/declaration.js';
 import { EngineError, type ValidationIssue } from '../errors.js';
+import { actorOf } from '../events/log.js';
 import type { Namespaces } from '../namespaces.js';
 import type { PublishResult, ReadCheck, SchemaCatalog, SchemaRecord, SchemaSummary } from './catalog.js';
 import { checkSchemaName } from './document.js';
@@ -45,22 +46,23 @@ export class SchemaRegistry {
 
   /**
    * define stores a schema document as the draft of its name in a
-   * namespace, replacing the draft before it. input is the document's JSON
-   * text, or the document as a value.
+   * namespace, replacing the draft before it, and appends a define event
+   * with the draft's hash. input is the document's JSON text, or the
+   * document as a value.
    */
   define(principal: Principal, input: string | Record<string, unknown>, options: DefineOptions = {}): SchemaRecord {
     checkPrincipal(principal);
     const namespace = this.namespaces.resolve(options.namespace);
     const model = this.catalog.read(input, options.source ?? 'schema');
     this.access.require(principal, 'define', namespace, model.name);
-    return this.catalog.define(model, namespace, principal.subject, this.reads(principal, namespace), options.source ?? 'schema');
+    return this.catalog.define(model, namespace, actorOf(principal), this.reads(principal, namespace), options.source ?? 'schema');
   }
 
   /** publish makes the draft of a name the next live version. */
   publish(principal: Principal, name: string, options: SchemaTarget = {}): PublishResult {
     const namespace = this.target(principal, name, options);
     this.access.require(principal, 'publish', namespace, name);
-    return this.catalog.publish(name, namespace, principal.subject, this.reads(principal, namespace));
+    return this.catalog.publish(name, namespace, actorOf(principal), this.reads(principal, namespace));
   }
 
   // reads is the check a define or publish asks before a behavior's

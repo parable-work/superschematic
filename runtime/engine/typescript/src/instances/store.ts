@@ -65,7 +65,7 @@ import { deepFreeze } from '../behaviors/json.js';
 import type { OperationSpec } from '../behaviors/registry.js';
 import { synchronous } from '../behaviors/storage.js';
 import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, type ValidationIssue } from '../errors.js';
-import { appendEvent, nextSeq, type EngineEvent, type OperationChange } from '../events/log.js';
+import { actorOf, appendEvent, nextSeq, type EngineEvent, type OperationChange } from '../events/log.js';
 import type { Namespaces } from '../namespaces.js';
 import { pageSize } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, VersionRuntime } from '../registry/catalog.js';
@@ -277,7 +277,7 @@ export class InstanceStore {
         instanceId: id,
         seq,
         version: record.version as number,
-        actor: subject,
+        ...actorOf(chain.principal),
         at: chain.now,
         change: JSON.stringify(instance.data),
         cause: chain.cause,
@@ -377,7 +377,7 @@ export class InstanceStore {
           instanceId: id,
           seq,
           version: record.version as number,
-          actor: principal.subject,
+          ...actorOf(principal),
           at: chain.now,
           change: JSON.stringify({ ...frozenPatch, ...diffPatch(before, after) }),
           cause: chain.cause,
@@ -423,7 +423,7 @@ export class InstanceStore {
           instanceId: id,
           seq: Number(row.seq) + 1,
           version: Number(row.version),
-          actor: principal.subject,
+          ...actorOf(principal),
           at: chain.now,
           change: null,
           cause: chain.cause,
@@ -586,7 +586,7 @@ export class InstanceStore {
         instanceId: id,
         seq,
         version: record.version as number,
-        actor: chain.principal.subject,
+        ...actorOf(chain.principal),
         at: chain.now,
         change: JSON.stringify(operationChange),
         cause: chain.cause,
