@@ -557,9 +557,11 @@ Cloud SQL connector configuration is refused at startup. And a server
 whose API has a `@requireService` or `@allowService` clause refuses to
 start, since no connector derives the callee's service-auth field yet.
 
-No `go.sum` is generated: run `go mod tidy` before `go build`, or build
-with `GOFLAGS=-mod=mod`. The Dockerfile builds from the repository root,
-the parent of the schemas root, after the stack's services are built:
+No `go.sum` is generated: build with `go build -mod=mod`, which fills it.
+`go mod tidy` can fail, because it also resolves the imports of the
+implementation module's tests, which the server's `go.mod` does not
+replace. The Dockerfile builds from the repository root, the parent of
+the schemas root, after the stack's services are built:
 
 ```sh
 docker build -f schemas/dist/server/shop-stack/Orders/Dockerfile .
