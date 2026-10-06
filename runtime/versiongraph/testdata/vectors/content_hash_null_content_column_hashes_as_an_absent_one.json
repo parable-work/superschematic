@@ -1,5 +1,5 @@
 {
-  "name": "content_hash_absent_content_column_is_null",
+  "name": "content_hash_null_content_column_hashes_as_an_absent_one",
   "op": "content_hash",
   "input": {
     "descriptor": {
@@ -65,7 +65,10 @@
           "created_at": "2026-09-01T10:00:00+00:00",
           "deleted_on_ref": false,
           "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "extras": null,
           "id": "00000000-0000-4000-8000-00000000d001",
+          "inputs": null,
+          "note": null,
           "position": 10,
           "recipe_id": "00000000-0000-4000-8000-000000000100",
           "ref": "00000000-0000-4000-8000-0000000f0001",
@@ -77,6 +80,6 @@
     }
   },
   "expect": {
-    "contentHash": "8ee9db305b6392c0520046d0a8eaf2f4f8741cda474c0d47a9b1f5350afa3719"
+    "contentHash": "4303fcc78cd8c9313044abd5b03faf11c29a26348c910dff3811045802df1fbd"
   }
 }
