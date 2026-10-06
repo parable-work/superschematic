@@ -3629,27 +3629,6 @@ hand wiring until a later change moves it onto the entrypoint.
 
 The rule is reversible until the first release.
 
-### D45, amended: a run's platform credentials are the ones its DNS platform resolves
-
-D45 named `stackdeploy.CredentialsOf` the one place the deploy learns of a
-platform credential, and set aside credentials declared on the DNS
-platform's spec, since a secret's name follows the zone. The Cloudflare DNS
-platform (D30, amended) declares them as a function of the environment's
-DNS values, which resolution calls, so the name follows the zone after all,
-and resolution writes them into `environment.json` under
-`dns.credentials`. Putting the two branches together settled the seam.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `CredentialsOf` returns the resolved environment's `dns.credentials`, each mapped to the deploy's `registry.Credential`. Resolution writes `ir.DNSCredential`, which a DNS platform's `Credentials` returns; the deploy reads `registry.Credential`, which a credential of another platform kind can join later. | One type for both, which ties the deploy's seam to the DNS platform's spec; the deploy calling the DNS platform's `Credentials` itself, which would resolve the environment a second time |
-
-Status: built. extensions/cloudflare's `TestBootstrapAndDeployReadTheToken`
-bootstraps and deploys the shop's Staging, its records on Cloudflare, on
-`stack/stacktest`'s fake target: bootstrap hands the target the zone's
-token secret and stores its value, and the deploy hands it to the
-provisioner in `CLOUDFLARE_API_TOKEN`.
-
-The rule is reversible until the first release.
 ### D14, amended: a scalar that holds JSON says which JSON
 
 A validator decides that a scalar holds JSON only from its `json_schema`
@@ -3752,3 +3731,25 @@ extension linked; converts it back to the same JSON; and checks that a
 catalog that names no package for `Ext` is refused. acme's
 `TestAcmePhotoRoundTripsThroughTypeScript` does the same for a Catalog
 schema with an `Acme.Photo` field, and its upload metadata survives.
+
+### D45, amended: a run's platform credentials are the ones its DNS platform resolves
+
+D45 named `stackdeploy.CredentialsOf` the one place the deploy learns of a
+platform credential, and set aside credentials declared on the DNS
+platform's spec, since a secret's name follows the zone. The Cloudflare DNS
+platform (D30, amended) declares them as a function of the environment's
+DNS values, which resolution calls, so the name follows the zone after all,
+and resolution writes them into `environment.json` under
+`dns.credentials`. Putting the two branches together settled the seam.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `CredentialsOf` returns the resolved environment's `dns.credentials`, each mapped to the deploy's `registry.Credential`. Resolution writes `ir.DNSCredential`, which a DNS platform's `Credentials` returns; the deploy reads `registry.Credential`, which a credential of another platform kind can join later. | One type for both, which ties the deploy's seam to the DNS platform's spec; the deploy calling the DNS platform's `Credentials` itself, which would resolve the environment a second time |
+
+Status: built. extensions/cloudflare's `TestBootstrapAndDeployReadTheToken`
+bootstraps and deploys the shop's Staging, its records on Cloudflare, on
+`stack/stacktest`'s fake target: bootstrap hands the target the zone's
+token secret and stores its value, and the deploy hands it to the
+provisioner in `CLOUDFLARE_API_TOKEN`.
+
+The rule is reversible until the first release.
