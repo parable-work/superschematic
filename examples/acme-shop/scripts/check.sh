@@ -70,7 +70,10 @@ capture() {
 }
 
 echo "==> core binary (no extension)"
-(cd "$REPO_ROOT" && go build -o "$OUT/superschematic" ./cmd/superschematic)
+# The core with no extension linked, under the name the docs pages run, so
+# the example proves the core alone builds it. The installed binary
+# (cmd/superschematic) is the same CLI with the official extensions linked.
+(cd "$REPO_ROOT" && go build -o "$OUT/superschematic" ./internal/cmd/superschematic-core)
 # The core with the Topcoat extension, a module of its own: only the
 # Topcoat step below uses it.
 (cd "$REPO_ROOT/extensions/topcoat" && go build -o "$OUT/superschematic-topcoat" ./cmd/superschematic-topcoat)

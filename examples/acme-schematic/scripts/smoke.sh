@@ -137,7 +137,9 @@ go_module_compiles() {
 }
 
 echo "==> core binary (no extension)"
-(cd "$REPO_ROOT" && go build -o "$OUT/superschematic" ./cmd/superschematic)
+# The core with no extension linked, not the installed binary
+# (cmd/superschematic), which links the official extensions.
+(cd "$REPO_ROOT" && go build -o "$OUT/superschematic" ./internal/cmd/superschematic-core)
 
 echo "==> acme module: build, vet, test, binary"
 cd "$EXAMPLE_DIR" || exit 1
