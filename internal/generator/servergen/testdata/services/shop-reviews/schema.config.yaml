@@ -1,0 +1,11 @@
+# Served with shop-orders by Storefront, on the same database, which it
+# takes from its one DB-kind dependency. It has no @envVars type, so its
+# config holds only the database's field.
+name: shop-reviews
+kind: API
+dependencies:
+  - { name: shop-db, kind: DB }
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }

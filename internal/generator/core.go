@@ -3,6 +3,7 @@ package generator
 import (
 	"encoding/json"
 
+	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack/local"
@@ -135,6 +136,21 @@ func RegisterCore(reg *registry.Registry) error {
 			},
 			Generate: func(c registry.GenerateContext) error {
 				return run{c}.measure("output.stack", func() error { return stackgen.Generate(c) })
+			},
+		},
+		{
+			// The Go entrypoint of each server of the stack, a module with
+			// its Dockerfile at server/<stack>/<server>, and the scaffold of
+			// each served API's implementation that is missing
+			// (docs/stack-model.md, sections 8.1, 8.2 and 8.5).
+			Name:  serverGenerator,
+			Kinds: []string{string(ir.SchemaKindStack)},
+			Dirs: func(c registry.GenerateContext) []string {
+				return []string{servergen.StackDir(c.Options.OutputRoot, c.Config.Name)}
+			},
+			Generate: func(c registry.GenerateContext) error {
+				r := run{c}
+				return r.measure("output.server", r.generateServers)
 			},
 		},
 	}
