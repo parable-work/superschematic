@@ -12,7 +12,7 @@ The extension adds one of each registration surface:
 |---|---|---|
 | Kind | `Catalog`, with a `catalog` generator | `ext/kind.go` |
 | Decorators | `@shelf` (with an argument) and `@feedKey` (a marker) from `@acme/schema`, into the field's `extensions.acme` slot; `@crossSell`, whose argument names a class, into the type's | `ext/decorator.go`, `ext/cross_sell.go`, `packages/schema` |
-| Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar that `shop-catalog` bounds with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
+| Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar that `shop-catalog` bounds with `uploadMaxBytes`, and the package its brand is imported from | `ext/scalars.go`, `packages/schema` |
 | Document | `catalog.config.yaml` next to a Catalog schema, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
@@ -390,7 +390,11 @@ catalog, err := registry.ScalarCatalogWithUploads(registry.ScalarCatalogOf(rows)
 if err != nil {
 	return err
 }
-return r.RegisterScalars(Name, catalog)
+named, err := registry.ScalarCatalogWithNpmPackages(catalog, map[string]string{"Acme": "@acme/schema"})
+if err != nil {
+	return err
+}
+return r.RegisterScalars(Name, named)
 ```
 
 `@acme/schema` exports the brand, `Acme.Photo`, and `shop-catalog`'s
@@ -399,6 +403,14 @@ return r.RegisterScalars(Name, catalog)
 ```ts
 photo: Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>;
 ```
+
+A `ScalarMetadata` row has no field for the package a brand lives in
+either, so the catalog names `@acme/schema` for the `Acme` namespace.
+`format --to=ts` imports `Acme` from it; superscalar, where it imports
+the core namespaces from, has no `Acme`. `TestAcmePhotoRoundTripsThroughTypeScript`
+writes a Catalog schema with an `Acme.Photo` field to TypeScript and loads
+it back. Only a Catalog schema can: `@acme/schema`'s decorators are all
+Catalog's, so a schema of another kind may not import it.
 
 The loader hydrates the upload metadata onto the scalar, then checks the
 bound: it must be positive and name a single file-upload scalar. The smoke

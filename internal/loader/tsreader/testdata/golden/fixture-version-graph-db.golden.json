@@ -13,6 +13,7 @@
       "name": "Generic.JSON",
       "languagePrimitive": "object",
       "typeMappings": {
+        "json_schema": "any",
         "sql": "JSONB"
       }
     },

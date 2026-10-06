@@ -12,13 +12,29 @@ meta-schema. On top of the loader, the engine requires:
 - field types the schema runtime validates: a builtin primitive, a scalar,
   an enum or a type of the document, alone, as a list or a list of lists.
   A union or a map is refused, since the runtime checks neither;
+- each scalar's map key is its name, as the Go data-form reader requires;
+- a scalar the document declares and the builtin catalog does not hold,
+  when its language primitive is `object`, is one the schema runtime
+  holds to JSON: it is no file upload, whatever its mapping, and its
+  `json_schema` type mapping is `any`, or `object` or `array` with no
+  pattern and no length (objectScalarIssue), as the Go loader requires of
+  a scalar once the catalog has filled it in. The engine knows only the
+  builtin catalog, so it reads such a scalar as the document writes it;
 - behaviors the engine has implementations for, composed as the compiler's
   loader requires (behaviors/composition.ts), which the caller checks
   through readSchema's compose argument.
 */
 
-import { BUILTIN_SCALARS, SchemaFileError, type LoadedSchemaFile, type SchemaFileLoader } from '@superschematic/schema-runtime';
-import type { Document, FieldDef, TypeDef, TypeRef } from '@superschematic/schema-ir/schema-file';
+import {
+  BUILTIN_SCALARS,
+  SchemaFileError,
+  isAnyJSONScalar,
+  parseSchemaIR,
+  structuredJSONType,
+  type LoadedSchemaFile,
+  type SchemaFileLoader,
+} from '@superschematic/schema-runtime';
+import type { Document, FieldDef, ScalarDef, TypeDef, TypeRef } from '@superschematic/schema-ir/schema-file';
 
 import { EngineError, SchemaDocumentError, type SchemaIssue } from '../errors.js';
 
@@ -98,6 +114,27 @@ export function readSchema(
       path: '/operationSets',
       message: 'a schema declares no operations; the engine serves create, get, list, update and delete, and behaviors add their own',
     });
+  }
+  // The Go data-form reader refuses a scalar whose map key is not its name
+  // (schemafile.keyMatchesName), and the schema runtime keys a scalar by
+  // its name, not its key.
+  const mismatched = new Set<string>();
+  for (const [key, scalar] of Object.entries(document.scalars ?? {})) {
+    if (scalar.name !== undefined && scalar.name !== '' && scalar.name !== key) {
+      mismatched.add(key);
+      issues.push({
+        path: pointer('scalars', key),
+        message: `scalar map key ${JSON.stringify(key)} does not match the definition name ${JSON.stringify(scalar.name)}`,
+      });
+    }
+  }
+  // A catalog scalar is the catalog's, whatever the document declares for
+  // it, and no builtin row is an object scalar without a JSON mapping.
+  for (const [scalarName, scalar] of Object.entries(runtimeDocument(document).scalars ?? {})) {
+    const issue = mismatched.has(scalarName) ? undefined : objectScalarIssue(scalarName, scalar);
+    if (issue) {
+      issues.push({ path: pointer('scalars', scalarName), message: issue });
+    }
   }
   const types = document.types ?? {};
   const instanceType = name === undefined ? undefined : instanceTypeOf(document, name);
@@ -224,6 +261,66 @@ export function runtimeDocument(document: Document): Document {
     return document;
   }
   return { ...document, scalars: Object.fromEntries(own.map((name) => [name, scalars[name]])) };
+}
+
+/**
+ * objectScalarIssue is the Go IR's ScalarDef.ObjectJSONError: why a scalar
+ * whose language primitive is object but which the schema runtime does not
+ * hold to JSON is refused, or undefined for any other scalar. The runtime
+ * holds a scalar's values to any JSON value, a JSON object or a JSON array
+ * only by isAnyJSONScalar and structuredJSONType, read here of the scalar as
+ * the runtime parses it, and checks every other one as a string, while every
+ * generated type holds the scalar as an object.
+ * ir/testdata/object_scalar_errors.json holds the messages the Go loader
+ * gives too.
+ */
+export function objectScalarIssue(name: string, scalar: ScalarDef): string | undefined {
+  if (scalar.languagePrimitive !== 'object') {
+    return undefined;
+  }
+  // A file part is no JSON, whatever the mapping says.
+  if (scalar.fileUpload) {
+    return (
+      `scalar ${name} is a file-upload scalar with language primitive object: a file part is not JSON, so ` +
+      'an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)'
+    );
+  }
+  // The runtime keys a parsed scalar by its definition's name.
+  const runtime = (parseSchemaIR({ scalars: { [name]: scalar } }).scalars ?? {})[scalarKey(scalar.name || name)];
+  if (runtime !== undefined && (isAnyJSONScalar(runtime) || structuredJSONType(runtime) !== '')) {
+    return undefined;
+  }
+  const jsonType = scalar.typeMappings?.json_schema;
+  const rules: string[] = [];
+  const names: string[] = [];
+  if (scalar.pattern) {
+    rules.push(`pattern ${JSON.stringify(scalar.pattern)}`);
+    names.push('pattern');
+  }
+  if ((scalar.minLength ?? 0) > 0) {
+    rules.push(`minLength ${scalar.minLength}`);
+    names.push('minLength');
+  }
+  if ((scalar.maxLength ?? 0) > 0) {
+    rules.push(`maxLength ${scalar.maxLength}`);
+    names.push('maxLength');
+  }
+  if ((jsonType === 'object' || jsonType === 'array') && rules.length > 0) {
+    return (
+      `scalar ${name} has language primitive object and json_schema type mapping ${jsonType}, but its ${joinList(rules)} ` +
+      `${rules.length > 1 ? 'are rules' : 'is a rule'} on a string, so the validators check its values as strings: drop the ${joinList(names)}`
+    );
+  }
+  return (
+    `scalar ${name} has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds: ` +
+    'add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row), ' +
+    "use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type"
+  );
+}
+
+// joinList joins items as a sentence lists them: "a", "a and b", "a, b and c".
+function joinList(items: string[]): string {
+  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
 /** pointer writes a JSON pointer from its tokens. */

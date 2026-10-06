@@ -8,6 +8,7 @@ import { afterEach, describe, test } from 'node:test';
 import { loadSchemaFile } from '@superschematic/schema-runtime';
 
 import { EngineError, SchemaDocumentError, type Engine } from '../dist/index.js';
+import { objectScalarIssue } from '../dist/registry/document.js';
 import { alice, cleanup, clone, drivers, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
@@ -237,6 +238,104 @@ for (const driver of drivers) {
       assert.deepEqual(engine.schemas.list(alice), []);
       // Without the behavior, the deployment's meta-schema loads the document.
       assert.equal(engine.schemas.define(alice, orderDocument()).name, 'Order');
+    });
+
+    test('an object scalar the document declares says which JSON it holds, or define and publish refuse it', () => {
+      const engine = open();
+      const blob = (name: string, typeMappings?: Record<string, string>, rules: Record<string, unknown> = {}) =>
+        schemaDocument(name, [{ name: 'payload', typeRef: { name: 'Acme.Blob' } }], {
+          scalars: { 'Acme.Blob': { name: 'Acme.Blob', languagePrimitive: 'object', ...rules, ...(typeMappings ? { typeMappings } : {}) } },
+        });
+      const refused = [
+        {
+          path: '/scalars/Acme.Blob',
+          message:
+            'scalar Acme.Blob has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds: ' +
+            'add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row), ' +
+            "use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type",
+        },
+      ];
+      assert.deepEqual(issuesOf(() => engine.schemas.define(alice, blob('Reading'))), refused);
+      assert.deepEqual(issuesOf(() => engine.schemas.define(alice, blob('Reading', { json_schema: 'string', sql: 'JSONB' }))), refused);
+      // A length is a rule on a string, so with one the runtime does not
+      // hold the value to a JSON object.
+      assert.deepEqual(issuesOf(() => engine.schemas.define(alice, blob('Reading', { json_schema: 'object' }, { maxLength: 10 }))), [
+        {
+          path: '/scalars/Acme.Blob',
+          message:
+            'scalar Acme.Blob has language primitive object and json_schema type mapping object, but its maxLength 10 is a rule on a string, ' +
+            'so the validators check its values as strings: drop the maxLength',
+        },
+      ]);
+      assert.deepEqual(engine.schemas.list(alice), []);
+
+      // A draft an engine stored before the rule is refused at publish,
+      // which loads it again.
+      const { canonical } = loadSchemaFile(JSON.stringify(blob('Reading')));
+      engine.storage.run(
+        'INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by) VALUES (?, ?, 0, ?, ?, ?, ?)',
+        ['default', 'Reading', canonical, createHash('sha256').update(canonical).digest('hex'), 1, 'alice']
+      );
+      assert.deepEqual(issuesOf(() => engine.schemas.publish(alice, 'Reading')), refused);
+      assert.equal(engine.schemas.live(alice, 'Reading'), undefined);
+
+      // With the mapping, the schema runtime holds the value to that JSON.
+      for (const [name, jsonType, value, wrong] of [
+        ['ObjectBlob', 'object', { a: [1, 'b'] }, [1]],
+        ['ArrayBlob', 'array', [1, 'b'], { a: 1 }],
+        ['AnyBlob', 'any', 'text', undefined],
+      ] as const) {
+        engine.schemas.define(alice, blob(name, { json_schema: jsonType }));
+        assert.equal(engine.schemas.publish(alice, name).version, 1, name);
+        assert.deepEqual(engine.schemas.validate(alice, name, { payload: value }), [], name);
+        if (wrong !== undefined) {
+          assert.deepEqual(
+            engine.schemas.validate(alice, name, { payload: wrong }).map((issue) => [issue.path, issue.rule]),
+            [['payload', 'type']],
+            name
+          );
+        }
+      }
+    });
+
+    test("a scalar whose map key is not its name is refused, as the Go reader refuses it, before its JSON is judged", () => {
+      const engine = open();
+      const document = schemaDocument('Reading', [{ name: 'payload', typeRef: { name: 'Acme.Blob' } }], {
+        scalars: { 'Acme.Blob': { name: 'Acme.Other', languagePrimitive: 'object', typeMappings: { json_schema: 'object' } } },
+      });
+      assert.deepEqual(issuesOf(() => engine.schemas.define(alice, document)), [
+        { path: '/scalars/Acme.Blob', message: 'scalar map key "Acme.Blob" does not match the definition name "Acme.Other"' },
+      ]);
+      assert.deepEqual(engine.schemas.list(alice), []);
+    });
+
+    test("an object scalar's refusal is the Go loader's, word for word", () => {
+      // ir/testdata/object_scalar_errors.json: the cases the Go IR's
+      // ScalarDef.ObjectJSONError tests read too.
+      const { cases } = JSON.parse(readFileSync(new URL('../../../../ir/testdata/object_scalar_errors.json', import.meta.url), 'utf8')) as {
+        cases: Array<{ case: string; scalar: { name: string } & Record<string, unknown>; error: string | null }>;
+      };
+      assert.ok(cases.length > 0);
+      for (const { case: name, scalar, error } of cases) {
+        assert.equal(objectScalarIssue(scalar.name, scalar as never), error ?? undefined, name);
+      }
+    });
+
+    test('an extension JSON scalar, as format --to=json writes it, is defined and published', () => {
+      // cli/testdata/format/ext-json-scalar.schema.json is what format
+      // --to=json writes of a TypeScript service whose extension catalog
+      // gives Ext.Doc the Object primitive and the json_schema mapping
+      // object; the Go test that writes it keeps it current. The engine
+      // knows only the builtin catalog, so it reads Ext.Doc as written.
+      const engine = open();
+      const text = readFileSync(new URL('../../../../cli/testdata/format/ext-json-scalar.schema.json', import.meta.url), 'utf8');
+      engine.schemas.define(alice, text);
+      assert.equal(engine.schemas.publish(alice, 'ext-json-scalar').version, 1);
+      assert.deepEqual(engine.schemas.validate(alice, 'ext-json-scalar', { payload: { a: 1 }, meta: [1, 'b'] }), []);
+      assert.deepEqual(
+        engine.schemas.validate(alice, 'ext-json-scalar', { payload: [1], meta: 7 }).map((issue) => [issue.path, issue.rule]),
+        [['payload', 'type']]
+      );
     });
 
     test('with the core meta-schema, the loader itself refuses a behavior the core does not declare', () => {

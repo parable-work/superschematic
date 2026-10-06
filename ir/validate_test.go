@@ -1,6 +1,9 @@
 package ir
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -32,9 +35,11 @@ func TestValidate_CleanSchema(t *testing.T) {
 func TestValidateHydrated_UploadMaxBytesRequiresPositiveFileUploadScalar(t *testing.T) {
 	limit := int64(64 * 1024 * 1024)
 	s := newTestSchema()
+	// The String primitive, as every upload row in a catalog here has it
+	// (Acme.Photo, Media.Photo): ObjectJSONError refuses an object one.
 	s.Scalars["Media.File"] = &ScalarDef{
 		Name:              "Media.File",
-		LanguagePrimitive: LanguageObject,
+		LanguagePrimitive: LanguageString,
 		FileUpload:        &FileUploadConfig{MaxSize: 1024},
 	}
 	s.Types["User"].Fields = append(s.Types["User"].Fields, &FieldDef{
@@ -62,6 +67,73 @@ func TestValidateHydrated_UploadMaxBytesRequiresPositiveFileUploadScalar(t *test
 	s.Types["User"].Fields[1].TypeRef = TypeRef{Name: "Identity.UUID"}
 	if errs := s.ValidateHydrated(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "User.archive uploadMaxBytes requires a file-upload scalar") {
 		t.Fatalf("non-upload bound errors = %v, want one file-upload scalar error", errs)
+	}
+}
+
+// objectScalarCases are ir/testdata/object_scalar_errors.json: scalars with
+// the object language primitive and the error each one gets. The engine's
+// tests read the same file, so the two messages cannot drift.
+func objectScalarCases(t *testing.T) []struct {
+	Case   string     `json:"case"`
+	Scalar *ScalarDef `json:"scalar"`
+	Error  *string    `json:"error"`
+} {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "object_scalar_errors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Cases []struct {
+			Case   string     `json:"case"`
+			Scalar *ScalarDef `json:"scalar"`
+			Error  *string    `json:"error"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Cases) == 0 {
+		t.Fatal("object_scalar_errors.json has no cases")
+	}
+	return file.Cases
+}
+
+// TestScalarDef_ObjectJSONError: an object scalar the validators do not
+// hold to JSON (IsAnyJSON, StructuredJSONType) gets the message its cause
+// calls for, word for word, and any other scalar none.
+func TestScalarDef_ObjectJSONError(t *testing.T) {
+	for _, tc := range objectScalarCases(t) {
+		t.Run(tc.Case, func(t *testing.T) {
+			err := tc.Scalar.ObjectJSONError()
+			switch {
+			case tc.Error == nil && err != nil:
+				t.Fatalf("ObjectJSONError() = %v, want none", err)
+			case tc.Error != nil && (err == nil || err.Error() != *tc.Error):
+				t.Fatalf("ObjectJSONError() = %v\nwant %s", err, *tc.Error)
+			}
+		})
+	}
+}
+
+// TestValidateHydrated_ObjectScalarSaysWhichJSON: ValidateHydrated reports
+// each object scalar ObjectJSONError refuses, and passes the others.
+func TestValidateHydrated_ObjectScalarSaysWhichJSON(t *testing.T) {
+	for _, tc := range objectScalarCases(t) {
+		t.Run(tc.Case, func(t *testing.T) {
+			s := newTestSchema()
+			s.Scalars[tc.Scalar.Name] = tc.Scalar
+			errs := s.ValidateHydrated()
+			if tc.Error == nil {
+				if len(errs) != 0 {
+					t.Fatalf("ValidateHydrated() = %v, want none", errs)
+				}
+				return
+			}
+			if len(errs) != 1 || errs[0].Error() != *tc.Error {
+				t.Fatalf("ValidateHydrated() = %v, want the one error %q", errs, *tc.Error)
+			}
+		})
 	}
 }
 
