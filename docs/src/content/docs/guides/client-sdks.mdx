@@ -12,7 +12,12 @@ An API schema can generate a client SDK in each of Go, TypeScript, Python
 and Rust, whatever language serves the API. Each SDK has a method per
 route, with the route's arguments typed from the schema, and returns the
 schema's types. `shop-orders` generates all four, and a test calls its Go
-server from each and checks they see the same answers.
+server and its generated Rust server from each and checks they see the
+same answers.
+
+An operation marked `@webhook` has no method in any SDK, since a third
+party calls it
+([Webhooks](/superschematic/guides/api-routes/#webhooks)).
 
 ## Generate them
 
@@ -71,10 +76,12 @@ order a product that does not exist: 400
 get a missing order: 404
 ```
 
-`scripts/check.sh` runs all four against one server and fails if any
-prints something else:
+`scripts/check.sh` runs all four against the Go server, then against
+`shop-orders` served by the generated Rust server
+([The Rust server](/superschematic/guides/api-routes/#the-rust-server)),
+and fails if any prints something else:
 
-<Snippet file="go/clients_test.go" symbol="TestEverySDKCallsTheGoServer" />
+<Snippet file="go/clients_test.go" symbol={['TestEverySDKCallsTheGoServer', 'TestEverySDKCallsTheRustServer']} />
 
 ## Errors
 
@@ -143,8 +150,9 @@ network, and logs each failed request through its logger.
 ## Service credentials
 
 A server that calls another API sends its own credential beside the end
-user's
-([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)).
+user's, which the callee admits by its operations' `@requireService` and
+`@allowService` clauses
+([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
 Each SDK's config takes a source, a function from a `fresh` flag to a
 token, and the headers to send it in: `Service-Authorization` unless you
 list others, such as `X-Serverless-Authorization` too for a Cloud Run

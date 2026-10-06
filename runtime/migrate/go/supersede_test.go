@@ -13,8 +13,8 @@ import (
 )
 
 // refused applies p in phase and fails the test unless the runner refuses
-// it with every one of want in its message.
-func refused(t *testing.T, r *migrate.Runner, p *migrate.Plan, phase migrate.Phase, want ...string) {
+// it with every one of want in its message. It returns the message.
+func refused(t *testing.T, r *migrate.Runner, p *migrate.Plan, phase migrate.Phase, want ...string) string {
 	t.Helper()
 	_, err := r.Apply(context.Background(), p, phase)
 	if !errors.Is(err, migrate.ErrRefused) {
@@ -25,6 +25,7 @@ func refused(t *testing.T, r *migrate.Runner, p *migrate.Plan, phase migrate.Pha
 			t.Fatalf("%q does not say %q", err, w)
 		}
 	}
+	return err.Error()
 }
 
 // fromCreate reads a fixture outside the chain that starts from 01's model.

@@ -33,10 +33,10 @@ schema that composes one until a deployment registers that package.
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision | | [Links](#links) |
-| `Rollups` | values computed from the instances that link here | `Workflow` | [Rollups](#rollups) |
-| `Search` | full-text search over the type's text fields, and vector search over embeddings an outside embedder computes | | [Search](#search) |
+| `Rollups` | values computed from the instances that link here, optionally gating the type's Workflow transitions | | [Rollups](#rollups) |
+| `Search` | full-text search over the type's text fields, vector search over embeddings an outside embedder computes, and a search across a namespace's schemas | | [Search](#search) |
 | `Reactions` | rules that move statuses after a change commits | `Workflow` | [Reactions](#reactions) |
-| `Constants` | fields the create sets and nothing changes after | | [Constants and Variants](#constants-and-variants) |
+| `Constants` | fields that keep the value their create gives them, unless a caller holds the config's permission | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
 | `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases | | [Branches](#branches) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
@@ -773,6 +773,9 @@ release, and a rollback is a release of an earlier one. The instance's
 own fields stay outside the graph. The graph lives
 in the behavior's own tables, through the version graph's SQLite
 adapter, in the transaction of the operation that writes it.
+[Version graphs](/superschematic/reference/version-graphs/) covers the
+model under it: refs, commits, merges by conflict unit, releases,
+snapshots and the sweep.
 
 Each kind's content is another type of the schema, so a recipe's steps,
 its ingredients under a step and its one cover are three types:
@@ -886,7 +889,9 @@ call("released");                                                 // { release, 
 - **Deleting.** Deleting an instance deletes its graph.
 - **Lease.** The operation that points the release pointer is
   `releaseCommit`, not `release`, because `Lease` has `release`, so a
-  type composes both.
+  type composes both. Lease's guard then holds `Branches`' writes to the
+  lease's holder, as it holds any writing operation
+  ([Work queues](/superschematic/guides/work-queues/#lease)).
 
 ## Where to go next
 

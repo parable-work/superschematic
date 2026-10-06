@@ -321,7 +321,13 @@ the generators name a method, with the schema name in kebab case, and its
 handle is the same two parts in snake case (`line_item_add_note`). A
 behavior operation's tool takes the instance `id`, `params` and
 `expectedSeq`; a schema-level one's (`scope: "schema"` in its
-declaration) takes `params` alone. Three more list, describe and define
+declaration) takes `params` alone. Where a behavior of the schema
+declares a precondition, as `Lease` does its token, the update, delete
+and instance operation tools also take `preconditions`, by behavior
+name, and where one takes create parameters, as `Links` and
+`Dependencies` do, the create tool takes `behaviors`
+([Engine behaviors](/superschematic/guides/engine-behaviors/#create-parameters)).
+Three more list, describe and define
 schemas, and none publishes; two list the behaviors the engine runs and
 describe one by name (`list_behaviors`, `describe_behavior`), which every
 caller may call; and where a schema composes `Search`, one more,
