@@ -289,8 +289,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings print to [WarningWriter], errors fail the load. A schema
-// that verifies has its version graphs expanded into ordinary types, and
-// any scalar only the generated fields use is hydrated from the registry.
+// that verifies has its version graphs expanded into ordinary types, any
+// scalar only the generated fields use is hydrated from the registry, and
+// the services its stack declarations name join its references (D41).
 func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
@@ -307,6 +308,11 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}
+	}
+	// The data forms write a stack's declarations as typed fields, which
+	// the TypeScript form's handle recording never sees.
+	for _, ref := range ir.StackReferences(schema) {
+		schema.AddReference(ref)
 	}
 	return schema, nil
 }

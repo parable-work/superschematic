@@ -52,14 +52,14 @@ func TestAcceptance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := stack.EnvironmentPath(out, "Shop", env.Name); path != want {
+			if want := stack.EnvironmentPath(out, "shop-stack", env.Name); path != want {
 				t.Fatalf("written to %s, want %s", path, want)
 			}
 			got, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			golden := stack.EnvironmentPath(goldenRoot, "Shop", env.Name)
+			golden := stack.EnvironmentPath(goldenRoot, "shop-stack", env.Name)
 			if *update {
 				if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
 					t.Fatal(err)
