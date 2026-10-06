@@ -1528,6 +1528,25 @@ between schema epochs (`Materialize` refuses a newer epoch). D19 rules out a
 parent of several types and moves the engine into a runtime in every
 language.
 
+### D17, amended: a null content column hashes as absent
+
+`content_hash` covers each kind's content columns, and D32's amendment "a
+partial row and an absent content column" has the core read a content
+column a row lacks as null wherever it compares, merges, diffs or hashes
+content. The hashed document therefore held every content column the
+descriptor declares, null where a row lacked it. When a schema version
+added a field to a kind, every row written before read the field as null,
+so every commit recorded before materialized to another hash than the one
+it stored, while `history` and the commit's own record still returned the
+stored one. The maintainer decided the rule below on 2026-10-05.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The content hash leaves out every content member of a row whose value is null, declared or not, so a null content column hashes exactly as an absent one. Only a row's own members are left out: a null inside a `json` value is content and is hashed. A value moves the hash as before, a `DEFAULT` that Postgres writes into the existing rows when a column is added with one included. | Keeping null members in the hashed document, which moves every older commit's materialized hash whenever a version adds a field |
+| A version that adds a field must not move older commits' hashes, as adding a kind already moves none. Every row written before the field reads it as null or lacks it, so a commit recorded before the gained column now materializes to the hash it recorded, under the descriptor that declares the column as under the one before, and `materialize`, `released` and `history` give it one hash. | Materializing a commit with the descriptor of its own version, which every read would have to look up per commit and which still gives a ref and its head commit two hashes once the field is added; rewriting the stored hashes when a version adds a field, which breaks "a commit is written once" |
+| This refines how the equal-as-null rule of D32's amendment "a partial row and an absent content column" is hashed. Absent and null are still one value when the core compares, merges and diffs, and those do not change; only their shared hashed form does, from present as null to left out. It replaces that amendment's consequence that a tree hashes afresh once its kind gains a column, and that a commit's recorded hash is its tree's hash only under the descriptor it was recorded with: a commit recorded before a gained column now materializes to the hash it recorded. | |
+| A content hash computed before this change is not comparable with one computed after it. No release has shipped, so nothing migrates, as D19 held for its own hash change. | |
+
 ## D18. A distribution's field directives live in its extension slot
 
 `ir.FieldDef` carried ten per-field directives from the source tree that
