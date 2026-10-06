@@ -816,18 +816,27 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --all-features -- -D warnings
           cargo clippy --no-default-features -- -D warnings
+          cargo clippy --no-default-features --features rusqlite -- -D warnings
 
-      - name: Rust engine and Postgres adapter (every scenario and canonical vector through the Rust engine, also with serde_json's preserve_order)
-        # make versiongraph-scenarios-rust fails, rather than skips, without
-        # the database. The second run turns serde_json's preserve_order on,
-        # as superscalar does, so the canonical rules' key sort is checked.
+      - name: Rust engine (its own tests, the SQLite adapter's and the SQLite vectors, and every scenario on SQLite)
+        # The quick tier: no database URL, so the Postgres tests skip; the
+        # full tier's step below runs them, and every scenario on Postgres.
+        working-directory: runtime/versiongraph/rust-engine
+        run: cargo test --features rusqlite
+
+      - name: Rust engine and its Postgres and SQLite adapters (every scenario on SQLite and on Postgres and every canonical vector through the Rust engine, also with serde_json's preserve_order)
+        # The SQLite pass of make versiongraph-scenarios-rust needs no
+        # database; its Postgres pass fails, rather than skips, without one.
+        # The second run turns serde_json's preserve_order on, as superscalar
+        # does, so the canonical rules' key sort is checked.
         if: github.event_name != 'pull_request'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           make versiongraph-scenarios-rust
-          (cd runtime/versiongraph/rust-engine && cargo test --tests --features serde_json/preserve_order)
+          (cd runtime/versiongraph/rust-engine && cargo test --tests --features rusqlite,serde_json/preserve_order)
 
       - name: golangci-lint (runtime/versiongraph/go)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0

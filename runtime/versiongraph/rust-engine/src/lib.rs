@@ -20,8 +20,11 @@
 //! [`Engine::run_sweeper`] are the graph's maintenance.
 //!
 //! The engine's operations are `async`: each runs in one transaction of its
-//! [`Storage`], and [`postgres`] is the Postgres adapter, with a default
-//! client over tokio-postgres (the `tokio-postgres` feature, on by default).
+//! [`Storage`]. [`postgres`] is the Postgres adapter, with a default client
+//! over tokio-postgres (the `tokio-postgres` feature, on by default), and
+//! [`sqlite`] the SQLite adapter (D32), which keeps every graph in one fixed
+//! layout of tables, with a default client over rusqlite (the `rusqlite`
+//! feature, off by default).
 //!
 //! ```no_run
 //! # async fn example() -> Result<(), superschematic_versiongraph_engine::Error> {
@@ -48,6 +51,7 @@ mod engine;
 mod error;
 pub mod facade;
 pub mod postgres;
+pub mod sqlite;
 pub mod storage;
 mod sweep;
 

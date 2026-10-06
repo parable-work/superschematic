@@ -146,9 +146,12 @@ python:
 # The version-graph crates' tests run again with serde_json's preserve_order
 # on, which superscalar turns on and Cargo unifies into every crate of a
 # build that uses it: a content hash and a canonical row must not depend on
-# the order a serde_json map keeps. The schema runtime's run again with
-# arbitrary_precision too, which superscalar's default lossless-json feature
-# turns on: an error map and a number check must not depend on either.
+# the order a serde_json map keeps. The Rust engine's tests run with its
+# rusqlite feature on, so its SQLite adapter's tests and scenario pass run
+# too, and its lints run with and without each of its features. The schema
+# runtime's run again with arbitrary_precision too, which superscalar's
+# default lossless-json feature turns on: an error map and a number check
+# must not depend on either.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -159,8 +162,10 @@ rust:
 		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test \
 		&& cargo test --features serde_json/preserve_order
 	cd runtime/versiongraph/rust-engine && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
-		&& cargo clippy --no-default-features -- -D warnings && cargo test \
-		&& cargo test --features serde_json/preserve_order
+		&& cargo clippy --all-targets --all-features -- -D warnings \
+		&& cargo clippy --no-default-features -- -D warnings \
+		&& cargo clippy --no-default-features --features rusqlite -- -D warnings \
+		&& cargo test --features rusqlite && cargo test --features rusqlite,serde_json/preserve_order
 
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
@@ -196,14 +201,23 @@ versiongraph-scenarios-ts:
 		bun test test/scenarios.test.ts test/canonical.test.ts test/adapter.test.ts test/sweeper.test.ts \
 		test/facade.test.ts test/gained-column.test.ts
 
-# Every version-graph scenario through the Rust engine and its Postgres
-# adapter, and the crate's other Postgres tests (every canonical vector's
-# rendering, the adapter, the sweeper), against the Postgres that
-# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+# Every version-graph scenario through the Rust engine. First on SQLite
+# (D32): the SQLite adapter over rusqlite (the rusqlite feature), with the
+# adapter's own tests, every canonical vector as a round trip and the SQLite
+# vectors, which need no database server and run with or without a Postgres
+# URL (the URL is unset for them, so the Postgres tests skip here and run
+# below). Then on Postgres: the Postgres adapter, and the crate's other
+# Postgres tests (every canonical vector's rendering, the adapter, the
+# sweeper), against the Postgres that
+# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names; that pass fails
+# without it. It runs every test target with the feature on, so the SQLite
+# tests run again there, and one build serves both passes.
 versiongraph-scenarios-rust:
+	cd runtime/versiongraph/rust-engine && env -u SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL \
+		cargo test --features rusqlite --test scenarios --test sqlite -- --nocapture
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
-		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
-	cd runtime/versiongraph/rust-engine && cargo test --tests -- --nocapture
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against (the SQLite pass above needs none)" >&2; exit 1; }
+	cd runtime/versiongraph/rust-engine && cargo test --tests --features rusqlite -- --nocapture
 
 # Every version-graph scenario through the Python engine. First on SQLite
 # (D32): the SQLite adapter over the standard library's sqlite3, with the

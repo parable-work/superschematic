@@ -186,6 +186,38 @@ pub(super) fn date_time_rule(value: &Value) -> Result<String, String> {
     Ok(out)
 }
 
+/// Writes a time in whole microseconds since the Unix epoch as the
+/// date-time rule writes an instant, without the quotes: UTC with a Z, its
+/// fraction of a second without trailing zeros and left out when zero. A
+/// year outside 0000-9999 is refused.
+pub(crate) fn date_time_of_micros(micros: i64) -> Result<String, String> {
+    let (seconds, fraction) = (micros.div_euclid(1_000_000), micros.rem_euclid(1_000_000));
+    let (days, of_day) = (
+        seconds.div_euclid(DAY_SECONDS),
+        seconds.rem_euclid(DAY_SECONDS),
+    );
+    let (year, month, day) = civil_from_days(days);
+    if !(0..=9999).contains(&year) {
+        return Err(format!(
+            "{micros} microseconds falls outside the years 0000-9999"
+        ));
+    }
+    let mut out = format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}",
+        of_day / 3600,
+        of_day / 60 % 60,
+        of_day % 60
+    );
+    let fraction = format!("{fraction:06}");
+    let fraction = fraction.trim_end_matches('0');
+    if !fraction.is_empty() {
+        out.push('.');
+        out.push_str(fraction);
+    }
+    out.push('Z');
+    Ok(out)
+}
+
 fn offset_seconds(text: &str) -> Result<i64, String> {
     if text == "Z" {
         return Ok(0);
