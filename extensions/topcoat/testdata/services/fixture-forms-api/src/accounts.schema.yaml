@@ -1,0 +1,114 @@
+# Accounts, signed up through a form: the input's fields are an email, a
+# URL, strings with rules, an enum, an integer and a number scalar, and a
+# boolean. A note's input holds a list, which a form does not.
+name: fixture-forms-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+  Contact.Email:
+    name: Contact.Email
+    languagePrimitive: string
+  Network.Url:
+    name: Network.Url
+    languagePrimitive: string
+  Ordering.Rank:
+    name: Ordering.Rank
+    languagePrimitive: number
+enums:
+  # What an account pays for.
+  Plan:
+    name: Plan
+    values:
+      - name: Free
+        serializedAs: free
+      - name: Pro
+        serializedAs: pro
+types:
+  SignupInput:
+    name: SignupInput
+    role: APIInput
+    fields:
+      - name: email
+        typeRef: { name: Contact.Email }
+        required: true
+      - name: displayName
+        title: Display name
+        placeholder: Ada Lovelace
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 2
+        validateMaxLength: 40
+      - name: handle
+        typeRef: { name: string }
+        validatePattern: "^[a-z0-9]+$"
+      - name: website
+        typeRef: { name: Network.Url }
+      - name: plan
+        typeRef: { name: Plan }
+        required: true
+      - name: seats
+        typeRef: { name: Ordering.Rank }
+        validateMin: 1
+        validateMax: 50
+      - name: budget
+        typeRef: { name: number }
+      - name: newsletter
+        typeRef: { name: boolean }
+  NoteInput:
+    name: NoteInput
+    role: APIInput
+    fields:
+      - name: text
+        typeRef: { name: string }
+        required: true
+      - name: tags
+        typeRef: { name: string, isArray: true }
+  AccountView:
+    name: AccountView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: email
+        typeRef: { name: Contact.Email }
+        required: true
+      - name: displayName
+        typeRef: { name: string }
+        required: true
+      - name: plan
+        typeRef: { name: Plan }
+        required: true
+      - name: seats
+        typeRef: { name: Ordering.Rank }
+      - name: newsletter
+        typeRef: { name: boolean }
+        required: true
+operationSets:
+  - name: AccountMutations
+    operations:
+      # Sign up for an account.
+      - name: signUp
+        typeRef: { name: AccountView }
+        required: true
+        httpMethod: POST
+        restPath: accounts
+        arguments:
+          - name: input
+            typeRef: { name: SignupInput }
+            required: true
+      # Note something about an account.
+      - name: annotate
+        typeRef: { name: AccountView }
+        required: true
+        httpMethod: POST
+        restPath: "accounts/{id}/notes"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: input
+            typeRef: { name: NoteInput }
+            required: true

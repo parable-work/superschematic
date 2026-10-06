@@ -3206,3 +3206,57 @@ under `/api`.
 Forms over input types and procedure wrappers follow, in their own
 changes. The crate pins Topcoat 0.10, which needs Rust 1.98, within the
 toolchain's 1.99.
+
+### D44, amended: a form per input type a form holds
+
+A Topcoat form posts flat, urlencoded fields, and Topcoat does not
+validate them. An operation's input type already has rules (D14), and the
+same rules give the HTML attributes a browser checks first.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An input type whose fields are each a string, a number, a boolean or an enum, alone, and which the service itself declares, gets `forms::<Input>Form`. The form holds every field as an `Option<String>`, so a refused form renders again as sent. Any other input type gets none, with the build log's reason. | Nested names (`lines[0].quantity`) for lists and objects, which Topcoat's `Form<T>` does not decode; typed fields, which would refuse a mistyped number before its field error could be shown |
+| `parse()` writes each field as the input's JSON (a whole number or a number parsed, a checkbox true when sent) and runs the generated `parse_<type>` with undeclared keys refused. Its errors, and an operation's refusal through `FormErrors::from_api`, are messages by field. | Rules restated in the form; validating only in the browser |
+| `<input>_fields(form, errors)` renders each field: its label (the `@docs` title or its name in words), its input type, and `required`, `min`/`max`, `minlength`/`maxlength` and `pattern` from the field's rules and its scalar's. A pattern is written only when a browser, which reads it anchored with the `v` flag, reads it as the server does, and never on an email or URL input, which checks its own syntax. An enum is a `<select>`, and an `@uiHidden` field is in the struct but not rendered. | Writing every pattern, where a browser refuses a pattern the `v` flag forbids (a class ending in `-`, as `Contact.Email`'s does) |
+
+The extension's fixture `fixture-forms-api`, a YAML schema, has an input
+of every kind a field takes, and one that holds a list. Its cargo test
+drives a Topcoat app: the form renders its rules as attributes, a post
+that breaks a rule or that the operation refuses renders again with 422,
+the values as sent and each field's errors, and a valid post signs up
+and redirects.
+
+### D44, amended: a procedure per operation, its refusal a record
+
+Browser code calls a server function through a Topcoat procedure. An
+`Err` from a procedure reaches the browser as a bare 500, so a 400's field
+errors, a 401 or a 403 would be lost there.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each mounted operation is a `#[procedure]` on `/_superschematic/<service>/<namespace>/<operation>`, a path that does not change with the build, registered by the app's `.discover()`. | Topcoat's default path, a hash of the item that changes when it moves; registering in `<service>(...)`, which panics beside `.discover()` |
+| The procedure takes `<Op>ArgsRecord`, a field per argument by its IR type (as records hold it) and the input as its type's record. It answers `Ok(Result<OutputRecord, ProblemRecord>)`: the route's status, code, detail and each refused field's path, rule and message, as data. | Typed arguments, which a record cannot hold (UUIDs, timestamps, maps); an `Err`, which the browser cannot read |
+| `to_args()` writes each record field as the JSON a request carries and decodes it into the `Args` struct, so a value that does not decode is the router's 400. The operation then runs in-process (D43). `call_<operation>` is the body as a plain function, which Rust code and tests call, since Topcoat turns a procedure into a unit struct. | Testing through Topcoat's wire format, which is private |
+| Every record gains `to_wire`, and the records cover the types a procedure's arguments name, inputs included. `procedures` needs records, so `records: false` leaves out both. | |
+
+A cargo test drives fixture-api's app with `.discover()`. A procedure body
+answers its result, a 401, an input's `name:minLength` refusal and a UUID
+that does not parse (`id:type`) as records. The discovered procedure path
+refuses a body that is not its JSON (400) and a GET (405), where an
+unknown path is 404.
+
+### D44, amended: superschematic.toml lists a project's Topcoat services, and acme-shop has a Topcoat app
+
+A binary that does not link the extension refuses `outputs.topcoat` in a
+config, as it refuses any outputs key no generator claims. The acme shop
+builds every service with the core binary, so its shop-orders config could
+not carry the key.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `[extension.topcoat] services = [...]` in `superschematic.toml` turns the crate on for the services it lists, with every default, as `outputs.topcoat: { enabled: true }` would. The core binary never reads an extension's table (section 3.11), so the same configs build with it. `outputs.topcoat` in a config still wins, and the table refuses a key it does not declare. | Building every service with the extension's binary, which would make the core-only example depend on an extension; a second copy of the config |
+| `extensions/topcoat/cmd/superschematic-topcoat` is the core with the extension linked, `cli.New(..., topcoat.Extension{})` and nothing else. | Asking each project to write the ten lines first |
+| acme-shop's `rust-server` becomes a library (`Shop`, `Tokens`, `implementations`) with its binary. `examples/acme-shop/topcoat` is a Topcoat app over the same implementations. It has a session sign-in and a `PageAuthenticator` over it, a reviews page that renders the reviews through a shard of their records, the form `WriteReviewInput` gives, and the 422 a refused review renders, an orders page behind `orders.read`, and the JSON API mounted at `/api`. `check.sh` builds `schemas/dist-rust` again with `superschematic-topcoat` after the core binary's build, then runs the app's tests through `Router::handle`. | A second copy of the implementations in the app |
+
+The docs site's [Pages with Topcoat](/superschematic/guides/topcoat/)
+guide quotes the app.

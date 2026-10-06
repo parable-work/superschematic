@@ -18,15 +18,22 @@ type record struct {
 	Fields   []recordField
 }
 
-// recordField is one field of a record: its Rust name and type, and the
+// recordField is one field of a record: its Rust name and type, the
 // expression that reads it from the type's JSON (`json`, a serde_json
-// Value).
+// Value), and the one that writes it back (Put applied to the field, or to
+// `value`, its value when Optional).
 type recordField struct {
 	Name     string
 	JSONName string
 	Type     string
 	Read     string
+	Put      string
+	Optional bool
 }
+
+// PutExpr is the expression that writes arg, the field's value (inside
+// its Option when Optional), as JSON.
+func (f recordField) PutExpr(arg string) string { return apply(f.Put, arg) }
 
 // reservedFields are names a Topcoat record cannot give a field: the
 // browser runtime's own members. A field so named gets a trailing
@@ -37,47 +44,60 @@ var reservedFields = map[string]bool{
 }
 
 // leaf is how a record holds one JSON value that is not a list, a map or
-// an object: its Rust type and the wire helper that reads it.
+// an object: its Rust type and the wire helpers that read and write it.
 type leaf struct {
 	rustType string
 	read     string
+	put      string
 }
 
 var (
-	stringLeaf  = leaf{"String", "wire::string"}
-	integerLeaf = leaf{"i64", "wire::integer"}
-	numberLeaf  = leaf{"f64", "wire::number"}
-	booleanLeaf = leaf{"bool", "wire::boolean"}
+	stringLeaf  = leaf{"String", "wire::string", "wire::put_string"}
+	integerLeaf = leaf{"i64", "wire::integer", "wire::put_integer"}
+	numberLeaf  = leaf{"f64", "wire::number", "wire::put_number"}
+	booleanLeaf = leaf{"bool", "wire::boolean", "wire::put_boolean"}
 	// jsonLeaf holds a value a record has no type for (a union, any JSON
 	// value, a JSON object or array scalar) as its JSON text.
-	jsonLeaf = leaf{"String", "wire::json_text"}
+	jsonLeaf = leaf{"String", "wire::json_text", "wire::put_json_text"}
 )
+
+// schemaSet is the service's schema and its dependencies', where a type
+// an operation names is declared.
+type schemaSet []*ir.Schema
 
 // recordBuilder walks the result types of the service's operations and
 // the object types they nest.
 type recordBuilder struct {
-	schemas []*ir.Schema
+	schemaSet
 	records map[string]*record
 }
 
-// recordsOf is a record per object type an operation of schemas[0]
-// returns, and per object type such a type nests, sorted by name.
-func recordsOf(schemas []*ir.Schema) ([]record, error) {
-	b := &recordBuilder{schemas: schemas, records: map[string]*record{}}
-	for _, set := range schemas[0].OperationSets {
+func newRecordBuilder(schemas schemaSet) *recordBuilder {
+	return &recordBuilder{schemaSet: schemas, records: map[string]*record{}}
+}
+
+// addResults adds a record per object type an operation of the service
+// returns, and per object type such a type nests.
+func (b *recordBuilder) addResults() error {
+	for _, set := range b.schemaSet[0].OperationSets {
 		for _, op := range set.Operations {
 			if b.objectType(op.TypeRef.Name) != nil {
 				if err := b.add(op.TypeRef.Name); err != nil {
-					return nil, err
+					return err
 				}
 			}
 		}
 	}
+	return nil
+}
+
+// sorted is every record added, by name.
+func (b *recordBuilder) sorted() []record {
 	out := make([]record, 0, len(b.records))
 	for _, name := range sortedKeys(b.records) {
 		out = append(out, *b.records[name])
 	}
-	return out, nil
+	return out
 }
 
 func (b *recordBuilder) add(name string) error {
@@ -100,53 +120,67 @@ func (b *recordBuilder) add(name string) error {
 			return fmt.Errorf("type %s: fields %s and %s are both the record field %s", name, other, field.Name, rustName)
 		}
 		seen[rustName] = field.Name
-		rustType, read, err := b.fieldShape(field.TypeRef, !field.Required, fmt.Sprintf("&json[%s]", rustString(field.Name)))
+		shape, err := b.fieldShape(field.TypeRef, !field.Required)
 		if err != nil {
 			return fmt.Errorf("type %s field %s: %w", name, field.Name, err)
 		}
-		rec.Fields = append(rec.Fields, recordField{Name: rustName, JSONName: field.Name, Type: rustType, Read: read})
+		rec.Fields = append(rec.Fields, recordField{
+			Name:     rustName,
+			JSONName: field.Name,
+			Type:     shape.rustType,
+			Read:     apply(shape.read, fmt.Sprintf("&json[%s]", rustString(field.Name))),
+			Put:      shape.put,
+			Optional: !field.Required,
+		})
 	}
 	return nil
 }
 
-// fieldShape is the record type of a field of type ref, in Option when
-// optional, and the expression that reads it from arg.
-func (b *recordBuilder) fieldShape(ref ir.TypeRef, optional bool, arg string) (string, string, error) {
-	elemType, elemRead, err := b.element(ref.Name)
+// shape is how a record holds a value of a field's type: its Rust type,
+// the function that reads it from JSON (Option included) and the one that
+// writes its value (Option excluded) as JSON. A function is a path, or a
+// closure over `v`.
+type shape struct {
+	rustType string
+	read     string
+	put      string
+}
+
+// fieldShape is the shape of a field of type ref, in Option when optional.
+func (b *recordBuilder) fieldShape(ref ir.TypeRef, optional bool) (shape, error) {
+	s, err := b.element(ref.Name)
 	if err != nil {
-		return "", "", err
+		return shape{}, err
 	}
 	// Each level wraps the one inside it: a list, a map's entries, then
 	// Option.
-	rustType, read := elemType, elemRead
 	for range ref.ArrayDepth() {
-		rustType, read = "Vec<"+rustType+">", closure("wire::list", read)
+		s = shape{"Vec<" + s.rustType + ">", closure("wire::list", s.read), closure("wire::put_list", s.put)}
 	}
 	if ref.IsMap {
-		rustType, read = "Vec<(String, "+rustType+")>", closure("wire::entries", read)
+		s = shape{"Vec<(String, " + s.rustType + ")>", closure("wire::entries", s.read), closure("wire::put_entries", s.put)}
 	}
 	if optional {
-		rustType, read = "Option<"+rustType+">", closure("wire::optional", read)
+		s.rustType, s.read = "Option<"+s.rustType+">", closure("wire::optional", s.read)
 	}
-	return rustType, apply(read, arg), nil
+	return s, nil
 }
 
-// element is the record type of a single value of the named type and the
-// function (a path, or a closure over `v`) that reads one.
-func (b *recordBuilder) element(name string) (string, string, error) {
+// element is the shape of a single value of the named type.
+func (b *recordBuilder) element(name string) (shape, error) {
 	if typeDef := b.objectType(name); typeDef != nil {
 		if err := b.add(name); err != nil {
-			return "", "", err
+			return shape{}, err
 		}
-		return name + "Record", name + "Record::from_wire", nil
+		return shape{name + "Record", name + "Record::from_wire", name + "Record::to_wire"}, nil
 	}
 	l := b.leafOf(name)
-	return l.rustType, l.read, nil
+	return shape(l), nil
 }
 
 // leafOf is how a record holds a value of a primitive, a scalar, an enum
 // or a union, by the JSON the API sends for it.
-func (b *recordBuilder) leafOf(name string) leaf {
+func (s schemaSet) leafOf(name string) leaf {
 	switch name {
 	case "string":
 		return stringLeaf
@@ -155,7 +189,7 @@ func (b *recordBuilder) leafOf(name string) leaf {
 	case "boolean":
 		return booleanLeaf
 	}
-	for _, schema := range b.schemas {
+	for _, schema := range s {
 		if _, ok := schema.Enums[name]; ok {
 			return stringLeaf
 		}
@@ -186,8 +220,8 @@ func (b *recordBuilder) leafOf(name string) leaf {
 }
 
 // objectType is the object type the schemas declare as name, or nil.
-func (b *recordBuilder) objectType(name string) *ir.TypeDef {
-	for _, schema := range b.schemas {
+func (s schemaSet) objectType(name string) *ir.TypeDef {
+	for _, schema := range s {
 		if typeDef := schema.Types[name]; typeDef != nil && !typeDef.IsTrait {
 			return typeDef
 		}
@@ -208,4 +242,24 @@ func apply(read, arg string) string {
 		return strings.Replace(body, "(v, ", "("+arg+", ", 1)
 	}
 	return read + "(" + arg + ")"
+}
+
+// enum is the enum the schemas declare as name, or nil.
+func (s schemaSet) enum(name string) *ir.EnumDef {
+	for _, schema := range s {
+		if enum := schema.Enums[name]; enum != nil {
+			return enum
+		}
+	}
+	return nil
+}
+
+// scalar is the scalar the schemas declare as name, or nil.
+func (s schemaSet) scalar(name string) *ir.ScalarDef {
+	for _, schema := range s {
+		if scalar := schema.Scalars[name]; scalar != nil {
+			return scalar
+		}
+	}
+	return nil
 }

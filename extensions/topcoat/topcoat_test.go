@@ -23,6 +23,19 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixtures = "../../internal/loader/tsreader/testdata/services"
 
+// formsService is the extension's own fixture, whose input types are of
+// every kind a form field takes, and one a form cannot hold.
+const formsService = "fixture-forms-api"
+
+// serviceDir is a fixture's directory: the extension's own, or the
+// loader's.
+func serviceDir(name string) string {
+	if name == formsService {
+		return filepath.Join("testdata", "services", name)
+	}
+	return filepath.Join(fixtures, name)
+}
+
 // rustOutputs are a fixture's outputs with the server in Rust and the
 // Topcoat crate on.
 func rustOutputs() map[string]any {
@@ -45,11 +58,17 @@ func build(t *testing.T, outputRoot string, outputs map[string]any) (*registry.R
 // step.
 func buildService(t *testing.T, name, outputRoot string, outputs map[string]any) (*registry.Result, error) {
 	t.Helper()
-	reg, err := registry.Assemble(registry.DefaultNaming(), topcoat.Extension{})
+	return buildWithNaming(t, registry.DefaultNaming(), name, outputRoot, outputs)
+}
+
+// buildWithNaming is buildService under names, a superschematic.toml.
+func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot string, outputs map[string]any) (*registry.Result, error) {
+	t.Helper()
+	reg, err := registry.Assemble(names, topcoat.Extension{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	service := filepath.Join(fixtures, name)
+	service := serviceDir(name)
 	schema, cfg, err := loader.LoadServiceWithConfig(service, loader.WithRegistry(reg))
 	if err != nil {
 		t.Fatalf("LoadServiceWithConfig: %v", err)
@@ -68,7 +87,7 @@ func buildService(t *testing.T, name, outputRoot string, outputs map[string]any)
 		OutputRoot:  outputRoot,
 		ServicePath: service,
 		Paths:       testpaths.Local(t),
-		Naming:      registry.DefaultNaming(),
+		Naming:      names,
 		Registry:    reg,
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(fixtures, name), loader.WithRegistry(reg))
@@ -117,6 +136,46 @@ func TestTheCrateIsWrittenOnlyBesideARustServer(t *testing.T) {
 	}
 }
 
+// TestTheNamingFileListsServices builds fixture-api, whose config has no
+// outputs.topcoat, under a superschematic.toml whose [extension.topcoat]
+// lists it: the crate is written, as the section would write it. The core
+// binary never reads the table, so the same configs build there. A key the
+// table does not declare fails assembly.
+func TestTheNamingFileListsServices(t *testing.T) {
+	names, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"fixture-api\"]\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	outputs := rustOutputs()
+	delete(outputs, "topcoat")
+	root := testpaths.TempDir(t)
+	result, err := buildWithNaming(t, names, "fixture-api", root, outputs)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if got := result.Outputs[topcoat.OutputKey]; got != topcoat.Dir(root, "fixture-api") {
+		t.Errorf("a listed service wrote no crate: outputs %v, skipped %v", result.Outputs, result.Skipped)
+	}
+
+	unlisted, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"other-api\"]\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	if result, err = buildWithNaming(t, unlisted, "fixture-api", testpaths.TempDir(t), outputs); err != nil || result.Outputs[topcoat.OutputKey] != "" {
+		t.Errorf("an unlisted service wrote a crate: %v, %v", err, result.Outputs)
+	}
+
+	for _, table := range []string{"services = \"fixture-api\"", "pages = true"} {
+		names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+table+"\n"), "superschematic.toml")
+		if err != nil {
+			t.Fatalf("ParseNaming: %v", err)
+		}
+		if _, err := registry.Assemble(names, topcoat.Extension{}); err == nil {
+			t.Errorf("[extension.topcoat] %s: assembled, want it refused", table)
+		}
+	}
+}
+
 func skipped(result *registry.Result, reason string) bool {
 	for _, skip := range result.Skipped {
 		if strings.Contains(skip, reason) {
@@ -127,41 +186,67 @@ func skipped(result *registry.Result, reason string) bool {
 }
 
 // TestGolden compares the crates written for fixture-api, whose
-// operations need a caller, and fixture-nested-arrays-api, whose operations
-// need none and whose result nests records in lists of lists, with
+// operations need a caller, fixture-nested-arrays-api, whose operations
+// need none and whose result nests records in lists of lists, and
+// fixture-forms-api, whose input types make forms, with
 // testdata/golden/<service>; -update rewrites them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api"} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, rustOutputs()); err != nil {
 			t.Fatalf("build %s: %v", service, err)
 		}
-		dir := topcoat.Dir(root, service)
+		got := treeOf(t, topcoat.Dir(root, service))
 		golden := filepath.Join("testdata", "golden", service)
-		for _, file := range []string{"Cargo.toml", "src/lib.rs", "src/operations.rs", "src/records.rs", "src/wire.rs"} {
-			got, err := os.ReadFile(filepath.Join(dir, file))
-			if err != nil {
+		if *update {
+			if err := os.RemoveAll(golden); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(golden, file)
-			if *update {
+			for file, data := range got {
+				path := filepath.Join(golden, file)
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(path, got, 0o644); err != nil {
+				if err := os.WriteFile(path, data, 0o644); err != nil {
 					t.Fatal(err)
 				}
-				continue
 			}
-			want, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(got, want) {
+			continue
+		}
+		want := treeOf(t, golden)
+		for file, data := range got {
+			if !bytes.Equal(data, want[file]) {
 				t.Errorf("%s/%s differs from golden (run with -update to accept)", service, file)
 			}
 		}
+		for file := range want {
+			if _, ok := got[file]; !ok {
+				t.Errorf("%s/%s is in the golden but was not written", service, file)
+			}
+		}
 	}
+}
+
+// treeOf reads every file under dir, by its slash path relative to dir.
+func treeOf(t *testing.T, dir string) map[string][]byte {
+	t.Helper()
+	files := map[string][]byte{}
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		files[filepath.ToSlash(rel)] = data
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 // TestRecordsOff builds with outputs.topcoat.records false: the crate has
@@ -202,6 +287,41 @@ func TestTheCrateServesATopcoatApp(t *testing.T) {
 // optional list read from the API's JSON.
 func TestACrateWithoutCallersBuilds(t *testing.T) {
 	cargoTestCrate(t, "fixture-nested-arrays-api", nestedRecordsTest)
+}
+
+// TestFormsServeATopcoatApp does the same for fixture-forms-api with
+// formsAppTest: a page renders the signup form's fields with the
+// attributes its input type's rules give them; a post that breaks a rule,
+// or that the operation refuses, re-renders as sent with 422 and each
+// field's errors; a valid post signs up and redirects.
+func TestFormsServeATopcoatApp(t *testing.T) {
+	cargoTestCrate(t, formsService, formsAppTest)
+}
+
+// TestAnInputAFormCannotHoldHasNoForm builds fixture-forms-api: NoteInput
+// holds a list, so the crate has no form for it.
+func TestAnInputAFormCannotHoldHasNoForm(t *testing.T) {
+	root := testpaths.TempDir(t)
+	if _, err := buildService(t, formsService, root, rustOutputs()); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	forms, err := os.ReadFile(filepath.Join(topcoat.Dir(root, formsService), "src", "forms.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(forms), "pub struct SignupInputForm") || strings.Contains(string(forms), "NoteInputForm") {
+		t.Error("forms.rs: want a form for SignupInput and none for NoteInput")
+	}
+
+	outputs := rustOutputs()
+	outputs["topcoat"] = map[string]any{"enabled": true, "forms": false}
+	root = testpaths.TempDir(t)
+	if _, err := buildService(t, formsService, root, outputs); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, formsService), "src", "forms.rs")); !os.IsNotExist(err) {
+		t.Errorf("forms.rs written with forms false: %v", err)
+	}
 }
 
 // cargoTestCrate builds service's crates with the Topcoat crate on, adds
@@ -291,10 +411,11 @@ use schemas_fixture_api_topcoat::api::{
     types, Implementations, SessionImplementation, TenantCreateTenantArgs, TenantGetTenantArgs, TenantImplementation,
     TenantListTenantsArgs, TenantUpdateSecretArgs,
 };
-use schemas_fixture_api_topcoat::records::TenantViewRecord;
+use schemas_fixture_api_topcoat::procedures::{self, TenantCreateTenantArgsRecord, TenantGetTenantArgsRecord};
+use schemas_fixture_api_topcoat::records::{CreateTenantInputRecord, TenantViewRecord};
 use schemas_fixture_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureApiExt};
 use topcoat::context::Cx;
-use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
+use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
 // The API's own authenticator, for requests to the mounted JSON API.
@@ -384,15 +505,47 @@ async fn readable(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <p>(said)</p> })
 }
 
+// A procedure's body, from a page: the problem as status, code and each
+// field error's path and rule, or the result.
+fn problem(result: Result<TenantViewRecord, procedures::ProblemRecord>) -> String {
+    match result {
+        Ok(tenant) => format!("created {}", tenant.name),
+        Err(problem) => {
+            let fields: Vec<String> = problem.errors.iter().map(|error| format!("{}:{}", error.path, error.validator)).collect();
+            format!("{} {} [{}]", problem.status, problem.code, fields.join(","))
+        }
+    }
+}
+
+async fn create_through_procedure(cx: &Cx, name: &str) -> String {
+    let args = TenantCreateTenantArgsRecord { input: CreateTenantInputRecord { name: name.to_string(), slug: "acme".to_string() } };
+    problem(procedures::call_tenant_create_tenant(cx, args).await)
+}
+
+#[page(POST "/procedures/create")]
+async fn procedure_create(cx: &Cx) -> topcoat::Result<impl View> {
+    let said = create_through_procedure(cx, "Acme").await;
+    Ok(view! { <p>(said)</p> })
+}
+
+#[page(POST "/procedures/create-short")]
+async fn procedure_create_short(cx: &Cx) -> topcoat::Result<impl View> {
+    let said = create_through_procedure(cx, "a").await;
+    Ok(view! { <p>(said)</p> })
+}
+
+#[page(POST "/procedures/get-unparsed")]
+async fn procedure_get_unparsed(cx: &Cx) -> topcoat::Result<impl View> {
+    let args = TenantGetTenantArgsRecord { id: "not a uuid!".to_string(), include_archived: false };
+    let said = problem(procedures::call_tenant_get_tenant(cx, args).await);
+    Ok(view! { <p>(said)</p> })
+}
+
+// The app registers its pages and the crate's procedures by discovery.
 fn app(caller: Option<Principal>) -> Router {
     let implementations =
         Implementations { session: Arc::new(Tenants), tenant: Arc::new(Tenants), authenticator: Arc::new(NoRequests) };
-    Router::builder()
-        .page(create_tenant)
-        .page(create_short_tenant)
-        .page(readable)
-        .fixture_api(implementations, Caller(caller))
-        .build()
+    Router::builder().discover().fixture_api(implementations, Caller(caller)).build()
 }
 
 async fn send(router: &Router, method: &str, uri: &str) -> (StatusCode, String) {
@@ -424,6 +577,31 @@ async fn a_page_calls_an_operation_by_its_route_rules() {
     assert!(body.contains("readable by ada"), "{body}");
     let (_, body) = send(&app(None), "GET", "/tenants/readable").await;
     assert!(body.contains("401 unauthorized"), "{body}");
+}
+
+#[tokio::test]
+async fn a_procedure_answers_a_refusal_as_a_record() {
+    let writer = Some(Principal::new("ada", ["tenants"]));
+    let (_, body) = send(&app(writer.clone()), "POST", "/procedures/create").await;
+    assert!(body.contains("created Acme"), "{body}");
+    let (_, body) = send(&app(writer.clone()), "POST", "/procedures/create-short").await;
+    assert!(body.contains("400 bad_request [name:minLength]"), "{body}");
+    let (_, body) = send(&app(None), "POST", "/procedures/create").await;
+    assert!(body.contains("401 unauthorized []"), "{body}");
+    let (_, body) = send(&app(writer), "POST", "/procedures/get-unparsed").await;
+    assert!(body.contains("400 bad_request [id:type]"), "{body}");
+}
+
+#[tokio::test]
+async fn the_procedures_are_discovered_on_their_paths() {
+    // Registered: the procedure refuses a body that is not its JSON,
+    // rather than the router answering 404.
+    let (status, _) = send(&app(None), "POST", "/_superschematic/fixture-api/tenant/create-tenant").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send(&app(None), "GET", "/_superschematic/fixture-api/tenant/create-tenant").await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    let (status, _) = send(&app(None), "POST", "/_superschematic/fixture-api/tenant/no-such-operation").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -515,5 +693,159 @@ fn a_record_holds_nested_lists_of_records() {
     assert_eq!(record.shades, vec![vec!["dark".to_string()]]);
     assert_eq!(record.polygons, vec![vec![PointRecord { x: 1.0, y: 2.0 }], vec![]]);
     assert_eq!(record.weights, None);
+}
+`
+
+// formsAppTest is tests/app.rs of fixture-forms-api's Topcoat crate.
+const formsAppTest = `use std::sync::Arc;
+
+use async_trait::async_trait;
+use schemas_fixture_forms_api_topcoat::api::runtime::{ApiError, RequestContext};
+use schemas_fixture_forms_api_topcoat::api::{types, AccountAnnotateArgs, AccountImplementation, AccountSignUpArgs, Implementations};
+use schemas_fixture_forms_api_topcoat::forms::{signup_input_fields, FormErrors, SignupInputForm};
+use schemas_fixture_forms_api_topcoat::{operations, RouterBuilderFixtureFormsApiExt};
+use serde_json::json;
+use topcoat::context::Cx;
+use topcoat::router::content::Form;
+use topcoat::router::error::see_other;
+use topcoat::router::{header, page, to_bytes, Body, Router, StatusCode};
+use topcoat::view::{view, View};
+
+struct Accounts;
+
+#[async_trait]
+impl AccountImplementation for Accounts {
+    async fn sign_up(&self, _ctx: RequestContext, args: AccountSignUpArgs) -> Result<types::AccountView, ApiError> {
+        let input = args.input;
+        if input.email == "taken@example.com" {
+            return Err(ApiError::conflict("That email is taken")
+                .with_errors(json!({"email": [{"validator": "unique", "message": "is taken"}]})));
+        }
+        Ok(types::AccountView {
+            id: serde_json::from_value(json!("1")).unwrap(),
+            email: input.email,
+            display_name: input.display_name,
+            plan: input.plan,
+            seats: input.seats,
+            newsletter: input.newsletter.unwrap_or_default(),
+        })
+    }
+    async fn annotate(&self, _ctx: RequestContext, _args: AccountAnnotateArgs) -> Result<types::AccountView, ApiError> {
+        Err(ApiError::not_implemented("annotate"))
+    }
+}
+
+#[page("/signup")]
+async fn signup_form() -> topcoat::Result<impl View> {
+    Ok(view! { <form method="post">signup_input_fields()</form> })
+}
+
+#[page(POST "/signup")]
+async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<impl View> {
+    let errors = match form.parse() {
+        Ok(input) => match operations::account_sign_up(cx, AccountSignUpArgs { input }).await {
+            Ok(_) => return Err(see_other("/welcome").into()),
+            Err(err) => FormErrors::from_api(&err),
+        },
+        Err(errors) => errors,
+    };
+    Ok(view! {
+        (StatusCode::UNPROCESSABLE_ENTITY)
+        <form method="post">signup_input_fields(form: form, errors: errors)</form>
+    })
+}
+
+fn app() -> Router {
+    Router::builder()
+        .page(signup_form)
+        .page(sign_up)
+        .fixture_forms_api(Implementations { account: Arc::new(Accounts) })
+        .build()
+}
+
+async fn send(request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
+    let response = app().handle(request).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+async fn post(body: &str) -> (StatusCode, http::HeaderMap, String) {
+    send(
+        http::Request::builder()
+            .method("POST")
+            .uri("/signup")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn the_form_renders_its_rules_as_attributes() {
+    let (status, _, html) = send(http::Request::builder().uri("/signup").body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    for want in [
+        r#"name="email" type="email" required="" maxlength="255""#,
+        r#"<label for="signup-input-display-name">Display name</label>"#,
+        r#"type="text" required="" minlength="2" maxlength="40" placeholder="Ada Lovelace""#,
+        r#"pattern="^[a-z0-9]+$""#,
+        r#"name="website" type="url""#,
+        r#"type="number" step="1" min="1" max="50""#,
+        r#"type="number" step="any""#,
+        r#"<option value="pro">Pro</option>"#,
+        r#"name="newsletter" type="checkbox""#,
+    ] {
+        assert!(html.contains(want), "missing {want} in {html}");
+    }
+    assert!(!html.contains("pattern=\"^[a-zA-Z0-9._%+-]"), "an email input carries the scalar's pattern: {html}");
+}
+
+#[tokio::test]
+async fn a_post_that_breaks_a_rule_renders_again_with_its_errors() {
+    let (status, _, html) = post("email=ada%40example.com&displayName=Ada&plan=pro&seats=many&newsletter=on").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains("must be a whole number"), "{html}");
+    assert!(html.contains(r#"value="many""#), "{html}");
+    assert!(html.contains(r#"<option value="pro" selected="">"#), "{html}");
+    assert!(html.contains(r#"type="checkbox" checked="""#), "{html}");
+
+    let (status, _, html) = post("email=ada%40example.com&displayName=A&plan=pro&seats=3").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains("at least 2"), "{html}");
+    assert!(html.contains(r#"value="A" aria-invalid="true""#), "{html}");
+
+    let (status, _, html) = post("email=taken%40example.com&displayName=Ada&plan=free").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains("is taken"), "{html}");
+}
+
+#[tokio::test]
+async fn a_valid_post_signs_up() {
+    let (status, headers, _) = post("email=ada%40example.com&displayName=Ada&plan=free&seats=3&budget=12.5").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(headers[header::LOCATION], "/welcome");
+}
+
+#[test]
+fn a_form_parses_into_its_input() {
+    let form = SignupInputForm {
+        email: Some("ada@example.com".to_string()),
+        display_name: Some("Ada".to_string()),
+        handle: Some("ada".to_string()),
+        plan: Some("pro".to_string()),
+        seats: Some(" 4 ".to_string()),
+        budget: Some("2.5".to_string()),
+        newsletter: Some("on".to_string()),
+        ..SignupInputForm::default()
+    };
+    let input = form.parse().unwrap();
+    assert_eq!((input.plan, input.seats, input.budget, input.newsletter), (types::Plan::Pro, Some(4), Some(2.5), Some(true)));
+    assert_eq!(input.website, None);
+
+    let errors = SignupInputForm { handle: Some("Not A Handle".to_string()), ..form }.parse().unwrap_err();
+    assert!(!errors.of("handle").is_empty(), "{errors:?}");
+    assert!(errors.of("email").is_empty(), "{errors:?}");
 }
 `

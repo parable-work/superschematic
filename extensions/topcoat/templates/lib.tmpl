@@ -4,14 +4,29 @@
 //! mounts the JSON API at `/api` and keeps the implementations for the
 //! in-process calls of `operations`, which pages, shards and procedures
 //! make by each route's rules.
-{{- if .Records }} `records` mirrors each type an
-//! operation returns as a record a page can hand the browser.
+{{- if .Records }}
+//! `records` mirrors each type an operation returns as a record a page
+//! can hand the browser.
+{{- end }}
+{{- if .Forms }}
+//! `forms` reads and renders a form per input type whose fields a form
+//! holds.
+{{- end }}
+{{- if .Procedures }}
+//! `procedures` lets browser code call each operation, its arguments and
+//! result records; the app's `.discover()` registers them.
 {{- end }}
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+{{ if .Forms -}}
+pub mod forms;
+{{ end -}}
 pub mod operations;
+{{- if .Procedures }}
+pub mod procedures;
+{{- end }}
 {{- if .Records }}
 pub mod records;
 mod wire;

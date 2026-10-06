@@ -3,13 +3,20 @@
 //! The fixture-api API in a Topcoat app. `RouterBuilderFixtureApiExt::fixture_api`
 //! mounts the JSON API at `/api` and keeps the implementations for the
 //! in-process calls of `operations`, which pages, shards and procedures
-//! make by each route's rules. `records` mirrors each type an
-//! operation returns as a record a page can hand the browser.
+//! make by each route's rules.
+//! `records` mirrors each type an operation returns as a record a page
+//! can hand the browser.
+//! `forms` reads and renders a form per input type whose fields a form
+//! holds.
+//! `procedures` lets browser code call each operation, its arguments and
+//! result records; the app's `.discover()` registers them.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+pub mod forms;
 pub mod operations;
+pub mod procedures;
 pub mod records;
 mod wire;
 
