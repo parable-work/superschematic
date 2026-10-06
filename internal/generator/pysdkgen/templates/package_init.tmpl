@@ -9,6 +9,7 @@ from .client import (
     EncryptedRequestOptions,
     FilePart,
     PublicEncryptionKey,
+    ServiceCredential,
 {{- if .HasUnsetArgs}}
     UNSET,
     Unset,
@@ -30,6 +31,7 @@ __all__ = [
     "{{.SDKClassName}}",
     "ClientConfig",
     "PublicEncryptionKey",
+    "ServiceCredential",
     "EncryptedRequestOptions",
     "FilePart",
     "SDKError",

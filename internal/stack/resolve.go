@@ -134,6 +134,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.place()
 	r.expose()
 	r.resolveCalls()
+	r.checkCalls()
 	if r.failed() {
 		return nil
 	}

@@ -2123,7 +2123,7 @@ release log, which `releases` reads.
 | Schedule | `sweep`, every `sweep.intervalMs` on a schema whose config gives `sweep`, off on any other |
 | Vetoes | the version graph engine's codes: `version_conflict`, `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`, `entity_not_found`, `invalid_tree` (the core's findings in `details.findings`), `merge_into_itself`, `no_parent`, `not_tagged`, `walk_ceiling`; and `primary_line`, a `discard` of the primary line |
 | Refusals at define | a kind whose type is no type of the document besides the instance type; a field whose JSON key is a role or audit column's; a field of a scalar no value class reads (`Geo.Location`); a parent that is no kind of the config, or whose key is not a field of the kind's type holding a UUID; an order that is not an integer field; a unit on a field the type lacks, a `keyed` or `jsonSchema` unit on a field that is not JSON, an excluded order or parent key; and what else the version graph's core refuses in the descriptor (`invalid_schema`) |
-| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change, and a unit be given a field the old type lacked; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused. Added to a schema with instances, not removed from one. A field a version adds changes the hash an earlier commit's tree reads with ("A field a version adds") |
+| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change, and a unit be given a field the old type lacked; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused. Added to a schema with instances, not removed from one. A field a version adds moves no earlier commit's hash ("A field a version adds") |
 
 | Operation | Takes | Returns |
 | --- | --- | --- |
@@ -2231,11 +2231,14 @@ times as UTC date-times; a tree is rows by kind.
   graph's rules call for and it lacks.
 - **A field a version adds.** Every stored row reads a field a new
   version adds to its kind's type as null, as a Postgres row reads a
-  column added after it was written. A commit's tree then hashes with
-  the new column in it, so `materialize` of a commit made before returns
-  another `contentHash` than the one the commit stored, which `history`
-  and a commit's own record still return. A commit compares trees, not
-  stored hashes, so `nothing_to_commit` holds as before.
+  column added after it was written. The content hash leaves out a null
+  content column, as it leaves out one a row lacks, so a commit's tree
+  hashes as it did before the version: `materialize` of a commit made
+  before returns the `contentHash` the commit stored, which `history` and
+  a commit's own record return, and `released` and `compose` of the
+  primary line give it too. A value written to the field is content and
+  moves the hash. A commit compares trees, not stored hashes, so
+  `nothing_to_commit` holds as before.
 - **Deleting.** Deleting an instance deletes its graph: its refs,
   commits, patches, snapshots, rows, release pointer and their history.
 - **The core.** `@superschematic/engine` depends on

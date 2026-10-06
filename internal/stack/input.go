@@ -60,6 +60,50 @@ type Service struct {
 
 	// Config is the service's `@envVars` type, or nil when it has none.
 	Config *Config
+
+	// Operations are an API service's operations, each with what admits a
+	// caller to it (docs/stack-model.md, section 9.3): every calls edge to
+	// the API must reach one its caller may invoke. OperationsOf reads them
+	// from the service's IR.
+	Operations []Operation
+}
+
+// Operation is what admits a caller to one operation of an API service.
+type Operation struct {
+	// Name is the operation's set and its name, dotted:
+	// "ProductQueries.getProduct".
+	Name string
+
+	// UserClause reports that the operation requires an end user: @auth,
+	// an Authenticated set, @requirePermission or @requireOwnership.
+	UserClause bool
+
+	// ServiceCallers is the operation's effective service clause,
+	// @requireService or @allowService, its own or its set's; nil when it
+	// has none.
+	ServiceCallers *ir.ServiceCallers
+}
+
+// OperationsOf reads the operations of an API service's IR as
+// Service.Operations holds them.
+func OperationsOf(schema *ir.Schema) []Operation {
+	var ops []Operation
+	for _, set := range schema.OperationSets {
+		if set == nil {
+			continue
+		}
+		for _, op := range set.Operations {
+			if op == nil {
+				continue
+			}
+			ops = append(ops, Operation{
+				Name:           set.Name + "." + op.Name,
+				UserClause:     op.HasUserClause(),
+				ServiceCallers: ir.EffectiveServiceCallers(set, op),
+			})
+		}
+	}
+	return ops
 }
 
 // Config is a service's `@envVars` type.

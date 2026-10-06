@@ -1,5 +1,6 @@
 export { Authenticated, Encrypted } from "./bases";
 export {
+  allowService,
   auth,
   bodyLimit,
   docs,
@@ -12,6 +13,7 @@ export {
   rateLimit,
   requireOwnership,
   requirePermission,
+  requireService,
   rest,
   source,
   timeout,
@@ -32,6 +34,8 @@ export type {
   MCPInvocationPolicy,
   MCPToolOptions,
   RateLimitConfig,
+  ServiceCallersConfig,
+  ServiceHandleRef,
   TimeoutConfig
 } from "./decorators";
 export { HttpMethod } from "./enums";

@@ -7,7 +7,8 @@ the Go router does with @hmacVerified: buildRouter refuses implementations
 without a verifier for each provider, and a provider's verifier runs before
 the rate limit, the body limit and the permission check of its routes, the
 manual one included. The route reads the body the verifier read, and a
-route that is not a webhook runs no verifier.
+route that is not a webhook runs no verifier. The service step (D37) runs
+after the verifier too.
 */
 import { describe, expect, test } from 'bun:test';
 import { createHmac } from 'node:crypto';
@@ -59,11 +60,12 @@ const implementations = {
   webhookVerifiers: { stripe: verifierFor('stripe'), github: verifierFor('github') },
 };
 
-function app() {
+function app(extra: Record<string, unknown> = {}) {
   const root = new Hono();
   root.route(
     '/',
     buildRouter(implementations, {
+      ...extra,
       authenticate: async (ctx: { headers: Headers }) =>
         ctx.headers.get('x-user') === 'github-app' ? { subject: 'github-app', permissions: ['webhooks.receive'] } : null,
       bodyLimits: { receiveStripeEvent: 64 },
@@ -77,10 +79,11 @@ function app() {
   return root;
 }
 
-async function post(router: Hono, provider: string, path: string, body: string, options: { signed?: boolean; user?: string } = {}) {
+async function post(router: Hono, provider: string, path: string, body: string, options: { signed?: boolean; user?: string; service?: string } = {}) {
   const sent: Record<string, string> = { 'content-type': 'application/json', 'x-real-ip': '198.51.100.20' };
   sent[headers[provider]!] = options.signed === false ? 'forged' : signatureOf(provider, body);
   if (options.user) sent['x-user'] = options.user;
+  if (options.service) sent['service-authorization'] = options.service;
   return router.request(path, { method: 'POST', headers: sent, body });
 }
 
@@ -133,6 +136,23 @@ describe('generated fixture-webhooks-api router', () => {
     const accepted = await post(router, 'github', '/api/webhooks/github', body, { user: 'github-app' });
     expect(accepted.status).toBe(200);
     expect(received.at(-1)).toEqual({ id: 'delivery-1', action: 'opened' });
+  });
+
+  test('the GitHub verifier runs before the service step, which checks a service credential on a webhook route too', async () => {
+    const services: string[] = [];
+    const router = app({
+      authenticateService: async (ctx: { headers: Headers }) => {
+        services.push(ctx.headers.get('service-authorization') ?? '');
+        throw new HttpProblem(401, 'Invalid service credential', { code: 'service_unauthorized' });
+      },
+    });
+    const body = JSON.stringify({ id: 'delivery-2', action: 'opened' });
+    await expectRefusedSignature(await post(router, 'github', '/api/webhooks/github', body, { signed: false, user: 'github-app', service: 'Bearer forged' }));
+    expect(services).toEqual([]);
+    const refused = await post(router, 'github', '/api/webhooks/github', body, { user: 'github-app', service: 'Bearer forged' });
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toMatchObject({ code: 'service_unauthorized' });
+    expect(services).toEqual(['Bearer forged']);
   });
 
   test("the manual route is verified before the service's handler, which reads the body", async () => {

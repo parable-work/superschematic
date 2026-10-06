@@ -31,6 +31,7 @@ var corpus = []string{
 	"internal/loader/tsreader/testdata/services/fixture-nested-arrays",
 	"internal/loader/tsreader/testdata/services/fixture-nested-arrays-db",
 	"internal/loader/tsreader/testdata/services/fixture-nested-arrays-api",
+	"internal/loader/tsreader/testdata/services/fixture-service-auth-api",
 	"internal/loader/testdata/services/fixture-db-json",
 	"internal/loader/testdata/services/fixture-db-yaml",
 	"internal/loader/testdata/services/fixture-general-json",

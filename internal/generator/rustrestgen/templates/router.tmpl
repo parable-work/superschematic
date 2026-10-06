@@ -14,7 +14,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
 use axum::response::Response;
 use axum::routing::{delete, get, patch, post, put};
-{{- if .HasAuth }}
+{{- if or .HasAuth .HasServiceCallers }}
 use axum::Extension;
 {{- end }}
 use axum::Router;
@@ -30,6 +30,9 @@ use {{ .RuntimeCrateIdent }}::Principal;
 {{- end }}
 {{- if .HasControls }}
 use {{ .RuntimeCrateIdent }}::RouteControls;
+{{- end }}
+{{- if .HasServiceCallers }}
+use {{ .RuntimeCrateIdent }}::ServiceCaller;
 {{- end }}
 use serde_json::Value;
 use std::collections::HashMap;
@@ -58,7 +61,7 @@ pub struct RouterState {
 ///
 {{- range .ManualEndpoints }}
 /// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }}){{ if .HasControls }}: apply its controls,
-///   `RouteControls::new(){{ range .ControlCalls "authenticator" }}{{ . }}{{ end }}.apply(route)`
+///   `RouteControls::new(){{ range .ControlCalls "authenticator" "service_authenticator" }}{{ . }}{{ end }}.apply(route)`
 {{- end }}{{ if .WebhookProvider }}{{ if .HasControls }}, then{{ else }}, @hmacVerified:{{ end }}
 ///   wrap its route in `webhook_verified` with the {{ .WebhookProvider }} verifier
 {{- end }}
@@ -73,7 +76,16 @@ pub struct RouterState {
 /// Mounts every operation.
 {{- end }}
 {{- end }}
-{{- if .HasControls }}
+{{- if .HasServiceCallers }}
+///
+/// A route's controls run in the order the Go server runs them: the rate
+/// limit, the body limit, the service step, the permission check of a
+/// route that needs a caller, then the timeout around the handler. The
+/// service step runs on every route: `implementations.service_authenticator`
+/// verifies a `Service-Authorization` credential when the request carries
+/// one, then a route's @requireService or @allowService rule applies; a
+/// listed caller on an @allowService route skips the permission check.
+{{- else if .HasControls }}
 ///
 /// A route's controls run in the order the Go server runs them: the rate
 /// limit, the body limit, the permission check of a route that needs a
@@ -115,7 +127,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
 {{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
     let route = RouteControls::new()
-{{- range .ControlCalls "Arc::clone(&state.implementations.authenticator)" }}
+{{- range .ControlCalls "Arc::clone(&state.implementations.authenticator)" "Arc::clone(&state.implementations.service_authenticator)" }}
         {{ . }}
 {{- end }}
         .apply({{ $route }});
@@ -235,8 +247,13 @@ impl {{ .ArgsName }} {
 async fn handle_{{ .SnakeName }}(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
-{{- if .RequiresAuth }}
+{{- if .AllowsService }}
+    principal: Option<Extension<Principal>>,
+{{- else if .RequiresAuth }}
     Extension(principal): Extension<Principal>,
+{{- end }}
+{{- if .ServiceStep }}
+    service_caller: Option<Extension<ServiceCaller>>,
 {{- end }}
 {{- if .PathArgs }}
     uri: Uri,
@@ -281,8 +298,14 @@ async fn handle_{{ .SnakeName }}(
 {{- end }}
     let mut ctx = RequestContext::new(method_from_str("{{ .Method }}"), "{{ .Path }}".to_string());
     ctx.headers = headers_to_map(&headers);
-{{- if .RequiresAuth }}
+{{- if .AllowsService }}
+    // A listed service caller stands in for the end user: no principal.
+    ctx.principal = principal.map(|Extension(principal)| principal);
+{{- else if .RequiresAuth }}
     ctx.principal = Some(principal);
+{{- end }}
+{{- if .ServiceStep }}
+    ctx.service_caller = service_caller.map(|Extension(caller)| caller);
 {{- end }}
 {{- if .PathArgs }}
     ctx.path_params = path_params;
