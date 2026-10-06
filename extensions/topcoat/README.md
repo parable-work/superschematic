@@ -22,8 +22,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   ([Procedures](#procedures)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
-are, and the core binary does not link it. `cmd/superschematic-topcoat` is
-the core with it linked:
+are. Neither the core nor the installed `superschematic`, which links gcp
+and pulumi, links it (D44). `cmd/superschematic-topcoat` is the core with
+it linked:
 
 ```bash
 go build -o superschematic-topcoat ./cmd/superschematic-topcoat
@@ -67,8 +68,9 @@ build and `build --api-language RUST`.
 
 A binary without the extension refuses `outputs.topcoat`, as it refuses
 any outputs key no generator claims. A project that also builds its
-configs with the core binary lists its Topcoat services in
-`superschematic.toml` instead. The core binary never reads that table:
+configs with such a binary, `superschematic` among them, lists its Topcoat
+services in `superschematic.toml` instead. Such a binary never reads that
+table:
 
 ```toml
 [extension.topcoat]

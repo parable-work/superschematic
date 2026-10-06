@@ -20,7 +20,7 @@ The versions are the pins in `tools.env`, which CI reads too.
 | --- | --- | --- |
 | Go | 1.26.4 | The CLI is a Go binary, and generated Go code targets this version. |
 | A C compiler | any | The CLI and generated Go code link superscalar through cgo (`CGO_ENABLED=1`). |
-| Rust (rustup) | superscalar's checkout pins its own toolchain | Builds superscalar's static archive and the version-graph archive from source. |
+| Rust (rustup) | 1.99.0 | Builds superscalar's static archive and the version-graph archive from source. `make` and the build scripts use this toolchain whatever rustup's default is. |
 | git | any | Checks superscalar out at the commit in `superscalar.pin`. |
 | Node | 22.12 or newer; 24 for the engine | Builds superscalar's TypeScript binding and the docs site, and runs [the engine](/superschematic/guides/engine/). |
 | Bun | 1.4 | Installs the TypeScript runtimes and the generated TypeScript packages, which use the `workspace:` protocol. |
@@ -48,7 +48,9 @@ make build
 3. installs the TypeScript authoring packages and runtimes with Bun, and
    the Python schema runtime with uv.
 
-`make build` writes the CLI to `bin/superschematic`. Check it:
+`make build` writes the CLI to `bin/superschematic`: the core with the
+official extensions linked, the gcp target and the Pulumi provisioner.
+Check it:
 
 ```sh
 bin/superschematic --help

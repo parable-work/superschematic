@@ -74,11 +74,31 @@ Version sites (relative to the repository root):
                                       .../superschematic/ir vX.Y.Z
   examples/acme-schematic/go.mod      require .../superschematic vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
+  extensions/gcp/go.mod               require .../superschematic vX.Y.Z and
+                                      .../superschematic/ir vX.Y.Z
+  extensions/pulumi/go.mod            require .../superschematic vX.Y.Z,
+                                      .../superschematic/ir vX.Y.Z and
+                                      .../extensions/gcp vX.Y.Z (its tests')
+  extensions/topcoat/go.mod           require .../superschematic vX.Y.Z and
+                                      .../superschematic/ir vX.Y.Z
+  cmd/superschematic/go.mod           require .../superschematic vX.Y.Z,
+                                      .../superschematic/ir vX.Y.Z,
+                                      .../extensions/gcp vX.Y.Z and
+                                      .../extensions/pulumi vX.Y.Z
 
 The Go requires carry the release version so a consumer at a tag resolves
 the sibling modules from their own tags (ir/vX.Y.Z and so on, all cut on the
 same commit by go-module-tag.yml); the `replace` lines next to them keep
-local builds on the checkout. 0.0.0 is the unreleased version.
+local builds on the checkout. Every module that requires the root module
+or ir is a site: the root requires ir at the release version, so a module
+left at 0.0.0 is a go.mod that `go build -mod=readonly` refuses to update.
+0.0.0 is the unreleased version.
+
+The `replace` lines stay in a release, and `go install <package>@vX.Y.Z`
+refuses a command whose module carries any, as cmd/superschematic does.
+runtime/migrate/go carries none, so superschematic-migrate installs that
+way. The installed binary is downloaded from the release or built from a
+checkout.
 
 Pre-releases: SemVer `-alpha.N`, `-beta.N` and `-rc.N` map to PEP 440 `aN`,
 `bN` and `rcN`. Other pre-release identifiers and build metadata are rejected
@@ -98,8 +118,20 @@ NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config"]
 
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is
-# vX.Y.Z.
-GO_MODULES = ["ir", "runtime/schema/go", "runtime/http/go", "runtime/versiongraph/go", "runtime/migrate/go", ""]
+# vX.Y.Z. cmd/superschematic, the installed binary, links the core and the
+# official extensions, so it comes last.
+GO_MODULES = [
+    "ir",
+    "runtime/schema/go",
+    "runtime/http/go",
+    "runtime/versiongraph/go",
+    "runtime/migrate/go",
+    "",
+    "extensions/gcp",
+    "extensions/pulumi",
+    "extensions/topcoat",
+    "cmd/superschematic",
+]
 
 SEMVER = re.compile(
     r"^(?P<core>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
@@ -385,6 +417,43 @@ def sites():
             [
                 (go_require_pattern(GO_MODULE), 1),
                 (go_require_pattern(GO_MODULE + "/ir"), 1),
+            ],
+            "gomod",
+        )
+    )
+    # The extension modules and the installed binary, for the same reason,
+    # and because each is tagged: a consumer at a tag resolves its siblings
+    # from theirs.
+    for ext in ("gcp", "topcoat"):
+        out.append(
+            (
+                ROOT / "extensions" / ext / "go.mod",
+                [
+                    (go_require_pattern(GO_MODULE), 1),
+                    (go_require_pattern(GO_MODULE + "/ir"), 1),
+                ],
+                "gomod",
+            )
+        )
+    out.append(
+        (
+            ROOT / "extensions" / "pulumi" / "go.mod",
+            [
+                (go_require_pattern(GO_MODULE), 1),
+                (go_require_pattern(GO_MODULE + "/ir"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
+            ],
+            "gomod",
+        )
+    )
+    out.append(
+        (
+            ROOT / "cmd" / "superschematic" / "go.mod",
+            [
+                (go_require_pattern(GO_MODULE), 1),
+                (go_require_pattern(GO_MODULE + "/ir"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
             ],
             "gomod",
         )

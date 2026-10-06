@@ -18,8 +18,10 @@ set. Extensions that implement `cli.CommandProvider` add subcommands at
 resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
-The core binary has six commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format` and `behaviors`.
+The core has six commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format` and `behaviors`. The installed `superschematic`
+links the official extensions (the gcp target and the Pulumi
+provisioner), which add none.
 
 ## `build <service-dir>`
 
@@ -311,7 +313,7 @@ superschematic json-schema --naming ./schemas/superschematic.toml
 | `--config` | false | emit the `schema.config.{json,yaml}` JSON Schema instead |
 | `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
 
-The output of the binary with no extension linked, under the built-in
+The output of the core with no extension linked, under the built-in
 names, ships in the `@superschematic/schema-ir` npm package as
 `schema-file.json`, next to TypeScript types for the same documents:
 

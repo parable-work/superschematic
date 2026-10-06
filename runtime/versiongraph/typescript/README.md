@@ -200,8 +200,11 @@ make versiongraph-scenarios-ts   # from the repository root: the SQLite pass, th
 UPDATE_SQLITE_VECTORS=1 bun test test/sqlite-vectors.test.ts   # after bun run build: rewrite the SQLite vectors; review the diff
 ```
 
-The build needs cargo with the `wasm32-unknown-unknown` target (`rustup
-target add wasm32-unknown-unknown`). `bun run test` builds the package,
+The build needs cargo and the toolchain `tools.env`'s `RUST_VERSION` names,
+with the `wasm32-unknown-unknown` target (`rustup toolchain install
+<RUST_VERSION> --target wasm32-unknown-unknown`); it builds with that
+toolchain whatever rustup's default is, unless `RUSTUP_TOOLCHAIN` names
+another. `bun run test` builds the package,
 type-checks the tests against the built `dist/`, runs every vector in
 `runtime/versiongraph/testdata/vectors` through the package API
 (`test/vectors.test.ts`), checks each way of loading the module

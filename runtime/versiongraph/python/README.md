@@ -164,8 +164,12 @@ make versiongraph-scenarios-python          # from the repository root: the SQLi
 
 uv builds the package with maturin into `.venv` and rebuilds it when the
 binding's or the core's Rust sources change (`[tool.uv] cache-keys`). The
-build needs cargo. `tests/test_vectors.py` runs every vector in
-`runtime/versiongraph/testdata/vectors` as JSON text through `run` and
+build needs cargo and the toolchain `tools.env`'s `RUST_VERSION` names,
+which the crate declares as its `rust-version`. `make` exports it as
+`RUSTUP_TOOLCHAIN`; for a bare `uv run`, export `RUSTUP_TOOLCHAIN` yourself
+or make that toolchain rustup's default. `tests/test_vectors.py` runs
+every vector in `runtime/versiongraph/testdata/vectors` as JSON text
+through `run` and
 through the typed operations with an exact codec, comparing each output
 with the vector's `expect`, member order and number digits included, and
 through the module-level operations when `json` reads the vector without

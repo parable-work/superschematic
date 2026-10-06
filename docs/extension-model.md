@@ -82,7 +82,9 @@ Goals:
    an auth provider and a command without editing a file in this
    repository.
 2. The core-only binary is the same program with no extensions:
-   `cmd/superschematic` is `cli.New(cli.Config{})`.
+   `internal/cmd/superschematic-core` is `cli.New(cli.Config{})`. The
+   installed binary, `cmd/superschematic`, is the same call with the
+   official extensions (`docs/stack-model.md`, section 13).
 3. Extension data round-trips through the TypeScript, JSON and YAML
    authoring forms and the persisted IR, and the core never knows its shape.
 4. Mistakes fail closed and early. A bad registration fails when the
@@ -488,7 +490,9 @@ registry assembles one the same way; acme's `describe` does.
 
 `cli.Config` names the binary in usage text (`Name`) and can replace the
 root descriptions (`Short`, `Long`). A binary is its `main` calling
-`cli.New(...).Execute()`; `cmd/superschematic` passes no extension.
+`cli.New(...).Execute()`. The installed `cmd/superschematic` passes the
+official extensions, and the core-only `internal/cmd/superschematic-core`
+passes none.
 
 `cli.Config.ToolDigest` replaces the hash of the running executable in
 every `build-all` cache key and stamp (section 7.4). `cli.New` applies it
