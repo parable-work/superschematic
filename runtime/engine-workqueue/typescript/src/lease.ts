@@ -104,6 +104,7 @@ import {
 
 import { DEFAULT_TTL_MS } from './defaults.js';
 import declaration from './declarations/Lease.behavior.json' with { type: 'json' };
+import { leaseGuidance } from './guidance/lease.js';
 
 export { DEFAULT_TTL_MS } from './defaults.js';
 
@@ -575,6 +576,8 @@ function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation
 
 export const lease = defineBehavior<LeaseConfig>({
   declaration,
+
+  guidance: leaseGuidance,
 
   // The configSchema holds the shape; this holds the config to the type:
   // its fields, its Workflow's states and the behaviors it lists.

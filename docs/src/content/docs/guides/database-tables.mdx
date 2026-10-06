@@ -87,7 +87,7 @@ points at the order.
 The ORM loads the lines when the read asks for them, through the nested
 field selection of the order's options:
 
-<Snippet file="go/orders.go" symbol="withLines" />
+<Snippet file="go/shop-orders/orders.go" symbol="withLines" />
 
 ## Indexes
 
@@ -147,7 +147,7 @@ context, set with `orm.WithUserID`; without one it returns
 does not tell the ORM who they are, so the orders service adds that step
 to its auth middleware:
 
-<Snippet file="go/orders.go" symbol="actingUser" />
+<Snippet file="go/shop-orders/orders.go" symbol="actingUser" />
 
 ## Transactions
 
@@ -155,7 +155,7 @@ to its auth middleware:
 and rolls it back when the function returns an error. Placing an order
 writes the order and its lines together:
 
-<Snippet file="go/orders.go" symbol="Orders.PlaceOrder" />
+<Snippet file="go/shop-orders/orders.go" symbol="Orders.PlaceOrder" />
 
 The transaction also takes raw SQL for what the repositories do not
 express: `Exec` for a write, and `Query` for a read such as a keyset-paged

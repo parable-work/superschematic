@@ -757,6 +757,8 @@ function is synchronous (D16): one that returns a promise is a
 | `validate(context, request)` | judges the instance's own fields a create or an update would store, once the live version accepts them: returned issues refuse the write (`invalid_instance`), as the live version's do ("Validating fields"). It gets no precondition: what one asserts is a guard's to judge |
 | `checkedTypes(config)` | the types of the document its `validate` checks values against with `checkType`, which the compatibility rule then holds ("Validating fields") |
 | `instanceSchema(config, form, typeSchema)` | what its `validate` holds the fields to, as JSON Schemas the describe document and the create and update tools carry under `allOf` ("Validating fields") |
+| `guidance(config, target)` | what it tells a caller about the type under its config: a summary, and by operation name the guidance it gives each operation of the type, its own, the built-in ones and other behaviors' it guards, each error a veto code its declaration lists ("Guidance" under "Tools") |
+| `createParamsSchema(config, target)` | the create parameters it takes under its config, narrower than its declaration's `createParamsSchema`, which the describe document and the create tool show in its place; display only, as `instanceSchema` is ("Create parameters") |
 | `guard(view, request)` | may veto a `create`, an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason, or `{ reason, code?, details? }`, vetoes ("Vetoes and preconditions"). It is asked once every `validate` has accepted the fields. A create's request carries the new instance's `data` and the create's parameters by behavior (`behaviors`), and no precondition. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does. `precondition` is the behavior's own entry of the caller's preconditions |
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext`, whose `sql` writes the behavior's own tables in a writing one ("Schema-level operations") |
@@ -843,6 +845,22 @@ creates an instance with its links and edges at once; `Blueprint` stamps
 its children this way. The create route's body, the create tool's
 arguments and the describe document carry the parameters under
 `behaviors` ("HTTP", "Tools").
+
+The declaration's schema is the same on every type; what a config
+admits is narrower. An implementation's `createParamsSchema(config,
+target)` returns the parameters it takes under the config, which the
+describe document and the create tool show in place of the declared
+one: `Links` a property per link name, the required ones required and a
+`revision` only for a pinned link, `Dependencies` a blocker's `schema`
+from the config's `schemas`, required when the type's own schema is not
+among them. It describes what `initialize` enforces, as
+`instanceSchema` describes what `validate` enforces: the engine checks a
+create against the declared schema, and `initialize` refuses what the
+config refuses, with its own messages. An implementation has the hook
+only where its declaration has a `createParamsSchema`, and what it
+returns is held to the same shape, an object schema whose
+`additionalProperties` is `false` or a schema; anything else is a
+`BehaviorError`.
 
 ### Validating fields
 
@@ -1664,7 +1682,9 @@ Their operations are served as any behavior's are. For a schema named
 `documents_transition`; the list operations' tools only read (`replay`
 `read_only`, `readOnlyHint`). None names an invocation policy, so each
 takes the default of the policy the engine is given, the core's or a
-distribution's (D11, "The invocation policy and the vendor keys"). A
+distribution's (D11, "The invocation policy and the vendor keys"). Each
+gives guidance from its config, which every tool of the type carries
+("Guidance" under "Tools"). A
 refusal is the HTTP API's problem: a transition whose permission the
 caller lacks is 403 `forbidden`, and over MCP a tool error carrying that
 problem.
@@ -1897,7 +1917,7 @@ of their schema's `Links` config: a parent's view of its children.
 | Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`; at least one. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`. `countBy`, `sum`, `min` and `max` take `field`, the others none; only `all` and `any` take `gatedStates` and `outcomes` |
 | Fields | `rollups`: `{ <name>: value }`, computed at each read |
 | Operations | none |
-| Guards | a Workflow `transition` of the instance into a state an `all` or `any` rollup gates, whoever asks, unless the rollup holds: `vetoed`, naming the rollup and how many linked instances keep it from holding |
+| Guards | a Workflow `transition` of the instance into a state an `all` or `any` rollup gates, whoever asks, unless the rollup holds: `vetoed` (`not_held`), naming the rollup and how many linked instances keep it from holding, details `{ rollup, to, over, linked, counted }`, `linked` and `counted` absent past the bound (`over: true`) |
 | Refusals | at define and publish (`invalid_schema`): a gated state that is not a state of the type's Workflow, or a type without Workflow; a linked schema with no live version, without `Links` or the link, or whose link points at another schema; a `countBy` field that is not a string, enum or boolean field of its type, or `status` when it composes Workflow; a `sum`, `min` or `max` field that is not a number or integer field; `all` or `any` over a schema without Workflow. A caller who may not read the linked schema cannot define or publish the rollup (`forbidden`) |
 | Events | none of its own: a linked instance's change appends no event on this one |
 | `configChange` | nothing is stored, so rollups may be added, removed and changed, and Rollups added to or removed from a schema with instances |
@@ -2838,14 +2858,16 @@ a schema's live version:
     "required": ["title"]
   },
   "behaviors": [{"name": "test.Counter", "description": "Counts up.", "config": {"start": 0},
+                 "summary": "Each Item counts up from 0.",
                  "fields": [{"name": "count", "description": "The count."}], "operations": ["increment"],
                  "vetoes": [{"code": "at_limit", "description": "The count is at its config's limit."}]}],
   "operations": [
     {"name": "create", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
      "params": {"type": "object", "additionalProperties": false, "properties": {"data": {...}, "id": {...}}, "required": ["data"]},
-     "result": {...}, "tool": "item.create"},
+     "result": {...}, "tool": "item.create",
+     "guidance": {"useWhen": "Use to create a new Item: ...", "doNotUseWhen": "...", "success": "...", "errors": []}},
     {"name": "increment", "behavior": "test.Counter", "scope": "instance", "description": "Adds to the count.", "writes": true,
-     "invocationPolicy": "auto", "params": {...}, "result": {...}, "tool": "item.increment"}
+     "invocationPolicy": "auto", "params": {...}, "result": {...}, "tool": "item.increment", "guidance": {...}}
   ]
 }
 ```
@@ -2857,13 +2879,16 @@ a schema's live version:
   to, as their `instanceSchema` writes it: `Variants`' `if`/`then` per
   value. Create's `data` carries the same, update's `patch` the patch
   form, and the instance in each result.
-- `behaviors` lists each behavior's config, fields, operations and the
-  codes its vetoes carry (`vetoes`).
+- `behaviors` lists each behavior's config, its `summary`, what its
+  guidance says it does under the config ("Guidance", below; absent for
+  a behavior that gives none), its fields, operations and the codes its
+  vetoes carry (`vetoes`).
 - `operations` lists `create`, `get`, `list`, `update`, `delete`, then each
   behavior's operations in the type's list order. `create`'s `params`
   has `behaviors` when a behavior the type composes declares a
   `createParamsSchema`: a closed object with each such behavior's
-  schema, as its declaration holds it, under its name. `update`'s,
+  schema under its name, as its implementation narrows it for the
+  config, else as its declaration holds it ("Create parameters"). `update`'s,
   `delete`'s and each instance operation's have `preconditions` when one
   declares a `preconditionSchema`, the same way; `create`'s never does,
   and the others never have `behaviors`. So a schema that composes
@@ -2874,7 +2899,7 @@ a schema's live version:
   what it returns (an instance, a page, `null` for a delete, a behavior
   operation's `resultSchema`), and the invocation policy sits under the
   policy's key. A behavior's operation carries `behavior` and `scope`,
-  `instance` or `schema`.
+  `instance` or `schema`. Each carries `guidance`, its tool's.
 
 A field's JSON Schema is what the SDK generators write for the same field
 as a tool argument (`internal/generator/toolsutil`), keyed by the field's
@@ -2927,8 +2952,10 @@ tools derive, or an engine tool's hides the tool with its reason in
 `hiddenReason`; the engine's tools keep theirs. A tool the access policy
 refuses the principal is hidden too, with that reason. `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
-`replay` is `read_only`, and `inputSchemaDigest` hashes the arguments as
-the Go encoder writes them.
+`replay` is `read_only`, `inputSchemaDigest` hashes the arguments as
+the Go encoder writes them, and `guidance` is the tool's guidance
+("Guidance", below), which a visible tool's `mcp._meta` carries under
+the guidance key too.
 
 `preconditions` is there only when a behavior of the schema declares a
 `preconditionSchema`: an object with an optional entry per such
@@ -2944,6 +2971,82 @@ engine call its handle names, with its arguments checked (an unknown or
 mistyped argument is `invalid_argument`). A handle the namespace has no
 visible tool for, among the schemas the principal may read, throws
 `UnknownToolError` (`not_found`).
+
+### Guidance
+
+An SDK tool carries its operation's `@docs` guidance: `useWhen`,
+`doNotUseWhen`, `success` and `errors`, each error a `code`, a
+`description` and a `commonCorrection` (`ir.ToolOperationGuidance`). A
+schema the engine runs has no `@docs`, so the engine writes the same
+members from what it knows:
+
+- its own tools (`list_schemas`, `describe_schema`, `define_schema`,
+  `list_behaviors`, `describe_behavior`, `search`) carry fixed guidance;
+- `create`, `get`, `list`, `update` and `delete` carry the engine's base,
+  which names the schema's instance type and, for `create`, the
+  behaviors that take create parameters;
+- each behavior adds what its config says, through its implementation's
+  `guidance(config, target)`: a `summary`, which the describe document's
+  `behaviors` entry carries, and, by operation name, what it says about
+  each operation of the type, its own, the built-in ones and other
+  behaviors' it guards. `target` has the schema, the instance type,
+  every behavior the type lists with its config as the schema holds it,
+  and every operation of the type with its behavior, `writes` and
+  `scope`, so `Lease` adds its refusals to every write its guard holds.
+
+An operation's guidance is the engine's base, then what the behavior
+that adds it says, then what each other behavior of the type says, in
+list order; each member's sentences are joined by a space. `errors`
+lists vetoes, the refusals a client branches on by `details.code`
+("Vetoes and preconditions"): each a code the contributing behavior's
+declaration lists, with its `description`, the declaration's when the
+behavior gives none, led by the behavior's name, since two behaviors may
+share a code (`Lease: Another principal holds ...`), and listed once per
+behavior. An engine code such as `forbidden` is not an error there; the
+text says which permission a call needs.
+
+```json
+{"useWhen": "Use to move status from todo to doing or dropped; from doing to done or dropped.",
+ "doNotUseWhen": "Do not use from done or dropped: no transition leaves a terminal state. Do not use to stay where the instance is. Do not move into done while blocked is true.",
+ "success": "Returns from and to; status holds to from then on.",
+ "errors": [{"code": "transition_not_allowed", "description": "Workflow: No transition leads from ...", "commonCorrection": "Read status, then ..."},
+            {"code": "blocked", "description": "Dependencies: A move into done while a blocker is open; ...", "commonCorrection": "Wait for ..."}]}
+```
+
+The text is short plain-ASCII sentences computed from the parsed config,
+once per published version, so the same config gives the same text. The
+engine holds what a behavior returns to its declaration and its type: a
+code the declaration does not list, an operation the type does not have,
+a text with surrounding whitespace, no summary, or a value that is not
+JSON is a `BehaviorError`, which fails the schema's describe and tools
+documents as any defect of an implementation does. A behavior without
+`guidance` has no summary and adds nothing, so an operation of its own
+has empty guidance unless another behavior speaks to it.
+
+Every core and work-queue behavior gives guidance, each one's text in a
+module of its own (`src/behaviors/core/guidance/` here, `src/guidance/`
+in `@superschematic/engine-workqueue`):
+
+| Behavior | What it says |
+| --- | --- |
+| `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; create's initial status, and that update does not set `status` |
+| `Comments` | the thread; `comment` and `listComments` |
+| `Revisions` | that every change records a revision, and the review permission; without review, that the review operations are refused (`no_review`) |
+| `Dependencies` | the blocker schemas, the gated states, the outcomes that finish a blocker; `blocked` on `transition`, the edge refusals on `addBlocker` and `create` |
+| `Links` | each link with its schema, required and pinned; what `create`, `link` and `unlink` take and refuse |
+| `Rollups` | what each rollup computes over which link, and the moves a rollup gates; `not_held` on `transition` |
+| `Search` | the fields and their weights, and the vectors' model, dimensions and permission; that `staleEmbeddings` and `settleEmbeddings` need vectors |
+| `Reactions` | each rule, what sets it off and the move it makes |
+| `Constants` | the fields that keep their create's value, and the permission that changes them |
+| `Variants` | the type the field holds for each value |
+| `Branches` | the kinds and the primary line, and each operation's version-graph refusals |
+| `Lease` | the length, the heartbeat interval, the longest hold, what an expiry and the last expiry do, the token; its refusals on every write its guard holds |
+| `Assignment` | who may assign whom; `assigned_to_another` on `acquire` and `claim` |
+| `Queue` | the claim states, the order, the match fields, what keeps work out; `claim_required` on `acquire` |
+| `Presence` | who beats an instance and how often, what a miss does |
+| `Blueprint` | what a stamp creates and when, and its refusals on the write that stamps |
+| `Budget` | each meter's limit, reservation, scope and day, overruns; `scope_reserved` on a scope link's `link` and `unlink` |
+| `Retries` | the classes and caps, what exhaustion does; `exhausted` on `transition`, `acquire` and `claim` |
 
 ### The behavior catalog
 

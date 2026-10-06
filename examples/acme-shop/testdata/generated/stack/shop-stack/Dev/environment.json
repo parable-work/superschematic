@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Dev",
+  "target": "local",
+  "provisioner": "local",
+  "deployables": [
+    {
+      "name": "shop-api",
+      "kind": "server",
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "exposed": true,
+      "resourceName": "shop-api",
+      "address": "http://127.0.0.1:22424",
+      "bindings": [
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-api->shop-db"
+        }
+      ]
+    },
+    {
+      "name": "shop-db",
+      "kind": "database",
+      "platform": "local.postgres",
+      "services": [
+        {
+          "name": "shop-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "postgres",
+      "resourceName": "shop-db",
+      "address": "127.0.0.1:32259"
+    },
+    {
+      "name": "shop-orders",
+      "kind": "server",
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "exposed": true,
+      "resourceName": "shop-orders",
+      "address": "http://127.0.0.1:21753",
+      "bindings": [
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-orders->shop-db"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "sql:shop-api->shop-db",
+      "kind": "sql",
+      "from": "shop-api",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-orders->shop-db",
+      "kind": "sql",
+      "from": "shop-orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "postgres.container",
+        "type": "local:docker/container:Container",
+        "properties": {
+          "env": [
+            {
+              "name": "POSTGRES_HOST_AUTH_METHOD",
+              "value": "trust"
+            }
+          ],
+          "image": "postgres:16-alpine",
+          "labels": {
+            "superschematic.environment": "Dev",
+            "superschematic.stack": "shop-stack"
+          },
+          "name": "superschematic-shop-stack-dev-postgres",
+          "ports": [
+            {
+              "containerPort": 5432,
+              "host": "127.0.0.1",
+              "hostPort": 32259
+            }
+          ]
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-api.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+            }
+          ],
+          "language": "go",
+          "module": "server/shop-stack/shop-api",
+          "name": "shop-api",
+          "port": 22424,
+          "readiness": "/readyz"
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-db.database.shop-db",
+        "type": "local:postgres/database:Database",
+        "properties": {
+          "container": {
+            "$output": {
+              "resource": "postgres.container",
+              "name": "name"
+            }
+          },
+          "name": "shop_db",
+          "service": "shop-db",
+          "url": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+        },
+        "dependsOn": [
+          "postgres.container"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-orders.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+            }
+          ],
+          "language": "go",
+          "module": "server/shop-stack/shop-orders",
+          "name": "shop-orders",
+          "port": 21753,
+          "readiness": "/readyz"
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-orders"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "postgres.container",
+        "shop-db.database.shop-db"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "shop-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "shop-api",
+        "shop-orders"
+      ],
+      "resources": [
+        "shop-api.process",
+        "shop-orders.process"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "shop-db"
+      ]
+    }
+  ]
+}

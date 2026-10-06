@@ -61,6 +61,7 @@ import {
 } from '@superschematic/engine';
 
 import declaration from './declarations/Presence.behavior.json' with { type: 'json' };
+import { presenceGuidance } from './guidance/presence.js';
 
 /** How often the runner misses the instances past their deadline when the config gives no sweepMs. */
 const DEFAULT_SWEEP_MS = 5000;
@@ -242,6 +243,8 @@ function checkLeases(target: ConfigTarget, schemas: readonly string[]): void {
 
 export const presence = defineBehavior<PresenceConfig>({
   declaration,
+
+  guidance: presenceGuidance,
 
   // The configSchema holds the shape; this holds the config to the type:
   // its fields, its Workflow's states, and the schemas it releases leases on.

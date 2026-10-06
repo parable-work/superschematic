@@ -18,6 +18,7 @@ import { OperationParamsError } from '../../errors.js';
 import type { Row } from '../../storage/driver.js';
 import { defineBehavior, type InstanceView } from '../behavior.js';
 import declaration from './declarations/Comments.behavior.json' with { type: 'json' };
+import { commentsGuidance } from './guidance/comments.js';
 import { page, pageRequest } from '../paging.js';
 
 /** One comment, as comment and listComments return it. */
@@ -48,6 +49,8 @@ function record(row: Row): CommentRecord {
 
 export const comments = defineBehavior({
   declaration,
+
+  guidance: commentsGuidance,
 
   configChange(before, after) {
     if (before !== undefined && after === undefined) {

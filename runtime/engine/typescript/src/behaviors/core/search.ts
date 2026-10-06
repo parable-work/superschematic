@@ -87,6 +87,7 @@ import { deepFreeze, jsonCopy } from '../json.js';
 import { page, pageRequest, type Page } from '../paging.js';
 import { BehaviorRegistry } from '../registry.js';
 import declaration from './declarations/Search.behavior.json' with { type: 'json' };
+import { searchGuidance } from './guidance/search.js';
 
 /** Search's vectors, as its config gives them. */
 export interface SearchVectors {
@@ -646,6 +647,8 @@ function ownText(sql: TableReader, config: SearchConfig, row: number): string {
 
 export const search = defineBehavior<SearchConfig>({
   declaration,
+
+  guidance: searchGuidance,
 
   parseConfig(json, target) {
     const raw = json as { fields: string[]; weights?: Record<string, number>; vectors?: SearchVectors };

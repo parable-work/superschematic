@@ -42,9 +42,9 @@ but count needs each instance's fields, which only reading it gives, and
 one bound for every function keeps one rule.
 
 The guard: an all or any rollup may name gatedStates, states of the
-type's own Workflow. A transition into one is refused (vetoed), whoever
-asks, unless every rollup that gates it holds; one past the bound does
-not. It reads the state from transition's to, the only parameter
+type's own Workflow. A transition into one is refused (vetoed, not_held,
+with the rollup, the state and the counts in its details), whoever asks,
+unless every rollup that gates it holds; one past the bound does not. It reads the state from transition's to, the only parameter
 Workflow's closed paramsSchema takes.
 
 parseConfig holds gatedStates to the states of the type's Workflow. When
@@ -62,10 +62,12 @@ configChange: nothing is stored, so rollups may be added, removed and
 changed, and Rollups added to or removed from a schema with instances.
 */
 
+import type { Veto } from '../../errors.js';
 import type { InstanceRecord } from '../../instances/store.js';
 import { setMember } from '../../instances/patch.js';
 import { BehaviorConfigError, defineBehavior, type ConfigSchema, type ConfigTarget, type FrozenJSON, type InstanceView } from '../behavior.js';
 import declaration from './declarations/Rollups.behavior.json' with { type: 'json' };
+import { rollupsGuidance } from './guidance/rollups.js';
 import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
 /** The functions a rollup computes. */
@@ -236,12 +238,18 @@ function counted(spec: RollupSpec): string {
   return spec.outcomes === undefined ? 'a terminal state' : `a terminal state whose outcome is ${spec.outcomes.join(' or ')}`;
 }
 
-// refusal says why a gating rollup does not hold.
-function refusal(view: InstanceView<RollupsConfig>, to: string, name: string, result: Computed): string {
+// refusal says why a gating rollup does not hold, as a veto with its
+// code: the rollup, the state, and how many linked instances it read and
+// counted, or that it read past its bound.
+function refusal(view: InstanceView<RollupsConfig>, to: string, name: string, result: Computed): Veto {
   const spec = view.config.rollups[name];
   const through = `instances of ${spec.schema} that point at it through ${spec.link}`;
   if (result.over) {
-    return `${view.schema} ${view.id} cannot move to ${to}: rollup ${name} has no value, since more than ${MAX_ROLLUP_READ} ${through} exist`;
+    return {
+      reason: `${view.schema} ${view.id} cannot move to ${to}: rollup ${name} has no value, since more than ${MAX_ROLLUP_READ} ${through} exist`,
+      code: 'not_held',
+      details: { rollup: name, to, over: true },
+    };
   }
   const terminal = result.terminal ?? 0;
   const detail =
@@ -250,7 +258,11 @@ function refusal(view: InstanceView<RollupsConfig>, to: string, name: string, re
       : result.total === 0
         ? `no instance of ${spec.schema} points at it through ${spec.link}`
         : `none of the ${result.total} ${through} is in ${counted(spec)}`;
-  return `${view.schema} ${view.id} cannot move to ${to} until rollup ${name} holds: ${detail}`;
+  return {
+    reason: `${view.schema} ${view.id} cannot move to ${to} until rollup ${name} holds: ${detail}`,
+    code: 'not_held',
+    details: { rollup: name, to, over: false, linked: result.total, counted: terminal },
+  };
 }
 
 // article names a JSON type in a sentence.
@@ -326,6 +338,8 @@ function checkLinked(name: string, spec: RollupSpec, target: ConfigTarget, sourc
 
 export const rollups = defineBehavior<RollupsConfig>({
   declaration,
+
+  guidance: rollupsGuidance,
 
   // The configSchema holds the shape and which functions take a field or
   // gate; this holds gated states to the type's Workflow and, when the

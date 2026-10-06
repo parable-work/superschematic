@@ -1,8 +1,13 @@
 package stacktest
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -13,8 +18,8 @@ import (
 )
 
 // The fake target's deploy seams (docs/stack-model.md, sections 7.3 and
-// 11): a state store, a secret store, a migration runner and a bootstrap
-// that keep everything in memory and record each call in the
+// 11): a state store, a secret store, a migration runner, an image builder
+// and a bootstrap that keep everything in memory and record each call in the
 // provisioner's call log, so a test reads the order a deploy ran in.
 
 // FakeState is a state store in memory.
@@ -134,16 +139,96 @@ type FakeMigrations struct {
 
 var _ registry.MigrationRunner = (*FakeMigrations)(nil)
 
-// Migrate records the phase and the plans' services.
+// Migrate records the phase and the plans' services, and the servers of
+// a plan with no steps in the phase.
 func (m *FakeMigrations) Migrate(_ context.Context, req registry.MigrationRequest) error {
 	var services []string
 	for _, plan := range req.Plans {
+		if plan.Steps == 0 {
+			// Handed only for the servers that connect, which changed.
+			services = append(services, plan.Service+" (no steps; servers "+strings.Join(plan.Servers, ", ")+")")
+			continue
+		}
 		services = append(services, plan.Service)
 	}
 	if m.log != nil {
 		m.log.Record("migrate %s %s: %s", req.Phase, req.Database, strings.Join(services, ", "))
 	}
 	return m.Fail[string(req.Phase)+" "+req.Database]
+}
+
+// FakeBuilder is an image builder that builds nothing: it records each
+// build in the provisioner's call log, keeps the entries of each context
+// it was handed, and returns the image the fake platform's repository
+// names (the server in kebab case) at the context's digest.
+type FakeBuilder struct {
+	log *FakeProvisioner
+
+	mu       sync.Mutex
+	contexts map[string][]string
+
+	// Fail holds the error to return for a server's build.
+	Fail map[string]error
+}
+
+var _ registry.ImageBuilder = (*FakeBuilder)(nil)
+
+// Build records the build and returns `<server in kebab case>@<context
+// digest>`.
+func (b *FakeBuilder) Build(_ context.Context, req registry.BuildRequest) (string, error) {
+	if err := req.Check(); err != nil {
+		return "", err
+	}
+	if b.log != nil {
+		b.log.Record("build %s: %s", req.Server, req.Dockerfile)
+	}
+	if err := b.Fail[req.Server]; err != nil {
+		return "", err
+	}
+	entries, err := archiveEntries(req.Context)
+	if err != nil {
+		return "", err
+	}
+	b.mu.Lock()
+	if b.contexts == nil {
+		b.contexts = map[string][]string{}
+	}
+	b.contexts[req.Server] = entries
+	b.mu.Unlock()
+	return kebab(req.Server) + "@" + req.ContextDigest, nil
+}
+
+// Context returns the entries of the context the last build of server was
+// handed, in archive order: a directory's name ends in a slash.
+func (b *FakeBuilder) Context(server string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Clone(b.contexts[server])
+}
+
+// archiveEntries lists a gzipped tarball's entries.
+func archiveEntries(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+	tr := tar.NewReader(gz)
+	var out []string
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, hdr.Name)
+	}
 }
 
 // FakeBootstrap is a bootstrap that creates nothing: it records the

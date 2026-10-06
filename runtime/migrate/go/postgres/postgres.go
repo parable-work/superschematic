@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,12 @@ type Options struct {
 	// LockPoll is how often Lock tries a lock another runner holds. Zero
 	// is DefaultLockPoll.
 	LockPoll time.Duration
+
+	// Dial, when set, opens the connection in place of pgx's dialer,
+	// whatever host the URL names: the Cloud SQL Go connector's, which
+	// dials an instance by its connection name and authenticates with IAM
+	// (package cloudsql).
+	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // Driver is a migrate.Driver over one pgx connection.
@@ -64,6 +71,13 @@ func Open(ctx context.Context, url string, opts Options) (*Driver, error) {
 	}
 	if _, ok := config.RuntimeParams["application_name"]; !ok {
 		config.RuntimeParams["application_name"] = "superschematic-migrate"
+	}
+	if opts.Dial != nil {
+		config.DialFunc = opts.Dial
+		// The dialer reaches the database whatever the host is, so the
+		// host is not looked up, and there is no fallback to try.
+		config.LookupFunc = func(_ context.Context, host string) ([]string, error) { return []string{host}, nil }
+		config.Fallbacks = nil
 	}
 	conn, err := pgx.ConnectConfig(ctx, config)
 	if err != nil {

@@ -121,6 +121,7 @@ import {
   type SqlWriter,
 } from '../behavior.js';
 import declaration from './declarations/Branches.behavior.json' with { type: 'json' };
+import { branchesGuidance } from './guidance/branches.js';
 import { DEFAULT_PAGE_SIZE } from '../../paging.js';
 import { page, pageRequest } from '../paging.js';
 
@@ -980,6 +981,8 @@ function deleteGraph(context: InstanceContext<BranchesConfig>): void {
 
 export const branches = defineBehavior<BranchesConfig>({
   declaration,
+
+  guidance: branchesGuidance,
 
   parseConfig(config, target) {
     const raw = config as RawConfig;

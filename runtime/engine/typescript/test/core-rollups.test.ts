@@ -236,8 +236,14 @@ for (const driver of drivers) {
       move(engine, 'Task', 't1', 'doing');
       const vetoed = thrown(() => move(engine, 'Project', 'p1', 'done'), BehaviorVetoError);
       assert.deepEqual(
-        [vetoed.behavior, vetoed.action, vetoed.reason],
-        ['Rollups', 'transition', 'Project p1 cannot move to done until rollup finished holds: 3 of the 3 instances of Task that point at it through project are not in a terminal state']
+        [vetoed.behavior, vetoed.action, vetoed.reason, vetoed.vetoCode, vetoed.vetoDetails],
+        [
+          'Rollups',
+          'transition',
+          'Project p1 cannot move to done until rollup finished holds: 3 of the 3 instances of Task that point at it through project are not in a terminal state',
+          'not_held',
+          { rollup: 'finished', to: 'done', over: false, linked: 3, counted: 0 },
+        ]
       );
       assert.equal(engine.instances.get(alice, 'Project', 'p1')?.data.status, 'active');
       move(engine, 'Task', 't1', 'done');
@@ -253,6 +259,7 @@ for (const driver of drivers) {
       const engine = world({}, { started: rollup('any', { gatedStates: ['done', 'dropped'] }) });
       const vetoed = thrown(() => move(engine, 'Project', 'p1', 'dropped'), BehaviorVetoError);
       assert.equal(vetoed.reason, 'Project p1 cannot move to dropped until rollup started holds: none of the 3 instances of Task that point at it through project is in a terminal state');
+      assert.deepEqual([vetoed.vetoCode, vetoed.vetoDetails], ['not_held', { rollup: 'started', to: 'dropped', over: false, linked: 3, counted: 0 }]);
       assert.match(thrown(() => move(engine, 'Project', 'p3', 'done'), BehaviorVetoError).reason, /until rollup started holds: no instance of Task points at it through project$/);
       move(engine, 'Task', 't2', 'dropped');
       assert.deepEqual(move(engine, 'Project', 'p1', 'dropped'), { from: 'active', to: 'dropped' });
@@ -316,6 +323,7 @@ for (const driver of drivers) {
       assert.deepEqual(rollupsOf(engine, 'p1'), { boards: 1, estimate: { over: true }, finished: { over: true }, tasks: { over: true } });
       const vetoed = thrown(() => move(engine, 'Project', 'p1', 'done'), BehaviorVetoError);
       assert.equal(vetoed.reason, 'Project p1 cannot move to done: rollup finished has no value, since more than 500 instances of Task that point at it through project exist');
+      assert.deepEqual([vetoed.vetoCode, vetoed.vetoDetails], ['not_held', { rollup: 'finished', to: 'done', over: true }]);
       engine.instances.invoke(alice, 'Task', 'last', 'unlink', { name: 'project' });
       assert.deepEqual(move(engine, 'Project', 'p1', 'done'), { from: 'active', to: 'done' });
     });

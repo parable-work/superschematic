@@ -26,11 +26,11 @@ resources that the Pulumi provisioner applies.
 | --- | --- |
 | the Stack kind and `@superschematic/stack`; every build resolves each environment to `environment.json` | |
 | `calls` in an API's config, and a build ordered by output | |
-| Go: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile | the same for TypeScript and Rust servers; OpenTelemetry export |
+| Go: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which dials Cloud SQL through the Cloud SQL connector where an environment places its database there | the same for TypeScript and Rust servers; OpenTelemetry export |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
-| the gcp target, with `stack bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and `outputs` | the gcp migration runner, so a gcp deploy with a migration to run is refused; the Cloud SQL connector in the entrypoint |
-| the Pulumi provisioner and the typed bindings generator | image builds: you build and push each image and pass its digest |
-| the Cloudflare DNS platform, as an extension | linking it in the installed binary; deploys reading its API token |
+| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's; a lifecycle rule for old build contexts and job documents in the state bucket |
+| the Pulumi provisioner and the typed bindings generator | |
+| the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 
 The design is
@@ -552,14 +552,18 @@ the API that registers its method and path, answers `GET /healthz` and
 on SIGTERM. The build refuses two served APIs that register one method
 and path.
 
-Two limits apply today. A database field must be a connection string: a
-Cloud SQL connector configuration is refused at startup. And a server
-whose API has a `@requireService` or `@allowService` clause refuses to
-start, since no connector derives the callee's service-auth field yet.
+A server whose database some environment of the stack places on Cloud
+SQL links the Cloud SQL Go connector and logs in with IAM database
+authentication; every other server links no Google module. One limit
+applies today: a server whose API has a `@requireService` or
+`@allowService` clause refuses to start, since no connector derives the
+callee's service-auth field yet.
 
-No `go.sum` is generated: run `go mod tidy` before `go build`, or build
-with `GOFLAGS=-mod=mod`. The Dockerfile builds from the repository root,
-the parent of the schemas root, after the stack's services are built:
+No `go.sum` is generated: build with `go build -mod=mod`, which fills it.
+`go mod tidy` can fail, because it also resolves the imports of the
+implementation module's tests, which the server's `go.mod` does not
+replace. The Dockerfile builds from the repository root, the parent of
+the schemas root, after the stack's services are built:
 
 ```sh
 docker build -f schemas/dist/server/shop-stack/Orders/Dockerfile .
@@ -620,10 +624,8 @@ and all but `secrets set` run the `pulumi` CLI, which must be on `PATH`:
 ```sh
 superschematic stack bootstrap Staging
 superschematic stack secrets set Staging
-superschematic stack plan Staging --image Orders=us-east1-docker.pkg.dev/acme-staging/shop-stack/orders@sha256:...
-superschematic stack deploy Staging \
-  --image Orders=us-east1-docker.pkg.dev/acme-staging/shop-stack/orders@sha256:... \
-  --image shop-api=us-east1-docker.pkg.dev/acme-staging/shop-stack/shop-api@sha256:...
+superschematic stack plan Staging
+superschematic stack deploy Staging
 superschematic stack outputs Staging --out outputs.json
 ```
 
@@ -631,9 +633,10 @@ superschematic stack outputs Staging --out outputs.json
   is safe to run again. It enables the APIs, creates the state bucket
   `<project>-superschematic-state` and its KMS key, and applies the
   Artifact Registry repository named after the stack, the
-  `<stack>-deployer` and read-only `<stack>-planner` accounts, and
-  Workload Identity Federation for the GitHub repository of the git
-  remote.
+  `<stack>-deployer` and read-only `<stack>-planner` accounts, the
+  `builder` account Cloud Build runs as, the `migrator` account the
+  migration job runs as, and Workload Identity Federation for the GitHub
+  repository of the git remote.
 - **`secrets set`** asks for each secret that has no value and stores it
   in Secret Manager. On a fresh environment, deploy first: its
   infrastructure step creates each secret's storage, and the deploy then
@@ -641,25 +644,33 @@ superschematic stack outputs Staging --out outputs.json
 - **`plan`** changes nothing: the provisioner's plan of every resource,
   each database's migration plan, the secrets with no value and the
   servers with no image.
-- **`deploy`** runs the deploy order: infrastructure, each database's
-  `expand` phase, the servers wave by wave, callees first, the `contract`
-  phase, then exposure. It records a deploy manifest in the state bucket
-  after every step. It refuses a migration hazard no `--allow`
+- **`build`** builds the image of each server whose build context
+  changed, on Cloud Build, and prints each as a `--image` flag. It
+  deploys nothing.
+- **`deploy`** first builds, as `build` does, each server whose context
+  changed and that `--image` names no image for. It then runs the deploy
+  order: infrastructure, each database's `expand` phase, the servers wave
+  by wave, callees first, the `contract` phase, then exposure. Each
+  migration phase runs as an execution of the stack's Cloud Run job,
+  `<stack>-migrate`, which also gives each server that connects to a
+  database its privileges. The deploy records a manifest in the state
+  bucket after every step, and refuses a migration hazard no `--allow`
   acknowledges.
 - **`destroy`** removes a run's resources and its manifest, and
   **`outputs`** prints the applied outputs.
 
-Build each image from its generated Dockerfile, push it to the path in
-the table above, and pass it by digest with `--image <server>=...`; a
-deploy keeps the image the manifest records for a server you leave out,
-and refuses a server with neither. A parameterized member takes its
-values with `--param pr=123`.
+A build's context is the repository root, cut down by the
+`Dockerfile.dockerignore` beside each server's Dockerfile. `--image
+<server>=...` takes a server's image by digest instead of building it,
+and `--no-build` builds nothing. A deploy keeps the image the manifest
+records for a server whose context did not change. A parameterized
+member takes its values with `--param pr=123`.
 
-Two limits make a gcp deploy of a stack with a database impractical
-today. The installed binary's gcp target has no migration runner, so a
-deploy with a migration to run is refused before it applies anything, and
-the entrypoint does not dial Cloud SQL yet. A stack whose servers use no
-database meets neither limit. The
+The migration job's image is built once per release of the runner. A
+binary built from a checkout names no release, so set
+`SUPERSCHEMATIC_MIGRATE_IMAGE` to an image of `superschematic-migrate`, by
+digest, in the stack's repository. None of this has run against Google
+Cloud yet. The
 [CLI reference](/superschematic/reference/cli/#stack-deploy-environment)
 has every flag, the hazard gate and the manifest.
 

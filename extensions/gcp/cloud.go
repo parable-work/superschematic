@@ -6,12 +6,21 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
+	"time"
 
+	artifactregistry "cloud.google.com/go/artifactregistry/apiv1"
+	"cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
+	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	run "cloud.google.com/go/run/apiv2"
+	"cloud.google.com/go/run/apiv2/runpb"
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	serviceusage "cloud.google.com/go/serviceusage/apiv1"
@@ -19,6 +28,7 @@ import (
 	"cloud.google.com/go/storage"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/parable-work/superschematic/registry"
 )
@@ -70,6 +80,88 @@ type Cloud interface {
 
 	// AccessSecret returns the value of a secret's latest version.
 	AccessSecret(ctx context.Context, project, secret string) ([]byte, error)
+
+	// ImageDigest returns the digest, `sha256:<hex>`, of the image an
+	// Artifact Registry tag names (`<repository>:<tag>`), or an error that
+	// wraps fs.ErrNotExist when the tag does not exist.
+	ImageDigest(ctx context.Context, image string) (string, error)
+
+	// RunBuild runs a Cloud Build build of a Docker image in the
+	// project's region, and returns once it finished: with the digest of
+	// the image it pushed, or an error that names the build's logs.
+	RunBuild(ctx context.Context, project, region string, spec BuildSpec) (*BuildResult, error)
+
+	// EnsureJob creates a Cloud Run job, or updates it when it differs
+	// from spec, and reports whether it changed anything.
+	EnsureJob(ctx context.Context, project, region string, spec JobSpec) (changed bool, err error)
+
+	// RunJob runs a job once, with args in place of its container's, and
+	// returns once the execution finished, whether it succeeded or not.
+	RunJob(ctx context.Context, project, region, job string, args []string) (*JobRun, error)
+}
+
+// BuildSpec is a Cloud Build build of a Docker image.
+type BuildSpec struct {
+	// Bucket and Object hold the build context: a gzipped tarball.
+	Bucket string
+	Object string
+
+	// Dockerfile is the Dockerfile's path in the context.
+	Dockerfile string
+
+	// Image is the repository and tag the build pushes,
+	// `<repository>:<tag>`.
+	Image string
+
+	// ServiceAccount is the email of the account the build runs as.
+	ServiceAccount string
+
+	// Timeout bounds the build.
+	Timeout time.Duration
+}
+
+// BuildResult is a finished build.
+type BuildResult struct {
+	// ID names the build, and LogURL is where its logs are.
+	ID     string
+	LogURL string
+
+	// Digest is the digest of the image it pushed, `sha256:<hex>`.
+	Digest string
+}
+
+// JobSpec is a Cloud Run job that runs one container to its end, once,
+// with no retry.
+type JobSpec struct {
+	// Name is the job's name in its project and region.
+	Name string
+
+	// Container names the job's one container, and Image is its image, by
+	// digest.
+	Container string
+	Image     string
+
+	// ServiceAccount is the email of the account the job runs as.
+	ServiceAccount string
+
+	// Timeout bounds one run.
+	Timeout time.Duration
+
+	// Labels are the job's labels.
+	Labels map[string]string
+}
+
+// JobRun is one finished execution of a job.
+type JobRun struct {
+	// Name is the execution's resource name, and LogURI where its logs
+	// are.
+	Name   string
+	LogURI string
+
+	// Succeeded is whether its one task succeeded; Message says why it
+	// did not.
+	Succeeded bool
+	Message   string
 }
 
 // NewCloud returns the Cloud over Google Cloud's client libraries. Each
@@ -84,6 +176,9 @@ type googleCloud struct {
 	storage  *storage.Client
 	kms      *kms.KeyManagementClient
 	secrets  *secretmanager.Client
+	registry *artifactregistry.Client
+	builds   *cloudbuild.Client
+	jobs     *run.JobsClient
 	clientOK bool
 }
 
@@ -106,6 +201,15 @@ func (c *googleCloud) clients(ctx context.Context) error {
 	}
 	if c.secrets, err = secretmanager.NewClient(ctx); err != nil {
 		return fmt.Errorf("gcp: the Secret Manager client: %w", err)
+	}
+	if c.registry, err = artifactregistry.NewClient(ctx); err != nil {
+		return fmt.Errorf("gcp: the Artifact Registry client: %w", err)
+	}
+	if c.builds, err = cloudbuild.NewClient(ctx); err != nil {
+		return fmt.Errorf("gcp: the Cloud Build client: %w", err)
+	}
+	if c.jobs, err = run.NewJobsClient(ctx); err != nil {
+		return fmt.Errorf("gcp: the Cloud Run jobs client: %w", err)
 	}
 	c.clientOK = true
 	return nil
@@ -220,7 +324,7 @@ func (c *googleCloud) WriteObject(ctx context.Context, bucket, object string, da
 		return err
 	}
 	w := c.storage.Bucket(bucket).Object(object).NewWriter(ctx)
-	w.ContentType = "application/json"
+	w.ContentType = contentType(object)
 	if _, err := w.Write(data); err != nil {
 		_ = w.Close()
 		return fmt.Errorf("gcp: write gs://%s/%s: %w", bucket, object, err)
@@ -229,6 +333,15 @@ func (c *googleCloud) WriteObject(ctx context.Context, bucket, object string, da
 		return fmt.Errorf("gcp: write gs://%s/%s: %w", bucket, object, err)
 	}
 	return nil
+}
+
+// contentType is the content type of an object the target writes: a
+// build context's tarball, or a JSON document.
+func contentType(object string) string {
+	if strings.HasSuffix(object, ".tar.gz") {
+		return "application/gzip"
+	}
+	return "application/json"
 }
 
 func (c *googleCloud) DeleteObject(ctx context.Context, bucket, object string) error {
@@ -352,4 +465,213 @@ func (c *googleCloud) AccessSecret(ctx context.Context, project, secret string) 
 		return nil, fmt.Errorf("gcp: read secret %s in %s: %w", secret, project, err)
 	}
 	return v.Payload.Data, nil
+}
+
+// tagResource returns the Artifact Registry resource name of an image's
+// tag: `<region>-docker.pkg.dev/<project>/<repository>/<image>:<tag>` is
+// projects/<project>/locations/<region>/repositories/<repository>/packages/<image>/tags/<tag>,
+// with each slash of the image's name escaped.
+func tagResource(image string) (string, error) {
+	slash := strings.LastIndex(image, "/")
+	colon := strings.LastIndex(image, ":")
+	if colon < slash || colon < 0 {
+		return "", fmt.Errorf("gcp: image %q names no tag", image)
+	}
+	ref, tag := image[:colon], image[colon+1:]
+	host, rest, _ := strings.Cut(ref, "/")
+	region, ok := strings.CutSuffix(host, "-docker.pkg.dev")
+	parts := strings.SplitN(rest, "/", 3)
+	if !ok || region == "" || len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" || tag == "" {
+		return "", fmt.Errorf("gcp: image %q is not <region>-docker.pkg.dev/<project>/<repository>/<image>:<tag>", image)
+	}
+	return fmt.Sprintf("projects/%s/locations/%s/repositories/%s/packages/%s/tags/%s",
+		parts[0], region, parts[1], url.PathEscape(parts[2]), tag), nil
+}
+
+func (c *googleCloud) ImageDigest(ctx context.Context, image string) (string, error) {
+	name, err := tagResource(image)
+	if err != nil {
+		return "", err
+	}
+	if err := c.clients(ctx); err != nil {
+		return "", err
+	}
+	tag, err := c.registry.GetTag(ctx, &artifactregistrypb.GetTagRequest{Name: name})
+	if status.Code(err) == codes.NotFound {
+		return "", fmt.Errorf("gcp: %s: %w", image, fs.ErrNotExist)
+	}
+	if err != nil {
+		return "", fmt.Errorf("gcp: the tag of %s: %w", image, err)
+	}
+	_, digest, ok := strings.Cut(tag.Version, "/versions/")
+	if !ok || !strings.HasPrefix(digest, "sha256:") {
+		return "", fmt.Errorf("gcp: the tag of %s names version %q, not a digest", image, tag.Version)
+	}
+	return digest, nil
+}
+
+// dockerStep is the Cloud Build step that builds and pushes an image. BuildKit
+// reads the Dockerfile's cache mounts and its Dockerfile.dockerignore.
+const dockerStep = "gcr.io/cloud-builders/docker"
+
+func (c *googleCloud) RunBuild(ctx context.Context, project, region string, spec BuildSpec) (*BuildResult, error) {
+	if err := c.clients(ctx); err != nil {
+		return nil, err
+	}
+	build := &cloudbuildpb.Build{
+		Source: &cloudbuildpb.Source{Source: &cloudbuildpb.Source_StorageSource{
+			StorageSource: &cloudbuildpb.StorageSource{Bucket: spec.Bucket, Object: spec.Object},
+		}},
+		Steps: []*cloudbuildpb.BuildStep{{
+			Name: dockerStep,
+			Env:  []string{"DOCKER_BUILDKIT=1"},
+			Args: []string{"build", "-f", spec.Dockerfile, "-t", spec.Image, "."},
+		}},
+		Images:         []string{spec.Image},
+		ServiceAccount: "projects/" + project + "/serviceAccounts/" + spec.ServiceAccount,
+		Timeout:        durationpb.New(spec.Timeout),
+		Options: &cloudbuildpb.BuildOptions{
+			// A build that names its account sends its logs to Cloud
+			// Logging only, and the server images compile Rust and Go.
+			Logging:     cloudbuildpb.BuildOptions_CLOUD_LOGGING_ONLY,
+			MachineType: cloudbuildpb.BuildOptions_E2_HIGHCPU_8,
+		},
+	}
+	op, err := c.builds.CreateBuild(ctx, &cloudbuildpb.CreateBuildRequest{
+		Parent:    fmt.Sprintf("projects/%s/locations/%s", project, region),
+		ProjectId: project,
+		Build:     build,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gcp: start the build of %s: %w", spec.Image, err)
+	}
+	logs := ""
+	if meta, merr := op.Metadata(); merr == nil && meta.GetBuild() != nil {
+		logs = meta.GetBuild().GetLogUrl()
+	}
+	done, err := op.Wait(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gcp: the build of %s failed (logs: %s): %w", spec.Image, logs, err)
+	}
+	if done.GetStatus() != cloudbuildpb.Build_SUCCESS {
+		return nil, fmt.Errorf("gcp: the build of %s ended %s: %s (logs: %s)", spec.Image, done.GetStatus(), done.GetStatusDetail(), done.GetLogUrl())
+	}
+	for _, image := range done.GetResults().GetImages() {
+		if image.GetName() == spec.Image {
+			return &BuildResult{ID: done.GetId(), LogURL: done.GetLogUrl(), Digest: image.GetDigest()}, nil
+		}
+	}
+	return nil, fmt.Errorf("gcp: the build of %s pushed no image of that name (logs: %s)", spec.Image, done.GetLogUrl())
+}
+
+// jobResource is a job's resource name.
+func jobResource(project, region, job string) string {
+	return fmt.Sprintf("projects/%s/locations/%s/jobs/%s", project, region, job)
+}
+
+// jobOf is the job spec describes.
+func jobOf(spec JobSpec) *runpb.Job {
+	return &runpb.Job{
+		Labels: spec.Labels,
+		Template: &runpb.ExecutionTemplate{
+			TaskCount:   1,
+			Parallelism: 1,
+			Template: &runpb.TaskTemplate{
+				Containers:     []*runpb.Container{{Name: spec.Container, Image: spec.Image}},
+				Retries:        &runpb.TaskTemplate_MaxRetries{MaxRetries: 0},
+				Timeout:        durationpb.New(spec.Timeout),
+				ServiceAccount: spec.ServiceAccount,
+			},
+		},
+	}
+}
+
+// jobMatches reports whether a job runs what spec describes.
+func jobMatches(job *runpb.Job, spec JobSpec) bool {
+	task := job.GetTemplate().GetTemplate()
+	containers := task.GetContainers()
+	return len(containers) == 1 && containers[0].GetName() == spec.Container && containers[0].GetImage() == spec.Image &&
+		task.GetServiceAccount() == spec.ServiceAccount && task.GetMaxRetries() == 0 &&
+		task.GetTimeout().AsDuration() == spec.Timeout && job.GetTemplate().GetTaskCount() == 1
+}
+
+func (c *googleCloud) EnsureJob(ctx context.Context, project, region string, spec JobSpec) (bool, error) {
+	if err := c.clients(ctx); err != nil {
+		return false, err
+	}
+	name := jobResource(project, region, spec.Name)
+	current, err := c.jobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
+	switch {
+	case status.Code(err) == codes.NotFound:
+		op, err := c.jobs.CreateJob(ctx, &runpb.CreateJobRequest{
+			Parent: fmt.Sprintf("projects/%s/locations/%s", project, region),
+			JobId:  spec.Name,
+			Job:    jobOf(spec),
+		})
+		if err != nil {
+			return false, fmt.Errorf("gcp: create job %s: %w", name, err)
+		}
+		if _, err := op.Wait(ctx); err != nil {
+			return false, fmt.Errorf("gcp: create job %s: %w", name, err)
+		}
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("gcp: job %s: %w", name, err)
+	case jobMatches(current, spec):
+		return false, nil
+	}
+	job := jobOf(spec)
+	job.Name = name
+	op, err := c.jobs.UpdateJob(ctx, &runpb.UpdateJobRequest{Job: job})
+	if err != nil {
+		return false, fmt.Errorf("gcp: update job %s: %w", name, err)
+	}
+	if _, err := op.Wait(ctx); err != nil {
+		return false, fmt.Errorf("gcp: update job %s: %w", name, err)
+	}
+	return true, nil
+}
+
+func (c *googleCloud) RunJob(ctx context.Context, project, region, job string, args []string) (*JobRun, error) {
+	if err := c.clients(ctx); err != nil {
+		return nil, err
+	}
+	name := jobResource(project, region, job)
+	current, err := c.jobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
+	if err != nil {
+		return nil, fmt.Errorf("gcp: job %s: %w", name, err)
+	}
+	container := ""
+	if containers := current.GetTemplate().GetTemplate().GetContainers(); len(containers) == 1 {
+		container = containers[0].GetName()
+	}
+	op, err := c.jobs.RunJob(ctx, &runpb.RunJobRequest{
+		Name: name,
+		Overrides: &runpb.RunJobRequest_Overrides{
+			ContainerOverrides: []*runpb.RunJobRequest_Overrides_ContainerOverride{{Name: container, Args: args}},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gcp: run job %s: %w", name, err)
+	}
+	execution, err := op.Wait(ctx)
+	if err != nil {
+		// The execution failed: its metadata says where its logs are.
+		out := &JobRun{Message: err.Error()}
+		if meta, merr := op.Metadata(); merr == nil && meta != nil {
+			out.Name, out.LogURI = meta.GetName(), meta.GetLogUri()
+		}
+		return out, nil
+	}
+	out := &JobRun{Name: execution.GetName(), LogURI: execution.GetLogUri()}
+	out.Succeeded = execution.GetSucceededCount() == 1 && execution.GetFailedCount() == 0
+	if !out.Succeeded {
+		for _, cond := range execution.GetConditions() {
+			if cond.GetMessage() != "" {
+				out.Message = cond.GetMessage()
+				break
+			}
+		}
+	}
+	return out, nil
 }

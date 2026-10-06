@@ -40,6 +40,7 @@ to a schema with instances is not, since their values were never checked.
 
 import { BehaviorConfigError, defineBehavior, type FrozenJSON } from '../behavior.js';
 import declaration from './declarations/Variants.behavior.json' with { type: 'json' };
+import { variantsGuidance } from './guidance/variants.js';
 
 /** Variants' config, parsed. */
 export interface VariantsConfig {
@@ -76,6 +77,8 @@ function valueOf(data: FrozenJSON, field: string): unknown {
 
 export const variants = defineBehavior<VariantsConfig>({
   declaration,
+
+  guidance: variantsGuidance,
 
   // The configSchema holds the shape; this holds the config to the type
   // and the document, as the header says.

@@ -2,7 +2,9 @@ package stack
 
 import (
 	"context"
+	"io"
 
+	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -16,8 +18,16 @@ type (
 	Options          = stackdeploy.Options
 	DeployOptions    = stackdeploy.DeployOptions
 	PlanOptions      = stackdeploy.PlanOptions
+	BuildOptions     = stackdeploy.BuildOptions
 	BootstrapOptions = stackdeploy.BootstrapOptions
 	SecretsOptions   = stackdeploy.SecretsOptions
+
+	// Sources says where a stack's build wrote each server's Dockerfile;
+	// BuildResult is what a build made; Context is a build context a
+	// deploy wrote for a server's image (WriteContext).
+	Sources     = stackdeploy.Sources
+	BuildResult = stackdeploy.BuildResult
+	Context     = stackdeploy.Context
 
 	// PlanResult is what a deploy would do; PendingNote names a migration
 	// phase a failed deploy left part-way.
@@ -49,6 +59,11 @@ type (
 	RunOutputs = stackdeploy.RunOutputs
 )
 
+// GoVersion is the Go release the images superschematic generates a
+// Dockerfile for build with: tools.env's GO_VERSION, the go directive of
+// every module it writes.
+const GoVersion = servergen.GoVersion
+
 // The statuses a manifest records.
 const (
 	StatusDeploying = stackdeploy.StatusDeploying
@@ -71,6 +86,24 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 // Plan returns what a deploy of a run would do; see
 // internal/stackdeploy.Plan.
 func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) { return stackdeploy.Plan(ctx, o) }
+
+// Build builds the images of a run's servers without deploying them; see
+// internal/stackdeploy.Build.
+func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
+	return stackdeploy.Build(ctx, o)
+}
+
+// WriteContext writes the build context of a Dockerfile as a gzipped
+// tarball, cut down by its ignore file; see internal/stackdeploy.WriteContext.
+func WriteContext(w io.Writer, root, dockerfile string) (*Context, error) {
+	return stackdeploy.WriteContext(w, root, dockerfile)
+}
+
+// SplitImage splits an image reference by digest into its repository and
+// its digest; see internal/stackdeploy.SplitImage.
+func SplitImage(image string) (repository, digest string, err error) {
+	return stackdeploy.SplitImage(image)
+}
 
 // Destroy removes a run's resources and manifest; see
 // internal/stackdeploy.Destroy.

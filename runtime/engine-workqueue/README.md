@@ -55,6 +55,18 @@ behaviors`) and CI checks (`make behaviors-check`), so the package and
 the compiler read one declaration. The implementations reach the engine
 only through its plug-in interface, as an extension's behavior does.
 
+Each implementation gives guidance from its config, which the describe
+document and every tool of a type that composes it carry
+(`runtime/engine/README.md`, "Guidance" under "Tools"), in a module of
+its own in `typescript/src/guidance/`: `Lease` its lengths, its expiry
+moves and the token, and its refusals on every write its guard holds;
+`Queue` the claim states, the order, the match fields and what keeps
+work out, and `claim_required` on `acquire`; `Retries` its classes and
+caps; `Budget` its meters and scopes; `Presence`, `Assignment` and
+`Blueprint` what their configs say. A tool's `errors` list each code
+under the behavior that vetoes it, so a claim's lists Queue's, Lease's,
+Assignment's, Budget's and Retries' refusals together.
+
 ## Runtimes
 
 The package ships compiled ESM with declarations (`dist/`), runs on
