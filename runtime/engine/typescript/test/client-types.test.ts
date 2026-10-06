@@ -39,6 +39,7 @@ export type Checks = [
   Holds<SameShape<server.SchemaSearchHit, client.SearchHit>>,
   Holds<SameShape<server.ToolManifest, client.ToolManifest>>,
   Holds<SameShape<server.ToolDefinition, client.ToolDefinition>>,
+  Holds<SameShape<server.ToolGuidance, client.ToolGuidance>>,
   // The HTTP runtime's credential sources fill the client's service credential.
   Holds<[ServiceTokenSource] extends [client.ServiceCredential['token']] ? true : false>,
 ];

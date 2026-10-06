@@ -138,6 +138,8 @@ export interface DescribedBehavior {
   name: string;
   description?: string;
   config: unknown;
+  /** What it does on the type under the config, as its guidance says; absent for a behavior that gives none. */
+  summary?: string;
   fields: Array<{ name: string; description?: string }>;
   operations: string[];
   vetoes: Array<{ code: string; description?: string }>;
@@ -153,7 +155,17 @@ export interface DescribedOperation {
   params: JSONObject;
   result: unknown;
   tool: string;
+  /** Its tool's guidance, as the tools document writes it. */
+  guidance: ToolGuidance;
   [policyKey: string]: unknown;
+}
+
+/** A tool's guidance: when to use it and not, what success is, and each error's fix. */
+export interface ToolGuidance {
+  useWhen: string;
+  doNotUseWhen: string;
+  success: string;
+  errors: Array<{ code: string; description: string; commonCorrection: string }>;
 }
 
 /** The tools document of a namespace, `tools/schema.json`'s shape. */
@@ -179,7 +191,7 @@ export interface ToolDefinition {
   lifecycle: string;
   visibility: string;
   audience: string;
-  guidance: { useWhen: string; doNotUseWhen: string; success: string; errors: Array<{ code: string; description: string; commonCorrection: string }> };
+  guidance: ToolGuidance;
   replay: { mode: string; idempotencyKeyPointers: string[]; expectedRevisionPointers: string[] } | null;
   description: string;
   namespace: string;

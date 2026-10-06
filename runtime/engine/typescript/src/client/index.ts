@@ -56,6 +56,7 @@ export type {
   SearchPage,
   SearchParams,
   ToolDefinition,
+  ToolGuidance,
   ToolMCPRecord,
   ToolManifest,
 } from './types.js';
