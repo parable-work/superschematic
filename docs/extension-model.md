@@ -135,7 +135,7 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `RustAPIOf` and `APIDir` (the Rust API crate the `api` generator writes, as `RustAPI` with its `RustEndpoint`, `RustParam` and `RustInput` records, and where), `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
@@ -237,13 +237,17 @@ The core kinds:
 | `DB` | `DBTable` | not allowed | no | `sql`, `orm`, `types` |
 | `API` | `EmbeddedStruct` | `APIView` | yes | `types`, `api`, `sdks` |
 | `General` | `EmbeddedStruct` | `EmbeddedStruct` | no | `types`, `envConfig` |
+| `Stack` | `EmbeddedStruct` | not allowed | no | `stack` |
 
 DB may not import `@superschematic/api`, API may not import
-`@superschematic/db`, General may import neither. DB may reference General
-types, API may reference DB and General types, General may not reference
-DB or API types.
+`@superschematic/db`, General and Stack may import neither. DB may
+reference General types, API may reference DB and General types, General
+may not reference DB or API types, and Stack references no other service's
+types. A Stack service names the services it deploys by their sentinels,
+so it sets `ImportsSiblingSentinels`, and nothing names it, so it sets
+`NoSentinel` (`docs/stack-model.md`, section 4.1).
 
-`ir.SchemaKind` is a named string with constants for the three core kinds.
+`ir.SchemaKind` is a named string with constants for the four core kinds.
 Any registered name is a valid value.
 
 ### 3.4 DecoratorSpec
@@ -418,6 +422,7 @@ The core generators:
 | `api` | `api` | the Go chi server, the Rust axum crate or the TypeScript Hono package (`outputs.api.language`), and OpenAPI |
 | `sdks` | `sdk` | TypeScript, Go, Python and Rust clients, one switch per language |
 | `envConfig` | none | the environment loader for a schema with an `@envVars` class |
+| `stack` | none | each environment of a Stack schema's stack, resolved, as `environment.json` (`docs/stack-model.md`, section 4.1). It loads the services the stack reaches with `LoadDependency`, and reads their outputs from the configs `Options.LoadDependencyConfig` supplies, which every build sets |
 
 ### 3.7 AuthProvider
 
@@ -933,7 +938,7 @@ engine; without them the engine refuses a schema that composes one.
 | `Reactions` | `rules` (each a `when`, `enters`, `allTerminal` or `anyTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 | `Constants` | `fields`, `permission`; required | none | none |
 | `Variants` | `field`, `by`, `types` (by a value of `by`, a type of the document); required | none | none |
-| `Branches` | `kinds` (by name: `type`, a type of the document, `parent` (`key`, `of`), `order`, `singleton`, `units`, `retentionDays`), `primary`, `snapshotEvery`, `sweep` (`intervalMs`, `discardGrace`, `pruneBatch`, `abandonAfter`); required | none | `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `release`, `discard`, and the read-only `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history` |
+| `Branches` | `kinds` (by name: `type`, a type of the document, `parent` (`key`, `of`), `order`, `singleton`, `units`, `retentionDays`), `primary`, `snapshotEvery`, `sweep` (`intervalMs`, `discardGrace`, `pruneBatch`, `abandonAfter`); required | none | `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`, and the read-only `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history` |
 | `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`; optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
@@ -1211,7 +1216,7 @@ forms.
 ### 6.3 Schema config kinds
 
 In `@superschematic/schema-config`, a config's `kind` has the type
-`SchemaKindName`: a member of the closed `SchemaKind` enum (the three core
+`SchemaKindName`: a member of the closed `SchemaKind` enum (the four core
 kinds) or any other string (`ExtensionKind`). An extension kind is written
 as a string literal:
 
@@ -1461,9 +1466,9 @@ its provider, which supplies those two functions. D15 in
 
 | Surface | Core registration |
 | --- | --- |
-| Kinds | `DB`, `API`, `General` (section 3.3) |
-| Decorators | 46 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config}`. Types (14): `trait`, `source`, `envVars`, `jsonField`, `denyUnknownFields`, `strictJSON`, `versioned`, `optimistic`, `versionGraph`, `graphMember`, `index`, `projection`, `join`, `behavior`. Fields (14): `key`, `unique`, `searchField`, `jsonField`, `uiHidden`, `internalMetadata`, `temporalFormat`, `conflictUnit`, `virtual`, `sourceMustProject`, `docs`, `purpose`, `icon`, `column`. Operation sets (3): `rateLimit`, `bodyLimit`, `timeout`. Operations (15): `rest`, `requirePermission`, `requireOwnership`, `auth`, `encrypted`, `publicRoute`, `webhook`, `hmacVerified`, `manualRouteRegistration`, `rateLimit`, `bodyLimit`, `timeout`, `docs`, `mcp`, `icon` |
-| Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig` (section 3.6). For a schema that declares a version graph, `orm` also writes the graph's shell and `types` its descriptor (D17) |
+| Kinds | `DB`, `API`, `General`, `Stack` (section 3.3) |
+| Decorators | 50 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `core_stack.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config,stack}`. Types (18): `trait`, `source`, `envVars`, `jsonField`, `denyUnknownFields`, `strictJSON`, `versioned`, `optimistic`, `versionGraph`, `graphMember`, `index`, `projection`, `join`, `behavior`, `stack`, `server`, `database`, `environment`. Fields (14): `key`, `unique`, `searchField`, `jsonField`, `uiHidden`, `internalMetadata`, `temporalFormat`, `conflictUnit`, `virtual`, `sourceMustProject`, `docs`, `purpose`, `icon`, `column`. Operation sets (3): `rateLimit`, `bodyLimit`, `timeout`. Operations (15): `rest`, `requirePermission`, `requireOwnership`, `auth`, `encrypted`, `publicRoute`, `webhook`, `hmacVerified`, `manualRouteRegistration`, `rateLimit`, `bodyLimit`, `timeout`, `docs`, `mcp`, `icon` |
+| Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig`, `stack` (section 3.6). For a schema that declares a version graph, `orm` also writes the graph's shell and `types` its descriptor (D17) |
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |

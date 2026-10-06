@@ -21,16 +21,19 @@ func formatScenario(roots string, steps ...string) string {
 }
 
 // TestScenarioFormat reads scenarios that each break one rule of the format
-// (runtime/versiongraph/README.md, "Scenarios"), and ones that keep them.
+// (runtime/versiongraph/README.md, "Scenarios"), and ones that keep them,
+// for a Postgres runner and, where the runner's backend matters, a SQLite
+// one.
 func TestScenarioFormat(t *testing.T) {
 	const createPrimary = `{"op": "createPrimary", "root": "Bread", "name": "main"}`
-	cases := []struct {
+	type formatCase struct {
 		name string
 		text string
 		// refused is a part of the error the scenario is refused with, or
 		// "" when it reads.
 		refused string
-	}{
+	}
+	cases := []formatCase{
 		{"a statement per backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}`), ""},
 		{"a plain string statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": "SELECT 1"}`), "a statement is an object of one statement per backend"},
 		{"a statement that is not text", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": 1}}`), "a statement is an object of one statement per backend"},
@@ -56,9 +59,29 @@ func TestScenarioFormat(t *testing.T) {
 		{"an unknown scenario member", `{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": [` + createPrimary + `]}`, `unknown field "backend"`},
 		{"an unknown step member", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}`), `unknown field "backend"`},
 	}
+	// The cases whose outcome depends on the runner's backend, for a SQLite
+	// runner.
+	sqliteCases := []formatCase{
+		{"a statement per backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT 1"}}`), ""},
+		{"an sql step without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1"}}`), "the sql step has no sqlite statement"},
+		{"an sql step with no statement", formatScenario(`["Bread"]`, `{"op": "sql"}`), "the sql step has no sqlite statement"},
+		{"a null statement for the runner's backend", formatScenario(`["Bread"]`, `{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": null}}`), "a statement is an object of one statement per backend"},
+		{"an sql step for another backend, without the runner's statement", formatScenario(`["Bread"]`, `{"op": "sql", "backends": ["postgres"], "statement": {"postgres": "SELECT 1"}}`), ""},
+	}
+	type backendCase struct {
+		formatCase
+		backend string
+	}
+	var all []backendCase
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			_, err := parseScenario([]byte(c.text), backend)
+		all = append(all, backendCase{c, postgresBackend})
+	}
+	for _, c := range sqliteCases {
+		all = append(all, backendCase{c, sqliteBackend})
+	}
+	for _, c := range all {
+		t.Run(c.backend+": "+c.name, func(t *testing.T) {
+			_, err := parseScenario([]byte(c.text), c.backend)
 			switch {
 			case c.refused == "" && err != nil:
 				t.Fatalf("refused: %v", err)
@@ -71,11 +94,14 @@ func TestScenarioFormat(t *testing.T) {
 	}
 }
 
-// TestScenarioFilesRead reads every scenario file as the format says,
-// whether or not a database is there to run it on.
+// TestScenarioFilesRead reads every scenario file as the format says, for
+// a runner of each backend, whether or not a database is there to run it
+// on.
 func TestScenarioFilesRead(t *testing.T) {
-	for _, file := range scenarioFiles(t) {
-		readScenario(t, file)
+	for _, backend := range knownBackends {
+		for _, file := range scenarioFiles(t) {
+			readScenario(t, file, backend)
+		}
 	}
 }
 
@@ -94,7 +120,7 @@ func syntheticRunner(t *testing.T) *runner {
 	return newRunner(t, dsn, mustReadFixture(t), createSQL)
 }
 
-func mustParseScenario(t *testing.T, text string) scenario {
+func mustParseScenario(t *testing.T, text, backend string) scenario {
 	t.Helper()
 	s, err := parseScenario([]byte(text), backend)
 	if err != nil {
@@ -103,19 +129,74 @@ func mustParseScenario(t *testing.T, text string) scenario {
 	return s
 }
 
+// backendsScenario is a scenario whose steps list their backends: a save
+// listed for the other backend alone, and one listed for both.
+func backendsScenario(other string) string {
+	return formatScenario(`["Bread"]`,
+		`{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}`,
+		`{"op": "branch", "from": "main", "name": "mix", "as": "mix"}`,
+		`{"op": "save", "ref": "mix", "backends": ["`+other+`"], "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}}`,
+		`{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}}`,
+		`{"op": "save", "ref": "mix", "backends": ["sqlite", "postgres"], "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}}`,
+		`{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": [{"entity_key": "Rest"}]}}`,
+	)
+}
+
 // TestScenarioBackends runs a scenario whose steps list their backends: a
 // save listed for SQLite alone is skipped and leaves no row, and a save
 // listed for Postgres too writes its row.
 func TestScenarioBackends(t *testing.T) {
 	r := syntheticRunner(t)
-	runScenario(t, r, mustParseScenario(t, formatScenario(`["Bread"]`,
-		`{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}`,
-		`{"op": "branch", "from": "main", "name": "mix", "as": "mix"}`,
-		`{"op": "save", "ref": "mix", "backends": ["sqlite"], "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}}`,
-		`{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": []}}`,
-		`{"op": "save", "ref": "mix", "backends": ["sqlite", "postgres"], "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}}`,
-		`{"op": "rows", "ref": "mix", "kind": "step", "expect": {"rows": [{"entity_key": "Rest"}]}}`,
-	)))
+	runScenario(t, r, mustParseScenario(t, backendsScenario(sqliteBackend), postgresBackend))
+}
+
+// TestScenarioBackendsOnSQLite: on SQLite, a save listed for Postgres alone
+// is skipped and leaves no row, and a save listed for SQLite too writes its
+// row.
+func TestScenarioBackendsOnSQLite(t *testing.T) {
+	for _, pass := range sqlitePasses {
+		t.Run(pass.name, func(t *testing.T) {
+			r := newSQLiteRunner(t, mustReadFixture(t), pass)
+			runScenario(t, r, mustParseScenario(t, backendsScenario(postgresBackend), sqliteBackend))
+		})
+	}
+}
+
+// TestScenarioRootsOnSQLite: on SQLite the runner seeds nothing, since the
+// layout has no root table, so a root the scenario does not name takes a
+// primary line as a named one does.
+func TestScenarioRootsOnSQLite(t *testing.T) {
+	r := newSQLiteRunner(t, mustReadFixture(t), sqlitePasses[0])
+	runScenario(t, r, mustParseScenario(t, formatScenario(`["Soup"]`,
+		`{"op": "createPrimary", "root": "Soup", "name": "main"}`,
+		`{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT CAST(count(*) AS TEXT) AS n FROM sqlite_schema WHERE name = 'recipe'"}, "expect": {"rows": [{"n": "0"}]}}`,
+	), sqliteBackend))
+	ref, err := r.engine.CreatePrimary(r.ctx, defaultActor, "Bread", "main")
+	if err != nil || ref.Root != "Bread" {
+		t.Fatalf("a primary line of a root the scenario does not name = %+v, %v; want it written", ref, err)
+	}
+}
+
+// TestScenarioSQLOnSQLite: on SQLite an sql step's statement runs on the
+// scenario's file under the layout's default names, takes its UUID
+// arguments in their canonical form, and returns its columns read as text;
+// a column that is not text is refused rather than turned into text.
+func TestScenarioSQLOnSQLite(t *testing.T) {
+	for _, pass := range sqlitePasses {
+		t.Run(pass.name, func(t *testing.T) {
+			r := newSQLiteRunner(t, mustReadFixture(t), pass)
+			runScenario(t, r, mustParseScenario(t, formatScenario(`["Bread"]`,
+				`{"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"}`,
+				`{"op": "sql", "statement": {"postgres": "SELECT 1", "sqlite": "SELECT name, CASE root_id WHEN ?2 THEN 'Bread' ELSE root_id END AS root FROM graph_ref WHERE id = ?1"},
+				  "args": [{"ref": "main"}, {"uuid": "Bread"}], "expect": {"rows": [{"name": "main", "root": "Bread"}]}}`,
+			), sqliteBackend))
+			r.step = "a column that is not text"
+			_, err := r.sqliteSQL(r.ctx, "SELECT 1 AS n", nil, true)
+			if err == nil || !strings.Contains(err.Error(), "column n is int64, not text: cast it in the statement") {
+				t.Fatalf("an integer column = %v, want it refused", err)
+			}
+		})
+	}
 }
 
 // TestScenarioRoots runs a scenario of two roots: each has the recipe row
@@ -131,7 +212,7 @@ func TestScenarioRoots(t *testing.T) {
 		  "expect": {"rows": [{"title": "Pie", "id": "Pie", "created_by": "Cook"}, {"title": "Soup", "id": "Soup", "created_by": "Cook"}]}}`,
 		`{"op": "createPrimary", "root": "Soup", "name": "main"}`,
 		`{"op": "createPrimary", "root": "Pie", "name": "main"}`,
-	)))
+	), postgresBackend))
 	_, err := r.engine.CreatePrimary(r.ctx, defaultActor, "Bread", "main")
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {

@@ -2710,11 +2710,35 @@ Phases 1, 2 and 3 do not depend on each other; phase 4 needs all three,
 and phase 5 needs phase 4.
 
 Status: phases 1 to 5 are built, `Branches` last
-(`runtime/engine/README.md`, "Branches"); the Later row is not.
+(`runtime/engine/README.md`, "Branches"), and so is the Later row. Go
+(package `sqlite` of the Go module, over a `database/sql` seam), Python
+(`superschematic_versiongraph.sqlite`, over the standard library's
+`sqlite3`) and Rust (module `sqlite` of the engine crate, over `rusqlite`
+behind its `rusqlite` feature) each have a SQLite adapter with the
+TypeScript one's layout, stored forms and rules. Every scenario runs on
+SQLite in all four languages, with no server.
+
+Rules settled as the Later row was built:
+
+- **Shared vectors.** Under `runtime/versiongraph/testdata/sqlite` there are:
+  - `layout.json`, the layout's statements;
+  - `typescript.sql`, a database the TypeScript adapter wrote;
+  - `typescript.json`, what it reads back as.
+
+  The TypeScript adapter writes all three. Every adapter's layout equals `layout.json` and reads `typescript.sql` as `typescript.json`. Run with the vectors' seeded ids and fixed clock, every adapter also writes `typescript.sql` byte for byte. That requires each to draw a row's id before a generated entity key, and to read the clock once in creating the tables. So a file one language writes reads the same in every other.
+- **The minimum SQLite.** Every adapter refuses a SQLite older than 3.37.0, for `STRICT`, or one where `json_each` and `json_extract` do not work, which a probe checks. Those functions are built in only from 3.38.0, and a later build can still leave them out.
+- **The time range.** Every adapter refuses a clock or a stored time outside ±(2^53−1) microseconds, the range TypeScript holds exactly.
+- **Transactions per language.** On a connection of its own, an adapter begins with `BEGIN IMMEDIATE`. A transaction inside a caller's transaction is a savepoint, as each language's Postgres binding has one, and only TypeScript's has D16's mode with no transaction control at all.
+- **Per-language settlements:**
+  - Go reads SQLite's extended result code from a driver error's `Code()`, or from a classifier the caller gives; its tests use `modernc.org/sqlite`.
+  - Python recognizes a unique violation by its message before 3.11, and runs on 3.9.
+  - Rust's binding holds its connection behind a mutex and blocks the executor while a statement runs.
+- **A canonical bug found on the way.** Python's canonical rule read a date-time in year 0's first two months as the next day. The canonical vectors now hold every language to it.
+- **CI.** A pull request runs every language's SQLite tests, which need no database.
 
 ### D32, amended: Branches as it was built
 
-Building `Branches` settled five points that the entry above left open
+Building `Branches` settled six points that the entry above left open
 or put otherwise.
 
 | Decision | Alternatives not taken |
@@ -2724,6 +2748,7 @@ or put otherwise.
 | `configChange` decides per kind: removing a kind, or changing its type, parent, order, singleton or a field's unit, is refused. `primary`, `snapshotEvery`, `sweep` and a retention may change, and a unit may be given a field the old type lacked, of which no stored row holds a value. | Refusing every change but a kind's fields and a retention, which freezes the sweep and the primary line's name for good |
 | `discard` refuses an instance's primary line, with the veto `primary_line`: the instance gets no other, so once discarded it would have no live ref to branch from. | Discarding it as the version graph engine allows |
 | `branch`'s `fromRef` is optional: left out, the draft branches from the instance's primary line. An instance created before its schema composed `Branches` gets its primary line at its first write, and every other writing operation names a ref or a commit it has none of, so its first `branch` makes the line, as the caller, and a draft of it, even where `Branches` is the schema's only writing behavior. | Only an update or another behavior's write, a dead end where `Branches` is the only writing behavior; creating each older instance's line in `afterConfigChange`, which the `Branches` rows rule out since it acts for no principal while a ref records its creator; a separate operation that only creates the line |
+| The operation that points the release pointer is `releaseCommit`, where the `Branches` row names `release`: `Lease` already has `release`, and D16 refuses two behaviors on one type that add an operation of one name, so a type could not compose `Branches` with `Lease`. It is the version graph's release under another name, with its parameters, result and refusals; `releases` and `released` keep their names. | Keeping `release`, so no type composes `Branches` with `Lease`; renaming `Lease`'s `release`, the standard term for ending a lease, which `Lease` had first; qualifying operations by behavior, which reverses D16's one namespace of operation names in routes, tools, SDKs and access-policy names |
 
 ### D32, amended: a partial row and an absent content column
 
@@ -3173,3 +3198,130 @@ undeclared keys. A Go caller sending an undeclared key now gets a 400
 where it was ignored.
 
 The rule is reversible until the first release.
+
+## D43. An in-process caller runs a Rust operation by its route's rules
+
+D39 gave each operation of a Rust API a typed `Args` struct and result, so
+a Rust caller in the same process (a server-rendered page, a job, the
+Topcoat extension's crate) can call the implementation directly. The
+route's checks ran only in the router, though: the caller, its
+permissions, and each argument's rules. A direct caller had to restate
+them, and could drift from the route.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each `Args` struct has `check()`. It runs the router's `ParamSpec` of each argument on the argument's JSON (`ParamSpec::check_value`), at the argument's location, and the input type's `prepare_<type>` with undeclared keys refused (`check_input`). A refusal is the 400 the router answers a request carrying the same values. | A second set of validators written for typed values, which would drift from the router's; validating only the input, where a list bound or a scalar's rule of an argument is the route's too |
+| The crate's `operations` module declares an `OperationInfo` per operation, manual ones included: its route, whether it needs a caller, its `@requirePermission` list, `@requireOwnership` and `@manualRouteRegistration`. `OperationInfo::admit` admits a caller by the route's rule, shared with `RouteControls::authorize` through the runtime's `admit`: 401 without one, 403 when `Authenticator::permits` refuses. `OperationInfo::context` builds the `RequestContext` the route would. | Each caller reading the auth rules from the schema itself, or the extension writing them into its own crate |
+| `ApiError` implements `Display` and `std::error::Error`, as `403 forbidden: Insufficient permissions`, so `?` carries it into a caller's own error type. The crate re-exports the runtime as `runtime`, so a crate built on it shares one version of it. | |
+| An extension reads the crate as the `api` generator builds it through `registry.RustAPIOf`, with its records aliased as `RustAPI`, `RustEndpoint`, `RustParam` and `RustInput`, and its directory through `registry.APIDir`. | Recomputing the endpoints in the extension from the IR, which would repeat rustrestgen's naming and typing |
+
+The router is unchanged: it keeps decoding what a request carries, and a
+request never reaches `check()`. A cargo test on fixture-api's crate
+(`operation_check_test.go`) compares `check()`'s refusal with the router's
+problem for a query list over its bound and an input that breaks its
+type's rule, and runs an operation in-process through `admit`, `check`
+and `context`. Serializing the arguments again costs a caller what the
+router spends decoding a request.
+
+## D44. A Topcoat app reaches a Rust API through a crate of its own, written by an extension
+
+[Topcoat](https://github.com/tokio-rs/topcoat) is a Rust web framework for
+server-rendered pages. Its pages, shards and procedures run in the same
+process as a service's Rust implementations, and it leaves validation and
+authentication to the app. A Rust API already has both, per route (D39,
+D43). A Topcoat app built on such an API would restate them for each page.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `extensions/topcoat` writes, for an API service with `outputs.topcoat`, a crate at `<out>/topcoat/<service>` that a Topcoat app depends on. It is a Go module of its own, like `extensions/gcp` and `extensions/pulumi`, and the core binary does not link it: a binary that wants it passes `topcoat.Extension{}` to `cli.New`. | Linking it into `cmd/superschematic`, which would break the core-only binary's promise (`docs/extension-model.md`, goal 2) for a framework still before 1.0; a core generator beside rustrestgen |
+| The crate needs the Rust server. A service whose server is in another language skips the output with its reason, so one config serves a Go build and `build --api-language RUST`. | Refusing the config, which would fail every build of a service that is Go by default |
+| `RouterBuilder<Service>Ext::<service>(implementations, page_authenticator)` keeps the implementations in the app context and mounts the JSON API (`build_router`) at `/api/{*rest}`. A `PageAuthenticator` establishes a page's caller, from the app's session say, and is asked only when an operation needs a caller. The API's `Authenticator` still decides permissions, so a page and the JSON API admit the same callers. | A middleware that authenticates every page; a second permission rule for pages |
+| `operations::<ns>_<op>(cx, args)` runs an operation as its route does: `OperationInfo::admit`, `Args::check`, then the implementation with `OperationInfo::context`. `can_<ns>_<op>(cx)` admits the caller alone, for every operation, manual ones included. A refusal is the route's `ApiError`, which `?` carries into `topcoat::Error`. | A page calling the implementation directly, or the JSON API over HTTP from its own process |
+| A Topcoat record mirrors each object type an operation returns, and the types it nests, as the API sends it. It is built from the type's JSON, not its Rust fields. A string scalar, a UUID, a timestamp and an enum are their JSON strings, an integer scalar `i64`, a number `f64`, a map its entries, and a union or any JSON value its JSON text. `@uiHidden` fields are left out, since a record reaches the browser, and a field whose name a record reserves gets a trailing underscore. | Records of the Rust types, which hold UUIDs, timestamps, maps and enums that a record cannot; mirroring input types too |
+
+The crate is tested in the extension's module. Goldens cover fixture-api
+(operations needing callers) and fixture-nested-arrays-api (none, and
+records in lists of lists). For each, cargo clippy with warnings denied,
+then a Topcoat app driven through `Router::handle`. In fixture-api's app,
+pages call an operation in-process and render its 401, 403, the router's
+400 and its result, a guard admits a reader, and the JSON API answers
+under `/api`.
+
+Forms over input types and procedure wrappers follow, in their own
+changes. The crate pins Topcoat 0.10, which needs Rust 1.98, within the
+toolchain's 1.99.
+
+### D44, amended: a form per input type a form holds
+
+A Topcoat form posts flat, urlencoded fields, and Topcoat does not
+validate them. An operation's input type already has rules (D14), and the
+same rules give the HTML attributes a browser checks first.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An input type whose fields are each a string, a number, a boolean or an enum, alone, and which the service itself declares, gets `forms::<Input>Form`. The form holds every field as an `Option<String>`, so a refused form renders again as sent. Any other input type gets none, with the build log's reason. | Nested names (`lines[0].quantity`) for lists and objects, which Topcoat's `Form<T>` does not decode; typed fields, which would refuse a mistyped number before its field error could be shown |
+| `parse()` writes each field as the input's JSON (a whole number or a number parsed, a checkbox true when sent) and runs the generated `parse_<type>` with undeclared keys refused. Its errors, and an operation's refusal through `FormErrors::from_api`, are messages by field. | Rules restated in the form; validating only in the browser |
+| `<input>_fields(form, errors)` renders each field: its label (the `@docs` title or its name in words), its input type, and `required`, `min`/`max`, `minlength`/`maxlength` and `pattern` from the field's rules and its scalar's. A pattern is written only when a browser, which reads it anchored with the `v` flag, reads it as the server does, and never on an email or URL input, which checks its own syntax. An enum is a `<select>`, and an `@uiHidden` field is in the struct but not rendered. | Writing every pattern, where a browser refuses a pattern the `v` flag forbids (a class ending in `-`, as `Contact.Email`'s does) |
+
+The extension's fixture `fixture-forms-api`, a YAML schema, has an input
+of every kind a field takes, and one that holds a list. Its cargo test
+drives a Topcoat app: the form renders its rules as attributes, a post
+that breaks a rule or that the operation refuses renders again with 422,
+the values as sent and each field's errors, and a valid post signs up
+and redirects.
+
+### D44, amended: a procedure per operation, its refusal a record
+
+Browser code calls a server function through a Topcoat procedure. An
+`Err` from a procedure reaches the browser as a bare 500, so a 400's field
+errors, a 401 or a 403 would be lost there.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each mounted operation is a `#[procedure]` on `/_superschematic/<service>/<namespace>/<operation>`, a path that does not change with the build, registered by the app's `.discover()`. | Topcoat's default path, a hash of the item that changes when it moves; registering in `<service>(...)`, which panics beside `.discover()` |
+| The procedure takes `<Op>ArgsRecord`, a field per argument by its IR type (as records hold it) and the input as its type's record. It answers `Ok(Result<OutputRecord, ProblemRecord>)`: the route's status, code, detail and each refused field's path, rule and message, as data. | Typed arguments, which a record cannot hold (UUIDs, timestamps, maps); an `Err`, which the browser cannot read |
+| `to_args()` writes each record field as the JSON a request carries and decodes it into the `Args` struct, so a value that does not decode is the router's 400. The operation then runs in-process (D43). `call_<operation>` is the body as a plain function, which Rust code and tests call, since Topcoat turns a procedure into a unit struct. | Testing through Topcoat's wire format, which is private |
+| Every record gains `to_wire`, and the records cover the types a procedure's arguments name, inputs included. `procedures` needs records, so `records: false` leaves out both. | |
+
+A cargo test drives fixture-api's app with `.discover()`. A procedure body
+answers its result, a 401, an input's `name:minLength` refusal and a UUID
+that does not parse (`id:type`) as records. The discovered procedure path
+refuses a body that is not its JSON (400) and a GET (405), where an
+unknown path is 404.
+
+### D44, amended: superschematic.toml lists a project's Topcoat services, and acme-shop has a Topcoat app
+
+A binary that does not link the extension refuses `outputs.topcoat` in a
+config, as it refuses any outputs key no generator claims. The acme shop
+builds every service with the core binary, so its shop-orders config could
+not carry the key.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `[extension.topcoat] services = [...]` in `superschematic.toml` turns the crate on for the services it lists, with every default, as `outputs.topcoat: { enabled: true }` would. The core binary never reads an extension's table (section 3.11), so the same configs build with it. `outputs.topcoat` in a config still wins, and the table refuses a key it does not declare. | Building every service with the extension's binary, which would make the core-only example depend on an extension; a second copy of the config |
+| `extensions/topcoat/cmd/superschematic-topcoat` is the core with the extension linked, `cli.New(..., topcoat.Extension{})` and nothing else. | Asking each project to write the ten lines first |
+| acme-shop's `rust-server` becomes a library (`Shop`, `Tokens`, `implementations`) with its binary. `examples/acme-shop/topcoat` is a Topcoat app over the same implementations. It has a session sign-in and a `PageAuthenticator` over it, a reviews page that renders the reviews through a shard of their records, the form `WriteReviewInput` gives, and the 422 a refused review renders, an orders page behind `orders.read`, and the JSON API mounted at `/api`. `check.sh` builds `schemas/dist-rust` again with `superschematic-topcoat` after the core binary's build, then runs the app's tests through `Router::handle`. | A second copy of the implementations in the app |
+
+The docs site's [Pages with Topcoat](/superschematic/guides/topcoat/)
+guide quotes the app.
+### D41, amended: a stack's typed declarations give its references in every form
+
+The Stack kind writes `@stack`, `@server`, `@database` and `@environment`
+in the data forms as typed `TypeDef` fields (`Stack`, `Server`,
+`Database`, `Environment`), not as decorator arguments, so a YAML stack's
+handles never passed through D41's recording. The TypeScript form recorded
+them; the YAML form would have had to restate each one in `references`.
+Until D41 merged, a stack's config also listed every service the stack
+reaches in `dependencies`, so that a change to one rebuilt the stack.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The loader adds the handles a Stack schema's declarations hold to its references, in every form, once the schema verifies: `@stack`'s `deploy` and exposed handles, `@server`'s `serves`, `@database`'s `hosts` and each settings element's `of` (`ir.StackReferences`). A data-form stack states no `references` list, and a stack's config lists no `dependencies`: the cache key follows the references and the services their configs reach. | A `references` list in every data-form stack, which restates each handle the declarations already hold; keeping the config's `dependencies`, which also orders every reached service before the stack, an order the stack's build does not need |
+
+`runVerify` in `internal/loader/loader.go` adds them.
+`TestAStacksReferencesAreTheServicesItNames` loads the stack in TypeScript
+and YAML with no `dependencies` and gets the same three references, and
+`TestAStacksCacheKeyFollowsTheServicesItReaches` changes each service the
+stack reaches after the stack's depfile is written, as a build writes it.
+The stackgen fixtures and the sketch in section 4.1 of
+`docs/stack-model.md` no longer list `dependencies`.

@@ -18,6 +18,7 @@ func coreOutputRegistry(t *testing.T) *Registry {
 		{Name: "api", OutputKey: "api"},
 		{Name: "sdks", OutputKey: "sdk"},
 		{Name: "envConfig"},
+		{Name: "stack", Kinds: []string{"Stack"}},
 	} {
 		spec.Generate = noopGenerate
 		if err := reg.RegisterGenerator(spec); err != nil {

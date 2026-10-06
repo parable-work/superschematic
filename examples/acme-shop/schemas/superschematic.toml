@@ -27,3 +27,10 @@ schema_runtime_rust = "../../runtime/schema/rust"
 http_runtime_go = "../../runtime/http/go"
 http_runtime_rust = "../../runtime/http/rust"
 versiongraph_go = "../../runtime/versiongraph/go"
+
+# The Topcoat extension's table, read only by a binary that links it
+# (extensions/topcoat's superschematic-topcoat): shop-orders gets the crate
+# the Topcoat app in topcoat/ depends on, when its server is built in Rust.
+# The core binary never reads this table, so the configs stay its own.
+[extension.topcoat]
+services = ["shop-orders"]

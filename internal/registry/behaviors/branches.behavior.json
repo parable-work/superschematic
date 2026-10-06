@@ -719,8 +719,8 @@
       "writes": true
     },
     {
-      "name": "release",
-      "description": "Points the instance's release at a tagged commit of the instance, fenced by the pointer's version, 0 for the first release. It writes no rows: a rollback is a release of an earlier tagged commit, and the pointer's history is the release log.",
+      "name": "releaseCommit",
+      "description": "Points the instance's release pointer at a tagged commit of the instance, fenced by the pointer's version, 0 for the first release: the version graph's release, named so a type can compose Branches with Lease, whose release ends a lease. It writes no rows: a rollback is a releaseCommit of an earlier tagged commit, and the pointer's history is the release log.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -750,7 +750,7 @@
             "type": "string"
           },
           "version": {
-            "description": "Its version, which the next release names.",
+            "description": "Its version, which the next releaseCommit names.",
             "type": "integer"
           }
         }
@@ -1074,7 +1074,7 @@
                 "type": "string"
               },
               "version": {
-                "description": "Its version, which the next release names.",
+                "description": "Its version, which the next releaseCommit names.",
                 "type": "integer"
               }
             }
@@ -1228,7 +1228,7 @@
   "vetoes": [
     {
       "code": "version_conflict",
-      "description": "A write through a ref, or a release, at a version the ref or the release pointer has moved past."
+      "description": "A write through a ref, or a releaseCommit, at a version the ref or the release pointer has moved past."
     },
     {
       "code": "name_taken",
@@ -1264,7 +1264,7 @@
     },
     {
       "code": "not_tagged",
-      "description": "release of a commit that is not tagged."
+      "description": "releaseCommit of a commit that is not tagged."
     },
     {
       "code": "walk_ceiling",

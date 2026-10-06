@@ -36,6 +36,11 @@ case "${1:-}" in
     ;;
 esac
 
+# Go binaries link this archive beside superscalar's, so both are built
+# with tools.env's RUST_VERSION (scripts/superscalar-dep.sh says why).
+RUSTUP_TOOLCHAIN="$(grep -E '^RUST_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
+export RUSTUP_TOOLCHAIN
+
 BUILD_LOG="$(mktemp)"
 trap 'rm -f "$BUILD_LOG"' EXIT
 

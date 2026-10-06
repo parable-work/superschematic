@@ -98,6 +98,21 @@ def test_negative_zero_is_zero() -> None:
     assert canonical_value("number", "-0") == "0"
 
 
+def test_every_day_of_year_0_is_its_own_date_time() -> None:
+    # Year 0, a leap year and the first the rule takes, as Go's time and
+    # JavaScript's Date read it: each of its days at midnight UTC is its own
+    # canonical date-time, and an offset moves a time across its days.
+    days = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    dates = [f"0000-{month:02d}-{day:02d}" for month in range(1, 13) for day in range(1, days[month - 1] + 1)]
+    dates.append("0001-01-01")
+    for date in dates:
+        assert canonical_value("dateTime", f'"{date}T00:00:00Z"') == f'"{date}T00:00:00Z"', date
+    for date, before in zip(dates[1:], dates):
+        assert canonical_value("dateTime", f'"{date}T00:30:00+01:00"') == f'"{before}T23:30:00Z"', date
+    with pytest.raises(CanonicalError):
+        canonical_value("dateTime", '"0000-01-01T00:30:00+01:00"')
+
+
 def test_uuid_forms_round_trip() -> None:
     hyphenated = "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90"
     assert uuid_hyphenated(uuid_canonical(hyphenated)) == hyphenated

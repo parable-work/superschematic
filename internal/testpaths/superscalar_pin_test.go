@@ -30,7 +30,7 @@ func TestSuperscalarPinMatchesGoModPseudoVersions(t *testing.T) {
 	}
 
 	requireRE := regexp.MustCompile(`github\.com/parable-work/superscalar/go v0\.0\.0-\d{14}-([0-9a-f]{12})`)
-	for _, mod := range []string{"go.mod", "runtime/schema/go/go.mod", "runtime/http/go/go.mod", "extensions/gcp/go.mod", "extensions/pulumi/go.mod"} {
+	for _, mod := range []string{"go.mod", "runtime/schema/go/go.mod", "runtime/http/go/go.mod", "extensions/gcp/go.mod", "extensions/pulumi/go.mod", "extensions/topcoat/go.mod"} {
 		data, err := os.ReadFile(filepath.Join(root, mod))
 		if err != nil {
 			t.Fatal(err)

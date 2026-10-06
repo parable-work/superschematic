@@ -21,7 +21,7 @@ images exclude nothing and its actor column is updated_by. The core
 checks the descriptor there, so a config it refuses fails the define.
 
 The operations are of instance scope. branch, save, commit, seal, merge,
-rebase, revert, release and discard write; refs, releases, compose,
+rebase, revert, releaseCommit and discard write; refs, releases, compose,
 materialize, released, diff and history read. Each takes what the version
 graph engine's operation takes, refs and commits by id, and every write
 through a ref its expected version; a ref or a commit that is not the
@@ -36,7 +36,10 @@ type. discard refuses the primary line (primary_line), which every draft
 branches from and merges into. The engine's refusals are vetoes with its
 stable codes (VETOES), released before the instance's first release is
 not_found, and refs and releases read the behavior's own tables, which
-the engine has no operation for.
+the engine has no operation for. releaseCommit is the version graph
+engine's release under another name: Lease, which a type may compose
+beside Branches, has release, and a type's behaviors share one namespace
+of operation names.
 
 The graph's tables are the behavior's own: the SQLite adapter's fixed
 layout (sqliteLayout) under sql.table's names, which its migration
@@ -1151,10 +1154,12 @@ export const branches = defineBehavior<BranchesConfig>({
       });
     },
 
-    release(context, params) {
+    releaseCommit(context, params) {
       const graph = ensureRoot(context);
-      return guarded(context, 'release', () => {
-        const commit = ownCommit(context, graph, 'release', 'commit', params.commit);
+      return guarded(context, 'releaseCommit', () => {
+        const commit = ownCommit(context, graph, 'releaseCommit', 'commit', params.commit);
+        // The version graph engine's release: releaseCommit names it so a
+        // type can compose Branches with Lease, whose release ends a lease.
         const release = graph.engine.release(actorOf(context), rootOf(context.id), commit, params.version as number);
         return { commit: release.commit, version: release.version };
       });

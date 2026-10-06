@@ -12,7 +12,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The arguments of tenant.listTenants (`GET /api/tenants`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct TenantListTenantsArgs {
     /// The `ids` query parameter.
@@ -22,7 +23,8 @@ pub struct TenantListTenantsArgs {
 }
 
 /// The arguments of tenant.createTenant (`POST /api/tenants`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct TenantCreateTenantArgs {
     /// The request body.
@@ -30,7 +32,8 @@ pub struct TenantCreateTenantArgs {
 }
 
 /// The arguments of tenant.getTenant (`GET /api/tenants/{id}`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct TenantGetTenantArgs {
     /// The `id` path parameter.
@@ -40,7 +43,8 @@ pub struct TenantGetTenantArgs {
 }
 
 /// The arguments of tenant.updateSecret (`PATCH /api/tenants/{id}`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct TenantUpdateSecretArgs {
     /// The `id` path parameter.

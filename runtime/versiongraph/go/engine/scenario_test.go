@@ -3,6 +3,7 @@ package engine_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,13 +44,20 @@ const fixtureSnapshotEvery = 3
 // its canonical form.
 const defaultActor = "Cook"
 
-// backend is the backend this runner runs the scenarios on. A step that
-// lists its backends runs here only when it lists this one, and an sql
-// step runs its statement for this backend.
-const backend = "postgres"
+// The backends a runner runs the scenarios on. A step that lists its
+// backends runs on a runner only when it lists the runner's, and an sql step
+// runs its statement for the runner's backend.
+const (
+	postgresBackend = "postgres"
+	sqliteBackend   = "sqlite"
+)
 
 // knownBackends are the backends a scenario may name.
-var knownBackends = []string{"postgres", "sqlite"}
+var knownBackends = []string{postgresBackend, sqliteBackend}
+
+// sqliteGraph is the graph the SQLite runner keeps the fixture's Recipe
+// graph under.
+const sqliteGraph = "recipe"
 
 var fixtureDir = filepath.Join("..", "..", "testdata", "fixture")
 
@@ -229,7 +237,8 @@ type commitExpect struct {
 // TestScenarios runs every scenario in runtime/versiongraph/testdata/scenarios
 // through the engine and the Postgres adapter, each in a schema of its own
 // that holds the fixture's DDL. It needs the Postgres named by
-// SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL.
+// SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL. TestScenariosOnSQLite runs
+// them on SQLite.
 func TestScenarios(t *testing.T) {
 	dsn := os.Getenv(databaseVariable)
 	if dsn == "" {
@@ -244,12 +253,51 @@ func TestScenarios(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range scenarioFiles(t) {
-		s := readScenario(t, file)
+		s := readScenario(t, file, postgresBackend)
 		if want := strings.TrimSuffix(filepath.Base(file), ".json"); s.Name != want {
 			t.Fatalf("%s: scenario name %q, want the file's name %q", file, s.Name, want)
 		}
 		t.Run(s.Name, func(t *testing.T) {
 			runScenario(t, newRunner(t, dsn, descriptor, createSQL), s)
+		})
+	}
+}
+
+// sqlitePass is one way the scenarios run on SQLite.
+type sqlitePass struct {
+	name string
+	// callerTransaction runs every transaction of the adapter inside one
+	// the runner holds, through DBTx, and the layout under names of its
+	// own.
+	callerTransaction bool
+}
+
+// sqlitePasses are the ways the scenarios run on SQLite: on the adapter's
+// own transactions over a database/sql pool, and in a transaction the
+// runner holds on one connection, under another name function.
+var sqlitePasses = []sqlitePass{
+	{name: "pool"},
+	{name: "caller's transaction", callerTransaction: true},
+}
+
+// TestScenariosOnSQLite runs every scenario in
+// runtime/versiongraph/testdata/scenarios through the engine and the SQLite
+// adapter (D32), each in a file of its own holding the adapter's layout,
+// with no database server: once on the adapter's own transactions over a
+// database/sql pool, and once in transactions the runner holds.
+func TestScenariosOnSQLite(t *testing.T) {
+	descriptor := mustReadFixture(t)
+	for _, pass := range sqlitePasses {
+		t.Run(pass.name, func(t *testing.T) {
+			for _, file := range scenarioFiles(t) {
+				s := readScenario(t, file, sqliteBackend)
+				if want := strings.TrimSuffix(filepath.Base(file), ".json"); s.Name != want {
+					t.Fatalf("%s: scenario name %q, want the file's name %q", file, s.Name, want)
+				}
+				t.Run(s.Name, func(t *testing.T) {
+					runScenario(t, newSQLiteRunner(t, descriptor, pass), s)
+				})
+			}
 		})
 	}
 }
@@ -267,7 +315,7 @@ func scenarioFiles(t *testing.T) []string {
 	return files
 }
 
-func readScenario(t *testing.T, file string) scenario {
+func readScenario(t *testing.T, file, backend string) scenario {
 	t.Helper()
 	text, err := os.ReadFile(file)
 	if err != nil {
@@ -351,7 +399,7 @@ func runScenario(t *testing.T, r *runner, s scenario) {
 	t.Helper()
 	r.seed(t, s.roots)
 	for i, st := range s.Steps {
-		if !st.runsOn(backend) {
+		if !st.runsOn(r.backend) {
 			continue
 		}
 		r.step = fmt.Sprintf("step %d (%s)", i, st.Op)
@@ -361,20 +409,35 @@ func runScenario(t *testing.T, r *runner, s scenario) {
 
 // runner holds one scenario's database, engine and named results.
 type runner struct {
+	// backend is the backend the runner runs on, postgres or sqlite.
+	backend    string
 	ctx        context.Context
 	descriptor json.RawMessage
-	config     *pgx.ConnConfig
-	conn       *pgx.Conn
 	store      storage.Storage
-	adapter    *postgres.Adapter
 	engine     *engine.Engine
 	refs       map[string]storage.Ref
 	commits    map[string]storage.Commit
 	releases   map[string]storage.Release
 	step       string
-	// holder is the transaction of another connection that holds the
-	// graph's sweep lock, between holdSweepLock and releaseSweepLock.
-	holder pgx.Tx
+
+	// On Postgres: the scenario's schema and connection, the adapter, and
+	// the transaction of another connection that holds the graph's sweep
+	// lock, between holdSweepLock and releaseSweepLock.
+	config  *pgx.ConnConfig
+	conn    *pgx.Conn
+	adapter *postgres.Adapter
+	holder  pgx.Tx
+
+	// On SQLite: what an sql step's statement runs on, and the statement
+	// as it runs there, written against the layout's default names.
+	sqlite    sqlQuerier
+	statement func(string) string
+}
+
+// sqlQuerier is what a database/sql pool and connection share.
+type sqlQuerier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 func newRunner(t *testing.T, dsn string, descriptor, createSQL []byte) *runner {
@@ -420,7 +483,7 @@ func newRunner(t *testing.T, dsn string, descriptor, createSQL []byte) *runner {
 		t.Fatal(err)
 	}
 	r := &runner{
-		ctx: ctx, descriptor: descriptor, config: config, conn: conn, store: store, adapter: adapter, engine: eng,
+		backend: postgresBackend, ctx: ctx, descriptor: descriptor, config: config, conn: conn, store: store, adapter: adapter, engine: eng,
 		refs: map[string]storage.Ref{}, commits: map[string]storage.Commit{}, releases: map[string]storage.Release{},
 	}
 	t.Cleanup(func() {
@@ -433,9 +496,13 @@ func newRunner(t *testing.T, dsn string, descriptor, createSQL []byte) *runner {
 
 // seed gives each root the row a root has on Postgres: a recipe whose id
 // is the root, whose title is the root's name and whose creator is the
-// default actor, all in one statement.
+// default actor, all in one statement. On SQLite it seeds nothing, since
+// the layout has no root table.
 func (r *runner) seed(t *testing.T, roots []string) {
 	t.Helper()
+	if r.backend == sqliteBackend {
+		return
+	}
 	args := []any{hyphenated(t, defaultActor)}
 	values := make([]string, len(roots))
 	for i, root := range roots {
@@ -624,6 +691,9 @@ func (r *runner) run(t *testing.T, st step) {
 	case "holdSweepLock":
 		r.holdSweepLock(t)
 	case "releaseSweepLock":
+		if r.backend == sqliteBackend {
+			r.holdSweepLock(t)
+		}
 		if r.holder == nil {
 			r.fatalf(t, "no sweep lock is held")
 		}
@@ -662,10 +732,13 @@ func (r *runner) run(t *testing.T, st step) {
 		for i, arg := range st.Args {
 			args[i] = r.sqlArg(t, arg)
 		}
-		statement := st.Statement[backend]
-		if st.Expect.Rows != nil {
+		statement := st.Statement[r.backend]
+		switch {
+		case r.backend == sqliteBackend:
+			rows, err = r.sqliteSQL(ctx, statement, args, st.Expect.Rows != nil)
+		case st.Expect.Rows != nil:
 			rows, err = r.queryRows(ctx, statement, args)
-		} else {
+		default:
 			_, err = r.conn.Exec(ctx, statement, args...)
 		}
 	default:
@@ -825,6 +898,9 @@ func (r *runner) queryRows(ctx context.Context, statement string, args []any) ([
 // releaseSweepLock.
 func (r *runner) holdSweepLock(t *testing.T) {
 	t.Helper()
+	if r.backend == sqliteBackend {
+		r.fatalf(t, "the sweep lock steps run on postgres only: under SQLite's one writer no transaction holds the lock while a sweep runs")
+	}
 	if r.holder != nil {
 		r.fatalf(t, "the sweep lock is already held")
 	}
@@ -849,6 +925,8 @@ func (r *runner) holdSweepLock(t *testing.T) {
 	}
 }
 
+// sqlArg is an sql step's argument: an id, hyphenated on Postgres and in
+// its canonical form on SQLite, as the layout stores it.
 func (r *runner) sqlArg(t *testing.T, arg sqlArg) string {
 	t.Helper()
 	var id string
@@ -861,6 +939,9 @@ func (r *runner) sqlArg(t *testing.T, arg sqlArg) string {
 		id = r.commitID(t, arg.Commit)
 	default:
 		r.fatalf(t, "an sql argument names a uuid, a ref or a commit")
+	}
+	if r.backend == sqliteBackend {
+		return id
 	}
 	return hyphenated(t, id)
 }

@@ -7,9 +7,9 @@ sidebar:
 
 A schema file imports decorators and type wrappers from the core authoring
 packages. The package decides which kinds of schema may use them:
-`@superschematic/schema` everywhere, `@superschematic/db` in DB schemas and
-`@superschematic/api` in API schemas. An extension adds its own from its
-own package. This page lists the ones these docs cover; the others join it
+`@superschematic/schema` everywhere, `@superschematic/db` in DB schemas,
+`@superschematic/api` in API schemas and `@superschematic/stack` in Stack
+schemas. An extension adds its own from its own package. This page lists the ones these docs cover; the others join it
 as their support lands in every generator.
 
 ## Types and fields: `@superschematic/schema`
@@ -72,3 +72,19 @@ as their support lands in every generator.
 | `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
 | `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and `calls`, and for a decorator argument that names a service; its type carries the kind (`ServiceHandle<"API">`). Each service's build writes its handle to `src/service.generated.ts`, which a config or a schema file imports from the service's package; an API's also carries its `@envVars` class | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
 | `@envVars` | on a class of a General schema: its fields are the service's environment variables, with a generated loader and `values-schema.json` | [Modeling types](/superschematic/guides/modeling-types/#environment-variables) |
+
+## Stacks: `@superschematic/stack`
+
+A Stack service (`kind: SchemaKind.Stack`) declares what runs where over
+the services it names by their handles, and its build writes each
+environment, resolved, to `stack/<service>/<environment>/environment.json`.
+The stack takes its service's name. Each class of its schema carries one
+of these decorators and no fields.
+
+| Name | On | What it does | Covered in |
+| --- | --- | --- | --- |
+| `@stack({ deploy, expose })` | class | the stack's entry points, API and DB handles: every service they reach through `authDb`, DB dependencies and `calls` joins the stack. `expose` names what is reachable from outside, an API's handle or an `@server` class. One class per schema | [The Stack kind](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#41-the-stack-kind) |
+| `@server({ serves })` | class | one server for the APIs listed, in place of their default servers | [The Stack kind](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#41-the-stack-kind) |
+| `@database({ hosts })` | class | one database for the DB schemas listed, in place of their default databases | [The Stack kind](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#41-the-stack-kind) |
+| `@environment({ target, domain, dns, settings, parameters })` | class | an environment: the target, its values under the target's name (`gcp: { project, region }`), and settings per deployable, each `of` a handle or an `@server` or `@database` class, with `env` values that are literals or `{ parameter }`. A class that extends another `@environment` class inherits its values | [The Stack kind](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#41-the-stack-kind) |
+| `Targets` | interface | a target's package augments it with the target's values and a settings type per deployable kind; `@environment` checks the values, each settings element and its `env` against them | [Typed authoring](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md#43-typed-authoring) |

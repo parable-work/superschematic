@@ -108,6 +108,7 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 		filepath.Join("src", "interfaces.rs"),
 		filepath.Join("src", "router.rs"),
 		filepath.Join("src", "openapi.rs"),
+		filepath.Join("src", "operations.rs"),
 		"openapi.json",
 	}
 

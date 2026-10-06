@@ -2110,12 +2110,15 @@ A version graph on each instance (D32, over D17 and D19): the instance is
 the graph's root, never overlaid and in no commit, so its own fields stay
 outside the graph, and rows of the kinds the config names live on refs, a
 primary line and drafts of it.
+`releaseCommit` is the version graph's release: it points the instance's
+release pointer at a tagged commit, and the pointer's history is the
+release log, which `releases` reads.
 
 | | |
 | --- | --- |
 | Config | `kinds` (1 to 64, by name, camelCase): each `{ type, parent?, order?, singleton?, units?, retentionDays? }`, `type` a type of the document besides the instance type, whose fields are the kind's content, `parent: { key, of }`, `order` and `singleton` as `@graphMember`'s, `units` each field's conflict unit as `@conflictUnit` sets it (`atomic`, `keyed`, `jsonSchema`, `excluded`), `retentionDays` as `@versioned`'s; `primary`, the primary line's name (`main`); `snapshotEvery`, as `@versionGraph`'s (64); `sweep: { intervalMs, discardGrace?, pruneBatch?, abandonAfter? }`, milliseconds but `pruneBatch`; required |
 | Fields | none |
-| Operations | writing: `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `release`, `discard`; read-only: `refs`, `releases`, `compose`, `materialize`, `released`, `diff`, `history`; all of instance scope |
+| Operations | writing: `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`; read-only: `refs`, `releases`, `compose`, `materialize`, `released`, `diff`, `history`; all of instance scope |
 | Storage | the SQLite adapter's layout (`sqliteLayout` of `@superschematic/versiongraph/sqlite`) under the behavior's names, `bhv_branches__ref` to `bhv_branches__member_history`, beside `roots` (each root's instance) and `actors` (each actor's subject) |
 | Schedule | `sweep`, every `sweep.intervalMs` on a schema whose config gives `sweep`, off on any other |
 | Vetoes | the version graph engine's codes: `version_conflict`, `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`, `entity_not_found`, `invalid_tree` (the core's findings in `details.findings`), `merge_into_itself`, `no_parent`, `not_tagged`, `walk_ceiling`; and `primary_line`, a `discard` of the primary line |
@@ -2131,7 +2134,7 @@ primary line and drafts of it.
 | `merge` | `source`, `target`, `targetVersion`, `resolutions?`, `message?`, `tag?` | `{ ref, commit, conflicts }` |
 | `rebase` | `draft`, `version`, `resolutions?` | `{ ref, commit, conflicts }` |
 | `revert` | `ref`, `version`, `toCommit` | `{ ref, commit }` |
-| `release` | `commit`, `version` (the release pointer's, 0 for the first) | `{ commit, version }` |
+| `releaseCommit` | `commit`, `version` (the release pointer's, 0 for the first) | `{ commit, version }`: the release pointer moved to the commit |
 | `discard` | `ref`, `version` | the draft, discarded; the primary line is not (`primary_line`) |
 | `refs` | `limit?`, `cursor?` | the instance's live refs, the primary line first, a page at a time |
 | `releases` | `limit?`, `cursor?` | the release log: `{ version, commit, releasedAt, releasedBy }` per version of the pointer, oldest first |
@@ -2242,8 +2245,8 @@ times as UTC date-times; a tree is rows by kind.
   `@superschematic/versiongraph`, whose `SyncEngine` and SQLite adapter
   run each operation, and instantiates the wasm core with `initSync` the
   first time a schema that composes `Branches` is composed.
-- **Lease.** `release` is also an operation of `Lease`, so a type cannot
-  compose both.
+- **Lease.** The operation that points the release pointer is
+  `releaseCommit`, not `release`, because `Lease` has `release`.
 
 ## Namespaces
 

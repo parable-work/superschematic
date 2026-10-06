@@ -2,8 +2,8 @@
 name = "superschematic-versiongraph-engine"
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.95.0"
-description = "The version graph's engine: every graph operation over a storage adapter, with a Postgres adapter"
+rust-version = "1.99.0"
+description = "The version graph's engine: every graph operation over a storage adapter, with a Postgres adapter and a SQLite adapter"
 license = "Apache-2.0"
 repository = "https://github.com/parable-work/superschematic"
 # Generated Rust types crates depend on it by path (see [paths]
@@ -20,14 +20,24 @@ default = ["tokio-postgres"]
 # adapter still builds; a caller implements postgres::Client over another
 # driver.
 tokio-postgres = ["dep:tokio-postgres"]
+# The SQLite adapter's default client, over rusqlite with the SQLite it
+# bundles, so the SQLite version is known. Off by default, so a Postgres
+# user does not compile SQLite; without it the adapter still builds, and a
+# caller implements sqlite::Client over another driver.
+rusqlite = ["dep:rusqlite"]
 
 [dependencies]
 async-trait = "0.1.89"
+# The SQLite adapter's ids: version-4 UUIDs it generates, as Postgres's
+# gen_random_uuid() does.
+getrandom = "0.4.3"
 regex = "1.12"
+rusqlite = { version = "0.40.2", optional = true, features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 # arbitrary_precision, which the core turns on too, keeps a number's digits as
-# written, so the canonical rules read a numeric column exactly.
-serde_json = { version = "1.0.149", features = ["arbitrary_precision"] }
+# written, so the canonical rules read a numeric column exactly; raw_value
+# reads each member of the SQLite adapter's stored JSON exactly as stored.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "raw_value"] }
 superschematic-versiongraph = { path = "../rust" }
 tokio = { version = "1.52", features = ["macros", "sync", "time"] }
 tokio-postgres = { version = "0.7.18", optional = true }
@@ -54,6 +64,11 @@ required-features = ["tokio-postgres"]
 [[test]]
 name = "sweeper"
 required-features = ["tokio-postgres"]
+
+# The SQLite adapter's tests use the default client.
+[[test]]
+name = "sqlite"
+required-features = ["rusqlite"]
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

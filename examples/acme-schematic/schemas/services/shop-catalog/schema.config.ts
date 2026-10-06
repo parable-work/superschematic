@@ -1,10 +1,10 @@
 import { defineConfig } from "@acme/schema-config";
 
 // A schema of the Catalog kind, which only the acme extension registers.
-// SchemaKind is closed to the core three; an extension kind is written as a
+// SchemaKind is closed to the core four; an extension kind is written as a
 // string (SchemaKindName admits any registered name) and the registry
 // validates it. The core-only binary rejects this file with
-// "unknown kind "Catalog" (registered kinds: API, DB, General)".
+// "unknown kind "Catalog" (registered kinds: API, DB, General, Stack)".
 //
 // The outputs type knows only the core keys, so the extension's output key
 // carries an expect-error; the registry validates it against the catalog
