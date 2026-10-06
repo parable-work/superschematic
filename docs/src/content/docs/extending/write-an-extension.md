@@ -357,6 +357,13 @@ return r.RegisterScalars(Name, catalog)
 
 - `rows` holds every scalar the schemas may use: acme copies the core rows
   from `registry.CoreScalars()` and adds its own.
+- A row whose `Primitive` the loader reads as the object language primitive
+  (`Object`, `JSON`, `Type`, or a spelling it does not know) needs a
+  `JSONSchemaType` of `object`, `array` or `any`, which becomes the
+  scalar's `json_schema` mapping and says what JSON it holds.
+  `RegisterScalars` refuses a catalog with a row that has none, and names
+  the row; for an unknown spelling, it also names the primitive
+  ([JSON-valued scalars](/superschematic/reference/json-scalars/#a-scalar-of-your-own-that-holds-json)).
 - A field of an upload scalar is a multipart file part in the generated
   APIs and SDKs. `Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>` lowers
   the limit for one field; the loader checks it after hydration, so it

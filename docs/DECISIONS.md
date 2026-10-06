@@ -3370,3 +3370,49 @@ A `@requireService` operation run in-process is not refused. Whether it
 should be stays open.
 
 The rule is reversible until the first release.
+
+### D14, amended: a scalar that holds JSON says which JSON
+
+A validator decides that a scalar holds JSON only from its `json_schema`
+type mapping. In the TypeScript schema runtime, `isAnyJSONScalar` reads
+`any`, and `structuredJSONType` reads `object` or `array` for a scalar
+with no pattern and no length (amended above), as `ir.ScalarDef.IsAnyJSON`
+and `StructuredJSONType` do in Go. A scalar whose language primitive is
+`object` and that has no such mapping fell through to the string checks:
+the schema runtime refused an object value as not a string. The engine's
+describe rule wrote its type as `string`, and `Branches` classed it a
+string. The generated code held an object: tsgen typed it
+`Record<string, any>`, rustgen `serde_json::Value`, checked as an object,
+and pygen `dict`, and graphdesc classed it `json`. So the engine refused
+values every generated server accepts.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar whose language primitive is `object` says what JSON it holds through its `json_schema` type mapping: `object`, `array` or `any`. One that does not is refused when it is loaded or registered. The message names the scalar and three routes: add `typeMappings: { json_schema: object }` (or `array` or `any`; `JSONSchemaType` in a catalog row), use the catalog's `Generic.JSON` for free-form JSON, or model a value with known fields as a nested object type. | Filling in `json_schema: object` at load, which silently picks "a JSON object" over "any JSON value" for a scalar that did not say; leaving it, which lets the engine refuse values every generated server accepts |
+| The rule judges a scalar as the IR will carry it, once the catalog has filled it in. A catalog scalar a schema file names by name and the `object` primitive, as `format --to=json` writes `Generic.JSON`, takes its row, mapping included, and loads. | |
+| One rule with one message, `ir.ObjectScalarJSONError`, runs wherever a scalar definition enters. The loader runs it on every scalar in `ir.Schema.ValidateHydrated`, in every form. `RegisterScalars` runs it on each row of an extension's catalog, with the row's `JSONSchemaType` as the mapping. The engine runs its twin, `objectScalarIssue`, in `readSchema`, on each scalar the document declares that the builtin catalog does not hold, so `define` and `publish` refuse such a document (D16). | Teaching each runtime and describe rule to read a bare `object` as JSON, which puts one rule in several places that can drift |
+| The loader reads a row's primitive it does not know as `object`, as before (`ir.CatalogLanguagePrimitive`, which the loader, the registry and the scalar catalog tool now share). Such a row with no JSON mapping gets this refusal, and the registry's error names the primitive the row wrote. | A rule of its own for an unknown primitive, which would also refuse one with a JSON mapping that registers today |
+
+The schema runtime's schema-file loader, the TypeScript twin of the Go
+data-form reader, only decodes. It has no catalog to fill a scalar in
+from, so it does not judge the rule; the engine does, after it.
+
+Nothing in the repository declares such a scalar. The `object` scalars in
+the fixtures (`Generic.JSON`, `Generic.StringMap`, `Embedding.Vector`) are
+catalog references. The catalog's four JSON scalars have the `String`
+primitive and a mapping: `Generic.JSON` `any`, `Generic.StringMap` and
+`Geo.Location` `object`, `Embedding.Vector` `array`. `Geo.Location`'s
+string pattern still contradicts its mapping (amended above); it has a
+mapping, so this rule leaves it alone.
+
+`TestLoadServiceRefusesObjectScalarWithoutJSONMapping` and
+`TestLoadServiceTakesObjectScalarThatSaysWhichJSON` load such a scalar in
+JSON and YAML, without a mapping and with each of the three.
+`TestLoadServiceHydratesObjectCatalogReferences` loads the four catalog
+scalars written by name and the `object` primitive.
+`TestRegisterScalarsRefusesObjectRowWithoutJSONMapping` and
+`TestRegisterScalarsNamesAnUnknownPrimitive` register such rows. The
+engine's registry test refuses such a document at define, and at publish
+for a draft stored before the rule.
+
+No release has shipped, so the rule is reversible until the first release.

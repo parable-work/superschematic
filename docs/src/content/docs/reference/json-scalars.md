@@ -1,6 +1,6 @@
 ---
 title: JSON-valued scalars
-description: The scalars whose value is not a string (Generic.JSON, Generic.StringMap, Embedding.Vector), what each target types them as, and how they are validated.
+description: The scalars whose value is not a string (Generic.JSON, Generic.StringMap, Embedding.Vector), what each target types them as, how they are validated, and what a scalar of your own that holds JSON declares.
 sidebar:
   order: 6
 ---
@@ -18,6 +18,41 @@ scalar's name
 | `Generic.StringMap` | `object` | A JSON object of string values, such as `{"region": "eu"}` |
 | `Embedding.Vector` | `array` | A JSON array of numbers, such as `[0.12, -0.5]` |
 | `Geo.Location` | `object` | Not settled: see [below](#geolocation) |
+
+## A scalar of your own that holds JSON
+
+A scalar whose language primitive is `object` says what JSON it holds
+through its `json_schema` type mapping: `object`, `array` or `any`. The
+validators take the mapping as the only sign that a scalar holds JSON.
+Without one, the schema runtimes and the engine would check its values as
+strings, while the generated Go, TypeScript, Python and Rust types hold an
+object
+([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-a-scalar-that-holds-json-says-which-json)).
+
+```yaml
+scalars:
+  Acme.Settings:
+    name: Acme.Settings
+    description: A tenant's settings, as a JSON object
+    languagePrimitive: object
+    typeMappings:
+      json_schema: object
+```
+
+A build refuses an `object` scalar with no such mapping, and so do the
+engine, when a schema is defined or published, and `RegisterScalars`, for
+an extension's catalog row. The error names the scalar and gives three
+ways out:
+
+- Add `typeMappings: { json_schema: object }`, or `array`, or `any`. A
+  catalog row sets `JSONSchemaType`.
+- Use the catalog's `Generic.JSON` for free-form JSON.
+- Model a value with known fields as a nested object type.
+
+The loader checks a scalar after it fills it in from the catalog. A
+catalog scalar a schema names by name and `languagePrimitive: object`, the
+way `superschematic format --to=json` writes `Generic.JSON`, takes the
+catalog's row, mapping included, and loads.
 
 ## What each target generates
 
