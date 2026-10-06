@@ -74,6 +74,85 @@ func TestRegisterScalarsAfterFinalizeIsAnError(t *testing.T) {
 	}
 }
 
+// TestRegisterScalarsRefusesObjectRowWithoutJSONMapping: a row whose
+// primitive the loader reads as object must say which JSON the scalar holds
+// through its JSONSchemaType. A catalog with rows that do not is refused,
+// each one named with the routes, and nothing is installed. The same rows
+// with object, array or any register.
+func TestRegisterScalarsRefusesObjectRowWithoutJSONMapping(t *testing.T) {
+	rows := func(jsonType string) map[string]*scalars.ScalarMetadata {
+		return map[string]*scalars.ScalarMetadata{
+			"Identity.UUID": scalars.ScalarMetadataByCanonical["Identity.UUID"],
+			"Acme.Blob":     {CanonicalName: "Acme.Blob", Symbol: "AcmeBlob", Primitive: "Object", JSONSchemaType: jsonType},
+			"Acme.Doc":      {CanonicalName: "Acme.Doc", Symbol: "AcmeDoc", Primitive: "JSON", JSONSchemaType: jsonType},
+		}
+	}
+
+	for _, jsonType := range []string{"", "string"} {
+		reg := New(naming.Default())
+		err := reg.RegisterScalars("acme", ScalarCatalogOf(rows(jsonType)))
+		if err == nil {
+			t.Fatalf("JSONSchemaType %q: RegisterScalars accepted object rows that do not say which JSON they hold", jsonType)
+		}
+		for _, want := range []string{
+			"registry: acme's scalar catalog: scalar Acme.Blob has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds",
+			"registry: acme's scalar catalog: scalar Acme.Doc has language primitive object but no json_schema type mapping",
+			"add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row)",
+			"use the catalog's Generic.JSON for free-form JSON",
+			"model a value with known fields as a nested object type",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("JSONSchemaType %q: error %q does not say %q", jsonType, err.Error(), want)
+			}
+		}
+		if strings.Contains(err.Error(), "Identity.UUID") {
+			t.Errorf("JSONSchemaType %q: error %q names a string row", jsonType, err.Error())
+		}
+		if reg.scalars != nil || len(reg.Extensions()) != 0 {
+			t.Fatalf("JSONSchemaType %q: a refused catalog was installed", jsonType)
+		}
+	}
+
+	for _, jsonType := range []string{"object", "array", "any"} {
+		reg := New(naming.Default())
+		if err := reg.RegisterScalars("acme", ScalarCatalogOf(rows(jsonType))); err != nil {
+			t.Errorf("JSONSchemaType %q: RegisterScalars: %v", jsonType, err)
+		}
+	}
+}
+
+// TestRegisterScalarsNamesAnUnknownPrimitive: the loader reads a primitive
+// it does not know as object, so a row with one and no JSON mapping gets the
+// object scalar refusal, which names the primitive the row wrote. With a
+// JSON mapping it is an object scalar and registers, as before.
+func TestRegisterScalarsNamesAnUnknownPrimitive(t *testing.T) {
+	row := &scalars.ScalarMetadata{CanonicalName: "Acme.Id", Symbol: "AcmeId", Primitive: "Uuid"}
+	err := New(naming.Default()).RegisterScalars("acme", ScalarCatalogOf(map[string]*scalars.ScalarMetadata{"Acme.Id": row}))
+	want := `registry: acme's scalar catalog: Acme.Id has primitive "Uuid", which the loader does not know and reads as object: scalar Acme.Id has language primitive object but no json_schema type mapping`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("RegisterScalars: err = %v, want %q", err, want)
+	}
+
+	mapped := *row
+	mapped.JSONSchemaType = "object"
+	if err := New(naming.Default()).RegisterScalars("acme", ScalarCatalogOf(map[string]*scalars.ScalarMetadata{"Acme.Id": &mapped})); err != nil {
+		t.Fatalf("RegisterScalars with a JSON mapping: %v", err)
+	}
+}
+
+// TestCoreScalarsSayWhichJSONTheyHold: no core row is an object scalar
+// without a JSON mapping, so the core catalog, which the loader falls back
+// to with no registration, passes the rule, and so does an extension's
+// catalog that copies its rows in, as acme's does.
+func TestCoreScalarsSayWhichJSONTheyHold(t *testing.T) {
+	if err := checkObjectScalarRows("core", CoreScalars()); err != nil {
+		t.Fatalf("core catalog: %v", err)
+	}
+	if err := New(naming.Default()).RegisterScalars("acme", CoreScalars()); err != nil {
+		t.Fatalf("RegisterScalars(core rows): %v", err)
+	}
+}
+
 func TestScalarCatalogOfSkipsNilRows(t *testing.T) {
 	catalog := ScalarCatalogOf(map[string]*scalars.ScalarMetadata{
 		"Identity.UUID": scalars.ScalarMetadataByCanonical["Identity.UUID"],

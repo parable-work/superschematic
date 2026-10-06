@@ -1241,3 +1241,153 @@ func TestHydrateScalarsKeepsInlineDataFormScalar(t *testing.T) {
 		t.Fatal("inline scalar definition was altered")
 	}
 }
+
+// objectScalarService lays out a data-form service, in JSON or YAML, whose
+// Widget.payload is of the scalar name, which the file declares with the
+// object language primitive, and with description and a json_schema type
+// mapping when they are not empty.
+func objectScalarService(t *testing.T, form, name, description, jsonSchema string) string {
+	t.Helper()
+	switch form {
+	case "json":
+		scalar := map[string]any{"name": name, "languagePrimitive": "object"}
+		if description != "" {
+			scalar["description"] = description
+		}
+		if jsonSchema != "" {
+			scalar["typeMappings"] = map[string]string{"json_schema": jsonSchema}
+		}
+		text, err := json.MarshalIndent(map[string]any{
+			"scalars": map[string]any{name: scalar},
+			"types": map[string]any{"Widget": map[string]any{
+				"name":   "Widget",
+				"role":   "EmbeddedStruct",
+				"fields": []any{map[string]any{"name": "payload", "typeRef": map[string]any{"name": name}, "required": true}},
+			}},
+		}, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return writeService(t, map[string]string{
+			"schema.config.json":     minimalConfig,
+			"src/widget.schema.json": string(text),
+		})
+	case "yaml":
+		scalar := "  " + name + ":\n    name: " + name + "\n    languagePrimitive: object\n"
+		if description != "" {
+			scalar += "    description: " + description + "\n"
+		}
+		if jsonSchema != "" {
+			scalar += "    typeMappings:\n      json_schema: " + jsonSchema + "\n"
+		}
+		return writeService(t, map[string]string{
+			"schema.config.yaml": "name: temp-service\nkind: General\noutputs: {}\n",
+			"src/widget.schema.yaml": "scalars:\n" + scalar +
+				"types:\n" +
+				"  Widget:\n" +
+				"    name: Widget\n" +
+				"    role: EmbeddedStruct\n" +
+				"    fields:\n" +
+				"      - name: payload\n" +
+				"        typeRef: { name: " + name + " }\n" +
+				"        required: true\n",
+		})
+	}
+	t.Fatalf("no form %q", form)
+	return ""
+}
+
+// TestLoadServiceRefusesObjectScalarWithoutJSONMapping: a scalar a schema
+// file declares itself, with the object language primitive and no
+// json_schema type mapping, is refused in both data forms. The message
+// names the scalar and the three ways to say which JSON it holds.
+func TestLoadServiceRefusesObjectScalarWithoutJSONMapping(t *testing.T) {
+	for _, form := range []string{"json", "yaml"} {
+		t.Run(form, func(t *testing.T) {
+			_, err := LoadService(objectScalarService(t, form, "Acme.Blob", "An opaque payload", ""))
+			if err == nil {
+				t.Fatal("LoadService accepted an object scalar that does not say which JSON it holds")
+			}
+			for _, want := range []string{
+				"temp-service: scalar Acme.Blob has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds",
+				"add typeMappings: { json_schema: object } (or array or any",
+				"use the catalog's Generic.JSON for free-form JSON",
+				"model a value with known fields as a nested object type",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not say %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// TestLoadServiceTakesObjectScalarThatSaysWhichJSON: the same scalar with a
+// json_schema type mapping of object, array or any loads, and the IR
+// carries the mapping and the object primitive as written.
+func TestLoadServiceTakesObjectScalarThatSaysWhichJSON(t *testing.T) {
+	for _, form := range []string{"json", "yaml"} {
+		for _, jsonType := range []string{"object", "array", "any"} {
+			t.Run(form+"/"+jsonType, func(t *testing.T) {
+				schema, err := LoadService(objectScalarService(t, form, "Acme.Blob", "An opaque payload", jsonType))
+				if err != nil {
+					t.Fatalf("LoadService: %v", err)
+				}
+				def := schema.Scalars["Acme.Blob"]
+				if def == nil || def.LanguagePrimitive != ir.LanguageObject || def.TypeMappings["json_schema"] != jsonType {
+					t.Fatalf("Acme.Blob = %+v, want the object primitive and json_schema %s", def, jsonType)
+				}
+			})
+		}
+	}
+}
+
+// TestLoadServiceHydratesObjectCatalogReferences: a catalog scalar written
+// by name and the object primitive, as format --to=json writes Generic.JSON,
+// is a catalog reference. The check runs on it once the catalog has filled
+// it in, so it loads with the catalog's mapping. Geo.Location, whose row
+// also has a string pattern, is left to its mapping.
+func TestLoadServiceHydratesObjectCatalogReferences(t *testing.T) {
+	want := map[string]string{
+		"Generic.JSON":      "any",
+		"Generic.StringMap": "object",
+		"Embedding.Vector":  "array",
+		"Geo.Location":      "object",
+	}
+	for _, form := range []string{"json", "yaml"} {
+		for name, jsonType := range want {
+			t.Run(form+"/"+name, func(t *testing.T) {
+				schema, err := LoadService(objectScalarService(t, form, name, "", ""))
+				if err != nil {
+					t.Fatalf("LoadService: %v", err)
+				}
+				def := schema.Scalars[name]
+				if def == nil || def.Description == "" || def.TypeMappings["json_schema"] != jsonType {
+					t.Fatalf("%s = %+v, want it hydrated from the catalog with json_schema %s", name, def, jsonType)
+				}
+			})
+		}
+	}
+}
+
+// TestValidateHydratedJudgesTheHydratedScalar: the loader judges a scalar
+// as the catalog fills it in, not as the schema wrote it. A reference the
+// schema records with the string primitive, as a TypeScript brand of a
+// string records it, to a catalog row with the object primitive and no
+// mapping is refused after hydration. RegisterScalars refuses such a row
+// (TestRegisterScalarsRefusesObjectRowWithoutJSONMapping), so the catalog
+// here is handed to the hydration directly.
+func TestValidateHydratedJudgesTheHydratedScalar(t *testing.T) {
+	schema := ir.NewSchema("temp-service", ir.SchemaKindGeneral)
+	schema.Scalars["Acme.Blob"] = &ir.ScalarDef{Name: "Acme.Blob", LanguagePrimitive: ir.LanguageString}
+	catalog := registry.ScalarCatalogOf(map[string]*scalars.ScalarMetadata{
+		"Acme.Blob": {CanonicalName: "Acme.Blob", Symbol: "AcmeBlob", Primitive: "Object", Description: "An opaque payload"},
+	})
+	if err := hydrateScalarsFromRegistry(schema, catalog); err != nil {
+		t.Fatalf("hydrateScalarsFromRegistry: %v", err)
+	}
+	err := validateHydrated(schema)
+	if err == nil || !strings.Contains(err.Error(), "temp-service: scalar Acme.Blob has language primitive object but no json_schema type mapping") {
+		t.Fatalf("validateHydrated = %v, want the object scalar error", err)
+	}
+}

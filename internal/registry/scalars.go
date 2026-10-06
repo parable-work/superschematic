@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -33,6 +34,13 @@ type ScalarCatalog interface {
 // CoreScalars. One catalog per registry: a second call is an error, as is a
 // call after Finalize. owner labels the error message; extensions pass their
 // Name().
+//
+// A row whose primitive the loader reads as the object language primitive
+// (ir.CatalogLanguagePrimitive, which reads a spelling it does not know as
+// object too) must say which JSON the scalar holds: its JSONSchemaType,
+// which becomes the scalar's json_schema type mapping, is "object", "array"
+// or "any" (ir.ObjectScalarJSONError). A catalog with a row that does not
+// is refused, with every such row named.
 func (r *Registry) RegisterScalars(owner string, catalog ScalarCatalog) error {
 	if err := r.registrable("scalar catalog"); err != nil {
 		return err
@@ -46,10 +54,37 @@ func (r *Registry) RegisterScalars(owner string, catalog ScalarCatalog) error {
 	if r.scalars != nil {
 		return fmt.Errorf("registry: scalar catalog already registered by %s; %s cannot register another", r.scalarsOwner, owner)
 	}
+	if err := checkObjectScalarRows(owner, catalog); err != nil {
+		return err
+	}
 	r.scalars = catalog
 	r.scalarsOwner = owner
 	r.noteExtension(owner)
 	return nil
+}
+
+// checkObjectScalarRows refuses each row of catalog the loader would hydrate
+// into an object scalar that does not say which JSON it holds. A row whose
+// primitive the loader does not know is named with that primitive, since
+// the loader reads it as object without saying so.
+func checkObjectScalarRows(owner string, catalog ScalarCatalog) error {
+	var errs []error
+	for _, name := range catalog.Names() {
+		row, ok := catalog.Scalar(name)
+		if !ok {
+			continue
+		}
+		primitive, known := ir.CatalogLanguagePrimitive(row.Primitive)
+		err := ir.ObjectScalarJSONError(name, primitive, row.JSONSchemaType)
+		switch {
+		case err == nil:
+		case known:
+			errs = append(errs, fmt.Errorf("registry: %s's scalar catalog: %w", owner, err))
+		default:
+			errs = append(errs, fmt.Errorf("registry: %s's scalar catalog: %s has primitive %q, which the loader does not know and reads as object: %w", owner, name, row.Primitive, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Scalars returns the registered scalar catalog, or CoreScalars when no

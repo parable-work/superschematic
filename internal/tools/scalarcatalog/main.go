@@ -214,15 +214,12 @@ func renderTS(names []string, classes map[string]string) []byte {
 	return b.Bytes()
 }
 
-// isObjectPrimitive mirrors the loader's languagePrimitiveFromScalarMetadata
-// for the one case that matters here: object-valued scalars carry their Go
-// type as the TypeScript mapping.
+// isObjectPrimitive reads a row's primitive as the loader does
+// (ir.CatalogLanguagePrimitive) for the one case that matters here:
+// object-valued scalars carry their Go type as the TypeScript mapping.
 func isObjectPrimitive(primitive string) bool {
-	switch strings.ToLower(strings.TrimSpace(primitive)) {
-	case "string", "str", "number", "float", "float64", "int", "int32", "int64", "integer", "bool", "boolean":
-		return false
-	}
-	return true
+	lp, _ := ir.CatalogLanguagePrimitive(primitive)
+	return lp == ir.LanguageObject
 }
 
 func renderPython(names []string) []byte {

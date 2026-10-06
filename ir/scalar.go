@@ -1,5 +1,10 @@
 package ir
 
+import (
+	"fmt"
+	"strings"
+)
+
 // LanguagePrimitive is the host-language primitive a semantic scalar bottoms
 // out on. It is named LanguagePrimitive to be explicit that this is the
 // host-language backing type.
@@ -144,6 +149,49 @@ func (s *ScalarDef) StructuredJSONType() string {
 		return jsonType
 	}
 	return ""
+}
+
+// ObjectScalarJSONError returns the error for a scalar whose language
+// primitive is object and whose json_schema type mapping is not "object",
+// "array" or "any", and nil for any other scalar. The validators read which
+// JSON a scalar holds only from that mapping (IsAnyJSON,
+// StructuredJSONType), so without one the schema runtimes and the engine
+// would check the scalar as a string while every generated type holds an
+// object. The loader refuses such a scalar once the catalog has filled it
+// in (Schema.ValidateHydrated), the registry refuses such a catalog row
+// (RegisterScalars), and the engine refuses such a document at define and
+// publish, each with this message.
+func ObjectScalarJSONError(name string, primitive LanguagePrimitive, jsonSchemaType string) error {
+	if primitive != LanguageObject {
+		return nil
+	}
+	switch jsonSchemaType {
+	case JSONSchemaObjectType, JSONSchemaArrayType, JSONSchemaAnyType:
+		return nil
+	}
+	return fmt.Errorf("scalar %s has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds: "+
+		"add typeMappings: { json_schema: object } (or array or any; JSONSchemaType in a catalog row), "+
+		"use the catalog's Generic.JSON for free-form JSON, or model a value with known fields as a nested object type", name)
+}
+
+// CatalogLanguagePrimitive is the language primitive the loader gives a
+// scalar it fills in from a scalar catalog row whose primitive
+// (superscalar's ScalarMetadata.Primitive) is primitive, read without case.
+// known is false for a spelling it does not know, which reads as
+// LanguageObject.
+func CatalogLanguagePrimitive(primitive string) (lp LanguagePrimitive, known bool) {
+	switch strings.ToLower(strings.TrimSpace(primitive)) {
+	case "string", "str":
+		return LanguageString, true
+	case "number", "float", "float64", "int", "int32", "int64", "integer":
+		return LanguageNumber, true
+	case "bool", "boolean":
+		return LanguageBoolean, true
+	case "type", "object", "json", "jsonb":
+		return LanguageObject, true
+	default:
+		return LanguageObject, false
+	}
 }
 
 // FileUploadConfig defines upload constraints for file-type scalars

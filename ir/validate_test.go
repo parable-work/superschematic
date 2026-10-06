@@ -32,9 +32,12 @@ func TestValidate_CleanSchema(t *testing.T) {
 func TestValidateHydrated_UploadMaxBytesRequiresPositiveFileUploadScalar(t *testing.T) {
 	limit := int64(64 * 1024 * 1024)
 	s := newTestSchema()
+	// The String primitive, as every upload row in a catalog here has it
+	// (Acme.Photo, Media.Photo): an object one would need a json_schema
+	// mapping (TestValidateHydrated_ObjectScalarSaysWhichJSON).
 	s.Scalars["Media.File"] = &ScalarDef{
 		Name:              "Media.File",
-		LanguagePrimitive: LanguageObject,
+		LanguagePrimitive: LanguageString,
 		FileUpload:        &FileUploadConfig{MaxSize: 1024},
 	}
 	s.Types["User"].Fields = append(s.Types["User"].Fields, &FieldDef{
@@ -62,6 +65,49 @@ func TestValidateHydrated_UploadMaxBytesRequiresPositiveFileUploadScalar(t *test
 	s.Types["User"].Fields[1].TypeRef = TypeRef{Name: "Identity.UUID"}
 	if errs := s.ValidateHydrated(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "User.archive uploadMaxBytes requires a file-upload scalar") {
 		t.Fatalf("non-upload bound errors = %v, want one file-upload scalar error", errs)
+	}
+}
+
+// TestValidateHydrated_ObjectScalarSaysWhichJSON: a scalar whose language
+// primitive is object is refused unless its json_schema type mapping says
+// which JSON it holds (object, array or any), with a message that names the
+// scalar and the three routes. A mapping that names another type is refused
+// too, and a scalar of any other primitive needs no mapping.
+func TestValidateHydrated_ObjectScalarSaysWhichJSON(t *testing.T) {
+	s := newTestSchema()
+	s.Scalars["Acme.Blob"] = &ScalarDef{Name: "Acme.Blob", LanguagePrimitive: LanguageObject, Description: "An opaque payload"}
+	errs := s.ValidateHydrated()
+	if len(errs) != 1 {
+		t.Fatalf("ValidateHydrated() = %v, want one error for Acme.Blob", errs)
+	}
+	for _, want := range []string{
+		"scalar Acme.Blob has language primitive object but no json_schema type mapping of object, array or any to say which JSON it holds",
+		"add typeMappings: { json_schema: object } (or array or any",
+		"use the catalog's Generic.JSON for free-form JSON",
+		"model a value with known fields as a nested object type",
+	} {
+		if !strings.Contains(errs[0].Error(), want) {
+			t.Errorf("error %q does not say %q", errs[0], want)
+		}
+	}
+
+	for _, jsonType := range []string{"object", "array", "any"} {
+		s.Scalars["Acme.Blob"].TypeMappings = map[string]string{"json_schema": jsonType, "sql": "JSONB"}
+		if errs := s.ValidateHydrated(); len(errs) != 0 {
+			t.Errorf("json_schema %s: ValidateHydrated() = %v, want none", jsonType, errs)
+		}
+	}
+	s.Scalars["Acme.Blob"].TypeMappings = map[string]string{"json_schema": "string"}
+	if errs := s.ValidateHydrated(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "scalar Acme.Blob has language primitive object") {
+		t.Errorf("json_schema string: ValidateHydrated() = %v, want the Acme.Blob error", errs)
+	}
+
+	delete(s.Scalars, "Acme.Blob")
+	for _, primitive := range []LanguagePrimitive{LanguageString, LanguageNumber, LanguageBoolean} {
+		s.Scalars["Acme.Plain"] = &ScalarDef{Name: "Acme.Plain", LanguagePrimitive: primitive}
+		if errs := s.ValidateHydrated(); len(errs) != 0 {
+			t.Errorf("%s scalar with no mapping: ValidateHydrated() = %v, want none", primitive, errs)
+		}
 	}
 }
 
