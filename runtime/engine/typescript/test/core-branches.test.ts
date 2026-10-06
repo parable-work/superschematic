@@ -758,6 +758,42 @@ for (const driver of drivers) {
         /the graphs its instances root would stay behind with nothing to delete them/
       );
     });
+
+    test("after a new version adds a field to a kind's type, materialize of a commit made before returns the contentHash history stored", () => {
+      const { engine, soup } = opened();
+      const first = soup.change('first', { step: { upsert: [boil, stir] } });
+      soup.invoke('release', { commit: first.id, version: 0 });
+      const draft = soup.branch('draft');
+      const drafted = soup.commit(soup.save(draft, { cover: { upsert: [{ photoUrl: 'soup.jpg' }] } }).ref).commit as Commit;
+      const stored = (ref: Ref) => soup.invoke<{ commits: Commit[] }>('history', { ref: ref.id }).commits.map((commit) => [commit.id, commit.contentHash]);
+      const before = [...stored(soup.main()), ...stored(draft)];
+      assert.deepEqual(before.map(([id]) => id), [first.id, drafted.id]);
+      // The next version: Step gains minutes, which every stored step reads as null.
+      const document = recipeDocument();
+      document.types.Step.fields.push({ name: 'minutes', typeRef: { name: 'Int' } });
+      engine.schemas.define(alice, document as unknown as Record<string, unknown>);
+      assert.equal(engine.schemas.publish(alice, 'Recipe').version, 2);
+      const main = soup.main();
+      assert.deepEqual(contentOf(soup.compose(main).tree, 'step', ['instruction', 'minutes']), [
+        { instruction: 'Boil the water', minutes: null },
+        { instruction: 'Stir', minutes: null },
+      ]);
+      // A null content column hashes as an absent one, so each commit made
+      // before materializes to the hash it stored, which history still
+      // returns; the primary line composes to its head's, and released
+      // gives the released commit's.
+      assert.deepEqual([...stored(main), ...stored(draft)], before);
+      for (const [id, contentHash] of before) {
+        assert.equal(soup.invoke<{ contentHash: string }>('materialize', { commit: id }).contentHash, contentHash, id);
+      }
+      assert.equal(soup.compose(main).contentHash, first.contentHash);
+      assert.equal(soup.invoke<{ contentHash: string }>('released').contentHash, first.contentHash);
+      // A value in the new field is content, and moves the hash.
+      const key = soup.compose(main).tree.step[0].entity_key as string;
+      const timed = soup.change('timed', { step: { upsert: [{ entity_key: key, ...boil, minutes: 5 }] } });
+      assert.notEqual(timed.contentHash, first.contentHash);
+      assert.equal(soup.invoke<{ contentHash: string }>('materialize', { commit: timed.id }).contentHash, timed.contentHash);
+    });
   });
 }
 

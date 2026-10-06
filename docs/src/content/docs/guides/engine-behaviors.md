@@ -751,9 +751,10 @@ call("released");                                           // { release, tree, 
   retention, `primary`, `snapshotEvery` and `sweep`; removing a kind or
   changing a kind's type, parent, order, singleton or a field's unit is
   refused, and so is a version without `Branches`. Every stored row reads
-  a field a version adds as null, so `materialize` of a commit made
-  before returns another `contentHash` than the one the commit stored and
-  `history` returns; `nothing_to_commit`, which compares trees, holds.
+  a field a version adds as null, and a null field hashes as an absent
+  one, so `materialize` of a commit made before returns the `contentHash`
+  the commit stored and `history` returns; a value written to the field
+  moves the hash, and `nothing_to_commit`, which compares trees, holds.
 - **Deleting.** Deleting an instance deletes its graph.
 - **Lease.** A type cannot compose `Branches` with `Lease`, whose
   `release` operation shares a name.
