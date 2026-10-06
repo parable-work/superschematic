@@ -246,13 +246,14 @@ func decide(st state, plan *Plan, contractStarted bool) (decision, error) {
 	case st.planHash != "" && !pending:
 		return 0, refusef("service %s has plan %s in progress (%s); finish it before applying plan %s",
 			plan.Service, st.planHash, describePhase(st.planPhase), plan.Hash)
+	case st.modelHash != plan.From && st.modelHash == "":
+		// status --model has nothing to print: a database built from
+		// create.sql or by hand records the model it holds with adopt.
+		return 0, refusef("the plan starts from %s, but service %s has no applied model; if the database already holds a schema (built from create.sql or by hand), record the model it matches with superschematic-migrate adopt (superschematic migrate plan --print-model prints it), and if it is empty, plan from an empty database",
+			describeModel(plan.From), plan.Service)
 	case st.modelHash != plan.From:
-		applied := "has no applied model"
-		if st.modelHash != "" {
-			applied = "is at model " + st.modelHash
-		}
-		return 0, refusef("the plan starts from %s, but service %s %s; plan again from the applied model (superschematic-migrate status --model)",
-			describeModel(plan.From), plan.Service, applied)
+		return 0, refusef("the plan starts from %s, but service %s is at model %s; plan again from the applied model (superschematic-migrate status --model)",
+			describeModel(plan.From), plan.Service, st.modelHash)
 	case st.recorded && st.dialect != plan.Dialect:
 		return 0, refusef("service %s's state records dialect %s; the plan is for %s", plan.Service, st.dialect, plan.Dialect)
 	case pending:

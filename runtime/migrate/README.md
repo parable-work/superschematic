@@ -197,7 +197,10 @@ on D1):
      plan supersedes it;
    - the row's `model_hash` is not the plan's `from`: refuse, naming both,
      and say to plan again from the applied model
-     (`superschematic-migrate status --model`);
+     (`superschematic-migrate status --model`). With no applied model,
+     `status --model` has nothing to print: say instead to `adopt` the
+     model the database matches if it was built from `create.sql` or by
+     hand, and to plan from an empty database if it is empty;
    - the row's dialect is not the plan's: refuse.
 5. `--phase contract` on a plan that is not the plan in progress, or on
    the plan in progress whose expand steps have not all finished: refuse.

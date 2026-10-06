@@ -44,7 +44,14 @@ superschematic-topcoat build --with-deps --api-language RUST --out schemas/dist-
 
 The crate, `acme-shop-orders-topcoat`, lands in
 `schemas/dist-rust/topcoat/shop-orders`, beside the API crate it builds
-on.
+on. A service whose server is in another language skips the crate and
+says why in the build log, so the same config also builds the Go server.
+The crate pins Topcoat 0.10, which needs Rust 1.98 or newer.
+
+The crate's forms, records and procedures, below, are on by default. In
+`outputs.topcoat`, `forms: false` leaves out the forms, `procedures: false`
+the procedures, and `records: false` the records and the procedures,
+which carry their arguments and results as records.
 
 ## Mount it
 
@@ -71,12 +78,18 @@ route does:
 3. the implementation.
 
 `can_<namespace>_<operation>(cx)` admits the caller alone, for a page that
-shows or hides what the operation does.
+shows or hides what the operation does. Both apply the end-user rule
+only: an operation's `@requireService` or `@allowService` clause is not
+checked in-process, since a page is the service's own code
+([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
 
-`forms::WriteReviewInputForm` holds the form's fields as the browser sends
-them. `parse()` reads them by `WriteReviewInput`'s rules, and
-`FormErrors::from_api` turns the operation's refusal into the same field
-messages:
+An input type gets a form when each of its fields is a string, a number,
+a boolean or an enum, alone, and the service declares it; the build log
+names any other and why. `forms::WriteReviewInputForm` holds the form's
+fields as the browser sends them, each an `Option<String>`, so a refused
+form renders again as it was sent. `parse()` reads them by
+`WriteReviewInput`'s rules, and `FormErrors::from_api` turns the
+operation's refusal into the same field messages:
 
 <Snippet file="topcoat/src/lib.rs" symbol="post_review" />
 
@@ -101,8 +114,11 @@ out, since a record reaches the browser.
 Each operation is also a procedure on
 `/_superschematic/shop-orders/<namespace>/<operation>`, which browser code
 calls with its arguments as a record. It answers the result's record, or a
-`ProblemRecord` with the route's status and each refused field. A
-procedure's `Err` would reach the browser as a bare 500.
+`ProblemRecord` with the route's status, code and detail and each refused
+field's path, rule and message, since a procedure's `Err` would reach the
+browser as a bare 500. `call_<namespace>_<operation>(cx, args)` is the
+procedure's body as a plain function, for Rust code and tests: Topcoat
+turns the procedure itself into a value Rust cannot call.
 
 ## Test the app
 

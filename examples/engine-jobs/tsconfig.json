@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true
+  },
+  "comment": "Node.js 24 runs these files by stripping their types, and Bun runs them as they are, so they use only erasable syntax and import each other with the .ts extension. tsc only checks them.",
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

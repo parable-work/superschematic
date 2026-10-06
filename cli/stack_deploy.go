@@ -829,11 +829,13 @@ func newStackOutputsCmd(a *app) *cobra.Command {
 	var out string
 	cmd := &cobra.Command{
 		Use:   "outputs <environment>",
-		Short: "Print the outputs of a run's applied resources",
-		Long: `outputs prints, as JSON, the outputs the provisioner reads from the run's
+		Short: "Print the outputs file of a run's applied resources",
+		Long: `outputs prints the run's outputs file, the outputs.json the bindings
+generator reads (docs/stack-model.md, section 6.6): a JSON object with the
+format's version, the stack, the environment, the run's parameter values
+and, under "resources", the outputs the provisioner reads from the run's
 applied resources, by node ID and output name, leaving out secret ones.
---out writes them to the outputs.json the bindings generator reads
-(docs/stack-model.md, section 6.6).`,
+--out writes the same file to a path in place of stdout.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params, err := parseParams(flags.params)
@@ -845,15 +847,14 @@ applied resources, by node ID and output name, leaving out secret ones.
 				return err
 			}
 			defer c.close()
-			values, err := stackdeploy.Outputs(cmd.Context(), c.options(cmd, params))
+			outputs, err := stackdeploy.Outputs(cmd.Context(), c.options(cmd, params))
 			if err != nil {
 				return err
 			}
-			data, err := json.MarshalIndent(values, "", "  ")
+			data, err := outputs.Marshal()
 			if err != nil {
 				return err
 			}
-			data = append(data, '\n')
 			if out != "" {
 				return os.WriteFile(out, data, 0o644)
 			}
@@ -862,7 +863,7 @@ applied resources, by node ID and output name, leaving out secret ones.
 		},
 	}
 	flags.register(cmd, true)
-	cmd.Flags().StringVar(&out, "out", "", "write the outputs to this file in place of stdout")
+	cmd.Flags().StringVar(&out, "out", "", "write the outputs file to this path in place of stdout")
 	return cmd
 }
 

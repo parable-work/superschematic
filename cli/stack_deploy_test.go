@@ -255,19 +255,35 @@ func TestStackCommands(t *testing.T) {
 	_, err = run("secrets", "set", "Staging")
 	require.ErrorContains(t, err, "stdin is not one")
 
-	// outputs writes what the provisioner read.
-	outputs := filepath.Join(t.TempDir(), "outputs.json")
+	// outputs prints the outputs file of what the provisioner read, and
+	// --out writes the same file.
+	printed, err := run("outputs", "Staging")
+	require.NoError(t, err)
+	outputs := filepath.Join(t.TempDir(), stackdeploy.OutputsFile)
 	_, err = run("outputs", "Staging", "--out", outputs)
 	require.NoError(t, err)
 	data, err = os.ReadFile(outputs)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `"demo-api.service"`)
+	assert.Equal(t, printed, string(data))
+	file, err := stackdeploy.UnmarshalOutputs(data)
+	require.NoError(t, err)
+	assert.Equal(t, "demo-stack", file.Stack)
+	assert.Equal(t, "Staging", file.Environment)
+	assert.Nil(t, file.Parameters)
+	assert.Equal(t, map[string]any{"id": "demo-api.service"}, file.Resources["demo-api.service"])
 
-	// A member of Preview needs its parameter.
+	// A member of Preview needs its parameter, and its outputs file
+	// carries it.
 	_, err = run("plan", "Preview")
 	require.ErrorContains(t, err, "takes parameter pr")
 	_, err = run("deploy", "Preview", "--param", "pr=7", "--image", demoImage(2))
 	require.NoError(t, err)
+	printed, err = run("outputs", "Preview", "--param", "pr=7")
+	require.NoError(t, err)
+	file, err = stackdeploy.UnmarshalOutputs([]byte(printed))
+	require.NoError(t, err)
+	assert.Equal(t, "Preview", file.Environment)
+	assert.Equal(t, map[string]string{"pr": "7"}, file.Parameters)
 
 	// bootstrap runs the target's, with the repository named.
 	_, err = run("bootstrap", "Staging", "--repository", "acme/shop")

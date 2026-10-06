@@ -53,6 +53,10 @@ type (
 
 	// Prompter asks a person for a secret value.
 	Prompter = stackdeploy.Prompter
+
+	// RunOutputs is an outputs file: what one run exported, which the
+	// bindings generator reads.
+	RunOutputs = stackdeploy.RunOutputs
 )
 
 // GoVersion is the Go release the images superschematic generates a
@@ -65,6 +69,13 @@ const (
 	StatusDeploying = stackdeploy.StatusDeploying
 	StatusDeployed  = stackdeploy.StatusDeployed
 	StatusFailed    = stackdeploy.StatusFailed
+)
+
+// OutputsVersion is the version of the outputs file format, and
+// OutputsFile its name beside environment.json; see internal/stackdeploy.
+const (
+	OutputsVersion = stackdeploy.OutputsVersion
+	OutputsFile    = stackdeploy.OutputsFile
 )
 
 // Deploy deploys a run; see internal/stackdeploy.Deploy.
@@ -98,10 +109,8 @@ func SplitImage(image string) (repository, digest string, err error) {
 // internal/stackdeploy.Destroy.
 func Destroy(ctx context.Context, o Options) error { return stackdeploy.Destroy(ctx, o) }
 
-// Outputs returns a run's outputs; see internal/stackdeploy.Outputs.
-func Outputs(ctx context.Context, o Options) (map[string]map[string]any, error) {
-	return stackdeploy.Outputs(ctx, o)
-}
+// Outputs returns a run's outputs file; see internal/stackdeploy.Outputs.
+func Outputs(ctx context.Context, o Options) (*RunOutputs, error) { return stackdeploy.Outputs(ctx, o) }
 
 // Bootstrap prepares the cloud project an environment deploys to; see
 // internal/stackdeploy.Bootstrap.
@@ -126,3 +135,13 @@ func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.Resol
 // UnmarshalManifest decodes a deploy manifest; see
 // internal/stackdeploy.UnmarshalManifest.
 func UnmarshalManifest(data []byte) (*Manifest, error) { return stackdeploy.UnmarshalManifest(data) }
+
+// NewOutputs returns the outputs file of one run of env; see
+// internal/stackdeploy.NewOutputs.
+func NewOutputs(env *ir.ResolvedEnvironment, parameters map[string]string, resources map[string]map[string]any) *RunOutputs {
+	return stackdeploy.NewOutputs(env, parameters, resources)
+}
+
+// UnmarshalOutputs decodes an outputs file; see
+// internal/stackdeploy.UnmarshalOutputs.
+func UnmarshalOutputs(data []byte) (*RunOutputs, error) { return stackdeploy.UnmarshalOutputs(data) }

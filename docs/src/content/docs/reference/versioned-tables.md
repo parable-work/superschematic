@@ -14,7 +14,12 @@ history.
 
 Both decorators come from `@superschematic/db` and are only allowed on DB
 tables. A table carries one or the other: `@versioned` implies
-`@optimistic`.
+`@optimistic`. Both are Postgres features: a DB service whose
+`outputs.sql.dialects` lists `sqlite` fails its build on either
+([Schema migrations](/superschematic/reference/migrations/#refusals)). On
+a database that already holds data, a migration plan makes a table
+versioned, or changes its options
+([Versioned tables and version graphs](/superschematic/reference/migrations/#versioned-tables-and-version-graphs)).
 
 ## Declare a versioned table
 

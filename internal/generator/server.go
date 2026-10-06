@@ -1,9 +1,11 @@
 package generator
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
+	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
@@ -20,10 +22,12 @@ const serverGenerator = "server"
 // generateServers writes the entrypoint of each Go server of the stack the
 // schema declares under servergen.StackDir (docs/stack-model.md, sections
 // 8.1 and 8.2), and scaffolds each served API's implementation that is
-// missing (section 8.5). It plans every server before it writes anything,
-// so a server it refuses leaves the last build's entrypoints and every
-// implementation as they were. A build without a repository root writes
-// none: the implementations live under it.
+// missing (section 8.5). No environment changes the servers, but the
+// entrypoint of one that some environment connects to a database on Cloud
+// SQL links the Cloud SQL connector. It plans every server before it
+// writes anything, so a server it refuses leaves the last build's
+// entrypoints and every implementation as they were. A build without a
+// repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
 		r.Skip(serverGenerator)
@@ -41,6 +45,10 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
+	cloudSQL, err := cloudSQLDatabases(r.GenerateContext, st, services)
+	if err != nil {
+		return err
+	}
 
 	type planned struct {
 		server   *servergen.Server
@@ -52,7 +60,7 @@ func (r run) generateServers() error {
 			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
 			continue
 		}
-		server, scaffolds, err := r.planServer(st.Name, s)
+		server, scaffolds, err := r.planServer(st.Name, s, cloudSQL[s.Name])
 		if err != nil {
 			return err
 		}
@@ -114,10 +122,11 @@ func (sc scaffold) write(r run) error {
 
 // planServer plans the entrypoint of server s of the stack: the Go server
 // output of each API it serves, read as that API's own build reads it,
-// where each implementation lives, and every module the build needs. It
-// returns the implementations that are missing, which the caller
+// where each implementation lives, and every module the build needs.
+// cloudSQL are the DB services some environment connects it to on Cloud
+// SQL. It returns the implementations that are missing, which the caller
 // scaffolds.
-func (r run) planServer(stackName string, s *ir.ResolvedDeployable) (*servergen.Server, []scaffold, error) {
+func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, []scaffold, error) {
 	in := servergen.Input{
 		Stack:          stackName,
 		Server:         s.Name,
@@ -125,6 +134,7 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable) (*servergen.
 		Naming:         r.Options.Naming,
 		RepositoryRoot: r.Options.RepositoryRoot,
 		ScalarGo:       r.Options.Paths.ScalarGo,
+		CloudSQL:       cloudSQL,
 	}
 	var scaffolds []scaffold
 	var versionGraph bool
@@ -165,6 +175,54 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable) (*servergen.
 		return nil, nil, err
 	}
 	return server, scaffolds, nil
+}
+
+// cloudSQLDatabases resolves every environment of the stack and returns, by
+// server, the DB services, sorted, that some environment's sql edge
+// connects the server to with a Cloud SQL connector configuration. The
+// entrypoint of such a server links the Cloud SQL connector, and no other
+// does (docs/stack-model.md, section 8.1). The stack generator runs first
+// and resolves the same environments, so a build whose environment does
+// not resolve stops at its error before this runs.
+func cloudSQLDatabases(c registry.GenerateContext, st *ir.Stack, services []stack.Service) (map[string][]string, error) {
+	envs, err := stackgen.Resolve(c, st, services)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]string{}
+	for _, env := range envs {
+		edges := map[string]*ir.Edge{}
+		for _, e := range env.Edges {
+			edges[e.ID] = e
+		}
+		for _, d := range env.Deployables {
+			for _, b := range d.Bindings {
+				e := edges[b.Edge]
+				if b.Source != ir.BindingDerived || e == nil || e.Kind != ir.EdgeSQL || !derivesCloudSQL(b.Value) {
+					continue
+				}
+				if !slices.Contains(out[d.Name], e.Service.Name) {
+					out[d.Name] = append(out[d.Name], e.Service.Name)
+				}
+			}
+		}
+	}
+	for _, dbs := range out {
+		slices.Sort(dbs)
+	}
+	return out, nil
+}
+
+// derivesCloudSQL reports whether a sql edge's derived value, an
+// ir.DatabaseConnection in its JSON form, is a Cloud SQL connector
+// configuration.
+func derivesCloudSQL(value any) bool {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return false
+	}
+	var conn ir.DatabaseConnection
+	return json.Unmarshal(data, &conn) == nil && conn.CloudSQL != nil
 }
 
 // servedAPI is the Go server output of the API service a server serves, as

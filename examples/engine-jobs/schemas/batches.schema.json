@@ -1,0 +1,52 @@
+{
+  "kind": "General",
+  "name": "batches",
+  "description": "A batch of jobs: its create stamps a job per step, each blocked by the steps before it. It counts its jobs by status, and is done when every job succeeded, or failed when one failed.",
+  "types": {
+    "Batch": {
+      "name": "Batch",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["running", "done", "failed"],
+            "transitions": [
+              { "from": "running", "to": "done" },
+              { "from": "running", "to": "failed" }
+            ],
+            "outcomes": { "failed": "failure" }
+          }
+        },
+        {
+          "name": "Blueprint",
+          "config": {
+            "schema": "jobs",
+            "parentLink": "batch",
+            "keyField": "step",
+            "steps": {
+              "fetch": { "data": { "title": "Fetch the sources" } },
+              "index": { "after": ["fetch"], "data": { "title": "Index what was fetched" } },
+              "report": { "after": ["index"], "data": { "title": "Report what was indexed" } }
+            },
+            "copyFields": ["topic"]
+          }
+        },
+        { "name": "Rollups", "config": { "rollups": { "steps": { "schema": "jobs", "link": "batch", "function": "countBy", "field": "status" } } } },
+        {
+          "name": "Reactions",
+          "config": {
+            "rules": [
+              { "when": { "allTerminal": { "schema": "jobs", "link": "batch", "outcomes": ["success"] } }, "then": { "transition": "done" } },
+              { "when": { "anyTerminal": { "schema": "jobs", "link": "batch", "outcomes": ["failure"] } }, "then": { "transition": "failed" } }
+            ]
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "description": "What the batch is for.", "typeRef": { "name": "string" }, "required": true },
+        { "name": "topic", "description": "Copied to every step, so the workers of the topic claim them.", "typeRef": { "name": "string" } }
+      ]
+    }
+  }
+}

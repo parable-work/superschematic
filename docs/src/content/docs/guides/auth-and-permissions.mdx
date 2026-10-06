@@ -1,6 +1,6 @@
 ---
 title: Auth and permissions
-description: Say which routes need a caller and which permissions they need, tell the server who the caller is, and send credentials from each SDK.
+description: Say which routes need a caller and which permissions they need, tell the server who the caller is, admit other services as callers, and send credentials from each SDK.
 sidebar:
   order: 4
 ---
@@ -14,7 +14,9 @@ the first against the second: 401 when a route needs a caller and has
 none, 403 when the caller holds no permission the route accepts. This guide
 uses `shop-orders`, served in Go, and `shop-storefront`, served in
 TypeScript; the Rust server applies the same rules
-([Rust](#say-who-the-caller-is-rust)).
+([Rust](#say-who-the-caller-is-rust)). Another of your servers can call a
+route too, with a credential of its own beside the end user's
+([Service callers](#service-callers)).
 
 ## What a route requires
 
@@ -24,7 +26,8 @@ TypeScript; the Rust server applies the same rules
 | `@auth` on a method | a caller |
 | `@requirePermission([...])` on a method | a caller holding one of the permissions |
 | `@requireOwnership` on a method | a caller, as `@auth` does; whether the caller owns the resource is for your implementation to check |
-| `@publicRoute` on a method | nothing: anyone may call it, even in an `Authenticated` set |
+| `@publicRoute` on a method | nothing: anyone may call it, even in an `Authenticated` set or a set with a service clause |
+| `@requireService` or `@allowService` on the set or the method | a listed calling service, in place of or beside the end user ([Service callers](#service-callers)) |
 | none of these | nothing: anyone may call it |
 
 Mark a route that anyone may call `@publicRoute`, so an open route reads as
@@ -66,6 +69,11 @@ and generates two stores over its ORM: `NewSessionStore`, which finds a
 session by its JWT id, and `NewPrincipalStore`, which loads the user. An
 extension can register another provider, as `examples/acme-schematic`
 does for API keys; see [Write an extension](/superschematic/extending/write-an-extension/#an-auth-provider).
+
+A Go API without `public` has no `AuthMiddleware`. Its `@auth` routes
+check nothing, and its `@requirePermission` routes answer 401 unless a
+middleware of your own puts the caller on the request context. The
+TypeScript and Rust servers enforce every route whatever `public` says.
 
 ## Say who the caller is: Go
 
@@ -149,3 +157,149 @@ reads the stores. The storefront is served by the TypeScript router, which
 reads no store, so its config sets neither; its SDK still sends the token,
 and the app's `authenticate` reads it. See
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/#call-it-from-typescript).
+
+## Service callers
+
+A server that calls another API, on its own account or for one of its
+users, is a service caller. It sends its own credential, a short-lived JWT
+in `Service-Authorization: Bearer <token>`, beside the end user's
+`Authorization`
+([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)).
+The two stay apart. The end-user authenticator never reads the service
+header, and the service authenticator never reads `Authorization`.
+Services hold no permissions: `@requirePermission` checks end users only,
+and an operation admits a service through a service clause.
+
+### Which services an operation admits
+
+`@requireService` and `@allowService`, from `@superschematic/api`, go on
+an operation or on an operation set, where they apply to every operation
+that has no clause of its own and is not `@publicRoute`. Each reads with
+the operation's user clause (`@auth`, `@requirePermission`,
+`@requireOwnership` or an `Authenticated` set):
+
+| In the schema | The route admits |
+| --- | --- |
+| `@requireService` alone | a listed service; no end user is looked at |
+| `@requireService` with a user clause | a listed service forwarding an end user who meets the clause |
+| `@allowService` with a user clause | an end user who meets the clause, or a listed service with no end user, which stands in for the user |
+
+`from` lists the services by the handles of the APIs they serve. Without
+it, every server with a `calls` edge to this API is listed; at run time,
+that is every caller the server's service auth config lists
+([below](#say-who-the-calling-service-is)). A stock API that
+`shop-orders`' server calls might declare:
+
+```ts
+import { HttpMethod, allowService, requirePermission, requireService, rest } from "@superschematic/api";
+import { ShopOrders } from "@acme/shop-orders";
+
+export class StockMutations {
+  // Only shop-orders' server, placing an order for a shopper who may.
+  @requirePermission(["stock.reserve"])
+  @requireService({ from: [ShopOrders] })
+  @rest(HttpMethod.POST, "stock/reservations")
+  reserveStock(sku: string): Reservation {
+    throw new Error("schema declaration only");
+  }
+
+  // A shopper who may, or shop-orders' server on its own.
+  @requirePermission(["stock.write"])
+  @allowService({ from: [ShopOrders] })
+  @rest(HttpMethod.POST, "stock/reservations/{id}/release")
+  releaseReservation(id: string): Reservation {
+    throw new Error("schema declaration only");
+  }
+
+  // Any server with a calls edge to this API, and no end user.
+  @requireService()
+  @rest(HttpMethod.POST, "stock/reindex")
+  reindexStock(): StockRun {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+A handle in `from` names a caller and adds no build-order edge, so two
+APIs may list each other. The build refuses `@allowService` without a user
+clause (that operation is `@requireService`), both clauses on one
+operation or one set, either clause on an `@publicRoute`, `@webhook` or
+`@hmacVerified` operation, whose third party holds no service credential,
+and a `@requireService` operation whose `@mcp` publishes a tool, since no
+end user's agent could call it. The OpenAPI document adds a `serviceAuth`
+scheme on the `Service-Authorization` header and writes each rule into the
+operation's security list.
+
+### Say who the calling service is
+
+A server whose schema has a service clause has a service authenticator
+beside the end-user one. Every route runs it after the rate limit and the
+body limit and before the end-user step, whether or not the route has a
+clause: it verifies a credential wherever one is present and puts the
+caller where the implementation reads it, with its `deployable`, the APIs
+it `serves` and the credential's `subject`. The route's clause then
+admits or refuses that caller, and a listed caller on an `@allowService`
+route skips the end-user step, so the implementation sees no end user.
+
+| Server | The authenticator | The standard one | The caller | Without one |
+| --- | --- | --- | --- | --- |
+| Go | `Config.ServiceAuthenticator`, a `serviceauth.Authenticator` | `serviceauth.New(config)` | `serviceauth.CallerFromContext(ctx)` | `Config.Validate` fails |
+| TypeScript | `buildRouter`'s `authenticateService` option | `serviceAuthenticator(config)` | `ctx.serviceCaller` | a route with a clause answers 401 |
+| Rust | `Implementations.service_authenticator` | `JwtServiceAuthenticator::new(config)` | `ctx.service_caller` | the crate does not compile |
+
+The Go and Rust servers have the field only when an operation declares a
+clause. The TypeScript router takes the option for any schema, and then
+verifies a credential on every route. The refusals are RFC 9457 problems:
+
+- 401 `service_unauthorized`: an `@requireService` route with no
+  credential, or a credential that does not verify.
+- 403 `service_forbidden`: an identity the config does not list, or a
+  caller the route's `from` does not list.
+- 503 `service_unavailable`: a failure that is not the caller's, such as
+  keys that cannot be fetched.
+
+The standard authenticator verifies RS256, ES256 and EdDSA tokens against
+a config that the Go, TypeScript and Rust runtimes read as the same JSON.
+Each issuer lists its audience, its algorithms, its keys or a `jwksUrl`,
+the claim that names the caller (`sub` unless `subjectClaim` says
+otherwise), and the identities that are callers, each with its deployable
+and the APIs it serves. An identity the config does not list is no caller:
+
+```json
+{
+  "issuers": [{
+    "issuer": "orders",
+    "audience": "shop-stock",
+    "algorithms": ["EdDSA"],
+    "keys": [{ "kty": "OKP", "crv": "Ed25519", "kid": "<thumbprint>", "x": "<public key>" }],
+    "maxLifetimeSeconds": 300,
+    "callers": { "orders": { "deployable": "orders", "serves": ["shop-orders"] } }
+  }]
+}
+```
+
+In a [stack](/superschematic/guides/stacks/), each inbound edge's
+connector is to derive this config for the callee. That is not built yet:
+the Go server entrypoint a stack's build writes has no service
+authenticator to give an API with a service clause, so that server
+refuses to start. Outside a stack, you supply the config yourself. A
+deployment whose credential the config cannot express passes its own
+authenticator in the same place.
+
+On a Go API that is not `public`, an `@auth` route checks nothing
+([above](#turn-it-on-public-and-authdb)), so an `@allowService` route whose
+only user clause is `@auth` admits any caller.
+
+### Send a service credential
+
+Each SDK's config takes the calling service's credential, and a server
+forwards its own caller's `Authorization` per call; see
+[Service credentials](/superschematic/guides/client-sdks/#service-credentials).
+The Go entrypoint a stack's build writes builds a client per `calls` edge
+that does both, with the credential source the edge names.
+Each runtime has a credential source per platform: a Google ID token from
+Cloud Run's metadata server, a Kubernetes projected token file, and a
+token signed with an edge's Ed25519 key (Go `serviceauth.GoogleIDToken`,
+`TokenFile` and `SignedToken`; TypeScript `googleIdTokenSource`,
+`tokenFileSource` and `signedTokenSource`; Rust `GoogleIdTokenSource`,
+`TokenFileSource` and `SignedKeySource`).
