@@ -1865,13 +1865,13 @@ registrations.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
   Built: it is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
-  pulumi.Extension{ProviderVersions: map[string]string{"gcp":
-  gcp.ProviderVersion}})`, so the provisioner installs the gcp provider at
-  the release whose schemas the target checks against.
-  `extensions/cloudflare` joins the list when it lands. An engineer
-  installs one binary and gets every official target. `extensions/topcoat`
-  is not linked (D44); its own binary links it. A release builds this
-  binary and tags the module with the others.
+  cloudflare.Extension{}, pulumi.Extension{ProviderVersions:
+  map[string]string{"gcp": gcp.ProviderVersion, cloudflare.Package:
+  cloudflare.ProviderVersion}})`, so the provisioner installs each
+  provider at the release whose schemas the target or the DNS platform
+  checks against. An engineer installs one binary and gets every official
+  target. `extensions/topcoat` is not linked (D44); its own binary links
+  it. A release builds this binary and tags the module with the others.
 
 The Pulumi SDK and the GCP client libraries stay out of the root module, as
 the compiler keeps its TypeScript parser out of the runtimes. The root

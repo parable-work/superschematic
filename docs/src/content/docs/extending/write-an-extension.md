@@ -7,8 +7,8 @@ sidebar:
 
 An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The installed
-binary (`cmd/superschematic`) passes the official ones, the gcp target and
-the Pulumi provisioner, and the core alone
+binary (`cmd/superschematic`) passes the official ones (the gcp target, the
+Cloudflare DNS platform and the Pulumi provisioner), and the core alone
 (`internal/cmd/superschematic-core`) passes none. Everything project-specific
 registers here: kinds, decorators, documents, generators, build-all
 hooks, auth providers, checks, OpenAPI hooks, tool hooks, behaviors and
