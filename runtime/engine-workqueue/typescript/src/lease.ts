@@ -102,10 +102,10 @@ import {
   type WorkflowStates,
 } from '@superschematic/engine';
 
+import { DEFAULT_TTL_MS } from './defaults.js';
 import declaration from './declarations/Lease.behavior.json' with { type: 'json' };
 
-/** How long a lease lasts after its acquire or its last heartbeat when the config gives no ttlMs. */
-export const DEFAULT_TTL_MS = 60000;
+export { DEFAULT_TTL_MS } from './defaults.js';
 
 /** How often the runner expires lapsed leases when the config gives no sweepMs. */
 export const DEFAULT_SWEEP_MS = 5000;

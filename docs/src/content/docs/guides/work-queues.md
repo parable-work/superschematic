@@ -114,7 +114,10 @@ export abstract class Job {
 ```
 
 `superschematic format --to=json` writes the JSON document you define and
-publish in the engine. A worker's loop then looks like this:
+publish in the engine. A worker's loop, written by hand against the
+engine in its own process, looks like this; a worker in another process
+uses the package's worker instead ([Write a worker](#write-a-worker)),
+which runs the same loop over HTTP:
 
 ```ts
 // Claim the best queued job about search: highest priority first, then
@@ -178,6 +181,79 @@ After the test's run, a job that timed out reads:
   "retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "bestScore": null, "exhausted": false, "stuck": false }
 }
 ```
+
+## Write a worker
+
+A worker process runs the loop above over the engine's HTTP API. Each
+one written by hand gets an edge case wrong: it writes on after its
+lease lapsed, acknowledges each directive with a write of its own, lets
+its leases lapse at shutdown, or polls an empty queue. The package's
+`./worker` subpath runs it for you, on the engine's typed client
+([The engine](/superschematic/guides/engine/#call-it-from-typescript)).
+It imports only `@superschematic/engine/client`, so a worker process
+loads no SQLite and no behavior:
+
+```ts
+import { EngineClient } from '@superschematic/engine/client';
+import { QueueWorker, WorkFailure } from '@superschematic/engine-workqueue/worker';
+import { signedTokenSource } from '@superschematic/http-runtime';
+
+const client = new EngineClient({
+  baseUrl: 'https://jobs.internal/api',
+  serviceCredential: { token: signedTokenSource(edgeKey, { issuer: 'indexer', subject: 'indexer', audience: 'jobs' }) },
+});
+
+const worker = new QueueWorker(client, {
+  schema: 'jobs',
+  match: { topic: 'search' },
+  concurrency: 4,
+  handle: async (job) => {
+    job.onDirective((directive) => {
+      if (directive.name === 'budgetExceeded') slowDown();
+    });
+    const { data } = await job.instance.get();
+    const result = await index(data, { signal: job.signal });   // aborts when the lease is lost
+    if (!result.ok) {
+      throw new WorkFailure('timed out', { failure: 'timeout', attempt: { detail: result.detail } });
+    }
+    await job.instance.invoke('recordUsage', { meter: 'cpuSeconds', amount: result.seconds });
+    return { transition: 'done' };
+  },
+  onError: (error, job) => console.warn(job?.id, error),
+});
+await worker.start();
+process.on('SIGTERM', () => worker.stop());
+```
+
+- **Claims.** `start()` reads the schema's describe document and claims
+  with `claimNext` until it holds `concurrency` jobs. An empty queue is
+  watched, not polled: the schema's event stream wakes the worker, and
+  between events it looks again with `countClaimable`, a read that takes
+  no write lock, after a backoff that doubles (`idle`).
+- **The job.** `job.instance` reads the claimed instance and presents
+  the lease's token on every write; `job.client` reaches everything else,
+  without it. Each job heartbeats at the claim's interval, and the
+  directives a heartbeat returns go to `job.onDirective`'s listeners, once
+  each; the next heartbeat acknowledges them in its own write.
+- **A lost lease.** A `lapsed` or `token_stale` refusal of a heartbeat or
+  a write, a deleted instance, or no heartbeat for the lease's length
+  aborts `job.signal` with a `LeaseLostError`. Pass the signal to what
+  the handler waits on. A write through `job.instance` after that throws
+  without being sent, and the worker writes nothing more for the job.
+- **How it ends.** `{ transition: 'done' }` records a successful attempt
+  when the schema composes `Retries`, moves the status and releases.
+  Returning nothing hands the job back. A `WorkFailure` records its
+  failure class and hands the job back, or abandons it with `abandon:
+  true`, which counts toward `maxExpiries`; any other error abandons it,
+  so a job no worker can finish escalates instead of coming back forever.
+- **Stopping.** `stop()` claims nothing more, waits up to 30 seconds for
+  the jobs it holds (`timeoutMs`; `drain: false` waits for none), then
+  aborts the rest and releases their leases, which counts nothing, so a
+  deploy hands work back at once instead of letting it lapse.
+
+The package's
+[README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md#the-worker)
+has every option.
 
 ## Lease
 
