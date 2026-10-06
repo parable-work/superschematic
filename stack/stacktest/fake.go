@@ -146,7 +146,6 @@ func (e *Extension) Register(r *registry.Registry) error {
 	}
 	if err := r.RegisterDNSPlatform(registry.DNSPlatformSpec{
 		Name: DNSPlatform, Extension: Name, Values: json.RawMessage(dnsValues), Lower: lowerRecords,
-		Credentials: []registry.Credential{{Name: DNSToken, Description: "An API token for the fake DNS zone", Env: DNSTokenEnv}},
 	}); err != nil {
 		return err
 	}

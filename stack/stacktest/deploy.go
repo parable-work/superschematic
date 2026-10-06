@@ -17,13 +17,6 @@ import (
 // that keep everything in memory and record each call in the
 // provisioner's call log, so a test reads the order a deploy ran in.
 
-// DNSToken is the credential the fake DNS platform declares, and
-// DNSTokenEnv the environment variable a deploy hands it in.
-const (
-	DNSToken    = "API_TOKEN"
-	DNSTokenEnv = "FAKE_DNS_API_TOKEN"
-)
-
 // FakeState is a state store in memory.
 type FakeState struct {
 	mu        sync.Mutex
@@ -161,10 +154,15 @@ type FakeBootstrap struct {
 
 var _ registry.Bootstrapper = (*FakeBootstrap)(nil)
 
-// Bootstrap records the environment, the repository and the credentials.
+// Bootstrap records the environment, the repository and the credentials'
+// secrets.
 func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapRequest) error {
+	var secrets []string
+	for _, c := range req.Credentials {
+		secrets = append(secrets, c.Secret)
+	}
 	if b.log != nil {
-		b.log.Record("bootstrap %s: repository %s, credentials %s", req.Environment.Environment, req.Repository, strings.Join(req.Credentials, ", "))
+		b.log.Record("bootstrap %s: repository %s, credentials %s", req.Environment.Environment, req.Repository, strings.Join(secrets, ", "))
 	}
 	return nil
 }

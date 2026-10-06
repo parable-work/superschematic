@@ -24,9 +24,9 @@ func secretPrompt(secret *ir.StackSecret) string {
 	return fmt.Sprintf("Value of %s (read by %s): ", secret.ID, strings.Join(secret.Readers, ", "))
 }
 
-// credentialPrompt is the prompt for a DNS platform's credential.
-func credentialPrompt(platform string, c registry.Credential) string {
-	return fmt.Sprintf("%s, for DNS platform %s (%s): ", c.Description, platform, c.Name)
+// credentialPrompt is the prompt for a platform credential.
+func credentialPrompt(c Credential) string {
+	return fmt.Sprintf("%s (%s): ", c.Description, c.Secret)
 }
 
 // promptSecret asks for one value and stores it under id. An empty value
@@ -42,7 +42,7 @@ func promptSecret(ctx context.Context, s *session, p Prompter, id, prompt string
 	if err := s.target.Secrets.Set(ctx, s.env, id, value); err != nil {
 		if errors.Is(err, registry.ErrSecretNotCreated) {
 			return fmt.Errorf("%s has nowhere to go yet: `stack deploy %s` creates an application secret's storage in its infrastructure step, "+
-				"and `stack bootstrap %s` a DNS credential's (%w)", id, s.env.Environment, s.env.Environment, err)
+				"and `stack bootstrap %s` a credential's (%w)", id, s.env.Environment, s.env.Environment, err)
 		}
 		return fmt.Errorf("store %s: %w", id, err)
 	}

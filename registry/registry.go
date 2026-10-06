@@ -143,7 +143,7 @@ type (
 	// The seams the cloud half of the `stack` commands drives
 	// (docs/stack-model.md, sections 7.3 and 11): a target's StateStore
 	// keeps its provisioner's state backend and each Run's deploy
-	// manifest, its SecretStore the values of secrets and DNS platform
+	// manifest, its SecretStore the values of secrets and platform
 	// Credentials, its Bootstrapper prepares a cloud project
 	// (BootstrapRequest), and its MigrationRunner runs MigrationPlans
 	// (MigrationRequest) between the deploy's steps.
@@ -210,10 +210,6 @@ var (
 	ErrNoManifest       = registry.ErrNoManifest
 	ErrSecretNotCreated = registry.ErrSecretNotCreated
 )
-
-// CredentialID is the identity a DNS platform's credential is stored
-// under; see internal/registry.CredentialID.
-func CredentialID(platform, name string) string { return registry.CredentialID(platform, name) }
 
 // DefaultToolInvocationPolicy returns the core's invocation policy:
 // invocationPolicy, auto or ask, auto by default.

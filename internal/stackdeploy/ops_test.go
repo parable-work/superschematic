@@ -11,7 +11,6 @@ import (
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
-	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
 // TestManifestRoundTrip writes a manifest, with a failed rollout's
@@ -93,9 +92,9 @@ func TestSetSecrets(t *testing.T) {
 	}
 	wantPrompts := []string{
 		"Value of PaymentsSecrets.STRIPE_KEY (read by Orders, shop-api): ",
-		"An API token for the fake DNS zone, for DNS platform fake.dns (API_TOKEN): ",
+		"An API token with DNS Edit on zone acme.dev (shop-stack-fake-dns-acme_dev): ",
 	}
-	if !slices.Equal(term.prompts, wantPrompts) || !slices.Equal(stored, []string{"PaymentsSecrets.STRIPE_KEY", "fake.dns:API_TOKEN"}) {
+	if !slices.Equal(term.prompts, wantPrompts) || !slices.Equal(stored, []string{"PaymentsSecrets.STRIPE_KEY", "shop-stack-fake-dns-acme_dev"}) {
 		t.Errorf("prompts %q, stored %v", term.prompts, stored)
 	}
 	if ids, _ := f.ext.Secrets.List(ctx, env); !slices.Equal(ids, stored) {
@@ -125,7 +124,7 @@ func TestSetSecrets(t *testing.T) {
 		answers    []string
 		want       string
 	}{
-		{"unknown", "PaymentsSecrets.OTHER", nil, "has no secret PaymentsSecrets.OTHER (its secrets: PaymentsSecrets.STRIPE_KEY, fake.dns:API_TOKEN)"},
+		{"unknown", "PaymentsSecrets.OTHER", nil, "has no secret PaymentsSecrets.OTHER (its secrets: PaymentsSecrets.STRIPE_KEY, shop-stack-fake-dns-acme_dev)"},
 		{"empty value", "PaymentsSecrets.STRIPE_KEY", []string{""}, "no value entered for PaymentsSecrets.STRIPE_KEY"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -175,13 +174,13 @@ func TestBootstrap(t *testing.T) {
 	if err := stackdeploy.Bootstrap(ctx, options(term)); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls(0); !slices.Equal(got, []string{"bootstrap Staging: repository acme/shop, credentials fake.dns:API_TOKEN"}) {
+	if got := f.calls(0); !slices.Equal(got, []string{"bootstrap Staging: repository acme/shop, credentials shop-stack-fake-dns-acme_dev"}) {
 		t.Errorf("calls %v", got)
 	}
 	if len(term.prompts) != 1 {
 		t.Errorf("prompts %q", term.prompts)
 	}
-	if got, _ := f.ext.Secrets.Get(ctx, env, registry.CredentialID(stacktest.DNSPlatform, stacktest.DNSToken)); string(got) != "dns-token" {
+	if got, _ := f.ext.Secrets.Get(ctx, env, dnsToken.Secret); string(got) != "dns-token" {
 		t.Errorf("stored %q", got)
 	}
 	term = &terminal{}

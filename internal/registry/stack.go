@@ -220,7 +220,7 @@ type TargetSpec struct {
 	State StateStore
 
 	// Secrets stores the values of its environments' secrets and of their
-	// DNS platforms' credentials (section 4.2). Nil stores none.
+	// platform credentials (section 4.2). Nil stores none.
 	Secrets SecretStore
 
 	// Bootstrap prepares a cloud project for the target's environments
@@ -277,11 +277,6 @@ type DNSPlatformSpec struct {
 	// Lower returns the records' resources. It is pure.
 	Lower func(DNSContext) ([]*ir.Resource, error)
 
-	// Credentials are the secrets the platform needs to write records,
-	// such as an API token, which bootstrap asks for and stores in the
-	// target's secret store (section 7.3).
-	Credentials []Credential
-
 	compiledValues *validator.Schema
 }
 
@@ -315,8 +310,8 @@ type ProvisionRequest struct {
 
 	// Env holds the platform credentials the run needs, keyed by the
 	// environment variable their provider reads (Credential.Env). The
-	// provisioner hands them to its tool's process and never writes them
-	// to a file.
+	// provisioner hands them to its tool's process for this run only, and
+	// never writes them to its config, its program, a log or a file.
 	Env map[string]string
 }
 
@@ -613,9 +608,7 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 
 // RegisterDNSPlatform adds a DNS platform. It refuses a malformed or
 // duplicate name, the reserved name ir.ManualDNS, a values schema that does
-// not compile, a missing Lower, and a credential whose name is not upper
-// snake case or repeats, that has no description, or whose Env is not an
-// environment variable's name.
+// not compile and a missing Lower.
 func (r *Registry) RegisterDNSPlatform(spec DNSPlatformSpec) error {
 	if err := r.registrable("DNS platform " + spec.Name); err != nil {
 		return err
@@ -632,10 +625,6 @@ func (r *Registry) RegisterDNSPlatform(spec DNSPlatformSpec) error {
 	if spec.Lower == nil {
 		return fmt.Errorf("registry: DNS platform %q has no Lower function", spec.Name)
 	}
-	if err := checkCredentials(spec.Name, spec.Credentials); err != nil {
-		return err
-	}
-	spec.Credentials = append([]Credential(nil), spec.Credentials...)
 	if len(spec.Values) > 0 {
 		compiled, err := compileSchema(spec.Values, "superschematic://dns-platforms/"+spec.Name+"/values.json")
 		if err != nil {

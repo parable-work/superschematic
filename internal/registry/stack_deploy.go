@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-	"sort"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -15,11 +14,10 @@ import (
 
 // The seams the cloud half of the `stack` commands drives
 // (docs/stack-model.md, sections 7.3, 11.1 and 11.2): a target keeps its
-// deploy state, stores secret values, bootstraps a cloud project and runs
-// migration plans on its databases, and a DNS platform declares the
-// credentials it needs. Each is an interface a TargetSpec or a
-// DNSPlatformSpec carries; the core's deploy (internal/stackdeploy) calls
-// them, and none of them knows the others.
+// deploy state, stores secret values and platform credentials, bootstraps
+// a cloud project and runs migration plans on its databases. Each is an
+// interface a TargetSpec carries; the core's deploy (internal/stackdeploy)
+// calls them, and none of them knows the others.
 
 // Run is one run of an environment: the resolved environment, and the
 // values of its parameters for this run. A plain environment has one run;
@@ -96,17 +94,18 @@ type StateStore interface {
 // was never deployed.
 var ErrNoManifest = errors.New("no deploy manifest")
 
-// SecretStore keeps the values of an environment's secrets, keyed by the
-// secret's identity: a StackSecret's ID (`PaymentsSecrets.STRIPE_KEY`,
-// section 4.2), or a platform credential's (CredentialID). The store
-// names where each value lives; Secret Manager on gcp. A value goes in
-// and is never written to a file or a log.
+// SecretStore keeps the values of an environment's secrets, keyed by an
+// ID: an application secret's StackSecret ID, its declaring type and field
+// (`PaymentsSecrets.STRIPE_KEY`, section 4.2), from which the store
+// derives where the value lives; or a platform credential's Secret, the
+// store's own name for it, which holds no dot. Secret Manager on gcp. A
+// value goes in and is never written to a file or a log.
 type SecretStore interface {
 	// Exists reports whether the secret has a value.
 	Exists(ctx context.Context, env *ir.ResolvedEnvironment, id string) (bool, error)
 
-	// List returns the IDs, sorted, of env's secrets and of its DNS
-	// platform's credentials that have a value.
+	// List returns the IDs, sorted, of env's secrets and of its
+	// credentials that have a value.
 	List(ctx context.Context, env *ir.ResolvedEnvironment) ([]string, error)
 
 	// Set stores a new value of the secret. It returns an error that
@@ -135,11 +134,11 @@ type BootstrapRequest struct {
 	// remote names it (`acme/shop` on GitHub); empty when there is none.
 	Repository string
 
-	// Credentials are the IDs (CredentialID) of the credentials the
-	// environment's DNS platform declares. Bootstrap creates their
-	// storage, readable by the accounts that deploy; the core then asks
-	// for each value that is missing and stores it.
-	Credentials []string
+	// Credentials are the environment's platform credentials, each named
+	// once. Bootstrap creates each one's storage, readable by the accounts
+	// that deploy and by nothing else; the core then asks for each value
+	// that is missing and stores it.
+	Credentials []Credential
 
 	// Provisioner applies what the bootstrap provisions through it, a
 	// program it renders under Dir.
@@ -195,53 +194,22 @@ type MigrationRunner interface {
 	Migrate(ctx context.Context, req MigrationRequest) error
 }
 
-// Credential is a secret a DNS platform needs to write records, entered at
-// bootstrap: the Cloudflare DNS platform's API token (section 6.9).
+// Credential is a secret a platform needs to write its resources, such
+// as the API token of the Cloudflare DNS platform (section 6.9): not an
+// application secret a server reads, but one the provisioner hands its
+// provider. Bootstrap creates its storage, readable by the accounts that
+// deploy, and asks for its value; every run reads it.
 type Credential struct {
-	// Name names the credential in upper snake case (`API_TOKEN`).
-	Name string
+	// Secret is the secret's name in the target's secret store, as the
+	// environment names it (`shop-cloudflare-dns-acme_dev`).
+	Secret string
+
+	// Env is the environment variable the provider reads the value from
+	// (`CLOUDFLARE_API_TOKEN`). Empty when the provider reads it otherwise.
+	Env string
 
 	// Description says what to enter; bootstrap prompts with it.
 	Description string
-
-	// Env is the environment variable the provisioner's provider reads
-	// the credential from (`CLOUDFLARE_API_TOKEN`). A deploy reads the
-	// value from the target's secret store and hands it to the
-	// provisioner there. Empty when the provider reads it otherwise.
-	Env string
-}
-
-// CredentialID is the identity a credential's value is stored under:
-// the DNS platform and the credential's name (`cloudflare.dns:API_TOKEN`).
-// It cannot be a StackSecret's ID, which holds no colon.
-func CredentialID(platform, name string) string { return platform + ":" + name }
-
-var (
-	credentialNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-	envNamePattern        = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
-)
-
-// checkCredentials refuses a DNS platform's credential with a name that is
-// not upper snake case or repeats, no description, or an Env that is not
-// an environment variable's name.
-func checkCredentials(platform string, creds []Credential) error {
-	seen := map[string]bool{}
-	for _, c := range creds {
-		if !credentialNamePattern.MatchString(c.Name) {
-			return fmt.Errorf("registry: DNS platform %q declares credential %q; a credential's name is upper snake case (API_TOKEN)", platform, c.Name)
-		}
-		if seen[c.Name] {
-			return fmt.Errorf("registry: DNS platform %q declares credential %s twice", platform, c.Name)
-		}
-		seen[c.Name] = true
-		if strings.TrimSpace(c.Description) == "" {
-			return fmt.Errorf("registry: DNS platform %q credential %s has no description to prompt with", platform, c.Name)
-		}
-		if c.Env != "" && !envNamePattern.MatchString(c.Env) {
-			return fmt.Errorf("registry: DNS platform %q credential %s names environment variable %q, which is not one", platform, c.Name, c.Env)
-		}
-	}
-	return nil
 }
 
 // checkDeploySeams refuses a target that carries a deploy seam it cannot
@@ -266,17 +234,4 @@ func checkDeploySeams(spec TargetSpec) error {
 		return fmt.Errorf("registry: target %q has Bootstrap or Migrations but no State: a bootstrap creates the deploy state, and a deploy records each migration in it", spec.Name)
 	}
 	return nil
-}
-
-// Credentials returns the credentials the DNS platform named name
-// declares, sorted by name, or none for an unknown platform or
-// ir.ManualDNS.
-func (r *Registry) Credentials(name string) []Credential {
-	spec, ok := r.stack.dnsPlatforms[name]
-	if !ok {
-		return nil
-	}
-	out := append([]Credential(nil), spec.Credentials...)
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
 }

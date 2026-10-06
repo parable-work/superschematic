@@ -9,7 +9,6 @@ import (
 
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
-	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
 // staging is Staging's deploy order on the fake target, as the call log
@@ -65,7 +64,7 @@ func TestDeployOrder(t *testing.T) {
 	if !maps(m.Images, images(1)) {
 		t.Errorf("images %v", m.Images)
 	}
-	if got := f.ext.Provisioner.Env()[stacktest.DNSTokenEnv]; got != "dns-token-value" {
+	if got := f.ext.Provisioner.Env()[dnsToken.Env]; got != "dns-token-value" {
 		t.Errorf("the provisioner was handed DNS token %q", got)
 	}
 	service := f.ext.Provisioner.Rendered().Resources.Resource("shop-api.service")
@@ -246,7 +245,7 @@ func TestDeployFailedMigration(t *testing.T) {
 func TestDeploySecrets(t *testing.T) {
 	f := newFixture(t)
 	env := f.env(t, "Staging")
-	f.setSecret(t, env, "fake.dns:API_TOKEN", "dns-token-value")
+	f.setSecret(t, env, dnsToken.Secret, "dns-token-value")
 	ctx := context.Background()
 	m, err := stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, &planner{to: 1}, images(1)))
 	if err == nil || !strings.Contains(err.Error(), "secret PaymentsSecrets.STRIPE_KEY has no value: run `stack secrets set Staging`") {
@@ -324,7 +323,7 @@ func TestDeployRefusals(t *testing.T) {
 func TestPlan(t *testing.T) {
 	f := newFixture(t)
 	env := f.env(t, "Staging")
-	f.setSecret(t, env, "fake.dns:API_TOKEN", "dns-token-value")
+	f.setSecret(t, env, dnsToken.Secret, "dns-token-value")
 	ctx := context.Background()
 	out, err := stackdeploy.Plan(ctx, stackdeploy.PlanOptions{Options: f.options(t, env, nil), Planner: (&planner{to: 1}).plan})
 	if err != nil {

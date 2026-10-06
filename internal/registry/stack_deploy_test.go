@@ -47,48 +47,6 @@ func TestRegisterTargetDeploySeams(t *testing.T) {
 	}
 }
 
-// TestRegisterDNSPlatformCredentials covers the refusals of a DNS
-// platform's credentials, and Credentials' order.
-func TestRegisterDNSPlatformCredentials(t *testing.T) {
-	lower := func(DNSContext) ([]*ir.Resource, error) { return nil, nil }
-	for _, tc := range []struct {
-		name  string
-		creds []Credential
-		want  string
-	}{
-		{"lowercase name", []Credential{{Name: "api_token", Description: "a token"}}, "upper snake case"},
-		{"repeated name", []Credential{{Name: "API_TOKEN", Description: "a"}, {Name: "API_TOKEN", Description: "b"}}, "declares credential API_TOKEN twice"},
-		{"no description", []Credential{{Name: "API_TOKEN", Description: " "}}, "has no description"},
-		{"bad env", []Credential{{Name: "API_TOKEN", Description: "a token", Env: "cf-token"}}, `names environment variable "cf-token"`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := New(naming.Default()).RegisterDNSPlatform(DNSPlatformSpec{Name: "fake.dns", Lower: lower, Credentials: tc.creds})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("RegisterDNSPlatform = %v, want an error containing %q", err, tc.want)
-			}
-		})
-	}
-	reg := New(naming.Default())
-	creds := []Credential{
-		{Name: "ZONE_TOKEN", Description: "a zone token"},
-		{Name: "API_TOKEN", Description: "an API token", Env: "FAKE_API_TOKEN"},
-	}
-	if err := reg.RegisterDNSPlatform(DNSPlatformSpec{Name: "fake.dns", Lower: lower, Credentials: creds}); err != nil {
-		t.Fatal(err)
-	}
-	creds[0].Name = "CHANGED"
-	got := reg.Credentials("fake.dns")
-	if len(got) != 2 || got[0].Name != "API_TOKEN" || got[1].Name != "ZONE_TOKEN" {
-		t.Errorf("Credentials = %+v, want API_TOKEN then ZONE_TOKEN, unchanged by the caller", got)
-	}
-	if got := reg.Credentials(ir.ManualDNS); got != nil {
-		t.Errorf("Credentials(manual) = %+v", got)
-	}
-	if id := CredentialID("fake.dns", "API_TOKEN"); id != "fake.dns:API_TOKEN" {
-		t.Errorf("CredentialID = %s", id)
-	}
-}
-
 // TestRunCheckAndName covers a run's parameter checks and its name.
 func TestRunCheckAndName(t *testing.T) {
 	plain := &ir.ResolvedEnvironment{Environment: "Staging"}

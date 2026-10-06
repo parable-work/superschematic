@@ -143,7 +143,7 @@ func Destroy(ctx context.Context, o Options) error {
 	if err := s.requireDeploy(); err != nil {
 		return err
 	}
-	req, err := s.request(ctx, s.env)
+	req, err := s.deployedRequest(ctx)
 	if err != nil {
 		return err
 	}
@@ -168,11 +168,34 @@ func Outputs(ctx context.Context, o Options) (map[string]map[string]any, error) 
 	if err := s.requireDeploy(); err != nil {
 		return nil, err
 	}
-	req, err := s.request(ctx, s.env)
+	req, err := s.deployedRequest(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return s.prov.Outputs(ctx, req)
+}
+
+// deployedRequest is the provisioner's request over the environment with
+// the images the manifest records pinned, so the program it renders is
+// the one the last deploy applied.
+func (s *session) deployedRequest(ctx context.Context) (registry.ProvisionRequest, error) {
+	prev, err := readManifest(ctx, s.target.State, s.run)
+	if err != nil {
+		return registry.ProvisionRequest{}, err
+	}
+	env := s.env
+	if prev != nil {
+		images := map[string]string{}
+		for server, image := range prev.Images {
+			if d := s.env.Deployable(server); d != nil && d.Kind == ir.DeployableServer {
+				images[server] = image
+			}
+		}
+		if env, err = PinImages(s.env, images); err != nil {
+			return registry.ProvisionRequest{}, err
+		}
+	}
+	return s.request(ctx, env)
 }
 
 // BootstrapOptions is one bootstrap of the cloud project an environment
@@ -184,28 +207,25 @@ type BootstrapOptions struct {
 	// the git remote (`acme/shop`).
 	Repository string
 
-	// Prompter asks for each credential of the environment's DNS platform
-	// that has no value.
+	// Prompter asks for each credential of the environment that has no
+	// value.
 	Prompter Prompter
 }
 
 // Bootstrap prepares the cloud project an environment deploys to
-// (docs/stack-model.md, section 7.3): the target's bootstrap, then a value
-// for each credential its DNS platform declares and the secret store
-// lacks. Both halves are idempotent, so it is safe to run again; a
-// credential that has a value is not asked for.
+// (docs/stack-model.md, section 7.3): the target's bootstrap, which also
+// creates the storage of each platform credential, then a value for each
+// credential the secret store lacks. Both halves are idempotent, so it is
+// safe to run again; a credential that has a value is not asked for, and
+// one that environments share is asked for once.
 func Bootstrap(ctx context.Context, o BootstrapOptions) error {
 	s, err := openEnvironment(o.Options)
 	if err != nil {
 		return err
 	}
-	platform, creds := s.dnsCredentials()
+	creds := s.credentials()
 	if len(creds) > 0 && s.target.Secrets == nil {
-		return fmt.Errorf("DNS platform %s needs credentials, and target %s stores no secrets", platform, s.target.Name)
-	}
-	var ids []string
-	for _, c := range creds {
-		ids = append(ids, registry.CredentialID(platform, c.Name))
+		return fmt.Errorf("environment %s needs credentials, and target %s stores no secrets", s.env.Environment, s.target.Name)
 	}
 	if s.target.Bootstrap != nil {
 		if err := s.requireDeploy(); err != nil {
@@ -215,7 +235,7 @@ func Bootstrap(ctx context.Context, o BootstrapOptions) error {
 		if err := s.target.Bootstrap.Bootstrap(ctx, registry.BootstrapRequest{
 			Environment: s.env,
 			Repository:  o.Repository,
-			Credentials: ids,
+			Credentials: creds,
 			Provisioner: s.prov,
 			Dir:         s.dir,
 			Log:         s.log,
@@ -225,19 +245,19 @@ func Bootstrap(ctx context.Context, o BootstrapOptions) error {
 	} else {
 		s.logf("target %s needs no bootstrap", s.target.Name)
 	}
-	for i, c := range creds {
-		ok, err := s.target.Secrets.Exists(ctx, s.env, ids[i])
+	for _, c := range creds {
+		ok, err := s.target.Secrets.Exists(ctx, s.env, c.Secret)
 		if err != nil {
-			return fmt.Errorf("credential %s: %w", ids[i], err)
+			return fmt.Errorf("credential %s: %w", c.Secret, err)
 		}
 		if ok {
-			s.logf("credential %s has a value", ids[i])
+			s.logf("credential %s has a value", c.Secret)
 			continue
 		}
 		if o.Prompter == nil {
-			return fmt.Errorf("credential %s has no value, and no terminal to ask for it on: run bootstrap at a terminal", ids[i])
+			return fmt.Errorf("credential %s has no value, and no terminal to ask for it on: run bootstrap at a terminal", c.Secret)
 		}
-		if err := promptSecret(ctx, s, o.Prompter, ids[i], credentialPrompt(platform, c)); err != nil {
+		if err := promptSecret(ctx, s, o.Prompter, c.Secret, credentialPrompt(c)); err != nil {
 			return err
 		}
 	}
@@ -249,7 +269,7 @@ type SecretsOptions struct {
 	Options
 
 	// Only names the one secret to set, by its ID: a StackSecret's
-	// (`PaymentsSecrets.STRIPE_KEY`) or a DNS credential's. Empty sets
+	// (`PaymentsSecrets.STRIPE_KEY`) or a credential's secret. Empty sets
 	// every secret and credential that has no value.
 	Only string
 
@@ -259,8 +279,8 @@ type SecretsOptions struct {
 
 // SetSecrets asks for and stores secret values (docs/stack-model.md,
 // section 4.2): the one Only names, which it asks for whether or not it
-// has a value, or every secret of the environment, and every credential
-// of its DNS platform, that has none. It returns the IDs it stored. A
+// has a value, or every secret and credential of the environment that has
+// none. It returns the IDs it stored. A
 // value goes from the prompter to the target's secret store and nowhere
 // else.
 func SetSecrets(ctx context.Context, o SecretsOptions) ([]string, error) {
@@ -279,9 +299,8 @@ func SetSecrets(ctx context.Context, o SecretsOptions) ([]string, error) {
 	for _, secret := range s.env.Secrets {
 		all = append(all, entry{secret.ID, secretPrompt(secret)})
 	}
-	platform, creds := s.dnsCredentials()
-	for _, c := range creds {
-		all = append(all, entry{registry.CredentialID(platform, c.Name), credentialPrompt(platform, c)})
+	for _, c := range s.credentials() {
+		all = append(all, entry{c.Secret, credentialPrompt(c)})
 	}
 	var todo []entry
 	if o.Only != "" {

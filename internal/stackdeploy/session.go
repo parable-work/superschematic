@@ -111,7 +111,7 @@ func (s *session) logf(format string, args ...any) {
 
 // request renders env, which may be s.env with its images pinned, and
 // returns the provisioner's request over it: the target's state backend,
-// and the credentials of the environment's DNS platform.
+// and the environment's credentials.
 func (s *session) request(ctx context.Context, env *ir.ResolvedEnvironment) (registry.ProvisionRequest, error) {
 	backend, err := s.target.State.Backend(ctx, env)
 	if err != nil {
@@ -133,30 +133,53 @@ func (s *session) request(ctx context.Context, env *ir.ResolvedEnvironment) (reg
 	}, nil
 }
 
-// dnsCredentials returns the credentials the environment's DNS platform
-// declares.
-func (s *session) dnsCredentials() (platform string, creds []registry.Credential) {
-	if s.env.DNS == nil {
-		return "", nil
-	}
-	return s.env.DNS.Platform, s.reg.Credentials(s.env.DNS.Platform)
+// Credential is a platform credential: a secret the provisioner hands a
+// provider, such as a DNS platform's API token.
+type Credential = registry.Credential
+
+// CredentialsOf returns the platform credentials a run of env needs, each
+// secret once. Bootstrap creates and asks for each, and plan, deploy,
+// destroy and outputs hand each to the provisioner. It is the one place
+// the operations learn of them.
+//
+// TODO(D45): return env.DNS.Credentials, the credentials the DNS platform
+// resolves into environment.json, once the Cloudflare DNS platform's
+// ir.DNSCredential lands; it is a one-line change. Until then an
+// environment needs none.
+func CredentialsOf(*ir.ResolvedEnvironment) []Credential {
+	return nil
 }
 
-// credentialEnv reads each credential of the environment's DNS platform
-// that its provider reads from an environment variable.
+// credentialsOf is CredentialsOf; a test replaces it.
+var credentialsOf = CredentialsOf
+
+// credentials returns the environment's credentials, each secret once.
+func (s *session) credentials() []Credential {
+	var out []Credential
+	seen := map[string]bool{}
+	for _, c := range credentialsOf(s.env) {
+		if !seen[c.Secret] {
+			seen[c.Secret] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// credentialEnv reads each credential whose provider reads it from an
+// environment variable, with the run's account.
 func (s *session) credentialEnv(ctx context.Context) (map[string]string, error) {
-	platform, creds := s.dnsCredentials()
 	var out map[string]string
-	for _, c := range creds {
+	for _, c := range s.credentials() {
 		if c.Env == "" {
 			continue
 		}
 		if s.target.Secrets == nil {
-			return nil, fmt.Errorf("DNS platform %s needs credential %s, and target %s stores no secrets", platform, c.Name, s.target.Name)
+			return nil, fmt.Errorf("environment %s needs credential %s, and target %s stores no secrets", s.env.Environment, c.Secret, s.target.Name)
 		}
-		value, err := s.target.Secrets.Get(ctx, s.env, registry.CredentialID(platform, c.Name))
+		value, err := s.target.Secrets.Get(ctx, s.env, c.Secret)
 		if err != nil {
-			return nil, fmt.Errorf("read credential %s of DNS platform %s (`stack bootstrap %s` stores it): %w", c.Name, platform, s.env.Environment, err)
+			return nil, fmt.Errorf("read credential %s: run `stack bootstrap %s`, which asks for it: %w", c.Secret, s.env.Environment, err)
 		}
 		if out == nil {
 			out = map[string]string{}
