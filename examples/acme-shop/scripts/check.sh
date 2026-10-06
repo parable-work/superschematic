@@ -25,6 +25,9 @@
 #      shop-orders served by the generated Rust server (rust-server/,
 #      built with --api-language RUST into schemas/dist-rust) and check
 #      they print the same;
+#   4a. the Topcoat app in topcoat/ passes its tests: its pages call
+#      shop-orders in-process through the crate the Topcoat extension
+#      writes into schemas/dist-rust, with the binary that links it;
 #   5. the TypeScript app's tests call the generated TypeScript router
 #      through the generated TypeScript SDK;
 #   6. build-all with --cache skips every service on a second run and
@@ -68,6 +71,9 @@ capture() {
 
 echo "==> core binary (no extension)"
 (cd "$REPO_ROOT" && go build -o "$OUT/superschematic" ./cmd/superschematic)
+# The core with the Topcoat extension, a module of its own: only the
+# Topcoat step below uses it.
+(cd "$REPO_ROOT/extensions/topcoat" && go build -o "$OUT/superschematic-topcoat" ./cmd/superschematic-topcoat)
 
 echo "==> build-all"
 rm -rf "$DIST"
@@ -163,6 +169,15 @@ rm -rf "$SCHEMAS/dist-rust"
   superschematic build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders >/dev/null)
 (cd "$EXAMPLE_DIR/rust-server" && cargo build --locked -q)
 RUST_SERVER="${CARGO_TARGET_DIR:-$EXAMPLE_DIR/rust-server/target}/debug/acme-shop-orders-server"
+
+echo "==> Topcoat: the app's pages call shop-orders in-process"
+# The same build with the extension linked: superschematic.toml's
+# [extension.topcoat] adds shop-orders' Topcoat crate beside its Rust
+# server, which the core build above left out.
+(cd "$EXAMPLE_DIR" &&
+  "$OUT/superschematic-topcoat" build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders >/dev/null)
+test -f "$SCHEMAS/dist-rust/topcoat/shop-orders/src/operations.rs"
+(cd "$EXAMPLE_DIR/topcoat" && cargo test --locked -q)
 
 echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server"
 (cd "$EXAMPLE_DIR/go" && GOFLAGS=-mod=mod go mod tidy >/dev/null && go build ./... && go vet ./...)
