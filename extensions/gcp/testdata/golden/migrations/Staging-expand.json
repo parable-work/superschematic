@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "phase": "expand",
+  "cloudSql": {
+    "instance": "acme-staging:us-east1:shop-db",
+    "user": "shop-migrator@acme-staging.iam"
+  },
+  "databases": [
+    {
+      "service": "shop-db",
+      "database": "shop_db",
+      "plan": "gs://acme-staging-superschematic-state/superschematic/migrations/shop/Staging/plans/shop-db-4c8d160f557bad43dc6f9f118ee0a5ce4ea9bd11b125287e4ab962350bd73cae.json",
+      "privileges": {
+        "readWrite": [
+          "orders@acme-staging.iam",
+          "shop-api@acme-staging.iam"
+        ]
+      }
+    }
+  ]
+}

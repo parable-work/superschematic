@@ -50,6 +50,7 @@ resources:
     name: Orders.database-user.shop-db
     type: gcp:sql/user:User
     properties:
+      deletionPolicy: ABANDON
       instance: ${shop-db-instance.name}
       name: orders@acme-staging.iam
       project: acme-staging
@@ -388,6 +389,7 @@ resources:
     name: shop-api.database-user.shop-db
     type: gcp:sql/user:User
     properties:
+      deletionPolicy: ABANDON
       instance: ${shop-db-instance.name}
       name: shop-api@acme-staging.iam
       project: acme-staging
@@ -596,6 +598,22 @@ resources:
         tier: db-custom-1-3840
     options:
       version: 9.37.1
+  # phase infrastructure; owners shop-db
+  shop-db-migrator:
+    name: shop-db.migrator
+    type: gcp:sql/user:User
+    properties:
+      databaseRoles:
+        - cloudsqlsuperuser
+      deletionPolicy: ABANDON
+      instance: ${shop-db-instance.name}
+      name: shop-migrator@acme-staging.iam
+      project: acme-staging
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${shop-db-instance}
+      version: 9.37.1
 outputs:
   Orders.account.email: ${Orders-account.email}
   Orders.account.id: ${Orders-account.id}
@@ -648,3 +666,4 @@ outputs:
   shop-db.instance.connectionName: ${shop-db-instance.connectionName}
   shop-db.instance.id: ${shop-db-instance.id}
   shop-db.instance.name: ${shop-db-instance.name}
+  shop-db.migrator.id: ${shop-db-migrator.id}

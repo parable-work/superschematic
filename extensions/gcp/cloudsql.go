@@ -25,10 +25,18 @@ func instanceAddress(ctx registry.PlatformContext) any {
 	return ir.Output{Resource: ctx.Deployable.Name + ".instance", Name: "connectionName"}
 }
 
-// lowerDatabase lowers a database to its instance and a database per
-// hosted schema. Settings choose the tier, high availability, the
-// Postgres version, the disk and deletion protection, which is on by
-// default in production (section 7.5).
+// lowerDatabase lowers a database to its instance, a database per hosted
+// schema, and the IAM database user of the stack's migrator account, which
+// the migration job connects as (section 8.4). Settings choose the tier,
+// high availability, the Postgres version, the disk and deletion
+// protection, which is on by default in production (section 7.5).
+//
+// The migrator holds cloudsqlsuperuser, the role that owns the databases
+// the platform creates, so it creates the tables, and owns them, and gives
+// each server that connects its privileges on them. A user that owns
+// tables cannot be dropped, so the node abandons the user when it goes,
+// with its instance. A member of a parameterized environment inherits it
+// with the instance.
 func lowerDatabase(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	env := ctx.Environment
@@ -60,10 +68,11 @@ func lowerDatabase(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if n, ok := d.Settings["diskSize"]; ok {
 		settings["diskSize"] = n
 	}
+	inherited := len(env.Parameters) > 0
 	out := registry.Lowered{Resources: []*ir.Resource{{
 		ID:        instance,
 		Type:      TypeInstance,
-		Inherited: len(env.Parameters) > 0,
+		Inherited: inherited,
 		Properties: map[string]any{
 			"project":            v.project,
 			"region":             v.region,
@@ -71,6 +80,18 @@ func lowerDatabase(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"databaseVersion":    settingString(d.Settings, "version", defaultPostgres),
 			"deletionProtection": protected,
 			"settings":           settings,
+		},
+	}, {
+		ID:        d.Name + ".migrator",
+		Type:      TypeUser,
+		Inherited: inherited,
+		Properties: map[string]any{
+			"project":        v.project,
+			"instance":       ir.Output{Resource: instance, Name: "name"},
+			"name":           migratorUser(env.Stack, v.project),
+			"type":           "CLOUD_IAM_SERVICE_ACCOUNT",
+			"databaseRoles":  []any{"cloudsqlsuperuser"},
+			"deletionPolicy": "ABANDON",
 		},
 	}}}
 	for _, svc := range d.Services {

@@ -16,7 +16,9 @@ const serverlessAuthorizationHeader = "X-Serverless-Authorization"
 // database (sections 7.2 and 7.4). The server's account gets the Cloud
 // SQL client role, to reach the instance through the connector, and the
 // instance user role, to log in with IAM, both held to the edge's
-// instance by an IAM condition; and an IAM database user on the instance.
+// instance by an IAM condition; and an IAM database user on the instance,
+// which the migration job gives read and write privileges on the edge's
+// DB service's tables.
 // The derived value is the Cloud SQL connection the server's connector
 // dials, so there is no password.
 //
@@ -62,6 +64,11 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 					"instance": ir.Output{Resource: to.Name + ".instance", Name: "name"},
 					"name":     user,
 					"type":     "CLOUD_IAM_SERVICE_ACCOUNT",
+					// The migration job gives the user privileges (section
+					// 8.4), and Postgres drops no role that holds any, so the
+					// node abandons it when it goes: after the job took them
+					// back from a server that left, or with its database.
+					"deletionPolicy": "ABANDON",
 				},
 			},
 		},
