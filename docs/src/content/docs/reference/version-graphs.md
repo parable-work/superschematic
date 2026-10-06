@@ -172,7 +172,7 @@ take one JSON document and return one:
 | `compose` | `{descriptor, base, overlay}` | `{tree, findings}`: the overlay's rows laid over the base by entity key; a tombstone removes the entity and its descendants. |
 | `merge` | `{descriptor, base, ours, theirs, resolutions?}` | `{merged, conflicts, entities}`: a three-way merge per entity, then per conflict unit. |
 | `diff` | `{descriptor, from, to}` | `{changes}`: each entity's `ADD`, `UPDATE` or `DELETE`, with `to`'s row. |
-| `content_hash` | `{descriptor, tree}` | `{contentHash}`: SHA-256 over the canonical JSON of each kind's content columns, less each `null` one, which hashes as one a row lacks, rows sorted by entity key. |
+| `content_hash` | `{descriptor, tree}` | `{contentHash}`: SHA-256 over the canonical JSON of each kind's content columns, less each declared one that is `null`, which hashes as one a row lacks, rows sorted by entity key. |
 | `validate` | `{descriptor, tree}` | `{findings}`: duplicate entity keys, the singleton rule, absent parents, parent cycles, orders outside the integers a JavaScript number holds exactly. |
 
 A tree is `{"<kind>": [row, ...]}`, and a row is a canonical row: a JSON
@@ -189,10 +189,11 @@ never set the column merges with one that sets it. `compose` returns each
 row as it was given; each row `diff` and `merge` return, which an engine
 writes back, carries every declared content column, `null` where its input
 lacked one, so a revert to a commit written before the gain clears a value
-the column holds. The hash leaves out a `null` content column, as it leaves
-out one a row lacks, so a gained column moves no hash: a commit written
-before the gain materializes to the hash it recorded. A `null` inside a
-`json` value is content. A column added with a `DEFAULT` is outside the
+the column holds. The hash leaves out a declared content column that is
+`null`, as it leaves out one a row lacks, so a gained column moves no hash:
+a commit written before the gain materializes to the hash it recorded. A
+column the descriptor does not declare is hashed as the row holds it, as
+`diff` reads it, and a `null` inside a `json` value is content. A column added with a `DEFAULT` is outside the
 rule, since Postgres gives its existing rows the default, a value, while
 the old images lack it. A refused input returns
 `{"error": {"code", "message"}}` with a stable code. The contract,

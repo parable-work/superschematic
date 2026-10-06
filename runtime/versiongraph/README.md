@@ -210,8 +210,9 @@ holds it is a change. Add the column without a default, and write its values
 through the graph. A role or excluded column a row lacks is nothing, as it
 is when the row has it. A column a row carries that `columns` lacks is
 content unless it is a role or excluded column, but it is not read as
-`null` where another row lacks it; the hash leaves it out when it is `null`,
-as it leaves out every `null` content column.
+`null` where another row lacks it, and it is hashed as the row holds it,
+`null` included, as compare, merge and diff read it: only a declared
+content column's `null` hashes as absent.
 
 `compose` returns each row as its input gave it. The rows `diff` and
 `merge` return are the ones an engine writes back, and a storage adapter
@@ -262,8 +263,9 @@ and the descriptor's `columns` lacks is refused; a declared column the row
 lacks (a history image leaves out a `@versioned({ exclude })` column, and
 one taken before its kind gained a column lacks that column) stays absent,
 and the core reads it as `null` when it is content; the content hash leaves
-out a `null` content column, so the row hashes as the row that holds it
-`null` and as the row did before its kind declared the column.
+out a declared content column that is `null`, so the row hashes as the row
+that holds it `null` and as the row did before its kind declared the
+column.
 
 `testdata/canonical` holds the vectors: one file per element class,
 `{"cases": [{"name", "class", "sql", "timeZone"?, "postgres", "canonical"}]}`,
@@ -387,19 +389,23 @@ insignificant whitespace, numbers as written) of
 ```
 
 with each kind's live rows sorted by entity key. The content holds each
-content column the row carries whose value is not `null`, declared or not:
-a `null` content column is left out, and so is a declared one the row
-lacks, which the core reads as `null`. So a row that lacks a content column
-hashes as the row with it `null`, a ref's composed tree and its head
-commit's tree hash the same whichever rows carry the column, and a column a
-kind gains moves no hash: each row written before it lacks it or holds it
-`null`, so under the descriptor that declares it a tree hashes as it did
-under the descriptor before, and a commit written before the gain
-materializes to the hash it recorded. A value moves the hash, a `DEFAULT`
-Postgres writes into the existing rows included. Only a row's own members
-are left out: a `null` inside a `json` value is content. Tombstone rows are
-left out, as are kinds with no live rows, so a delete hashes as an absence
-and a kind added to the descriptor does not move existing hashes.
+content column the descriptor declares whose value is not `null`: a
+declared content column that is `null` is left out, and so is one the row
+lacks, which the core reads as `null`. So a row that lacks a declared
+content column hashes as the row with it `null`, a ref's composed tree and
+its head commit's tree hash the same whichever rows carry the column, and a
+column a kind gains moves no hash: each row written before it lacks it or
+holds it `null`, so under the descriptor that declares it a tree hashes as
+it did under the descriptor before, and a commit written before the gain
+materializes to the hash it recorded. A content column the row carries that
+the descriptor does not declare is hashed as the row holds it, `null`
+included, as compare, merge and diff read it, so two trees hash the same
+exactly when `diff` finds no change between them. A value moves the hash, a
+`DEFAULT` Postgres writes into the existing rows included. Only a row's own
+members are left out: a `null` inside a `json` value is content, and a live
+row whose every content column is `null` still hashes as a row. Tombstone
+rows are left out, as are kinds with no live rows, so a delete hashes as an
+absence and a kind added to the descriptor does not move existing hashes.
 
 ### validate
 
