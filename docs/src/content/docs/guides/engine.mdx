@@ -166,6 +166,16 @@ a draft defined over HTTP; see
   Revisions check those after the policy has allowed the write. A server
   that replaces the matching rule passes the same `permissionMatcher` to
   `openEngine` and to the HTTP options.
+- Another service in a stack can call the engine too (D37). Pass the HTTP
+  runtime's `authenticateService` beside `authenticate`, and the
+  principal carries the verified caller in `service`. A service that
+  forwards an end user's token acts as that end user. One that sends no
+  `Authorization` header stands in for an end user, as
+  `service:<deployable>` with no permissions, so the policy decides what
+  it may do by `principal.service.deployable`, and a transition behind a
+  permission stays closed to it. The README's
+  [service callers](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#service-callers)
+  section has the rules.
 
 ## Serve it
 
@@ -526,8 +536,8 @@ section has the whole interface.
 ## The event log
 
 Every write appends one event in its own transaction: a create, an update,
-a delete, a behavior operation that writes, and a publish. The cursor
-orders the whole log:
+a delete, a behavior operation that writes, a publish, and the define of
+a draft. The cursor orders the whole log:
 
 ```sh
 curl -s "$API/events?after=0" -H 'authorization: Bearer carol-token' \
@@ -535,14 +545,15 @@ curl -s "$API/events?after=0" -H 'authorization: Bearer carol-token' \
 ```
 
 ```
-[1,"publish","engine-notes",null]
-[2,"create","alice",null]
-[3,"update","alice",null]
-[4,"operation","alice","transition"]
-[5,"operation","bob","transition"]
-[6,"operation","carol","comment"]
-[7,"operation","carol","propose"]
-[8,"operation","bob","approve"]
+[1,"define","engine-notes",null]
+[2,"publish","engine-notes",null]
+[3,"create","alice",null]
+[4,"update","alice",null]
+[5,"operation","alice","transition"]
+[6,"operation","bob","transition"]
+[7,"operation","carol","comment"]
+[8,"operation","carol","propose"]
+[9,"operation","bob","approve"]
 ```
 
 A page is `{events, next, more}`; read on with `after` set to `next`.
@@ -550,7 +561,16 @@ A page is `{events, next, more}`; read on with `after` set to `next`.
 not read are left out. An event's `change` is the instance for a create,
 the merge patch for an update, and `{behavior, operation, params, patch}`
 for an operation, so applying the changes in order gives the note as a
-read returns it.
+read returns it. A define's is `{hash}`, the draft's hash: a reviewer
+watching the log learns a draft waits, and reads it from the draft route.
+
+Three filters narrow a page further, each a list, repeated or
+comma-separated: `kind` keeps those kinds, `behavior` keeps the
+operations of those behaviors, and `exclude` drops operations by name.
+`?kind=operation&exclude=comment` is every operation but comments. A page
+still scans its limit of events, so one whose events were all dropped is
+empty, and its `next` is past them. `after=head` starts at the last
+event: no events, and `next` to read on from.
 
 A write that reaches other instances, such as a delete that clears the
 links pointing at it or a create that stamps children, appends an event
@@ -561,36 +581,49 @@ off.
 
 With `Accept: text/event-stream` the same route streams. It replays from
 `after` (or `Last-Event-ID`, which a reconnecting `EventSource` sends),
-then waits and sends each event as it commits:
+sends a `ready` event with the cursor once it has caught up, then waits
+and sends each event as it commits:
 
 ```sh
-curl -sN "$API/events?after=5" -H 'accept: text/event-stream' -H 'authorization: Bearer carol-token'
+curl -sN "$API/events?after=6" -H 'accept: text/event-stream' -H 'authorization: Bearer carol-token'
 ```
 
 ```
 : open
 
-id: 6
-data: {"cursor":6,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":5,"version":1,"actor":"carol","at":1790790700450,"change":{"behavior":"Comments","operation":"comment","params":{"body":"Which fall?"},"patch":{"commentCount":1}}}
-
 id: 7
-data: {"cursor":7,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{}}}
+data: {"cursor":7,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":5,"version":1,"actor":"carol","at":1790790700450,"change":{"behavior":"Comments","operation":"comment","params":{"body":"Which fall?"},"patch":{"commentCount":1}}}
 
 id: 8
-data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":7,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"body":"Ships on October 1.","revision":3}}}
+data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{}}}
+
+id: 9
+data: {"cursor":9,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":7,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"body":"Ships on October 1.","revision":3}}}
+
+event: ready
+id: 9
+data: {"cursor":9}
 
 : keepalive
 ```
 
-While it waits it sends a `: keepalive` comment every five seconds. Stop
-it with Ctrl-C. The end-to-end test reads the stream from a cursor, then
+`ready` is a named event, so `EventSource.onmessage` does not receive
+it; `addEventListener('ready', ...)` does, and its id is where a
+reconnect resumes. `after=head` skips the replay: `ready` comes at once,
+then only what commits. The filters work as on the JSON page; when they
+drop the last events the stream read, a message with only an `id:` keeps
+the client's place, which `EventSource` records without an event. While
+it waits it sends a `: keepalive` comment every five seconds. Stop it
+with Ctrl-C. The end-to-end test reads the stream from a cursor, then
 adds a comment and receives its event.
 
 ## MCP tools
 
 The MCP endpoint serves one tool per operation of every live schema the
-caller may read, and three schema tools: `list_schemas`, `describe_schema`
-and `define_schema`. A tool's name is the schema's and the operation's,
+caller may read, and five engine tools: `list_schemas`, `describe_schema`
+and `define_schema`, and `list_behaviors` and `describe_behavior`, which
+list the behaviors the engine runs and return one's declaration, its
+config's JSON Schema included. A tool's name is the schema's and the operation's,
 in snake case: `notes_create`, `notes_transition`, `notes_list_comments`.
 A tool the policy refuses the caller is left out of the caller's list, so
 carol, a reader, sees these:
@@ -606,6 +639,8 @@ curl -s $API/mcp -H 'authorization: Bearer carol-token' -H 'content-type: applic
 list_schemas
 describe_schema
 define_schema
+list_behaviors
+describe_behavior
 notes_get
 notes_list
 notes_comment
@@ -615,11 +650,13 @@ notes_propose
 notes_list_proposals
 ```
 
-The schema tools name no schema until they are called, so everyone lists
-them and the policy answers the call. Where a schema composes `Search`,
-one more tool, `search`, searches every such schema the caller may read
-([Engine behaviors](/superschematic/guides/engine-behaviors/#searching-every-schema)). No tool publishes: a draft that
-`define_schema` stores goes live only through the HTTP publish route.
+The engine's tools name no schema until they are called, so everyone
+lists them and the policy answers the call; the behavior tools ask it
+nothing, since the behaviors are the server's code. Where a schema
+composes `Search`, one more tool, `search`, searches every such schema the
+caller may read ([Engine behaviors](/superschematic/guides/engine-behaviors/#searching-every-schema)).
+No tool publishes: a draft that `define_schema` stores goes live only
+through the HTTP publish route.
 
 An MCP client connects to `http://127.0.0.1:8787/api/namespaces/default/mcp`
 with the header `Authorization: Bearer <token>`. The end-to-end test uses
@@ -658,8 +695,11 @@ jq '.types.Note.fields += [{"name": "owner", "typeRef": {"name": "string"}, "req
 }
 ```
 
-A draft the rule allows is stored, and the publish route makes it the
-live version. This server publishes its schema file each time it starts,
+Before writing a draft, `GET /api/behaviors` lists the behaviors the
+engine runs, and `GET /api/behaviors/Workflow` returns one's declaration:
+the JSON Schema of its config, its operations and the codes its vetoes
+carry. A draft the rule allows is stored, with a `define` event in the
+log, and the publish route makes it the live version. This server publishes its schema file each time it starts,
 so change the file rather than the live version: after a version with a
 field the file lacks goes live over HTTP, the next start refuses the file.
 

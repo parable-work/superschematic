@@ -18,10 +18,10 @@ set. Extensions that implement `cli.CommandProvider` add subcommands at
 resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
-The core has six commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format` and `behaviors`. The installed `superschematic`
-links the official extensions (the gcp target and the Pulumi
-provisioner), which add none.
+The core has seven commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors` and the `stack` group. The installed
+`superschematic` links the official extensions (the gcp target and the
+Pulumi provisioner), which add none.
 
 ## `build <service-dir>`
 
@@ -118,7 +118,11 @@ the schemas root by default). Its `New` has the signature of the generated
 `Constructor`, `func(deps Deps) (Implementations, error)`, and each
 method answers 501 until it is implemented. It never writes into a
 directory that holds a Go file. Without the flag a build writes nothing
-outside the output root.
+outside the output root, except a stack's: building a `Stack` service
+writes each Go server's entrypoint under `server/<stack>/<server>` in the
+output root and scaffolds, with no flag, each API its servers serve whose
+implementation is missing, with a `go.mod` beside it when no module holds
+the package.
 
 ```
 superschematic build ./schemas/services/shop-db
@@ -417,6 +421,177 @@ implement them: `Workflow`, `Comments`, `Revisions`, `Dependencies`,
 @superschematic/engine-workqueue` (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
+
+## `stack dev [<stack-service-dir>]`
+
+Run an environment of a stack on the `local` target until Ctrl-C. The
+design is section 8.3 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md).
+
+1. Build the Stack service and every service it reaches, each with its
+   dependencies, as `build --with-deps` builds one service; the stack
+   builds last.
+2. Read the environment the build resolved to
+   `<out>/stack/<stack>/<environment>/environment.json`: `--environment`,
+   or the stack's one environment on the local target.
+3. Start the environment's Postgres container,
+   `superschematic-<stack>-<environment>-postgres`, published on
+   127.0.0.1 only, and create a database per DB schema it hosts.
+4. Migrate each database to its schema's model: a plan from the model the
+   database recorded, applied with `superschematic-migrate`, expand and
+   contract back to back. The runner must be on `PATH`, or named by
+   `SUPERSCHEMATIC_MIGRATE`; [Schema migrations](/superschematic/reference/migrations/)
+   says how to install it.
+5. Build each server's entrypoint module at `<out>/server/<stack>/<server>`
+   with `go build`, start it with its resolved config and `PORT`, callees
+   first, and wait until it answers `/readyz`. Each line a server prints is
+   printed with its name in front.
+
+Dev stays in the foreground until Ctrl-C or until a server exits, then
+stops the servers, callers first, and the container, which keeps its data
+for the next run. `--remove-database` removes the container and its data
+instead.
+
+A secret a server reads comes from
+`<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
+line per secret, `<Type>.<FIELD>=<value>`, such as
+`PaymentsSecrets.STRIPE_KEY=sk_test_...`. A value that is not plain is a Go
+quoted string. The `.superschematic` directory ignores itself in git, and
+also holds the Ed25519 key pair each server signs its calls to another
+with; no secret and no private key reaches the output root.
+
+Without a directory, dev runs the working directory when it is a Stack
+service, else the one Stack service under `./schemas/services`. It needs
+Docker and Go.
+
+```
+superschematic stack dev ./schemas/services/shop-stack
+superschematic stack dev ./schemas/services/shop-stack --environment Dev --remove-database
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
+| `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
+| `--remove-database` | false | on exit, remove the Postgres container and its data instead of stopping it |
+| `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
+
+A local environment sets the container's image and host port with its
+values, and a server's port with its settings; a port it leaves out comes
+from a hash of the stack, the environment and the server, so it stays the
+same from run to run:
+
+```ts
+@environment({
+  target: "local",
+  local: { postgresImage: "postgres:16-alpine", postgresPort: 55432 },
+  settings: [{ of: ShopApi, port: 8080 }],
+})
+export abstract class Dev {}
+```
+
+## `stack bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and `outputs`
+
+The cloud half of the `stack` group bootstraps, plans, deploys and
+destroys the environments a Stack service declares
+(`docs/stack-model.md`, sections 7.3, 11.1 and 11.2). Each command loads
+the stack, resolves one environment as the `stack` generator does, and
+drives the environment's target and provisioner. A binary deploys to a
+target only when it links the target's extension and the provisioner's
+(`gcp.Extension{}`, `pulumi.Extension{...}`). An environment on the
+`local` target runs with `stack dev`; `plan`, `deploy`, `bootstrap`,
+`destroy` and `outputs` refuse it, and `secrets set` writes its
+`secrets.env`.
+
+Each of these commands takes these flags:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
+| `--naming` | `<stack>/../../superschematic.toml` | naming config file |
+| `--program-dir` | `<schemas-root>/dist/program/<stack>/<environment>` | where to render the provisioner's program |
+| `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `deploy`, `destroy` and `outputs` take it |
+
+### `stack bootstrap <environment>`
+
+Prepare the cloud project the environment deploys to, with an owner's
+credentials, once; it is safe to run again. On gcp it enables the APIs,
+creates the state bucket and its KMS key, applies the Artifact Registry
+repository, the `deployer` and `planner` accounts and Workload Identity
+Federation for the GitHub repository, and creates the secret of each
+platform credential the environment needs. Then it asks for each
+credential with no value, with the terminal's echo off.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--repository` | read from the git remote `origin` | the GitHub repository the CI runs in, `owner/name` |
+
+### `stack secrets set <environment> [Type.FIELD]`
+
+Ask for the value of every secret of the environment that has none, and
+every platform credential, with the terminal's echo off, and store each in
+the target's secret store (Secret Manager on gcp), or, for a local
+environment, in the `secrets.env` `stack dev` reads. Name one secret, by
+the type that declares it and its field, to replace its value. It needs a
+terminal. On a fresh cloud environment, deploy first: its infrastructure
+step creates each secret's storage.
+
+```
+superschematic stack secrets set Staging
+superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
+```
+
+### `stack plan <environment>`
+
+Show what `stack deploy` would do, changing nothing: the provisioner's plan
+of every resource, with each server's image pinned, and each database's
+migration plan from the schema the deploy manifest records. It also lists
+the secrets with no value, the servers with no image yet, the migration
+phases a failed deploy left part-way, and the records to create by hand
+for a domain no DNS platform holds. It exits 1 after printing when a plan
+has a hazard of a `--fail-on` class that no `--allow` names.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--image` | the manifest's | a server's image, `<server>=<repository>@sha256:<digest>`; repeatable |
+| `--fail-on` | `all` | hazard classes, comma-separated, `all`, or `none` |
+| `--allow` | none | a hazard id to acknowledge; repeatable |
+| `--out` | none | write the plan as JSON, for `stack deploy --expect` |
+| `--format` | `text` | print the plan as `text` or `json` |
+
+### `stack deploy <environment>`
+
+Deploy the environment in deploy order: infrastructure, each database's
+`expand` phase, the servers wave by wave, callees first, the `contract`
+phases, exposure. The deploy manifest records each step. Every secret
+needs a value before the first step after infrastructure; at a terminal
+the deploy asks for each one missing. A rollout that fails runs no
+`contract` step, and the next deploy plans from the schema between the
+phases.
+
+```
+superschematic stack deploy Staging --image shop-api=us-east1-docker.pkg.dev/acme-staging/shop/shop-api@sha256:...
+superschematic stack plan Preview --param pr=123 --out plan.json
+superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'destructive:table/order/column/total'
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--image` | the manifest's | a server's image, `<server>=<repository>@sha256:<digest>`; repeatable. A server with neither is refused |
+| `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
+| `--allow` | none | a hazard id to acknowledge; repeatable |
+| `--expect` | none | a plan `stack plan --out` wrote: refuse migration plans other than its |
+
+### `stack destroy <environment>`
+
+Remove every resource of the run and its deploy manifest. It asks for the
+run's name at a terminal unless `--yes`, and refuses without either.
+
+### `stack outputs <environment>`
+
+Print the outputs of the run's applied resources as JSON, by node ID and
+output name, leaving out secret ones. `--out` writes them to a file, the
+`outputs.json` the bindings generator reads.
 
 ## Extension commands
 

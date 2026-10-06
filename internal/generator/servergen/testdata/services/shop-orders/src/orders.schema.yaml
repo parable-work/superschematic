@@ -1,0 +1,45 @@
+name: shop-orders
+kind: API
+types:
+  OrdersConfig:
+    name: OrdersConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: FULFILLMENT_REGION
+        typeRef: { name: string }
+        required: true
+        default: "us"
+  OrderView:
+    name: OrderView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: OrderQueries
+    operations:
+      - name: getOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: GET
+        restPath: orders/{id}
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+  - name: OrderMutations
+    operations:
+      # Encrypted: the server's Config takes the implementation's
+      # PayloadDecryptor.
+      - name: placeOrder
+        typeRef: { name: OrderView }
+        required: true
+        encrypted: true
+        httpMethod: POST
+        restPath: orders
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true

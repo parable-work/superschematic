@@ -1,0 +1,22 @@
+# Two servers: Storefront, declared, serves shop-orders and shop-reviews;
+# shop-api, which Storefront calls, runs on a default server of its own.
+# The entrypoints need no environment, so the stack declares none.
+kind: Stack
+types:
+  Shop:
+    name: Shop
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: shop-api, kind: API }
+        - { name: shop-orders, kind: API }
+        - { name: shop-reviews, kind: API }
+      expose:
+        - deployable: Storefront
+  Storefront:
+    name: Storefront
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: shop-orders, kind: API }
+        - { name: shop-reviews, kind: API }

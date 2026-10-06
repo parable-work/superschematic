@@ -1,0 +1,141 @@
+{
+  "token": "gcp:iam/workloadIdentityPool:WorkloadIdentityPool",
+  "terraform": {
+    "type": "google_iam_workload_identity_pool",
+    "renames": {
+      "attestationRules": "attestation_rules",
+      "attestationRules.googleCloudResource": "google_cloud_resource",
+      "deletionPolicy": "deletion_policy",
+      "displayName": "display_name",
+      "inlineCertificateIssuanceConfig": "inline_certificate_issuance_config",
+      "inlineCertificateIssuanceConfig.caPools": "ca_pools",
+      "inlineCertificateIssuanceConfig.keyAlgorithm": "key_algorithm",
+      "inlineCertificateIssuanceConfig.rotationWindowPercentage": "rotation_window_percentage",
+      "inlineCertificateIssuanceConfig.useDefaultSharedCa": "use_default_shared_ca",
+      "inlineTrustConfig": "inline_trust_config",
+      "inlineTrustConfig.additionalTrustBundles": "additional_trust_bundles",
+      "inlineTrustConfig.additionalTrustBundles.trustAnchors": "trust_anchors",
+      "inlineTrustConfig.additionalTrustBundles.trustAnchors.pemCertificate": "pem_certificate",
+      "inlineTrustConfig.additionalTrustBundles.trustDefaultSharedCa": "trust_default_shared_ca",
+      "inlineTrustConfig.additionalTrustBundles.trustDomain": "trust_domain",
+      "workloadIdentityPoolId": "workload_identity_pool_id"
+    }
+  },
+  "inputProperties": {
+    "attestationRules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:iam/WorkloadIdentityPoolAttestationRule:WorkloadIdentityPoolAttestationRule"
+      }
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "disabled": {
+      "type": "boolean"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "inlineCertificateIssuanceConfig": {
+      "$ref": "#/types/gcp:iam/WorkloadIdentityPoolInlineCertificateIssuanceConfig:WorkloadIdentityPoolInlineCertificateIssuanceConfig"
+    },
+    "inlineTrustConfig": {
+      "$ref": "#/types/gcp:iam/WorkloadIdentityPoolInlineTrustConfig:WorkloadIdentityPoolInlineTrustConfig"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "workloadIdentityPoolId": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "workloadIdentityPoolId"
+  ],
+  "types": {
+    "gcp:iam/WorkloadIdentityPoolAttestationRule:WorkloadIdentityPoolAttestationRule": {
+      "type": "object",
+      "properties": {
+        "googleCloudResource": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "googleCloudResource"
+      ]
+    },
+    "gcp:iam/WorkloadIdentityPoolInlineCertificateIssuanceConfig:WorkloadIdentityPoolInlineCertificateIssuanceConfig": {
+      "type": "object",
+      "properties": {
+        "caPools": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "keyAlgorithm": {
+          "type": "string"
+        },
+        "lifetime": {
+          "type": "string"
+        },
+        "rotationWindowPercentage": {
+          "type": "integer"
+        },
+        "useDefaultSharedCa": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:iam/WorkloadIdentityPoolInlineTrustConfig:WorkloadIdentityPoolInlineTrustConfig": {
+      "type": "object",
+      "properties": {
+        "additionalTrustBundles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:iam/WorkloadIdentityPoolInlineTrustConfigAdditionalTrustBundle:WorkloadIdentityPoolInlineTrustConfigAdditionalTrustBundle"
+          }
+        }
+      }
+    },
+    "gcp:iam/WorkloadIdentityPoolInlineTrustConfigAdditionalTrustBundle:WorkloadIdentityPoolInlineTrustConfigAdditionalTrustBundle": {
+      "type": "object",
+      "properties": {
+        "trustAnchors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:iam/WorkloadIdentityPoolInlineTrustConfigAdditionalTrustBundleTrustAnchor:WorkloadIdentityPoolInlineTrustConfigAdditionalTrustBundleTrustAnchor"
+          }
+        },
+        "trustDefaultSharedCa": {
+          "type": "boolean"
+        },
+        "trustDomain": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "trustAnchors",
+        "trustDomain"
+      ]
+    },
+    "gcp:iam/WorkloadIdentityPoolInlineTrustConfigAdditionalTrustBundleTrustAnchor:WorkloadIdentityPoolInlineTrustConfigAdditionalTrustBundleTrustAnchor": {
+      "type": "object",
+      "properties": {
+        "pemCertificate": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pemCertificate"
+      ]
+    }
+  }
+}

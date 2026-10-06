@@ -2,9 +2,10 @@
 The schema catalog: the stored schemas, with no access checks (the
 registry and the instance store ask the policy first). A schema name has
 one draft and a line of published versions in each namespace. define
-stores the draft, replacing the one before it; publish makes the draft the
-next live version (1, 2, 3, ...) and appends a publish event. Instances
-are read and written with the live version, the newest one.
+stores the draft, replacing the one before it, and appends a define event
+with the draft's hash; publish makes the draft the next live version (1,
+2, 3, ...) and appends a publish event. Instances are read and written
+with the live version, the newest one.
 
 Both refuse a document the engine does not take (document.ts) and a
 version the compatibility rule refuses against the live one (compat.ts).
@@ -44,7 +45,7 @@ import { afterConfigChanges } from '../behaviors/publish.js';
 import type { BehaviorRegistry } from '../behaviors/registry.js';
 import { prefixOf, storedKey } from '../behaviors/storage.js';
 import { EngineError, IncompatibleChangeError, SchemaDocumentError } from '../errors.js';
-import { appendEvent } from '../events/log.js';
+import { appendEvent, type DefineChange } from '../events/log.js';
 import type { Namespaces } from '../namespaces.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
@@ -109,6 +110,12 @@ export interface VersionRuntime {
  */
 export type ReadCheck = (schema: string) => void;
 
+/** Who defines or publishes: the event's actor and, for a service's call, its deployable (events/log.ts, actorOf). */
+export interface SchemaActor {
+  readonly actor: string;
+  readonly service?: string;
+}
+
 const allowReads: ReadCheck = () => undefined;
 
 const DRAFT = 0;
@@ -135,13 +142,15 @@ export class SchemaCatalog {
   }
 
   /**
-   * define stores a document as its name's draft in a namespace. ask is
-   * the access check of the caller who defines it, for read on each other
-   * schema its behaviors' configs reach (ConfigTarget.schemas); source
-   * names the document in errors.
+   * define stores a document as its name's draft in a namespace and
+   * appends a define event with its hash. ask is the access check of the
+   * caller who defines it, for read on each other schema its behaviors'
+   * configs reach (ConfigTarget.schemas); source names the document in
+   * errors.
    */
-  define(model: SchemaModel, namespace: string, actor: string, ask: ReadCheck = allowReads, source = 'schema'): SchemaRecord {
+  define(model: SchemaModel, namespace: string, by: SchemaActor, ask: ReadCheck = allowReads, source = 'schema'): SchemaRecord {
     const now = this.clock();
+    const hash = hashOf(model.canonical);
     return this.storage.transaction(() => {
       this.checkNameSide(namespace, model.name);
       this.composeReaching(model, namespace, ask, source);
@@ -154,8 +163,20 @@ export class SchemaCatalog {
          ON CONFLICT (namespace, name, version) DO UPDATE
          SET document = excluded.document, hash = excluded.hash,
              defined_at = excluded.defined_at, defined_by = excluded.defined_by`,
-        [namespace, model.name, DRAFT, model.canonical, hashOf(model.canonical), now, actor]
+        [namespace, model.name, DRAFT, model.canonical, hash, now, by.actor]
       );
+      const change: DefineChange = { hash };
+      appendEvent(this.storage, {
+        kind: 'define',
+        namespace,
+        schema: model.name,
+        instanceId: null,
+        seq: null,
+        version: null,
+        ...by,
+        at: now,
+        change: JSON.stringify(change),
+      });
       return toRecord(this.row(namespace, model.name, DRAFT) as Row);
     });
   }
@@ -164,7 +185,7 @@ export class SchemaCatalog {
    * publish makes the draft of a name the next live version. ask is the
    * access check of the caller who publishes it, as define's is.
    */
-  publish(name: string, namespace: string, actor: string, ask: ReadCheck = allowReads): PublishResult {
+  publish(name: string, namespace: string, by: SchemaActor, ask: ReadCheck = allowReads): PublishResult {
     const now = this.clock();
     return this.storage.transaction(() => {
       const draft = this.row(namespace, name, DRAFT);
@@ -189,7 +210,7 @@ export class SchemaCatalog {
       this.storage.run(
         `UPDATE engine_schemas SET version = ?, document = ?, hash = ?, published_at = ?, published_by = ?
          WHERE namespace = ? AND name = ? AND version = ?`,
-        [version, model.canonical, hash, now, actor, namespace, name, DRAFT]
+        [version, model.canonical, hash, now, by.actor, namespace, name, DRAFT]
       );
       afterConfigChanges(this.storage, configTransitions(live ? modelOf(String(live.document)) : undefined, model, this.behaviors), {
         holder: namespace,
@@ -206,7 +227,7 @@ export class SchemaCatalog {
         instanceId: null,
         seq: null,
         version,
-        actor,
+        ...by,
         at: now,
         change: model.canonical,
       });

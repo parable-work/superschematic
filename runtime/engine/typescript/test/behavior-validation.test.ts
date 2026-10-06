@@ -200,7 +200,7 @@ for (const driver of drivers) {
         },
       ]);
       assert.equal(engine.instances.get(alice, 'Item', 'i1'), undefined);
-      assert.equal(engine.events.read(alice, { schema: 'Item' }).events.filter((event) => event.kind !== 'publish').length, 0);
+      assert.equal(engine.events.read(alice, { schema: 'Item' }).events.filter((event) => event.instanceId !== null).length, 0);
       seen.length = 0;
       engine.instances.create(alice, 'Item', { title: 'plain' }, { id: 'i1' });
       assert.deepEqual(

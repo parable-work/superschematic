@@ -1104,7 +1104,9 @@ deployment registers with the engine: the work-queue package is built.
 So are search's vectors (the amendment "search's vectors" below), which
 an outside embedder computes and the engine keeps and ranks with no
 SQLite extension, and the engine's search across a namespace's schemas.
-Each change that
+The engine's event log starts at its head, filters and logs defines, its
+HTTP and MCP mounts take service callers (D37), and it serves the
+behaviors it runs (an amendment below on each). Each change that
 lands a piece updates this paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
@@ -1389,6 +1391,64 @@ an outside embedder computes them, and a query carries its own vector.
 | `similar({ id, limit, cursor })`, schema-level and read-only, ranks the instances nearest to one and leaves it out: a full-text search for any of its 32 longest distinct words of three characters or more, fused with its vector's ranking once it has one. Its declaration tells an agent to call it before creating an instance like one it found, to find near-duplicates. | The whole text as the query, which every word must then match; every word, which makes the longest texts slow and the commonest words noisy; the vector alone, which gives nothing before the embedder runs |
 | `engine.search(principal, params, { namespace })`, `POST /namespaces/{namespace}/search` and the MCP tool `search` search every schema the namespace reaches that composes Search, with each schema's `search` as the caller, and merge the hits: a hit scores as its schema's search scores it, 1 / (60 + its place) over its schema's rankings, the first 200 of each, so one schema's best ties another's, and a tie goes to the better place, then to the schema's name. A vector needs its `model` there, and ranks the schemas whose vectors come from that model with its dimensions; the query ranks the rest. It is the engine's one call that names a behavior: a search across schemas has no schema to be an operation of. | A search operation per schema only, which leaves every client to list the schemas and fuse their pages; comparing bm25 or cosine across schemas, whose weights, statistics and models differ |
 | A schema the caller may not read, whose `search` the policy refuses, or whose behaviors the engine cannot run is skipped, not refused. The MCP tool is listed where a schema the caller may read composes Search. | Refusing the whole search for one such schema, which a policy that hides a schema would then turn into a namespace with no search, and which names a schema the caller may not see; the tool in every namespace, offering a search with nothing to search |
+
+### D16, amended: a live client reads the log from its head, filtered, and hears of drafts
+
+A client that wanted only new events replayed the whole log: a stream
+with no `after` started at 0, and nothing named the head. It could not
+leave out high-volume operations such as a lease's heartbeats, so a
+dashboard over a work queue parsed every heartbeat to drop it, and it
+could not tell when replay had caught up, so it could not show "live".
+Defining a draft appended nothing, so a reviewer watching the stream
+never learned a draft waited to be published.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `after` takes `head` in `events.read`, the JSON route and the stream: the page is empty, `next` is the cursor of the log's last event and `more` is false. The checks of any read still run, so a refused schema is still 403. | An option of its own (`fromHead`) beside `after`, which two arguments could contradict; a stream with no `after` starting at the head, which changes what every client that relies on a replay from 0 gets; a route for the head alone |
+| Three filters, ANDed: `kinds`, the event kinds kept; `behaviors`, the operation events of those behaviors kept, so no event of another kind; `exclude`, operation events dropped by operation name (`heartbeat`). Over HTTP each is a list, repeated or comma-separated. A value that is not a kind, a behavior name or an operation name, and an empty `kinds` or `behaviors`, which would keep nothing, are `invalid_argument`. | `behaviors` letting other kinds through, under which `behavior=Lease` alone would keep every create and publish; `exclude` qualified by behavior (`Lease.heartbeat`), which a dotted behavior name makes ambiguous to split and no case needs, since a type's behaviors share no operation name; an expression language over events |
+| The filters run on the page a read scans, as the access check does: a page scans at most its limit, and `next` is past every event it scanned, kept or dropped. A page of dropped events is empty with `more` true. | Filtering in SQL with a limit on kept events, which scans the log without bound inside one synchronous read to fill a page of a rare kind; `next` at the last kept event, under which a reader scans every dropped event again and one whose filters drop everything later never moves |
+| The stream sends `event: ready`, whose `id:` and `data:` carry the cursor, once per connection, after the first page with `more` false. From `head` it comes at once. Its id is what a reconnecting `EventSource` resumes from. | An unnamed message, which `onmessage` would take for an event of the log; a comment, which carries no id, so a client that started at the head and received nothing would resume from a later head and lose what committed while it was away; a response header, sent before replay starts |
+| A message with only `id:` brings the client's last event id up to the stream's cursor when the filters dropped the last events it read: appended to a write whose last event is behind, alone for a page of replay that kept none, and while waiting, at the next heartbeat in place of its comment. `EventSource` records the id and dispatches nothing, since the HTML standard's dispatch steps return when the data is empty. A reconnect rescans at most what one heartbeat let pass. | An id-only message for every commit the filters drop, a write per heartbeat event per client, the traffic `exclude` exists to save; no id, so a reconnect rescans every dropped event since the last kept one, the whole log for a client whose filters keep few; a named `cursor` event, which a client must listen for to keep its place |
+| A define appends an event of kind `define`, whose change is `{ hash }`, with no instance, sequence or version (null), since a draft has none. Every define appends one, a draft that matches the live version included; a refused define appends none. Engine migration 7 rebuilds `engine_events`, as migration 4 did, so its CHECKs admit exactly that. The runner's subscriptions read instance events only, so no reaction hears a define. | The draft's document in the change, which the draft route already serves, and which would put a document into the log at every edit; version 0, the stored draft's row number, which a client could not tell from a version; the live version the draft follows, which a first draft does not have; appending only when the hash changes, which hides who defined it again |
+| A define is read with `read` on its schema, as every event is. | `define`, which would hide the event from a reviewer who may read and publish but not define, the reader it exists for; `publish`, which would hide it from readers whom the draft route already shows the draft with `read` |
+| A namespace reads its own defines only, not those of the shared namespace it looks names up in, whose publishes it does read. | Reading them too: a shared draft changes nothing the namespace reaches until it is published, and only the shared namespace can publish it |
+
+### D16, amended: a calling service reaches the engine's policy and behaviors
+
+D37 is built in the HTTP runtimes: a request carries a `ServiceCaller`
+beside the end user's principal. The engine used none of it, though its
+natural callers, workers, embedders and controllers, are services. A
+worker with no end user got in only with an end-user credential minted
+for it, which the policy could not tell from a person, and a service
+acting for a user left no trace in the log.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine's `Principal` gains `service`: `{ deployable, serves, subject, standsIn }`, the runtime's `ServiceCaller` and whether it stands in for an end user. The policy and the behaviors see it through the principal. `standsIn(principal)` and `servicePrincipal(caller)` are exported. | A service argument on every engine call, which changes every entry point's signature; a member of the `AccessRequest` alone, which behaviors would not see |
+| A call that brings an end user acts as the end user, with the service beside it: the end user's subject, permissions and claims, `standsIn: false`. | Acting as the service, which loses whom the call is for and gives the user's request the service's authority |
+| A service that brings no end user stands in for one, as D37's `@allowService` admits it: subject `service:<deployable>`, no permissions, `standsIn: true`. | The deployable's name as the subject, which an end user's subject can equal, so a lease or an assignment would be shared between them; the credential's subject, which is a platform's identifier (a service account's id) and changes with the platform; refusing a service with no end user, which shuts out workers |
+| Services hold no permissions (D37). `checkPrincipal` refuses a principal that stands in and holds any, and `can()` is false for one without asking the matcher. A service acting for an end user adds none to the end user's. What a service may do is the policy's to say, by `principal.service`. | Permissions granted to services through the deployment's `PermissionMatcher`, which D37 rules out: the grant restates the edge where nothing checks it against `calls`, and the matcher's rule is for end users |
+| An event records the principal's subject as its actor and the calling deployable in `service`, a column migration 7 adds. An instance's `createdBy` and `updatedBy` stay the subject. | The service only as a stand-in's actor, so a write a service made for a user reads as the user's own; the credential's subject, a platform's identifier |
+| The HTTP and MCP mounts take `authenticateService`, the router option a generated TypeScript server takes, so the runtime's service step verifies `Service-Authorization` on every route. The routes declare no service clause. The engine wraps the deployment's `Authenticator`: its principal when it returns one; else, for a verified service and a request with no `Authorization` header, the service standing in; else no caller, 401. A deployment whose callers are all services passes no `Authenticator`. | `@allowService` on every route, whose listed caller skips the end-user step, so a forwarded end user would never be authenticated; `@requireService`, which shuts out end users; a stand-in whenever the `Authenticator` returns none, under which a service forwarding an expired token would act with its own authority instead of being refused |
+| The runner keeps the principal the deployment names for it. | The service principal of the deployment's workers, which is theirs to present per call |
+
+### D16, amended: the engine serves the behaviors it runs
+
+An MCP client could call `define_schema`, but it could not learn which
+behaviors the engine runs or what their config accepts:
+`engine.behaviors.names()` and `declaration()` answered only in the
+process. An agent composed a behavior by guessing its config and
+reading the refusal, and a UI that builds schemas needed a copy of every
+declaration of its own.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `GET /behaviors` and the tool `list_behaviors` list a summary of each registered behavior, by name: `{ name, description, requires, conflicts, fields, operations }`, the last two by name. `GET /behaviors/{name}` and `describe_behavior` return one behavior's document. The tools are read-only engine tools, in every caller's list beside the schema tools; `tools.invocation` sets their policy (`listBehaviors`, `describeBehavior`). The routes carry no namespace, since an engine registers its behaviors for every namespace. | One tool returning every declaration, over a hundred kilobytes with the core's and the work queue's, which an MCP client would carry in its context; one tool with an optional name, whose result has two shapes; routes under a namespace, which would answer the same in each |
+| A behavior's document is its declaration with what a reader would otherwise have to know filled in: `requires`, `conflicts`, `fields`, `operations` and `vetoes` as lists, and each operation's `scope`, `writes` and invocation policy, the declaration's or the default, under the policy's key after `writes`, as the describe document writes it (D11). An absent `configSchema`, `createParamsSchema` or `preconditionSchema` stays absent: the behavior takes none. | The declaration as its file holds it, which leaves a client to know that an absent scope is `instance` and an absent policy the deployment's default, which it cannot know; the describe document's `params` and `result`, which there name a tool's arguments, not the operation's parameters |
+| Any caller the gate admits may read the catalog, and the policy is not asked. It is the deployment's registered code, the same in every namespace, and carries no schema's or instance's data; the describe document already shows a schema's behaviors to whoever may read it. | Asking `define`, which needs a schema name the catalog does not have, so a policy would be asked about a schema that does not exist |
+
+Generated guidance per behavior's tool and create parameters narrowed by
+a config are a later change.
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -3441,6 +3501,92 @@ renamed `cloudflare:index/record:Record`), and its goldens resolve the
 `stack/stacktest` shop stack with its domains on Cloudflare, DNS-only and
 proxied. The target's bootstrap and the deploy that read
 `dns.credentials` are not built.
+
+### D30, amended: the core registers the local target, with a resource vocabulary of its own
+
+D30 names `local` beside `gcp`, and section 8.3 of `docs/stack-model.md`
+has `stack dev` run it, but section 6.4 makes Pulumi's package schemas the
+vocabulary of every resource graph, and section 6.7 had the core register
+no target. Building the local target and `stack dev` settled both for
+`local`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The core registers `local` (`internal/stack/local`, from `generator.RegisterCore`): its `local.process` and `local.postgres` platforms, their two connectors, its provisioner and its policy rules. A binary with no extension linked runs `stack dev`. | An extension, which every distribution would have to link for the one target that needs no cloud |
+| Its resource types are the core's own `local` provider's: `local:docker/container:Container`, `local:postgres/database:Database`, `local:serviceauth/keyPair:KeyPair` and `local:process/process:Process`, each with a closed JSON Schema the target registers, so resolution checks every node as it checks gcp's. | Pulumi's `docker` and `command` packages, which have no process that is waited on until ready, would need the `pulumi` CLI for a local run, and would be applied by no provisioner but the local one anyway; a Docker Compose file, a second tool with no readiness, migration or secrets step of ours |
+| Every database deployable of an environment shares one Postgres container, a node every database's lowering returns, with a database per hosted DB schema. The container publishes its port on 127.0.0.1 only and trusts every connection, so the derived connection string holds no password. | A container per database, which a laptop pays for in memory; a generated password, which would sit in `environment.json` and buys nothing on loopback |
+| A port the environment does not set is a hash of the stack, the environment and the server, in a range for servers and one for Postgres below the ephemeral ports; a server's `port` setting and the `postgresPort` value replace it, and `local-distinct-ports` refuses two listeners on one. | Ports in order of the servers, which a platform cannot give, since it addresses one deployable and sees no other; ports the provisioner picks at run time, which `environment.json` could not hold, so a derived URL would change from run to run |
+| Each run plans each database's migration with `sqlmigrate`, from the model the database recorded to the schema's, and applies it with `superschematic-migrate`, a binary on `PATH`, expand and contract back to back. | Linking the runner, which brings the database drivers into the compiler's module (D27, Apply); applying `create.sql`, which cannot change a database that has data |
+| Secrets and keys live in `<schemas-root>/.superschematic/local/<stack>/<environment>/`, the provisioner's state backend: `secrets.env`, a line `<Type>.<FIELD>=<value>` per secret, and `keys/`, an Ed25519 key pair per calling and called server, generated at the first run. The directory's `.gitignore` ignores it, and `environment.json` names a secret by its ID and a private key by a reference to the key pair node's `privateJwk` output. | A dotenv file at the schemas root that a person must remember to ignore; keys in `environment.json`, which is checked in |
+| An http edge derives D37's `signed-token` credential with the key pair's private key. The callee gets nothing yet: which field carries a callee's verification keys is for the connectors and the generated entrypoint to define together, and the key pair's `publicJwk` output is what the local connector will give it. | A `SERVICE_AUTH` variable of the local target's own, which the entrypoint would have to read from no shared contract |
+| `local-no-domain` and `local-no-parameters` refuse a domain and parameters. A local server is reached on loopback, and the target runs one copy of an environment. | `manual` DNS for a local domain, which would print records nothing could serve |
+| `ProvisionRequest` gains `OutputRoot`, where the provisioner finds what the build wrote: the local provisioner builds each server's entrypoint module there. | Deriving the output root from the program directory, a layout no other provisioner shares |
+
+`internal/stack/local` holds goldens of the shop stack's local
+environments and their rendered programs, provisioner tests over a fake
+runner, and `TestLocalStackRuns`, which runs a container, a migration and
+two servers for real when Docker is there; `cli`'s
+`TestStackDevRunsALocalEnvironment` runs `stack dev` itself.
+
+The rule is reversible until the first release.
+
+## D45. A deploy runs the deploy order as one targeted update per step, with migrations between, over four target seams
+
+D30 left the cloud half of the `stack` commands to design: how a deploy
+maps the deploy order (`docs/stack-model.md`, section 5.3) onto a
+provisioner, where the deploy manifest lives (section 11.2), how images
+reach the graph, what a target provides for bootstrap and secrets, and what
+a failed deploy leaves. Building `bootstrap`, `secrets set`, `plan`,
+`deploy`, `destroy` and `outputs` settled them.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each step of the deploy order is one targeted update of the provisioner's whole program: the step's nodes are the targets, and the last step that holds nodes updates everything, which deletes what the graph dropped. Each migration phase runs between two updates, outside the graph, through the target's migration runner, which runs the D27 plan documents. The program, and its state, stay one per run. | A graph subset per phase, a Pulumi stack each, read across stack references: more stacks and state, and a node that changes phase moves between stacks, which deletes and creates it. Migration jobs as graph nodes, such as a Cloud Run job whose run token is the plan's hash, with the contract a node after the rollout: the graph would depend on the baseline the manifest records, so `environment.json` would stop being a function of the schemas, and a failed job would leave the runner's state in the provisioner's. |
+| A target carries four deploy seams on its `TargetSpec`: `State` (the provisioner's state backend and each run's manifest), `Secrets` (set, exists, list and get, keyed by a secret's identity or a credential's secret name), `Bootstrap` and `Migrations`. `RegisterTarget` refuses `State`, `Bootstrap` or `Migrations` without a provisioner, and `Bootstrap` or `Migrations` without `State`. A target with none resolves and does not deploy. | A registration per seam, which a target would have to name back; one `Deployer` interface holding all four, which a target that stores secrets but runs no migrations could not register in part |
+| The deploy manifest lives in the target's state store, beside the provisioner's state: on gcp, the versioned state bucket, under `superschematic/manifests/<stack>/<run>.json`. The deploy writes it after every step, with the step it reached and a status (`deploying`, `deployed`, `failed` with the step and the error), so a deploy that died says how far it got, and the bucket keeps every version. It holds the resolved environment as resolved, the IR digest of each service, each server's image and each database's applied model. | The provisioner's stack outputs or config, which tie the manifest to Pulumi and hold no model; a file committed to the repository, a commit per deploy; the runner's state table alone, which records the model but not the images |
+| Images enter a deploy as parameters of the run, `--image <server>=<repository>@sha256:<digest>`; a server given none keeps the image the manifest records, and one with neither is refused. A platform writes a server's image into the graph as its repository path, and the deploy pins it: every string property of the server's own nodes equal to the repository becomes `<repository>@<digest>`, in a copy of the environment the provisioner renders. | Images as environment parameters the graph references, which resolution would have to declare and every golden would change for; an image field on the resolved deployable, the same golden churn; building the images in the deploy, which waits for the generated Dockerfile (section 8.2) |
+| A failed rollout runs no contract, and the manifest records the model between the plan's phases, from which the next deploy plans, superseding the pending contract (D27, amended). A failed migration phase is recorded as pending on the model the database held before it, with its plan; the next deploy finishes that phase first, as the runner requires, then plans from where it ends. A server whose wave did not finish keeps its previous image in the manifest. | An `abandon` step; leaving the recovery to a person reading the runner's status |
+| Every secret needs a value before the first step after infrastructure. The secret's storage is a node of the environment's graph, so a first deploy creates it, then asks for each missing value at a terminal, or stops and names them, for `stack secrets set`. | `secrets set` creating the secret itself, which the graph's node would then fail to create; secrets out of the graph, which would leave their accessor grants without the node they name |
+| A platform credential, such as a DNS platform's API token, is a secret name, the environment variable its provider reads and a description, from one function (`stackdeploy.CredentialsOf`) that bootstrap, plan, deploy, destroy and outputs read. Bootstrap creates its secret directly, readable by the deploying accounts only, and asks for its value; each run reads it with its own account and hands it to the provisioner in `ProvisionRequest.Env`, which reaches the tool's process for that run only. | Credentials declared on the DNS platform's spec, when the secret's name follows the zone, which resolution knows; the credential as provisioner config, which writes ciphertext into the stack's settings file; the credential's secret in the bootstrap graph, which the next environment's bootstrap in the same project would delete |
+| gcp bootstrap creates the state bucket and key directly, then applies its graph (the Artifact Registry repository, the `deployer` and read-only `planner` accounts, their use of the state, Workload Identity Federation for the GitHub repository) in a Pulumi project of its own with a stack per GCP project. The network stays in the environment's graph, where the edges decide it (section 7.2). Google Cloud is reached through an interface over the client libraries, which tests replace. | A bootstrap per environment, which would have two environments in one project own the same accounts; the network in bootstrap, created whether or not a server calls another |
+| A deploy refuses a migration hazard of a `--fail-on` class, every class by default, that no `--allow` names, and `--expect` refuses plans other than the ones `stack plan --out` showed. Acknowledgments are flags until the generated CI decides where a pull request keeps them. | No default gate, which lets a drop through unread |
+
+Status: built. The seams are in `internal/registry/stack_deploy.go`, the
+deploy in `internal/stackdeploy` with its public face in `stack`, and the
+commands in `cli/stack_deploy.go`; `stack/stacktest`'s fake target carries
+every seam, and `TestDeployRandom` in `extensions/pulumi` deploys through
+the real provisioner against a `file://` backend. The gcp target has
+bootstrap, the Secret Manager store and the state bucket. The local target
+carries no deploy seam: `stack dev` runs it, the cloud commands refuse a
+local environment and point to it, and `secrets set` writes a local
+environment's `secrets.env` through a store the CLI hands the operation,
+since the file sits under the schemas root, which a registry does not
+know. Not built: the
+gcp migration runner, a Cloud Run job running `superschematic-migrate`, so
+a gcp deploy with a migration to run is refused; `CredentialsOf` returns
+none until the Cloudflare DNS platform resolves its credentials into
+`environment.json`; image builds; and a lock that keeps two deploys of one
+run apart beyond the provisioner's and the runner's own.
+### D30, amended: the server entrypoint, its Dockerfile and the scaffold a stack writes
+
+D30 said superschematic generates each server's entrypoint and Dockerfile,
+and its amendment on `Deps` left both to the build. Building them for Go
+(`docs/stack-model.md`, sections 8.1, 8.2 and 8.5) settled the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Stack kind's `server` generator writes them, beside `stack`, for each Go server of the stack, which `stack.Servers` lists without an environment. Each server is a Go module at `<output-root>/server/<stack>/<server>/` holding `main.go`, `go.mod` and a Dockerfile, whose `go.mod` requires and replaces every generated, runtime and implementation module it builds from. superschematic writes no `go.sum`; `go mod tidy` fills it. | A generator on each API service, which cannot see that one server serves several APIs. The entrypoint under `stack/<stack>`, which `stack` empties on each build of the environments. A generated `go.sum`, whose hashes depend on modules no offline build can read. |
+| One `main` serves every API of its server: one pgx pool per database and one SDK client per callee, shared across the APIs, and each API's routes on a router of its own, a request going to the API whose router registers its method and path. The build refuses two served APIs that register one method and path. The server answers `/healthz` while it runs and `/readyz` while each database answers, listens on `$PORT`, and drains on SIGTERM. A pool connects when first used, so a server starts before its database. | Every API's `RegisterRoutes` on one router, which chi refuses: each registers middleware and mounts `/api`. A connection at startup, which stops a server whose database comes up after it. |
+| The implementation package supplies what only it can: `New(deps)`, and `AuthMiddleware(deps)` and `PayloadDecryptor(deps)` where the API's `Config` takes them. The scaffold's refuse every request and every payload. | An auth middleware the entrypoint builds from the auth provider's stores, which still needs the deployment's token verification and role store, and which an extension's provider has no hook for. |
+| A stack's build scaffolds each API its servers serve, with no flag, and writes a `go.mod` beside a scaffold that no module holds. The entrypoint imports each implementation from the module of the nearest `go.mod`, read on each build. `--scaffold` stays for builds outside a stack, and build-all rebuilds a cached stack whose served implementation is missing. | Requiring the engineer to make a module first, which leaves a fresh stack unbuildable. A path per server, which D30 already refused. |
+| Each client of a `calls` edge sends the D37 credential its `ServiceEndpoint` names and forwards the request's end user. The service authenticator waits for the service-auth field: until a connector derives it, a server whose API has a service clause refuses to start. | A service-auth configuration in one JSON variable, the encoding section 3.4 refused for derived fields. Starting with no authenticator, whose routes would answer every service caller 401. |
+| The Dockerfile's context is the repository root, cut down by `Dockerfile.dockerignore`. A Rust stage builds superscalar's static archive (and the version graph's, when a database declares one) with `tools.env`'s Rust release, the Go stage links it on Debian's glibc, and the binary runs on distroless `cc` as a non-root user. | A `CGO_ENABLED=0` binary on a static base, which cgo against the archive rules out (D3). An archive from the host's checkout, whose platform is the host's. |
+
+OpenTelemetry export, the Cloud SQL connector and the entrypoints of
+TypeScript and Rust servers are not built. `examples/acme-shop` keeps its
+hand wiring until a later change moves it onto the entrypoint.
+
+The rule is reversible until the first release.
 
 ### D14, amended: a scalar that holds JSON says which JSON
 

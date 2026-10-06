@@ -191,6 +191,59 @@ func TestCallWithinOneServer(t *testing.T) {
 	}
 }
 
+// TestServers: a stack's servers need no environment. Each declared server
+// and the default server of every API it reaches that no declared server
+// serves come with the APIs they serve, the APIs those call and their
+// language, and a server whose APIs are written in two languages fails.
+func TestServers(t *testing.T) {
+	describe := func(servers []*ir.ResolvedDeployable) string {
+		var parts []string
+		for _, s := range servers {
+			var serves, calls []string
+			for _, ref := range s.Services {
+				serves = append(serves, ref.Name)
+			}
+			for _, ref := range s.Calls {
+				calls = append(calls, ref.Name)
+			}
+			parts = append(parts, fmt.Sprintf("%s declared=%t serves=%s calls=%s %s", s.Name, s.Declared, strings.Join(serves, ","), strings.Join(calls, ","), s.Language))
+		}
+		return strings.Join(parts, "; ")
+	}
+	t.Run("declared and default", func(t *testing.T) {
+		s, services := shop()
+		s.Environments = nil
+		servers, err := stack.Servers(stack.Input{Stack: s, Services: services})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := describe(servers), "Orders declared=true serves=shop-orders calls=shop-api GO; shop-api declared=false serves=shop-api calls= GO"; got != want {
+			t.Errorf("servers = %s, want %s", got, want)
+		}
+	})
+	t.Run("one server for two APIs", func(t *testing.T) {
+		s, services := shop()
+		s.Deployables = []*ir.DeployableDecl{{Name: "Backend", Kind: ir.DeployableServer, Serves: []ir.ServiceRef{stacktest.ShopOrders, stacktest.ShopAPI}}}
+		servers, err := stack.Servers(stack.Input{Stack: s, Services: services})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := describe(servers), "Backend declared=true serves=shop-api,shop-orders calls=shop-api GO"; got != want {
+			t.Errorf("servers = %s, want %s", got, want)
+		}
+	})
+	t.Run("two languages in one process", func(t *testing.T) {
+		s, services := shop()
+		s.Deployables[0].Serves = append(s.Deployables[0].Serves, ir.ServiceRef{Name: "shop-storefront", Kind: ir.SchemaKindAPI})
+		_, err := stack.Servers(stack.Input{Stack: s, Services: services})
+		var errs *stack.Errors
+		if !errors.As(err, &errs) {
+			t.Fatalf("Servers = %v, want *stack.Errors", err)
+		}
+		mustFail(t, errs, stack.CodeUnrealizable, "server Orders serves shop-orders in GO and shop-storefront in TYPESCRIPT; one process runs one language")
+	})
+}
+
 // TestSQLEdgeFromTheOneDBDependency: an API with no authDb connects to its
 // one DB-kind dependency, and one with only a General dependency connects
 // to nothing (section 3.3).

@@ -36,6 +36,10 @@ namespace, with the time of its last run and of its next. The event log
 records the cause of an event the runner's work wrote: the behavior, the
 event it reacted to or the schedule that ran, and its depth, 0 for a
 caller's change.
+
+The define of a draft is an event too, of kind define, with no instance
+and no version, since a draft has none; an event a service's call wrote
+records the service's deployable (D37).
 */
 
 import type { MigrationSet } from './storage/migrations.js';
@@ -237,6 +241,57 @@ ALTER TABLE engine_events ADD COLUMN cause_behavior TEXT;
 ALTER TABLE engine_events ADD COLUMN cause_event INTEGER;
 ALTER TABLE engine_events ADD COLUMN cause_schedule TEXT;
 ALTER TABLE engine_events ADD COLUMN depth INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0);
+`);
+      },
+    },
+    {
+      version: 7,
+      name: 'define events and calling services',
+      // As migration 4 did: SQLite cannot change a CHECK constraint, so the
+      // log is copied, cursors and all, into a table whose kind CHECK
+      // admits define, whose version is null for a define alone, and which
+      // has the service column; every index and trigger is made again.
+      up(storage) {
+        storage.exec(`
+CREATE TABLE engine_events_next (
+  cursor         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind           TEXT    NOT NULL CHECK (kind IN ('create', 'update', 'delete', 'operation', 'publish', 'define')),
+  namespace      TEXT    NOT NULL,
+  schema         TEXT    NOT NULL,
+  instance_id    TEXT,
+  seq            INTEGER CHECK (seq >= 1),
+  version        INTEGER CHECK (version >= 1),
+  actor          TEXT    NOT NULL,
+  at             INTEGER NOT NULL,
+  change         TEXT    CHECK (change IS NULL OR json_valid(change)),
+  cause_behavior TEXT,
+  cause_event    INTEGER,
+  cause_schedule TEXT,
+  depth          INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0),
+  service        TEXT,
+  CHECK ((kind IN ('publish', 'define')) = (instance_id IS NULL)),
+  CHECK ((instance_id IS NULL) = (seq IS NULL)),
+  CHECK ((kind = 'define') = (version IS NULL))
+) STRICT;
+
+INSERT INTO engine_events_next
+  (cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, cause_schedule, depth)
+SELECT cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, cause_schedule, depth
+FROM engine_events ORDER BY cursor;
+
+DROP TABLE engine_events;
+ALTER TABLE engine_events_next RENAME TO engine_events;
+
+CREATE UNIQUE INDEX engine_events_instance ON engine_events (namespace, schema, instance_id, seq)
+  WHERE instance_id IS NOT NULL;
+CREATE INDEX engine_events_namespace ON engine_events (namespace, cursor);
+CREATE INDEX engine_events_schema ON engine_events (namespace, schema, cursor);
+CREATE INDEX engine_events_publish ON engine_events (namespace, cursor) WHERE kind = 'publish';
+
+CREATE TRIGGER engine_events_no_update BEFORE UPDATE ON engine_events
+BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
+CREATE TRIGGER engine_events_no_delete BEFORE DELETE ON engine_events
+BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
 `);
       },
     },

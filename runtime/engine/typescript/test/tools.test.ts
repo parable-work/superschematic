@@ -2,7 +2,8 @@
 // names and MCP handles, hidden tools and why, invocation policies (the
 // default, configured ones, a behavior operation's and a distribution's
 // policy), the options' checks, the core's behaviors' operations as tools,
-// what each tool call does and refuses, and that no tool publishes.
+// what each tool call does and refuses, that no tool publishes, and the
+// behavior catalog.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -240,6 +241,8 @@ describe('the tools document', () => {
         ['engine.listSchemas', 'list_schemas', 'engine', 'listSchemas'],
         ['engine.describeSchema', 'describe_schema', 'engine', 'describeSchema'],
         ['engine.defineSchema', 'define_schema', 'engine', 'defineSchema'],
+        ['engine.listBehaviors', 'list_behaviors', 'engine', 'listBehaviors'],
+        ['engine.describeBehavior', 'describe_behavior', 'engine', 'describeBehavior'],
         ['item.create', 'item_create', 'item', 'create'],
         ['item.get', 'item_get', 'item', 'get'],
         ['item.list', 'item_list', 'item', 'list'],
@@ -323,7 +326,7 @@ describe('the tools document', () => {
     const tools = engine.tools.manifest(reader).tools;
     assert.deepEqual(
       tools.filter((entry) => !entry.mcp.hidden).map((entry) => entry.name),
-      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'item.get', 'item.list', 'item.history']
+      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'item.get', 'item.list', 'item.history']
     );
     assert.equal(
       (tool(engine, 'item.increment', reader).mcp as { hiddenReason: string }).hiddenReason,
@@ -343,7 +346,7 @@ describe('the tools document', () => {
     publish(engine, orderDocument());
     assert.deepEqual(
       engine.tools.manifest(alice).tools.map((entry) => entry.namespace),
-      ['engine', 'engine', 'engine', 'order', 'order', 'order', 'order', 'order']
+      ['engine', 'engine', 'engine', 'engine', 'engine', 'order', 'order', 'order', 'order', 'order']
     );
   });
 });
@@ -359,6 +362,8 @@ describe('invocation policies', () => {
       'engine.listSchemas': 'auto',
       'engine.describeSchema': 'auto',
       'engine.defineSchema': 'ask',
+      'engine.listBehaviors': 'auto',
+      'engine.describeBehavior': 'auto',
       'item.create': 'auto',
       'item.get': 'auto',
       'item.list': 'auto',
@@ -395,6 +400,8 @@ describe('invocation policies', () => {
         ['engine.listSchemas', 'on-write'],
         ['engine.describeSchema', 'on-write'],
         ['engine.defineSchema', 'on-write'],
+        ['engine.listBehaviors', 'on-write'],
+        ['engine.describeBehavior', 'on-write'],
         ['item.create', 'on-write'],
         ['item.get', 'never'],
         ['item.list', 'never'],
@@ -584,6 +591,9 @@ describe('tool calls', () => {
       ['describe_schema', { name: 3 }],
       ['define_schema', { document: 'text' }],
       ['list_schemas', { all: true }],
+      ['list_behaviors', { name: 'Workflow' }],
+      ['describe_behavior', {}],
+      ['describe_behavior', { name: 'not a name' }],
     ] as const) {
       assert.equal(thrown(() => engine.tools.call(alice, handle, args), EngineError).code, 'invalid_argument', `${handle} ${JSON.stringify(args)}`);
     }
@@ -599,5 +609,81 @@ describe('tool calls', () => {
     const nobody = { subject: 'nobody', permissions: [] };
     assert.ok(thrown(() => engine.tools.call(nobody, 'item_get', { id: 'i1' }), UnknownToolError));
     assert.equal(thrown(() => engine.tools.call(alice, 'item_get', { id: 'i1' }, { namespace: 'nowhere' }), EngineError).code, 'unknown_namespace');
+  });
+});
+
+describe('the behavior catalog', () => {
+  test('lists every behavior the engine runs and describes each with its defaults filled in, asking the policy nothing', () => {
+    const asked: string[] = [];
+    const engine = openTestEngine({
+      metaSchema: openMetaSchema(),
+      behaviors: testBehaviors,
+      policy: (request) => {
+        asked.push(request.action);
+        return false;
+      },
+    });
+    const nobody = { subject: 'nobody', permissions: [] };
+    const summaries = engine.tools.listBehaviors(nobody);
+    assert.deepEqual(
+      summaries.map((summary) => summary.name),
+      engine.behaviors.names()
+    );
+    assert.deepEqual(
+      summaries.find((summary) => summary.name === 'test.Counter'),
+      { name: 'test.Counter', description: counterDeclaration.description, requires: [], conflicts: [], fields: ['count'], operations: ['increment', 'history'] }
+    );
+    assert.deepEqual(engine.tools.describeBehavior(nobody, 'test.Counter'), {
+      name: 'test.Counter',
+      description: counterDeclaration.description,
+      configSchema: counterDeclaration.configSchema,
+      requires: [],
+      conflicts: [],
+      fields: [{ name: 'count', description: 'The count.' }],
+      operations: [
+        {
+          name: 'increment',
+          description: 'Adds to the count.',
+          scope: 'instance',
+          writes: true,
+          invocationPolicy: 'auto',
+          paramsSchema: counterDeclaration.operations?.[0].paramsSchema,
+          resultSchema: counterDeclaration.operations?.[0].resultSchema,
+        },
+        {
+          name: 'history',
+          description: 'Lists what each increment added.',
+          scope: 'instance',
+          writes: false,
+          invocationPolicy: 'auto',
+          paramsSchema: counterDeclaration.operations?.[1].paramsSchema,
+          resultSchema: counterDeclaration.operations?.[1].resultSchema,
+        },
+      ],
+      vetoes: [],
+    });
+    // Everything a declaration carries reaches the document.
+    const described = engine.tools.describeBehavior(nobody, 'Links');
+    const links = engine.behaviors.declaration('Links');
+    assert.deepEqual(described.createParamsSchema, links?.createParamsSchema);
+    assert.deepEqual(
+      described.vetoes.map((veto) => veto.code),
+      (links?.vetoes ?? []).map((veto) => veto.code)
+    );
+    assert.deepEqual(engine.tools.call(nobody, 'list_behaviors', {}), summaries);
+    assert.deepEqual(engine.tools.call(nobody, 'describe_behavior', { name: 'Workflow' }), engine.tools.describeBehavior(nobody, 'Workflow'));
+    assert.equal(thrown(() => engine.tools.describeBehavior(nobody, 'test.Missing'), EngineError).code, 'not_found');
+    assert.deepEqual(asked, [], 'the catalog names no schema, so the policy is not asked');
+  });
+
+  test("a schema-level operation, a precondition schema and a distribution's policy key reach a behavior's document", () => {
+    const review = { key: 'review', values: ['never', 'on-write', 'always'], default: 'on-write' };
+    const engine = openTestEngine({ metaSchema: openMetaSchema(), behaviors: [...reachBehaviors, hold], tools: { invocationPolicy: review } });
+    const holder = engine.tools.describeBehavior(alice, 'test.Holder');
+    const holders = holder.operations.find((operation) => operation.name === 'holders');
+    assert.deepEqual([holders?.scope, holders?.writes, holders?.review], ['schema', false, 'on-write']);
+    // The policy sits after writes whatever its key, as in the describe document.
+    assert.deepEqual(Object.keys(holders ?? {}), ['name', 'description', 'scope', 'writes', 'review', 'paramsSchema', 'resultSchema']);
+    assert.deepEqual(engine.tools.describeBehavior(alice, 'test.Hold').preconditionSchema, holdDeclaration.preconditionSchema);
   });
 });

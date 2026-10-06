@@ -20,8 +20,14 @@ const ProgramFile = "program.json"
 // graph as a list of nodes, plans a create per node, and records each
 // call.
 type FakeProvisioner struct {
-	mu    sync.Mutex
-	calls []string
+	// Fail holds the error Apply returns for a step, keyed by the step's
+	// name (`rollout 2`, `exposure`).
+	Fail map[string]error
+
+	mu       sync.Mutex
+	calls    []string
+	rendered *ir.ResolvedEnvironment
+	env      map[string]string
 }
 
 var _ registry.Provisioner = (*FakeProvisioner)(nil)
@@ -33,10 +39,34 @@ func (p *FakeProvisioner) Calls() []string {
 	return append([]string(nil), p.calls...)
 }
 
-func (p *FakeProvisioner) record(format string, args ...any) {
+// Record adds a call to the log. The target's other fakes record theirs
+// here too.
+func (p *FakeProvisioner) Record(format string, args ...any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls = append(p.calls, fmt.Sprintf(format, args...))
+}
+
+func (p *FakeProvisioner) record(format string, args ...any) { p.Record(format, args...) }
+
+// Rendered returns the environment Render last rendered.
+func (p *FakeProvisioner) Rendered() *ir.ResolvedEnvironment {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.rendered
+}
+
+// Env returns the credentials the last Plan or Apply was handed.
+func (p *FakeProvisioner) Env() map[string]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.env
+}
+
+func (p *FakeProvisioner) keepEnv(req registry.ProvisionRequest) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.env = req.Env
 }
 
 // Render writes program.json: one entry per node of the environment's
@@ -63,6 +93,9 @@ func (p *FakeProvisioner) Render(env *ir.ResolvedEnvironment, dir string) error 
 		return err
 	}
 	p.record("render %d nodes", len(program.Nodes))
+	p.mu.Lock()
+	p.rendered = env
+	p.mu.Unlock()
 	return os.WriteFile(filepath.Join(dir, ProgramFile), append(data, '\n'), 0o644)
 }
 
@@ -71,6 +104,7 @@ func (p *FakeProvisioner) Plan(_ context.Context, req registry.ProvisionRequest)
 	if err := checkParameters(req); err != nil {
 		return nil, err
 	}
+	p.keepEnv(req)
 	var changes []registry.PlannedChange
 	for _, res := range req.Environment.Resources.Resources {
 		if !res.Inherited {
@@ -90,8 +124,9 @@ func (p *FakeProvisioner) Apply(_ context.Context, req registry.ProvisionRequest
 	if step.Wave > 0 {
 		name = fmt.Sprintf("%s %d", name, step.Wave)
 	}
+	p.keepEnv(req)
 	p.record("apply %s: %s", name, strings.Join(step.Resources, ", "))
-	return nil
+	return p.Fail[name]
 }
 
 // Destroy records the call.

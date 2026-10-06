@@ -512,9 +512,11 @@ The field of each API an API `calls`.
 
 Where each API service's implementation lives, per language, as a path
 from the repository root (the parent of the schemas root) in which
-`{service}` is the service's name. `build --scaffold` and
-`build-all --scaffold` write a missing implementation there. An absolute
-path, or one without `{service}`, is an error.
+`{service}` is the service's name. A stack's build writes a missing
+implementation there for each API its servers serve, and
+`build --scaffold` and `build-all --scaffold` for each Go API built. A
+server's generated entrypoint imports the implementation from there. An
+absolute path, or one without `{service}`, is an error.
 
 ### `implementation_paths.go`
 
