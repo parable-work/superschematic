@@ -739,19 +739,18 @@ The release pins the `pulumi` CLI at the Go SDK's version,
 `extensions/pulumi/bindings` writes a Go package over a stack's outputs,
 for scripts and for hand-written Pulumi programs that need a resource the
 vocabulary lacks. It has no command: call it from Go with each
-environment's `environment.json` and the outputs `stack outputs` printed,
-a map from node ID to output name to value.
+environment's `environment.json` and the outputs file `stack outputs --out`
+wrote, which `bindings.UnmarshalOutputs` reads and checks the version of.
 
 ```go
 env, err := stack.Unmarshal(environmentJSON)
 if err != nil {
 	return err
 }
-var resources map[string]map[string]any
-if err := json.Unmarshal(outputsJSON, &resources); err != nil {
+outputs, err := bindings.UnmarshalOutputs(outputsJSON)
+if err != nil {
 	return err
 }
-outputs := bindings.NewOutputs(env, nil, resources)
 err = bindings.Write("internal/shopstack", "shopstack",
 	[]bindings.Environment{{Resolved: env, Outputs: outputs}})
 ```
