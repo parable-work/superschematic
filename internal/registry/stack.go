@@ -21,8 +21,9 @@ import (
 // deployables is realized by a connector, a target names a platform for
 // each deployable kind, a DNS platform holds an environment's domain
 // records, and a provisioner turns the resource graph into running
-// resources. The resolver (internal/stack) reads them; the core registers
-// none.
+// resources. The resolver (internal/stack) reads them. The core registers
+// one target, `local`, with its platforms, connectors and provisioner
+// (internal/stack/local); every other target is an extension's.
 
 // StackEnvironment is the environment being resolved, as platforms,
 // connectors and DNS platforms see it. They must not modify it.
@@ -303,6 +304,13 @@ type ProvisionRequest struct {
 
 	// Dir is where Render wrote the program.
 	Dir string
+
+	// OutputRoot is the output root the stack and its services were built
+	// to. A provisioner that runs or packages what the build wrote reads it
+	// there: the local provisioner builds each server's entrypoint module
+	// at `<OutputRoot>/server/<stack>/<server>`. Empty when the run needs
+	// no build output.
+	OutputRoot string
 
 	// Backend is where the provisioner keeps the environment's state, as
 	// the target's bootstrap created it.

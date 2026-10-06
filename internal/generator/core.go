@@ -5,6 +5,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/stack/local"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -26,10 +27,14 @@ const typesGenerator = "types"
 // ormGenerator is the name of the core generator of the Go ORM.
 const ormGenerator = "orm"
 
-// RegisterCore adds the core generators to reg. The kinds are registered by
-// registry.New; this half lives here because the generator closures call
-// the dispatch methods of this package. Core registers no documents and no
-// build-all hooks; extensions do.
+// RegisterCore adds the core generators to reg, and the core's one target,
+// `local`, with its platforms, connectors and provisioner
+// (internal/stack/local), which a binary with no extension linked runs
+// `stack dev` on. The kinds are registered by registry.New; this half lives
+// here because the generator closures call the dispatch methods of this
+// package, and the local target's provisioner plans migrations with
+// sqlmigrate, which registry cannot import. Core registers no documents and
+// no build-all hooks; extensions do.
 //
 // Registration order fixes Registry.OutputKeys: types, sql, api, sdk is the
 // order the ParseOutputs error lists.
@@ -138,7 +143,7 @@ func RegisterCore(reg *registry.Registry) error {
 			return err
 		}
 	}
-	return nil
+	return local.Register(reg)
 }
 
 // envLoaderLanguage picks the language of the standalone env-var loader

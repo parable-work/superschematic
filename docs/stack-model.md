@@ -645,8 +645,12 @@ A target is a named bundle, registered as a `TargetSpec`, of:
   resolved environment.
 
 `gcp` is Cloud Run, Cloud SQL, Secret Manager, Cloud Build with Artifact
-Registry, and a load balancer. `local` is processes, a Postgres container
-and a dotenv file.
+Registry, and a load balancer. `local` is processes, one Postgres container
+per environment and a gitignored secrets file (section 8.3). The core
+registers `local`, so every binary has it. Its resource types are the
+core's own `local` provider's (a container, a database, an edge's key pair
+and a process), not a Pulumi package's, since its own provisioner is the
+only one that applies them.
 
 Every deployable records its own placement in the IR from the start; the
 environment's target is only the default. A `settings` entry can place one
@@ -872,7 +876,9 @@ last part is not built: the Stack IR has no field for the program yet.
 ### 6.7 Registry surface
 
 There are five specs, registered like the others in section 3 of
-`docs/extension-model.md`. The core registers none of them.
+`docs/extension-model.md`. The core registers one target, `local`, with
+its platforms, connectors and provisioner (section 8.3, and D30, amended:
+the core registers the local target); every other is an extension's.
 
 - `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a server platform without languages or a
@@ -1181,11 +1187,59 @@ equivalents.
 
 ### 8.3 Local stack
 
-`superschematic stack dev` resolves the `local` environment and runs it:
+`superschematic stack dev [<stack-service-dir>] [--environment <name>]`
+runs an environment on the `local` target (`internal/stack/local`):
 
-- a Postgres container with migrations applied;
-- each server as a process with its resolved config;
-- readiness from the generated health endpoints.
+1. It builds the stack service and every service the stack reaches, each
+   with its dependencies, the stack last.
+2. It reads the environment the build resolved: `--environment`, or the
+   stack's one environment on the local target.
+3. It applies the deploy order (section 5.3) through the local provisioner,
+   then stays in the foreground until Ctrl-C or until a server exits.
+4. It stops the servers, callers first, then the container, which keeps
+   its data for the next run. `--remove-database` removes the container
+   and its data instead.
+
+| Stack concept | local |
+| --- | --- |
+| database | one Postgres container per environment, `superschematic-<stack>-<environment>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
+| migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
+| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
+| sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
+| http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
+| secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
+| port | a server's `port` setting and the `postgresPort` value, else a hash of the stack, the environment and the server: 20000 to 22767 for a server and 30000 to 32767 for Postgres, the same from run to run |
+
+`<schemas-root>/.superschematic` holds what belongs to one machine: each
+local environment's secrets file and the key pairs of its edges. It
+ignores itself in git, and nothing in it reaches the output root.
+`environment.json` and the rendered program name a secret by its ID and a
+private key by a reference to its key pair node's `privateJwk` output,
+which the provisioner reads when it starts the caller.
+
+The provisioner renders `local.json` into
+`<output-root>/program/<stack>/<environment>`: the containers, databases,
+migrations and servers it runs. Beside it are the models `stack dev` writes
+for it (`models/<service>.json`), the plans it applies
+(`migrations/<service>.plan.json`) and the binaries it builds (`bin/`).
+Each server runs in a process group of its own, so Ctrl-C reaches `stack
+dev` first, which sends each server SIGTERM, callers first, and SIGKILL
+ten seconds later.
+
+Policy rules refuse what a local environment cannot hold: a domain
+(`local-no-domain`), parameters (`local-no-parameters`), and two listeners
+on one port (`local-distinct-ports`). The platform runs Go servers only,
+until the TypeScript and Rust entrypoints exist.
+
+Not built:
+
+- The callee's half of service auth. Which config field gives a callee
+  its verification keys is for the connectors and the generated entrypoint
+  to define together, in one change; the key pair node's `publicJwk`
+  output is what the local connector will put there. Until then the
+  entrypoint does not start a server whose API has a service clause.
+- Key rotation: a local key pair lasts until its file is removed.
+- Restarting a server that exits: `stack dev` stops the environment.
 
 The resolver is the same, so local and cloud differ only in their platforms
 and connectors.
@@ -1706,7 +1760,8 @@ request adds an edge and grants `run.invoker`".
 
 The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
 `dev`, `plan`, `deploy`, `destroy` and `outputs`. Targets and provisioners
-plug into it; they add no commands of their own.
+plug into it; they add no commands of their own. `stack dev` runs a local
+environment (section 8.3).
 
 Each command loads the Stack service `--stack` names, or the one under
 `./schemas/services`, and resolves the environment as the `stack`

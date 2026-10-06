@@ -3371,6 +3371,34 @@ should be stays open.
 
 The rule is reversible until the first release.
 
+### D30, amended: the core registers the local target, with a resource vocabulary of its own
+
+D30 names `local` beside `gcp`, and section 8.3 of `docs/stack-model.md`
+has `stack dev` run it, but section 6.4 makes Pulumi's package schemas the
+vocabulary of every resource graph, and section 6.7 had the core register
+no target. Building the local target and `stack dev` settled both for
+`local`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The core registers `local` (`internal/stack/local`, from `generator.RegisterCore`): its `local.process` and `local.postgres` platforms, their two connectors, its provisioner and its policy rules. A binary with no extension linked runs `stack dev`. | An extension, which every distribution would have to link for the one target that needs no cloud |
+| Its resource types are the core's own `local` provider's: `local:docker/container:Container`, `local:postgres/database:Database`, `local:serviceauth/keyPair:KeyPair` and `local:process/process:Process`, each with a closed JSON Schema the target registers, so resolution checks every node as it checks gcp's. | Pulumi's `docker` and `command` packages, which have no process that is waited on until ready, would need the `pulumi` CLI for a local run, and would be applied by no provisioner but the local one anyway; a Docker Compose file, a second tool with no readiness, migration or secrets step of ours |
+| Every database deployable of an environment shares one Postgres container, a node every database's lowering returns, with a database per hosted DB schema. The container publishes its port on 127.0.0.1 only and trusts every connection, so the derived connection string holds no password. | A container per database, which a laptop pays for in memory; a generated password, which would sit in `environment.json` and buys nothing on loopback |
+| A port the environment does not set is a hash of the stack, the environment and the server, in a range for servers and one for Postgres below the ephemeral ports; a server's `port` setting and the `postgresPort` value replace it, and `local-distinct-ports` refuses two listeners on one. | Ports in order of the servers, which a platform cannot give, since it addresses one deployable and sees no other; ports the provisioner picks at run time, which `environment.json` could not hold, so a derived URL would change from run to run |
+| Each run plans each database's migration with `sqlmigrate`, from the model the database recorded to the schema's, and applies it with `superschematic-migrate`, a binary on `PATH`, expand and contract back to back. | Linking the runner, which brings the database drivers into the compiler's module (D27, Apply); applying `create.sql`, which cannot change a database that has data |
+| Secrets and keys live in `<schemas-root>/.superschematic/local/<stack>/<environment>/`, the provisioner's state backend: `secrets.env`, a line `<Type>.<FIELD>=<value>` per secret, and `keys/`, an Ed25519 key pair per calling and called server, generated at the first run. The directory's `.gitignore` ignores it, and `environment.json` names a secret by its ID and a private key by a reference to the key pair node's `privateJwk` output. | A dotenv file at the schemas root that a person must remember to ignore; keys in `environment.json`, which is checked in |
+| An http edge derives D37's `signed-token` credential with the key pair's private key. The callee gets nothing yet: which field carries a callee's verification keys is for the connectors and the generated entrypoint to define together, and the key pair's `publicJwk` output is what the local connector will give it. | A `SERVICE_AUTH` variable of the local target's own, which the entrypoint would have to read from no shared contract |
+| `local-no-domain` and `local-no-parameters` refuse a domain and parameters. A local server is reached on loopback, and the target runs one copy of an environment. | `manual` DNS for a local domain, which would print records nothing could serve |
+| `ProvisionRequest` gains `OutputRoot`, where the provisioner finds what the build wrote: the local provisioner builds each server's entrypoint module there. | Deriving the output root from the program directory, a layout no other provisioner shares |
+
+`internal/stack/local` holds goldens of the shop stack's local
+environments and their rendered programs, provisioner tests over a fake
+runner, and `TestLocalStackRuns`, which runs a container, a migration and
+two servers for real when Docker is there; `cli`'s
+`TestStackDevRunsALocalEnvironment` runs `stack dev` itself.
+
+The rule is reversible until the first release.
+
 ## D45. A deploy runs the deploy order as one targeted update per step, with migrations between, over four target seams
 
 D30 left the cloud half of the `stack` commands to design: how a deploy
