@@ -19,7 +19,8 @@
       "superscalar": ["../../../../third_party/superscalar/bindings/typescript/src/index.ts"],
       "@superschematic/schema": ["../../../../packages/schema/src/index.ts"],
       "@superschematic/schema-config": ["../../../../packages/schema-config/src/index.ts"],
-      "@schemas/*": ["./services/*/src/index.ts"]
+      "@schemas/*": ["./services/*/src/index.ts"],
+      "@fixture/ext-scalars": ["./packages/ext-scalars/src/index.ts"]
     }
   }
 }
