@@ -150,6 +150,8 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	}
 
 	// Operation sets and operations share the service clause pair (D37).
+	// `from` only names who may call, so its handles are identities, not
+	// references (D41).
 	for _, clause := range []struct {
 		name string
 		mode ir.ServiceCallersMode
@@ -159,12 +161,14 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	} {
 		specs = append(specs, DecoratorSpec{
 			Name: clause.name, Packages: []string{pkgAPI}, Target: TargetOperationSet,
+			Identities: []string{"from"},
 			Apply: func(n Node, args []any, _ Site) error {
 				return applyServiceCallers(clause.name, clause.mode, args, &n.OperationSet.ServiceCallers, "operation set")
 			},
 		})
 		specs = append(specs, DecoratorSpec{
 			Name: clause.name, Packages: []string{pkgAPI}, Target: TargetOperation,
+			Identities: []string{"from"},
 			Apply: func(n Node, args []any, _ Site) error {
 				return applyServiceCallers(clause.name, clause.mode, args, &n.Field.ServiceCallers, "operation")
 			},

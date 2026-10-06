@@ -3336,8 +3336,12 @@ that question with the three D37 left open.
 the Go, TypeScript and Rust runtimes pass. Each server generator compiles
 `fixture-service-auth-api` and runs requests through it, under Go, Bun
 and cargo, and output for a schema without the decorators is unchanged
-byte for byte. The stack-model pieces that do not exist yet are not
-built: connectors writing the callee config, the generated entrypoint,
-key rotation in the resource graph, and `stack dev`'s keys.
+byte for byte. `from` declares its handles identities
+(`DecoratorSpec.Identities`, D41): naming a caller adds no reference, so
+two APIs may list each other, and the callee's cache key follows only the
+caller's sentinel file, not its schema. The stack-model pieces that do
+not exist yet are not built: connectors writing the callee config, the
+generated entrypoint, key rotation in the resource graph, and
+`stack dev`'s keys.
 
 The rule is reversible until the first release.
