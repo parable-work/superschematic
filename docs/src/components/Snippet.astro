@@ -1,9 +1,9 @@
 ---
 // Quotes a file of an example, read when the site builds, so the code on a
 // page is the code that example builds and tests: examples/acme-shop
-// (scripts/check.sh there), the default, or examples/engine-notes
-// (scripts/check.sh there). See src/lib/snippet.ts for how a page picks the
-// part it quotes.
+// (scripts/check.sh there), the default, examples/engine-notes or
+// examples/engine-jobs (scripts/check.sh in each). See src/lib/snippet.ts
+// for how a page picks the part it quotes.
 //
 // Files under acme-shop's testdata/generated/ are committed copies of the
 // build's output; the title shows them where a reader's own build writes
@@ -16,6 +16,7 @@ const files = import.meta.glob(
   [
     '../../../examples/acme-shop/**/*.{ts,go,sql,toml,json,mod,sh,txt,py,rs}',
     '../../../examples/engine-notes/**/*.{ts,json,sh}',
+    '../../../examples/engine-jobs/**/*.{ts,json,sh}',
     '!../../../examples/*/**/node_modules/**',
     '!../../../examples/acme-shop/schemas/dist/**',
     '!../../../examples/acme-shop/schemas/dist-rust/**',
@@ -39,7 +40,7 @@ const languages: Record<string, string> = {
 
 interface Props {
   /** The example under examples/ the file belongs to. */
-  example?: 'acme-shop' | 'engine-notes';
+  example?: 'acme-shop' | 'engine-notes' | 'engine-jobs';
   /** Path under the example. */
   file: string;
   symbol?: string | string[];
