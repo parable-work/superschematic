@@ -18,7 +18,6 @@ import (
 	"github.com/parable-work/superschematic/cli"
 	"github.com/parable-work/superschematic/registry"
 
-	"github.com/parable-work/superschematic/extensions/cloudflare"
 	"github.com/parable-work/superschematic/extensions/gcp"
 	"github.com/parable-work/superschematic/extensions/pulumi"
 )
@@ -38,10 +37,8 @@ func main() {
 func extensions() []registry.Extension {
 	return []registry.Extension{
 		gcp.Extension{},
-		cloudflare.Extension{},
-		pulumi.Extension{ProviderVersions: map[string]string{
-			"gcp":              gcp.ProviderVersion,
-			cloudflare.Package: cloudflare.ProviderVersion,
-		}},
+		// extensions/cloudflare, the Cloudflare DNS platform, goes here
+		// once it lands, with its provider's pin in ProviderVersions below.
+		pulumi.Extension{ProviderVersions: map[string]string{"gcp": gcp.ProviderVersion}},
 	}
 }

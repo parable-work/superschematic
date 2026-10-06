@@ -24,7 +24,7 @@ import { retries } from './retries.js';
 export { assignment } from './assignment.js';
 export type { AssignmentConfig } from './assignment.js';
 export { budget } from './budget.js';
-export type { BudgetConfig, BudgetMeter, BudgetTransition, MeterRecord, Overrun, ReserveCheck } from './budget.js';
+export type { BudgetConfig, BudgetMeter, BudgetTransition, MeterRecord, Overrun, ReserveCheck, ScopeRead, ScopeValue } from './budget.js';
 export { DEFAULT_SWEEP_MS, DEFAULT_TTL_MS, MAX_SWEEP, lease } from './lease.js';
 export type { DirectiveRecord, ExpiryReason, LeaseConfig, LeaseEnd, LeaseRecord, LeaseTransition } from './lease.js';
 export { presence } from './presence.js';
