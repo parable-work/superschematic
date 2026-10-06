@@ -173,11 +173,15 @@ versiongraph:
 	scripts/versiongraph-archive.sh >/dev/null
 
 # Every version-graph scenario (runtime/versiongraph/testdata/scenarios)
-# through the Go engine and its Postgres adapter, against the Postgres that
-# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+# through the Go engine. First on SQLite (D32): the SQLite adapter, with its
+# own tests and the SQLite vectors, which need no database server and run
+# with or without a Postgres URL. Then through its Postgres adapter,
+# against the Postgres that SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL
+# names; that pass fails without it.
 versiongraph-scenarios: versiongraph
+	cd runtime/versiongraph/go && go test -count=1 -v -run 'OnSQLite$$' ./engine/ && go test -count=1 ./sqlite/
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
-		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against (the SQLite pass above needs none)" >&2; exit 1; }
 	cd runtime/versiongraph/go && go test -count=1 -v -run '^TestScenarios$$' ./engine/
 
 # Every version-graph scenario through the TypeScript engine. First on SQLite
