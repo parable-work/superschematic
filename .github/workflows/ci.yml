@@ -146,12 +146,12 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
-        # Builds the superscalar ffi archive from source; the checkout carries
-        # its own rust-toolchain.toml which rustup reads when it builds. The
-        # wasm32 target builds the version-graph TypeScript package, and
+        # Builds the superscalar ffi archive from source, with this toolchain
+        # rather than the one the checkout's rust-toolchain.toml pins, as the
+        # version-graph archive is (tools.env says why). The wasm32 target builds the version-graph TypeScript package, and
         # rustsdkgen compile tests run cargo clippy on the generated SDK
         # crates, so this toolchain carries clippy.
         run: |
@@ -284,7 +284,7 @@ jobs:
           GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
-          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/pulumi; do
+          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/pulumi extensions/topcoat; do
             echo "==> $m"
             # Packages that run cargo queue on its lock of the shared target
             # directory, and the wait counts against each package's timeout.
@@ -401,6 +401,15 @@ jobs:
           working-directory: extensions/pulumi
           install-mode: none
 
+      - name: golangci-lint (extensions/topcoat)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: extensions/topcoat
+          install-mode: none
+
   acme:
     name: acme (example extension builds without core edits)
     # The full tier: every step builds the example end to end.
@@ -453,7 +462,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The wasm32 target builds the version-graph core the engine's
@@ -487,19 +496,22 @@ jobs:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: examples/acme-schematic/scripts/check_second_decorator.sh
 
-      # The Rust client and the Rust server check.sh builds against the
-      # example's generated crates.
+      # The Rust client, the Rust server and the Topcoat app check.sh builds
+      # against the example's generated crates.
       - name: Cache the acme-shop Rust builds
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             examples/acme-shop/rust
             examples/acme-shop/rust-server
+            examples/acme-shop/topcoat
 
       # The docs site's start-here, first-project and guide pages quote
       # examples/acme-shop. This builds it with the core binary, compiles and
       # tests the Go, TypeScript, Python and Rust code the pages show, runs
-      # every SDK's client against shop-orders served in Go and in Rust, and
+      # every SDK's client against shop-orders served in Go and in Rust,
+      # tests the Topcoat app over shop-orders (built with the binary that
+      # links extensions/topcoat), and
       # fails when a generated file or command output a page quotes
       # (examples/acme-shop/testdata/generated/) is stale.
       - name: acme-shop (the docs example builds and passes its tests in four languages)
@@ -540,7 +552,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The wasm32 target builds the version-graph core the engine's
@@ -654,7 +666,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The superscalar Python package is built from the checkout by

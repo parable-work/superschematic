@@ -2,7 +2,7 @@
 name = "schemas-fixture-nested-arrays-db-types"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.95.0"
+rust-version = "1.99.0"
 description = "Generated Rust types for fixture-nested-arrays-db schema"
 license = "UNLICENSED"
 
