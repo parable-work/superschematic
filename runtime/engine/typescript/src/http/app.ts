@@ -25,8 +25,9 @@ its own under the schema; it sends no ETag, since it names no instance.
 Besides the instances and the event log, the routes serve a schema's
 describe document, the namespace's tools document (tools/catalog.ts) and
 the behaviors the engine runs, which are the same in every namespace, so
-their routes carry none (tools/behaviors.ts); the MCP endpoint is the
-./mcp entry point's.
+their routes carry none (tools/behaviors.ts), and a search across the
+namespace's schemas (engine.search); the MCP endpoint is the ./mcp entry
+point's.
 
 With the runtime's `authenticateService`, a calling service is verified
 on every route and reaches the engine beside the end user, or standing in
@@ -94,6 +95,7 @@ const SCHEMA_OPERATION = `${SCHEMA}/operations/{operation}`;
 const EVENTS = '/namespaces/{namespace}/events';
 const TOOLS = '/namespaces/{namespace}/tools';
 const BEHAVIORS = '/behaviors';
+const SEARCH = '/namespaces/{namespace}/search';
 
 const PATH_PARAMS: Record<string, ParamSpec> = {
   namespace: { name: 'namespace', kind: 'string', required: true },
@@ -277,6 +279,13 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
   route(spec('describeBehavior', 'GET', `${BEHAVIORS}/{name}`), (ctx, { path }) =>
     engine.tools.describeBehavior(principalOf(ctx), path.name as string)
   );
+  // A search across the namespace's schemas that compose Search: the body
+  // is its parameters, which a vector makes too long for a query string.
+  route(spec('searchSchemas', 'POST', SEARCH, body), (ctx, { path, input }) => {
+    const refused = mediaTypeRefusal(ctx, JSON_MEDIA_TYPE);
+    if (refused) return refused;
+    return engine.search(principalOf(ctx), input, { namespace: path.namespace as string });
+  });
 
   // The event log: a JSON page, or with Accept: text/event-stream the
   // stream. A manual route, so the handler owns the streaming response;

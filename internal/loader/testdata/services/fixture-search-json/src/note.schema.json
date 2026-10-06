@@ -1,13 +1,14 @@
 {
   "kind": "General",
   "name": "notes",
-  "description": "A note an engine runs with the core's Search and no extension: its title and body are indexed, the title weighing three times the body.",
+  "description": "A note an engine runs with the core's Search and no extension: its title and body are indexed, the title weighing three times the body, and an embedder settles a vector of 384 numbers for each.",
   "types": {
     "Note": {
       "name": "Note",
       "role": "EmbeddedStruct",
       "behaviors": [
-        { "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 } } }
+        { "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 },
+            "vectors": { "dimensions": 384, "model": "minilm-l6", "permission": "notes.embed" } } }
       ],
       "fields": [
         { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },

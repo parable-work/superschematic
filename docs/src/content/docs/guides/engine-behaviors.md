@@ -34,7 +34,7 @@ schema that composes one until a deployment registers that package.
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision | | [Links](#links) |
 | `Rollups` | values computed from the instances that link here | `Workflow` | [Rollups](#rollups) |
-| `Search` | full-text search over the type's text fields | | [Search](#search) |
+| `Search` | full-text search over the type's text fields, and vector search over embeddings an outside embedder computes | | [Search](#search) |
 | `Reactions` | rules that move statuses after a change commits | `Workflow` | [Reactions](#reactions) |
 | `Constants` | fields the create sets and nothing changes after | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
@@ -155,12 +155,15 @@ create tool (`tasks_create`) takes them as its `behaviors` argument:
 
 Most operations run on one instance. An operation a behavior declares
 with `scope: "schema"` runs on the schema as a whole and names no
-instance. Five do so far:
+instance. Eight do so far:
 
 | Operation | Behavior | What it does |
 | --- | --- | --- |
 | `listLinked` | `Links` | the instances whose link points at a target |
-| `search` | `Search` | a full-text search over the schema's instances |
+| `search` | `Search` | a full-text or vector search over the schema's instances |
+| `similar` | `Search` | the instances nearest to one |
+| `staleEmbeddings` | `Search` | the instances an embedder has a vector to compute for, read-only |
+| `settleEmbeddings` | `Search` | stores the vectors an embedder computed |
 | `claimNext` | `Queue` | claims the first instance the caller can claim |
 | `countClaimable` | `Queue` | counts the instances `claimNext` would try, read-only |
 | `expireHolder` | `Lease` | expires every lease one principal holds |
@@ -181,8 +184,11 @@ engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', li
 
 The access policy is asked for `read` or `write` with the operation's
 name, as for an instance operation. A schema-level operation appends no
-event of its own: it changes state only through the instance operations
-it invokes and the instances it creates, each with its own event. Each
+event of its own: it changes what a read of an instance returns only
+through the instance operations it invokes and the instances it creates,
+each with its own event. A writing one may also write its behavior's own
+tables where no read of an instance shows the change, as
+`settleEmbeddings` stores vectors. Each
 route answers 404 for an operation of the other scope. Over MCP, the tool
 takes the operation's parameters and no instance id.
 
@@ -443,15 +449,18 @@ they ended.
 
 ## Search
 
-Full-text search over the type's own text fields, on SQLite's FTS5.
+Full-text search over the type's own text fields, on SQLite's FTS5, and
+with `vectors`, vector search over embeddings an outside embedder
+computes from the same text.
 
 | | |
 | --- | --- |
-| Config | `fields`: 1 to 16 top-level fields, each a string or a string-valued scalar; `weights`: by field, above 0 and at most 1000 (1 when absent) |
-| Operation | the schema-level, read-only `search({ query, syntax?, limit?, cursor? })`, which returns a page of `{ id, rank, field?, snippet? }` |
+| Config | `fields`: 1 to 16 top-level fields, each a string or a string-valued scalar; `weights`: by field, above 0 and at most 1000 (1 when absent); `vectors`, optional: `dimensions` (1 to 4096), `model` (a label) and `permission` (what an embedder needs) |
+| Operations | all schema-level: `search({ query?, vector?, model?, syntax?, limit?, cursor? })` and `similar({ id, limit?, cursor? })`, which return a page of hits, and an embedder's `staleEmbeddings({ limit?, cursor? })` and `settleEmbeddings({ items })` |
 
 ```json
-"behaviors": [{ "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 } } }]
+"behaviors": [{ "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 },
+    "vectors": { "dimensions": 384, "model": "minilm-l6", "permission": "notes.embed" } } }]
 ```
 
 ```ts
@@ -482,9 +491,67 @@ engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', li
 - **Access.** A caller needs `read` on the schema, and only sees results
   from their own namespace.
 
-There is no vector search; D16 in
-[docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
-says why.
+### Vectors
+
+The engine calls no embedding provider and loads no SQLite extension. A
+worker process, the embedder, holds the config's permission and keeps
+the vectors current: it pulls the instances whose text has no vector,
+computes them with the config's model, and settles them back.
+
+```ts
+const page = engine.instances.invokeSchema(embedder, 'notes', 'staleEmbeddings', { limit: 50 });
+// { model: 'minilm-l6', dimensions: 384,
+//   items: [{ id: 'n1', text: 'Release plan\n\nDates and owners.', sourceHash: '9c1f...' }], next: null }
+const vectors = await provider.embed(page.items.map((item) => item.text));
+engine.instances.invokeSchema(embedder, 'notes', 'settleEmbeddings', {
+  items: page.items.map((item, i) => ({ id: item.id, sourceHash: item.sourceHash, vector: vectors[i] })),
+});
+// { settled: 1, skipped: [] }
+```
+
+- **Stale.** An instance is stale from its create, and again when its
+  indexed text changes or a version changes the model or the dimensions.
+  Its text is its indexed fields joined by a blank line.
+- **The hash.** A settle presents the hash it pulled, and is skipped for
+  an instance whose text or model changed since (`moved`) or that is gone
+  (`not_found`). A vector of the wrong dimensions, all zeros, or with a
+  value a 32-bit float cannot hold refuses the whole batch.
+- **No event.** A settle appends no event and moves no instance's `seq`:
+  no read of an instance shows a vector. Who settled each one and when is
+  kept beside it.
+
+A search takes the query's `vector` beside its `query`, computed with the
+same model:
+
+```ts
+engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', vector: queryVector, model: 'minilm-l6' });
+// { items: [{ id: 'n2', rank: 1, score: 0.0328, field: 'title', snippet: [...],
+//             text: { rank: 1 }, vector: { rank: 1, similarity: 0.83 } }, ...], next: null }
+```
+
+- **A vector alone** ranks by cosine similarity.
+- **Both** fuse the full-text and vector rankings by reciprocal rank
+  fusion (k = 60, over the first 200 of each). Each hit carries its
+  `score`, its place in each ranking (`text`, `vector`) and its
+  similarity, so you can show why it ranks where it does.
+- **The cost.** Vectors are ranked by a scan of every vector of the
+  schema in the namespace, in the engine's process.
+
+`similar({ id })` lists the instances nearest to one, leaving it out: by
+its own text and, once its vector is settled, by its vector too. An agent
+calls it before creating an instance like one it found, to reuse or link
+a near-duplicate instead.
+
+### Searching every schema
+
+`engine.search(principal, params, { namespace })`, `POST
+/namespaces/{namespace}/search` and the MCP tool `search` run `search` on
+every schema of the namespace that composes Search and that the caller
+may read, and merge the hits, each naming its `schema`. Each schema's
+best hit ties the others', since bm25 and cosine do not compare across
+schemas. A vector needs its `model`, and ranks only the schemas whose
+vectors come from it. A schema the caller may not read is skipped
+silently, not refused.
 
 ## Reactions
 

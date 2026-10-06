@@ -652,9 +652,11 @@ notes_list_proposals
 
 The engine's tools name no schema until they are called, so everyone
 lists them and the policy answers the call; the behavior tools ask it
-nothing, since the behaviors are the server's code. No tool publishes: a
-draft that `define_schema` stores goes live only through the HTTP publish
-route.
+nothing, since the behaviors are the server's code. Where a schema
+composes `Search`, one more tool, `search`, searches every such schema the
+caller may read ([Engine behaviors](/superschematic/guides/engine-behaviors/#searching-every-schema)).
+No tool publishes: a draft that `define_schema` stores goes live only
+through the HTTP publish route.
 
 An MCP client connects to `http://127.0.0.1:8787/api/namespaces/default/mcp`
 with the header `Authorization: Bearer <token>`. The end-to-end test uses

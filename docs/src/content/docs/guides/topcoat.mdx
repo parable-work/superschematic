@@ -21,9 +21,9 @@ serves.
 
 ## Build the crate
 
-The extension is a Go module of its own, `extensions/topcoat`. The core
-binary does not link it; `superschematic-topcoat` is the core with it
-linked:
+The extension is a Go module of its own, `extensions/topcoat`. The
+installed `superschematic` binary does not link it, since Topcoat is
+before 1.0; `superschematic-topcoat` is the core with it linked:
 
 ```bash
 cd extensions/topcoat && go build -o superschematic-topcoat ./cmd/superschematic-topcoat
@@ -31,8 +31,8 @@ cd extensions/topcoat && go build -o superschematic-topcoat ./cmd/superschematic
 
 The crate needs the Rust server. A service turns it on with
 `outputs.topcoat: { enabled: true }` in its config, or by being listed in
-`superschematic.toml`. The core binary never reads that table, so the same
-configs still build there:
+`superschematic.toml`. A binary without the extension, `superschematic`
+included, never reads that table, so the same configs still build there:
 
 <Snippet file="schemas/superschematic.toml" from="[extension.topcoat]" to="services" />
 

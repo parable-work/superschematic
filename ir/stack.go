@@ -168,7 +168,7 @@ type Environment struct {
 }
 
 // DNSPlacement names the DNS platform that holds an environment's records
-// and the values it needs (`dns: { cloudflare: { zone } }`).
+// and the values it needs (`dns: { cloudflare: { zone, zoneId } }`).
 type DNSPlacement struct {
 	// Platform is the registered DNS platform's name.
 	Platform string `json:"platform" yaml:"platform"`

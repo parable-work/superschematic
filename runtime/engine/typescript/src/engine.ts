@@ -4,16 +4,18 @@ opens, the namespaces the deployment configures, the access policy it
 supplies, the core's behaviors and the implementations it registers, the
 schema registry, instance store and event log, each of which asks that
 policy on every call, the tool catalog, which reads and calls through
-them, and the runner, which runs the behaviors' reactions and schedules
+them, the search across a namespace's schemas, which calls through them
+too, and the runner, which runs the behaviors' reactions and schedules
 after the commit as the principal the deployment names for it.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
 import { SchemaFileLoader } from '@superschematic/schema-runtime';
 
-import { Access, type AccessPolicy } from './access.js';
+import { Access, checkPrincipal, type AccessPolicy, type Principal } from './access.js';
 import type { AnyBehaviorImplementation } from './behaviors/behavior.js';
-import { coreBehaviors } from './behaviors/core/index.js';
+import { coreBehaviors, searchSchemas, type SchemaSearchHit } from './behaviors/core/index.js';
+import type { Page } from './behaviors/paging.js';
 import { BehaviorRegistry } from './behaviors/registry.js';
 import { EventLog } from './events/log.js';
 import { InstanceStore, defaultIds } from './instances/store.js';
@@ -149,6 +151,19 @@ export class Engine {
       new ToolCatalog(namespaces, access, schemas, instances, tools, catalog, behaviors),
       new Runner(storage, namespaces, catalog, behaviors, instances.reach, events, clock, permissionMatcher, runnerOptions)
     );
+  }
+
+  /**
+   * search searches every schema the namespace reaches that composes
+   * Search and that the principal may read, with each one's search as the
+   * principal, and fuses their rankings (runtime/engine/README.md,
+   * "Search"). params are search's, with a vector only beside its model.
+   * A schema the principal may not read, or whose search the policy
+   * refuses, is skipped, not refused.
+   */
+  search(principal: Principal, params: unknown, target: { namespace?: string } = {}): Page<SchemaSearchHit> {
+    checkPrincipal(principal);
+    return searchSchemas(this.schemas, this.instances, principal, params, this.namespaces.resolve(target.namespace));
   }
 
   /** close stops the runner, ends the engine's event watchers, then closes its file. */

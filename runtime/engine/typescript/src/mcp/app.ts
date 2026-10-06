@@ -1,7 +1,8 @@
 /*
 The engine's MCP endpoint (D16): /namespaces/{namespace}/mcp speaks MCP
 over the streamable HTTP transport, one tool per operation of every live
-schema the namespace reaches and the schema tools (tools/catalog.ts).
+schema the namespace reaches, the schema tools and the search across
+schemas (tools/catalog.ts).
 
 The protocol is the official TypeScript SDK's (@modelcontextprotocol/server,
 an optional peer dependency of this entry point): createMcpHandler serves

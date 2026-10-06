@@ -263,7 +263,7 @@ func TestRegisterTargetRejects(t *testing.T) {
 		other := valid()
 		other.Name = "other"
 		other.ResourceTypes = map[string]json.RawMessage{"fake:x/y:Z": json.RawMessage(`{"type": "array"}`)}
-		if err := reg.RegisterTarget(other); err == nil || !strings.Contains(err.Error(), `targets "fake" and "other" register different schemas for resource type fake:x/y:Z`) {
+		if err := reg.RegisterTarget(other); err == nil || !strings.Contains(err.Error(), `target "fake" and target "other" register different schemas for resource type fake:x/y:Z`) {
 			t.Errorf("a different schema: %v", err)
 		}
 	})
@@ -415,5 +415,45 @@ func TestValidateResource(t *testing.T) {
 	}
 	if ok, _ := reg.ValidateResource(&ir.Resource{ID: "x", Type: "fake:other:Thing"}); ok {
 		t.Error("a type no target registered reports a schema")
+	}
+}
+
+// TestDNSPlatformResourceTypes: a DNS platform registers the schemas of
+// the types it emits as a target does, against the same rule: one schema
+// per type, whoever registers it.
+func TestDNSPlatformResourceTypes(t *testing.T) {
+	lower := func(DNSContext) ([]*ir.Resource, error) { return nil, nil }
+	record := json.RawMessage(`{"type": "object", "required": ["zoneId"], "properties": {"zoneId": {"type": "string"}}, "additionalProperties": false}`)
+	reg := New(naming.Default())
+	if err := reg.RegisterDNSPlatform(DNSPlatformSpec{
+		Name: "other.dns", Lower: lower, ResourceTypes: map[string]json.RawMessage{"other:dns/record:Record": record},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := reg.ValidateResource(&ir.Resource{ID: "r", Type: "other:dns/record:Record", Properties: map[string]any{"zoneId": "z"}}); !ok || err != nil {
+		t.Errorf("valid record: ok %v, %v", ok, err)
+	}
+	if _, err := reg.ValidateResource(&ir.Resource{ID: "r", Type: "other:dns/record:Record", Properties: map[string]any{"zone": "z"}}); err == nil {
+		t.Error("a record without its zone id validates")
+	}
+	if spec, _ := reg.DNSPlatform("other.dns"); spec.ResourceTypes != nil {
+		t.Error("the registered spec keeps its resource type schemas")
+	}
+	if err := reg.RegisterTarget(TargetSpec{Name: "fake", ResourceTypes: map[string]json.RawMessage{"other:dns/record:Record": record}}); err != nil {
+		t.Errorf("a target with the same schema: %v", err)
+	}
+	err := reg.RegisterTarget(TargetSpec{Name: "fake2", ResourceTypes: map[string]json.RawMessage{"other:dns/record:Record": json.RawMessage(`{"type": "object"}`)}})
+	if err == nil || !strings.Contains(err.Error(), `DNS platform "other.dns" and target "fake2" register different schemas for resource type other:dns/record:Record`) {
+		t.Errorf("a target with a different schema: %v", err)
+	}
+	err = reg.RegisterDNSPlatform(DNSPlatformSpec{Name: "third.dns", Lower: lower, ResourceTypes: map[string]json.RawMessage{"third:x:Y": json.RawMessage(`{"type": []}`)}})
+	if err == nil || !strings.Contains(err.Error(), `DNS platform "third.dns" resource type third:x:Y`) {
+		t.Errorf("a schema that does not compile: %v", err)
+	}
+	if _, ok := reg.DNSPlatform("third.dns"); ok {
+		t.Error("a refused DNS platform was registered")
+	}
+	if ok, _ := reg.ValidateResource(&ir.Resource{ID: "x", Type: "third:x:Y"}); ok {
+		t.Error("a refused DNS platform's type was registered")
 	}
 }

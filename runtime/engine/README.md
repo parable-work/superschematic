@@ -13,16 +13,18 @@ the runner of reactions and schedules, the describe and tools documents,
 the behavior catalog, the MCP endpoint (`@superschematic/engine/mcp`),
 and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
-reach other instances, `Search`, full-text search, `Reactions`, which
-the runner runs, `Constants` and `Variants`, which judge the fields a
-write stores, and `Branches`, a version graph on each instance (D32). The
-plug-in interface has what D32 gives a behavior that keeps values of
-other types in its own tables: the schema's other types in
-`parseConfig`, `validate(type, value)` in its contexts, and schedules a
-schema turns off and whose runs write the behavior's own tables. Not
-built yet: the vectors D16 lists beside search. The work-queue behaviors are a package of their own,
-`@superschematic/engine-workqueue` (`runtime/engine-workqueue/README.md`),
-which a deployment registers with the engine.
+reach other instances, `Search`, full-text search with vectors an outside
+embedder computes, and a search across a namespace's schemas,
+`Reactions`, which the runner runs, `Constants` and `Variants`, which
+judge the fields a write stores, and `Branches`, a version graph on each
+instance (D32). The plug-in interface has what D32 gives a behavior that
+keeps values of other types in its own tables: the schema's other types
+in `parseConfig`, `validate(type, value)` in its contexts, and schedules
+a schema turns off and whose runs write the behavior's own tables; a
+writing schema-level operation writes them too. The work-queue behaviors
+are a package of their own, `@superschematic/engine-workqueue`
+(`runtime/engine-workqueue/README.md`), which a deployment registers with
+the engine.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -747,7 +749,7 @@ function is synchronous (D16): one that returns a promise is a
 | `instanceSchema(config, form, typeSchema)` | what its `validate` holds the fields to, as JSON Schemas the describe document and the create and update tools carry under `allOf` ("Validating fields") |
 | `guard(view, request)` | may veto a `create`, an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason, or `{ reason, code?, details? }`, vetoes ("Vetoes and preconditions"). It is asked once every `validate` has accepted the fields. A create's request carries the new instance's `data` and the create's parameters by behavior (`behaviors`), and no precondition. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does. `precondition` is the behavior's own entry of the caller's preconditions |
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
-| `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext` ("Schema-level operations") |
+| `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext`, whose `sql` writes the behavior's own tables in a writing one ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
 | `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"), as a guard does; the view is the referencing instance's, and the request carries no precondition |
@@ -1272,11 +1274,14 @@ An operation declared with `scope: "schema"` has no instance: it runs on
 the schema as a whole, from `schemaOperations`, with a `SchemaContext`:
 the behavior, its config, the call, `can`, `validate` ("Other types"),
 `instances`, `schemas`, and `sql` that reads the behavior's tables and
-its columns across the schema
-(`sql.instances()`) and writes nothing. No instance guard runs and no
-event is appended for it; a writing one changes state only through the
-instance operations it invokes and the instances it creates, each with
-its own event.
+its columns across the schema (`sql.instances()`). No instance guard runs
+and no event is appended for it; a writing one changes what a read of an
+instance returns only through the instance operations it invokes and the
+instances it creates, each with its own event. A writing one's `sql`
+also writes the behavior's own tables (`sql.run`, on `sql.table(name)`),
+in the call's transaction, under the rule a schedule's writes keep
+("Reactions and schedules"): `Search`'s `settleEmbeddings` stores vectors
+this way. A read-only one's `run` refuses (`BehaviorError`).
 
 ```ts
 engine.instances.invokeSchema(me, 'Order', 'summarize', { since: 0 });   // a schema-level operation of Order
@@ -1343,11 +1348,15 @@ the instances stays read-only, as in every context, and a reaction's
 `sql` writes nothing. A schedule writes its tables directly only where
 the write changes nothing an operation returns: history no commit or
 snapshot pins, rows of what no operation can read any more (a discarded
-draft's), and data that only makes a read cheaper, a snapshot say. A
-change an operation shows, such as discarding an idle draft, still goes
-through the operation the run invokes on each instance, so its guards
-run and it appends its event. The engine cannot tell one write from the
-other: keeping to the rule is the behavior's part.
+draft's), and data that only makes a read cheaper, a snapshot say. One
+more kind may change what an operation returns: an index derived from
+the instances' own fields, which moves what a ranking returns and in
+what order and never an instance a read returns (D16, amended: search's
+vectors). A change an operation shows, such as discarding an idle draft,
+still goes through the operation the run invokes on each instance, so
+its guards run and it appends its event. A writing schema-level
+operation's own writes keep the same rule. The engine cannot tell one
+write from the other: keeping to the rule is the behavior's part.
 
 ### Storage
 
@@ -1911,19 +1920,22 @@ task can roll up its subtasks through its own `parent` link, and
 
 #### Search
 
-Full-text search over the instance's own text fields.
+Full-text search over the instance's own text fields, and with
+`vectors`, vector search over embeddings an outside embedder computes
+from the same text.
 
 | | |
 | --- | --- |
-| Config | `fields`: the type's own top-level fields to index, by JSON key, 1 to 16, each a string or a scalar whose values are strings; `weights`: by indexed field, above 0 and at most 1000, 1 for a field it does not name |
-| Fields | none |
-| Operations | schema-level `search({ query, syntax?, limit?, cursor? })` -> a page of `{ id, rank, field?, snippet? }`, read-only |
-| Refusals | a field the type does not declare, or one that is not text (a number, an enum, a list, an object), and a weight for a field it does not index, when the schema is defined; a caller who may not `read` the schema, even one the policy lets call `search` (`forbidden`); an FTS5 expression FTS5 cannot parse, or one with a column filter (`invalid_argument`) |
-| Events | none: the index is the behavior's own, written with the change of the instance |
-| `configChange` | every change: `fields` and `weights` may change, and it may be added to or removed from a schema with instances |
+| Config | `fields`: the type's own top-level fields to index, by JSON key, 1 to 16, each a string or a scalar whose values are strings; `weights`: by indexed field, above 0 and at most 1000, 1 for a field it does not name; `vectors`, optional: `dimensions` (1 to 4096), `model` (a label the engine only compares) and `permission` (what an embedder needs to settle) |
+| Fields | none: whether an instance is embedded is `staleEmbeddings`'s to say, since a settle appends no event |
+| Operations | all schema-level. Read-only: `search({ query?, vector?, model?, syntax?, limit?, cursor? })` -> a page of `{ id, rank, score?, field?, snippet?, text?, vector? }`; `similar({ id, limit?, cursor? })` -> a page of the same and `embedded`; `staleEmbeddings({ limit?, cursor? })` -> `{ model, dimensions, items: [{ id, text, sourceHash }], next }`. Writing: `settleEmbeddings({ items: [{ id, sourceHash, vector }] })` -> `{ settled, skipped: [{ id, reason }] }` |
+| Refusals | a field the type does not declare, or one that is not text (a number, an enum, a list, an object), and a weight for a field it does not index, when the schema is defined; a caller who may not `read` the schema, even one the policy lets call the operation (`forbidden`); an FTS5 expression FTS5 cannot parse, or one with a column filter (`invalid_argument`); a vector on a schema without `vectors`, of other dimensions, all zeros, with a value a 32-bit float cannot hold, or of a `model` other than the config's (`invalid_argument`); a settle by a caller without the config's permission (`forbidden`); `similar` of an instance the namespace does not have (`not_found`) |
+| Events | none: the index and the vectors are the behavior's own, the index written with the change of the instance and a vector by a settle, which records who settled it and when |
+| `configChange` | every change: `fields`, `weights` and `vectors` may change, and it may be added to or removed from a schema with instances |
 
 ```json
-"behaviors": [{ "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 } } }]
+"behaviors": [{ "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 },
+    "vectors": { "dimensions": 384, "model": "minilm-l6", "permission": "notes.embed" } } }]
 ```
 
 ```ts
@@ -1935,7 +1947,8 @@ engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', li
 
 The index is one FTS5 table, `bhv_search__text`, with a column per
 indexed field in the config's order, and `bhv_search__rows`, which gives
-each of its rows a namespace, a schema and an id. The tokenizer is
+each of its rows a namespace, a schema and an id, and with `vectors` the
+hash of its text and its vector ("Vectors"). The tokenizer is
 `unicode61` with diacritics removed, so `cafe` also finds the word with
 an accent on its e, and case does not matter; there is no stemming. `afterChange` writes an
 instance's row in the transaction of its create, of an update or a
@@ -1991,17 +2004,140 @@ caller who may read the schema may read every hit.
 A version that adds Search (a first version included) or changes
 `fields`, their order included, rebuilds the index of the schema's
 instances in `afterConfigChange` ("Publishing"); one that removes it
-drops the index, so a deleted field's text does not stay behind; a
-change of `weights` alone needs nothing, since they apply when a search
-runs. The rebuild runs in the publish's transaction and holds the
-write lock until every instance is indexed: on an Apple M-series laptop,
-adding Search to a schema of 10,000 instances of about 160 words each
-took 0.4 s and changing its fields 0.5 to 0.9 s, on Node.js and on Bun.
+drops the index, so a deleted field's text does not stay behind, and
+with it every vector; a change of `weights` alone needs nothing, since
+they apply when a search runs. One that adds `vectors`, or changes their
+model or dimensions, hashes every instance's text again and clears every
+vector, and one that removes them clears the hashes and the vectors; a
+change of the permission needs nothing. A rebuild for new `fields`
+leaves every instance stale. Each runs in the publish's transaction and
+holds the write lock until it has visited every instance: on an Apple
+M-series laptop, adding Search to a schema of 10,000 instances of about
+160 words each took 0.4 s and changing its fields 0.5 to 0.9 s, on
+Node.js and on Bun.
 
-There are no vectors. D16 lists them as optional beside search; SQLite
-has no vector search without an extension, which the engine refuses to
-load, and an embedding comes from a provider the engine would call
-outside its synchronous write transaction.
+##### Vectors
+
+The engine calls no embedding provider and loads no SQLite extension
+(D16, amended: search's vectors). An outside embedder, a worker process
+with the config's permission, keeps the vectors current:
+
+```ts
+const embed: Principal = { subject: 'embedder', permissions: ['notes.embed'] };
+const page = engine.instances.invokeSchema(embed, 'notes', 'staleEmbeddings', { limit: 50 });
+// { model: 'minilm-l6', dimensions: 384,
+//   items: [{ id: 'n1', text: 'Release plan\n\nDates and owners.', sourceHash: '9c1f...' }], next: null }
+const vectors = await provider.embed(page.items.map((item) => item.text));   // the embedder's own call
+engine.instances.invokeSchema(embed, 'notes', 'settleEmbeddings', {
+  items: page.items.map((item, i) => ({ id: item.id, sourceHash: item.sourceHash, vector: vectors[i] })),
+});
+// { settled: 1, skipped: [] }
+```
+
+- **What is stale.** An instance whose text has no vector: one created
+  or written since its vector was settled, and every instance after a
+  version adds `vectors` or changes the model or the dimensions. Its text
+  is the indexed fields that hold more than whitespace, in the config's
+  order, joined by a blank line; an instance whose fields hold nothing
+  wants no vector. `staleEmbeddings` pages through them in the order they
+  were first indexed, 50 at a time by default and at most 100, with the
+  model and the dimensions to compute with. A cursor goes forward, so an
+  instance that goes stale behind it waits for the next pass from the
+  start.
+- **The hash.** `sourceHash` is the SHA-256 of the text, the model and
+  the dimensions. A write of an indexed field or a version that changes
+  the model or the dimensions moves it and clears the vector, so a stored
+  vector always matches the instance's text and the live config, and a
+  search never ranks by text an instance no longer holds.
+- **Settling.** `settleEmbeddings` takes at most 100 items. It stores
+  each vector whose hash still holds, as little-endian 32-bit floats
+  scaled to unit length, with who settled it and when, and skips the
+  rest: `moved`, the text or the model changed since the pull (pull it
+  again), or `not_found`. A vector of other dimensions, all zeros, with a
+  value a 32-bit float cannot hold, or an id given twice refuses the
+  whole batch (`invalid_argument`, at `/items/<i>/...`), so a defect in
+  the embedder is not read as moved text. It needs the config's
+  permission and `read` on the schema. The HTTP runtime's default body
+  limit, 1 MiB, holds about 30 vectors of 1536 numbers; a deployment that
+  settles larger batches raises `bodyLimitBytes`.
+- **No event.** A settle appends no event and moves no `seq`: no read of
+  an instance shows a vector, and its text and model are in the
+  instance's events and the publish's. It changes what `search` and
+  `similar` return, as a writing schema-level operation's own writes may
+  ("Schema-level operations"). An event per instance would move each
+  instance's ETag under an editor's `If-Match` and flood the log at every
+  model change.
+
+##### Ranking by a vector
+
+A caller that wants vector ranking computes the query's vector with the
+config's model and passes it, with the query or without:
+
+```ts
+engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', vector: queryVector, model: 'minilm-l6', limit: 20 });
+// { items: [{ id: 'n2', rank: 1, score: 0.0328, field: 'title', snippet: [...],
+//             text: { rank: 1 }, vector: { rank: 1, similarity: 0.83 } },
+//           { id: 'n7', rank: 2, score: 0.0161, vector: { rank: 2, similarity: 0.79 } }],
+//   next: null }
+```
+
+- **A vector alone** ranks the instances with a settled vector by cosine
+  similarity, best first, then in the order they were first indexed.
+- **A query and a vector** are fused by reciprocal rank fusion: a hit
+  scores 1 / (60 + its place) in each ranking it is in, over the first
+  200 of each (`RRF_K`, `RRF_WINDOW`), and the scores add; a tie goes to
+  the better place by text, then by vector. So a hybrid search returns at
+  most 400 instances.
+- **Each hit says how it matched**: `score`, `text: { rank }` when the
+  query matched it, with its snippet, and `vector: { rank, similarity }`
+  when its vector ranked. A search by query alone answers as before, with
+  no score.
+- **The scan.** The vectors are ranked by a brute-force scan in the
+  engine's process: every vector of the schema in the caller's
+  namespace, read 512 at a time through a partial index, behind an
+  internal interface an approximate index could replace. It runs
+  synchronously, like a full-text search, and its cost grows with the
+  schema's instances.
+
+##### Similar instances
+
+`similar({ id })` lists the instances nearest to one and leaves it out:
+a full-text search for any of its 32 longest distinct words of three
+characters or more, ranked by bm25, fused as above with its vector's
+ranking once its vector is settled; `embedded` says whether it was. An
+agent calls it before creating an instance like one it found, to reuse
+or link a near-duplicate instead.
+
+##### Across schemas
+
+`engine.search(principal, params, { namespace })`, the HTTP route `POST
+/namespaces/{namespace}/search` and the MCP tool `search` search every
+schema the namespace reaches that composes Search, each with its own
+`search` as the caller, and merge the hits into one page of `{ schema,
+id, rank, score, field?, snippet?, text?, vector? }`:
+
+```ts
+engine.search(me, { query: 'walnut', vector: queryVector, model: 'minilm-l6' }, { namespace: 'default' });
+// { items: [{ schema: 'Note', id: 'n1', rank: 1, score: 0.0328, ..., text: { rank: 1 }, vector: { rank: 1, similarity: 1 } },
+//           { schema: 'Task', id: 't1', rank: 2, score: 0.0164, ..., text: { rank: 1 } }], next: null }
+```
+
+- **Ranks, not scores, merge.** A hit scores as its schema's search
+  scores it, 1 / (60 + its place) in each ranking of its schema, the
+  first 200 of each, so one schema's best ties another's; a tie goes to
+  the better place, then to the schema's name. bm25 and cosine do not
+  compare across schemas, whose weights, statistics and models differ.
+- **A vector needs its `model`** here, and ranks only the schemas whose
+  vectors come from that model with its dimensions; the query ranks the
+  rest, and without one they are left out.
+- **What the caller may not read is skipped, not refused**: a schema the
+  policy refuses `read`, or `search` on, and one whose behaviors this
+  engine cannot run, as the tools document leaves them out. Refusing the
+  whole search would make a policy that hides one schema end the
+  namespace's search, and name a schema the caller may not see.
+- The parameters are `search`'s, `query` or `vector` required;
+  `SEARCH_SCHEMAS_PARAMS` is their JSON Schema. The MCP tool is listed
+  where a schema the caller may read composes Search.
 
 #### Reactions
 
@@ -2378,6 +2514,7 @@ sees what the engine does not raise.
 | POST | `/namespaces/{namespace}/schemas/{name}/operations/{operation}` | `instances.invokeSchema`, body: the parameters of a schema-level operation | 200, the result |
 | GET | `/namespaces/{namespace}/schemas/{name}/describe` | `tools.describe` | 200, the describe document ("Tools") |
 | GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
+| POST | `/namespaces/{namespace}/search` | `engine.search`, body: its parameters | 200, `{items, next}`, the hits of every schema that composes Search ("Search", "Across schemas") |
 | GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=&kind=&behavior=&exclude=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
 | GET | `/behaviors` | `tools.listBehaviors` | 200, a summary of each behavior the engine runs ("The behavior catalog") |
 | GET | `/behaviors/{name}` | `tools.describeBehavior` | 200, the behavior's document |
@@ -2642,8 +2779,9 @@ included; `typeArguments(document, type, keys)` returns it for any type.
 `tools.manifest(principal, { namespace })` is `tools/schema.json`'s shape
 (`ir.ToolManifest`, section "The tool documents" of the MCP tools
 reference): a tool per operation of every live schema the namespace
-reaches that the principal may read, by name, after the engine's five
-tools: three schema tools and two behavior tools.
+reaches that the principal may read, by name, after the engine's tools:
+three schema tools, two behavior tools, and the search across schemas
+where one of those schemas composes Search.
 
 | Tool | Name | MCP handle | Arguments |
 | --- | --- | --- | --- |
@@ -2659,6 +2797,7 @@ tools: three schema tools and two behavior tools.
 | define a draft | `engine.defineSchema` | `define_schema` | `document` |
 | list behaviors | `engine.listBehaviors` | `list_behaviors` | none |
 | describe a behavior | `engine.describeBehavior` | `describe_behavior` | `name` |
+| search every schema | `engine.search` | `search` | `query`, `syntax`, `vector`, `model`, `limit`, `cursor` (`engine.search`'s); listed where a schema the principal may read composes Search |
 
 A name follows the SDK generators, `<namespace>.<method>`, with the schema
 name in kebab case as the namespace (`LineItem` is `line-item`). An SDK
@@ -2748,8 +2887,9 @@ openEngine({
 ```
 
 - `invocationPolicy` is D11's key, values and default. A built-in
-  operation or engine tool takes `invocation`'s value for it, else the
-  default; a behavior operation takes its declaration's `invocationPolicy`,
+  operation or engine tool (the schema tools, the behavior tools and
+  `search`) takes `invocation`'s value for it, else the default; a
+  behavior operation takes its declaration's `invocationPolicy`,
   else the default. Registration refuses a declaration whose value is not
   one of the values, as the compiler's `Finalize` does. The core's
   behaviors name none, so they register under any policy.
@@ -2800,11 +2940,13 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   as the name, the title, the description, the arguments as `inputSchema`,
   `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
   invocation policy under the policy's key. The list is the caller's: a
-  tool the policy refuses is not in it. The engine's tools
-  (`list_schemas`, `describe_schema`, `define_schema`, `list_behaviors`,
-  `describe_behavior`) are in every caller's list, since they name no
-  schema until they are called: the access policy answers the call, not
-  the listing, and asks nothing of the behavior tools.
+  tool the policy refuses is not in it. The schema tools
+  (`list_schemas`, `describe_schema`, `define_schema`) and the behavior
+  tools (`list_behaviors`, `describe_behavior`) are in every caller's
+  list, since they name no schema until they are called: the access
+  policy answers the call, not the listing, and asks nothing of the
+  behavior tools. `search` is in the list of a caller who may read a
+  schema that composes Search, and searches the ones it may read.
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:
   `isError`, with the problem document the HTTP API answers with as text

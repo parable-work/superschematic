@@ -258,6 +258,18 @@ type DNSPlatformSpec struct {
 	// Lower returns the records' resources. It is pure.
 	Lower func(DNSContext) ([]*ir.Resource, error)
 
+	// ResourceTypes holds the JSON Schema of the properties of each
+	// resource type Lower emits that no target registers, as a
+	// TargetSpec's ResourceTypes does: a DNS platform of another provider
+	// than the target's (Cloudflare DNS beside gcp) brings its own.
+	ResourceTypes map[string]json.RawMessage
+
+	// Credentials returns the secrets the platform's provider reads to
+	// write an environment's records: an API token the engineer enters at
+	// bootstrap. It sees the environment and the DNS values, and no
+	// records. It is pure. Nil needs none.
+	Credentials func(DNSContext) []ir.DNSCredential
+
 	compiledValues *validator.Schema
 }
 
@@ -348,10 +360,10 @@ type ProvisionerSpec struct {
 	Provisioner Provisioner
 }
 
-// resourceType is one resource type's properties schema and the target
-// that registered it.
+// resourceType is one resource type's properties schema and what
+// registered it: `target "gcp"`, `DNS platform "cloudflare"`.
 type resourceType struct {
-	target   string
+	owner    string
 	schema   []byte
 	compiled *validator.Schema
 }
@@ -545,27 +557,9 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 		seenRules[rule.Name] = true
 	}
 	spec.Policies = append([]PolicyRule(nil), spec.Policies...)
-	types := map[string]resourceType{}
-	for _, typ := range keysOf(spec.ResourceTypes) {
-		schema := spec.ResourceTypes[typ]
-		if typ == "" {
-			return fmt.Errorf("registry: target %q registers a resource type with no name", spec.Name)
-		}
-		canonical, err := canonicalJSON(schema)
-		if err != nil {
-			return fmt.Errorf("registry: target %q resource type %s: %w", spec.Name, typ, err)
-		}
-		if prev, ok := r.stack.resourceTypes[typ]; ok {
-			if !bytes.Equal(prev.schema, canonical) {
-				return fmt.Errorf("registry: targets %q and %q register different schemas for resource type %s", prev.target, spec.Name, typ)
-			}
-			continue
-		}
-		compiled, err := compileSchema(canonical, "superschematic://resource-types/"+typ+".json")
-		if err != nil {
-			return fmt.Errorf("registry: target %q resource type %s: %w", spec.Name, typ, err)
-		}
-		types[typ] = resourceType{target: spec.Name, schema: canonical, compiled: compiled}
+	types, err := r.compileResourceTypes(fmt.Sprintf("target %q", spec.Name), spec.ResourceTypes)
+	if err != nil {
+		return err
 	}
 	for typ, rt := range types {
 		r.stack.resourceTypes[typ] = rt
@@ -576,9 +570,39 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 	return nil
 }
 
+// compileResourceTypes compiles the resource type schemas owner (`target
+// "gcp"`) registers. It leaves out a type already registered with the same
+// schema, and refuses an empty type name, a schema that does not compile
+// and a type registered with a different schema.
+func (r *Registry) compileResourceTypes(owner string, schemas map[string]json.RawMessage) (map[string]resourceType, error) {
+	types := map[string]resourceType{}
+	for _, typ := range keysOf(schemas) {
+		if typ == "" {
+			return nil, fmt.Errorf("registry: %s registers a resource type with no name", owner)
+		}
+		canonical, err := canonicalJSON(schemas[typ])
+		if err != nil {
+			return nil, fmt.Errorf("registry: %s resource type %s: %w", owner, typ, err)
+		}
+		if prev, ok := r.stack.resourceTypes[typ]; ok {
+			if !bytes.Equal(prev.schema, canonical) {
+				return nil, fmt.Errorf("registry: %s and %s register different schemas for resource type %s", prev.owner, owner, typ)
+			}
+			continue
+		}
+		compiled, err := compileSchema(canonical, "superschematic://resource-types/"+typ+".json")
+		if err != nil {
+			return nil, fmt.Errorf("registry: %s resource type %s: %w", owner, typ, err)
+		}
+		types[typ] = resourceType{owner: owner, schema: canonical, compiled: compiled}
+	}
+	return types, nil
+}
+
 // RegisterDNSPlatform adds a DNS platform. It refuses a malformed or
-// duplicate name, the reserved name ir.ManualDNS, a values schema that does
-// not compile and a missing Lower.
+// duplicate name, the reserved name ir.ManualDNS, a values or resource
+// type schema that does not compile, a resource type a target or another
+// DNS platform registered with a different schema, and a missing Lower.
 func (r *Registry) RegisterDNSPlatform(spec DNSPlatformSpec) error {
 	if err := r.registrable("DNS platform " + spec.Name); err != nil {
 		return err
@@ -602,6 +626,14 @@ func (r *Registry) RegisterDNSPlatform(spec DNSPlatformSpec) error {
 		}
 		spec.compiledValues = compiled
 	}
+	types, err := r.compileResourceTypes(fmt.Sprintf("DNS platform %q", spec.Name), spec.ResourceTypes)
+	if err != nil {
+		return err
+	}
+	for typ, rt := range types {
+		r.stack.resourceTypes[typ] = rt
+	}
+	spec.ResourceTypes = nil
 	r.stack.dnsPlatforms[spec.Name] = spec
 	r.noteExtension(spec.Extension)
 	return nil
@@ -731,9 +763,9 @@ func (r *Registry) Provisioner(name string) (ProvisionerSpec, bool) {
 // Provisioners returns the registered provisioner names, sorted.
 func (r *Registry) Provisioners() []string { return keysOf(r.stack.provisioners) }
 
-// ValidateResource checks a resource's properties against the schema some
-// target registered for its type. ok is false when no target registered
-// one. References in the properties validate as strings, the form a
+// ValidateResource checks a resource's properties against the schema a
+// target or a DNS platform registered for its type. ok is false when none
+// registered one. References in the properties validate as strings, the form a
 // provisioner renders them in.
 func (r *Registry) ValidateResource(res *ir.Resource) (ok bool, err error) {
 	rt, ok := r.stack.resourceTypes[res.Type]

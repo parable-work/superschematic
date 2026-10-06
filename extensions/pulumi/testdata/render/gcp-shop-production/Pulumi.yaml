@@ -1,0 +1,622 @@
+# Rendered by superschematic from the resource graph of environment Production
+# of stack Shop. Do not edit: change the stack and render it again.
+
+name: shop
+runtime: yaml
+description: Environment Production of stack Shop
+resources:
+  # phase infrastructure; owners Orders
+  Orders-account:
+    name: Orders.account
+    type: gcp:serviceaccount/account:Account
+    properties:
+      accountId: orders
+      displayName: Shop Production server Orders
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners sql:Orders->shop-db
+  Orders-cloudsql-client-shop-db:
+    name: Orders.cloudsql-client.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-prod/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${Orders-account.member}
+      project: acme-prod
+      role: roles/cloudsql.client
+    options:
+      dependsOn:
+        - ${Orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:Orders->shop-db
+  Orders-cloudsql-login-shop-db:
+    name: Orders.cloudsql-login.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-prod/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${Orders-account.member}
+      project: acme-prod
+      role: roles/cloudsql.instanceUser
+    options:
+      dependsOn:
+        - ${Orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:Orders->shop-db
+  Orders-database-user-shop-db:
+    name: Orders.database-user.shop-db
+    type: gcp:sql/user:User
+    properties:
+      instance: ${shop-db-instance.name}
+      name: orders@acme-prod.iam
+      project: acme-prod
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  Orders-reads-PaymentsSecrets-STRIPE_KEY:
+    name: Orders.reads.PaymentsSecrets.STRIPE_KEY
+    type: gcp:secretmanager/secretIamMember:SecretIamMember
+    properties:
+      member: ${Orders-account.member}
+      project: acme-prod
+      role: roles/secretmanager.secretAccessor
+      secretId: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+      version: 9.37.1
+  # phase rollout; owners http:Orders->shop-api
+  Orders-run-invoker-shop-api:
+    name: Orders.run-invoker.shop-api
+    type: gcp:cloudrunv2/serviceIamMember:ServiceIamMember
+    properties:
+      location: us-east1
+      member: ${Orders-account.member}
+      name: ${shop-api-service.name}
+      project: acme-prod
+      role: roles/run.invoker
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${shop-api-service}
+      version: 9.37.1
+  # phase rollout; owners Orders
+  Orders-service:
+    name: Orders.service
+    type: gcp:cloudrunv2/service:Service
+    properties:
+      deletionProtection: false
+      ingress: INGRESS_TRAFFIC_INTERNAL_ONLY
+      invokerIamDisabled: false
+      location: us-east1
+      name: orders
+      project: acme-prod
+      template:
+        containers:
+          - envs:
+              - name: FULFILLMENT_REGION
+                value: us
+              - name: MAX_LINE_ITEMS
+                value: "50"
+              - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
+                value: ${shop-api-service.uri}
+              - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
+                value: google-id-token
+              - name: SHOP_API_SERVICE_URL
+                value: ${shop-api-service.uri}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
+                value: ${shop-db-database-shop-db.name}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
+                value: ${shop-db-instance.connectionName}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
+                value: orders@acme-prod.iam
+              - name: STRIPE_KEY
+                valueSource:
+                  secretKeyRef:
+                    secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
+                    version: latest
+            image: us-east1-docker.pkg.dev/acme-prod/shop/orders
+            ports:
+              containerPort: 8080
+            resources:
+              limits:
+                cpu: "1"
+                memory: 1Gi
+            volumeMounts:
+              - mountPath: /cloudsql
+                name: cloudsql
+        scaling:
+          minInstanceCount: 0
+        serviceAccount: ${Orders-account.email}
+        volumes:
+          - cloudSqlInstance:
+              instances:
+                - ${shop-db-instance.connectionName}
+            name: cloudsql
+        vpcAccess:
+          egress: ALL_TRAFFIC
+          networkInterfaces:
+            - network: ${network.name}
+              subnetwork: ${network-subnet.name}
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${network}
+        - ${network-subnet}
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-service}
+        - ${shop-db-database-shop-db}
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  Orders-trace-agent:
+    name: Orders.trace-agent
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      member: ${Orders-account.member}
+      project: acme-prod
+      role: roles/cloudtrace.agent
+    options:
+      dependsOn:
+        - ${Orders-account}
+      version: 9.37.1
+  # phase exposure; owners dns
+  dns-shop-api-a:
+    name: dns.shop-api.a
+    type: gcp:dns/recordSet:RecordSet
+    properties:
+      managedZone: acme-dev
+      name: shop-api.acme.dev.
+      project: acme-prod
+      rrdatas:
+        - ${shop-api-address.address}
+      ttl: 300
+      type: A
+    options:
+      dependsOn:
+        - ${shop-api-address}
+      version: 9.37.1
+  # phase exposure; owners dns
+  dns-shop-api-cname:
+    name: dns.shop-api.cname
+    type: gcp:dns/recordSet:RecordSet
+    properties:
+      managedZone: acme-dev
+      name: _acme-challenge.shop-api.acme.dev.
+      project: acme-prod
+      rrdatas:
+        - ${shop-api-dns-authorization.dnsResourceRecords[0].data}
+      ttl: 300
+      type: CNAME
+    options:
+      dependsOn:
+        - ${shop-api-dns-authorization}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  network:
+    name: network
+    type: gcp:compute/network:Network
+    properties:
+      autoCreateSubnetworks: false
+      name: shop
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  network-nat:
+    name: network.nat
+    type: gcp:compute/routerNat:RouterNat
+    properties:
+      name: shop-egress
+      natIpAllocateOption: AUTO_ONLY
+      project: acme-prod
+      region: us-east1
+      router: ${network-router.name}
+      sourceSubnetworkIpRangesToNat: ALL_SUBNETWORKS_ALL_IP_RANGES
+    options:
+      dependsOn:
+        - ${network-router}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  network-router:
+    name: network.router
+    type: gcp:compute/router:Router
+    properties:
+      name: shop-egress
+      network: ${network.id}
+      project: acme-prod
+      region: us-east1
+    options:
+      dependsOn:
+        - ${network}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  network-subnet:
+    name: network.subnet
+    type: gcp:compute/subnetwork:Subnetwork
+    properties:
+      ipCidrRange: 10.8.0.0/20
+      name: shop-egress
+      network: ${network.id}
+      privateIpGoogleAccess: true
+      project: acme-prod
+      region: us-east1
+    options:
+      dependsOn:
+        - ${network}
+      version: 9.37.1
+  # phase infrastructure; owners Orders, shop-api
+  secret-PaymentsSecrets-STRIPE_KEY:
+    name: secret.PaymentsSecrets.STRIPE_KEY
+    type: gcp:secretmanager/secret:Secret
+    properties:
+      project: acme-prod
+      replication:
+        auto: {}
+      secretId: Shop-PaymentsSecrets-STRIPE_KEY
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners shop-api
+  shop-api-account:
+    name: shop-api.account
+    type: gcp:serviceaccount/account:Account
+    properties:
+      accountId: shop-api
+      displayName: Shop Production server shop-api
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-address:
+    name: shop-api.address
+    type: gcp:compute/globalAddress:GlobalAddress
+    properties:
+      ipVersion: IPV4
+      name: shop-api-ip
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-backend:
+    name: shop-api.backend
+    type: gcp:compute/backendService:BackendService
+    properties:
+      backends:
+        - group: ${shop-api-endpoint-group.id}
+      loadBalancingScheme: EXTERNAL_MANAGED
+      name: shop-api-backend
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-api-endpoint-group}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-certificate:
+    name: shop-api.certificate
+    type: gcp:certificatemanager/certificate:Certificate
+    properties:
+      managed:
+        dnsAuthorizations:
+          - ${shop-api-dns-authorization.id}
+        domains:
+          - shop-api.acme.dev
+      name: shop-api-cert
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-api-dns-authorization}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-certificate-map:
+    name: shop-api.certificate-map
+    type: gcp:certificatemanager/certificateMap:CertificateMap
+    properties:
+      name: shop-api-certs
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-certificate-map-entry:
+    name: shop-api.certificate-map-entry
+    type: gcp:certificatemanager/certificateMapEntry:CertificateMapEntry
+    properties:
+      certificates:
+        - ${shop-api-certificate.id}
+      hostname: shop-api.acme.dev
+      map: ${shop-api-certificate-map.name}
+      name: shop-api-certs-host
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-api-certificate}
+        - ${shop-api-certificate-map}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-api->shop-db
+  shop-api-cloudsql-client-shop-db:
+    name: shop-api.cloudsql-client.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-prod/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${shop-api-account.member}
+      project: acme-prod
+      role: roles/cloudsql.client
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-api->shop-db
+  shop-api-cloudsql-login-shop-db:
+    name: shop-api.cloudsql-login.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-prod/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${shop-api-account.member}
+      project: acme-prod
+      role: roles/cloudsql.instanceUser
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-api->shop-db
+  shop-api-database-user-shop-db:
+    name: shop-api.database-user.shop-db
+    type: gcp:sql/user:User
+    properties:
+      instance: ${shop-db-instance.name}
+      name: shop-api@acme-prod.iam
+      project: acme-prod
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${shop-api-account}
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-dns-authorization:
+    name: shop-api.dns-authorization
+    type: gcp:certificatemanager/dnsAuthorization:DnsAuthorization
+    properties:
+      domain: shop-api.acme.dev
+      name: shop-api-dns-auth
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-endpoint-group:
+    name: shop-api.endpoint-group
+    type: gcp:compute/regionNetworkEndpointGroup:RegionNetworkEndpointGroup
+    properties:
+      cloudRun:
+        service: ${shop-api-service.name}
+      name: shop-api-neg
+      networkEndpointType: SERVERLESS
+      project: acme-prod
+      region: us-east1
+    options:
+      dependsOn:
+        - ${shop-api-service}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-forwarding-rule:
+    name: shop-api.forwarding-rule
+    type: gcp:compute/globalForwardingRule:GlobalForwardingRule
+    properties:
+      ipAddress: ${shop-api-address.address}
+      ipProtocol: TCP
+      loadBalancingScheme: EXTERNAL_MANAGED
+      name: shop-api-https
+      portRange: "443"
+      project: acme-prod
+      target: ${shop-api-https-proxy.id}
+    options:
+      dependsOn:
+        - ${shop-api-address}
+        - ${shop-api-https-proxy}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-https-proxy:
+    name: shop-api.https-proxy
+    type: gcp:compute/targetHttpsProxy:TargetHttpsProxy
+    properties:
+      certificateMap: //certificatemanager.googleapis.com/${shop-api-certificate-map.id}
+      name: shop-api-https
+      project: acme-prod
+      urlMap: ${shop-api-url-map.id}
+    options:
+      dependsOn:
+        - ${shop-api-certificate-map}
+        - ${shop-api-certificate-map-entry}
+        - ${shop-api-url-map}
+      version: 9.37.1
+  # phase infrastructure; owners shop-api
+  shop-api-reads-PaymentsSecrets-STRIPE_KEY:
+    name: shop-api.reads.PaymentsSecrets.STRIPE_KEY
+    type: gcp:secretmanager/secretIamMember:SecretIamMember
+    properties:
+      member: ${shop-api-account.member}
+      project: acme-prod
+      role: roles/secretmanager.secretAccessor
+      secretId: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+    options:
+      dependsOn:
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase rollout; owners shop-api
+  shop-api-service:
+    name: shop-api.service
+    type: gcp:cloudrunv2/service:Service
+    properties:
+      deletionProtection: false
+      ingress: INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
+      invokerIamDisabled: true
+      location: us-east1
+      name: shop-api
+      project: acme-prod
+      template:
+        containers:
+          - envs:
+              - name: LOG_LEVEL
+                value: warn
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
+                value: ${shop-db-database-shop-db.name}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
+                value: ${shop-db-instance.connectionName}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
+                value: shop-api@acme-prod.iam
+              - name: STRIPE_KEY
+                valueSource:
+                  secretKeyRef:
+                    secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
+                    version: latest
+            image: us-east1-docker.pkg.dev/acme-prod/shop/shop-api
+            ports:
+              containerPort: 8080
+            resources:
+              limits:
+                cpu: "1"
+                memory: 512Mi
+            volumeMounts:
+              - mountPath: /cloudsql
+                name: cloudsql
+        scaling:
+          minInstanceCount: 1
+        serviceAccount: ${shop-api-account.email}
+        volumes:
+          - cloudSqlInstance:
+              instances:
+                - ${shop-db-instance.connectionName}
+            name: cloudsql
+    options:
+      dependsOn:
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-account}
+        - ${shop-db-database-shop-db}
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners shop-api
+  shop-api-trace-agent:
+    name: shop-api.trace-agent
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      member: ${shop-api-account.member}
+      project: acme-prod
+      role: roles/cloudtrace.agent
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-url-map:
+    name: shop-api.url-map
+    type: gcp:compute/uRLMap:URLMap
+    properties:
+      defaultService: ${shop-api-backend.id}
+      name: shop-api-lb
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-api-backend}
+      version: 9.37.1
+  # phase infrastructure; owners shop-db
+  shop-db-database-shop-db:
+    name: shop-db.database.shop-db
+    type: gcp:sql/database:Database
+    properties:
+      instance: ${shop-db-instance.name}
+      name: shop_db
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners shop-db
+  shop-db-instance:
+    name: shop-db.instance
+    type: gcp:sql/databaseInstance:DatabaseInstance
+    properties:
+      databaseVersion: POSTGRES_16
+      deletionProtection: true
+      name: shop-db
+      project: acme-prod
+      region: us-east1
+      settings:
+        availabilityType: REGIONAL
+        backupConfiguration:
+          enabled: true
+          pointInTimeRecoveryEnabled: true
+        connectorEnforcement: REQUIRED
+        databaseFlags:
+          - name: cloudsql.iam_authentication
+            value: on
+        deletionProtectionEnabled: true
+        edition: ENTERPRISE
+        ipConfiguration:
+          ipv4Enabled: true
+        tier: db-custom-2-7680
+    options:
+      version: 9.37.1
+outputs:
+  Orders.account.email: ${Orders-account.email}
+  Orders.account.id: ${Orders-account.id}
+  Orders.account.member: ${Orders-account.member}
+  Orders.cloudsql-client.shop-db.id: ${Orders-cloudsql-client-shop-db.id}
+  Orders.cloudsql-login.shop-db.id: ${Orders-cloudsql-login-shop-db.id}
+  Orders.database-user.shop-db.id: ${Orders-database-user-shop-db.id}
+  Orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${Orders-reads-PaymentsSecrets-STRIPE_KEY.id}
+  Orders.run-invoker.shop-api.id: ${Orders-run-invoker-shop-api.id}
+  Orders.service.id: ${Orders-service.id}
+  Orders.service.uri: ${Orders-service.uri}
+  Orders.trace-agent.id: ${Orders-trace-agent.id}
+  dns.shop-api.a.id: ${dns-shop-api-a.id}
+  dns.shop-api.cname.id: ${dns-shop-api-cname.id}
+  network.id: ${network.id}
+  network.name: ${network.name}
+  network.nat.id: ${network-nat.id}
+  network.router.id: ${network-router.id}
+  network.router.name: ${network-router.name}
+  network.subnet.id: ${network-subnet.id}
+  network.subnet.name: ${network-subnet.name}
+  secret.PaymentsSecrets.STRIPE_KEY.id: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+  secret.PaymentsSecrets.STRIPE_KEY.secretId: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
+  shop-api.account.email: ${shop-api-account.email}
+  shop-api.account.id: ${shop-api-account.id}
+  shop-api.account.member: ${shop-api-account.member}
+  shop-api.address.address: ${shop-api-address.address}
+  shop-api.address.id: ${shop-api-address.id}
+  shop-api.backend.id: ${shop-api-backend.id}
+  shop-api.certificate-map-entry.id: ${shop-api-certificate-map-entry.id}
+  shop-api.certificate-map.id: ${shop-api-certificate-map.id}
+  shop-api.certificate-map.name: ${shop-api-certificate-map.name}
+  shop-api.certificate.id: ${shop-api-certificate.id}
+  shop-api.cloudsql-client.shop-db.id: ${shop-api-cloudsql-client-shop-db.id}
+  shop-api.cloudsql-login.shop-db.id: ${shop-api-cloudsql-login-shop-db.id}
+  shop-api.database-user.shop-db.id: ${shop-api-database-user-shop-db.id}
+  shop-api.dns-authorization.dnsResourceRecords[0].data: ${shop-api-dns-authorization.dnsResourceRecords[0].data}
+  shop-api.dns-authorization.id: ${shop-api-dns-authorization.id}
+  shop-api.endpoint-group.id: ${shop-api-endpoint-group.id}
+  shop-api.forwarding-rule.id: ${shop-api-forwarding-rule.id}
+  shop-api.https-proxy.id: ${shop-api-https-proxy.id}
+  shop-api.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-api-reads-PaymentsSecrets-STRIPE_KEY.id}
+  shop-api.service.id: ${shop-api-service.id}
+  shop-api.service.name: ${shop-api-service.name}
+  shop-api.service.uri: ${shop-api-service.uri}
+  shop-api.trace-agent.id: ${shop-api-trace-agent.id}
+  shop-api.url-map.id: ${shop-api-url-map.id}
+  shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
+  shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
+  shop-db.instance.connectionName: ${shop-db-instance.connectionName}
+  shop-db.instance.id: ${shop-db-instance.id}
+  shop-db.instance.name: ${shop-db-instance.name}

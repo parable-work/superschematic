@@ -831,8 +831,10 @@ root := cli.New(cli.Config{
 
 That is the whole of `cmd/acme-schematic/main.go`. The core assembles a
 fresh registry per command from the naming file the command resolves, with
-every extension passed here; `cmd/superschematic` is the same call with no
-extension.
+every extension passed here. The installed `superschematic`
+(`cmd/superschematic`) is the same call with the official extensions, and
+the core alone (`internal/cmd/superschematic-core`) the same call with
+none.
 
 ## Naming
 

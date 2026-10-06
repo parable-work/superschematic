@@ -324,7 +324,8 @@ behavior operation's tool takes the instance `id`, `params` and
 declaration) takes `params` alone. Three more list, describe and define
 schemas, and none publishes; two list the behaviors the engine runs and
 describe one by name (`list_behaviors`, `describe_behavior`), which every
-caller may call. The engine
+caller may call; and where a schema composes `Search`, one more,
+`search`, searches every such schema the caller may read. The engine
 writes empty guidance, takes the invocation policy and the vendor keys
 above as options, and takes a behavior operation's policy from its
 declaration, else the default: the core's behaviors (`Workflow`,

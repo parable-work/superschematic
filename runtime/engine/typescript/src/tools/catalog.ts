@@ -14,8 +14,10 @@ data, update's patch and the describe document's instance carry what the
 behaviors' validate holds the fields to, as allOf entries their
 instanceSchema writes), each operation its behaviors add (a
 schema-level one takes its parameters and no instance id), three tools
-for writing schemas: list, describe and define a draft, and two that
-list and describe the behaviors a schema may compose (behaviors.ts). The
+for writing schemas: list, describe and define a draft, two that list
+and describe the behaviors a schema may compose (behaviors.ts), and where
+a schema the caller may read composes Search, search, the search across
+the namespace's schemas (engine.search). The
 update, delete and instance operation tools of a schema one of whose
 behaviors declares a preconditionSchema take `preconditions`, each such
 behavior's entry by its name, as the HTTP API's Preconditions header
@@ -38,6 +40,7 @@ be called by its handle: the call is refused.
 
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
 import type { InstanceSchemaForm, TypeSchema } from '../behaviors/behavior.js';
+import { SEARCH_SCHEMAS_PARAMS, searchSchemas } from '../behaviors/core/index.js';
 import { BEHAVIOR_NAME, type BehaviorDeclaration, type BehaviorOperationDeclaration, type OperationScope } from '../behaviors/declaration.js';
 import type { BehaviorRegistry } from '../behaviors/registry.js';
 import { jsonCopy } from '../behaviors/json.js';
@@ -190,7 +193,8 @@ type ToolKind =
   | 'describeSchema'
   | 'defineSchema'
   | 'listBehaviors'
-  | 'describeBehavior';
+  | 'describeBehavior'
+  | 'search';
 
 // One tool before it is rendered: its names, what it does, and who may see it.
 interface ToolSpec {
@@ -444,6 +448,8 @@ export class ToolCatalog {
         only(tool, input, ['params']);
         return this.instances.invokeSchema(principal, schema, tool.methodName, input.params ?? {}, { namespace });
       }
+      case 'search':
+        return searchSchemas(this.schemas, this.instances, principal, input, namespace);
     }
   }
 
@@ -451,8 +457,10 @@ export class ToolCatalog {
   // schema's, with every handle checked and each tool's visibility to the
   // principal decided.
   private toolSet(principal: Principal, namespace: string): ToolSpec[] {
-    const engineTools = this.engineTools(namespace);
     const schemaTools = this.schemas.list(principal, { namespace }).flatMap((summary) => this.liveTools(principal, namespace, summary));
+    // The search across schemas is there when a schema it would search is.
+    const searches = schemaTools.some((tool) => tool.kind === 'schemaOperation' && tool.behavior?.name === 'Search' && tool.methodName === 'search');
+    const engineTools = this.engineTools(namespace).filter((tool) => tool.kind !== 'search' || searches);
     const all = [...engineTools, ...schemaTools];
     const reserved = new Map(engineTools.map((tool) => [tool.handle, tool.name]));
     const byHandle = new Map<string, ToolSpec[]>();
@@ -556,6 +564,15 @@ export class ToolCatalog {
         false,
         'GET',
         '/behaviors/{name}'
+      ),
+      tool(
+        'search',
+        'search',
+        'Search every schema',
+        "Searches the instances of every schema this namespace reaches that composes Search and that the caller may read, and returns one ranking: by query, by vector (with its model), or both. Each hit names its schema and says how it matched. Before creating an instance, search for its text to find near-duplicates.",
+        false,
+        'POST',
+        `/namespaces/${encodeURIComponent(namespace)}/search`
       ),
     ];
   }
@@ -734,6 +751,11 @@ export class ToolCatalog {
         return schema([], []);
       case 'describeBehavior':
         return schema([['name', { type: 'string', description: 'The behavior name', pattern: BEHAVIOR_NAME.source }]], ['name']);
+      case 'search':
+        return schema(
+          Object.entries(SEARCH_SCHEMAS_PARAMS.properties as Record<string, JSONSchemaValue>).map(([name, raw]): [string, Property] => [name, { raw }]),
+          []
+        );
       case 'create': {
         const properties: Array<[string, Property]> = [
           ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
@@ -779,7 +801,7 @@ export class ToolCatalog {
         );
       case 'operation': {
         const params = (tool.operation as BehaviorOperationDeclaration).paramsSchema;
-        const required = isPlainObject(params) && Array.isArray(params.required) && params.required.length > 0;
+        const required = paramsRequired(params);
         return schema(
           [
             ['id', id],
@@ -792,7 +814,7 @@ export class ToolCatalog {
       }
       case 'schemaOperation': {
         const params = (tool.operation as BehaviorOperationDeclaration).paramsSchema;
-        const required = isPlainObject(params) && Array.isArray(params.required) && params.required.length > 0;
+        const required = paramsRequired(params);
         return schema([['params', { raw: params }]], required ? ['params'] : []);
       }
     }
@@ -928,6 +950,8 @@ export class ToolCatalog {
         return { type: 'array', description: 'Array of behavior summaries', items: { type: 'object', description: 'A behavior summary' } };
       case 'describeBehavior':
         return { type: 'object', description: "The behavior's declaration" };
+      case 'search':
+        return { type: 'object', description: 'A page of hits across the schemas, best first' };
       case 'operation':
       case 'schemaOperation': {
         const result = (tool.operation as BehaviorOperationDeclaration).resultSchema;
@@ -956,6 +980,22 @@ function createParamsOf(behaviors: readonly ComposedBehavior[]): JSONSchemaObjec
     additionalProperties: false,
     properties,
   };
+}
+
+// paramsRequired is whether an operation's parameters must hold a member:
+// its schema requires one, or every branch of its anyOf or oneOf does, as
+// search's query or vector.
+function paramsRequired(params: unknown): boolean {
+  if (!isPlainObject(params)) {
+    return false;
+  }
+  if (Array.isArray(params.required) && params.required.length > 0) {
+    return true;
+  }
+  return (['anyOf', 'oneOf'] as const).some((key) => {
+    const branches = params[key];
+    return Array.isArray(branches) && branches.length > 0 && branches.every(paramsRequired);
+  });
 }
 
 /** The JSON Schema of an instance as the engine returns it. */
