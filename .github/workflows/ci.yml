@@ -792,7 +792,7 @@ jobs:
           docker logs superschematic-pg
           exit 1
 
-      - name: Go binding, engine and Postgres adapter (build / vet / test over the static archive)
+      - name: Go binding, engine, Postgres adapter and SQLite adapter (build / vet / test over the static archive)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -802,8 +802,9 @@ jobs:
           cd runtime/versiongraph/go
           go build ./... && go vet ./... && go test -count=1 ./...
 
-      - name: Scenarios (every scenario through the Go engine and the Postgres adapter)
-        # Fails, rather than skips, without the database.
+      - name: Scenarios (every scenario through the Go engine on SQLite, with the SQLite adapter's tests, then on the Postgres adapter)
+        # The SQLite pass needs no database; the Postgres pass fails, rather
+        # than skips, without one.
         if: github.event_name != 'pull_request'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
