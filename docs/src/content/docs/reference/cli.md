@@ -116,7 +116,11 @@ the schemas root by default). Its `New` has the signature of the generated
 `Constructor`, `func(deps Deps) (Implementations, error)`, and each
 method answers 501 until it is implemented. It never writes into a
 directory that holds a Go file. Without the flag a build writes nothing
-outside the output root.
+outside the output root, except a stack's: building a `Stack` service
+writes each Go server's entrypoint under `server/<stack>/<server>` in the
+output root and scaffolds, with no flag, each API its servers serve whose
+implementation is missing, with a `go.mod` beside it when no module holds
+the package.
 
 ```
 superschematic build ./schemas/services/shop-db

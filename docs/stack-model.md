@@ -1109,28 +1109,102 @@ The target sets defaults that `settings` can override:
 
 ### 8.1 Server entrypoint
 
-A generator per server language, Go first, writes a `main` that:
+A generator per server language, Go first, writes each server's entrypoint
+when its stack builds. The Stack kind's `server` generator
+(`internal/generator/servergen`) reads the stack's servers, which no
+environment changes (`stack.Servers`), and writes a Go module per Go
+server at `<output-root>/server/<stack>/<server>/`, holding `main.go`,
+`go.mod` and a Dockerfile (section 8.2). A server takes its name in the
+stack: a declared server's class name, or the API service a default server
+serves. The output root's `server/<stack>` directory holds only what the
+last build wrote, and a TypeScript or Rust server gets no entrypoint yet.
 
-- loads the generated config, derived fields included;
-- connects the ORM from each database field;
-- builds an SDK client for each `calls` edge, with the platform's service
-  credentials (section 9.2);
-- builds the auth middleware from the API's auth provider;
-- mounts every served API on one router, with health and readiness
-  endpoints;
-- sets up OpenTelemetry and graceful shutdown.
+`main` reads its whole configuration from the environment, and:
+
+- loads each served API's `EnvConfig` with `LoadEnvConfig`: its
+  `@envVars` settings and its derived fields (section 3.4);
+- opens one pgx pool per database, shared by every API on it, from the
+  database field's connection string. A pool connects when first used, so
+  the server starts while its database is not up. A Cloud SQL connector
+  configuration is refused at startup until the entrypoint links the Cloud
+  SQL connector;
+- builds one Go SDK client per API called, shared by every API that calls
+  it, from the callee's `ServiceEndpoint`. The client sends the service
+  credential the endpoint names, from the Go HTTP runtime's sources
+  (section 9.6), and forwards the end user of the request on each call's
+  context (section 9.4);
+- calls each implementation's constructor with its `Deps`, and its
+  `AuthMiddleware` and `PayloadDecryptor` where the API's generated
+  `Config` takes them (section 8.5);
+- registers each API's routes on a router of its own, and hands each
+  request to the API whose router registers its method and path. The
+  build refuses two served APIs that register one method and path, path
+  parameters matched whatever their names. The routes every API
+  registers, its index, OpenAPI document and docs, answer for the first
+  API by name;
+- answers `GET /healthz` while the process runs, and `GET /readyz` while
+  every database answers a ping and the server is not shutting down;
+- listens on `$PORT`, 8080 when unset, logs JSON through zap, and on
+  SIGTERM or SIGINT stops taking requests and gives those in flight 10
+  seconds to finish.
+
+An API whose operations have a service clause also takes a service
+authenticator, a `serviceauth.Verifier` over the service-auth field of
+section 3.4. No connector derives that field yet, so until one does the
+entrypoint's `serviceAuthenticator` refuses to start such a server, rather
+than answer every service caller 401. OpenTelemetry export is not set up:
+the runtime records spans through the global tracer, and an exporter
+would add the OTLP client's dependencies to every server.
 
 The engineer writes the implementation of each served API, and nothing else
 (section 8.5). The entrypoint calls each implementation's constructor with
 its `Deps`. A mismatch between the code and the generated signature fails
 to compile at level 2 of section 10.
 
+`go.mod` requires each generated module, runtime module and
+implementation module the server builds from, and a replace points each
+at its directory. superschematic writes no `go.sum`: `go mod tidy` fills
+it before the first `go build .`, or the build runs with
+`GOFLAGS=-mod=mod`.
+
 ### 8.2 Container image
 
-A generated Dockerfile per server language builds the entrypoint and the
-implementation together. For Go, that is a multi-stage build to a static
-binary on a distroless base; TypeScript and Rust have their own
-equivalents.
+A generated Dockerfile per server builds the entrypoint and the
+implementations together. Its build context is the repository root, the
+parent of the schemas root, after the stack's services are built:
+
+```sh
+docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
+```
+
+`Dockerfile.dockerignore` beside it cuts the context down to the
+directories the build reads: the server's module, the generated modules,
+the runtime modules, the implementations' modules and the superscalar
+checkout. A server whose modules lie outside the repository root, or a
+naming file without `[paths] scalar_go`, gets no Dockerfile, and the build
+says why.
+
+The generated Go code links superscalar's static archive through cgo (D3),
+so the binary cannot be a `CGO_ENABLED=0` build. The image is built in
+stages:
+
+- a Rust stage builds the archive for the image's platform from the
+  checkout `[paths] scalar_go` names, with `tools.env`'s Rust release, the
+  one the host's archives are built with. A second stage builds the
+  version graph's archive when a database the server connects to declares
+  a version graph;
+- a Go stage, on the Go release `tools.env` pins, puts each archive where
+  its binding's cgo flags look, then tidies and builds the server;
+- the binary runs on distroless `cc`, which holds the glibc and libgcc
+  the archives need and nothing else, as a non-root user.
+
+TypeScript and Rust servers get their own Dockerfiles with their
+entrypoints.
+
+Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
+the scalar library allows; and fetching a prebuilt archive, which
+superscalar does not publish yet. When it does, the Rust stage becomes a
+download.
 
 ### 8.3 Local stack
 
@@ -1174,11 +1248,22 @@ found with no declaration:
 - **Scaffold.** When the package is missing, superschematic writes it
   once: an `implementation.go` whose `New` builds `Implementations` with a
   struct per namespace, each method returning the API package's
-  not-implemented error, which answers 501. It never writes into a
-  directory that holds a Go file, so the package is the engineer's from
-  then on. `build --scaffold` and `build-all --scaffold` write it. A
-  service the cache would restore builds again when its implementation is
-  missing, since the cache stores outputs, not the scaffold.
+  not-implemented error, which answers 501. For an API whose generated
+  `Config` takes them, it also writes `AuthMiddleware(deps)`, which
+  refuses every request with 401 until it verifies the end user, and
+  `PayloadDecryptor(deps)`, which refuses every encrypted payload. It never
+  writes into a directory that holds a Go file, so the package is the
+  engineer's from then on. A stack's build scaffolds each API its servers
+  serve; `build --scaffold` and `build-all --scaffold` scaffold each Go
+  API built, outside a stack. A service the cache would restore builds
+  again when its implementation is missing, and so does a stack that
+  serves it, since the cache stores outputs, not the scaffold.
+- **Module.** The entrypoint imports the package from the module of the
+  nearest `go.mod` at the package or above it, up to the repository root,
+  and reads that module's path on each build. When none holds a package
+  the stack's build scaffolds, it writes a `go.mod` beside the scaffold,
+  module `<go_module_root>/implementation/<service>`, which the engineer
+  may rename. An existing package that no module holds fails the build.
 - **Signature.** The API generator writes `Deps` and the constructor's
   signature in `deps.go`: `type Constructor func(deps Deps)
   (Implementations, error)`, which the scaffold asserts with `var _
@@ -1202,11 +1287,10 @@ found with no declaration:
   one whose config does not. The generated `Config` and `RegisterRoutes`
   do not change.
 
-The scaffold is opt-in until the entrypoint lands. Nothing imports the
-package before the generated `main` does (section 8.1), and a build of a
-tree whose Go code lives elsewhere, such as `examples/acme-shop`, would
-gain a stub package beside it. The entrypoint scaffolds each API a stack's
-servers serve.
+Outside a stack the scaffold stays opt-in. Nothing imports the package
+but a server's generated `main` (section 8.1), and a build of a tree whose
+Go code lives elsewhere, such as `examples/acme-shop`, would gain a stub
+package beside it.
 
 A server that serves several APIs calls each one's constructor with that
 API's `Deps`, built from the server's shared connections and clients.
@@ -1766,14 +1850,20 @@ registrations.
    connectors that write it.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
-   (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`, and
-   the scaffold under `build --scaffold` and `build-all --scaffold`. Next:
-   the entrypoint and the Dockerfile, then `Deps`, the constructor
-   signature and the scaffold in TypeScript and Rust, in a later PR.
-   `examples/acme-shop/go` keeps its hand wiring until the entrypoint
-   lands. Moving it to the scaffold layout now would move the code its
-   docs pages quote (`go/products.go`, `go/orders.go`, `NewHandler`) for
-   no running server.
+   (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`;
+   the scaffold, which a stack's build writes for each API its servers
+   serve and `build --scaffold` and `build-all --scaffold` write outside a
+   stack; and the Stack kind's `server` generator
+   (`internal/generator/servergen`), which writes each Go server's
+   entrypoint module and Dockerfile at `server/<stack>/<server>` (sections
+   8.1 and 8.2). Its clients send the D37 service credential each edge's
+   endpoint names. Next: the service authenticator, once a connector
+   derives the service-auth field; the Cloud SQL connector; OpenTelemetry
+   export; then `Deps`, the constructor signature, the scaffold and the
+   entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
+   hand wiring until a later change moves it onto the entrypoint, which
+   moves the code its docs pages quote (`go/products.go`, `go/orders.go`,
+   `NewHandler`).
 5. **Config and build plan.** `calls` is in the schema config, beside
    `authDb`, in the TypeScript type and the data-form schema, valid on an
    API config and naming API services. It is a build-order edge for the

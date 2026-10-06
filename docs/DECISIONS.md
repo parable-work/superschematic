@@ -3370,3 +3370,24 @@ A `@requireService` operation run in-process is not refused. Whether it
 should be stays open.
 
 The rule is reversible until the first release.
+
+### D30, amended: the server entrypoint, its Dockerfile and the scaffold a stack writes
+
+D30 said superschematic generates each server's entrypoint and Dockerfile,
+and its amendment on `Deps` left both to the build. Building them for Go
+(`docs/stack-model.md`, sections 8.1, 8.2 and 8.5) settled the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Stack kind's `server` generator writes them, beside `stack`, for each Go server of the stack, which `stack.Servers` lists without an environment. Each server is a Go module at `<output-root>/server/<stack>/<server>/` holding `main.go`, `go.mod` and a Dockerfile, whose `go.mod` requires and replaces every generated, runtime and implementation module it builds from. superschematic writes no `go.sum`; `go mod tidy` fills it. | A generator on each API service, which cannot see that one server serves several APIs. The entrypoint under `stack/<stack>`, which `stack` empties on each build of the environments. A generated `go.sum`, whose hashes depend on modules no offline build can read. |
+| One `main` serves every API of its server: one pgx pool per database and one SDK client per callee, shared across the APIs, and each API's routes on a router of its own, a request going to the API whose router registers its method and path. The build refuses two served APIs that register one method and path. The server answers `/healthz` while it runs and `/readyz` while each database answers, listens on `$PORT`, and drains on SIGTERM. A pool connects when first used, so a server starts before its database. | Every API's `RegisterRoutes` on one router, which chi refuses: each registers middleware and mounts `/api`. A connection at startup, which stops a server whose database comes up after it. |
+| The implementation package supplies what only it can: `New(deps)`, and `AuthMiddleware(deps)` and `PayloadDecryptor(deps)` where the API's `Config` takes them. The scaffold's refuse every request and every payload. | An auth middleware the entrypoint builds from the auth provider's stores, which still needs the deployment's token verification and role store, and which an extension's provider has no hook for. |
+| A stack's build scaffolds each API its servers serve, with no flag, and writes a `go.mod` beside a scaffold that no module holds. The entrypoint imports each implementation from the module of the nearest `go.mod`, read on each build. `--scaffold` stays for builds outside a stack, and build-all rebuilds a cached stack whose served implementation is missing. | Requiring the engineer to make a module first, which leaves a fresh stack unbuildable. A path per server, which D30 already refused. |
+| Each client of a `calls` edge sends the D37 credential its `ServiceEndpoint` names and forwards the request's end user. The service authenticator waits for the service-auth field: until a connector derives it, a server whose API has a service clause refuses to start. | A service-auth configuration in one JSON variable, the encoding section 3.4 refused for derived fields. Starting with no authenticator, whose routes would answer every service caller 401. |
+| The Dockerfile's context is the repository root, cut down by `Dockerfile.dockerignore`. A Rust stage builds superscalar's static archive (and the version graph's, when a database declares one) with `tools.env`'s Rust release, the Go stage links it on Debian's glibc, and the binary runs on distroless `cc` as a non-root user. | A `CGO_ENABLED=0` binary on a static base, which cgo against the archive rules out (D3). An archive from the host's checkout, whose platform is the host's. |
+
+OpenTelemetry export, the Cloud SQL connector and the entrypoints of
+TypeScript and Rust servers are not built. `examples/acme-shop` keeps its
+hand wiring until a later change moves it onto the entrypoint.
+
+The rule is reversible until the first release.
