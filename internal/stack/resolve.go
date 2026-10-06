@@ -31,7 +31,50 @@ func Resolve(reg *registry.Registry, in Input) (*ir.ResolvedEnvironment, error) 
 	if err := in.FieldNames.Validate(); err != nil {
 		return nil, &Errors{Stack: in.Stack.Name, Environment: in.Environment, List: []Error{{Code: CodeInvalidStack, Message: err.Error()}}}
 	}
-	r := &resolver{
+	r := newResolver(reg, in)
+	env := r.resolve()
+	if len(r.errs.List) > 0 {
+		return nil, r.errs
+	}
+	return env, nil
+}
+
+// Servers returns the servers of in.Stack, which no environment changes:
+// each declared server and the default server of every API service the
+// stack reaches and no declared server serves (section 3.2), sorted by
+// name. Each has its Name, Declared, Services sorted by name, Calls and
+// Language; the rest is the environment's to resolve. in.Environment is
+// not read. The error is an *Errors with every failure found among the
+// checks that decide the servers.
+func Servers(in Input) ([]*ir.ResolvedDeployable, error) {
+	if in.Stack == nil {
+		return nil, &Errors{List: []Error{{Code: CodeInvalidStack, Message: "no stack to read servers from"}}}
+	}
+	in.Environment = ""
+	r := newResolver(nil, in)
+	r.indexServices()
+	r.collectMembers()
+	r.declareDeployables()
+	r.defaultDeployables()
+	r.resolveCalls()
+	var servers []*ir.ResolvedDeployable
+	for _, name := range sortedKeys(r.deployables) {
+		res := r.deployables[name].res
+		if res.Kind != ir.DeployableServer {
+			continue
+		}
+		slices.SortFunc(res.Services, func(a, b ir.ServiceRef) int { return strings.Compare(a.Name, b.Name) })
+		res.Language, _ = r.serverLanguage(res)
+		servers = append(servers, res)
+	}
+	if r.failed() {
+		return nil, r.errs
+	}
+	return servers, nil
+}
+
+func newResolver(reg *registry.Registry, in Input) *resolver {
+	return &resolver{
 		reg:         reg,
 		in:          in,
 		stack:       in.Stack,
@@ -43,11 +86,6 @@ func Resolve(reg *registry.Registry, in Input) (*ir.ResolvedEnvironment, error) 
 		edges:       map[string]*edge{},
 		errs:        &Errors{Stack: in.Stack.Name, Environment: in.Environment},
 	}
-	env := r.resolve()
-	if len(r.errs.List) > 0 {
-		return nil, r.errs
-	}
-	return env, nil
 }
 
 // resolver is one resolution's state.
@@ -589,8 +627,22 @@ func (r *resolver) place() {
 }
 
 func (r *resolver) placeServer(d *deployable) {
+	lang, ok := r.serverLanguage(d.res)
+	if !ok {
+		return
+	}
+	d.res.Language = lang
+	if !slices.Contains(d.platform.Languages, d.res.Language) {
+		r.fail(CodeUnrealizable, "server %s is a %s server, and platform %s runs only %s", d.res.Name, d.res.Language, d.platform.Name, strings.Join(d.platform.Languages, ", "))
+	}
+}
+
+// serverLanguage returns the language of a server: that of the APIs it
+// serves, Go for an API that names none. It reports false, and fails the
+// resolution, when the APIs are written in more than one.
+func (r *resolver) serverLanguage(res *ir.ResolvedDeployable) (string, bool) {
 	languages := map[string][]string{}
-	for _, ref := range d.res.Services {
+	for _, ref := range res.Services {
 		lang := r.services[ref.Name].Language
 		if lang == "" {
 			lang = registry.APILanguageGo
@@ -602,15 +654,13 @@ func (r *resolver) placeServer(d *deployable) {
 		for _, lang := range sortedKeys(languages) {
 			parts = append(parts, fmt.Sprintf("%s in %s", strings.Join(languages[lang], ", "), lang))
 		}
-		r.fail(CodeUnrealizable, "server %s serves %s; one process runs one language", d.res.Name, strings.Join(parts, " and "))
-		return
+		r.fail(CodeUnrealizable, "server %s serves %s; one process runs one language", res.Name, strings.Join(parts, " and "))
+		return "", false
 	}
 	for lang := range languages {
-		d.res.Language = lang
+		return lang, true
 	}
-	if !slices.Contains(d.platform.Languages, d.res.Language) {
-		r.fail(CodeUnrealizable, "server %s is a %s server, and platform %s runs only %s", d.res.Name, d.res.Language, d.platform.Name, strings.Join(d.platform.Languages, ", "))
-	}
+	return "", true
 }
 
 func (r *resolver) placeDatabase(d *deployable) {
