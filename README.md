@@ -14,6 +14,7 @@ schema source (.schema.ts | .schema.json | .schema.yaml)
      -> types/       Go, TypeScript, Python, Rust
      -> sdk/         Go, TypeScript, Python, Rust clients, and MCP tool documents
      -> stack/       one environment.json per environment a Stack service declares
+     -> server/      a Go entrypoint and Dockerfile per server that stack runs
 ```
 
 superschematic is pre-release: build it from this checkout (see
@@ -48,10 +49,13 @@ SDK refuses the request the server would refuse.
 | --- | --- | --- |
 | A Postgres data layer | a DB schema: one class per table | DDL with keys, relations, indexes, text search and JSON columns; a Go ORM with typed repositories and transactions |
 | An HTTP API | an API schema: operations over those tables | a Go, Rust or TypeScript server that routes, decodes, validates and checks permissions, and its OpenAPI; you implement one interface |
+| Services that call each other | `calls` in a config, and `@requireService` or `@allowService` on operations | a typed Go `Deps` with an SDK client of each API it calls, and service callers admitted per operation beside the end user, on every server |
+| A database that changes safely | the next version of a DB schema | `migrate plan`: an offline plan from the previous version, in expand and contract phases with each step's hazards, for Postgres and SQLite; `superschematic-migrate` applies it to Postgres, a SQLite file or Cloudflare D1 |
 | Clients for that API | a line per language in the service's config | SDKs in Go, TypeScript, Python and Rust, plus MCP tool documents an agent can call the operations through |
 | Types shared across a polyglot stack | a General schema | the same types and validators in all four languages, and a typed loader for environment variables |
 | Row history, branches and merges | `@versioned` and `@versionGraph` on tables | history tables and version-fenced writes; a tree of tables you can branch, commit, merge, release and rebase, with an engine in each language |
-| A backend without generated code | a schema as JSON, published to a running server | [`@superschematic/engine`](runtime/engine/README.md): instances, an event log and access control, with workflow, comments, revisions, links, search and work queues, over HTTP, an event stream and MCP |
+| A backend without generated code | a schema as JSON, published to a running server | [`@superschematic/engine`](runtime/engine/README.md): instances, an event log and access control, with workflow, comments, revisions, links, rollups, full-text and vector search, branches and work queues, over HTTP, an event stream and MCP |
+| The tree, running | a Stack schema: what runs where, in which environments | a Go entrypoint and Dockerfile per server; `stack dev` runs an environment on your machine, with Postgres in Docker and its migrations applied; `stack plan` and `stack deploy` apply one to Cloud Run and Cloud SQL through the gcp target and Pulumi |
 | Your own conventions | a Go extension | new schema kinds, decorators, generators, auth providers and commands, without forking the core |
 
 ## A quick look
@@ -246,13 +250,15 @@ tag. To browse it locally with working navigation and code samples, run
 **Guides**
 
 - [Modeling types](docs/src/content/docs/guides/modeling-types.mdx): objects, scalars, enums, lists, maps, defaults, constraints, environment variables and secrets.
-- [Database tables](docs/src/content/docs/guides/database-tables.mdx): keys, relations, indexes, text search, JSON columns, soft delete and transactions.
-- [API routes](docs/src/content/docs/guides/api-routes.mdx): operation sets, default routes, parameters, bodies, views, errors, encrypted payloads, traffic controls and webhooks.
-- [Auth and permissions](docs/src/content/docs/guides/auth-and-permissions.mdx): which routes need a caller, permissions, and credentials in each SDK.
+- [Database tables](docs/src/content/docs/guides/database-tables.mdx): keys, relations, indexes, text search, JSON columns, soft delete, transactions, and changing tables that hold data.
+- [API routes](docs/src/content/docs/guides/api-routes.mdx): operation sets, the implementation and its `Deps`, parameters, bodies, views, errors, encrypted payloads, traffic controls, webhooks and the Rust server.
+- [Auth and permissions](docs/src/content/docs/guides/auth-and-permissions.mdx): which routes need a caller, permissions, service callers, and credentials in each SDK.
+- [Stacks and deploys](docs/src/content/docs/guides/stacks.md): declare what runs where, run an environment locally with `stack dev`, and deploy one to Google Cloud.
 - [Client SDKs](docs/src/content/docs/guides/client-sdks.mdx): generate and call a client in Go, TypeScript, Python and Rust.
 - [The engine](docs/src/content/docs/guides/engine.mdx): run a schema with no generated code, over HTTP, an event stream and MCP.
 - [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches.
 - [Work queues](docs/src/content/docs/guides/work-queues.md): claimable work with `@superschematic/engine-workqueue`: leases, claims, worker heartbeats, blueprints, budgets and retries.
+- [Pages with Topcoat](docs/src/content/docs/guides/topcoat.mdx): call a Rust API's operations in-process from a Topcoat app, with forms and records built from the schema.
 
 **Languages**: what the generated code offers in
 [Go](docs/src/content/docs/install/go.md),
@@ -279,6 +285,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [Write an extension](docs/src/content/docs/extending/write-an-extension.md): add a kind, decorator, document, generator, auth provider or command.
 - [Deploy extension](docs/src/content/docs/extending/deploy.md): map `@envVars` fields to a Helm values file.
 - [Platform extension](docs/src/content/docs/extending/platform.md): a kind that groups other services.
+- [Stack targets](docs/src/content/docs/extending/stack-targets.md): a platform, connector, target, DNS platform or provisioner for the stack model.
 
 **Runtime references.** Each runtime the generated code or the engine
 links has its own README:
@@ -294,7 +301,8 @@ HTTP runtime for [Go](runtime/http/go/README.md),
 [Python](runtime/versiongraph/python/README.md) packages).
 
 **Design.** [`docs/extension-model.md`](docs/extension-model.md) is the
-design of the extension seam, and [`docs/DECISIONS.md`](docs/DECISIONS.md)
+design of the extension seam, [`docs/stack-model.md`](docs/stack-model.md)
+the design of stacks and deploys, and [`docs/DECISIONS.md`](docs/DECISIONS.md)
 records every design decision (cited as D1, D2, ... in code and commits).
 
 ## Examples

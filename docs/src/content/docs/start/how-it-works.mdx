@@ -49,7 +49,7 @@ kinds it may reference, and which generators run, in order.
 | DB | a table | `@superschematic/db` | General | `sql`, `orm`, `types` |
 | API | a request or response type; with `@source`, a view of a table | `@superschematic/api` | DB, General | `types`, `api`, `sdks` |
 | General | a plain type | neither | General | `types`, `envConfig` |
-| Stack | a declaration of what runs where: the stack, a deployable or an environment | `@superschematic/stack` | none; it names services by their handles | `stack` |
+| Stack | a declaration of what runs where: the stack, a deployable or an environment | `@superschematic/stack` | none; it names services by their handles | `stack`, `server` |
 
 Every kind may import `@superschematic/schema` (wrappers such as
 `Nullable` and `Default`, and decorators that apply everywhere),
@@ -57,6 +57,12 @@ Every kind may import `@superschematic/schema` (wrappers such as
 load error, unless an extension registers the package; the
 [`authoring_packages`](/superschematic/reference/naming/#authoring_packages)
 key lists them.
+
+A Stack service's build resolves each environment it
+declares to `stack/<stack>/<environment>/environment.json`, and writes a
+Go entrypoint and Dockerfile for each server it runs under
+`server/<stack>/`. [Stacks and deploys](/superschematic/guides/stacks/)
+covers it, with `stack dev` and `stack deploy`.
 
 An extension can register more kinds, each with its own rules and
 generators. The [extension guide](/superschematic/extending/write-an-extension/)

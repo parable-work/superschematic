@@ -490,7 +490,7 @@ part of the build cache key: moving the copy rebuilds nothing.
 
 How the config fields an API's edges derive in a stack are named: the
 API's database connection and the endpoint of each API it `calls`
-(see the stack model, section 3.4). In each template `{SERVICE}` is the
+(see [What an API gets from its edges](/superschematic/guides/stacks/#what-an-api-gets-from-its-edges)). In each template `{SERVICE}` is the
 DB or called API service's name in upper snake case, and the rest of the
 template holds upper-case letters, digits and underscores. A platform sets
 each field as one environment variable per member of its value

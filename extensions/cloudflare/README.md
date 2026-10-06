@@ -89,6 +89,13 @@ The DNS platform names it as a credential, which resolution writes into
   `CLOUDFLARE_API_TOKEN` in the environment the provisioner runs the
   pulumi CLI in, for that run only.
 
+Neither of the last two is wired yet. `stack bootstrap`, `plan`, `deploy`,
+`destroy` and `outputs` take a run's credentials from
+`stackdeploy.CredentialsOf`, which returns none until it reads
+`dns.credentials` (D45), and the installed `superschematic` does not link
+this extension. Until then, set `CLOUDFLARE_API_TOKEN` yourself in the
+environment the provisioner runs in.
+
 ## Linking it
 
 A distribution links the extension beside its target and the pulumi
