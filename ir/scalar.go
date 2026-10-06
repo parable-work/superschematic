@@ -162,18 +162,23 @@ func (s *ScalarDef) StructuredJSONType() string {
 // publish, each with this message. ir/testdata/object_scalar_errors.json
 // holds the messages, which the engine's tests read too.
 //
-// The message fits the cause: an upload scalar takes the string primitive;
+// The message fits the cause: an upload scalar takes the string primitive,
+// whatever its json_schema mapping;
 // a json_schema mapping of object or array with a pattern or a length,
 // which are rules on a string, is not structured JSON until they go; any
 // other scalar says which JSON it holds, uses Generic.JSON, or becomes a
 // nested object type.
 func (s *ScalarDef) ObjectJSONError() error {
-	if s == nil || s.LanguagePrimitive != LanguageObject || s.IsAnyJSON() || s.StructuredJSONType() != "" {
+	if s == nil || s.LanguagePrimitive != LanguageObject {
 		return nil
 	}
+	// A file part is no JSON, whatever the mapping says.
 	if s.FileUpload != nil {
 		return fmt.Errorf("scalar %s is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: "+
 			"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)", s.Name)
+	}
+	if s.IsAnyJSON() || s.StructuredJSONType() != "" {
+		return nil
 	}
 	switch jsonType := s.TypeMappings["json_schema"]; jsonType {
 	case JSONSchemaObjectType, JSONSchemaArrayType:

@@ -146,16 +146,19 @@ func TestRegisterScalarsNamesAnUnknownPrimitive(t *testing.T) {
 // loader fills a scalar in from it. An object row whose JSONSchemaType is
 // object or array but which has a pattern or a length, rules on a string,
 // is refused with them named, and so is an object row the catalog declares
-// as a file upload, which takes the String primitive. Geo.Location, whose
+// as a file upload, with a JSON mapping or without: it takes the String
+// primitive. Geo.Location, whose
 // row has a pattern and the String primitive, is no object scalar.
 func TestRegisterScalarsJudgesARowAsTheValidatorsDo(t *testing.T) {
 	rows := map[string]*scalars.ScalarMetadata{
 		"Geo.Location": scalars.ScalarMetadataByCanonical["Geo.Location"],
 		"Acme.Blob":    {CanonicalName: "Acme.Blob", Symbol: "AcmeBlob", Primitive: "Object", JSONSchemaType: "object", MaxLength: 10},
 		"Media.Photo":  {CanonicalName: "Media.Photo", Symbol: "MediaPhoto", Primitive: "Object"},
+		"Media.Scan":   {CanonicalName: "Media.Scan", Symbol: "MediaScan", Primitive: "Object", JSONSchemaType: "object"},
 	}
 	catalog, err := ScalarCatalogWithUploads(ScalarCatalogOf(rows), map[string]ScalarUpload{
 		"Media.Photo": {FileUpload: ir.FileUploadConfig{MaxSize: 1024}},
+		"Media.Scan":  {FileUpload: ir.FileUploadConfig{MaxSize: 1024}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -168,6 +171,9 @@ func TestRegisterScalarsJudgesARowAsTheValidatorsDo(t *testing.T) {
 	for _, want := range []string{
 		"registry: acme's scalar catalog: scalar Acme.Blob has language primitive object and json_schema type mapping object, but its maxLength 10 is a rule on a string, so the validators check its values as strings: drop the maxLength",
 		"registry: acme's scalar catalog: scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
+			"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
+		// A file part is no JSON, whatever the mapping says.
+		"registry: acme's scalar catalog: scalar Media.Scan is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
 			"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -183,6 +189,7 @@ func TestRegisterScalarsJudgesARowAsTheValidatorsDo(t *testing.T) {
 
 	rows["Acme.Blob"] = &scalars.ScalarMetadata{CanonicalName: "Acme.Blob", Symbol: "AcmeBlob", Primitive: "Object", JSONSchemaType: "object"}
 	rows["Media.Photo"] = &scalars.ScalarMetadata{CanonicalName: "Media.Photo", Symbol: "MediaPhoto", Primitive: "String"}
+	rows["Media.Scan"] = &scalars.ScalarMetadata{CanonicalName: "Media.Scan", Symbol: "MediaScan", Primitive: "String"}
 	if err := New(naming.Default()).RegisterScalars("acme", catalog); err != nil {
 		t.Fatalf("RegisterScalars with the length dropped and the upload a string: %v", err)
 	}

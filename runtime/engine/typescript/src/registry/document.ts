@@ -14,9 +14,9 @@ meta-schema. On top of the loader, the engine requires:
   A union or a map is refused, since the runtime checks neither;
 - a scalar the document declares and the builtin catalog does not hold,
   when its language primitive is `object`, is one the schema runtime holds
-  to JSON: its `json_schema` type mapping is `any`, or `object` or `array`
-  with no pattern and no length, and it is no file upload
-  (objectScalarIssue), as the Go loader requires of a scalar once the
+  to JSON: it is no file upload, whatever its mapping, and its
+  `json_schema` type mapping is `any`, or `object` or `array` with no
+  pattern and no length (objectScalarIssue), as the Go loader requires of a scalar once the
   catalog has filled it in. The engine knows only the builtin catalog, so
   it reads such a scalar as the document writes it;
 - behaviors the engine has implementations for, composed as the compiler's
@@ -264,15 +264,16 @@ export function objectScalarIssue(name: string, scalar: ScalarDef): string | und
   if (scalar.languagePrimitive !== 'object') {
     return undefined;
   }
-  const runtime = (parseSchemaIR({ scalars: { [name]: scalar } }).scalars ?? {})[scalarKey(name)];
-  if (runtime !== undefined && (isAnyJSONScalar(runtime) || structuredJSONType(runtime) !== '')) {
-    return undefined;
-  }
+  // A file part is no JSON, whatever the mapping says.
   if (scalar.fileUpload) {
     return (
       `scalar ${name} is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: ` +
       'an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)'
     );
+  }
+  const runtime = (parseSchemaIR({ scalars: { [name]: scalar } }).scalars ?? {})[scalarKey(name)];
+  if (runtime !== undefined && (isAnyJSONScalar(runtime) || structuredJSONType(runtime) !== '')) {
+    return undefined;
   }
   const jsonType = scalar.typeMappings?.json_schema;
   const rules: string[] = [];

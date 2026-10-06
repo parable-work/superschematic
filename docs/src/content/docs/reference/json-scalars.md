@@ -41,9 +41,10 @@ scalars:
 ```
 
 A build refuses an `object` scalar the validators would check as a string,
-and so do the engine, when a schema is defined or published, and
-`RegisterScalars`, for an extension's catalog row. The error names the
-scalar and says what to change:
+and every `object` scalar that is a file upload, and so do the engine, when
+a schema is defined or published, and `RegisterScalars`, for an
+extension's catalog row. The error names the scalar and says what to
+change:
 
 - With no such mapping: add `typeMappings: { json_schema: object }`, or
   `array`, or `any` (a catalog row sets `JSONSchemaType`), use the
@@ -51,9 +52,9 @@ scalar and says what to change:
   fields as a nested object type.
 - With `object` or `array` and a pattern or a length: drop the pattern or
   the length.
-- For a file-upload scalar: give it the string primitive. Its value is a
-  file part, not JSON, and acme's `Acme.Photo` row has the `String`
-  primitive too.
+- For a file-upload scalar, with a `json_schema` mapping or without: give
+  it the string primitive. Its value is a file part, not JSON, and acme's
+  `Acme.Photo` row has the `String` primitive too.
 
 The loader checks a scalar after it fills it in from the catalog, so a
 catalog scalar a schema names by name and `languagePrimitive: object`, as

@@ -1353,8 +1353,8 @@ func TestLoadServiceTakesObjectScalarThatSaysWhichJSON(t *testing.T) {
 // TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString: the loader
 // judges an object scalar as the validators read it. A json_schema mapping
 // of object with a length, a rule on a string, is no JSON object to them,
-// and an upload scalar with the object primitive is checked as a string:
-// each is refused, with the length or the string primitive named.
+// and an upload scalar takes the string primitive, with a JSON mapping or
+// without: each is refused, with the length or the string primitive named.
 func TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -1372,6 +1372,17 @@ func TestLoadServiceRefusesObjectScalarTheValidatorsCheckAsAString(t *testing.T)
 			name:   "an upload",
 			scalar: "Media.Photo",
 			fields: map[string]any{"fileUpload": map[string]any{"maxSize": 1048576, "allowedTypes": []string{"image/png"}, "category": "image"}},
+			want: "temp-service: scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
+				"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
+		},
+		{
+			// A file part is no JSON, whatever the mapping says.
+			name:   "an upload with a JSON mapping",
+			scalar: "Media.Photo",
+			fields: map[string]any{
+				"fileUpload":   map[string]any{"maxSize": 1048576, "allowedTypes": []string{"image/png"}, "category": "image"},
+				"typeMappings": map[string]string{"json_schema": "object"},
+			},
 			want: "temp-service: scalar Media.Photo is a file-upload scalar with language primitive object, which the generated types hold as a JSON value and the runtimes check as a string: " +
 				"an upload scalar takes the string primitive (languagePrimitive: string; Primitive String in a catalog row)",
 		},
