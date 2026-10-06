@@ -1105,8 +1105,9 @@ So are search's vectors (the amendment "search's vectors" below), which
 an outside embedder computes and the engine keeps and ranks with no
 SQLite extension, and the engine's search across a namespace's schemas.
 The engine's event log starts at its head, filters and logs defines, its
-HTTP and MCP mounts take service callers (D37), and it serves the
-behaviors it runs (an amendment below on each). Each change that
+HTTP and MCP mounts take service callers (D37), it serves the behaviors
+it runs, and each tool carries guidance its behaviors' configs give,
+with create parameters narrowed by them (an amendment below on each). Each change that
 lands a piece updates this paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
@@ -1447,8 +1448,9 @@ declaration of its own.
 | A behavior's document is its declaration with what a reader would otherwise have to know filled in: `requires`, `conflicts`, `fields`, `operations` and `vetoes` as lists, and each operation's `scope`, `writes` and invocation policy, the declaration's or the default, under the policy's key after `writes`, as the describe document writes it (D11). An absent `configSchema`, `createParamsSchema` or `preconditionSchema` stays absent: the behavior takes none. | The declaration as its file holds it, which leaves a client to know that an absent scope is `instance` and an absent policy the deployment's default, which it cannot know; the describe document's `params` and `result`, which there name a tool's arguments, not the operation's parameters |
 | Any caller the gate admits may read the catalog, and the policy is not asked. It is the deployment's registered code, the same in every namespace, and carries no schema's or instance's data; the describe document already shows a schema's behaviors to whoever may read it. | Asking `define`, which needs a schema name the catalog does not have, so a policy would be asked about a schema that does not exist |
 
-Generated guidance per behavior's tool and create parameters narrowed by
-a config are a later change.
+Guidance per behavior's tool and create parameters narrowed by a config
+came after (the amendment "a behavior's config gives its tools their
+guidance" below).
 
 ### D16, amended: a reference hears what can move its holder
 
@@ -1490,6 +1492,30 @@ work pinned to a superseded revision out.
 | `when: { revised: { link } }` names a link of the type's `Links`. It fires on an update or an operation of the target whose change carries `revision`, of a schema that composes `Revisions`, and on a `releaseCommit` operation of one that composes `Branches`; a link to a schema with neither is a failure at run. It moves the instances `Links`' `listLinked` finds on the type's own schema, for a pinned link and a revision only the stale ones. No transition makes a revision or a release, so it never sets itself off. | Firing on every event of the target, which sends work back on a comment; every instance of a pinned link, which sends back work already pinned to the new revision; checking the target's schema at define, which need not be published yet, as the `Reactions` rows have it |
 | `Queue`'s `excludeStale` names pinned links of the type's `Links`, which `parseConfig` checks. While one is `stale` in the instance's `links` field, the instance is excluded until a change (`excluded_until`, as for Retries' exhaustion) and `claim` refuses it (`stale_link`, details `{ links }`). While none is, Queue hears each target's `/revision` crossing the pinned revision plus one, which the target's next revision does; once stale it hears nothing, since only its own new `link` lets it back in. A new `excludeStale` applies to an instance from its next change, as a new `priorityField` does. | A column of its own beside `blocked`, which the candidate query's index would read past; leaving the claim to `Links`, which has none to refuse |
 | `Links` pins revisions of `Revisions` only, so `excludeStale` cannot keep out work pinned to a `Branches` release; pinning one is a change to `Links` of its own. | |
+
+### D16, amended: a behavior's config gives its tools their guidance
+
+The engine's MCP tools carried empty guidance, and a behavior operation's
+tool only its declaration's text, the same on every type. An agent
+calling `transition` could not tell which states it may move to from
+where the instance is, or which move needs a permission; one calling
+`heartbeat`, how often; a `claimNext` caller, what keeps work out. The
+create tool showed each behavior's create parameters as declared, which
+name no link of the type and require none, so a required link showed up
+as a refusal. And the gate of `Rollups` was the one veto with no code.
+Each behavior now says what its config means, and the engine puts it
+where an SDK tool carries its `@docs` guidance.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An implementation's `guidance(config, target)` returns `{ summary, operations }`: what the behavior does on the type under the parsed config, and by operation name `{ useWhen?, doNotUseWhen?, success?, errors? }`, the members of `ir.ToolOperationGuidance`. `target` has the schema, the instance type, every behavior the type lists with its config as the schema holds it, and every operation of the type with its behavior, `writes` and `scope`. | Guidance in the declaration, which is static and cannot name a config's states or lengths; a hook per operation, which cannot speak to another behavior's operation; prose for the whole behavior alone, which an agent reads only in the describe document, not on the tool it is about to call |
+| A behavior speaks to any operation of the type: its own, `create`, `get`, `list`, `update`, `delete`, and another behavior's it guards, so Lease's fence reaches every write its guard holds and Dependencies' gate reaches `transition`. A tool's guidance is the engine's base for a built-in operation, then the owner's, then each other behavior's in list order, each member's sentences joined by a space. | Guidance only on a behavior's own operations, which leaves out the refusals an agent meets most, on another behavior's operation; the engine reading refusals out of guards, which are code |
+| `errors` are vetoes, the refusals a client branches on by `details.code`: each a code the contributing behavior's declaration lists, its description the declaration's when the behavior gives none, led by the behavior's name, and listed once per behavior. The engine refuses any other code, an operation the type does not have, a padded text and a missing summary as a `BehaviorError`. | Engine codes such as `forbidden` beside the vetoes, which mix the problem's code with `details.code` in one list; a `behavior` member on each error, which `ir.ToolOperationGuidanceError` does not have; codes qualified by the behavior, which an earlier amendment declined |
+| The engine writes guidance of its own: fixed for its tools, and a base naming the instance type for the operations every schema has. Each core and work-queue behavior gives guidance, plain ASCII computed from the config, its text in a module of its own; a behavior without the hook adds nothing. | Empty guidance where no behavior speaks, which leaves every create, read and engine tool without the members an SDK tool fills; text shared across behaviors in one module, which every behavior's change would touch |
+| It is computed once per published version, which never changes, so the same config gives the same text. The tools document carries it in each tool's `guidance` and, under the guidance key (D11), in a visible tool's MCP `_meta`; the describe document carries it on each operation and each behavior's summary beside its config. | Computing it at each listing; a route of its own, which a client would have to know to call |
+| An implementation's `createParamsSchema(config, target)` narrows its declaration's: `Links` a property per link, the required ones required and a revision only for a pinned link; `Dependencies` a blocker's schema from the config's, required when the type's own is not among them. The describe document and the create tool show it in place of the declared one. Only a behavior whose declaration takes create parameters has the hook, and what it returns has the declaration's shape. | One schema for every config, which names no link and requires none; the engine narrowing per behavior, which D16 rules out, since the engine names no behavior |
+| The narrowed schema is display only, as `instanceSchema` is: the engine checks a create against the declared schema, and `initialize` refuses what the config refuses, with its own messages. | Checking the narrowed schema too, which moves a config's refusals, a required link not given, a link the config lacks, ahead of every guard, and replaces each behavior's message with the validator's: a change to refusals this does not make. A test holds each core narrowing to what its `initialize` refuses |
+| `Rollups`' gate vetoes with `not_held`, details `{ rollup, to, over, linked, counted }`, `linked` and `counted` absent past the read bound. | `gated`, Dependencies' code for another refusal, which a client reads beside `blocked` on the same transition; no details, which leaves a client parsing the reason for the rollup |
 
 ## D17. A version graph over versioned tables, with one merge core
 

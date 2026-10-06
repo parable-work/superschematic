@@ -103,6 +103,7 @@ import {
 } from '@superschematic/engine';
 
 import declaration from './declarations/Lease.behavior.json' with { type: 'json' };
+import { leaseGuidance } from './guidance/lease.js';
 
 /** How long a lease lasts after its acquire or its last heartbeat when the config gives no ttlMs. */
 export const DEFAULT_TTL_MS = 60000;
@@ -575,6 +576,8 @@ function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation
 
 export const lease = defineBehavior<LeaseConfig>({
   declaration,
+
+  guidance: leaseGuidance,
 
   // The configSchema holds the shape; this holds the config to the type:
   // its fields, its Workflow's states and the behaviors it lists.

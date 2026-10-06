@@ -843,12 +843,18 @@ of the schema's other types in its own tables reads those types in
 `parseConfig` (`target.types.get(name)`), which holds them to the
 schema's checks and its compatibility rule as a type a field reaches is
 held, and checks a value against one with `validate(type, value)` in its
-contexts. The engine's README
-("Behaviors") has the whole interface: `parseConfig`, `configChange`,
-`afterConfigChange`, `migrations`, `initialize`, `validate`,
-`checkedTypes`, `instanceSchema`, `guard`, `operations`,
-`schemaOperations`, `fields`, `afterChange`, `guardReference`,
-`afterReferenceChange`, `reactions` and `schedules`.
+contexts. `guidance` tells an MCP client what the config means: a
+summary, and for each operation of the type, the behavior's own and the
+ones its guard holds, when to call it and the codes of the vetoes it can
+meet, which the engine merges into each tool's guidance, as an SDK tool
+carries its `@docs`. `createParamsSchema` shows the create parameters
+the config takes, narrower than the declaration's. The engine's README
+("Behaviors", and "Guidance" under "Tools") has the whole interface:
+`parseConfig`, `configChange`, `afterConfigChange`, `migrations`,
+`initialize`, `validate`, `checkedTypes`, `instanceSchema`, `guidance`,
+`createParamsSchema`, `guard`, `operations`, `schemaOperations`,
+`fields`, `afterChange`, `guardReference`, `afterReferenceChange`,
+`reactions` and `schedules`.
 
 A deployment registers the implementation with the engine and passes the
 meta-schema its binary writes, which declares the behavior, and the tool
