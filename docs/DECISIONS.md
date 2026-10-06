@@ -3344,4 +3344,10 @@ not exist yet are not built: connectors writing the callee config, the
 generated entrypoint, key rotation in the resource graph, and
 `stack dev`'s keys.
 
+D43's `OperationInfo` carries no service clause, so `OperationInfo::admit`
+applies only the end-user step: an in-process caller is the service's own
+code, not another deployable, and has no service credential to present.
+A `@requireService` operation run in-process is not refused. Whether it
+should be stays open.
+
 The rule is reversible until the first release.
