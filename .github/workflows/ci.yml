@@ -718,7 +718,8 @@ jobs:
       # superscalar's default lossless-json feature turns on serde_json's
       # arbitrary_precision and preserve_order, and Cargo unifies them into
       # every crate of a build that uses it, so both runtimes' lints and
-      # tests run with and without them.
+      # tests run with and without them. The http runtime's run again with
+      # its optional http-client feature.
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
         run: |
@@ -727,6 +728,8 @@ jobs:
           cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings
           cargo test
           cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
+          cargo clippy --all-targets --features http-client -- -D warnings
+          cargo test --features http-client
 
       - name: schema runtime fmt / clippy / test
         working-directory: runtime/schema/rust

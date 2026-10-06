@@ -74,6 +74,7 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		{"FieldDef", "conflictUnit", []string{
 			ir.ConflictUnitAtomic, ir.ConflictUnitKeyed, ir.ConflictUnitJSONSchema, ir.ConflictUnitExcluded,
 		}},
+		{"ServiceCallers", "mode", []string{string(ir.ServiceCallersRequire), string(ir.ServiceCallersAllow)}},
 		{"OperationDocs", "lifecycle", []string{
 			string(ir.DocsLifecycleDraft), string(ir.DocsLifecycleExperimental),
 			string(ir.DocsLifecycleActive), string(ir.DocsLifecycleDeprecated),

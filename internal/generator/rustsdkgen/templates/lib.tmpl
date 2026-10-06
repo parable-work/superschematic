@@ -9,11 +9,12 @@ pub mod runtime;
 pub mod sdk;
 
 pub use client::{
-    ClientConfig, RefreshTokenCallback, RefreshTokenFuture, TokenProvider, TokenProviderFuture,
+    ClientConfig, RefreshTokenCallback, RefreshTokenFuture, ServiceCredential, ServiceTokenFuture,
+    ServiceTokenSource, TokenProvider, TokenProviderFuture,
 };
 pub use errors::{ApiProblem, SDKError};
 pub use runtime::{
-    EncryptedPayloadEnvelope, EncryptedRequestOptions, MultipartBody, PublicEncryptionKey, RequestHook,
-    RequestOptions, UploadFile,
+    EncryptedPayloadEnvelope, EncryptedRequestOptions, ForwardedUser, MultipartBody, PublicEncryptionKey,
+    RequestHook, RequestOptions, UploadFile,
 };
 pub use sdk::{{.SDKStructName}};

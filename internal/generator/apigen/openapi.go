@@ -47,6 +47,11 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 		},
 	}
 
+	if output.HasServiceCallers {
+		schemes := spec["components"].(map[string]interface{})["securitySchemes"].(map[string]interface{})
+		schemes[openAPIServiceAuthScheme] = openAPIServiceAuth()
+	}
+
 	doc, err := applyOpenAPIHooks(spec, schema, hooks)
 	if err != nil {
 		return "", "", err
@@ -467,12 +472,11 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			},
 		}
 
-		if endpoint.RequiresAuth {
-			operation["security"] = []map[string]interface{}{
-				{
-					"bearerAuth": []string{},
-				},
-			}
+		if security := operationSecurity(endpoint); security != nil {
+			operation["security"] = security
+		}
+		if endpoint.ServiceCallers != nil && len(endpoint.ServiceCallers.From) > 0 {
+			operation[OpenAPIServiceCallersKey] = endpoint.ServiceCallers.From
 		}
 
 		switch strings.ToLower(endpoint.Method) {

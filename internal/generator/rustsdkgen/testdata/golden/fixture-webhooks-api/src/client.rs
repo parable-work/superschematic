@@ -1,4 +1,4 @@
-use reqwest::header::{HeaderName, HeaderValue, AUTHORIZATION};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use reqwest::{Method, Url};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -16,6 +16,35 @@ pub type TokenProvider = Arc<dyn Fn() -> TokenProviderFuture + Send + Sync>;
 pub type RefreshTokenFuture = Pin<Box<dyn Future<Output = Result<String, SDKError>> + Send>>;
 pub type RefreshTokenCallback = Arc<dyn Fn() -> RefreshTokenFuture + Send + Sync>;
 
+pub type ServiceTokenFuture = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
+/// Returns the calling service's credential; `fresh` asks for a new token
+/// rather than a cached one. The HTTP runtime's credential sources have this
+/// shape.
+pub type ServiceTokenSource = Arc<dyn Fn(bool) -> ServiceTokenFuture + Send + Sync>;
+
+/// The calling service's own credential, beside the end user's (D37). The
+/// client sends `Bearer <token>` in each header on every request. A 401
+/// whose problem code is `service_unauthorized` asks `token(true)` for a
+/// fresh token once and retries, without the end-user refresh; any other
+/// 401 never asks this source.
+#[derive(Clone)]
+pub struct ServiceCredential {
+    pub token: ServiceTokenSource,
+    /// Headers that carry the token; empty means `Service-Authorization`
+    /// alone.
+    pub headers: Vec<String>,
+}
+
+impl ServiceCredential {
+    /// A credential sent in `Service-Authorization`.
+    pub fn new(token: ServiceTokenSource) -> Self {
+        Self {
+            token,
+            headers: vec!["Service-Authorization".to_string()],
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ClientConfig {
     pub base_url: String,
@@ -24,6 +53,7 @@ pub struct ClientConfig {
     pub auth_token_provider: Option<TokenProvider>,
     pub refresh_auth_token: Option<RefreshTokenCallback>,
     pub auth_header: Option<String>,
+    pub service_credential: Option<ServiceCredential>,
     /// Optional config-level interceptor applied to every outgoing request
     /// after the auth header is attached. Use for header injection that is
     /// constant for the lifetime of the SDK (eg. service identity, scope
@@ -55,6 +85,7 @@ pub struct HttpClient {
     client: reqwest::Client,
     base_url: Url,
     auth: Arc<AuthState>,
+    service: Option<Arc<ServiceState>>,
     request_interceptor: Option<RequestInterceptor>,
 }
 
@@ -63,6 +94,41 @@ struct AuthState {
     token_provider: Option<TokenProvider>,
     refresh_token_callback: Option<RefreshTokenCallback>,
     auth_header: HeaderName,
+}
+
+struct ServiceState {
+    token: ServiceTokenSource,
+    headers: Vec<HeaderName>,
+}
+
+/// A response read whole.
+struct ResponseText {
+    status: reqwest::StatusCode,
+    headers: HeaderMap,
+    body: String,
+}
+
+impl ResponseText {
+    async fn read(response: reqwest::Response) -> Result<Self, SDKError> {
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response.text().await?;
+        Ok(Self {
+            status,
+            headers,
+            body,
+        })
+    }
+}
+
+/// The retries one call has spent: at most one end-user refresh and at
+/// most one fresh service credential.
+#[derive(Default)]
+struct Retries {
+    user_refreshed: bool,
+    service_retried: bool,
+    /// Ask the service credential source for a fresh token on this attempt.
+    fresh_service_token: bool,
 }
 
 impl HttpClient {
@@ -89,6 +155,31 @@ impl HttpClient {
             SDKError::config(format!("invalid auth_header value {auth_header_raw:?}: {err}"))
         })?;
 
+        let service = match config.service_credential {
+            Some(credential) => {
+                let names = if credential.headers.is_empty() {
+                    vec!["Service-Authorization".to_string()]
+                } else {
+                    credential.headers
+                };
+                let headers = names
+                    .iter()
+                    .map(|name| {
+                        HeaderName::from_bytes(name.as_bytes()).map_err(|err| {
+                            SDKError::config(format!(
+                                "invalid service_credential header {name:?}: {err}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Some(Arc::new(ServiceState {
+                    token: credential.token,
+                    headers,
+                }))
+            }
+            None => None,
+        };
+
         Ok(Self {
             client,
             base_url: parsed_base_url,
@@ -98,6 +189,7 @@ impl HttpClient {
                 refresh_token_callback: config.refresh_auth_token,
                 auth_header,
             }),
+            service,
             request_interceptor: config.request_interceptor,
         })
     }
@@ -134,7 +226,7 @@ impl HttpClient {
         let response = self
             .send_json_with_refresh(method, path, query, body, request_options)
             .await?;
-        self.decode_response(response).await
+        self.decode_response(response)
     }
 
     pub async fn request_multipart<T>(
@@ -151,7 +243,7 @@ impl HttpClient {
         let response = self
             .send_multipart_with_refresh(method, path, query, body, request_options)
             .await?;
-        self.decode_response(response).await
+        self.decode_response(response)
     }
 
     async fn send_json_with_refresh(
@@ -161,16 +253,24 @@ impl HttpClient {
         query: &[(String, String)],
         body: Option<Value>,
         request_options: Option<&RequestOptions>,
-    ) -> Result<reqwest::Response, SDKError> {
-        let response = self
-            .send_json_once(method, path, query, body.clone(), request_options)
-            .await?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED && self.refresh_token().await? {
-            return self
-                .send_json_once(method, path, query, body, request_options)
-                .await;
+    ) -> Result<ResponseText, SDKError> {
+        let mut retries = Retries::default();
+        loop {
+            let response = self
+                .send_json_once(
+                    method,
+                    path,
+                    query,
+                    body.clone(),
+                    request_options,
+                    retries.fresh_service_token,
+                )
+                .await?;
+            let response = ResponseText::read(response).await?;
+            if !self.retry(&response, &mut retries, request_options).await? {
+                return Ok(response);
+            }
         }
-        Ok(response)
     }
 
     async fn send_json_once(
@@ -180,9 +280,10 @@ impl HttpClient {
         query: &[(String, String)],
         body: Option<Value>,
         request_options: Option<&RequestOptions>,
+        fresh_service_token: bool,
     ) -> Result<reqwest::Response, SDKError> {
         let mut request = self
-            .build_request(method, path, query, request_options)
+            .build_request(method, path, query, request_options, fresh_service_token)
             .await?;
         if let Some(payload) = body {
             request = request.json(&payload);
@@ -197,16 +298,24 @@ impl HttpClient {
         query: &[(String, String)],
         body: MultipartBody,
         request_options: Option<&RequestOptions>,
-    ) -> Result<reqwest::Response, SDKError> {
-        let response = self
-            .send_multipart_once(method, path, query, body.clone(), request_options)
-            .await?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED && self.refresh_token().await? {
-            return self
-                .send_multipart_once(method, path, query, body, request_options)
-                .await;
+    ) -> Result<ResponseText, SDKError> {
+        let mut retries = Retries::default();
+        loop {
+            let response = self
+                .send_multipart_once(
+                    method,
+                    path,
+                    query,
+                    body.clone(),
+                    request_options,
+                    retries.fresh_service_token,
+                )
+                .await?;
+            let response = ResponseText::read(response).await?;
+            if !self.retry(&response, &mut retries, request_options).await? {
+                return Ok(response);
+            }
         }
-        Ok(response)
     }
 
     async fn send_multipart_once(
@@ -216,9 +325,10 @@ impl HttpClient {
         query: &[(String, String)],
         body: MultipartBody,
         request_options: Option<&RequestOptions>,
+        fresh_service_token: bool,
     ) -> Result<reqwest::Response, SDKError> {
         let mut request = self
-            .build_request(method, path, query, request_options)
+            .build_request(method, path, query, request_options, fresh_service_token)
             .await?;
         let mut form = reqwest::multipart::Form::new();
 
@@ -241,12 +351,43 @@ impl HttpClient {
         request.send().await.map_err(SDKError::from)
     }
 
+    /// Whether a response is retried, spending the retry: a 401 whose code
+    /// is `service_unauthorized` asks the service credential source for a
+    /// fresh token once and never refreshes the end user; any other 401
+    /// refreshes the end user once, unless the call forwards one.
+    async fn retry(
+        &self,
+        response: &ResponseText,
+        retries: &mut Retries,
+        request_options: Option<&RequestOptions>,
+    ) -> Result<bool, SDKError> {
+        retries.fresh_service_token = false;
+        if response.status != reqwest::StatusCode::UNAUTHORIZED {
+            return Ok(false);
+        }
+        if problem_code(&response.body).as_deref() == Some("service_unauthorized") {
+            if self.service.is_none() || retries.service_retried {
+                return Ok(false);
+            }
+            retries.service_retried = true;
+            retries.fresh_service_token = true;
+            return Ok(true);
+        }
+        let forwards = request_options.is_some_and(|options| options.forward.is_some());
+        if forwards || retries.user_refreshed {
+            return Ok(false);
+        }
+        retries.user_refreshed = true;
+        self.refresh_token().await
+    }
+
     async fn build_request(
         &self,
         method: &str,
         path: &str,
         query: &[(String, String)],
         request_options: Option<&RequestOptions>,
+        fresh_service_token: bool,
     ) -> Result<reqwest::RequestBuilder, SDKError> {
         let parsed_method = Method::from_bytes(method.as_bytes())
             .map_err(|err| SDKError::request(format!("invalid http method {method:?}: {err}")))?;
@@ -260,9 +401,24 @@ impl HttpClient {
             request = request.query(query);
         }
 
-        if let Some(token) = self.resolve_auth_token().await? {
-            request = self.apply_auth_header(request, &token)?;
+        // A forwarded end user replaces the configured auth: its token, or no
+        // Authorization when the request being served has no end user.
+        match request_options.and_then(|options| options.forward.as_ref()) {
+            Some(forward) => {
+                if let Some(token) = forward.bearer_token.as_deref() {
+                    if !token.trim().is_empty() {
+                        request =
+                            request.header(AUTHORIZATION, bearer_value("Authorization", token)?);
+                    }
+                }
+            }
+            None => {
+                if let Some(token) = self.resolve_auth_token().await? {
+                    request = self.apply_auth_header(request, &token)?;
+                }
+            }
         }
+        request = self.apply_service_credential(request, fresh_service_token).await?;
 
         // Config-level interceptor runs before per-call hooks so caller
         // hooks observe (and can override) any default headers injected
@@ -331,6 +487,28 @@ impl HttpClient {
         Ok(true)
     }
 
+    /// Sends the service credential, `Bearer <token>`, in each configured
+    /// header. `fresh` asks the source for a new token.
+    async fn apply_service_credential(
+        &self,
+        mut request: reqwest::RequestBuilder,
+        fresh: bool,
+    ) -> Result<reqwest::RequestBuilder, SDKError> {
+        let Some(service) = &self.service else {
+            return Ok(request);
+        };
+        let token = (service.token)(fresh)
+            .await
+            .map_err(|err| SDKError::request(format!("service credential: {err}")))?;
+        if token.trim().is_empty() {
+            return Ok(request);
+        }
+        for name in &service.headers {
+            request = request.header(name.clone(), bearer_value(name.as_str(), &token)?);
+        }
+        Ok(request)
+    }
+
     fn apply_auth_header(
         &self,
         request: reqwest::RequestBuilder,
@@ -350,13 +528,15 @@ impl HttpClient {
         Ok(request.header(self.auth.auth_header.clone(), header_value))
     }
 
-    async fn decode_response<T>(&self, response: reqwest::Response) -> Result<T, SDKError>
+    fn decode_response<T>(&self, response: ResponseText) -> Result<T, SDKError>
     where
         T: DeserializeOwned,
     {
-        let status = response.status();
-        let headers = response.headers().clone();
-        let body = response.text().await?;
+        let ResponseText {
+            status,
+            headers,
+            body,
+        } = response;
         if !status.is_success() {
             return Err(SDKError::api(status.as_u16(), &headers, &body));
         }
@@ -378,6 +558,23 @@ impl HttpClient {
             ))
         })
     }
+}
+
+/// `Bearer <token>` as a header value.
+fn bearer_value(header: &str, token: &str) -> Result<HeaderValue, SDKError> {
+    HeaderValue::from_str(&format!("Bearer {token}"))
+        .map_err(|err| SDKError::request(format!("invalid token for header {header}: {err}")))
+}
+
+/// The problem code of an error body: `code` of an RFC 9457 problem, or
+/// `error.code` of the legacy `{"error": {...}}` envelope.
+fn problem_code(body: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    value
+        .get("code")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("error")?.get("code")?.as_str())
+        .map(str::to_string)
 }
 
 fn unwrap_envelope(payload: Value) -> Result<Value, SDKError> {

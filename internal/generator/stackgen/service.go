@@ -16,6 +16,9 @@ import (
 //   - authDb, dependencies and calls from ir.Schema. The IR keeps authDb's
 //     name, and the handle it held names a DB service;
 //   - an API's outputs.api.language and a DB's outputs.sql.dialects;
+//   - an API's operations, each with what admits a caller to it
+//     (stack.OperationsOf), against which the resolver checks each edge to
+//     the API (D37);
 //   - an API's @envVars type, read as the env loaders read it
 //     (envgen), with each field's Secret, Default and InheritedFrom.
 //
@@ -41,6 +44,7 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 			return stack.Service{}, err
 		}
 		svc.Config = config
+		svc.Operations = stack.OperationsOf(schema)
 	case ir.SchemaKindDB:
 		svc.Dialects = outputs.SQLDialects()
 	}

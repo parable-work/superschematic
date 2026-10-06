@@ -115,10 +115,53 @@ type EndpointInfo struct {
 	// mounts the route with Implementations.webhookVerifiers[provider],
 	// which runs before every other step.
 	WebhookProvider string
+	// ServiceCallers is the effective @requireService or @allowService
+	// clause, nil when the operation has none; ServiceLiteral is the
+	// operation table's `service` object for it, empty without one. The
+	// runtime's service step applies it before the end-user step (D37).
+	ServiceCallers *ir.ServiceCallers
+	ServiceLiteral string
 
 	// DocLines is the JSDoc body of the implementation method: title,
 	// description, route, and the auth requirement.
 	DocLines []string
+}
+
+// AuthSummary is the README's auth cell: the user clause (public, the
+// permissions, authenticated, or none), and the service clause when there
+// is one: `and service: ...` for @requireService with a user clause (the
+// service forwards the user), `service: ...` alone without one, and `or
+// service: ...` for @allowService.
+func (e EndpointInfo) AuthSummary() string {
+	user := "none"
+	switch {
+	case e.PublicRoute:
+		user = "public"
+	case len(e.RequiredPerms) > 0:
+		user = strings.Join(e.RequiredPerms, ", ")
+	case e.RequiresAuth:
+		user = "authenticated"
+	}
+	if e.ServiceCallers == nil {
+		return user
+	}
+	service := "service: " + serviceCallersText(e.ServiceCallers, ", ", "any caller")
+	switch {
+	case e.ServiceCallers.Mode == ir.ServiceCallersAllow:
+		return user + " or " + service
+	case e.RequiresAuth:
+		return user + " and " + service
+	}
+	return service
+}
+
+// serviceCallersText names the APIs a clause's callers serve, joined by
+// sep, or none when from is empty (every caller with an edge).
+func serviceCallersText(clause *ir.ServiceCallers, sep, none string) string {
+	if len(clause.From) == 0 {
+		return none
+	}
+	return strings.Join(clause.From, sep)
 }
 
 // HasArgs reports whether the implementation method takes any argument.
@@ -163,6 +206,9 @@ type APIOutput struct {
 	// manual ones included, sorted: Implementations.webhookVerifiers has a
 	// verifier for each, as the Go server's WebhookVerifiers map does.
 	WebhookProviders []string
+	// HasServiceCallers reports whether any endpoint has a service clause;
+	// the docs then name RouterOptions.authenticateService.
+	HasServiceCallers bool
 
 	// TypeImports are the type-only imports of interfaces.ts from
 	// `<package>/types` (inputs, outputs, enum parameters);
@@ -213,16 +259,17 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 
 	b := newBuilder(schema, opts)
 	output := &APIOutput{
-		SchemaName:     opts.SchemaName,
-		PackageName:    opts.Naming.NpmAPIPackage(opts.SchemaName),
-		TypesPackage:   opts.Naming.NpmTypesPackage(opts.SchemaName),
-		RuntimePackage: opts.Naming.HTTPRuntimeNpmPackage,
-		ScalarPackage:  opts.Naming.ScalarNpmPackage + "/scalars",
-		Author:         opts.Naming.PackageAuthor,
-		HonoVersion:    HonoVersion,
-		TSVersion:      TypeScriptVersion,
-		Timestamp:      opts.Clock.RFC3339(),
-		OpenAPISpecRaw: apiOutput.OpenAPISpecRaw,
+		SchemaName:        opts.SchemaName,
+		PackageName:       opts.Naming.NpmAPIPackage(opts.SchemaName),
+		TypesPackage:      opts.Naming.NpmTypesPackage(opts.SchemaName),
+		RuntimePackage:    opts.Naming.HTTPRuntimeNpmPackage,
+		ScalarPackage:     opts.Naming.ScalarNpmPackage + "/scalars",
+		Author:            opts.Naming.PackageAuthor,
+		HonoVersion:       HonoVersion,
+		TSVersion:         TypeScriptVersion,
+		Timestamp:         opts.Clock.RFC3339(),
+		OpenAPISpecRaw:    apiOutput.OpenAPISpecRaw,
+		HasServiceCallers: apiOutput.HasServiceCallers,
 	}
 
 	byNamespace := map[string]*NamespaceInfo{}
@@ -320,6 +367,12 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		PermsLiteral:            tsStringList(ep.RequiredPerms),
 		ManualRouteRegistration: ep.ManualRouteRegistration,
 		WebhookProvider:         ep.WebhookHMACProvider,
+	}
+	if ep.ServiceCallers != nil {
+		clause := *ep.ServiceCallers
+		clause.From = append([]string{}, clause.From...)
+		endpoint.ServiceCallers = &clause
+		endpoint.ServiceLiteral = fmt.Sprintf("{ mode: %s, from: %s }", tsString(string(clause.Mode)), tsStringList(clause.From))
 	}
 	if ep.BodyLimit != nil {
 		bytes := *ep.BodyLimit * 1024 * 1024
@@ -761,6 +814,20 @@ func docLines(ep EndpointInfo) []string {
 		lines = append(lines, "Requires a principal holding one of: "+strings.Join(ep.RequiredPerms, ", ")+".")
 	case ep.RequiresAuth:
 		lines = append(lines, "Requires an authenticated principal.")
+	}
+	if clause := ep.ServiceCallers; clause != nil {
+		caller := "a calling service (ctx.serviceCaller)"
+		if len(clause.From) > 0 {
+			caller += " that serves " + serviceCallersText(clause, " or ", "")
+		}
+		switch {
+		case clause.Mode == ir.ServiceCallersAllow:
+			lines = append(lines, "Or "+caller+", standing in for the principal (ctx.principal is null).")
+		case ep.RequiresAuth:
+			lines = append(lines, "Requires "+caller+", forwarding that principal.")
+		default:
+			lines = append(lines, "Requires "+caller+"; no end user.")
+		}
 	}
 	return lines
 }
