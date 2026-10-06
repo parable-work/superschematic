@@ -163,10 +163,12 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a service field per http edge. It holds the callee's base URL, the
   source of the service credential and the headers that carry it (section
   9.2);
-- a service-auth field on a server that an http edge reaches. It holds
-  what the server's `ServiceAuthenticator` checks: each inbound edge's
-  issuer, keys and audience, and the deployable each caller identity is
-  (section 9.2).
+- a callers field per served API with a service clause, `<API>_CALLERS`
+  (`SHOP_API_CALLERS`), named by the core's rule alone over the API's own
+  name. It holds what the server's `ServiceAuthenticator` checks: the
+  issuers it accepts, with their keys and audience, and the deployable
+  each caller identity is, which the connectors of the http edges to the
+  API write together (section 9.2).
 
 An API's database field comes from its `authDb`, or its one DB-kind
 dependency, as its sql edge does (section 3.3).
@@ -178,30 +180,38 @@ reads. `values-schema.json` lists each derived field in
 `x-superschematic.envVars` with `derived` (the edge kind), `service` and
 `variables`, and each of its variables as an optional string property
 that the platform sets, not a deployment's values. The TypeScript and Rust
-loaders read no derived field yet (section 12), and the service-auth field
-waits for the connectors that write it.
+loaders read no derived field yet (section 12). The callers field is in
+neither `EnvConfig` nor `values-schema.json`, since its variables follow
+the environment's edges: the generated entrypoint reads it with
+`stackconfig.LoadCallers` (section 8.1).
 
 What a connector derives for each edge kind has a contract, in
-`ir/derived_value.go`. Resolution checks every connector's value against
-it and refuses one that breaks it with a `lowering` failure that names the
-member at fault:
+`ir/derived_value.go` and `ir/service_auth.go`. Resolution checks every
+connector's value against it and refuses one that breaks it with a
+`lowering` failure that names the member at fault:
 
 | Edge | Value | Members |
 | --- | --- | --- |
 | sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
 | http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization` |
+| http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 
 A member holds a string or a reference to an output or a parameter. A
-credential's `source` and `headers` are literals, and a member the
-contract lacks, or that the credential's source does not read, is
-refused.
+credential's `source` and `headers` are literals, as are an issuer's
+aliases, algorithms, subject claim and maximum lifetime, a whole number,
+and a caller's deployable and the APIs it serves. A member the contract
+lacks, or that the credential's source does not read, is refused.
 
 In environment variables, a derived field is one variable per member:
 the field's name, an underscore and the member's path in upper snake case,
-with a list joined by commas (`SHOP_DB_DATABASE_URL`,
+with a list of strings joined by commas (`SHOP_DB_DATABASE_URL`,
 `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `SHOP_API_SERVICE_URL`,
-`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). `ir.DerivedVariables` encodes a
-value that way for platforms, and the generated loaders read it back.
+`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). A list of objects, or an empty
+list, is a variable that holds the list's length, and each object's
+members follow the list's name and the object's index
+(`SHOP_API_CALLERS_ISSUERS=1`, `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`). A
+whole number is its decimal. `ir.DerivedVariables` encodes a value that
+way for platforms, and the generated loaders read it back.
 Each variable is a plain string a platform can set from an output
 reference, or from its secret store for a member such as a signing key.
 
@@ -1093,7 +1103,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service mounts |
-| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for that URL as the service credential (section 9.2) |
+| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
@@ -2159,11 +2169,12 @@ registrations.
    every connector's value against it. The Go loader's `EnvConfig`, with
    a field per database and per `calls` entry named by `[derived_fields]`
    and read through the Go HTTP runtime's `stackconfig`;
-   `values-schema.json` marking those fields derived; and the loader's
-   refusal of an `@envVars` field that collides with one. Next: the
-   TypeScript and Rust loaders read the derived fields, in the PR that
-   gives them `Deps`, and the service-auth field arrives with the
-   connectors that write it.
+   `values-schema.json` marking those fields derived; the loader's
+   refusal of an `@envVars` field that collides with one; and the callers
+   field of an API with a service clause, `ir.ServiceAuth` in
+   `ir/service_auth.go`, which the local and gcp connectors write and
+   `stackconfig.LoadCallers` reads (section 9.2). Next: the TypeScript and
+   Rust loaders read the derived fields, in the PR that gives them `Deps`.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
    (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`;
@@ -2173,9 +2184,9 @@ registrations.
    (`internal/generator/servergen`), which writes each Go server's
    entrypoint module and Dockerfile at `server/<stack>/<server>` (sections
    8.1 and 8.2). Its clients send the D37 service credential each edge's
-   endpoint names. Next: the service authenticator, once a connector
-   derives the service-auth field; the Cloud SQL connector; OpenTelemetry
-   export; then `Deps`, the constructor signature, the scaffold and the
+   endpoint names, and `serviceauth.go` builds the service authenticator
+   of each API with a service clause from its callers field. Next: the
+   Cloud SQL connector; OpenTelemetry export; then `Deps`, the constructor signature, the scaffold and the
    entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
    hand wiring until a later change moves it onto the entrypoint, which
    moves the code its docs pages quote (`go/products.go`, `go/orders.go`,
