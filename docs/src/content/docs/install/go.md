@@ -27,6 +27,10 @@ and a Go SDK. The build refuses the config without it.
   `scripts/versiongraph-archive.sh` and add the `-L` directory it prints to
   `CGO_LDFLAGS`, beside superscalar's. A `go.mod` replace line to the
   checkout (`paths.versiongraph_go`) finds the archive without the flag.
+  The module's engine keeps a graph in Postgres (package `postgres`, over
+  pgx) or SQLite (package `sqlite`, over `database/sql` and a driver you
+  pick); see
+  [The engine and its adapters](/superschematic/reference/version-graphs/#the-engine-and-its-adapters).
 
 ## Install the CLI
 
@@ -289,6 +293,14 @@ sit on each value, the items of a list or the values of a map, and
 query parameter's schema is never nullable: the parameter is present or
 absent, which `required` says.
 
+Who may call each route, and how the server learns who is calling, is in
+[Auth and permissions](/superschematic/guides/auth-and-permissions/): an
+API with `public: true` runs `Config.AuthMiddleware` on its protected
+routes, and a schema with an `@requireService` or `@allowService` clause
+adds `Config.ServiceAuthenticator`, a `serviceauth.Authenticator` from the
+HTTP runtime, which `Config.Validate` requires. A handler reads the
+calling service with `serviceauth.CallerFromContext(ctx)`.
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk.go` enabled writes
@@ -302,6 +314,19 @@ sdk, err := catalogsdk.New(catalogsdk.SDKConfig{
     Auth:    &catalogsdk.AuthConfig{Token: token},
 })
 ```
+
+`AuthConfig.Token` is static. `GetToken` is asked per request, with the
+call's context, when no static token is set, and `RefreshToken` runs once
+after a 401. `SDKConfig.ServiceCredential` is the calling service's own
+credential
+([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+its `Token(ctx, fresh)` returns it, a `serviceauth.TokenSource` of the
+HTTP runtime among others, and the SDK sends `Bearer <token>` in
+`Service-Authorization`, or in each of `Headers`, on every request. A 401
+whose code is `service_unauthorized` calls `Token(ctx, true)` once and
+retries, without the end-user refresh. A server forwards its own caller by
+setting `GetToken` to `serviceauth.ForwardedToken`, which reads the token
+of the request on the call's context.
 
 The client has one field per namespace. Operation sets that share a
 namespace share a field: `ProductQueries` and `ProductMutations` are both
