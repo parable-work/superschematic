@@ -1203,10 +1203,17 @@ password. Otherwise the platform generates a password into Secret Manager
 and uses the Cloud SQL mount Cloud Run provides. The server's database
 field is the same either way (section 3.4).
 
-The connector form is built. A Rust server's sql edge fails to lower until
-the derived value has a password form. An IAM database user starts with no
-privileges in its database; granting them belongs to the migration job
-(section 8.4), which is not built.
+The connector form is built for Go. The sql connector derives the Cloud
+SQL connection (section 7.2), and the generated Go entrypoint dials it with
+the Cloud SQL Go connector, `cloud.google.com/go/cloudsqlconn`, under pgx:
+IAM database authentication, the instance's public IP, which the instance
+admits only through a connector, and a certificate refreshed when a dial
+needs it rather than in the background, since Cloud Run throttles an
+instance's CPU between requests (section 8.1). A TypeScript server gets no
+entrypoint yet. A Rust server's sql edge fails to lower until the derived
+value has a password form. An IAM database user starts with no privileges
+in its database; granting them belongs to the migration job (section 8.4),
+which is not built.
 
 ### 7.5 Defaults
 
@@ -1252,10 +1259,11 @@ last build wrote, and a TypeScript or Rust server gets no entrypoint yet.
 - loads each served API's `EnvConfig` with `LoadEnvConfig`: its
   `@envVars` settings and its derived fields (section 3.4);
 - opens one pgx pool per database, shared by every API on it, from the
-  database field's connection string. A pool connects when first used, so
-  the server starts while its database is not up. A Cloud SQL connector
-  configuration is refused at startup until the entrypoint links the Cloud
-  SQL connector;
+  database field: a connection string, or a Cloud SQL connector
+  configuration, which the pool dials through the Cloud SQL connector,
+  logging in as the IAM database user with no password (section 7.4). A
+  pool connects when first used, so the server starts while its database
+  is not up;
 - builds one Go SDK client per API called, shared by every API that calls
   it, from the callee's `ServiceEndpoint`. The client sends the service
   credential the endpoint names, from the Go HTTP runtime's sources
@@ -1294,6 +1302,22 @@ implementation module the server builds from, and a replace points each
 at its directory. superschematic writes no `go.sum`: `go mod tidy` fills
 it before the first `go build .`, or the build runs with
 `GOFLAGS=-mod=mod`.
+
+Only a server that some environment places on Cloud SQL links the Cloud
+SQL connector, whose Google modules (auth, the Admin API client, gRPC)
+no other server should carry. The servers do not depend on an
+environment, but the build knows the stack's environments: the `server`
+generator resolves each, as `stack` does, and a server whose database
+some environment's sql edge connects with a `cloudSql` value gets
+`cloudsql.go` beside `main.go`, and its `go.mod` requires
+`cloud.google.com/go/cloudsqlconn`. Its `connect` hands a Cloud SQL
+configuration to `connectCloudSQL`, in `cloudsql.go`, and a connection
+string to pgx as before, so one binary runs locally and on gcp. It builds
+one dialer, which reads the application default credentials, when its
+first Cloud SQL database connects, and its pools still connect on first
+use, so `/readyz` reports a database the connector cannot reach. Any
+other server refuses a Cloud SQL configuration at startup and says to
+build the stack again.
 
 ### 8.2 Container image
 
@@ -2111,8 +2135,9 @@ registrations.
    (`internal/generator/servergen`), which writes each Go server's
    entrypoint module and Dockerfile at `server/<stack>/<server>` (sections
    8.1 and 8.2). Its clients send the D37 service credential each edge's
-   endpoint names. Next: the service authenticator, once a connector
-   derives the service-auth field; the Cloud SQL connector; OpenTelemetry
+   endpoint names, and a server some environment places on Cloud SQL links
+   the Cloud SQL connector. Next: the service authenticator, once a
+   connector derives the service-auth field; OpenTelemetry
    export; then `Deps`, the constructor signature, the scaffold and the
    entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
    hand wiring until a later change moves it onto the entrypoint, which

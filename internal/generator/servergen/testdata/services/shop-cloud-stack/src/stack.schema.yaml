@@ -1,8 +1,8 @@
-# Two servers: Storefront, declared, serves shop-orders and shop-reviews;
-# shop-api, which Storefront calls, runs on a default server of its own.
-# Its one environment, Local, runs on the local target, whose sql edges
-# derive a connection string, so no entrypoint links the Cloud SQL
-# connector.
+# shop-stack's servers in two environments: Staging on stacktest's fake
+# target, whose sql connector derives a Cloud SQL connector configuration
+# as the gcp target's does, and Local on the local target, whose derives a
+# connection string. Every server on shop-db links the Cloud SQL connector
+# and connects either way.
 kind: Stack
 types:
   Shop:
@@ -22,6 +22,12 @@ types:
       serves:
         - { name: shop-orders, kind: API }
         - { name: shop-reviews, kind: API }
+  Staging:
+    name: Staging
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-staging, region: us-east1 }
   Local:
     name: Local
     role: EmbeddedStruct
