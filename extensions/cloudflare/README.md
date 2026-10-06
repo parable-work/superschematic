@@ -92,7 +92,9 @@ The DNS platform names it as a credential, which resolution writes into
 ## Linking it
 
 A distribution links the extension beside its target and the pulumi
-provisioner, and pins the provider for the `cloudflare` package:
+provisioner, and pins the provider for the `cloudflare` package. The
+installed binary, `cmd/superschematic`, links it this way, beside the gcp
+target:
 
 ```go
 cli.New(cli.Config{Name: "superschematic"},
