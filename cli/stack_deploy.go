@@ -35,23 +35,26 @@ import (
 // the stack generator does, and hands it to internal/stackdeploy, which
 // drives the environment's target and provisioner.
 
-// addStackDeployCommands adds the cloud half of the stack commands to the
-// stack group.
-func addStackDeployCommands(group *cobra.Command, a *app) {
-	secrets := &cobra.Command{
+func init() {
+	registerStackCommands(
+		newStackBootstrapCmd,
+		newStackSecretsCmd,
+		newStackPlanCmd,
+		newStackDeployCmd,
+		newStackDestroyCmd,
+		newStackOutputsCmd,
+	)
+}
+
+// newStackSecretsCmd groups `secrets set`.
+func newStackSecretsCmd(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "secrets",
 		Short: "Enter the values of an environment's secrets",
 		Args:  cobra.NoArgs,
 	}
-	secrets.AddCommand(newStackSecretsSetCmd(a))
-	group.AddCommand(
-		newStackBootstrapCmd(a),
-		secrets,
-		newStackPlanCmd(a),
-		newStackDeployCmd(a),
-		newStackDestroyCmd(a),
-		newStackOutputsCmd(a),
-	)
+	cmd.AddCommand(newStackSecretsSetCmd(a))
+	return cmd
 }
 
 // stackFlags are the flags every stack command shares.
@@ -101,6 +104,12 @@ func (g *gateFlags) gate() (stackdeploy.Gate, error) {
 
 // deployContext is one stack command's environment, resolved from the
 // schemas, with what loaded it.
+//
+// TODO(D45): fold openDeployContext and findStackDir into the local
+// target's openStackProject and (*stackProject).environment once
+// claude/local-target merges, so every stack command finds and opens a
+// stack one way; and default --program-dir to its
+// programDir(outputRoot, stack, env).
 type deployContext struct {
 	reg      *registry.Registry
 	env      *ir.ResolvedEnvironment
@@ -410,6 +419,11 @@ step, so on a fresh environment run stack deploy first: it stops for the
 values it lacks, and asks for them when it runs at a terminal.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// TODO(D45): once claude/local-target merges, a local
+			// environment's secrets go through its store
+			// (local.WriteSecret, local.SecretsFile), which the local
+			// target's SecretStore should wrap, so this command stays
+			// target-neutral.
 			c, err := openDeployContext(a, flags, args[0])
 			if err != nil {
 				return err
