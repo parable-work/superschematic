@@ -48,6 +48,17 @@
           "field": "SHOP_API_SERVICE",
           "source": "derived",
           "value": {
+            "credential": {
+              "audience": "shop-api",
+              "issuer": "Orders",
+              "key": {
+                "$output": {
+                  "resource": "Orders.calls.shop-api.key",
+                  "name": "privateJwk"
+                }
+              },
+              "source": "signed-token"
+            },
             "url": "http://127.0.0.1:8080"
           },
           "edge": "http:Orders->shop-api"
@@ -172,6 +183,22 @@
   "resources": {
     "resources": [
       {
+        "id": "Orders.calls.shop-api.key",
+        "type": "local:serviceauth/keyPair:KeyPair",
+        "properties": {
+          "algorithm": "Ed25519",
+          "callee": "shop-api",
+          "caller": "Orders",
+          "serves": [
+            "shop-orders"
+          ]
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:Orders->shop-api"
+        ]
+      },
+      {
         "id": "Orders.process",
         "type": "local:process/process:Process",
         "properties": {
@@ -183,6 +210,27 @@
             {
               "name": "MAX_LINE_ITEMS",
               "value": "50"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": "shop-api"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_ISSUER",
+              "value": "Orders"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_KEY",
+              "value": {
+                "$output": {
+                  "resource": "Orders.calls.shop-api.key",
+                  "name": "privateJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+              "value": "signed-token"
             },
             {
               "name": "SHOP_API_SERVICE_URL",
@@ -203,6 +251,9 @@
           "port": 8081,
           "readiness": "/readyz"
         },
+        "dependsOn": [
+          "Orders.calls.shop-api.key"
+        ],
         "phase": "rollout",
         "owners": [
           "Orders"
@@ -294,6 +345,7 @@
     {
       "step": "infrastructure",
       "resources": [
+        "Orders.calls.shop-api.key",
         "postgres.container",
         "shop-db.database.shop-db"
       ]

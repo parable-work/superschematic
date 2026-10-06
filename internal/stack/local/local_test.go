@@ -127,8 +127,9 @@ func TestGolden(t *testing.T) {
 // TestWiring reads the resolved Dev environment for what the local
 // platforms and connectors derive: one Postgres container both databases'
 // lowering shares, a connection string to it per sql edge, the callee's
-// loopback URL per http edge, and ports that stay put between runs and
-// differ between environments.
+// loopback URL per http edge with a token signed by the edge's key, whose
+// private half only a reference names, and ports that stay put between
+// runs and differ between environments.
 func TestWiring(t *testing.T) {
 	reg := assemble(t)
 	dev := resolve(t, reg, shop(), stacktest.AcmeShop(), "Dev")
@@ -154,7 +155,12 @@ func TestWiring(t *testing.T) {
 	if got := values["SHOP_DB_DATABASE"]; !equalJSON(t, got, wantDB) {
 		t.Errorf("Orders SHOP_DB_DATABASE = %v, want %v", got, wantDB)
 	}
-	wantAPI := map[string]any{"url": local.ServerURL(apiPort)}
+	wantAPI := map[string]any{"url": local.ServerURL(apiPort), "credential": map[string]any{
+		"source":   "signed-token",
+		"audience": "shop-api",
+		"issuer":   "Orders",
+		"key":      ir.Output{Resource: "Orders.calls.shop-api.key", Name: "privateJwk"},
+	}}
 	if got := values["SHOP_API_SERVICE"]; !equalJSON(t, got, wantAPI) {
 		t.Errorf("Orders SHOP_API_SERVICE = %v, want %v", got, wantAPI)
 	}

@@ -232,6 +232,17 @@ func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) (
 			}
 		}
 	}
+	if len(prog.KeyPairs) > 0 {
+		dir, err := stateDirOf(req.Backend)
+		if err != nil {
+			return nil, fmt.Errorf("local: environment %s has key pairs, but %w", req.Environment.Environment, err)
+		}
+		for _, k := range prog.KeyPairs {
+			if _, err := readKey(dir, k.ID); err != nil {
+				changes = append(changes, registry.PlannedChange{Resource: k.ID, Action: "create"})
+			}
+		}
+	}
 	started := map[string]bool{}
 	p.mu.Lock()
 	for _, rs := range p.running[key(req.Environment)] {
@@ -272,16 +283,34 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 	}
 	var containers []*Container
 	var databases []*Database
+	var keyPairs []*KeyPair
 	var servers []*Server
 	for _, id := range step.Resources {
 		if c := prog.container(id); c != nil {
 			containers = append(containers, c)
 		} else if db := prog.database(id); db != nil {
 			databases = append(databases, db)
+		} else if k := prog.keyPair(id); k != nil {
+			keyPairs = append(keyPairs, k)
 		} else if s := prog.server(id); s != nil {
 			servers = append(servers, s)
 		} else {
 			return fmt.Errorf("local: step %s applies %s, which is not in the program", step.Step, id)
+		}
+	}
+	if len(keyPairs) > 0 {
+		dir, err := stateDirOf(req.Backend)
+		if err != nil {
+			return fmt.Errorf("local: environment %s has key pairs to keep, but %w", req.Environment.Environment, err)
+		}
+		for _, k := range keyPairs {
+			_, created, err := ensureKey(dir, k.ID, nil)
+			if err != nil {
+				return err
+			}
+			if created {
+				p.printf("create key pair %s: %s signs its calls to %s with it", k.ID, k.Caller, k.Callee)
+			}
 		}
 	}
 	if len(containers) > 0 || len(databases) > 0 {
@@ -374,7 +403,19 @@ func (p *Provisioner) Outputs(_ context.Context, req registry.ProvisionRequest) 
 	if err != nil {
 		return nil, err
 	}
-	return prog.outputs(), nil
+	out := prog.outputs()
+	if dir, err := stateDirOf(req.Backend); err == nil {
+		for _, k := range prog.KeyPairs {
+			if key, err := readKey(dir, k.ID); err == nil {
+				public, err := json.Marshal(key.Public())
+				if err != nil {
+					return nil, err
+				}
+				out[k.ID] = map[string]any{"kid": key.Kid, "publicJwk": string(public)}
+			}
+		}
+	}
+	return out, nil
 }
 
 func (prog *Program) outputs() map[string]map[string]any {
@@ -651,6 +692,21 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 	}
 	var builds []built
 	outputs := prog.outputs()
+	keys, err := p.keysFor(req, prog)
+	if err != nil {
+		return err
+	}
+	for id, key := range keys {
+		private, err := json.Marshal(key)
+		if err != nil {
+			return err
+		}
+		public, err := json.Marshal(key.Public())
+		if err != nil {
+			return err
+		}
+		outputs[id] = map[string]any{"kid": key.Kid, "publicJwk": string(public), "privateJwk": string(private)}
+	}
 	for _, s := range servers {
 		module := filepath.Join(req.OutputRoot, filepath.FromSlash(s.Module))
 		if info, err := os.Stat(module); err != nil || !info.IsDir() {
@@ -663,6 +719,13 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		env, err := serverEnv(s, secrets, req.Parameters, outputs)
 		if err != nil {
 			return fmt.Errorf("local: server %s: %w", s.Deployable, err)
+		}
+		if len(s.ServiceAuth) > 0 {
+			config, err := serviceAuth(s, prog, keys)
+			if err != nil {
+				return fmt.Errorf("local: server %s: %w", s.Deployable, err)
+			}
+			env = append(env, ServiceAuthVariable+"="+config)
 		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
 		// Each module stands alone: a go.work above the output root does
@@ -796,6 +859,30 @@ func (p *Provisioner) stop(rs *runningServer) error {
 		return fmt.Errorf("local: stop server %s: %w", rs.server.Deployable, err)
 	}
 	return nil
+}
+
+// keysFor reads every key pair of the environment from its state
+// directory, where applying its infrastructure generated them.
+func (p *Provisioner) keysFor(req registry.ProvisionRequest, prog *Program) (map[string]JWK, error) {
+	if len(prog.KeyPairs) == 0 {
+		return nil, nil
+	}
+	dir, err := stateDirOf(req.Backend)
+	if err != nil {
+		return nil, fmt.Errorf("local: environment %s has key pairs, but %w", req.Environment.Environment, err)
+	}
+	keys := map[string]JWK{}
+	for _, k := range prog.KeyPairs {
+		key, err := readKey(dir, k.ID)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("local: no key pair %s in %s; apply the environment's infrastructure first", k.ID, filepath.Join(dir, KeysDir))
+		}
+		if err != nil {
+			return nil, err
+		}
+		keys[k.ID] = key
+	}
+	return keys, nil
 }
 
 // secretsFor reads the environment's secrets file when a server reads a

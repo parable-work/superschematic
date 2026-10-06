@@ -48,6 +48,9 @@ type Program struct {
 	// Databases are the databases on the containers, sorted by ID.
 	Databases []*Database `json:"databases,omitempty"`
 
+	// KeyPairs are the http edges' key pairs, sorted by ID.
+	KeyPairs []*KeyPair `json:"keyPairs,omitempty"`
+
 	// Migrations are the DB schemas each migrate step migrates, expand and
 	// contract back to back, in deploy order.
 	Migrations []*Migration `json:"migrations,omitempty"`
@@ -77,6 +80,15 @@ type Database struct {
 	URL       string `json:"url"`
 }
 
+// KeyPair is a key pair node: the Ed25519 key the caller signs its service
+// credential with, and whose public half the callee accepts.
+type KeyPair struct {
+	ID     string   `json:"id"`
+	Caller string   `json:"caller"`
+	Callee string   `json:"callee"`
+	Serves []string `json:"serves"`
+}
+
 // Migration is one DB schema's migration: the plan from the model its
 // database recorded to the model the deploy wrote into ModelsDir.
 type Migration struct {
@@ -103,6 +115,10 @@ type Server struct {
 	URL        string   `json:"url"`
 	Readiness  string   `json:"readiness"`
 	Env        []EnvVar `json:"env,omitempty"`
+
+	// ServiceAuth are the key pairs of the edges that reach the server,
+	// whose public keys its ServiceAuthVariable holds.
+	ServiceAuth []string `json:"serviceAuth,omitempty"`
 }
 
 // EnvVar is one environment variable of a process or a container: a value,
@@ -156,6 +172,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			var d *Database
 			if d, err = databaseOf(res); err == nil {
 				prog.Databases = append(prog.Databases, d)
+			}
+		case TypeKeyPair:
+			var k *KeyPair
+			if k, err = keyPairOf(res); err == nil {
+				prog.KeyPairs = append(prog.KeyPairs, k)
 			}
 		case TypeProcess:
 			var s *Server
@@ -216,6 +237,18 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			return nil, fmt.Errorf("local: process %s is in no rollout step", id)
 		}
 	}
+	for _, k := range prog.KeyPairs {
+		var callee *Server
+		for _, s := range prog.Servers {
+			if s.Deployable == k.Callee {
+				callee = s
+			}
+		}
+		if callee == nil {
+			return nil, fmt.Errorf("local: key pair %s is for server %s, which the environment does not run", k.ID, k.Callee)
+		}
+		callee.ServiceAuth = append(callee.ServiceAuth, k.ID)
+	}
 	return prog, nil
 }
 
@@ -232,6 +265,15 @@ func (p *Program) container(id string) *Container {
 	for _, c := range p.Containers {
 		if c.ID == id {
 			return c
+		}
+	}
+	return nil
+}
+
+func (p *Program) keyPair(id string) *KeyPair {
+	for _, k := range p.KeyPairs {
+		if k.ID == id {
+			return k
 		}
 	}
 	return nil
@@ -348,6 +390,30 @@ func databaseOf(res *ir.Resource) (*Database, error) {
 	}
 	d.Container = container.Resource
 	return d, nil
+}
+
+func keyPairOf(res *ir.Resource) (*KeyPair, error) {
+	k := &KeyPair{ID: res.ID}
+	var ok bool
+	if k.Caller, ok = res.Properties["caller"].(string); !ok || k.Caller == "" {
+		return nil, fmt.Errorf("its caller is not a string")
+	}
+	if k.Callee, ok = res.Properties["callee"].(string); !ok || k.Callee == "" {
+		return nil, fmt.Errorf("its callee is not a string")
+	}
+	if algorithm, _ := res.Properties["algorithm"].(string); algorithm != KeyAlgorithm {
+		return nil, fmt.Errorf("its algorithm is %q, not %s", algorithm, KeyAlgorithm)
+	}
+	serves, _ := res.Properties["serves"].([]any)
+	k.Serves = []string{}
+	for _, v := range serves {
+		name, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("its serves holds %v, not an API's name", v)
+		}
+		k.Serves = append(k.Serves, name)
+	}
+	return k, nil
 }
 
 func serverOf(res *ir.Resource) (*Server, error) {

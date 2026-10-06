@@ -4,14 +4,17 @@
 // module, every database deployable of the environment shares one Postgres
 // container, with a database per hosted DB schema, a sql edge derives a
 // connection string to that container, and an http edge the callee's
-// loopback URL.
+// loopback URL with a service credential the caller signs with the edge's
+// Ed25519 key (D37), whose public half the callee's service-auth config
+// holds.
 //
 // The target registers like any other (Register), but the core registers
 // it, so a binary with no extension linked runs `stack dev`. Its resource
-// vocabulary is the core's own, the `local` provider's three types
-// (TypeContainer, TypeDatabase, TypeProcess), not a Pulumi package's: no
-// published provider schema describes a local process, and nothing but the
-// local provisioner applies them (D30, amended: the local target).
+// vocabulary is the core's own, the `local` provider's four types
+// (TypeContainer, TypeDatabase, TypeKeyPair, TypeProcess), not a Pulumi
+// package's: no published provider schema describes a local process, and
+// nothing but the local provisioner applies them (D30, amended: the local
+// target).
 //
 // The platforms and connectors are pure. Provisioner applies their graph:
 // it runs Docker, the migration runner, `go build` and the servers.
@@ -63,6 +66,13 @@ const (
 
 	// TypeDatabase is a database on a Postgres container.
 	TypeDatabase = "local:postgres/database:Database"
+
+	// TypeKeyPair is an http edge's Ed25519 key pair. The provisioner
+	// generates it into the environment's state directory, never the
+	// output root: the caller signs its service credential with the
+	// private key, and the callee's service-auth config holds the public
+	// one.
+	TypeKeyPair = "local:serviceauth/keyPair:KeyPair"
 
 	// TypeProcess is a server process built from its entrypoint module.
 	TypeProcess = "local:process/process:Process"
@@ -185,6 +195,17 @@ var resourceTypes = map[string]string{
 	    "service": {"type": "string", "minLength": 1},
 	    "container": {"type": "string", "minLength": 1},
 	    "url": {"type": "string", "minLength": 1}
+	  },
+	  "additionalProperties": false
+	}`,
+	TypeKeyPair: `{
+	  "type": "object",
+	  "required": ["caller", "callee", "serves", "algorithm"],
+	  "properties": {
+	    "caller": {"type": "string", "minLength": 1},
+	    "callee": {"type": "string", "minLength": 1},
+	    "serves": {"type": "array", "items": {"type": "string", "minLength": 1}},
+	    "algorithm": {"enum": ["Ed25519"]}
 	  },
 	  "additionalProperties": false
 	}`,
