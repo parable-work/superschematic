@@ -3,8 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/parable-work/superschematic/internal/stack/local"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
@@ -96,36 +97,29 @@ types:
 	}
 }
 
-// fakeEntrypoint is a server module that honours the generated
-// entrypoint's contract (docs/stack-model.md, section 8.1): it listens on
-// $PORT, answers /readyz and echoes its environment at /env.
-var fakeEntrypoint = map[string]string{
-	"go.mod": "module example.com/fakeentrypoint\n\ngo 1.26\n",
-	"main.go": `package main
-
-import (
-	"encoding/json"
-	"net/http"
-	"os"
-	"strings"
-)
-
-func main() {
-	http.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {})
-	http.HandleFunc("GET /env", func(w http.ResponseWriter, _ *http.Request) {
-		env := map[string]string{}
-		for _, kv := range os.Environ() {
-			key, value, _ := strings.Cut(kv, "=")
-			env[key] = value
-		}
-		_ = json.NewEncoder(w).Encode(env)
-	})
-	println("entrypoint up")
-	if err := http.ListenAndServe("127.0.0.1:"+os.Getenv("PORT"), nil); err != nil {
-		os.Exit(1)
+// writeRuntimePaths writes the naming file of the schemas root at
+// schemasRoot, its [paths] at this repository's runtime modules, relative
+// to the repository root the schemas root sits in, as a repository's own
+// naming file places them: a generated server module requires each, and
+// builds against the checkout. It skips the test when the superscalar
+// checkout is missing.
+func writeRuntimePaths(t *testing.T, schemasRoot string) {
+	t.Helper()
+	paths := testpaths.Local(t)
+	repoRoot := filepath.Dir(schemasRoot)
+	var b strings.Builder
+	b.WriteString("[paths]\n")
+	for _, p := range []struct{ key, dir string }{
+		{"scalar_go", paths.ScalarGo},
+		{"schema_ir", paths.SchemaIR},
+		{"schema_runtime_go", paths.SchemaRuntimeGo},
+		{"http_runtime_go", paths.HTTPRuntimeGo},
+	} {
+		rel, err := filepath.Rel(repoRoot, p.dir)
+		require.NoError(t, err)
+		fmt.Fprintf(&b, "%s = %q\n", p.key, filepath.ToSlash(rel))
 	}
-}
-`,
+	require.NoError(t, os.WriteFile(filepath.Join(schemasRoot, "superschematic.toml"), []byte(b.String()), 0o644))
 }
 
 func writeFiles(t *testing.T, dir string, files map[string]string) {
@@ -165,12 +159,15 @@ func (b *lockedBuffer) String() string {
 }
 
 // TestStackDevRunsALocalEnvironment runs `stack dev` for real, with Docker:
-// it builds the stack and shop-api with its database, runs Postgres with
-// shop-db migrated, starts shop-api's entrypoint module with its resolved
-// config, and on cancellation, as on Ctrl-C, stops it and, with
-// --remove-database, removes the container. The entrypoint generator is
-// not here, so the test puts a module that honours its contract where the
-// build would write it.
+// it builds the stack and shop-api with its database, which writes
+// shop-api's generated entrypoint and scaffolds its implementation, runs
+// Postgres with shop-db migrated, builds the entrypoint and starts it with
+// its resolved config, and on cancellation, as on Ctrl-C, stops it and,
+// with --remove-database, removes the container. The entrypoint reads its
+// whole config at startup, so a server that answers shows its variables
+// reached it: it listens on PORT, refuses to start without the secret
+// STRIPE_KEY, and answers /readyz 200 only while the database at the URL
+// the local target derived answers.
 func TestStackDevRunsALocalEnvironment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: stack dev runs Docker, Postgres and a server")
@@ -189,8 +186,8 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 	servicesRoot := prepareStackServicesRoot(t)
 	pgPort, apiPort := freeTCPPort(t), freeTCPPort(t)
 	writeFiles(t, filepath.Join(servicesRoot, "dev-stack"), devStack(pgPort, apiPort))
+	writeRuntimePaths(t, filepath.Dir(servicesRoot))
 	outputRoot := t.TempDir()
-	writeFiles(t, filepath.Join(outputRoot, "server", "dev-stack", "shop-api"), fakeEntrypoint)
 	stateDir, err := local.EnsureStateDir(filepath.Dir(servicesRoot), "dev-stack", "Dev")
 	require.NoError(t, err)
 	require.NoError(t, local.WriteSecret(filepath.Join(stateDir, local.SecretsFile), "PaymentsSecrets.STRIPE_KEY", "sk_test_dev"))
@@ -207,9 +204,8 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- root.ExecuteContext(ctx) }()
 
-	var env map[string]string
 	deadline := time.Now().Add(4 * time.Minute)
-	for env == nil {
+	for !strings.Contains(buf.String(), "is running:") {
 		select {
 		case err := <-done:
 			t.Fatalf("stack dev returned before the server ran: %v\n%s", err, buf)
@@ -218,20 +214,28 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("shop-api did not come up:\n%s", buf)
 		}
-		if strings.Contains(buf.String(), "is running:") {
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/env", apiPort))
-			require.NoError(t, err)
-			require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
-			_ = resp.Body.Close()
-		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.Equal(t, local.DatabaseURL(pgPort, "shop_db"), env["SHOP_DB_DATABASE_URL"], buf.String())
-	require.Equal(t, "sk_test_dev", env["STRIPE_KEY"])
-	require.Equal(t, "info", env["LOG_LEVEL"])
-	require.Equal(t, fmt.Sprint(apiPort), env["PORT"])
+	base := local.ServerURL(apiPort)
+	for path, want := range map[string]struct {
+		status int
+		body   string
+	}{
+		"/healthz":          {http.StatusOK, `"ok"`},
+		"/readyz":           {http.StatusOK, `"ready"`},
+		"/api/products/p-1": {http.StatusNotImplemented, "Product.GetProduct"},
+	} {
+		resp, err := http.Get(base + path)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		require.NoError(t, err)
+		require.Equal(t, want.status, resp.StatusCode, "%s: %s\n%s", path, body, buf)
+		require.Contains(t, string(body), want.body, path)
+	}
 	require.FileExists(t, filepath.Join(programDir(outputRoot, "dev-stack", "Dev"), local.ModelsDir, "shop-db.json"))
-	require.Contains(t, buf.String(), "[shop-api] entrypoint up")
+	require.Contains(t, buf.String(), "+ implementation scaffold of shop-api written to")
+	require.Contains(t, buf.String(), fmt.Sprintf(`"msg":"listening","stack":"dev-stack","server":"shop-api","addr":":%d"`, apiPort))
 	require.Contains(t, buf.String(), "migrate shop-db: ")
 
 	cancel()

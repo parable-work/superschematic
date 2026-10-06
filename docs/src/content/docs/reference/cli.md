@@ -20,8 +20,8 @@ carries extensions.
 
 The core has seven commands: `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors` and the `stack` group. The installed
-`superschematic` links the official extensions (the gcp target and the
-Pulumi provisioner), which add none.
+`superschematic` links the official extensions (the gcp target, the
+Cloudflare DNS platform and the Pulumi provisioner), which add none.
 
 ## `build <service-dir>`
 
@@ -374,7 +374,11 @@ extension's kind, decorators, documents or behaviors converts between JSON
 and YAML with its extension data. The TypeScript writer cannot render an
 extension's decorators: converting such a file to `ts` fails and names the
 extension slot instead of dropping it. It writes a type's behaviors as
-`@behavior` decorators.
+`@behavior` decorators. It imports each scalar namespace from the npm
+package the linked extension's scalar catalog names for it (`Acme` from
+`@acme/schema`), and the others from superscalar. A file with a scalar
+that superscalar does not have, in a namespace no catalog names a package
+for, fails to convert to `ts`, since the import would not resolve.
 
 ## `behaviors --out <dir>`
 
@@ -585,9 +589,26 @@ run's name at a terminal unless `--yes`, and refuses without either.
 
 ### `stack outputs <environment>`
 
-Print the outputs of the run's applied resources as JSON, by node ID and
-output name, leaving out secret ones. `--out` writes them to a file, the
-`outputs.json` the bindings generator reads.
+Print the run's outputs file, the `outputs.json` the bindings generator
+reads: a JSON object with the format's `version`, the `stack`, the
+`environment`, the run's `parameters` for a member of a parameterized
+environment, and under `resources` the outputs of the run's applied
+resources by node ID and output name, leaving out secret ones.
+
+```json
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Staging",
+  "resources": {
+    "shop-api.service": { "url": "https://shop-api-3kq7x2-ue.a.run.app" }
+  }
+}
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--out` | stdout | write the outputs file to this path; put it beside the environment's `environment.json` for the bindings generator |
 
 ## Extension commands
 

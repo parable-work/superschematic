@@ -56,8 +56,19 @@ calls `engine.runner.start()`:
 
 <Snippet example="engine-jobs" file="src/server.ts" symbol="openJobs" />
 
-The runner's principal needs what its sweeps and reactions do: `write`
-on each schema they change, and the permissions their configs name.
+Two permissions are easy to miss:
+
+- **The runner reads what it sweeps.** Its principal needs `write` on
+  each schema its sweeps and reactions change and the permissions their
+  configs name, and also `read` on each schema a sweep reads. Without
+  `read`, every run fails `forbidden` and is retried with the backoff;
+  `engine.runner.status()` shows the schedule `retrying` with the error.
+- **Defining reads the schemas a config names.** Presence's
+  `releaseLeases`, Blueprint's `schema`, a Budget meter's `scope` and the
+  core's `Rollups` are checked against the live version of the schema
+  they name when you define or publish, as you, so you need `read` on it;
+  otherwise the define is `forbidden`. The example's server defines as a
+  principal that holds `jobs.read` for this.
 
 <Snippet example="engine-jobs" file="src/auth.ts" symbol="runner" />
 
@@ -218,8 +229,8 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 - **A gone holder.** `expireHolder` expires every lease one principal
   holds and returns the ids; `notRenewedAfter` spares a lease renewed
   after a time, whose own heartbeats show it alive.
-- **The sweep** needs the runner's principal to hold `write` on the
-  schema and any permission an `onExpiry` transition names.
+- **The sweep** needs the runner's principal to hold `read` and `write`
+  on the schema and any permission an `onExpiry` transition names.
 - **Heartbeats fill the log.** Each one is an operation event. A
   dashboard that streams the event log passes `exclude=heartbeat` and
   keeps its place past them without receiving one.
@@ -252,13 +263,14 @@ takes its lease and moves its status.
 
 | | |
 | --- | --- |
-| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100) |
+| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, pinned `Links` links |
 | Operations | `claim({ ttlMs? })`, `refresh()`, the schema-level `claimNext({ match?, assignedOnly?, ttlMs? })`, which returns `{ claimed }`, a claim or null, and the schema-level, read-only `countClaimable({ match?, assignedOnly? })`, which returns `{ count }` |
 | Guard | `Lease.acquire` other than through a claim is `vetoed` (`claim_required`), so a claimable instance's lease is taken only by claiming it |
 
 `claim` expires a lapsed lease first, then checks the status is one of
-`claim.from` and that no `Dependencies` blocker holds the instance up,
-then acquires the lease, reserves `Budget` when the type composes it, and
+`claim.from`, that no `Dependencies` blocker holds the instance up, and
+that no link `excludeStale` names is pinned to a revision its target has
+moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
 transitions to `claim.to`. A refusal at any step leaves nothing behind.
 
 A claim waits on blockers; a plain `transition` to `claim.to` does not,
@@ -271,8 +283,8 @@ dependent's `satisfiedBy` lists, a success by default
 
 `claimNext` tries candidates highest priority first (an instance with no
 priority last), then oldest, then by id, skipping work that is blocked,
-assigned to another principal, at `maxExpiries`, exhausted by `Retries`
-or over its `Budget`, and claims the first that succeeds; a claim
+assigned to another principal, at `maxExpiries`, exhausted by `Retries`,
+pinned to a superseded revision or over its `Budget`, and claims the first that succeeds; a claim
 refused to this caller (`vetoed`, `conflict` or `forbidden`) passes to
 the next. Calls are synchronous and the engine writes from one process,
 so two claims never interleave.
@@ -281,10 +293,18 @@ so two claims never interleave.
   ["search", "mail"] }` takes either topic, highest priority first across
   both.
 - **Over budget is not tried.** Queue copies Budget's `checkReserve`, and
-  hears the enclosing scopes it read, so a pool that runs out takes its
+  hears the values of the enclosing scopes it says its answer turns on,
+  each at the instance's own amount, so a pool that runs out takes its
   queued work out of the candidates, and a pool that frees up, or a new
   UTC day for a daily meter, puts it back. Work over its budget at the
-  head of the queue never hides claimable work behind it.
+  head of the queue never hides claimable work behind it, and a write to
+  a pool with thousands of jobs queued under it reaches only the jobs
+  whose amount its remaining crosses.
+- **Outdated work is not tried.** With `excludeStale: ["spec"]` and a
+  pinned `spec` link, a job whose spec has a newer revision than the one
+  it pins is out of the candidates, and `claim` refuses it, until it is
+  linked to the spec again. A `revised` rule of `Reactions` can send it
+  back to review ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
 - **Your own work.** `assignedOnly: true` takes only work assigned to
   the caller.
 - **How much is waiting.** `countClaimable` counts the candidates with
@@ -322,13 +342,17 @@ export abstract class Worker {
 A worker that misses its deadline is marked `missed`, moved to
 `missing`, and the leases its principal holds on the `releaseLeases`
 schemas are expired through `Lease.expireHolder`, so its jobs go back in
-the queue even if their own leases had time left. A lease renewed after
-the worker's last beat is spared: its heartbeats show the process
-holding it is alive, and it expires on its own if they stop. Keep lease
-heartbeats at most the presence `ttlMs` apart. The miss records the ids
-it expired in `presence.released`, which its event carries. The
-runner's principal needs Lease's `overridePermission` on those schemas.
-A later `beat` clears the miss.
+the queue even if their own leases had time left. A lease acquired or
+renewed strictly after the worker's last beat is spared: its heartbeats
+show the process holding it is alive, and it expires on its own if they
+stop. A lease taken in the same millisecond as the beat is not spared.
+Keep lease heartbeats at most the presence `ttlMs` apart. The miss
+records the ids it expired in `presence.released`, which its event
+carries. The runner's principal needs `read` and `write` on the worker
+schema, which the sweep reads (`workers.read` in the example), and
+`read` and Lease's `overridePermission` on each `releaseLeases` schema.
+Without `read`, the sweep fails `forbidden` and keeps retrying. A later
+`beat` clears the miss.
 
 The example's test shows it on a clock it moves, with a worker
 `ttlMs` of 15 seconds and a lease of 30:
@@ -406,8 +430,9 @@ the enclosing scopes its `scope` link points at.
 
 - A claim reserves each meter's amount, the instance's `reserveField`
   or else `reserve`, and is refused when it does not fit (`over_limit`).
-  `checkReserve` says whether it would fit, without reserving; Queue
-  copies it, so `claimNext` does not try work over its budget.
+  `checkReserve` says whether it would fit, without reserving, and which
+  values of each scope its answer turns on; Queue copies it, so
+  `claimNext` does not try work over its budget.
 - `recordUsage` is never refused, since the usage has happened. It
   releases the part the reservation covered and reports any overrun;
   with `onExceeded`, the lease holder also gets a directive, and with

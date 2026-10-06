@@ -1,6 +1,6 @@
 {
   "name": "Reactions",
-  "description": "Rules that move Workflow statuses after a change commits: when the instance's status enters a state, when every instance that links to it through a link is in a terminal state, optionally one with a listed outcome, or when one of them enters a terminal state with a listed outcome, move the instance, or the instance one of its links points to, to a state. An engine runs them after the commit, as the principal it names for its runner, so a rule never refuses the change that set it off. A target already in the state, with no transition to it, or whose guards refuse is left as it is.",
+  "description": "Rules that move Workflow statuses after a change commits: when the instance's status enters a state, when every instance that links to it through a link is in a terminal state, optionally one with a listed outcome, when one of them enters a terminal state with a listed outcome, when an all or any rollup of the instance comes to hold, or when the instance one of its links points to gains a revision or a release, move the instance, or the instance one of its links points to, to a state. An engine runs them after the commit, as the principal it names for its runner, so a rule never refuses the change that set it off. A target already in the state, with no transition to it, or whose guards refuse is left as it is.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -17,7 +17,7 @@
           "required": ["when", "then"],
           "properties": {
             "when": {
-              "description": "What sets the rule off: one of enters, allTerminal and anyTerminal.",
+              "description": "What sets the rule off: one of enters, allTerminal, anyTerminal, holds and revised.",
               "type": "object",
               "additionalProperties": false,
               "minProperties": 1,
@@ -60,6 +60,20 @@
                       "uniqueItems": true,
                       "items": { "enum": ["success", "failure", "neutral"] }
                     }
+                  }
+                },
+                "holds": {
+                  "description": "An all or any rollup of the type's Rollups config: the rule fires on an instance when an instance of the rollup's schema changes, links, unlinks or goes, and that change makes the rollup hold: it holds after it, and would not with that instance as it was before it, the other linked instances as they are when the rule runs.",
+                  "type": "string",
+                  "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+                },
+                "revised": {
+                  "description": "The rule fires on an instance when the instance its link points to gains a new revision of Revisions, or, when its schema composes Branches, a new release (releaseCommit). For a pinned link, only an instance the new revision leaves stale.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["link"],
+                  "properties": {
+                    "link": { "description": "A link of the type's Links config.", "type": "string", "pattern": "^[a-z][A-Za-z0-9]{0,63}$" }
                   }
                 }
               }

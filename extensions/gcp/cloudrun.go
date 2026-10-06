@@ -116,6 +116,23 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"cpu":    settingString(d.Settings, "cpu", defaultCPU),
 			"memory": settingString(d.Settings, "memory", defaultMemory),
 		}},
+		// The entrypoint's health checks (section 8.1): an instance takes
+		// traffic once /readyz answers, so a revision whose databases do
+		// not answer never serves, and one whose process stops answering
+		// /healthz is restarted. /healthz answers while the instance
+		// drains, so a drain is never cut short.
+		"startupProbe": map[string]any{
+			"httpGet":          map[string]any{"path": readinessPath, "port": containerPort},
+			"periodSeconds":    startupPeriod,
+			"timeoutSeconds":   startupTimeout,
+			"failureThreshold": startupFailures,
+		},
+		"livenessProbe": map[string]any{
+			"httpGet":          map[string]any{"path": livenessPath, "port": containerPort},
+			"periodSeconds":    livenessPeriod,
+			"timeoutSeconds":   livenessTimeout,
+			"failureThreshold": livenessFailures,
+		},
 	}
 	if len(envs) > 0 {
 		container["envs"] = envs

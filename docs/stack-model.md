@@ -848,10 +848,37 @@ has one value per environment and one field per deployable
 read it over Pulumi stack references; scripts and CI read it over the
 outputs file.
 
+The outputs file, `outputs.json`, is the core's: `stack outputs
+<environment> --out <file>` writes one run's (section 11.1), and stdout
+without `--out` gets the same bytes. It is a versioned JSON object:
+
+```json
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Preview",
+  "parameters": { "pr": "123" },
+  "resources": {
+    "shop-api.service": { "url": "https://shop-api-pr-123-3kq7x2-ue.a.run.app" }
+  }
+}
+```
+
+`version` is the format's version, 1 today, and a reader refuses any
+other; `stack` and `environment` name the environment the run applied;
+`parameters`, present only for a member of a parameterized environment,
+are the run's values; and `resources` holds what the provisioner's
+`Outputs` read, by node ID and output name, without the secret ones. The
+type is `stack.RunOutputs`, with `stack.UnmarshalOutputs` to read one and
+`stack.NewOutputs` to make one; `stack.Outputs` returns it from Go.
+
 `extensions/pulumi/bindings` is the generator. It reads each environment's
-`environment.json` and its outputs file, `outputs.json`, which holds what
-`Outputs` read for one run by node ID and output name. It writes two
-packages:
+`environment.json` and the outputs file beside it; its `Outputs`,
+`NewOutputs`, `UnmarshalOutputs`, `OutputsVersion` and `OutputsFile`
+forward to the core's. A build writes
+`<output-root>/stack/<stack>/<environment>/environment.json`, and `stack
+outputs <environment> --out` with that directory and `outputs.json` puts
+the run's file beside it. It writes two packages:
 
 - **The values** (`shopstack`). `Environment` has a field per deployable,
   and a value per applied environment (`Staging`). A deployable's field
@@ -1091,7 +1118,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | Stack concept | gcp |
 | --- | --- |
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
-| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value |
+| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service mounts |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for that URL as the service credential (section 9.2) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
@@ -1924,7 +1951,8 @@ A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
 `stackdeploy.CredentialsOf`, which bootstrap, `plan`, `deploy`, `destroy`
 and `outputs` all read: each is a secret name, the environment variable its
-provider reads and what to enter. Every run reads each value with the
+provider reads and what to enter, as the DNS platform resolved them into
+`environment.json` under `dns.credentials` (section 6.9). Every run reads each value with the
 run's account and hands it to the provisioner, which passes it to the
 tool's process for that run only, never to its config, its program or a
 file.
@@ -1940,8 +1968,9 @@ file.
    repository path, and the deploy pins it: every string property of the
    server's own nodes equal to the repository becomes
    `<repository>@<digest>`, so the program the provisioner renders names
-   each image by digest. Building the images comes later, with the
-   generated Dockerfile (section 8.2);
+   each image by digest. The deploy does not build the images yet: each
+   server's generated Dockerfile (section 8.2) builds one, and the deploy
+   takes its digest;
 2. plans each database's migration from the model the manifest records
    (D27), with the readers of the schemas root as the readers after the
    rollout, refuses a hazard of a `--fail-on` class (every class by
@@ -1954,7 +1983,8 @@ file.
    working;
 6. rolls servers callee first, a wave at a time, each wave returning once
    the platform reports its servers ready: Cloud Run's provider waits for
-   the revision's `Ready` condition;
+   the revision's `Ready` condition, which the startup probe on `/readyz`
+   holds back until the server's databases answer (section 7.2);
 7. runs the plan's `contract` steps (`--phase contract`), the drops and
    tightenings that the previous version's servers could not survive, once
    none of them runs;
@@ -1990,7 +2020,8 @@ prints both, with the secrets that have no value, the servers with no
 image yet, and the records to create by hand for a `manual` domain. It
 changes nothing, so the read-only `planner` account runs it. `stack
 destroy` removes a run's resources and its manifest, and `stack outputs`
-prints the outputs the bindings read (section 6.6).
+prints the run's outputs file, or writes it with `--out`, which the
+bindings generator reads (section 6.6).
 
 Not built: the gcp target's migration runner, a Cloud Run job that runs
 `superschematic-migrate` (section 8.4). Until it lands, a gcp deploy with a
@@ -2116,10 +2147,12 @@ registrations.
    run's credentials, and the deploy that drives them in deploy order
    (`internal/stackdeploy`, section 11.2), which `stack/stacktest`'s fake
    target carries too; the gcp target's bootstrap, Secret Manager store and
-   state bucket (section 7.3). Next: the gcp migration runner, and
-   `stackdeploy.CredentialsOf` reading the credentials the Cloudflare DNS
-   platform resolves.
-8. **CLI.** The `stack` command group.
+   state bucket (section 7.3), and `stackdeploy.CredentialsOf` reading
+   the credentials a DNS platform resolves into `dns.credentials`. Next:
+   the gcp migration runner.
+8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
+   and `bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and
+   `outputs` (section 11).
 
 ## 13. Module layout
 
@@ -2142,13 +2175,13 @@ registrations.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
   Built: it is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
-  pulumi.Extension{ProviderVersions: map[string]string{"gcp":
-  gcp.ProviderVersion}})`, so the provisioner installs the gcp provider at
-  the release whose schemas the target checks against.
-  `extensions/cloudflare` joins the list when it lands. An engineer
-  installs one binary and gets every official target. `extensions/topcoat`
-  is not linked (D44); its own binary links it. A release builds this
-  binary and tags the module with the others.
+  cloudflare.Extension{}, pulumi.Extension{ProviderVersions:
+  map[string]string{"gcp": gcp.ProviderVersion, cloudflare.Package:
+  cloudflare.ProviderVersion}})`, so the provisioner installs each
+  provider at the release whose schemas the target or the DNS platform
+  checks against. An engineer installs one binary and gets every official
+  target. `extensions/topcoat` is not linked (D44); its own binary links
+  it. A release builds this binary and tags the module with the others.
 
 The Pulumi SDK and the GCP client libraries stay out of the root module, as
 the compiler keeps its TypeScript parser out of the runtimes. The root
