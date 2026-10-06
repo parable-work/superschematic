@@ -57,6 +57,7 @@ export type {
   RollupSource,
   RollupsConfig,
   SearchConfig,
+  SearchVectorsConfig,
   VariantsConfig,
   WorkflowConfig,
   WorkflowOutcome,

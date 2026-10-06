@@ -82,6 +82,15 @@ type Options struct {
 	// 8.5). Empty writes no scaffold; build and build-all set it under
 	// --scaffold.
 	ImplementationRoot string
+
+	// RepositoryRoot is the repository root, the parent of the schemas
+	// root, which every build of the CLI sets. A stack's server
+	// entrypoints find each served API's implementation under it at the
+	// naming file's [implementation_paths] template, scaffolding a missing
+	// one, and their Dockerfiles take it as the build context
+	// (docs/stack-model.md, sections 8.1, 8.2 and 8.5). Empty writes no
+	// entrypoint.
+	RepositoryRoot string
 }
 
 // BuildStage is the part of a service's generator pipeline one run
