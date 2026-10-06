@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The arguments of event.getEvent (`GET /api/events/{id}`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct EventGetEventArgs {
     /// The `id` path parameter.
@@ -23,7 +24,8 @@ pub struct EventGetEventArgs {
 }
 
 /// The arguments of webhook.receiveGithubEvent (`POST /api/webhooks/github`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct WebhookReceiveGithubEventArgs {
     /// The `id` field of the request body.
@@ -33,7 +35,8 @@ pub struct WebhookReceiveGithubEventArgs {
 }
 
 /// The arguments of webhook.receiveStripeEvent (`POST /api/webhooks/stripe`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct WebhookReceiveStripeEventArgs {
     /// The request body.

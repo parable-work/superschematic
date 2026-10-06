@@ -296,6 +296,7 @@ records every design decision (cited as D1, D2, ... in code and commits).
 | [`examples/acme-schematic`](examples/acme-schematic/) | The same shop with an extension that adds a kind, decorators, a generator, an auth provider, a behavior and commands, without editing the core | `examples/acme-schematic/scripts/smoke.sh` |
 | [`examples/engine-notes`](examples/engine-notes/) | A notes server on the engine: workflow, comments and revisions over HTTP, an event stream and MCP | `examples/engine-notes/scripts/check.sh` |
 | [`extensions/deploy`](extensions/deploy/), [`extensions/platform`](extensions/platform/) | Two small extensions: Helm values from `@envVars`, and a kind that groups services | `go test ./extensions/...` |
+| [`extensions/topcoat`](extensions/topcoat/) | A Go module of its own: for a Rust API, a crate a [Topcoat](https://github.com/tokio-rs/topcoat) app calls the operations through in-process, by each route's rules, with records of their results | `cd extensions/topcoat && go test ./...` |
 
 ## Extending superschematic
 

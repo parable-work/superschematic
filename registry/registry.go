@@ -17,6 +17,8 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
+	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
@@ -88,6 +90,17 @@ type (
 	// builds one outside a run.
 	EnvConfig      = envgen.ConfigOutput
 	EnvConfigField = envgen.ConfigField
+
+	// RustAPI is the Rust REST API crate the api generator writes for a
+	// service whose API language is Rust (D39): its crate names, and each
+	// operation, mounted (Endpoints) or manual (ManualEndpoints), as a
+	// RustEndpoint with its Args struct, its arguments (RustParam), its
+	// input (RustInput), its result type and its auth rules. RustAPIOf
+	// returns it.
+	RustAPI      = rustrestgen.APIOutput
+	RustEndpoint = rustrestgen.EndpointInfo
+	RustParam    = rustrestgen.ParamInfo
+	RustInput    = rustrestgen.InputInfo
 
 	// The auth provider seam (docs/extension-model.md section 8). An
 	// extension registers one with Registry.RegisterAuthProvider; the api
@@ -274,6 +287,23 @@ func ScalarCatalogWithRawBodyChecks(catalog ScalarCatalog, checks map[string]Sca
 func EnvConfigOf(schema *ir.Schema, schemaName string) (*EnvConfig, error) {
 	return envgen.Generate(schema, schemaName)
 }
+
+// RustAPIOf is the Rust REST API crate the api generator writes for the
+// service c generates, as the generator builds it; (nil, nil) for a schema
+// without operations. It does not read the outputs block: an extension
+// that writes Rust beside the crate checks that the service's API language
+// is Rust. See internal/generator.RustAPIOf.
+func RustAPIOf(c GenerateContext) (*RustAPI, error) { return generator.RustAPIOf(c) }
+
+// APIDir is the directory the api generator writes service's server to
+// under outputRoot, the Rust crate's directory for a Rust API; see
+// internal/generator.APIDir.
+func APIDir(outputRoot, service string) string { return generator.APIDir(outputRoot, service) }
+
+// RustIdentifier is name as a snake_case Rust identifier, a keyword
+// escaped, or fallback when nothing is left: how the Rust server and SDK
+// name an argument's field; see internal/generator/rustutil.Identifier.
+func RustIdentifier(name, fallback string) string { return rustutil.Identifier(name, fallback) }
 
 // GoPublicIdentifier converts an arbitrary handle into an exported Go
 // identifier, the way the core generators name generated constants; see

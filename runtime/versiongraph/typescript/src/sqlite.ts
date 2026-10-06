@@ -35,7 +35,9 @@
 // positional parameters, and exec for transaction control. nodeSqlite and
 // bunSqlite bind an already-open node:sqlite DatabaseSync or bun:sqlite
 // Database; they use only the methods they call, so this module imports no
-// SQLite module and loads without one.
+// SQLite module and loads without one. createTables and storage refuse a
+// SQLite older than 3.37.0, the first with STRICT tables, and one that
+// cannot run json_each and json_extract (minSqliteVersion).
 
 import { canonicalOf, uuidCanonical } from "./canonical.js";
 import type { Descriptor } from "./contract.js";
@@ -106,6 +108,88 @@ export const SQLITE_BUSY = 5;
 
 /** SQLITE_CONSTRAINT_UNIQUE: a unique index refused a row. */
 export const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+/**
+ * The oldest SQLite the adapter runs on: 3.37.0, the first with the STRICT
+ * tables its layout declares. Its statements need nothing later: RETURNING
+ * came in 3.35.0, and json_each and json_extract, which its reads take lists
+ * through, are built in from 3.38.0 and in 3.37 builds with JSON1.
+ */
+export const minSqliteVersion = "3.37.0";
+
+/** A statement only a SQLite with json_each and json_extract runs, giving 1. */
+const jsonProbe = "SELECT json_extract(p.value, '$[0]') AS one FROM json_each('[[1]]') AS p";
+
+/** A SQLite version's numbers, major, minor and patch; undefined for text that is not one. */
+function versionParts(version: string): [number, number, number] | undefined {
+  const m = /^([0-9]+)\.([0-9]+)\.([0-9]+)/.exec(version);
+  return m === null ? undefined : [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/** The clients on a connection of the adapter's own whose SQLite passed checkSqlite. */
+const checkedClients = new WeakSet<SqliteClient>();
+
+/**
+ * The layouts, by their tables' names, whose SQLite passed checkSqlite in a
+ * caller's transaction. A host such as D16's Branches binds a new adapter
+ * over a new client for each call, all on one connection, so a check kept
+ * by client would run on every call. What the check reads is the SQLite
+ * library's, so this assumes one SQLite library serves every connection
+ * that uses a layout name in this process, as D16's engine does. A second
+ * library without the JSON functions under the same names would pass
+ * unchecked and fail at its first json_each statement, with SQLite's own
+ * error.
+ */
+const checkedLayouts = new Set<string>();
+
+/**
+ * Refuses a SQLite the adapter cannot run on: one older than
+ * minSqliteVersion, and one that cannot run json_each and json_extract. On a
+ * connection of its own the adapter reads the version with sqlite_version().
+ * In the caller's transaction it checks the JSON functions only: D16 refuses
+ * a behavior's statement that names sqlite_version, and D16's engine, whose
+ * own tables are STRICT, already needs 3.37.0. A check that passes is kept,
+ * by client on a connection of the adapter's own and by layout in a
+ * caller's transaction, so it runs once; one that fails is not kept.
+ */
+function checkSqlite(config: AdapterConfig, client: SqliteClient): void {
+  const layout = config.callerTransaction ? Object.values(config.tables).join("\u0000") : undefined;
+  if (layout !== undefined ? checkedLayouts.has(layout) : checkedClients.has(client)) {
+    return;
+  }
+  let version: string | undefined;
+  if (!config.callerTransaction) {
+    const reported = client.get("SELECT sqlite_version() AS version")?.["version"];
+    const parts = typeof reported === "string" ? versionParts(reported) : undefined;
+    if (parts === undefined) {
+      throw new Error(`sqlite: SQLite reports its version as ${String(reported)}, not major.minor.patch`);
+    }
+    version = reported as string;
+    const least = versionParts(minSqliteVersion)!;
+    const older = parts[0] !== least[0] ? parts[0] < least[0] : parts[1] !== least[1] ? parts[1] < least[1] : parts[2] < least[2];
+    if (older) {
+      throw new Error(`sqlite: SQLite ${version} is older than ${minSqliteVersion}, the first with the STRICT tables the adapter's layout declares`);
+    }
+  }
+  const of = version === undefined ? "this SQLite" : `SQLite ${version}`;
+  let one: SqliteValue | undefined;
+  try {
+    one = client.get(jsonProbe)?.["one"];
+  } catch (err) {
+    throw new Error(
+      `sqlite: ${of} cannot run json_each and json_extract, which the adapter's statements use (built in from 3.38.0, and in 3.37 with JSON1): ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  if (Number(one) !== 1) {
+    throw new Error(`sqlite: ${of} gives ${String(one)} for json_extract over json_each, not 1, so the adapter's statements cannot run on it`);
+  }
+  if (layout !== undefined) {
+    checkedLayouts.add(layout);
+  } else {
+    checkedClients.add(client);
+  }
+}
 
 /** Names a table or an index of the layout from its local name ("ref", "member_entity"). */
 export type TableName = (name: string) => string;
@@ -404,10 +488,12 @@ export class SqliteAdapter {
   /**
    * Creates the layout's tables and indexes where they are missing
    * (sqliteLayout), in one transaction: its own on the connection, or the
-   * caller's when the adapter runs in the caller's transaction.
+   * caller's when the adapter runs in the caller's transaction. It first
+   * refuses a SQLite the adapter cannot run on (minSqliteVersion).
    */
   createTables(client: SqliteClient): void {
     const config = configs.get(this)!;
+    checkSqlite(config, client);
     transact(config, client, () => {
       for (const statement of sqliteLayout(config.tableName)) {
         client.run(statement);
@@ -419,7 +505,8 @@ export class SqliteAdapter {
    * Binds the adapter to a client. On a connection of its own it turns the
    * connection's foreign keys on first, which SQLite ignores inside a
    * transaction, so bind it outside one; in the caller's transaction the
-   * caller's connection has them on, as D16's does.
+   * caller's connection has them on, as D16's does. Either way it refuses a
+   * SQLite the adapter cannot run on (minSqliteVersion).
    */
   storage(client: SqliteClient): SyncStorage {
     const config = configs.get(this)!;
@@ -433,6 +520,7 @@ export class SqliteAdapter {
         throw new Error("sqlite: the connection's foreign keys would not turn on; bind the adapter outside a transaction");
       }
     }
+    checkSqlite(config, client);
     return {
       transact: <T>(fn: (tx: SyncTx) => T): T => transact(config, client, (time) => fn(new SqliteTx(config, client, time))),
     };

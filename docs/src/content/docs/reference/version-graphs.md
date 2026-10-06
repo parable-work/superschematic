@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine, its SQLite adapter and the generated facade from TypeScript, the Rust engine, its SQLite adapter and facade, and the core, the engine and the generated facade from Python.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine, its SQLite adapter and the generated facade from TypeScript, the Rust engine, its SQLite adapter and facade, and the core, the engine, its SQLite adapter and the generated facade from Python.
 sidebar:
   order: 8
 ---
@@ -335,12 +335,10 @@ snapshots and the release pointer, take the next sequence under a root
 lock, walk commits, read discarded refs and idle change sets, prune and
 take the sweep lock. It asks the adapter for one transaction per
 operation. Every language's engine has a Postgres adapter, and the
-TypeScript and Rust engines have a SQLite adapter too
-([below](#the-sqlite-adapter)); another database needs its own
+TypeScript, Rust and Python engines have a SQLite adapter too
+([TypeScript](#the-sqlite-adapter), [Rust](#use-the-engine-from-rust),
+[Python](#use-the-engine-from-python)); another database needs its own
 implementation of that interface.
-([below](#the-sqlite-adapter)), as the Python engine does
-([Use the engine from Python](#use-the-engine-from-python)); another
-database needs its own implementation of that interface.
 
 Package `postgres` is the Postgres adapter. It builds its statements at run
 time from the descriptor, reads live rows with `to_jsonb` and history
@@ -629,7 +627,7 @@ point of its own, so the core's entry loads in a browser without them:
 | --- | --- |
 | `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, and the canonical rules (`canonicalRow`, `canonicalValue`) with the exact JSON codec they read with. |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
-| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
+| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout`, `minSqliteVersion`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
 
 `pg` is an optional peer dependency. The bindings use only the methods they
@@ -746,14 +744,18 @@ inside the transaction its caller holds and issues no transaction control,
 for a host such as D16's engine that holds the transaction. With one
 writer per file, a ref needs no lock of its own and the sweep lock is
 always free. `sqliteLayout(tableName)` returns the layout's statements, one
-statement each, for a caller that runs its own migrations.
+statement each, for a caller that runs its own migrations. The adapter
+refuses a SQLite older than 3.37.0 (`minSqliteVersion`, the first with
+`STRICT` tables) and one without the JSON functions `json_each` and
+`json_extract`.
 `nodeSqlite(db)` and `bunSqlite(db)` bind an open `node:sqlite`
 `DatabaseSync` and an open `bun:sqlite` `Database`; another driver
 implements `SqliteClient` (`run`, `get` and `all` with numbered `?1`
 parameters, and `exec`), whose errors carry SQLite's extended result code
 in `code`. The Rust engine has the same adapter
-([below](#use-the-engine-from-rust)); the SQLite adapters for Go and Python
-are still to come.
+([below](#use-the-engine-from-rust)), and Python's is in
+[Use the engine from Python](#use-the-engine-from-python); Go's is
+still to come.
 The vectors in
 [`runtime/versiongraph/testdata/sqlite`](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/testdata/sqlite)
 hold every language's adapter to this one: the layout's statements, a

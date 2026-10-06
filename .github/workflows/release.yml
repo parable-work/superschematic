@@ -178,7 +178,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         run: |
@@ -336,7 +336,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
+          key: superscalar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The schema runtime's TypeScript build links the superscalar binding
