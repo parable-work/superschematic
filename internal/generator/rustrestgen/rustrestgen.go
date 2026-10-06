@@ -76,6 +76,18 @@ func (e EndpointInfo) ConstName() string {
 	return constName(e.HandlerName)
 }
 
+// ImplementationsField is the field of Implementations that holds the
+// operation's namespace implementation.
+func (e EndpointInfo) ImplementationsField() string {
+	return rustutil.ToSnakeCase(e.Namespace)
+}
+
+// SnakeName is the operation's namespace and method in snake_case,
+// orders_get_order, as the router names its handler and decoder.
+func (e EndpointInfo) SnakeName() string {
+	return e.ImplementationsField() + "_" + e.FunctionName
+}
+
 // HasArgs reports whether the implementation method takes an Args struct.
 func (e EndpointInfo) HasArgs() bool {
 	return e.Input != nil || len(e.PathArgs) > 0 || len(e.QueryArgs) > 0 || len(e.BodyArgs) > 0

@@ -284,7 +284,7 @@ jobs:
           GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
-          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/pulumi; do
+          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/pulumi extensions/topcoat; do
             echo "==> $m"
             # Packages that run cargo queue on its lock of the shared target
             # directory, and the wait counts against each package's timeout.
@@ -399,6 +399,15 @@ jobs:
         with:
           version: v${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: extensions/pulumi
+          install-mode: none
+
+      - name: golangci-lint (extensions/topcoat)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: extensions/topcoat
           install-mode: none
 
   acme:

@@ -3178,3 +3178,31 @@ problem for a query list over its bound and an input that breaks its
 type's rule, and runs an operation in-process through `admit`, `check`
 and `context`. Serializing the arguments again costs a caller what the
 router spends decoding a request.
+
+## D44. A Topcoat app reaches a Rust API through a crate of its own, written by an extension
+
+[Topcoat](https://github.com/tokio-rs/topcoat) is a Rust web framework for
+server-rendered pages. Its pages, shards and procedures run in the same
+process as a service's Rust implementations, and it leaves validation and
+authentication to the app. A Rust API already has both, per route (D39,
+D43). A Topcoat app built on such an API would restate them for each page.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `extensions/topcoat` writes, for an API service with `outputs.topcoat`, a crate at `<out>/topcoat/<service>` that a Topcoat app depends on. It is a Go module of its own, like `extensions/gcp` and `extensions/pulumi`, and the core binary does not link it: a binary that wants it passes `topcoat.Extension{}` to `cli.New`. | Linking it into `cmd/superschematic`, which would break the core-only binary's promise (`docs/extension-model.md`, goal 2) for a framework still before 1.0; a core generator beside rustrestgen |
+| The crate needs the Rust server. A service whose server is in another language skips the output with its reason, so one config serves a Go build and `build --api-language RUST`. | Refusing the config, which would fail every build of a service that is Go by default |
+| `RouterBuilder<Service>Ext::<service>(implementations, page_authenticator)` keeps the implementations in the app context and mounts the JSON API (`build_router`) at `/api/{*rest}`. A `PageAuthenticator` establishes a page's caller, from the app's session say, and is asked only when an operation needs a caller. The API's `Authenticator` still decides permissions, so a page and the JSON API admit the same callers. | A middleware that authenticates every page; a second permission rule for pages |
+| `operations::<ns>_<op>(cx, args)` runs an operation as its route does: `OperationInfo::admit`, `Args::check`, then the implementation with `OperationInfo::context`. `can_<ns>_<op>(cx)` admits the caller alone, for every operation, manual ones included. A refusal is the route's `ApiError`, which `?` carries into `topcoat::Error`. | A page calling the implementation directly, or the JSON API over HTTP from its own process |
+| A Topcoat record mirrors each object type an operation returns, and the types it nests, as the API sends it. It is built from the type's JSON, not its Rust fields. A string scalar, a UUID, a timestamp and an enum are their JSON strings, an integer scalar `i64`, a number `f64`, a map its entries, and a union or any JSON value its JSON text. `@uiHidden` fields are left out, since a record reaches the browser, and a field whose name a record reserves gets a trailing underscore. | Records of the Rust types, which hold UUIDs, timestamps, maps and enums that a record cannot; mirroring input types too |
+
+The crate is tested in the extension's module. Goldens cover fixture-api
+(operations needing callers) and fixture-nested-arrays-api (none, and
+records in lists of lists). For each, cargo clippy with warnings denied,
+then a Topcoat app driven through `Router::handle`. In fixture-api's app,
+pages call an operation in-process and render its 401, 403, the router's
+400 and its result, a guard admits a reader, and the JSON API answers
+under `/api`.
+
+Forms over input types and procedure wrappers follow, in their own
+changes. The crate pins Topcoat 0.10, which needs Rust 1.98, within the
+toolchain's 1.99.

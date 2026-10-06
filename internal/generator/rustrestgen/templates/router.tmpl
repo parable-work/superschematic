@@ -112,7 +112,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
 {{- range .Endpoints }}
-{{- $route := printf "%s(handle_%s_%s)" .Method (toSnakeCase .Namespace) .FunctionName }}
+{{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
     let route = RouteControls::new()
 {{- range .ControlCalls "Arc::clone(&state.implementations.authenticator)" }}
@@ -184,7 +184,7 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 
 /// Decodes the arguments of {{ .Namespace }}.{{ .Name }} in the order the TypeScript
 /// router reads them: path, query, input, then body fields.
-fn decode_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName }}, ApiError> {
+fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName }}, ApiError> {
     Ok({{ .ArgsName }} {
 {{- range .PathArgs }}
         {{ .Field }}: {{ .Spec }}.path(captures)?,
@@ -232,7 +232,7 @@ impl {{ .ArgsName }} {
 }
 {{- end }}
 
-async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
+async fn handle_{{ .SnakeName }}(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
 {{- if .RequiresAuth }}
@@ -274,7 +274,7 @@ async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
     };
 {{- end }}
 {{- if .HasArgs }}
-    let args = match decode_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}({{ .DecodeCall }}) {
+    let args = match decode_{{ .SnakeName }}({{ .DecodeCall }}) {
         Ok(args) => args,
         Err(err) => return error_response(err),
     };
@@ -290,7 +290,7 @@ async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
     ctx.query_params = query.last_values();
     let result = state
         .implementations
-        .{{ toSnakeCase .Namespace }}
+        .{{ .ImplementationsField }}
         .{{ .FunctionName }}(ctx{{ if .HasArgs }}, args{{ end }})
         .await;
     operation_response(result, request_id.as_deref())
