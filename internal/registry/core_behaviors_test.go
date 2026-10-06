@@ -71,9 +71,14 @@ func TestCoreBehaviors(t *testing.T) {
 	if want := []string{"link:", "unlink:", "listLinked:schema"}; !slices.Equal(scopes, want) {
 		t.Errorf("Links operations and scopes = %v, want %v", scopes, want)
 	}
-	if len(search.Operations) != 1 || search.Operations[0].Name != "search" || search.Operations[0].Scope != OperationScopeSchema ||
-		search.Operations[0].Writes || len(search.Fields) != 0 {
-		t.Errorf("Search = %+v, want one read-only schema-level operation, search, and no field", search)
+	// Search's operations are all schema-level; only the embedder's
+	// settleEmbeddings writes.
+	var searchOps []string
+	for _, op := range search.Operations {
+		searchOps = append(searchOps, fmt.Sprintf("%s:%s:%v", op.Name, op.Scope, op.Writes))
+	}
+	if want := []string{"search:schema:false", "similar:schema:false", "staleEmbeddings:schema:false", "settleEmbeddings:schema:true"}; !slices.Equal(searchOps, want) || len(search.Fields) != 0 {
+		t.Errorf("Search operations = %v and fields %v, want %v and no field", searchOps, search.Fields, want)
 	}
 	lease, _ := reg.Behavior("Lease")
 	assignment, _ := reg.Behavior("Assignment")
@@ -273,6 +278,12 @@ func TestCoreBehaviors(t *testing.T) {
 		{search, `{"fields": ["title"], "weights": {"title": 0}}`, "behavior Search config: "},
 		{search, `{"fields": ["title"], "weights": {"title": "high"}}`, "behavior Search config: "},
 		{search, `{"fields": ["title"], "vectors": true}`, "behavior Search config: "},
+		{search, `{"fields": ["title"], "vectors": {"dimensions": 384, "model": "minilm-l6", "permission": "notes.embed"}}`, ""},
+		{search, `{"fields": ["title"], "vectors": {"dimensions": 384, "model": "minilm-l6"}}`, "behavior Search config: "},
+		{search, `{"fields": ["title"], "vectors": {"dimensions": 0, "model": "minilm-l6", "permission": "notes.embed"}}`, "behavior Search config: "},
+		{search, `{"fields": ["title"], "vectors": {"dimensions": 4097, "model": "minilm-l6", "permission": "notes.embed"}}`, "behavior Search config: "},
+		{search, `{"fields": ["title"], "vectors": {"dimensions": 384, "model": "", "permission": "notes.embed"}}`, "behavior Search config: "},
+		{search, `{"fields": ["title"], "vectors": {"dimensions": 384, "model": "minilm-l6", "permission": "notes.embed", "provider": "x"}}`, "behavior Search config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "project", "transition": "active"}}, {"when": {"allTerminal": {"schema": "tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, ""},
 		{reactions, ``, "behavior Reactions config: "},
 		{reactions, `{"rules": []}`, "behavior Reactions config: "},

@@ -322,7 +322,8 @@ handle is the same two parts in snake case (`line_item_add_note`). A
 behavior operation's tool takes the instance `id`, `params` and
 `expectedSeq`; a schema-level one's (`scope: "schema"` in its
 declaration) takes `params` alone. Three more list, describe and define
-schemas, and none publishes. The engine
+schemas, and none publishes; where a schema composes `Search`, a fourth,
+`search`, searches every such schema the caller may read. The engine
 writes empty guidance, takes the invocation policy and the vendor keys
 above as options, and takes a behavior operation's policy from its
 declaration, else the default: the core's behaviors (`Workflow`,

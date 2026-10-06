@@ -1,11 +1,11 @@
 {
   "name": "Search",
-  "description": "Full-text search over the instance's own text fields, which the config names. The index is kept in the transaction of each create, update and delete, and the schema-level search operation returns the matching ids in rank order, each with a snippet of the field it matched best, from the instances of the caller's namespace only.",
+  "description": "Full-text search over the instance's own text fields, which the config names, and with vectors in the config, vector search over embeddings an outside embedder computes from the same text. The index is kept in the transaction of each create, update and delete; an embedder pulls the instances whose text changed since their vector was computed (staleEmbeddings) and settles their vectors back (settleEmbeddings). The schema-level search returns the matching ids in rank order, by the text, by a vector the caller gives, or by both fused, from the instances of the caller's namespace only, and similar returns the instances nearest to one.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
       "fields": {
-        "description": "The type's own top-level fields to index, by JSON key, each a string or a scalar whose values are strings; at most 16. Their order is the order a snippet's field is chosen in when two match equally.",
+        "description": "The type's own top-level fields to index, by JSON key, each a string or a scalar whose values are strings; at most 16. Their order is the order a snippet's field is chosen in when two match equally, and the order an embedder's text joins them in.",
         "items": {
           "minLength": 1,
           "type": "string"
@@ -14,6 +14,35 @@
         "minItems": 1,
         "type": "array",
         "uniqueItems": true
+      },
+      "vectors": {
+        "additionalProperties": false,
+        "description": "Keeps a vector per instance, which an outside embedder computes from the indexed fields' text, for vector and hybrid search. A version that changes the model or the dimensions makes every vector stale.",
+        "properties": {
+          "dimensions": {
+            "description": "How many numbers a vector holds.",
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "model": {
+            "description": "A label for the embedding model the vectors come from, which the engine only compares: an embedder computes with it, and a query vector may name it.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "permission": {
+            "description": "The permission an embedder needs to settle vectors.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "dimensions",
+          "model",
+          "permission"
+        ],
+        "type": "object"
       },
       "weights": {
         "additionalProperties": {
@@ -36,9 +65,26 @@
   "operations": [
     {
       "name": "search",
-      "description": "Searches the indexed fields of the schema's instances in the caller's namespace and returns the matching ids, best match first, one page at a time. A query is plain words by default: an instance matches when its indexed fields hold every word, and quotes and operators in the query are text. With syntax fts5 the query is an SQLite FTS5 expression (phrases, AND, OR, NOT, NEAR, prefix*), without column filters.",
+      "description": "Searches the schema's instances in the caller's namespace and returns the matching ids, best match first, one page at a time: by query, by vector, or by both, whose rankings are fused. A query is plain words by default: an instance matches when its indexed fields hold every word, and quotes and operators in the query are text. With syntax fts5 the query is an SQLite FTS5 expression (phrases, AND, OR, NOT, NEAR, prefix*), without column filters. A vector, computed with the config's model from the text to search for, ranks the instances whose vectors are settled by cosine similarity. With a vector, each hit says how it matched.",
       "paramsSchema": {
         "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "query"
+            ]
+          },
+          {
+            "required": [
+              "vector"
+            ]
+          }
+        ],
+        "dependentRequired": {
+          "model": [
+            "vector"
+          ]
+        },
         "properties": {
           "cursor": {
             "description": "The next of the previous page.",
@@ -50,8 +96,14 @@
             "minimum": 1,
             "type": "integer"
           },
+          "model": {
+            "description": "The model the vector was computed with; refused when it is not the config's.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
           "query": {
-            "description": "What to search for.",
+            "description": "What to search for, as text.",
             "maxLength": 1000,
             "minLength": 1,
             "type": "string"
@@ -63,11 +115,17 @@
               "fts5"
             ],
             "type": "string"
+          },
+          "vector": {
+            "description": "The vector to search for: as many numbers as the config's dimensions, computed with its model.",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "type": "array"
           }
         },
-        "required": [
-          "query"
-        ],
         "type": "object"
       },
       "resultSchema": {
@@ -90,6 +148,10 @@
                   "minimum": 1,
                   "type": "integer"
                 },
+                "score": {
+                  "description": "With a vector: the fused score, the sum of 1 / (60 + its place) over the rankings it is in, which orders the hits.",
+                  "type": "number"
+                },
                 "snippet": {
                   "description": "A few words of that field around its matches, in parts; each part says whether it is a match.",
                   "items": {
@@ -109,6 +171,38 @@
                     "type": "object"
                   },
                   "type": "array"
+                },
+                "text": {
+                  "additionalProperties": false,
+                  "description": "With a vector: its place in the full-text ranking, when the query matched it.",
+                  "properties": {
+                    "rank": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "rank"
+                  ],
+                  "type": "object"
+                },
+                "vector": {
+                  "additionalProperties": false,
+                  "description": "With a vector: its place in the vector ranking and the cosine similarity of its vector to the one searched for, when its vector is settled and ranks.",
+                  "properties": {
+                    "rank": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "similarity": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "rank",
+                    "similarity"
+                  ],
+                  "type": "object"
                 }
               },
               "required": [
@@ -133,6 +227,292 @@
         ],
         "type": "object"
       },
+      "scope": "schema"
+    },
+    {
+      "name": "similar",
+      "description": "Lists the instances nearest to an existing one, leaving it out: by its own indexed text and, once its vector is settled, by its vector, the two rankings fused, each hit saying how it matched. Call it before creating an instance like this one, to find near-duplicates to reuse or link instead.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The instance whose neighbours to list.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many instances; 50 when absent.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "embedded": {
+            "description": "Whether the instance's vector is settled, so the ranking used it.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "rank": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "snippet": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "match": {
+                        "type": "boolean"
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "match"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "text": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "rank": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "rank"
+                  ],
+                  "type": "object"
+                },
+                "vector": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "rank": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "similarity": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "rank",
+                    "similarity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "id",
+                "rank"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next",
+          "embedded"
+        ],
+        "type": "object"
+      },
+      "scope": "schema"
+    },
+    {
+      "name": "staleEmbeddings",
+      "description": "Lists the instances whose vector is missing or stale, in the order they were first indexed: each one's id, the text to compute its vector from (its indexed fields, joined by a blank line) and the hash of that text and the model, which a settle presents. Needs vectors in the config.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many instances; 50 when absent.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "dimensions": {
+            "description": "How many numbers each vector holds.",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "sourceHash": {
+                  "description": "The hash of the text and the model, which the settle presents.",
+                  "type": "string"
+                },
+                "text": {
+                  "description": "The text to compute the vector from.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "text",
+                "sourceHash"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "model": {
+            "description": "The model to compute the vectors with.",
+            "type": "string"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "model",
+          "dimensions",
+          "items",
+          "next"
+        ],
+        "type": "object"
+      },
+      "scope": "schema"
+    },
+    {
+      "name": "settleEmbeddings",
+      "description": "Stores the vectors an embedder computed from the text staleEmbeddings returned, each with the hash it returned with it. An item whose instance is gone, or whose text or model changed since, is skipped. A vector of the wrong dimensions, all zeros, or with a value a 32-bit float cannot hold refuses the whole batch. Needs vectors in the config and the permission it names. Appends no event: a vector is derived from text the log records, and no read of an instance shows it.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "sourceHash": {
+                  "description": "The hash staleEmbeddings returned with the text.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "vector": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 4096,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "id",
+                "sourceHash",
+                "vector"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "settled": {
+            "description": "How many vectors were stored.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "skipped": {
+            "description": "The items not stored: moved, the text or the model changed since the hash was read, so pull the instance again; not_found, the namespace has no such instance.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "enum": [
+                    "moved",
+                    "not_found"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "settled",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "writes": true,
       "scope": "schema"
     }
   ]
