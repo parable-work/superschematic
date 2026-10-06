@@ -230,7 +230,7 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Order', { title: 'Lamp' }, { id: 'o2' });
       engine.instances.update(alice, 'Order', 'o1', { title: 'Desk, oak' });
       engine.instances.create(alice, 'Order', { title: 'Rug' }, { id: 'o3' });
-      const caller = engine.events.read(alice, { schema: 'Order' }).events.filter((event) => event.kind !== 'publish');
+      const caller = engine.events.read(alice, { schema: 'Order' }).events.filter((event) => event.instanceId !== null);
       const [created1, created2, updated1, created3] = caller;
       refuse = created2.cursor;
 

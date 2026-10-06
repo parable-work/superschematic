@@ -62,7 +62,7 @@ checkedTypes names.
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
 
-import type { Principal } from '../access.js';
+import { standsIn, type Principal } from '../access.js';
 import {
   BehaviorError,
   BehaviorVetoError,
@@ -838,10 +838,14 @@ function schemasOf(chain: Chain, reach: Reach, behavior: string, own: string): S
 }
 
 // can asks the deployment's matcher whether the principal holds one
-// permission; only a literal true is yes.
+// permission; only a literal true is yes. A service standing in for an
+// end user holds none (D37), so it is never asked for one.
 function can(chain: Chain, behavior: string, permission: string): boolean {
   if (typeof permission !== 'string' || permission === '') {
     throw new BehaviorError(behavior, 'can() takes a permission: a non-empty string');
+  }
+  if (standsIn(chain.principal)) {
+    return false;
   }
   const answer: unknown = chain.permissions(chain.principal.permissions, [permission]);
   if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {

@@ -8,8 +8,8 @@ runtime/engine/README.md.
 export { Engine, openEngine } from './engine.js';
 export type { EngineOptions } from './engine.js';
 
-export { allowAll } from './access.js';
-export type { AccessPolicy, AccessRequest, Action, Principal } from './access.js';
+export { SERVICE_SUBJECT_PREFIX, allowAll, servicePrincipal, standsIn } from './access.js';
+export type { AccessPolicy, AccessRequest, Action, Principal, PrincipalService } from './access.js';
 
 export {
   BehaviorError,
@@ -37,8 +37,8 @@ export { INSTANCE_ID, InstanceStore } from './instances/store.js';
 export type { CreateOptions, DeleteOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions, UpdateOptions } from './instances/store.js';
 export type { InvokeOptions, InvokeSchemaOptions, OperationOutcome } from './instances/store.js';
 
-export { EventLog } from './events/log.js';
-export type { EngineEvent, EventCause, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
+export { EVENT_KINDS, EventLog } from './events/log.js';
+export type { DefineChange, EngineEvent, EventCause, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
 export type { EventWatcher } from './events/notifier.js';
 
 // The runner of reactions and schedules (runtime/engine/README.md, "The runner").
@@ -189,7 +189,7 @@ export type { StorageOptions } from './storage/storage.js';
 export { appliedMigrations, migrate } from './storage/migrations.js';
 export type { AppliedMigration, Migration, MigrationResult, MigrationSet } from './storage/migrations.js';
 
-// Tools: the describe and tools documents and the calls the MCP tools make (runtime/engine/README.md, "Tools").
+// Tools: the describe and tools documents, the behavior catalog and the calls the MCP tools make (runtime/engine/README.md, "Tools").
 export { MCP_HANDLE, MCP_HANDLE_MAX_LENGTH, ToolCatalog, UnknownToolError, kebabCase, snakeCase } from './tools/catalog.js';
 export type {
   DescribeDocument,
@@ -201,6 +201,7 @@ export type {
   ToolManifest,
   ToolTarget,
 } from './tools/catalog.js';
+export type { BehaviorDocument, BehaviorOperationDocument, BehaviorSummary } from './tools/behaviors.js';
 export { BUILTIN_TOOLS, DEFAULT_INVOCATION_POLICY, DEFAULT_TOOL_KEYS, resolveToolOptions } from './tools/options.js';
 export type { BuiltinTool, InvocationPolicy, ResolvedToolOptions, ToolKeys, ToolOptions } from './tools/options.js';
 export { ANY_JSON_TYPES, typeArguments } from './tools/schema.js';

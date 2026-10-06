@@ -23,8 +23,14 @@ has no instance to fence and ignores the header; its body carries
 A schema-level behavior operation, which has no instance, has a route of
 its own under the schema; it sends no ETag, since it names no instance.
 Besides the instances and the event log, the routes serve a schema's
-describe document and the namespace's tools document (tools/catalog.ts);
-the MCP endpoint is the ./mcp entry point's.
+describe document, the namespace's tools document (tools/catalog.ts) and
+the behaviors the engine runs, which are the same in every namespace, so
+their routes carry none (tools/behaviors.ts); the MCP endpoint is the
+./mcp entry point's.
+
+With the runtime's `authenticateService`, a calling service is verified
+on every route and reaches the engine beside the end user, or standing in
+for one (callers.ts, D37).
 */
 
 import { Hono } from 'hono';
@@ -36,7 +42,6 @@ import {
   envelopeResponse,
   notFound,
   problemResponse,
-  unauthorized,
   type OperationSpec,
   type ParamSpec,
   type RequestContext,
@@ -51,11 +56,12 @@ import {
   type RouterRuntimeOptions,
 } from '@superschematic/http-runtime/hono';
 
-import type { Principal } from '../access.js';
 import type { Engine } from '../engine.js';
+import type { EventKind } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject } from '../instances/patch.js';
 import type { SchemaRecord } from '../registry/catalog.js';
+import { callerAuthenticator, principalOf } from './callers.js';
 import { engineProblem } from './problems.js';
 import { checkStreamOptions, eventStream, type StreamOptions } from './stream.js';
 
@@ -87,6 +93,7 @@ const OPERATION = `${INSTANCE}/operations/{operation}`;
 const SCHEMA_OPERATION = `${SCHEMA}/operations/{operation}`;
 const EVENTS = '/namespaces/{namespace}/events';
 const TOOLS = '/namespaces/{namespace}/tools';
+const BEHAVIORS = '/behaviors';
 
 const PATH_PARAMS: Record<string, ParamSpec> = {
   namespace: { name: 'namespace', kind: 'string', required: true },
@@ -97,10 +104,13 @@ const PATH_PARAMS: Record<string, ParamSpec> = {
 };
 
 const EVENT_QUERY: readonly ParamSpec[] = [
-  { name: 'after', kind: 'integer', required: false, min: 0 },
+  { name: 'after', kind: 'string', required: false },
   { name: 'limit', kind: 'integer', required: false },
   { name: 'schema', kind: 'string', required: false },
   { name: 'instanceId', kind: 'string', required: false },
+  { name: 'kind', kind: 'string', required: false, isArray: true },
+  { name: 'behavior', kind: 'string', required: false, isArray: true },
+  { name: 'exclude', kind: 'string', required: false, isArray: true },
 ];
 
 /**
@@ -116,6 +126,7 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
   // default rate-limit store.
   const runtime: RouterRuntimeOptions = {
     ...options,
+    authenticate: callerAuthenticator(options.authenticate),
     onError: async (error, ctx) => engineProblem(error) ?? (deployed ? await deployed(error, ctx) : undefined),
   };
   const app = new Hono();
@@ -261,6 +272,12 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
 
   route(spec('listTools', 'GET', TOOLS), (ctx, { path }) => engine.tools.manifest(principalOf(ctx), { namespace: path.namespace as string }));
 
+  // The behaviors this engine runs: every caller may read them.
+  route(spec('listBehaviors', 'GET', BEHAVIORS), (ctx) => engine.tools.listBehaviors(principalOf(ctx)));
+  route(spec('describeBehavior', 'GET', `${BEHAVIORS}/{name}`), (ctx, { path }) =>
+    engine.tools.describeBehavior(principalOf(ctx), path.name as string)
+  );
+
   // The event log: a JSON page, or with Accept: text/event-stream the
   // stream. A manual route, so the handler owns the streaming response;
   // the runtime still applies the rate limit, the timeout and the gate.
@@ -273,9 +290,17 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
       const query = decodeParams('query', EVENT_QUERY, (name) => {
         const values = ctx.query.getAll(name);
         return values.length > 0 ? values : undefined;
-      }) as { after?: number; limit?: number; schema?: string; instanceId?: string };
-      const after = lastEventIdOf(ctx) ?? query.after;
-      const read = { namespace, schema: query.schema, instanceId: query.instanceId, after };
+      }) as { after?: string; limit?: number; schema?: string; instanceId?: string; kind?: string[]; behavior?: string[]; exclude?: string[] };
+      const after = lastEventIdOf(ctx) ?? afterOf(query.after);
+      const read = {
+        namespace,
+        schema: query.schema,
+        instanceId: query.instanceId,
+        after,
+        ...(query.kind !== undefined ? { kinds: query.kind as EventKind[] } : {}),
+        ...(query.behavior !== undefined ? { behaviors: query.behavior } : {}),
+        ...(query.exclude !== undefined ? { exclude: query.exclude } : {}),
+      };
       if (!wantsEventStream(ctx.headers.get('accept'))) {
         return envelopeResponse(engine.events.read(principal, { ...read, limit: query.limit }), ctx.requestId);
       }
@@ -287,23 +312,6 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
   app.notFound(notFoundHandler());
   app.onError(errorHandler((error) => engineProblem(error)));
   return app;
-}
-
-/**
- * The engine's principal for the caller the runtime gate established. The
- * HTTP runtime's Principal has the engine's shape; a copy keeps only its
- * members. A principal without a subject is no caller.
- */
-function principalOf(ctx: RequestContext): Principal {
-  const caller = ctx.principal;
-  if (!caller || typeof caller.subject !== 'string' || caller.subject === '') {
-    throw unauthorized();
-  }
-  return {
-    subject: caller.subject,
-    permissions: caller.permissions,
-    ...(caller.claims !== undefined ? { claims: caller.claims } : {}),
-  };
 }
 
 /** A schema version as the API returns it: the stored record without its canonical text, which the hash identifies. */
@@ -408,6 +416,17 @@ function mediaTypeRefusal(ctx: RequestContext, expected: string): Response | und
     response.headers.set('accept-patch', expected);
   }
   return response;
+}
+
+/** The `after` query parameter: an event cursor, or `head` for the log's last event. */
+function afterOf(value: string | undefined): number | 'head' | undefined {
+  if (value === undefined || value === 'head') {
+    return value;
+  }
+  if (!/^[0-9]{1,15}$/u.test(value)) {
+    throw badRequest('after is an event cursor, a non-negative integer, or head');
+  }
+  return Number(value);
 }
 
 /** The cursor a reconnecting EventSource sends; it wins over `after`, which stays in the URL it reconnects to. */

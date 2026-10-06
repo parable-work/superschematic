@@ -6,11 +6,12 @@ schema-file document, versions it per namespace, and keeps it, its
 instances and an event log in one SQLite file.
 
 Built: the storage layer and its migrations, the schema registry with its
-compatibility rule, instances, the event log, the access policy, the
-HTTP API with the event stream (`@superschematic/engine/http`), the
-behavior plug-in interface, the runner of reactions and schedules, the
-describe and tools documents, the MCP endpoint
-(`@superschematic/engine/mcp`), and the core's behaviors: `Workflow`,
+compatibility rule, instances, the event log with its filters, the
+access policy with service callers (D37), the HTTP API with the event
+stream (`@superschematic/engine/http`), the behavior plug-in interface,
+the runner of reactions and schedules, the describe and tools documents,
+the behavior catalog, the MCP endpoint (`@superschematic/engine/mcp`),
+and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
 reach other instances, `Search`, full-text search, `Reactions`, which
 the runner runs, `Constants` and `Variants`, which judge the fields a
@@ -36,6 +37,7 @@ const order = engine.instances.create(me, 'Order', { title: 'Desk', quantity: 1 
 engine.instances.update(me, 'Order', order.id, { quantity: null, status: 'open' });
 const page = engine.instances.list(me, 'Order', { limit: 20 });   // { items, next }
 const feed = engine.events.read(me, { after: 0 });                // { events, next, more }
+const live = engine.events.read(me, { after: 'head' });           // only what commits from now on
 engine.close();
 ```
 
@@ -254,14 +256,15 @@ A refused document throws `SchemaDocumentError` with an issue per problem,
 each at a JSON pointer.
 
 `define` stores the document as its name's draft in a namespace,
-replacing the previous draft. `publish` makes the draft the next live
-version. The engine stores the canonical form the loader returns
-(compact, keys sorted) and its SHA-256; publishing a draft identical to
-the live version mints nothing and drops the draft. There is no
-deprecate or promote: the live version changes only when a newer one is
-published, so an older version never comes back into use. `live`,
-`draft`, `version` and `list` read them. Each version records who defined
-and who published it.
+replacing the previous draft, and appends a `define` event with the
+draft's hash ("The event log"). `publish` makes the draft the next live
+version and appends a `publish` event. The engine stores the canonical
+form the loader returns (compact, keys sorted) and its SHA-256;
+publishing a draft identical to the live version mints nothing and drops
+the draft. There is no deprecate or promote: the live version changes
+only when a newer one is published, so an older version never comes back
+into use. `live`, `draft`, `version` and `list` read them. Each version
+records who defined and who published it.
 
 ### The compatibility rule
 
@@ -376,35 +379,69 @@ stored.
 ## The event log
 
 Each write appends one event in its own transaction: an instance's
-`create`, `update` and `delete`, a behavior `operation` that writes, and a
-schema's `publish` (a publish that mints nothing appends nothing). An
-event carries its namespace (for a publish, the namespace that holds the
-schema), schema, instance id, per-instance sequence, schema version,
-actor (the principal's subject), time and change: the instance for a
-create, its behaviors' fields included; for an update, the merge patch,
-with any change the behaviors' fields took merged in; for an operation,
-`{ behavior, operation, params, patch }`, where `patch` is the merge patch
-of the instance's own fields the operation changed (an operation's
-`update()`, under "Contexts") and of its behaviors' fields; nothing for a
-delete; and the schema document
-for a publish. Applying each change in order to the create's instance
-gives the instance as a read returns it. The
-cursor orders the whole log; an instance's sequence runs 1, 2, 3, ...
-across its life, a re-create after a delete included. A delete never
-removes earlier events.
+`create`, `update` and `delete`, a behavior `operation` that writes, a
+schema's `publish` (a publish that mints nothing appends nothing), and
+the `define` of a draft. An event carries its namespace (for a publish
+or a define, the namespace that holds the schema), schema, instance id,
+per-instance sequence, schema version, actor (the principal's subject),
+the calling service (`service`, below), time and change: the instance
+for a create, its behaviors' fields included; for an update, the merge
+patch, with any change the behaviors' fields took merged in; for an
+operation, `{ behavior, operation, params, patch }`, where `patch` is the
+merge patch of the instance's own fields the operation changed (an
+operation's `update()`, under "Contexts") and of its behaviors' fields;
+nothing for a delete; the schema document for a publish; and `{ hash }`
+for a define, the draft's hash and not its document, which the draft
+route serves. A define has no instance, no sequence and no version
+(`null`), since a draft has none; every define appends one, a draft that
+matches the live version included, so a reviewer watching the log learns
+a draft waits to be published. Applying each change in order to the
+create's instance gives the instance as a read returns it. The cursor
+orders the whole log; an instance's sequence runs 1, 2, 3, ... across
+its life, a re-create after a delete included. A delete never removes
+earlier events.
 
 `engine.events.read(principal, { namespace, schema, instanceId, after,
-limit })` returns `{ events, next, more }`: the events after the cursor
-`after` in one namespace, optionally one schema and one instance, 50 by
-default and at most 500 scanned per page. Read on from `next`. Without a
-schema filter, events of schemas the principal may not read are skipped,
-so a page can hold fewer events than its limit while `more` is true.
+limit, kinds, behaviors, exclude })` returns `{ events, next, more }`:
+the events after the cursor `after` in one namespace, optionally one
+schema and one instance, 50 by default and at most 500 scanned per page.
+Read on from `next`. Without a schema filter, events of schemas the
+principal may not read are skipped, so a page can hold fewer events than
+its limit while `more` is true. `engine.events.head()` is the cursor of
+the last event, 0 for an empty log.
+
+- `after: 'head'` starts at the head: the page is empty, `next` is the
+  head and `more` is false, so a client that wants only new events reads
+  on from there without replaying the log. It asks what any read asks.
+- `kinds` keeps events of those kinds; `behaviors` keeps operation events
+  of those behaviors (`change.behavior`), and so no event of another
+  kind; `exclude` drops operation events by operation name
+  (`change.operation`), such as `heartbeat`. They combine: an event is
+  kept when every filter given keeps it. A name that is not an event
+  kind, a behavior name or an operation name, and an empty `kinds` or
+  `behaviors`, which would keep nothing, are `invalid_argument`.
+- The filters run on the page a read scans, as the access check does: a
+  page still scans at most its limit, and `next` is past every event it
+  scanned, kept or dropped. A reader that goes on from `next` sees no
+  dropped event again and scans none again, and a page whose events were
+  all dropped is empty with `more` true.
+
+A define is read with `read` on its schema, as every event is. The
+draft route already shows the draft to a principal with `read`, and the
+event carries less: its hash.
+
+An event a service's call wrote (D37, "Service callers" under "Access")
+carries `service`, the calling deployable, beside `actor`: the end user
+the service acted for, or the service's own subject when it stood in for
+one. An event no service's call wrote has no `service`.
 
 A namespace that looks names up in a shared namespace also reads the
 shared namespace's publish events, which change the schemas it reaches;
 they keep the shared namespace as their `namespace`. Its own instance
 events and the shared publishes are two indexed range reads merged by
-cursor.
+cursor. It does not read the shared namespace's defines: a draft changes
+nothing a namespace reaches until it is published, and only the
+namespace that holds a draft can publish it.
 
 An event the runner's work wrote ("The runner") also carries `cause`:
 `{ behavior, event, depth }` for a reaction, `event` being the cursor of
@@ -590,6 +627,35 @@ runtime, so one rule answers both.
 `permissions`, `claims`), so a principal its `Authenticator` returns can
 be passed on as it is. The main entry point does not import the HTTP
 runtime, which brings Hono; the `./http` entry point does.
+
+### Service callers
+
+A call another deployable makes (D37) carries the calling service in the
+principal's `service`: `{ deployable, serves, subject, standsIn }`, the
+HTTP runtime's `ServiceCaller` and whether it stands in for an end user.
+The policy sees it with the principal, and so do behaviors, through
+their context's `principal`.
+
+| The call brings | The principal | `can()` | An event's `actor` and `service` |
+| --- | --- | --- | --- |
+| an end user | the end user's | the end user's permissions | the end user's subject; none |
+| a service and an end user | the end user's, with `service` (`standsIn: false`) | the end user's permissions | the end user's subject; the deployable |
+| a service alone | `servicePrincipal(caller)`: `service:<deployable>`, no permissions, `service` (`standsIn: true`) | false, without asking the matcher | `service:<deployable>`; the deployable |
+
+- A service with no end user stands in for one, as D37's `@allowService`
+  admits it. Its subject is `service:<deployable>`, apart from every end
+  user's, so a behavior that keys state by subject (a lease's holder, an
+  assignee) keeps a service's apart, and every process of one deployable
+  shares it.
+- Services hold no permissions (D37). A principal that stands in has
+  none, and `checkPrincipal` refuses one that has any; a behavior's
+  `can()` is false for it whatever the matcher says. A service acting
+  for an end user adds none to the end user's. What a service may do is
+  the policy's to say, by `principal.service`: the engine has no grant
+  of its own for services, as the deployment's `PermissionMatcher`
+  matches end users' permissions.
+- `standsIn(principal)` says which case a principal is. The runner keeps
+  its own principal, which the deployment names.
 
 ## Errors
 
@@ -2288,10 +2354,10 @@ serve({ fetch: app.fetch, port: 8080 });
 ```
 
 The options are the HTTP runtime's router options (`authenticate`,
-`permissionMatcher`, `onError`, `bodyLimitBytes`, `rateLimit`), with
-`rateLimitPerMinute` and `timeoutSeconds` for every route and `stream:
-{ pageSize, heartbeatMs }`. The deployment's `onError` sees what the
-engine does not raise.
+`authenticateService`, `permissionMatcher`, `onError`, `bodyLimitBytes`,
+`rateLimit`), with `rateLimitPerMinute` and `timeoutSeconds` for every
+route and `stream: { pageSize, heartbeatMs }`. The deployment's `onError`
+sees what the engine does not raise.
 
 ### Routes
 
@@ -2312,7 +2378,9 @@ engine does not raise.
 | POST | `/namespaces/{namespace}/schemas/{name}/operations/{operation}` | `instances.invokeSchema`, body: the parameters of a schema-level operation | 200, the result |
 | GET | `/namespaces/{namespace}/schemas/{name}/describe` | `tools.describe` | 200, the describe document ("Tools") |
 | GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
-| GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
+| GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=&kind=&behavior=&exclude=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
+| GET | `/behaviors` | `tools.listBehaviors` | 200, a summary of each behavior the engine runs ("The behavior catalog") |
+| GET | `/behaviors/{name}` | `tools.describeBehavior` | 200, the behavior's document |
 
 A schema version is the stored record without its canonical text, which
 `hash` identifies. An instance is the stored record (`namespace`,
@@ -2331,14 +2399,25 @@ takes its parameters the same way and answers its result with no `ETag`,
 since it names no instance; each operation route answers 404 for an
 operation of the other scope.
 
+The event route's `after` is a cursor or `head`; `kind`, `behavior` and
+`exclude` are lists, as repeated parameters or comma-separated
+(`kind=create,update`), with `events.read`'s meaning ("The event log").
+An `after` that is neither is 400 `bad_request`; a filter value the
+engine refuses is 400 `invalid_argument`.
+
+The behavior routes carry no namespace: the behaviors an engine runs are
+the same in every namespace.
+
 ### Statuses
 
 | Status | `code` | When |
 | --- | --- | --- |
 | 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), a create's parameters the engine or a behavior refuses (`CreateParamsError`), or preconditions the engine refuses (`PreconditionsError`), `details.issues` |
-| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data, behaviors?}`, a `Preconditions` header that is not a JSON object, a path that is not valid percent-encoding |
-| 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject |
+| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data, behaviors?}`, a `Preconditions` header that is not a JSON object, a path that is not valid percent-encoding, an event `after` that is not a cursor or `head` |
+| 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject, and no verified service stands in for one |
+| 401 | `service_unauthorized` | a `Service-Authorization` credential that does not verify (the runtime's service step, D37) |
 | 403 | `forbidden` | the access policy refused, or a behavior refused a caller without the permission its config names |
+| 403 | `service_forbidden` | a verified service identity the service authenticator does not list as a caller |
 | 404 | `not_found` | no such version, draft or instance in the namespace, or no such route |
 | 404 | `unknown_namespace` | the namespace is not configured |
 | 409 | `conflict` | an instance with the id exists |
@@ -2353,6 +2432,7 @@ operation of the other scope.
 | 429 | `too_many_requests` | the rate limit; `Retry-After` |
 | 500 | `internal_error` | anything else the deployment's `onError` does not map, a `BehaviorError` included; the failure stays off the wire |
 | 503 | `unavailable` | the schema's live version composes a behavior this engine has no implementation for, or whose implementation refuses its config |
+| 503 | `service_unavailable` | the service authenticator could not check a credential (its keys could not be fetched) |
 | 504 | `gateway_timeout` | the timeout elapsed |
 
 `engineProblem` and `ENGINE_ERROR_STATUS` hold the engine's rows. `type`
@@ -2369,6 +2449,27 @@ The runtime's gate requires a caller on every route: the deployment's
 that principal, which already has the engine's `Principal` shape, and
 asks its access policy (403). The routes name no permissions, so
 `permissionMatcher` matters only where the policy calls it.
+
+With `authenticateService` (D37, the HTTP runtime's `ServiceAuthenticator`;
+`serviceAuthenticator(config)` is the standard one), the runtime's
+service step verifies a `Service-Authorization` credential on every
+route, before the end-user step, and the engine's principal carries the
+caller ("Service callers" under "Access"). The routes declare no
+`@requireService` or `@allowService` clause: what a service may do is the
+policy's to say. The engine wraps the deployment's `Authenticator`:
+
+- its principal, when it returns one, with the service beside it when
+  one called;
+- else, for a verified service and a request with no `Authorization`
+  header, the service standing in (`servicePrincipal`);
+- else no caller, 401. A request whose `Authorization` the
+  `Authenticator` refuses is 401 whatever service sent it, so a service
+  that forwards an expired token never acts with its own authority
+  instead.
+
+A deployment whose callers are all services passes `authenticateService`
+and no `authenticate`. Without `authenticateService` the runtime ignores
+the header, as before.
 
 ### Concurrency
 
@@ -2406,22 +2507,42 @@ answers server-sent events:
 id: 41
 data: {"cursor":41,"kind":"create","namespace":"default","schema":"Order","instanceId":"o1","seq":1,"version":1,"actor":"alice","at":1790000000000,"change":{"title":"Desk"}}
 
+event: ready
+id: 41
+data: {"cursor":41}
+
 : keepalive
 ```
 
-- Each event is one message with no `event:` field, so
+- Each event of the log is one message with no `event:` field, so
   `EventSource.onmessage` receives every one: `id:` is its cursor and
   `data:` the event as `events.read` returns it, of every kind, an
-  `operation` included.
+  `operation` and a `define` included.
 - The stream starts after `Last-Event-ID`, which a reconnecting
-  `EventSource` sends, else after `after`, else at the start of the log.
-  `schema` and `instanceId` filter as on the JSON route; `limit` applies
+  `EventSource` sends, else after `after` (a cursor, or `head` for no
+  replay), else at the start of the log. `schema`, `instanceId`, `kind`,
+  `behavior` and `exclude` filter as on the JSON route; `limit` applies
   to the JSON route only.
 - It replays in pages of `stream.pageSize` (100) and reads the next page
   only when the server has sent the previous one, so a slow client holds
-  one page and replay never loads the backlog. Caught up, it waits for the
-  engine's notice of a commit (`events.watch`) and reads on from its
-  cursor.
+  one page and replay never loads the backlog. The first page that is the
+  last (`more` false) ends replay, and the stream sends `event: ready`,
+  whose `id:` and `data:` carry the cursor it caught up at
+  (`addEventListener('ready', ...)`; `onmessage` does not receive it).
+  From `after=head`, ready comes at once. Its id is what a reconnect
+  resumes from, so a client that started at the head resumes where it
+  caught up, not at a later head. Caught up, it waits for the engine's
+  notice of a commit (`events.watch`) and reads on from its cursor.
+- A page's cursor moves past every event it scanned, the ones the
+  filters dropped too, so it can run ahead of the last event sent. A
+  message with only `id:` brings the client's last event id up to it:
+  `EventSource` records the id and, the data being empty, dispatches
+  nothing (the HTML standard's dispatch steps). The stream sends one
+  after events whose last is behind its cursor, and for a page of replay
+  that kept none. While it waits, a commit whose events the filters all
+  drop sends nothing; the next heartbeat carries the cursor instead of
+  its comment. A reconnect therefore rescans at most what one heartbeat
+  let pass, and replays nothing it dropped.
 - While it waits it sends a comment every `stream.heartbeatMs` (5000),
   under the 10 seconds after which `Bun.serve` closes a quiet connection.
 - A namespace's stream, like its JSON page, carries the shared
@@ -2439,9 +2560,9 @@ data: {"cursor":41,"kind":"create","namespace":"default","schema":"Order","insta
 ## Tools
 
 `engine.tools` holds a describe document per schema, the tools document
-of a namespace, and the calls the MCP tools make. Each reads and calls
-through the schema registry and the instance store, so the access policy
-answers every one.
+of a namespace, the behavior catalog, and the calls the MCP tools make.
+Each schema's reads and calls go through the schema registry and the
+instance store, so the access policy answers every one.
 
 ### The describe document
 
@@ -2521,7 +2642,8 @@ included; `typeArguments(document, type, keys)` returns it for any type.
 `tools.manifest(principal, { namespace })` is `tools/schema.json`'s shape
 (`ir.ToolManifest`, section "The tool documents" of the MCP tools
 reference): a tool per operation of every live schema the namespace
-reaches that the principal may read, by name, after three schema tools.
+reaches that the principal may read, by name, after the engine's five
+tools: three schema tools and two behavior tools.
 
 | Tool | Name | MCP handle | Arguments |
 | --- | --- | --- | --- |
@@ -2535,14 +2657,16 @@ reaches that the principal may read, by name, after three schema tools.
 | list schemas | `engine.listSchemas` | `list_schemas` | none |
 | describe a schema | `engine.describeSchema` | `describe_schema` | `name` |
 | define a draft | `engine.defineSchema` | `define_schema` | `document` |
+| list behaviors | `engine.listBehaviors` | `list_behaviors` | none |
+| describe a behavior | `engine.describeBehavior` | `describe_behavior` | `name` |
 
 A name follows the SDK generators, `<namespace>.<method>`, with the schema
 name in kebab case as the namespace (`LineItem` is `line-item`). An SDK
 tool's handle is authored with `@mcp`; the engine derives one from the
 same parts in snake case (`line_item_add_note`). A handle `@mcp` would
 refuse (not lowercase snake case, longer than 48 characters), one two
-tools derive, or a schema tool's hides the tool with its reason in
-`hiddenReason`; the schema tools keep theirs. A tool the access policy
+tools derive, or an engine tool's hides the tool with its reason in
+`hiddenReason`; the engine's tools keep theirs. A tool the access policy
 refuses the principal is hidden too, with that reason. `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
 `replay` is `read_only`, and `inputSchemaDigest` hashes the arguments as
@@ -2563,6 +2687,49 @@ mistyped argument is `invalid_argument`). A handle the namespace has no
 visible tool for, among the schemas the principal may read, throws
 `UnknownToolError` (`not_found`).
 
+### The behavior catalog
+
+A client that writes schemas must learn which behaviors the engine runs
+and what each one's config takes before it composes one, and
+`engine.behaviors.names()` and `declaration()` answer only in the
+process. The catalog serves them:
+
+- `tools.listBehaviors(principal)` (`GET /behaviors`, `list_behaviors`)
+  lists a summary of each registered behavior, by name: `{ name,
+  description, requires, conflicts, fields, operations }`, the last two
+  by name.
+- `tools.describeBehavior(principal, name)` (`GET /behaviors/{name}`,
+  `describe_behavior`) is the behavior's declaration (section 3.16 of
+  `docs/extension-model.md`) with what a reader would otherwise have to
+  know filled in: `requires`, `conflicts`, `fields`, `operations` and
+  `vetoes` as lists, empty when the declaration has none, and each
+  operation's `scope`, `writes` and invocation policy, the declaration's
+  or the default, under the policy's key after `writes`, as the describe
+  document writes it (D11). `configSchema`, `createParamsSchema` and
+  `preconditionSchema` are as declared, and absent when the behavior
+  takes none. A name the engine does not run is `not_found`; one that is
+  not a behavior name, `invalid_argument`.
+
+```json
+{
+  "name": "test.Flag", "description": "Holds an instance still while it is flagged.",
+  "requires": [], "conflicts": ["test.Tally"],
+  "fields": [{"name": "flagged", "description": "Whether the instance is flagged."}, ...],
+  "operations": [{"name": "flag", "scope": "instance", "writes": true, "invocationPolicy": "ask",
+                  "paramsSchema": {...}, "resultSchema": {"type": "boolean"}}, ...],
+  "vetoes": []
+}
+```
+
+Every caller may read the catalog, and the policy is not asked: it is the
+deployment's registered code, the same in every namespace and for every
+schema, and carries no schema's or instance's data, while a policy
+question names a schema. The describe document already shows a schema's
+behaviors to whoever may read it. The list is summaries and a behavior's
+document a call of its own, because every declaration together runs to
+over a hundred kilobytes, which an MCP client would carry in its
+context.
+
 ### The invocation policy and the vendor keys
 
 They are the deployment's binary's registrations in the compiler, which
@@ -2581,7 +2748,7 @@ openEngine({
 ```
 
 - `invocationPolicy` is D11's key, values and default. A built-in
-  operation or schema tool takes `invocation`'s value for it, else the
+  operation or engine tool takes `invocation`'s value for it, else the
   default; a behavior operation takes its declaration's `invocationPolicy`,
   else the default. Registration refuses a declaration whose value is not
   one of the values, as the compiler's `Finalize` does. The core's
@@ -2614,10 +2781,13 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
 ```
 
 - The route goes through the HTTP runtime like every other: the request
-  id, the rate limit, the timeout, the body limit and the authentication
-  gate with the deployment's `Authenticator`. Its caller is the principal
-  of every call, so the access policy answers each. An unknown namespace
-  is the HTTP API's 404 problem; a request without a caller is 401.
+  id, the rate limit, the timeout, the body limit, the service step with
+  `authenticateService` and the authentication gate with the deployment's
+  `Authenticator`. Its caller, an end user, a service acting for one or a
+  service standing in for one ("Authentication and access" under
+  "HTTP"), is the principal of every call, so the access policy answers
+  each. An unknown namespace is the HTTP API's 404 problem; a request
+  without a caller is 401.
 - The protocol is the official TypeScript SDK's
   (`@modelcontextprotocol/server`, pinned): its web-standard handler
   answers each request with a fresh server, statelessly, on the 2025
@@ -2630,10 +2800,11 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   as the name, the title, the description, the arguments as `inputSchema`,
   `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
   invocation policy under the policy's key. The list is the caller's: a
-  tool the policy refuses is not in it. The schema tools
-  (`list_schemas`, `describe_schema`, `define_schema`) are in every
-  caller's list, since they name no schema until they are called: the
-  access policy answers the call, not the listing.
+  tool the policy refuses is not in it. The engine's tools
+  (`list_schemas`, `describe_schema`, `define_schema`, `list_behaviors`,
+  `describe_behavior`) are in every caller's list, since they name no
+  schema until they are called: the access policy answers the call, not
+  the listing, and asks nothing of the behavior tools.
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:
   `isError`, with the problem document the HTTP API answers with as text

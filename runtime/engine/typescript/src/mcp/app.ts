@@ -12,10 +12,12 @@ Request/Response exchange, statelessly, for the 2025 protocol revisions
 route mounts on Hono beside the engine's others.
 
 The route goes through the HTTP runtime (D15) like every engine route:
-its rate limit, timeout, body limit and authentication gate, with the
-deployment's Authenticator. The caller it establishes is the principal
-every tools/list and tools/call acts as, so the engine's access policy
-answers each call. A call the engine refuses returns a tool error
+its rate limit, timeout, body limit, service step and authentication
+gate, with the deployment's Authenticator and, when it passes one, its
+service authenticator (D37). The caller it establishes, an end user, a
+service acting for one, or a service standing in for one
+(http/callers.ts), is the principal every tools/list and tools/call acts
+as, so the engine's access policy answers each call. A call the engine refuses returns a tool error
 (isError) whose structured content is the problem document the HTTP API
 would answer with; a tool the namespace does not have is a JSON-RPC
 invalid-params error, and a malformed message the SDK's JSON-RPC error.
@@ -24,12 +26,13 @@ invalid-params error, and a malformed message the SDK's JSON-RPC error.
 import { readFileSync } from 'node:fs';
 
 import { Server, ProtocolError, ProtocolErrorCode, createMcpHandler, type CallToolResult, type McpRequestContext, type Tool } from '@modelcontextprotocol/server';
-import { internal, problemBody, unauthorized, HttpProblem, type OperationSpec, type RequestContext } from '@superschematic/http-runtime';
+import { internal, problemBody, HttpProblem, type OperationSpec, type RequestContext } from '@superschematic/http-runtime';
 import { errorHandler, mountManualOperation, notFoundHandler, type RouterRuntimeOptions } from '@superschematic/http-runtime/hono';
 import { Hono } from 'hono';
 
 import type { Principal } from '../access.js';
 import type { Engine } from '../engine.js';
+import { callerAuthenticator, principalOf } from '../http/callers.js';
 import { engineProblem } from '../http/problems.js';
 import { isPlainObject } from '../instances/patch.js';
 import { UnknownToolError } from '../tools/catalog.js';
@@ -65,7 +68,7 @@ export function engineMcp(engine: Engine, options: EngineMcpOptions = {}): Hono 
   const deployed = options.onError;
   const mapError = async (error: unknown, ctx: RequestContext): Promise<HttpProblem | Response | undefined> =>
     engineProblem(error) ?? (deployed ? await deployed(error, ctx) : undefined);
-  const runtime: RouterRuntimeOptions = { ...options, onError: mapError };
+  const runtime: RouterRuntimeOptions = { ...options, authenticate: callerAuthenticator(options.authenticate), onError: mapError };
   const serverInfo = options.serverInfo ?? packageInfo();
   const handler = createMcpHandler((context) => serverFor(engine, context, serverInfo, options.instructions, mapError));
   const app = new Hono();
@@ -168,19 +171,6 @@ export function listTools(engine: Engine, principal: Principal, namespace: strin
 function toolResult(result: unknown): CallToolResult {
   const text = JSON.stringify(result === undefined ? null : result);
   return isPlainObject(result) ? { content: [{ type: 'text', text }], structuredContent: result } : { content: [{ type: 'text', text }] };
-}
-
-// The caller the runtime gate established, as the HTTP API reads it.
-function principalOf(ctx: RequestContext): Principal {
-  const caller = ctx.principal;
-  if (!caller || typeof caller.subject !== 'string' || caller.subject === '') {
-    throw unauthorized();
-  }
-  return {
-    subject: caller.subject,
-    permissions: caller.permissions,
-    ...(caller.claims !== undefined ? { claims: caller.claims } : {}),
-  };
 }
 
 function packageInfo(): { name: string; version: string } {

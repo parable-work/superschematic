@@ -146,7 +146,7 @@ export class Engine {
       schemas,
       instances,
       events,
-      new ToolCatalog(namespaces, access, schemas, instances, tools, catalog),
+      new ToolCatalog(namespaces, access, schemas, instances, tools, catalog, behaviors),
       new Runner(storage, namespaces, catalog, behaviors, instances.reach, events, clock, permissionMatcher, runnerOptions)
     );
   }

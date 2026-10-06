@@ -13,8 +13,9 @@ behaviors declare a createParamsSchema for, under behaviors, and create's
 data, update's patch and the describe document's instance carry what the
 behaviors' validate holds the fields to, as allOf entries their
 instanceSchema writes), each operation its behaviors add (a
-schema-level one takes its parameters and no instance id), and three
-tools for writing schemas: list, describe and define a draft. The
+schema-level one takes its parameters and no instance id), three tools
+for writing schemas: list, describe and define a draft, and two that
+list and describe the behaviors a schema may compose (behaviors.ts). The
 update, delete and instance operation tools of a schema one of whose
 behaviors declares a preconditionSchema take `preconditions`, each such
 behavior's entry by its name, as the HTTP API's Preconditions header
@@ -27,8 +28,8 @@ the namespace the schema name in kebab case (codegen.ToKebabCase) and the
 method the operation's name, as `order.create` or `line-item.addNote`. An
 SDK tool's MCP handle is authored with @mcp; the engine derives it from
 the same two parts in snake case (codegen.ToSnakeCase), as `order_create`,
-and the schema tools are `list_schemas`, `describe_schema` and
-`define_schema`. A handle @mcp would refuse (not lowercase snake case, or
+and the engine's own tools are `list_schemas`, `describe_schema`,
+`define_schema`, `list_behaviors` and `describe_behavior`. A handle @mcp would refuse (not lowercase snake case, or
 longer than 48 characters) or one two tools derive hides both tools, with
 the reason; the engine's schema tools keep theirs. A tool the access
 policy refuses the caller is hidden too, with that reason, and can still
@@ -37,7 +38,8 @@ be called by its handle: the call is refused.
 
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
 import type { InstanceSchemaForm, TypeSchema } from '../behaviors/behavior.js';
-import type { BehaviorOperationDeclaration, OperationScope } from '../behaviors/declaration.js';
+import { BEHAVIOR_NAME, type BehaviorDeclaration, type BehaviorOperationDeclaration, type OperationScope } from '../behaviors/declaration.js';
+import type { BehaviorRegistry } from '../behaviors/registry.js';
 import { jsonCopy } from '../behaviors/json.js';
 import { synchronous } from '../behaviors/storage.js';
 import { BehaviorError, EngineError } from '../errors.js';
@@ -48,6 +50,7 @@ import { MAX_PAGE_SIZE } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, SchemaSummary } from '../registry/catalog.js';
 import { SCHEMA_NAME } from '../registry/document.js';
 import type { ComposedBehavior, SchemaRegistry } from '../registry/registry.js';
+import { behaviorDocument, behaviorSummary, type BehaviorDocument, type BehaviorSummary } from './behaviors.js';
 import type { BuiltinTool, ResolvedToolOptions } from './options.js';
 import {
   ANY_JSON_TYPES,
@@ -185,7 +188,9 @@ type ToolKind =
   | 'schemaOperation'
   | 'listSchemas'
   | 'describeSchema'
-  | 'defineSchema';
+  | 'defineSchema'
+  | 'listBehaviors'
+  | 'describeBehavior';
 
 // One tool before it is rendered: its names, what it does, and who may see it.
 interface ToolSpec {
@@ -235,8 +240,37 @@ export class ToolCatalog {
     /** The invocation policy, the built-in tools' policies and the vendor keys. */
     readonly options: ResolvedToolOptions,
     /** The versions' runtimes, for what their behaviors hold an instance's fields to; the registry has asked the policy. */
-    private readonly catalog: SchemaCatalog
+    private readonly catalog: SchemaCatalog,
+    /** The behaviors this engine runs, which listBehaviors and describeBehavior serve. */
+    private readonly behaviors: BehaviorRegistry
   ) {}
+
+  /**
+   * listBehaviors returns a summary of each behavior this engine runs, by
+   * name. Every caller may read it; the policy is not asked, since it
+   * names no schema.
+   */
+  listBehaviors(principal: Principal): BehaviorSummary[] {
+    checkPrincipal(principal);
+    return this.behaviors.names().map((name) => behaviorSummary(this.behaviors.declaration(name) as BehaviorDeclaration));
+  }
+
+  /**
+   * describeBehavior returns the document of a behavior this engine runs:
+   * its declaration with every default filled in. It throws not_found for
+   * a name it does not run. Every caller may read it.
+   */
+  describeBehavior(principal: Principal, name: string): BehaviorDocument {
+    checkPrincipal(principal);
+    if (typeof name !== 'string' || !BEHAVIOR_NAME.test(name)) {
+      throw new EngineError('invalid_argument', `${JSON.stringify(name)} is not a behavior name`);
+    }
+    const declaration = this.behaviors.declaration(name);
+    if (declaration === undefined) {
+      throw new EngineError('not_found', `this engine runs no behavior ${name}`);
+    }
+    return behaviorDocument(declaration, this.options.invocationPolicy);
+  }
 
   /**
    * describe returns the describe document of a schema's live version. It
@@ -343,6 +377,12 @@ export class ToolCatalog {
         const { canonical: _canonical, ...draft } = this.schemas.define(principal, document, { namespace });
         return draft;
       }
+      case 'listBehaviors':
+        only(tool, input, []);
+        return this.listBehaviors(principal);
+      case 'describeBehavior':
+        only(tool, input, ['name']);
+        return this.describeBehavior(principal, requiredString(tool, input, 'name'));
       case 'create': {
         only(tool, input, ['id', 'data', 'behaviors']);
         const id = optionalString(tool, input, 'id');
@@ -498,6 +538,24 @@ export class ToolCatalog {
         true,
         'POST',
         base
+      ),
+      tool(
+        'listBehaviors',
+        'list_behaviors',
+        'List behaviors',
+        "Lists the behaviors this engine runs, which a schema's types may compose: each one's name and description, the behaviors it requires and conflicts with, and the fields and operations it adds.",
+        false,
+        'GET',
+        '/behaviors'
+      ),
+      tool(
+        'describeBehavior',
+        'describe_behavior',
+        'Describe a behavior',
+        "Returns a behavior's declaration: the JSON Schema of the config a type gives it, of the parameters a create gives it and of the entry a write's preconditions carry for it, the behaviors it requires and conflicts with, its fields, its operations with their scope, parameters, result and invocation policy, and the codes its vetoes carry.",
+        false,
+        'GET',
+        '/behaviors/{name}'
       ),
     ];
   }
@@ -672,6 +730,10 @@ export class ToolCatalog {
         return schema([['name', { type: 'string', description: 'The schema name', pattern: SCHEMA_NAME.source }]], ['name']);
       case 'defineSchema':
         return schema([['document', { raw: { type: 'object', description: 'The schema-file document: kind General, a name, and the types; superschematic format --to=json writes it' } }]], ['document']);
+      case 'listBehaviors':
+        return schema([], []);
+      case 'describeBehavior':
+        return schema([['name', { type: 'string', description: 'The behavior name', pattern: BEHAVIOR_NAME.source }]], ['name']);
       case 'create': {
         const properties: Array<[string, Property]> = [
           ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
@@ -862,6 +924,10 @@ export class ToolCatalog {
         return { type: 'object', description: 'The describe document' };
       case 'defineSchema':
         return { type: 'object', description: 'The draft' };
+      case 'listBehaviors':
+        return { type: 'array', description: 'Array of behavior summaries', items: { type: 'object', description: 'A behavior summary' } };
+      case 'describeBehavior':
+        return { type: 'object', description: "The behavior's declaration" };
       case 'operation':
       case 'schemaOperation': {
         const result = (tool.operation as BehaviorOperationDeclaration).resultSchema;

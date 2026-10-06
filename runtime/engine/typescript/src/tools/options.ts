@@ -10,7 +10,7 @@ held to the Go defaults by runtime/engine/testdata/tool_parameters_parity.json.
   docs/extension-model.md). A behavior operation takes its declaration's
   invocationPolicy, which must be one of the values, or the default.
 - invocation: the policy of the operations every schema has and of the
-  engine's schema tools, by operation name; the default when absent.
+  engine's own tools, by operation name; the default when absent.
 - keys: the vendor keys of the tool documents (apigen.ToolKeys, section
   3.14): the scalar key, the `_meta` key of a tool's guidance, and keys
   written at the root of every argument schema.
@@ -38,10 +38,31 @@ export interface ToolKeys {
   readonly parameters: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
 }
 
-/** The operations every schema has, and the engine's tools for writing schemas. */
-export type BuiltinTool = 'create' | 'get' | 'list' | 'update' | 'delete' | 'listSchemas' | 'describeSchema' | 'defineSchema';
+/** The operations every schema has, and the engine's tools for writing schemas and reading its behaviors. */
+export type BuiltinTool =
+  | 'create'
+  | 'get'
+  | 'list'
+  | 'update'
+  | 'delete'
+  | 'listSchemas'
+  | 'describeSchema'
+  | 'defineSchema'
+  | 'listBehaviors'
+  | 'describeBehavior';
 
-export const BUILTIN_TOOLS: readonly BuiltinTool[] = ['create', 'get', 'list', 'update', 'delete', 'listSchemas', 'describeSchema', 'defineSchema'];
+export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
+  'create',
+  'get',
+  'list',
+  'update',
+  'delete',
+  'listSchemas',
+  'describeSchema',
+  'defineSchema',
+  'listBehaviors',
+  'describeBehavior',
+];
 
 /** EngineOptions.tools. */
 export interface ToolOptions {
