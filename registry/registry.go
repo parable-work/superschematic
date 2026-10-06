@@ -18,6 +18,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
+	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
@@ -298,6 +299,11 @@ func RustAPIOf(c GenerateContext) (*RustAPI, error) { return generator.RustAPIOf
 // under outputRoot, the Rust crate's directory for a Rust API; see
 // internal/generator.APIDir.
 func APIDir(outputRoot, service string) string { return generator.APIDir(outputRoot, service) }
+
+// RustIdentifier is name as a snake_case Rust identifier, a keyword
+// escaped, or fallback when nothing is left: how the Rust server and SDK
+// name an argument's field; see internal/generator/rustutil.Identifier.
+func RustIdentifier(name, fallback string) string { return rustutil.Identifier(name, fallback) }
 
 // GoPublicIdentifier converts an arbitrary handle into an exported Go
 // identifier, the way the core generators name generated constants; see

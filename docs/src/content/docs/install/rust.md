@@ -209,6 +209,10 @@ config says; give it its own `--out`, so the two servers do not share an
 output root. The acme-shop example's `rust-server` crate serves its
 shop-orders service that way
 ([The Rust server](/superschematic/guides/api-routes/#the-rust-server)).
+A [Topcoat](https://github.com/tokio-rs/topcoat) app can call the same
+implementations from its pages, by each route's rules, through the crate
+the Topcoat extension writes
+([Pages with Topcoat](/superschematic/guides/topcoat/)).
 
 `build_router` mounts every operation except those declared
 `@manualRouteRegistration`, as the Go server's `RegisterRoutes` leaves
