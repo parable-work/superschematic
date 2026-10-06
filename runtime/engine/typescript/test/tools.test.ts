@@ -84,8 +84,8 @@ describe('the describe document', () => {
     );
     assert.deepEqual(params, {
       create: [['data', 'id'], ['data']],
-      get: [['id'], ['id']],
-      list: [['cursor', 'limit'], []],
+      get: [['id', 'valueRefs'], ['id']],
+      list: [['cursor', 'limit', 'valueRefs'], []],
       update: [['expectedSeq', 'id', 'patch'], ['id', 'patch']],
       delete: [['expectedSeq', 'id'], ['id']],
     });
@@ -243,6 +243,7 @@ describe('the tools document', () => {
         ['engine.defineSchema', 'define_schema', 'engine', 'defineSchema'],
         ['engine.listBehaviors', 'list_behaviors', 'engine', 'listBehaviors'],
         ['engine.describeBehavior', 'describe_behavior', 'engine', 'describeBehavior'],
+        ['engine.getValue', 'get_value', 'engine', 'getValue'],
         ['item.create', 'item_create', 'item', 'create'],
         ['item.get', 'item_get', 'item', 'get'],
         ['item.list', 'item_list', 'item', 'list'],
@@ -326,7 +327,7 @@ describe('the tools document', () => {
     const tools = engine.tools.manifest(reader).tools;
     assert.deepEqual(
       tools.filter((entry) => !entry.mcp.hidden).map((entry) => entry.name),
-      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'item.get', 'item.list', 'item.history']
+      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue', 'item.get', 'item.list', 'item.history']
     );
     assert.equal(
       (tool(engine, 'item.increment', reader).mcp as { hiddenReason: string }).hiddenReason,
@@ -346,7 +347,7 @@ describe('the tools document', () => {
     publish(engine, orderDocument());
     assert.deepEqual(
       engine.tools.manifest(alice).tools.map((entry) => entry.namespace),
-      ['engine', 'engine', 'engine', 'engine', 'engine', 'order', 'order', 'order', 'order', 'order']
+      ['engine', 'engine', 'engine', 'engine', 'engine', 'engine', 'order', 'order', 'order', 'order', 'order']
     );
   });
 });
@@ -364,6 +365,7 @@ describe('invocation policies', () => {
       'engine.defineSchema': 'ask',
       'engine.listBehaviors': 'auto',
       'engine.describeBehavior': 'auto',
+      'engine.getValue': 'auto',
       'item.create': 'auto',
       'item.get': 'auto',
       'item.list': 'auto',
@@ -402,6 +404,7 @@ describe('invocation policies', () => {
         ['engine.defineSchema', 'on-write'],
         ['engine.listBehaviors', 'on-write'],
         ['engine.describeBehavior', 'on-write'],
+        ['engine.getValue', 'on-write'],
         ['item.create', 'on-write'],
         ['item.get', 'never'],
         ['item.list', 'never'],

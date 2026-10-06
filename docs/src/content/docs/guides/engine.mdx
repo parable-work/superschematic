@@ -318,6 +318,18 @@ curl -s -X PATCH $API/schemas/notes/instances/launch \
 at a time (`limit`, and the `next` cursor as `cursor`), `GET` on a note
 reads it, and `DELETE` removes it.
 
+A field whose JSON is longer than 64 KiB, a long body or a step's result
+document, is stored once in the engine's value store, under the SHA-256
+of its canonical JSON, and the note's row keeps a small ref in its place:
+a write that leaves the field alone, and a lease's heartbeat, never
+rewrites it. Reads return the value as they always do. Add
+`?valueRefs=true` to a list or a get to receive the ref instead,
+`{"$value": "<hash>", "bytes": <n>}`, with the pointers to the refs in
+the instance's `valueRefs`, and read a value when you need it from
+`GET $API/values/<hash>`, which answers a caller who may read the note's
+schema. The engine's README, `runtime/engine/README.md` ("The value
+store"), has the rules.
+
 ## Behaviors
 
 Each behavior operation on an instance is a route:
@@ -526,7 +538,11 @@ schedules at an interval its schema's config can set, or turn off. A
 behavior that keeps values of the schema's other types in its own
 tables reads those types' fields in `parseConfig` (`target.types`),
 which holds them to the schema's checks and its compatibility rule, and
-checks a value against one with `validate(type, value)`. A schedule's
+checks a value against one with `validate(type, value)`. A behavior
+that keeps an object with large members in its own tables, a copy of the
+instance's fields say, keeps it through the value store
+(`values.stow`, `load` and `release`), as Revisions does, so the value
+is stored once however many rows hold it. A schedule's
 run may write the behavior's own tables directly, but only what no
 operation returns, history nothing pins say; a change a read shows goes
 through an operation it invokes. The README's
@@ -563,6 +579,9 @@ the merge patch for an update, and `{behavior, operation, params, patch}`
 for an operation, so applying the changes in order gives the note as a
 read returns it. A define's is `{hash}`, the draft's hash: a reviewer
 watching the log learns a draft waits, and reads it from the draft route.
+A member of a change longer than 64 KiB is a ref to the value store, and
+the event lists the pointers to its refs in `valueRefs`, so the log never
+copies a large field; read the value from `GET $API/values/<hash>`.
 
 Three filters narrow a page further, each a list, repeated or
 comma-separated: `kind` keeps those kinds, `behavior` keeps the
@@ -620,10 +639,11 @@ adds a comment and receives its event.
 ## MCP tools
 
 The MCP endpoint serves one tool per operation of every live schema the
-caller may read, and five engine tools: `list_schemas`, `describe_schema`
-and `define_schema`, and `list_behaviors` and `describe_behavior`, which
+caller may read, and six engine tools: `list_schemas`, `describe_schema`
+and `define_schema`, `list_behaviors` and `describe_behavior`, which
 list the behaviors the engine runs and return one's declaration, its
-config's JSON Schema included. A tool's name is the schema's and the operation's,
+config's JSON Schema included, and `get_value`, which reads a value of
+the value store by its hash. A tool's name is the schema's and the operation's,
 in snake case: `notes_create`, `notes_transition`, `notes_list_comments`.
 A tool the policy refuses the caller is left out of the caller's list, so
 carol, a reader, sees these:
@@ -641,6 +661,7 @@ describe_schema
 define_schema
 list_behaviors
 describe_behavior
+get_value
 notes_get
 notes_list
 notes_comment

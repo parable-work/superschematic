@@ -13,6 +13,7 @@ import {
   Storage,
   allowAll,
   appliedMigrations,
+  canonicalJSON,
   engineMigrations,
   migrate,
   openEngine,
@@ -303,7 +304,51 @@ const seeds: Record<number, Seed> = {
       assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'notes'), ['update Item i1']);
     },
   },
+  // Version 8 kept every field inline in the row and in the event log,
+  // however large, and had no value store.
+  8: {
+    write(storage) {
+      const order = canonical(orderDocument());
+      const data = JSON.stringify({ title: 'Bulk', lines: bulkLines() });
+      storage.run(
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
+      );
+      storage.run(
+        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 'o1', 'default', 1, 1, data, 300, 'alice', 300, 'alice']
+      );
+      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
+      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, data]);
+    },
+    check(engine) {
+      // The row and its create event read as they were written, inline.
+      const lines = bulkLines();
+      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.data.lines, lines);
+      const created = engine.events.read(alice).events[1];
+      assert.deepEqual([(created.change as { lines: unknown }).lines, created.valueRefs], [lines, undefined]);
+      // The row's next write moves the large field to the value store; the
+      // event the seed wrote keeps it inline.
+      engine.instances.update(alice, 'Order', 'o1', { title: 'Bulk order' }, { expectedSeq: 1 });
+      const row = engine.storage.get("SELECT data, value_refs FROM engine_instances WHERE id = 'o1'");
+      assert.equal(row?.value_refs, '["/lines"]');
+      const hash = createHash('sha256').update(canonicalJSON(lines)).digest('hex');
+      assert.deepEqual((JSON.parse(String(row?.data)) as { lines: unknown }).lines, { $value: hash, bytes: canonicalJSON(lines).length });
+      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.data.lines, lines);
+      assert.deepEqual(engine.values.get(alice, hash).value, lines);
+      assert.deepEqual((engine.events.read(alice).events[1].change as { lines: unknown }).lines, lines);
+      checkOperationEvents(engine, 3);
+    },
+  },
 };
+
+/** bulkLines is an order's lines whose JSON is past the default threshold, 64 KiB. */
+function bulkLines(): Array<{ sku: string; count: number }> {
+  return Array.from({ length: 3000 }, (_, index) => ({ sku: `SKU-${String(index).padStart(5, '0')}`, count: index + 1 }));
+}
 
 // checkOperationEvents publishes a schema with a behavior on a migrated file,
 // runs one of its writing operations and reads the events that follow the

@@ -143,6 +143,13 @@ engine.instances.invoke(worker, 'jobs', claimed.id, 'transition', { to: 'done' }
 engine.instances.invoke(worker, 'jobs', claimed.id, 'release', {}, fenced);
 ```
 
+A large result, a field whose JSON is longer than 64 KiB that
+`recordAttempt` keeps or the worker writes, is stored once in the
+engine's value store, and the job's row and events keep a ref to it, so
+heartbeats and the other writes under the lease never rewrite it. A
+dashboard that lists jobs passes `valueRefs` to receive the refs rather
+than the results ([The engine](/superschematic/guides/engine/#instances)).
+
 Over HTTP, `claimNext` is a schema-level route and the rest are instance
 operations, each with the token in the `Preconditions` header:
 

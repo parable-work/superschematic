@@ -3,10 +3,12 @@ The engine: one SQLite file, brought up to the engine's migrations when it
 opens, the namespaces the deployment configures, the access policy it
 supplies, the core's behaviors and the implementations it registers, the
 schema registry, instance store and event log, each of which asks that
-policy on every call, the tool catalog, which reads and calls through
-them, the search across a namespace's schemas, which calls through them
-too, and the runner, which runs the behaviors' reactions and schedules
-after the commit as the principal the deployment names for it.
+policy on every call, the value store, which keeps each large value once
+and serves it by hash to a caller who may read a schema that references
+it, the tool catalog, which reads and calls through them, the search
+across a namespace's schemas, which calls through them too, and the
+runner, which runs the behaviors' reactions and schedules after the
+commit as the principal the deployment names for it.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
@@ -28,6 +30,8 @@ import { migrate } from './storage/migrations.js';
 import { Storage, type StorageOptions } from './storage/storage.js';
 import { ToolCatalog } from './tools/catalog.js';
 import { resolveToolOptions, type ToolOptions } from './tools/options.js';
+import { bindValues, checkValueOptions, type ValueOptions } from './values/store.js';
+import { EngineValues } from './values/values.js';
 
 export interface EngineOptions extends StorageOptions {
   /** The SQLite file. One process writes it. */
@@ -79,6 +83,14 @@ export interface EngineOptions extends StorageOptions {
    * refuses to start; engine.runner.start() starts it.
    */
   runner?: RunnerOptions;
+  /**
+   * The value store (runtime/engine/README.md, "The value store"): the
+   * threshold past which a top-level member of an instance, an event or a
+   * behavior's row is stored once by hash (64 KiB by default), where the
+   * values live (engine_payloads in this file by default) and how many
+   * bytes of them the engine keeps parsed in memory.
+   */
+  values?: ValueOptions;
 }
 
 export class Engine {
@@ -91,6 +103,8 @@ export class Engine {
   readonly tools: ToolCatalog;
   /** Runs reactions and schedules after the commit; the deployment starts and stops it. */
   readonly runner: Runner;
+  /** Reads a value of the value store by its hash, as a caller who may read a schema that references it. */
+  readonly values: EngineValues;
 
   private constructor(
     storage: Storage,
@@ -100,7 +114,8 @@ export class Engine {
     instances: InstanceStore,
     events: EventLog,
     tools: ToolCatalog,
-    runner: Runner
+    runner: Runner,
+    values: EngineValues
   ) {
     this.storage = storage;
     this.namespaces = namespaces;
@@ -110,6 +125,7 @@ export class Engine {
     this.events = events;
     this.tools = tools;
     this.runner = runner;
+    this.values = values;
   }
 
   /** open opens the engine's file, creating it if absent, and applies the engine's migrations. */
@@ -126,9 +142,11 @@ export class Engine {
     // Checked before the file opens, so a bad option leaves nothing open.
     const runnerOptions = options.runner;
     Runner.check(runnerOptions);
+    checkValueOptions(options.values);
     const storage = Storage.open(options.path, options);
     const behaviors = new BehaviorRegistry(storage, clock, tools.invocationPolicy);
     try {
+      bindValues(storage, options.values);
       migrate(storage, engineMigrations, clock());
       for (const implementation of [...coreBehaviors, ...(options.behaviors ?? [])]) {
         behaviors.register(implementation);
@@ -141,6 +159,7 @@ export class Engine {
     const schemas = new SchemaRegistry(catalog, namespaces, access);
     const instances = new InstanceStore(storage, namespaces, catalog, access, options.ids ?? defaultIds, clock, permissionMatcher);
     const events = new EventLog(storage, namespaces, access);
+    const values = new EngineValues(storage, namespaces, access);
     return new Engine(
       storage,
       namespaces,
@@ -148,8 +167,9 @@ export class Engine {
       schemas,
       instances,
       events,
-      new ToolCatalog(namespaces, access, schemas, instances, tools, catalog, behaviors),
-      new Runner(storage, namespaces, catalog, behaviors, instances.reach, events, clock, permissionMatcher, runnerOptions)
+      new ToolCatalog(namespaces, access, schemas, instances, tools, catalog, behaviors, values),
+      new Runner(storage, namespaces, catalog, behaviors, instances.reach, events, clock, permissionMatcher, runnerOptions),
+      values
     );
   }
 

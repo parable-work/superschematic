@@ -203,6 +203,7 @@ describe('tools/list', () => {
         'define_schema',
         'list_behaviors',
         'describe_behavior',
+        'get_value',
         'item_create',
         'item_get',
         'item_list',
@@ -260,6 +261,7 @@ describe('tools/list', () => {
         ['define_schema', { confirm: 'never' }],
         ['list_behaviors', { confirm: 'never' }],
         ['describe_behavior', { confirm: 'never' }],
+        ['get_value', { confirm: 'never' }],
         ['order_create', { confirm: 'never' }],
         ['order_get', { confirm: 'never' }],
         ['order_list', { confirm: 'never' }],
@@ -270,11 +272,11 @@ describe('tools/list', () => {
     for (const tool of tools) {
       assert.equal((tool.inputSchema as Record<string, unknown>)['x-acme-arguments'], 1, tool.name);
     }
-    const data = (tools[5].inputSchema.properties as Record<string, any>).data;
+    const data = (tools[6].inputSchema.properties as Record<string, any>).data;
     assert.equal(data.properties.quantity['x-acme-scalar'], 'Generic.Int64');
     // The other namespace has no schema.
     const { client: other } = await connect(endpoint(url));
-    assert.equal((await other.listTools()).tools.length, 5);
+    assert.equal((await other.listTools()).tools.length, 6);
   });
 
   test('lists only what the access policy lets the caller call', async () => {
@@ -282,7 +284,7 @@ describe('tools/list', () => {
     const { client } = await connect(endpoint(url), 'reader');
     assert.deepEqual(
       (await client.listTools()).tools.map((tool) => tool.name),
-      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'item_get', 'item_list', 'item_history']
+      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'item_get', 'item_list', 'item_history']
     );
   });
 });
@@ -423,7 +425,7 @@ describe('tools/call', () => {
     const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
     assert.deepEqual(
       [...byName.keys()],
-      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior'],
+      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value'],
       'reader may read no schema, and still lists the engine tools'
     );
     assert.deepEqual(byName.get('list_behaviors')?.annotations, { readOnlyHint: true });
@@ -643,8 +645,8 @@ describe("the core's behaviors", () => {
       tools.map((tool) => [tool.name, tool.annotations?.readOnlyHint, Object.keys(tool.inputSchema.properties ?? {}).join(' ')]),
       [
         ['tasks_create', false, 'behaviors data id'],
-        ['tasks_get', true, 'id'],
-        ['tasks_list', true, 'cursor limit'],
+        ['tasks_get', true, 'id valueRefs'],
+        ['tasks_list', true, 'cursor limit valueRefs'],
         ['tasks_update', false, 'expectedSeq id patch'],
         ['tasks_delete', false, 'expectedSeq id'],
         ['tasks_transition', false, 'expectedSeq id params'],

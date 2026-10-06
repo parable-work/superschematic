@@ -38,6 +38,14 @@ to or the schedule that ran, and its depth, one more than its cause's.
 A caller's change has none. An event a service's call wrote (D37)
 records the service's deployable beside the actor, the end user it acted
 for or, standing in for one, its own subject.
+
+An instance event keeps a large member of its change in the value store
+(values/store.ts): a create's instance, an update's patch, an operation's
+params and patch each hold a ref in place of a member whose JSON is over
+the threshold, and the event lists the pointers to them (valueRefs). A
+read returns the event as the log keeps it, refs and all; a caller reads
+a value by its hash (values/values.ts), and before() in a reaction puts
+the values back.
 */
 
 import { checkPrincipal, type Access, type Principal } from '../access.js';
@@ -48,6 +56,7 @@ import { pageSize } from '../paging.js';
 import { checkSchemaName } from '../registry/document.js';
 import type { Row, SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
+import { refsOf, refsText, valuesOf } from '../values/store.js';
 import { notifierOf, type EventNotifier, type EventWatcher } from './notifier.js';
 
 export type EventKind = 'create' | 'update' | 'delete' | 'operation' | 'publish' | 'define';
@@ -96,6 +105,13 @@ export interface EngineEvent {
   change: unknown;
   /** What caused it, for an event a reaction or a schedule wrote; absent for a caller's change. */
   cause?: EventCause;
+  /**
+   * The JSON pointers into change of the members the log keeps in the
+   * value store: each holds a ref, `{ "$value": <hash>, "bytes": <n> }`,
+   * in place of a value whose JSON is longer than the engine's threshold.
+   * Absent when change holds none.
+   */
+  valueRefs?: string[];
 }
 
 /** The change of an operation event: what was called, and what it did to the instance. */
@@ -167,6 +183,11 @@ export interface NewEvent {
   change: string | null;
   /** For an event the runner's work writes, what caused it. */
   cause?: EventCause;
+  /**
+   * For a change the value store stowed: the pointers to its refs, and the
+   * hashes they name, which the event holds from its append on.
+   */
+  values?: { readonly refs: readonly string[]; readonly hashes: ReadonlySet<string> };
 }
 
 /**
@@ -178,8 +199,8 @@ export function appendEvent(storage: Storage, event: NewEvent): number {
   const cause = event.cause;
   const result = storage.run(
     `INSERT INTO engine_events
-       (kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       event.kind,
       event.namespace,
@@ -195,9 +216,16 @@ export function appendEvent(storage: Storage, event: NewEvent): number {
       cause?.event ?? null,
       cause?.schedule ?? null,
       cause?.depth ?? 0,
+      refsText(event.values?.refs ?? []),
     ]
   );
   const cursor = Number(result.lastInsertRowid);
+  if (event.values !== undefined && event.values.hashes.size > 0) {
+    valuesOf(storage).hold(
+      { namespace: event.namespace, schema: event.schema, holder: 'event', id: event.instanceId ?? '', key: String(cursor) },
+      event.values.hashes
+    );
+  }
   const notify = () => notifierOf(storage).committed(cursor);
   if (storage.inTransaction) {
     storage.afterCommit(notify);
@@ -222,7 +250,8 @@ export function nextSeq(storage: Storage, namespace: string, schema: string, ins
 }
 
 /** The engine_events columns toEvent reads. */
-export const EVENT_COLUMNS = 'cursor, kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth';
+export const EVENT_COLUMNS =
+  'cursor, kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs';
 
 export class EventLog {
   private readonly notifier: EventNotifier;
@@ -422,6 +451,10 @@ export function toEvent(row: Row): EngineEvent {
       ...(row.cause_schedule === null ? {} : { schedule: String(row.cause_schedule) }),
       depth: Number(row.depth),
     };
+  }
+  const refs = refsOf(row.value_refs);
+  if (refs !== undefined) {
+    event.valueRefs = refs;
   }
   return event;
 }
