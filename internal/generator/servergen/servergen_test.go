@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -557,5 +558,145 @@ func TestAServiceClauseRefusesToStartWithoutTheServiceAuthField(t *testing.T) {
 	}
 	if want := "shop-api has operations with a service clause, and no environment derives the service-auth field"; !strings.Contains(string(out), want) {
 		t.Errorf("shop-api stopped without saying %q:\n%s", want, out)
+	}
+}
+
+// TestToolchainPinsMatchToolsEnv: the go directive the modules state and
+// the images the Dockerfile builds in are tools.env's pins.
+func TestToolchainPinsMatchToolsEnv(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(testpaths.RepoRoot(t), "tools.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pins := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if key, value, ok := strings.Cut(line, "="); ok && !strings.HasPrefix(key, "#") {
+			pins[key] = value
+		}
+	}
+	if pins["GO_VERSION"] != servergen.GoVersion {
+		t.Errorf("tools.env pins Go %s; servergen.GoVersion is %s", pins["GO_VERSION"], servergen.GoVersion)
+	}
+	if pins["RUST_VERSION"] != servergen.RustVersion {
+		t.Errorf("tools.env pins Rust %s; servergen.RustVersion is %s", pins["RUST_VERSION"], servergen.RustVersion)
+	}
+}
+
+// copyTree copies the directory src to dst, leaving out build products:
+// target and node_modules directories, and skip, a directory under src.
+func copyTree(t *testing.T, src, dst string, skip ...string) {
+	t.Helper()
+	err := filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "target" || d.Name() == "node_modules" || slices.Contains(skip, filepath.ToSlash(rel)) {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// docker runs docker with args and returns its trimmed output.
+func docker(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("docker", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestTheDockerfileBuildsAnImageThatServes: Storefront's Dockerfile
+// builds from a repository root holding the generated modules, the
+// scaffolds, the runtime modules and a superscalar checkout, and the image
+// serves: /healthz, an API's route, and a clean stop on docker stop. It
+// needs Docker, and builds superscalar's archive in a Rust stage, so it
+// runs only outside -short.
+func TestTheDockerfileBuildsAnImageThatServes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping docker build in -short mode")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker is not installed")
+	}
+	if out, err := exec.Command("docker", "info").CombinedOutput(); err != nil {
+		t.Skipf("docker is not running: %v\n%s", err, out)
+	}
+	local := testpaths.Local(t)
+	repo := testpaths.RepoRoot(t)
+	repoRoot := t.TempDir()
+	for _, dir := range []string{"ir", "runtime/http/go", "runtime/schema/go", "third_party/superscalar/crates"} {
+		copyTree(t, filepath.Join(repo, dir), filepath.Join(repoRoot, dir))
+	}
+	copyTree(t, local.ScalarGo, filepath.Join(repoRoot, "third_party", "superscalar", "go"), "lib")
+	for _, file := range []string{"Cargo.toml", "Cargo.lock"} {
+		data, err := os.ReadFile(filepath.Join(repo, "third_party", "superscalar", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repoRoot, "third_party", "superscalar", file), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot))
+
+	image := fmt.Sprintf("superschematic-servergen-test:%d", time.Now().UnixNano())
+	cmd := exec.Command("docker", "build", "-q", "-f", "schemas/dist/server/shop-stack/Storefront/Dockerfile", "-t", image, ".")
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("docker build: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "rmi", "-f", image).Run() })
+
+	container := docker(t, "run", "-d", "-p", "127.0.0.1::8080",
+		"-e", "SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1",
+		"-e", "SHOP_API_SERVICE_URL=http://127.0.0.1:9", image)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", container).Run() })
+	address := docker(t, "port", container, "8080/tcp")
+	if i := strings.LastIndex(address, "\n"); i >= 0 {
+		address = address[:i]
+	}
+	s := &started{base: "http://" + address, out: &strings.Builder{}}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		resp, err := http.Get(s.base + "/healthz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the container did not answer /healthz: %v\n%s", err, docker(t, "logs", container))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	s.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
+	s.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
+	docker(t, "stop", container)
+	if code := docker(t, "inspect", "-f", "{{.State.ExitCode}}", container); code != "0" {
+		t.Errorf("the container exited %s on docker stop:\n%s", code, docker(t, "logs", container))
+	}
+	if logs := docker(t, "logs", container); !strings.Contains(logs, `"msg":"stopped"`) {
+		t.Errorf("the container did not log its graceful stop:\n%s", logs)
 	}
 }
