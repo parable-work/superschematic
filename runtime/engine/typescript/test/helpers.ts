@@ -195,3 +195,17 @@ export function stepsDocument(): Record<string, unknown> {
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-variants-json/src/step.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
+
+/**
+ * recipesDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-branches-json), a schema named Recipe like its instance type,
+ * which composes Branches: each recipe is a version graph's root, with
+ * steps ordered by position, ingredients under a step and at most one
+ * cover, and the sweep on.
+ */
+export function recipesDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-branches-json/src/recipe.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}

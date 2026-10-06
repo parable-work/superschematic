@@ -105,6 +105,13 @@ func Run(schema *ir.Schema, cfg *schemaconfig.SchemaConfig, opts Options) (*Resu
 		return nil, err
 	}
 
+	// The server stage runs only the generators that read calls; the
+	// documents belong to the base stage.
+	if r.Options.Stage == registry.StageServer {
+		sort.Strings(r.Result.Skipped)
+		return r.Result, nil
+	}
+
 	// Document generators are presence-driven: a registered document that
 	// the loader attached to the schema runs its Generate regardless of the
 	// kind and outputs switches (extension-model section 7.1). They run in
@@ -183,6 +190,15 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 		}
 		enabled = append(enabled, gen)
 	}
+	enabled = slices.DeleteFunc(enabled, func(gen registry.GeneratorSpec) bool {
+		switch r.Options.Stage {
+		case registry.StageBase:
+			return gen.ReadsCalls
+		case registry.StageServer:
+			return !gen.ReadsCalls
+		}
+		return false
+	})
 	if err := refuseBehaviors(r.Schema, enabled); err != nil {
 		return err
 	}

@@ -65,6 +65,34 @@ pub async fn connect(dsn: &str, schema: Option<&str>) -> Client {
 pub struct Schema {
     pub dsn: String,
     pub name: String,
+    /// The server's URL and the name of the database the schema is in, when
+    /// the database is the schema's own: the value drops the database.
+    database: Option<(String, String)>,
+}
+
+/// A name, after `prefix`, that no other schema or database of the tests
+/// has.
+fn unique_name(prefix: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    // Tests of one process run side by side, and a clock may tick in
+    // microseconds, so a counter tells their names apart.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{nanos}_{}_{n}", std::process::id())
+}
+
+/// The URL `dsn`, a postgres:// URL, with the database `name` in place of
+/// its own.
+fn database_url(dsn: &str, name: &str) -> String {
+    let (scheme, rest) = dsn
+        .split_once("://")
+        .expect("the database variable is a postgres:// URL");
+    let authority = rest.find(['/', '?']).unwrap_or(rest.len());
+    let query = rest.find('?').map_or("", |i| &rest[i..]);
+    format!("{scheme}://{}/{name}{query}", &rest[..authority])
 }
 
 impl Schema {
@@ -83,15 +111,7 @@ impl Schema {
             let unique = error.code().is_some_and(|c| c.code() == "23505");
             assert!(unique, "create pgcrypto: {error}");
         }
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        // Tests of one process run side by side, and a clock may tick in
-        // microseconds, so a counter tells their schemas apart.
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let name = format!("{prefix}_{nanos}_{}_{n}", std::process::id());
+        let name = unique_name(prefix);
         admin
             .batch_execute(&format!("CREATE SCHEMA {name}"))
             .await
@@ -106,7 +126,29 @@ impl Schema {
         Schema {
             dsn: dsn.to_owned(),
             name,
+            database: None,
         }
+    }
+
+    /// Creates a database of its own on the server `dsn` names, and in it a
+    /// schema as [`Schema::create`] does. The value drops the database.
+    ///
+    /// The graph's sweep lock is an advisory lock, and Postgres keys an
+    /// advisory lock to the database, not to a schema. The tests of one
+    /// binary run side by side, so in a database they share, one test's
+    /// held lock makes another's sweep skip, and one test's sweep makes
+    /// another's take of the lock fail. A test that holds or takes the lock
+    /// while another test of its binary does runs in a database of its own.
+    pub async fn create_in_own_database(dsn: &str, prefix: &str) -> Schema {
+        let database = unique_name(prefix);
+        connect(dsn, None)
+            .await
+            .batch_execute(&format!("CREATE DATABASE {database}"))
+            .await
+            .expect("create the database");
+        let mut schema = Schema::create(&database_url(dsn, &database), prefix).await;
+        schema.database = Some((dsn.to_owned(), database));
+        schema
     }
 
     /// A new connection whose search path is the schema.
@@ -123,12 +165,26 @@ impl Schema {
     }
 }
 
-/// Drops the schema and everything in it, when the test ends and when it
-/// panics. It runs on a thread of its own, since a destructor cannot await,
-/// and gives up on a lock it waits on past a few seconds rather than hang.
+/// Drops the schema and everything in it, or the schema's own database,
+/// when the test ends and when it panics. It runs on a thread of its own,
+/// since a destructor cannot await, and gives up on a lock it waits on past
+/// a few seconds rather than hang. A database is dropped with the
+/// connections to it still open.
 impl Drop for Schema {
     fn drop(&mut self) {
-        let (dsn, name) = (self.dsn.clone(), self.name.clone());
+        let (dsn, statement) = match &self.database {
+            Some((server, database)) => (
+                server.clone(),
+                format!("DROP DATABASE IF EXISTS {database} WITH (FORCE)"),
+            ),
+            None => (
+                self.dsn.clone(),
+                format!(
+                    "SET lock_timeout = '5s'; DROP SCHEMA IF EXISTS {} CASCADE",
+                    self.name
+                ),
+            ),
+        };
         let dropped = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -136,11 +192,7 @@ impl Drop for Schema {
                 .expect("a runtime");
             runtime.block_on(async {
                 let admin = connect(&dsn, None).await;
-                let _ = admin
-                    .batch_execute(&format!(
-                        "SET lock_timeout = '5s'; DROP SCHEMA IF EXISTS {name} CASCADE"
-                    ))
-                    .await;
+                let _ = admin.batch_execute(&statement).await;
             });
         })
         .join();

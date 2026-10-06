@@ -392,7 +392,7 @@ async function decode(ctx: RequestContext, spec: OperationSpec): Promise<Decoded
       try {
         input = spec.input.parse(raw);
       } catch (error) {
-        throw badRequest('Request body does not match the declared input', { cause: error });
+        throw inputRefusal(error);
       }
     }
   }
@@ -414,6 +414,25 @@ async function decode(ctx: RequestContext, spec: OperationSpec): Promise<Decoded
     }
   }
   return { path, query, body, input };
+}
+
+/**
+ * The 400 of a body the input type refuses, as every generated server
+ * answers it: `details` says where (`body`) and why, from the generated
+ * parser's ParseError (`expected an object`, `unknown fields: a, b`,
+ * `validation failed`), and the top-level `errors` member holds an
+ * undeclared key's or a broken rule's field errors, keyed by path, as the
+ * SDKs read them.
+ */
+function inputRefusal(error: unknown): HttpProblem {
+  const parsed = (typeof error === 'object' && error !== null ? error : {}) as { reason?: unknown; errors?: unknown };
+  const reason = typeof parsed.reason === 'string' ? parsed.reason : 'does not match the declared type';
+  const errors = typeof parsed.errors === 'object' && parsed.errors !== null ? parsed.errors : undefined;
+  return badRequest('Request body does not match the declared input', {
+    cause: error,
+    details: { location: 'body', reason },
+    ...(errors !== undefined ? { extensions: { errors } } : {}),
+  });
 }
 
 /** A list-of-lists result with every nullish list as []: an inner list is never null on the wire. */

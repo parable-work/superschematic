@@ -94,6 +94,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// its fields (core_projection.go).
 	specs = append(specs, projectionDecorators()...)
 
+	// The Stack kind's declarations: @stack, @server, @database and
+	// @environment (core_stack.go).
+	specs = append(specs, stackDecorators()...)
+
 	// Fields.
 	fieldFlag := func(name string, packages []string, set func(*ir.FieldDef)) {
 		flag(TargetField, name, packages, func(n Node) { set(n.Field) })

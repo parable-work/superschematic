@@ -327,7 +327,8 @@ writes empty guidance, takes the invocation policy and the vendor keys
 above as options, and takes a behavior operation's policy from its
 declaration, else the default: the core's behaviors (`Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-and `Reactions`, `Constants` and `Variants`, which have no operations),
+`Branches`, and `Reactions`, `Constants` and `Variants`, which have no
+operations),
 which every engine registers, name none, and neither do the work-queue
 behaviors `@superschematic/engine-workqueue` implements.
 Its argument schemas are the generators':

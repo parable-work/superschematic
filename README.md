@@ -242,7 +242,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [Auth and permissions](docs/src/content/docs/guides/auth-and-permissions.mdx): which routes need a caller, permissions, and credentials in each SDK.
 - [Client SDKs](docs/src/content/docs/guides/client-sdks.mdx): generate and call a client in Go, TypeScript, Python and Rust.
 - [The engine](docs/src/content/docs/guides/engine.mdx): run a schema with no generated code, over HTTP, an event stream and MCP.
-- [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search, Reactions, Constants and Variants.
+- [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches.
 - [Work queues](docs/src/content/docs/guides/work-queues.md): claimable work with `@superschematic/engine-workqueue`: leases, claims, worker heartbeats, blueprints, budgets and retries.
 
 **Languages**: what the generated code offers in
@@ -296,6 +296,7 @@ records every design decision (cited as D1, D2, ... in code and commits).
 | [`examples/acme-schematic`](examples/acme-schematic/) | The same shop with an extension that adds a kind, decorators, a generator, an auth provider, a behavior and commands, without editing the core | `examples/acme-schematic/scripts/smoke.sh` |
 | [`examples/engine-notes`](examples/engine-notes/) | A notes server on the engine: workflow, comments and revisions over HTTP, an event stream and MCP | `examples/engine-notes/scripts/check.sh` |
 | [`extensions/deploy`](extensions/deploy/), [`extensions/platform`](extensions/platform/) | Two small extensions: Helm values from `@envVars`, and a kind that groups services | `go test ./extensions/...` |
+| [`extensions/topcoat`](extensions/topcoat/) | A Go module of its own: for a Rust API, a crate a [Topcoat](https://github.com/tokio-rs/topcoat) app calls the operations through in-process, by each route's rules, with records of their results | `cd extensions/topcoat && go test ./...` |
 
 ## Extending superschematic
 

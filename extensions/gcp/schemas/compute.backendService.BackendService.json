@@ -1,0 +1,878 @@
+{
+  "token": "gcp:compute/backendService:BackendService",
+  "terraform": {
+    "type": "google_compute_backend_service",
+    "renames": {
+      "affinityCookieTtlSec": "affinity_cookie_ttl_sec",
+      "backends": "backend",
+      "backends.balancingMode": "balancing_mode",
+      "backends.capacityScaler": "capacity_scaler",
+      "backends.customMetrics": "custom_metrics",
+      "backends.customMetrics.dryRun": "dry_run",
+      "backends.customMetrics.maxUtilization": "max_utilization",
+      "backends.maxConnections": "max_connections",
+      "backends.maxConnectionsPerEndpoint": "max_connections_per_endpoint",
+      "backends.maxConnectionsPerInstance": "max_connections_per_instance",
+      "backends.maxInFlightRequests": "max_in_flight_requests",
+      "backends.maxInFlightRequestsPerEndpoint": "max_in_flight_requests_per_endpoint",
+      "backends.maxInFlightRequestsPerInstance": "max_in_flight_requests_per_instance",
+      "backends.maxRate": "max_rate",
+      "backends.maxRatePerEndpoint": "max_rate_per_endpoint",
+      "backends.maxRatePerInstance": "max_rate_per_instance",
+      "backends.maxUtilization": "max_utilization",
+      "backends.trafficDuration": "traffic_duration",
+      "cdnPolicy": "cdn_policy",
+      "cdnPolicy.bypassCacheOnRequestHeaders": "bypass_cache_on_request_headers",
+      "cdnPolicy.bypassCacheOnRequestHeaders.headerName": "header_name",
+      "cdnPolicy.cacheKeyPolicy": "cache_key_policy",
+      "cdnPolicy.cacheKeyPolicy.includeHost": "include_host",
+      "cdnPolicy.cacheKeyPolicy.includeHttpHeaders": "include_http_headers",
+      "cdnPolicy.cacheKeyPolicy.includeNamedCookies": "include_named_cookies",
+      "cdnPolicy.cacheKeyPolicy.includeProtocol": "include_protocol",
+      "cdnPolicy.cacheKeyPolicy.includeQueryString": "include_query_string",
+      "cdnPolicy.cacheKeyPolicy.queryStringBlacklists": "query_string_blacklist",
+      "cdnPolicy.cacheKeyPolicy.queryStringWhitelists": "query_string_whitelist",
+      "cdnPolicy.cacheMode": "cache_mode",
+      "cdnPolicy.clientTtl": "client_ttl",
+      "cdnPolicy.defaultTtl": "default_ttl",
+      "cdnPolicy.maxTtl": "max_ttl",
+      "cdnPolicy.negativeCaching": "negative_caching",
+      "cdnPolicy.negativeCachingPolicies": "negative_caching_policy",
+      "cdnPolicy.requestCoalescing": "request_coalescing",
+      "cdnPolicy.serveWhileStale": "serve_while_stale",
+      "cdnPolicy.signedUrlCacheMaxAgeSec": "signed_url_cache_max_age_sec",
+      "circuitBreakers": "circuit_breakers",
+      "circuitBreakers.connectTimeout": "connect_timeout",
+      "circuitBreakers.maxConnections": "max_connections",
+      "circuitBreakers.maxPendingRequests": "max_pending_requests",
+      "circuitBreakers.maxRequests": "max_requests",
+      "circuitBreakers.maxRequestsPerConnection": "max_requests_per_connection",
+      "circuitBreakers.maxRetries": "max_retries",
+      "compressionMode": "compression_mode",
+      "connectionDrainingTimeoutSec": "connection_draining_timeout_sec",
+      "consistentHash": "consistent_hash",
+      "consistentHash.httpCookie": "http_cookie",
+      "consistentHash.httpHeaderName": "http_header_name",
+      "consistentHash.minimumRingSize": "minimum_ring_size",
+      "customMetrics": "custom_metrics",
+      "customMetrics.dryRun": "dry_run",
+      "customRequestHeaders": "custom_request_headers",
+      "customResponseHeaders": "custom_response_headers",
+      "deletionPolicy": "deletion_policy",
+      "dynamicForwarding": "dynamic_forwarding",
+      "dynamicForwarding.ipPortSelection": "ip_port_selection",
+      "edgeSecurityPolicy": "edge_security_policy",
+      "enableCdn": "enable_cdn",
+      "externalManagedMigrationState": "external_managed_migration_state",
+      "externalManagedMigrationTestingPercentage": "external_managed_migration_testing_percentage",
+      "healthChecks": "health_checks",
+      "iap.oauth2ClientId": "oauth2_client_id",
+      "iap.oauth2ClientIdWo": "oauth2_client_id_wo",
+      "iap.oauth2ClientIdWoVersion": "oauth2_client_id_wo_version",
+      "iap.oauth2ClientSecret": "oauth2_client_secret",
+      "iap.oauth2ClientSecretSha256": "oauth2_client_secret_sha256",
+      "iap.oauth2ClientSecretWo": "oauth2_client_secret_wo",
+      "iap.oauth2ClientSecretWoVersion": "oauth2_client_secret_wo_version",
+      "ipAddressSelectionPolicy": "ip_address_selection_policy",
+      "loadBalancingScheme": "load_balancing_scheme",
+      "localityLbPolicies": "locality_lb_policies",
+      "localityLbPolicies.customPolicy": "custom_policy",
+      "localityLbPolicy": "locality_lb_policy",
+      "logConfig": "log_config",
+      "logConfig.optionalFields": "optional_fields",
+      "logConfig.optionalMode": "optional_mode",
+      "logConfig.requestHeaders": "request_headers",
+      "logConfig.requestHeaders.headerName": "header_name",
+      "logConfig.responseHeaders": "response_headers",
+      "logConfig.responseHeaders.headerName": "header_name",
+      "logConfig.sampleRate": "sample_rate",
+      "maxStreamDuration": "max_stream_duration",
+      "networkPassThroughLbTrafficPolicy": "network_pass_through_lb_traffic_policy",
+      "networkPassThroughLbTrafficPolicy.zonalAffinity": "zonal_affinity",
+      "networkPassThroughLbTrafficPolicy.zonalAffinity.spilloverRatio": "spillover_ratio",
+      "outlierDetection": "outlier_detection",
+      "outlierDetection.baseEjectionTime": "base_ejection_time",
+      "outlierDetection.consecutiveErrors": "consecutive_errors",
+      "outlierDetection.consecutiveGatewayFailure": "consecutive_gateway_failure",
+      "outlierDetection.enforcingConsecutiveErrors": "enforcing_consecutive_errors",
+      "outlierDetection.enforcingConsecutiveGatewayFailure": "enforcing_consecutive_gateway_failure",
+      "outlierDetection.enforcingSuccessRate": "enforcing_success_rate",
+      "outlierDetection.maxEjectionPercent": "max_ejection_percent",
+      "outlierDetection.successRateMinimumHosts": "success_rate_minimum_hosts",
+      "outlierDetection.successRateRequestVolume": "success_rate_request_volume",
+      "outlierDetection.successRateStdevFactor": "success_rate_stdev_factor",
+      "params.resourceManagerTags": "resource_manager_tags",
+      "portName": "port_name",
+      "securityPolicy": "security_policy",
+      "securitySettings": "security_settings",
+      "securitySettings.awsV4Authentication": "aws_v4_authentication",
+      "securitySettings.awsV4Authentication.accessKey": "access_key",
+      "securitySettings.awsV4Authentication.accessKeyId": "access_key_id",
+      "securitySettings.awsV4Authentication.accessKeyVersion": "access_key_version",
+      "securitySettings.awsV4Authentication.originRegion": "origin_region",
+      "securitySettings.clientTlsPolicy": "client_tls_policy",
+      "securitySettings.subjectAltNames": "subject_alt_names",
+      "serviceLbPolicy": "service_lb_policy",
+      "sessionAffinity": "session_affinity",
+      "strongSessionAffinityCookie": "strong_session_affinity_cookie",
+      "timeoutSec": "timeout_sec",
+      "tlsSettings": "tls_settings",
+      "tlsSettings.authenticationConfig": "authentication_config",
+      "tlsSettings.subjectAltNames": "subject_alt_names",
+      "tlsSettings.subjectAltNames.dnsName": "dns_name",
+      "tlsSettings.subjectAltNames.uniformResourceIdentifier": "uniform_resource_identifier"
+    }
+  },
+  "inputProperties": {
+    "affinityCookieTtlSec": {
+      "type": "integer"
+    },
+    "backends": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/BackendServiceBackend:BackendServiceBackend"
+      }
+    },
+    "cdnPolicy": {
+      "$ref": "#/types/gcp:compute/BackendServiceCdnPolicy:BackendServiceCdnPolicy"
+    },
+    "circuitBreakers": {
+      "$ref": "#/types/gcp:compute/BackendServiceCircuitBreakers:BackendServiceCircuitBreakers"
+    },
+    "compressionMode": {
+      "type": "string"
+    },
+    "connectionDrainingTimeoutSec": {
+      "type": "integer"
+    },
+    "consistentHash": {
+      "$ref": "#/types/gcp:compute/BackendServiceConsistentHash:BackendServiceConsistentHash"
+    },
+    "customMetrics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/BackendServiceCustomMetric:BackendServiceCustomMetric"
+      }
+    },
+    "customRequestHeaders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "customResponseHeaders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "dynamicForwarding": {
+      "$ref": "#/types/gcp:compute/BackendServiceDynamicForwarding:BackendServiceDynamicForwarding"
+    },
+    "edgeSecurityPolicy": {
+      "type": "string"
+    },
+    "enableCdn": {
+      "type": "boolean"
+    },
+    "externalManagedMigrationState": {
+      "type": "string"
+    },
+    "externalManagedMigrationTestingPercentage": {
+      "type": "number"
+    },
+    "healthChecks": {
+      "type": "string"
+    },
+    "iap": {
+      "$ref": "#/types/gcp:compute/BackendServiceIap:BackendServiceIap"
+    },
+    "ipAddressSelectionPolicy": {
+      "type": "string"
+    },
+    "loadBalancingScheme": {
+      "type": "string"
+    },
+    "localityLbPolicies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:compute/BackendServiceLocalityLbPolicy:BackendServiceLocalityLbPolicy"
+      }
+    },
+    "localityLbPolicy": {
+      "type": "string"
+    },
+    "logConfig": {
+      "$ref": "#/types/gcp:compute/BackendServiceLogConfig:BackendServiceLogConfig"
+    },
+    "maxStreamDuration": {
+      "$ref": "#/types/gcp:compute/BackendServiceMaxStreamDuration:BackendServiceMaxStreamDuration"
+    },
+    "name": {
+      "type": "string"
+    },
+    "networkPassThroughLbTrafficPolicy": {
+      "$ref": "#/types/gcp:compute/BackendServiceNetworkPassThroughLbTrafficPolicy:BackendServiceNetworkPassThroughLbTrafficPolicy"
+    },
+    "outlierDetection": {
+      "$ref": "#/types/gcp:compute/BackendServiceOutlierDetection:BackendServiceOutlierDetection"
+    },
+    "params": {
+      "$ref": "#/types/gcp:compute/BackendServiceParams:BackendServiceParams"
+    },
+    "portName": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "protocol": {
+      "type": "string"
+    },
+    "securityPolicy": {
+      "type": "string"
+    },
+    "securitySettings": {
+      "$ref": "#/types/gcp:compute/BackendServiceSecuritySettings:BackendServiceSecuritySettings"
+    },
+    "serviceLbPolicy": {
+      "type": "string"
+    },
+    "sessionAffinity": {
+      "type": "string"
+    },
+    "strongSessionAffinityCookie": {
+      "$ref": "#/types/gcp:compute/BackendServiceStrongSessionAffinityCookie:BackendServiceStrongSessionAffinityCookie"
+    },
+    "timeoutSec": {
+      "type": "integer"
+    },
+    "tlsSettings": {
+      "$ref": "#/types/gcp:compute/BackendServiceTlsSettings:BackendServiceTlsSettings"
+    }
+  },
+  "types": {
+    "gcp:compute/BackendServiceBackend:BackendServiceBackend": {
+      "type": "object",
+      "properties": {
+        "balancingMode": {
+          "type": "string"
+        },
+        "capacityScaler": {
+          "type": "number"
+        },
+        "customMetrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/BackendServiceBackendCustomMetric:BackendServiceBackendCustomMetric"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "maxConnections": {
+          "type": "integer"
+        },
+        "maxConnectionsPerEndpoint": {
+          "type": "integer"
+        },
+        "maxConnectionsPerInstance": {
+          "type": "integer"
+        },
+        "maxInFlightRequests": {
+          "type": "integer"
+        },
+        "maxInFlightRequestsPerEndpoint": {
+          "type": "integer"
+        },
+        "maxInFlightRequestsPerInstance": {
+          "type": "integer"
+        },
+        "maxRate": {
+          "type": "integer"
+        },
+        "maxRatePerEndpoint": {
+          "type": "number"
+        },
+        "maxRatePerInstance": {
+          "type": "number"
+        },
+        "maxUtilization": {
+          "type": "number"
+        },
+        "preference": {
+          "type": "string"
+        },
+        "trafficDuration": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "group"
+      ]
+    },
+    "gcp:compute/BackendServiceBackendCustomMetric:BackendServiceBackendCustomMetric": {
+      "type": "object",
+      "properties": {
+        "dryRun": {
+          "type": "boolean"
+        },
+        "maxUtilization": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dryRun",
+        "name"
+      ]
+    },
+    "gcp:compute/BackendServiceCdnPolicy:BackendServiceCdnPolicy": {
+      "type": "object",
+      "properties": {
+        "bypassCacheOnRequestHeaders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/BackendServiceCdnPolicyBypassCacheOnRequestHeader:BackendServiceCdnPolicyBypassCacheOnRequestHeader"
+          }
+        },
+        "cacheKeyPolicy": {
+          "$ref": "#/types/gcp:compute/BackendServiceCdnPolicyCacheKeyPolicy:BackendServiceCdnPolicyCacheKeyPolicy"
+        },
+        "cacheMode": {
+          "type": "string"
+        },
+        "clientTtl": {
+          "type": "integer"
+        },
+        "defaultTtl": {
+          "type": "integer"
+        },
+        "maxTtl": {
+          "type": "integer"
+        },
+        "negativeCaching": {
+          "type": "boolean"
+        },
+        "negativeCachingPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/BackendServiceCdnPolicyNegativeCachingPolicy:BackendServiceCdnPolicyNegativeCachingPolicy"
+          }
+        },
+        "requestCoalescing": {
+          "type": "boolean"
+        },
+        "serveWhileStale": {
+          "type": "integer"
+        },
+        "signedUrlCacheMaxAgeSec": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceCdnPolicyBypassCacheOnRequestHeader:BackendServiceCdnPolicyBypassCacheOnRequestHeader": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "headerName"
+      ]
+    },
+    "gcp:compute/BackendServiceCdnPolicyCacheKeyPolicy:BackendServiceCdnPolicyCacheKeyPolicy": {
+      "type": "object",
+      "properties": {
+        "includeHost": {
+          "type": "boolean"
+        },
+        "includeHttpHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeNamedCookies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeProtocol": {
+          "type": "boolean"
+        },
+        "includeQueryString": {
+          "type": "boolean"
+        },
+        "queryStringBlacklists": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "queryStringWhitelists": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/BackendServiceCdnPolicyNegativeCachingPolicy:BackendServiceCdnPolicyNegativeCachingPolicy": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "ttl": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceCircuitBreakers:BackendServiceCircuitBreakers": {
+      "type": "object",
+      "properties": {
+        "connectTimeout": {
+          "$ref": "#/types/gcp:compute/BackendServiceCircuitBreakersConnectTimeout:BackendServiceCircuitBreakersConnectTimeout"
+        },
+        "maxConnections": {
+          "type": "integer"
+        },
+        "maxPendingRequests": {
+          "type": "integer"
+        },
+        "maxRequests": {
+          "type": "integer"
+        },
+        "maxRequestsPerConnection": {
+          "type": "integer"
+        },
+        "maxRetries": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceCircuitBreakersConnectTimeout:BackendServiceCircuitBreakersConnectTimeout": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/BackendServiceConsistentHash:BackendServiceConsistentHash": {
+      "type": "object",
+      "properties": {
+        "httpCookie": {
+          "$ref": "#/types/gcp:compute/BackendServiceConsistentHashHttpCookie:BackendServiceConsistentHashHttpCookie"
+        },
+        "httpHeaderName": {
+          "type": "string"
+        },
+        "minimumRingSize": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceConsistentHashHttpCookie:BackendServiceConsistentHashHttpCookie": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "ttl": {
+          "$ref": "#/types/gcp:compute/BackendServiceConsistentHashHttpCookieTtl:BackendServiceConsistentHashHttpCookieTtl"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceConsistentHashHttpCookieTtl:BackendServiceConsistentHashHttpCookieTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/BackendServiceCustomMetric:BackendServiceCustomMetric": {
+      "type": "object",
+      "properties": {
+        "dryRun": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dryRun",
+        "name"
+      ]
+    },
+    "gcp:compute/BackendServiceDynamicForwarding:BackendServiceDynamicForwarding": {
+      "type": "object",
+      "properties": {
+        "ipPortSelection": {
+          "$ref": "#/types/gcp:compute/BackendServiceDynamicForwardingIpPortSelection:BackendServiceDynamicForwardingIpPortSelection"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceDynamicForwardingIpPortSelection:BackendServiceDynamicForwardingIpPortSelection": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceIap:BackendServiceIap": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "oauth2ClientId": {
+          "type": "string"
+        },
+        "oauth2ClientIdWo": {
+          "type": "string"
+        },
+        "oauth2ClientIdWoVersion": {
+          "type": "string"
+        },
+        "oauth2ClientSecret": {
+          "type": "string"
+        },
+        "oauth2ClientSecretSha256": {
+          "type": "string"
+        },
+        "oauth2ClientSecretWo": {
+          "type": "string"
+        },
+        "oauth2ClientSecretWoVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "gcp:compute/BackendServiceLocalityLbPolicy:BackendServiceLocalityLbPolicy": {
+      "type": "object",
+      "properties": {
+        "customPolicy": {
+          "$ref": "#/types/gcp:compute/BackendServiceLocalityLbPolicyCustomPolicy:BackendServiceLocalityLbPolicyCustomPolicy"
+        },
+        "policy": {
+          "$ref": "#/types/gcp:compute/BackendServiceLocalityLbPolicyPolicy:BackendServiceLocalityLbPolicyPolicy"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceLocalityLbPolicyCustomPolicy:BackendServiceLocalityLbPolicyCustomPolicy": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:compute/BackendServiceLocalityLbPolicyPolicy:BackendServiceLocalityLbPolicyPolicy": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:compute/BackendServiceLogConfig:BackendServiceLogConfig": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean"
+        },
+        "optionalFields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "optionalMode": {
+          "type": "string"
+        },
+        "requestHeaders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/BackendServiceLogConfigRequestHeader:BackendServiceLogConfigRequestHeader"
+          }
+        },
+        "responseHeaders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/BackendServiceLogConfigResponseHeader:BackendServiceLogConfigResponseHeader"
+          }
+        },
+        "sampleRate": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceLogConfigRequestHeader:BackendServiceLogConfigRequestHeader": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "headerName"
+      ]
+    },
+    "gcp:compute/BackendServiceLogConfigResponseHeader:BackendServiceLogConfigResponseHeader": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "headerName"
+      ]
+    },
+    "gcp:compute/BackendServiceMaxStreamDuration:BackendServiceMaxStreamDuration": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/BackendServiceNetworkPassThroughLbTrafficPolicy:BackendServiceNetworkPassThroughLbTrafficPolicy": {
+      "type": "object",
+      "properties": {
+        "zonalAffinity": {
+          "$ref": "#/types/gcp:compute/BackendServiceNetworkPassThroughLbTrafficPolicyZonalAffinity:BackendServiceNetworkPassThroughLbTrafficPolicyZonalAffinity"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceNetworkPassThroughLbTrafficPolicyZonalAffinity:BackendServiceNetworkPassThroughLbTrafficPolicyZonalAffinity": {
+      "type": "object",
+      "properties": {
+        "spillover": {
+          "type": "string"
+        },
+        "spilloverRatio": {
+          "type": "number"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceOutlierDetection:BackendServiceOutlierDetection": {
+      "type": "object",
+      "properties": {
+        "baseEjectionTime": {
+          "$ref": "#/types/gcp:compute/BackendServiceOutlierDetectionBaseEjectionTime:BackendServiceOutlierDetectionBaseEjectionTime"
+        },
+        "consecutiveErrors": {
+          "type": "integer"
+        },
+        "consecutiveGatewayFailure": {
+          "type": "integer"
+        },
+        "enforcingConsecutiveErrors": {
+          "type": "integer"
+        },
+        "enforcingConsecutiveGatewayFailure": {
+          "type": "integer"
+        },
+        "enforcingSuccessRate": {
+          "type": "integer"
+        },
+        "interval": {
+          "$ref": "#/types/gcp:compute/BackendServiceOutlierDetectionInterval:BackendServiceOutlierDetectionInterval"
+        },
+        "maxEjectionPercent": {
+          "type": "integer"
+        },
+        "successRateMinimumHosts": {
+          "type": "integer"
+        },
+        "successRateRequestVolume": {
+          "type": "integer"
+        },
+        "successRateStdevFactor": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceOutlierDetectionBaseEjectionTime:BackendServiceOutlierDetectionBaseEjectionTime": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/BackendServiceOutlierDetectionInterval:BackendServiceOutlierDetectionInterval": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/BackendServiceParams:BackendServiceParams": {
+      "type": "object",
+      "properties": {
+        "resourceManagerTags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/BackendServiceSecuritySettings:BackendServiceSecuritySettings": {
+      "type": "object",
+      "properties": {
+        "awsV4Authentication": {
+          "$ref": "#/types/gcp:compute/BackendServiceSecuritySettingsAwsV4Authentication:BackendServiceSecuritySettingsAwsV4Authentication"
+        },
+        "clientTlsPolicy": {
+          "type": "string"
+        },
+        "subjectAltNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/BackendServiceSecuritySettingsAwsV4Authentication:BackendServiceSecuritySettingsAwsV4Authentication": {
+      "type": "object",
+      "properties": {
+        "accessKey": {
+          "type": "string"
+        },
+        "accessKeyId": {
+          "type": "string"
+        },
+        "accessKeyVersion": {
+          "type": "string"
+        },
+        "originRegion": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceStrongSessionAffinityCookie:BackendServiceStrongSessionAffinityCookie": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "ttl": {
+          "$ref": "#/types/gcp:compute/BackendServiceStrongSessionAffinityCookieTtl:BackendServiceStrongSessionAffinityCookieTtl"
+        }
+      }
+    },
+    "gcp:compute/BackendServiceStrongSessionAffinityCookieTtl:BackendServiceStrongSessionAffinityCookieTtl": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "gcp:compute/BackendServiceTlsSettings:BackendServiceTlsSettings": {
+      "type": "object",
+      "properties": {
+        "authenticationConfig": {
+          "type": "string"
+        },
+        "sni": {
+          "type": "string"
+        },
+        "subjectAltNames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/BackendServiceTlsSettingsSubjectAltName:BackendServiceTlsSettingsSubjectAltName"
+          }
+        }
+      }
+    },
+    "gcp:compute/BackendServiceTlsSettingsSubjectAltName:BackendServiceTlsSettingsSubjectAltName": {
+      "type": "object",
+      "properties": {
+        "dnsName": {
+          "type": "string"
+        },
+        "uniformResourceIdentifier": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

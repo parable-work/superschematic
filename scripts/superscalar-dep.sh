@@ -9,8 +9,8 @@
 #   1. checks out superscalar at the commit in superscalar.pin under
 #      third_party/superscalar (gitignored);
 #   2. builds the superscalar-ffi static archive from that checkout with its
-#      own go/scripts/build_ffi.sh (needs a Rust toolchain; rustup reads the
-#      checkout's rust-toolchain.toml);
+#      own go/scripts/build_ffi.sh, with tools.env's RUST_VERSION rather than
+#      the toolchain the checkout's rust-toolchain.toml names (see below);
 #   3. builds the TypeScript binding (napi addon for this host plus the CJS
 #      and ESM tsc passes; the browser/wasm pass is skipped) so generated
 #      TypeScript packages can depend on it by path;
@@ -31,6 +31,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Go binaries link this archive beside the version graph's
+# (scripts/versiongraph-archive.sh), and the standard libraries of two Rust
+# releases both define rust_eh_personality: archives that different
+# toolchains built do not link into one binary. Both scripts build with
+# tools.env's RUST_VERSION, which overrides the checkout's own pin.
+RUSTUP_TOOLCHAIN="$(grep -E '^RUST_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
+export RUSTUP_TOOLCHAIN
+
 DEP="$ROOT/third_party/superscalar"
 PIN="$ROOT/superscalar.pin"
 REPO_URL="${SUPERSCALAR_REPO_URL:-https://github.com/parable-work/superscalar}"
@@ -70,13 +79,16 @@ if ! git -C "$DEP" cat-file -e "$commit^{commit}" 2>/dev/null; then
 fi
 git -C "$DEP" checkout --quiet --detach "$commit"
 
-# The archive and the TS dist are build products of one specific commit. A
-# pin bump over an existing checkout must rebuild them even though the files
-# exist, or the Go binding at the new pseudo-version links an archive built
-# from the old commit. The stamp records which commit produced them.
+# The archive and the TS dist are build products of one specific commit and
+# toolchain. A pin bump over an existing checkout must rebuild them even
+# though the files exist, or the Go binding at the new pseudo-version links
+# an archive built from the old commit, and a RUST_VERSION bump must too, or
+# the archive does not link beside the version graph's. The stamp records
+# which commit and toolchain produced them.
 STAMP="$DEP/.built-commit"
+built="$commit $RUSTUP_TOOLCHAIN"
 rebuild="${SUPERSCALAR_REBUILD:-0}"
-if [ "$(cat "$STAMP" 2>/dev/null)" != "$commit" ]; then
+if [ "$(cat "$STAMP" 2>/dev/null)" != "$built" ]; then
   rebuild=1
 fi
 
@@ -95,7 +107,7 @@ if [ ! -f "$TS/dist/esm/validation.js" ] || [ "$rebuild" = "1" ]; then
     node scripts/fix-esm-extensions.mjs
   )
 fi
-printf '%s\n' "$commit" > "$STAMP"
+printf '%s\n' "$built" > "$STAMP"
 
 echo "superscalar $commit ready under $DEP" >&2
 echo "CGO_LDFLAGS=\"$ldflags\"" >&2

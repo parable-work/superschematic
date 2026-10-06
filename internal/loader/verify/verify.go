@@ -202,6 +202,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkMiddleware(schema, r)
 	checkPublicRoutes(schema, r)
 	checkServiceCallers(schema, r)
+	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)
 	reg := in.registry()

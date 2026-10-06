@@ -1,0 +1,5 @@
+# The Topcoat extension's own fixture: an input type of every kind a form
+# field takes, and one a form cannot hold.
+name: fixture-forms-api
+kind: API
+outputs: {}

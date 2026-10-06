@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants and Variants behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
 sidebar:
   order: 7
 ---
@@ -20,8 +20,8 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares seventeen behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements ten itself
+The core declares eighteen behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements eleven itself
 and registers them when it opens. The other seven are claimable work,
 implemented by `@superschematic/engine-workqueue`; the engine refuses a
 schema that composes one until a deployment registers that package.
@@ -38,6 +38,7 @@ schema that composes one until a deployment registers that package.
 | `Reactions` | rules that move statuses after a change commits | `Workflow` | [Reactions](#reactions) |
 | `Constants` | fields the create sets and nothing changes after | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
+| `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases | | [Branches](#branches) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
 ## Compose a behavior
@@ -633,6 +634,131 @@ engine.instances.update(me, 'Step', lint.id, { kind: 'review' });
 
 The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#validating-fields)
 shows how a behavior of your own judges the fields a write stores.
+
+## Branches
+
+`Branches` makes each instance the root of a version graph (D17, D19,
+D32 in `docs/DECISIONS.md`). Rows of the kinds its config names live on
+refs: a primary line, which each instance gets when it is created, and
+drafts of it, which only a merge brings back. A tagged commit of the
+primary line is released with `releaseCommit`, the version graph's
+release, and a rollback is a release of an earlier one. The instance's
+own fields stay outside the graph. The graph lives
+in the behavior's own tables, through the version graph's SQLite
+adapter, in the transaction of the operation that writes it.
+
+Each kind's content is another type of the schema, so a recipe's steps,
+its ingredients under a step and its one cover are three types:
+
+```ts
+import { Generic, Identity } from "superscalar";
+import { behavior } from "@superschematic/schema";
+
+export abstract class Step {
+  instruction: string;
+  position: Generic.Int64;
+  timings?: Generic.JSON;
+}
+
+export abstract class Ingredient {
+  stepKey: Identity.UUID;
+  quantity: string;
+}
+
+export abstract class Cover {
+  photoUrl: string;
+}
+
+@behavior("Branches", {
+  kinds: {
+    step: { type: "Step", order: "position", units: { timings: "keyed" }, retentionDays: 365 },
+    ingredient: { type: "Ingredient", parent: { key: "stepKey", of: "step" } },
+    cover: { type: "Cover", singleton: true }
+  },
+  sweep: { intervalMs: 3600000, abandonAfter: 2592000000 }
+})
+export abstract class Recipe {
+  title: string;
+}
+```
+
+| Config | |
+| --- | --- |
+| `kinds` | by name, camelCase: `type`, the type of the schema whose fields are the kind's content; `parent: { key, of }`, the field of a UUID scalar that holds the parent row's entity key and the parent's kind, so deleting a parent removes its descendants; `order`, an integer field that orders siblings; `singleton`, at most one live row; `units`, a field's conflict unit (`atomic`, the default, `keyed` for each key of a JSON object, `jsonSchema`, or `excluded`, not content); `retentionDays`, how many days of history the sweep keeps |
+| `primary` | the primary line's name, `main` when absent |
+| `snapshotEvery` | how many commits past the nearest snapshot a commit is snapshotted at, 64 when absent |
+| `sweep` | `intervalMs`, and optionally `discardGrace`, `pruneBatch` and `abandonAfter`: turns the sweep on for the schema |
+
+Work happens on a draft and merges into the primary line:
+
+```ts
+const call = (operation: string, params = {}) => engine.instances.invoke(me, "Recipe", id, operation, params);
+
+const [main] = call("refs").items;                          // the primary line, from the create
+const draft = call("branch", { name: "spicier" });          // from the primary line; or { fromRef, name }
+const { ref } = call("save", {
+  ref: draft.id, version: draft.version,
+  edits: { step: { upsert: [{ instruction: "Add chili", position: 3 }] } },
+});
+const { ref: committed } = call("commit", { ref: ref.id, version: ref.version, message: "chili" });
+const merged = call("merge", { source: committed.id, target: main.id, targetVersion: main.version, tag: true });
+call("releaseCommit", { commit: merged.commit.id, version: 0 });  // 0: the first release
+call("released");                                                 // { release, tree, contentHash, findings }
+```
+
+- **Operations.** `branch`, `save`, `commit`, `seal`, `merge`, `rebase`,
+  `revert`, `releaseCommit` and `discard` write; `refs`, `releases` (the
+  release log), `compose`, `materialize`, `released`, `diff` and
+  `history` read. Each is an operation of the instance, so the access
+  policy is asked `write` or `read` with its name, and who may `merge`
+  or `releaseCommit` is the deployment's to decide. Each write appends
+  the instance's operation event.
+- **Refs, commits and versions.** An operation names refs and commits by
+  id, and every write through a ref names the ref's version, which the
+  write moves. One that is not the instance's is `invalid_argument`; the
+  version graph's refusals are vetoes with its codes: `version_conflict`,
+  `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`,
+  `entity_not_found`, `invalid_tree`, `merge_into_itself`, `no_parent`,
+  `not_tagged` and `walk_ceiling`. `discard` refuses the primary line
+  (`primary_line`), which every draft branches from and merges into.
+- **Rows.** A kind's rows carry fixed columns beside its type's fields:
+  `id`, `entity_key`, `ref_id`, `root_id`, `deleted_on_ref`, `_version`,
+  `created_at`, `created_by`, `updated_at` and `updated_by`, the author a
+  conflict names. A type with a field of one of those names is refused.
+  A saved row is an entity's whole content, with `entity_key` to replace
+  one, and it is held to its kind's type as a field of that type is, and
+  each value to its column's value class; a refused row is
+  `invalid_argument` at its field. A read returns each author as the
+  caller's subject.
+- **Conflicts.** A merge or a rebase whose sides changed a unit
+  differently returns the conflicts, each side's value and author, and
+  writes nothing; `resolutions` settle them by unit path, taking a side
+  or giving a value. A value is held to its field's class, and the row it
+  leaves to its kind's type, as a saved row is; a refused one is
+  `invalid_argument` at `/resolutions/<i>/value` and writes nothing.
+- **Older instances.** `Branches` can be added to a schema with
+  instances. One created before gets its primary line at its first write
+  after, as its caller: a `branch` without `fromRef`, which then branches
+  from that line, an update that changes it, or another behavior's
+  writing operation.
+- **The sweep.** With `sweep`, a schedule runs on the schema as the
+  runner's principal: it discards each draft with no write for
+  `abandonAfter` through the instance's `discard`, with an event each,
+  then deletes the rows of refs discarded longer ago than `discardGrace`
+  (seven days by default), prunes history past each kind's
+  `retentionDays` and writes missing snapshots. Without `sweep` it is off.
+- **New versions.** A new version may add a kind, change a kind's fields
+  as the compatibility rule allows a field to change, and change a
+  retention, `primary`, `snapshotEvery` and `sweep`; removing a kind or
+  changing a kind's type, parent, order, singleton or a field's unit is
+  refused, and so is a version without `Branches`. Every stored row reads
+  a field a version adds as null, so `materialize` of a commit made
+  before returns another `contentHash` than the one the commit stored and
+  `history` returns; `nothing_to_commit`, which compares trees, holds.
+- **Deleting.** Deleting an instance deletes its graph.
+- **Lease.** The operation that points the release pointer is
+  `releaseCommit`, not `release`, because `Lease` has `release`, so a
+  type composes both.
 
 ## Where to go next
 

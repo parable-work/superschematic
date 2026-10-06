@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
@@ -18,11 +19,15 @@ import (
 // Rust types crate, whose src/versiongraph_recipe.rs is the Recipe graph's
 // typed facade over the version graph's Rust engine, and runs two tests in
 // it against the Postgres SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL
-// names. The first saves a Tasting, whose columns hold a value of every
-// class a descriptor names, commits it and reads it back from the save and
-// from the commit: each field comes back as the typed value of its
-// canonical form. The second merges, resolves a typed conflict, diffs,
-// releases, rebases and sweeps through the facade.
+// names. Each test creates a database of its own there and drops it after:
+// the graph's sweep lock is an advisory lock, which Postgres keys to the
+// database, and go test runs pygen's, tsgen's and ormgen's facade tests,
+// which sweep the same graph, beside this one. The variable's role must be
+// able to create databases. The first saves a Tasting, whose columns hold a
+// value of every class a descriptor names, commits it and reads it back
+// from the save and from the commit: each field comes back as the typed
+// value of its canonical form. The second merges, resolves a typed
+// conflict, diffs, releases, rebases and sweeps through the facade.
 func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the compiled facade in -short mode")
@@ -57,6 +62,8 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if err := sqlgen.WriteDDL(ddl, filepath.Join(root, "sql")); err != nil {
 		t.Fatalf("write the DDL: %v", err)
 	}
+	createSQL := filepath.Join(root, "sql", "create.sql")
+	pgtest.WriteCreateSQL(t, createSQL, createSQL)
 	outDir := filepath.Join(root, output.CrateName)
 	paths := testpaths.Local(t)
 	if err := SetLocalPaths(output, paths, outDir); err != nil {
@@ -92,7 +99,7 @@ tokio-postgres = "0.7.18"
 	cmd.Dir = outDir
 	cmd.Env = append(os.Environ(),
 		"CARGO_TARGET_DIR="+filepath.Join(root, "target"),
-		"FACADE_DDL="+filepath.Join(root, "sql", "create.sql"),
+		"FACADE_DDL="+createSQL,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -120,13 +127,13 @@ fn uuid(text: &str) -> IdentityUUID {
     IdentityUUID::from_str(text).expect("a UUID")
 }
 
-/// Drops a test's schema when the test ends, and when it panics.
-struct DropSchema {
+/// Drops a test's database when the test ends, and when it panics.
+struct DropDatabase {
     dsn: String,
     name: String,
 }
 
-impl Drop for DropSchema {
+impl Drop for DropDatabase {
     fn drop(&mut self) {
         let (dsn, name) = (self.dsn.clone(), self.name.clone());
         let _ = std::thread::spawn(move || {
@@ -134,24 +141,27 @@ impl Drop for DropSchema {
             runtime.block_on(async {
                 let (client, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls).await.expect("connect");
                 tokio::spawn(connection);
-                let _ = client.batch_execute(&format!("SET lock_timeout = '5s'; DROP SCHEMA IF EXISTS {name} CASCADE")).await;
+                let _ = client.batch_execute(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)")).await;
             });
         })
         .join();
     }
 }
 
-/// A schema of its own holding the fixture's DDL and a Bread recipe, and the
-/// Recipe graph over a connection to it.
-async fn graph(name: &str) -> (RecipeGraph, tokio_postgres::Client, IdentityUUID, DropSchema) {
+/// A database of its own holding the fixture's DDL and a Bread recipe, and
+/// the Recipe graph over a connection to it. The graph's sweep lock is an
+/// advisory lock, which Postgres keys to the database, not to a schema; go
+/// test runs the other languages' facade tests beside these, and in a
+/// database they shared, their sweeps would make this one's skip.
+async fn graph(name: &str) -> (RecipeGraph, tokio_postgres::Client, IdentityUUID, DropDatabase) {
     let dsn = std::env::var("SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL").expect("the database");
     let ddl = std::fs::read_to_string(std::env::var("FACADE_DDL").expect("the DDL")).expect("read the DDL");
-    let connect = |schema: Option<String>| {
+    let connect = |database: Option<String>| {
         let dsn = dsn.clone();
         async move {
             let mut config: tokio_postgres::Config = dsn.parse().expect("the database URL");
-            if let Some(schema) = schema {
-                config.options(format!("-c search_path={schema},public"));
+            if let Some(database) = database {
+                config.dbname(database);
             }
             let (client, connection) = config.connect(tokio_postgres::NoTls).await.expect("connect");
             tokio::spawn(connection);
@@ -159,11 +169,11 @@ async fn graph(name: &str) -> (RecipeGraph, tokio_postgres::Client, IdentityUUID
         }
     };
     let admin = connect(None).await;
-    let _ = admin.batch_execute("CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public").await;
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_nanos();
-    let schema = format!("vg_rust_facade_{name}_{nanos}_{}", std::process::id());
-    admin.batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}")).await.expect("create the schema");
-    let sql = connect(Some(schema.clone())).await;
+    let database = format!("vg_rust_facade_{name}_{nanos}_{}", std::process::id());
+    admin.batch_execute(&format!("CREATE DATABASE {database}")).await.expect("create the database");
+    let dropper = DropDatabase { dsn: dsn.clone(), name: database.clone() };
+    let sql = connect(Some(database.clone())).await;
     sql.batch_execute(&ddl).await.expect("apply the DDL");
     let root = IdentityUUID::new_v4();
     sql.execute(
@@ -172,8 +182,8 @@ async fn graph(name: &str) -> (RecipeGraph, tokio_postgres::Client, IdentityUUID
     )
     .await
     .expect("insert the recipe");
-    let graph = RecipeGraph::postgres(TokioPostgres::new(connect(Some(schema.clone())).await)).expect("the graph");
-    (graph, sql, root, DropSchema { dsn, name: schema })
+    let graph = RecipeGraph::postgres(TokioPostgres::new(connect(Some(database)).await)).expect("the graph");
+    (graph, sql, root, dropper)
 }
 
 fn cook() -> IdentityUUID {
@@ -193,7 +203,7 @@ fn fields(tasting: &Tasting) -> serde_json::Map<String, Value> {
 
 #[tokio::test]
 async fn facade_keeps_every_class() {
-    let (graph, _sql, root, _schema) = graph("classes").await;
+    let (graph, _sql, root, _database) = graph("classes").await;
     let main = graph.create_primary(&cook(), &root, "main").await.expect("create_primary");
     let draft = graph.branch(&cook(), &uuid(&main.id), "tastings").await.expect("branch");
     let input = Tasting {
@@ -297,7 +307,7 @@ async fn current_version(graph: &RecipeGraph, id: &IdentityUUID) -> i64 {
 
 #[tokio::test]
 async fn facade_merges_releases_rebases_and_sweeps() {
-    let (graph, sql, root, _schema) = graph("flow").await;
+    let (graph, sql, root, _database) = graph("flow").await;
     let main = graph.create_primary(&cook(), &root, "main").await.expect("create_primary");
     let main_id = uuid(&main.id);
     let tagged = CommitOptions { message: "v1".to_owned(), tag: true };

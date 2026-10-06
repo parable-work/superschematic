@@ -37,6 +37,16 @@ directory two levels above the service directory (`<schemas-root>/dist`
 for services under `<schemas-root>/services/`). Names come from
 `<schemas-root>/superschematic.toml` or `--naming`.
 
+A config may import a sibling's sentinel (`import { ShopDb } from
+"@acme/shop-db"`). When the target's config imports anything but
+`@superschematic/schema-config`, or its kind's schema files import
+sentinels, `build` first writes every sibling's sentinel that is missing
+or stale, as `build-all` does. `--with-deps` always does. A config that
+imports anything else (a class, a type, another module's namespace, a
+default export or a module for its side effects) fails to load with a
+message naming the import, in every build command:
+`schema.config.ts imports Product from "@acme/shop-db", which is a class, not a service sentinel; a config imports only @superschematic/schema-config and other services' sentinels (D34)`.
+
 A type that composes a behavior (`behaviors` in the data forms) loads,
 and `--emit-ir` prints it, but no generator renders behaviors yet: the
 build fails and names the first generator that would run, the type and the
@@ -99,6 +109,15 @@ as a committed language must. Pair it with `--out`, so the two servers do
 not share an output root; a build's cache stamps come from `build-all`,
 which has no such flag.
 
+`--scaffold` writes the implementation of each Go API the command builds
+whose package is missing: an `implementation.go` at the naming file's
+`[implementation_paths]` `go` template (`go/{service}` from the parent of
+the schemas root by default). Its `New` has the signature of the generated
+`Constructor`, `func(deps Deps) (Implementations, error)`, and each
+method answers 501 until it is implemented. It never writes into a
+directory that holds a Go file. Without the flag a build writes nothing
+outside the output root.
+
 ```
 superschematic build ./schemas/services/shop-db
 superschematic build ./schemas/services/shop-db --emit-ir | jq .types
@@ -115,20 +134,24 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 | `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
+| `--scaffold` | false | write the implementation scaffold of each Go API built whose package is missing, at the `[implementation_paths]` `go` template |
 
 ## `build-all <services-root>`
 
 Write every service's sentinel that is missing or stale, then discover
 every schema service under `<services-root>` and build them in one
 process, in dependency order. The sentinels come first because a config
-may import a sibling's. A service's `authDb`, and each API it
-`calls`, count as dependencies for ordering. Discovery fails, before any
+may import a sibling's. A service's `authDb` counts as a dependency for
+ordering. The build orders outputs for `calls`: each API's server builds
+after the SDK of every API it calls, so two APIs may call each other. A
+service whose callee comes after it builds its other outputs in its place
+and its server later, and `--parallel` names the two steps
+`shop-api (base)` and `shop-api (server)`. Discovery fails, before any
 service is built, on a handle whose kind is not the kind of the service it
 names (`shop-orders: calls names shop-db with kind API, but shop-db is kind DB`),
-and on a cycle, which it names edge by edge
-(`circular dependency involving shop-api: shop-api calls shop-orders, shop-orders calls shop-api`).
-Two APIs cannot call each other yet. `build --with-deps` runs the same
-discovery. A service whose API server, SDK or DB kind needs
+and on a cycle of `dependencies` and `authDb`, which it names edge by edge
+(`circular dependency involving shop-db: shop-db depends on shop-api, shop-api authenticates against shop-db`).
+`build --with-deps` runs the same discovery and ordering. A service whose API server, SDK or DB kind needs
 a types language its config does not enable fails discovery, before any
 service is built. A service whose type library imports a
 dependency that does not generate types in that language fails, as with
@@ -162,6 +185,7 @@ superschematic build-all ./schemas/services --parallel --cache
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 | `--deps-copy` | `[deps] copy`, else none | also write the dependency graph to this path |
+| `--scaffold` | false | write the implementation scaffold of each Go API whose package is missing, as `build --scaffold` does; a cached service whose implementation is missing builds again |
 
 Every service `build-all` builds gets a stamp,
 `<schemas-root>/dist/.build-stamps/<service>`, holding the hash of the
@@ -187,6 +211,18 @@ files elsewhere under the schemas root that its documents import. The
 input hash covers those files' contents. `build`, `build --with-deps` and
 `build-all` all write it under the schemas root they resolved, whatever the
 schemas root is named and wherever `--out` points.
+
+A service whose decorators take other services' handles gets
+`<schemas-root>/dist/.schema-references/<service>.json` the same way. It
+lists the services the decorators reference, and the sentinel files of
+those a decorator only names, in an argument it declares an identity
+(D41). The input hash covers each referenced service's
+sources and those of every service its config reaches through
+`dependencies`, `authDb` and `calls`, and each listed sentinel. So an edit
+to a referenced service rebuilds the service that references it. A
+reference does not order the build, so two services may name each other.
+The IR lists the references under `references`, and a JSON or YAML schema
+file states them there, as it states `imports`.
 
 ## `migrate plan <service-dir>`
 
@@ -369,8 +405,8 @@ extension's declarations are registered only in its own binary: acme's
 copy comes from `acme-schematic`, and its smoke runs `--check`. The core
 binary writes the behaviors the core declares into the two packages that
 implement them: `Workflow`, `Comments`, `Revisions`, `Dependencies`,
-`Links`, `Rollups`, `Search`, `Reactions`, `Constants` and `Variants`
-with `--package @superschematic/engine`, and `Lease`, `Assignment`, `Queue`, `Presence`,
+`Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants` and
+`Branches` with `--package @superschematic/engine`, and `Lease`, `Assignment`, `Queue`, `Presence`,
 `Blueprint`, `Budget` and `Retries` with `--package
 @superschematic/engine-workqueue` (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary

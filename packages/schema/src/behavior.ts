@@ -43,6 +43,8 @@ export interface BehaviorConfigs {
   Constants: ConstantsConfig;
   /** Types an open JSON field of the type by the value of another of its fields. */
   Variants: VariantsConfig;
+  /** Makes each instance the root of a version graph over rows of the kinds it names, each kind's content a type of the document. */
+  Branches: BranchesConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -244,6 +246,52 @@ export interface VariantsConfig {
    * value or none, field holds none.
    */
   readonly types: Readonly<Record<string, string>>;
+}
+
+/** Branches' config. */
+export interface BranchesConfig {
+  /** The graph's kinds, by name (camelCase): the rows each ref holds. */
+  readonly kinds: Readonly<Record<string, BranchesKind>>;
+  /** The name of each instance's primary line; main when absent. */
+  readonly primary?: string;
+  /** How many commits past the nearest snapshot on its chain a commit is snapshotted at; 64 when absent. */
+  readonly snapshotEvery?: number;
+  /** Turns the sweep schedule on for the schema. */
+  readonly sweep?: BranchesSweep;
+}
+
+/** One kind of a Branches graph, as @graphMember, @conflictUnit and @versioned declare a member of a compiled graph. */
+export interface BranchesKind {
+  /**
+   * The type of the schema document, besides the instance type, whose
+   * fields are the kind's content. None of its fields may take the JSON key
+   * of a role or audit column: id, entity_key, ref_id, root_id,
+   * deleted_on_ref, _version, created_at, created_by, updated_at or
+   * updated_by.
+   */
+  readonly type: string;
+  /** Containment: key is the kind's field, of a UUID scalar, that holds the parent row's entity key, and of is the parent's kind. */
+  readonly parent?: { readonly key: string; readonly of: string };
+  /** The kind's integer field that orders siblings. */
+  readonly order?: string;
+  /** At most one live row of the kind. */
+  readonly singleton?: boolean;
+  /** A field's conflict unit: atomic (the default), keyed, jsonSchema, or excluded (not content). */
+  readonly units?: Readonly<Record<string, "atomic" | "keyed" | "jsonSchema" | "excluded">>;
+  /** How many days of the kind's history the sweep keeps; all of it when absent. */
+  readonly retentionDays?: number;
+}
+
+/** When the Branches sweep runs on a schema, and what it keeps. */
+export interface BranchesSweep {
+  /** How often it runs, in milliseconds; at least 1000. */
+  readonly intervalMs: number;
+  /** How long a discarded ref's rows are kept, in milliseconds; seven days when absent. */
+  readonly discardGrace?: number;
+  /** At most this many history images of each kind pruned per run; no limit when absent. */
+  readonly pruneBatch?: number;
+  /** Discards a draft with no write for this many milliseconds; none when absent. */
+  readonly abandonAfter?: number;
 }
 
 /** Lease's config. */

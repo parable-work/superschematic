@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -30,26 +29,12 @@ type field struct {
 }
 
 // DerivedField returns the name of the config field an edge of kind to
-// service fills: the service's name in upper snake case, suffixed
-// `_DATABASE` for a sql edge and `_SERVICE` for an http edge
-// (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`). It is the core's rule; a naming
-// key replaces it when envgen writes the derived fields (section 3.4).
+// service fills under the core's rule: the service's name in upper snake
+// case, suffixed `_DATABASE` for a sql edge and `_SERVICE` for an http edge
+// (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`). Input.FieldNames replaces the
+// rule with the naming file's (section 3.4).
 func DerivedField(kind ir.EdgeKind, service string) string {
-	var b strings.Builder
-	for _, r := range service {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(unicode.ToUpper(r))
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	switch kind {
-	case ir.EdgeSQL:
-		b.WriteString("_DATABASE")
-	case ir.EdgeHTTP:
-		b.WriteString("_SERVICE")
-	}
-	return b.String()
+	return ir.DerivedFieldNames{}.Field(kind, service)
 }
 
 // databaseOf returns the DB service an API service connects to: its
@@ -111,7 +96,7 @@ func (r *resolver) addEdge(kind ir.EdgeKind, from *deployable, service string) {
 			From:    from.res.Name,
 			To:      to.res.Name,
 			Service: ir.ServiceRef{Name: svc.Name, Kind: svc.Kind},
-			Field:   DerivedField(kind, service),
+			Field:   r.in.FieldNames.Field(kind, service),
 		},
 		from: from,
 		to:   to,
@@ -156,8 +141,10 @@ func (r *resolver) bindConfig() {
 				r.fail(CodeFieldCollision, "server %s: edges %s and %s derive the same field %s", name, other.res.ID, e.res.ID, e.res.Field)
 			}
 			derived[e.res.Field] = e
-			if f, clash := d.fields[e.res.Field]; clash {
-				r.fail(CodeFieldCollision, "server %s: config field %s of %s has the name of the field edge %s derives", name, f.name, f.declaring, e.res.ID)
+			for _, fieldName := range sortedKeys(d.fields) {
+				if f := d.fields[fieldName]; ir.DerivedFieldClaims(e.res.Field, f.name) {
+					r.fail(CodeFieldCollision, "server %s: config field %s of %s collides with %s, the field edge %s derives", name, f.name, f.declaring, e.res.Field, e.res.ID)
+				}
 			}
 		}
 		for _, key := range sortedKeys(d.settings.env) {
@@ -259,6 +246,15 @@ func (r *resolver) bindField(d *deployable, f *field) *ir.Binding {
 	return nil
 }
 
+// contractOf names the derived value an edge of kind fills its field
+// with, for an error message.
+func contractOf(kind ir.EdgeKind) string {
+	if kind == ir.EdgeSQL {
+		return "database connection (ir.DatabaseConnection)"
+	}
+	return "service endpoint (ir.ServiceEndpoint)"
+}
+
 func isScalar(v any) bool {
 	switch v.(type) {
 	case string, bool, float64, float32, int, int32, int64, json.Number:
@@ -305,8 +301,9 @@ func (r *resolver) secrets() []*ir.StackSecret {
 }
 
 // connectEdges asks each edge's connector for its resources and its
-// derived binding's value. Every connector sees the bindings as they stood
-// before any connector ran: the derived bindings without values.
+// derived binding's value, which must meet the contract of the edge's
+// kind (ir.CheckDerivedValue). Every connector sees the bindings as they
+// stood before any connector ran: the derived bindings without values.
 func (r *resolver) connectEdges() {
 	values := map[string]any{}
 	for _, id := range sortedKeys(r.edges) {
@@ -322,11 +319,16 @@ func (r *resolver) connectEdges() {
 			r.fail(CodeLowering, "connector %s on edge %s: %v", e.connector.Name, id, err)
 			continue
 		}
-		if connected.Value == nil {
-			r.fail(CodeLowering, "connector %s on edge %s derives no value for %s", e.connector.Name, id, e.res.Field)
-		}
 		where := fmt.Sprintf("connector %s derives %s with", e.connector.Name, e.res.Field)
 		values[id] = r.normalize(where, connected.Value)
+		switch {
+		case connected.Value == nil:
+			r.fail(CodeLowering, "connector %s on edge %s derives no value for %s", e.connector.Name, id, e.res.Field)
+		case values[id] != nil:
+			if err := ir.CheckDerivedValue(e.res.Kind, values[id]); err != nil {
+				r.fail(CodeLowering, "connector %s on edge %s derives a value for %s that is no %s: %v", e.connector.Name, id, e.res.Field, contractOf(e.res.Kind), err)
+			}
+		}
 		r.checkParameters(where, values[id])
 		r.produce(id, ir.PhaseInfrastructure, connected.Resources)
 	}

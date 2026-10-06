@@ -1,0 +1,45 @@
+{
+  "token": "gcp:projects/iAMMember:IAMMember",
+  "terraform": {
+    "type": "google_project_iam_member"
+  },
+  "inputProperties": {
+    "condition": {
+      "$ref": "#/types/gcp:projects/IAMMemberCondition:IAMMemberCondition"
+    },
+    "member": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "member",
+    "project",
+    "role"
+  ],
+  "types": {
+    "gcp:projects/IAMMemberCondition:IAMMemberCondition": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression",
+        "title"
+      ]
+    }
+  }
+}

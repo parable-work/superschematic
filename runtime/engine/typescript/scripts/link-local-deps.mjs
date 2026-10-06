@@ -26,6 +26,19 @@
 // symlink would resolve them from runtime/http/typescript/node_modules, a
 // second copy of Hono. superscalar is a symlink to the checkout
 // scripts/superscalar-dep.sh stands up.
+//
+// @superschematic/versiongraph is a dependency (D32): Branches, a core
+// behavior, runs the version graph's engine, and the engine instantiates
+// its wasm core when it first runs a schema that composes Branches. Its
+// spec is a file: path into this checkout, as the TypeScript types tsgen
+// writes for a graph depend on it, so bun install puts a copy of the
+// package in node_modules, taken when it runs. The build here replaces
+// that copy with the package as runtime/versiongraph/typescript last
+// built it, its package.json and dist/ with the wasm module (run bun
+// install && bun run build there first, which needs cargo and the
+// wasm32-unknown-unknown target), as it copies the http runtime: the
+// version graph imports nothing at run time, so it needs no node_modules
+// of its own.
 import { cpSync, existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +49,7 @@ const scope = join(root, "node_modules", "@superschematic");
 const schemaIR = join(repo, "ir", "typescript");
 const schemaRuntime = join(repo, "runtime", "schema", "typescript");
 const httpRuntime = join(repo, "runtime", "http", "typescript");
+const versiongraph = join(repo, "runtime", "versiongraph", "typescript");
 const superscalar = join(repo, "third_party", "superscalar", "bindings", "typescript");
 
 for (const required of [join(schemaIR, "package.json"), join(schemaRuntime, "package.json"), join(httpRuntime, "package.json")]) {
@@ -58,6 +72,12 @@ if (!existsSync(join(httpRuntime, "dist", "index.js"))) {
   console.error(`link-local-deps: ${join(httpRuntime, "dist", "index.js")} is missing; run bun install && bun run build in runtime/http/typescript first`);
   process.exit(1);
 }
+for (const required of [join(versiongraph, "dist", "engine.js"), join(versiongraph, "dist", "sqlite.js"), join(versiongraph, "dist", "superschematic_versiongraph.wasm")]) {
+  if (!existsSync(required)) {
+    console.error(`link-local-deps: ${required} is missing; run bun install && bun run build in runtime/versiongraph/typescript first`);
+    process.exit(1);
+  }
+}
 
 mkdirSync(scope, { recursive: true });
 
@@ -77,6 +97,12 @@ remove(httpCopy);
 mkdirSync(httpCopy);
 cpSync(join(httpRuntime, "package.json"), join(httpCopy, "package.json"));
 cpSync(join(httpRuntime, "dist"), join(httpCopy, "dist"), { recursive: true });
+
+const versiongraphCopy = join(scope, "versiongraph");
+remove(versiongraphCopy);
+mkdirSync(versiongraphCopy);
+cpSync(join(versiongraph, "package.json"), join(versiongraphCopy, "package.json"));
+cpSync(join(versiongraph, "dist"), join(versiongraphCopy, "dist"), { recursive: true });
 
 const superscalarLink = join(root, "node_modules", "superscalar");
 remove(superscalarLink);

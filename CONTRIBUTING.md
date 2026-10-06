@@ -73,7 +73,7 @@ By making a contribution to this project, I certify that:
 | Bun           | 1.4.0   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
-| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
+| Rust          | 1.99.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
 | Postgres      | 16      | `tools.env` (`POSTGRES_VERSION`); CI's database tests run against it |
 | superscalar   | commit  | `superscalar.pin`; `go.mod` carries the same commit as a pseudo-version |
 
@@ -81,7 +81,7 @@ Setup on a fresh machine:
 
 ```
 export GOTOOLCHAIN=go1.26.4
-rustup toolchain install 1.95.0 --target wasm32-unknown-unknown
+rustup toolchain install 1.99.0 --target wasm32-unknown-unknown
 make setup
 ```
 
@@ -90,7 +90,12 @@ the pinned commit under `third_party/superscalar` (gitignored), builds its Go
 static archive and TypeScript binding, and prints the `CGO_LDFLAGS` value.
 It then runs `scripts/versiongraph-archive.sh`, which builds the
 version-graph core's static archive and stages it under
-`runtime/versiongraph/go/lib`, where that binding links it. The Makefile
+`runtime/versiongraph/go/lib`, where that binding links it. Both scripts
+build with `RUST_VERSION`, not the toolchain superscalar's checkout pins:
+Go binaries link the two archives together, and archives that two Rust
+releases built do not link into one binary (both define
+`rust_eh_personality`). The superscalar build records its commit and
+toolchain, so either changing rebuilds it. The Makefile
 exports both link directories for every Go target; outside make, run
 `eval "$(scripts/superscalar-dep.sh --export)"` first. Bump a tool version in
 `tools.env` only; workflows read that file and never inline a version. Bump
@@ -100,8 +105,32 @@ to rewrite the TypeScript and Python scalar catalogs.
 
 ## Running the gates
 
-The Makefile mirrors `.github/workflows/ci.yml`. A pull request must pass all
-of them; run them locally before pushing.
+The Makefile mirrors `.github/workflows/ci.yml`, which runs in two tiers
+(`docs/DECISIONS.md`, D40):
+
+- A pull request runs the quick tier: the lints and drift checks, the Go
+  tests with `-short` (which skips every test that compiles and runs a
+  generated module), the runtimes' and the version graph's own test suites,
+  and the docs build.
+- The full tier adds the Go tests without `-short`, `make cli-smoke`, the
+  acme example (`examples/acme-schematic/scripts/smoke.sh`,
+  `check_second_decorator.sh` and `examples/acme-shop/scripts/check.sh`),
+  `examples/engine-notes/scripts/check.sh` and the version-graph scenarios
+  (`make versiongraph-scenarios`, `-ts`, `-rust` and `-python`). It runs
+  twice a day on `main` as the release candidate (`release-candidate.yml`),
+  and before every release. A red candidate opens an issue, "Release
+  candidate failing on main", which the next green one closes.
+
+A full-tier failure first shows on `main`, so before pushing, run the
+full-tier checks your change touches: `make go-test` for a generator change,
+an example's script for a change to that example.
+
+CI runs only on a pull request that targets `main` and is not a draft.
+Marking a draft ready for review starts its run. A stacked pull request runs
+nothing until it targets `main`; when GitHub retargets it after its parent
+merges, push to it, or close and reopen it, to start the run. A pull
+request merges with one approval and a green `ci-pass`; an approval from an
+agent or a bot with write access counts.
 
 | Target                | What it checks                                                      |
 | --------------------- | ------------------------------------------------------------------- |
@@ -133,9 +162,20 @@ The database tests (the generated ORM and history triggers, the
 version-graph shell, the projection migrations) skip unless `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` and
 `SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` name a Postgres whose role may
 create schemas, databases and roles; each test creates and drops its own.
-The canonical-row vectors' check against Postgres
-(`runtime/versiongraph/go/canonical`) skips unless
-`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names one; it only reads.
+The test packages share that database in parallel, and an extension belongs
+to the whole database, so a test that applies a generated `create.sql` in a
+schema of its own applies the copy `internal/pgtest` prepares, which creates
+the extensions in `public` under an advisory lock first.
+The version-graph runtimes' Postgres tests, the canonical-row vectors'
+check among them (`runtime/versiongraph/go/canonical`), and the generated
+Python, Rust and TypeScript facades' tests (pygen, rustgen, tsgen) skip
+unless `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names one. The Go
+and Rust runtime tests that hold or take a graph's sweep lock while other
+tests run beside them create a database of their own, so that role must be
+able to create databases (`runtime/versiongraph/README.md`, "Build and
+test"). Each generated facade's test, the ORM's version-graph shell among
+them, creates one too: `go test` runs the four generator packages side by
+side, and each sweeps the same graph.
 CI runs them against a `postgres:16-alpine` container. Locally a throwaway
 container is enough:
 
@@ -210,7 +250,8 @@ builds on the checkout.
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
 (Settings -> Actions -> General) must permit; it is off by default on a new
-repository.
+repository, and the organization that owns the repository must allow it
+first (it does not yet).
 
 A release is three steps, each started by a person. For the first release,
 `v0.1.0-alpha.1`:
@@ -281,7 +322,9 @@ A dry run of the build on any branch: Actions -> release -> Run workflow with
 `dry_run` checked (or `gh workflow run release.yml --ref <branch> -f
 dry_run=true`). It runs the verify, build, build-migrate and assemble jobs
 and uploads the assembled release set as the `release-assets` workflow
-artifact; nothing is released, published or deployed.
+artifact; nothing is released, published or deployed. `release-candidate.yml`
+starts this dry run on `main` at 06:00 and 18:00 UTC, unless `main`'s head
+already passed one.
 
 ### Trusted publishing
 

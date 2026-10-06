@@ -13,9 +13,10 @@ use axum::Extension;
 use axum::Router;
 use superschematic_http_runtime::schema::{self, Pattern};
 use superschematic_http_runtime::{
-    body_fields, error_response, input, json_body, openapi_router, operation_response,
-    path_is_percent_encoded, query_values, request_id_from_headers, request_ids, required_input,
-    ApiError, ParamKind, ParamSpec, QueryValues, RequestContext, RouterOptions, ScalarConstraints,
+    body_fields, check_input, error_response, input, json_body, openapi_router,
+    operation_response, path_is_percent_encoded, query_values, request_id_from_headers,
+    request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
+    RequestContext, RouterOptions, ScalarConstraints,
 };
 use superschematic_http_runtime::Principal;
 use superschematic_http_runtime::RouteControls;
@@ -180,6 +181,17 @@ fn decode_stock_reserve_stock(body: Option<Value>) -> Result<StockReserveStockAr
     })
 }
 
+impl StockReserveStockArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        STOCK_RESERVE_STOCK_SKU.check_value(ParamLocation::Body, &self.sku)?;
+        Ok(())
+    }
+}
+
 async fn handle_stock_reserve_stock(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
@@ -222,6 +234,17 @@ fn decode_stock_get_reservation(captures: &HashMap<String, String>) -> Result<St
     Ok(StockGetReservationArgs {
         id: STOCK_GET_RESERVATION_ID.path(captures)?,
     })
+}
+
+impl StockGetReservationArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        STOCK_GET_RESERVATION_ID.check_value(ParamLocation::Path, &self.id)?;
+        Ok(())
+    }
 }
 
 async fn handle_stock_get_reservation(
@@ -273,6 +296,17 @@ fn decode_stock_release_reservation(captures: &HashMap<String, String>) -> Resul
     Ok(StockReleaseReservationArgs {
         id: STOCK_RELEASE_RESERVATION_ID.path(captures)?,
     })
+}
+
+impl StockReleaseReservationArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        STOCK_RELEASE_RESERVATION_ID.check_value(ParamLocation::Path, &self.id)?;
+        Ok(())
+    }
 }
 
 async fn handle_stock_release_reservation(

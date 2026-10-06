@@ -94,6 +94,24 @@ pub fn has_any_permission(held: &[String], required: &[String]) -> bool {
             .any(|need| held.iter().any(|have| covers(have, need)))
 }
 
+/// The permission gate for a caller already established: the rule the
+/// router applies to a request's caller (`RouteControls::authorize`), and
+/// an in-process caller to its own (`OperationInfo::admit`). No caller is
+/// 401 "Authentication required"; a caller whose permissions
+/// `authenticator.permits` finds do not satisfy a non-empty `required` is
+/// 403 "Insufficient permissions".
+pub fn admit(
+    authenticator: &dyn Authenticator,
+    principal: Option<Principal>,
+    required: &[String],
+) -> Result<Principal, ApiError> {
+    let principal = principal.ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
+    if !required.is_empty() && !authenticator.permits(&principal.permissions, required) {
+        return Err(ApiError::forbidden("Insufficient permissions"));
+    }
+    Ok(principal)
+}
+
 /// The token of an `Authorization: Bearer <token>` header, for an
 /// authenticator that reads one; `None` without the header or another scheme.
 pub fn bearer_token(headers: &HeaderMap) -> Option<&str> {

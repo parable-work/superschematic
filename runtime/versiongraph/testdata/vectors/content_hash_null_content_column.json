@@ -1,0 +1,85 @@
+{
+  "name": "content_hash_null_content_column",
+  "op": "content_hash",
+  "input": {
+    "descriptor": {
+      "commitTable": "recipe_commit",
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "extras": "json",
+            "id": "uuid",
+            "inputs": "json",
+            "note": "string",
+            "position": "integer",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "title": "string",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "updated_at"
+          ],
+          "history": {
+            "actor": "updated_by",
+            "exclude": []
+          },
+          "historyTable": "step_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "ref": "ref",
+          "root": "recipe_id",
+          "table": "step",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "extras": "keyed",
+            "inputs": "jsonSchema"
+          },
+          "version": "_version"
+        }
+      ],
+      "patchTable": "recipe_patch",
+      "refTable": "recipe_ref",
+      "releaseTable": "recipe_release",
+      "root": {
+        "key": "id",
+        "table": "recipe"
+      },
+      "snapshotTable": "recipe_snapshot_entry",
+      "version": 3
+    },
+    "tree": {
+      "step": [
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "extras": null,
+          "id": "00000000-0000-4000-8000-00000000d001",
+          "inputs": null,
+          "note": null,
+          "position": 10,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "title": "Chop",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "contentHash": "8ee9db305b6392c0520046d0a8eaf2f4f8741cda474c0d47a9b1f5350afa3719"
+  }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "acme-shop-topcoat"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# The Topcoat crate the extension writes for shop-orders, under
+# ../schemas/dist-rust, which scripts/check.sh builds with
+# `superschematic-topcoat build --with-deps --api-language RUST --out schemas/dist-rust`
+# (superschematic.toml's [extension.topcoat] lists shop-orders), and the
+# in-memory implementations the Rust server serves.
+[dependencies]
+acme-shop-orders-topcoat = { path = "../schemas/dist-rust/topcoat/shop-orders" }
+acme-shop-orders-server = { path = "../rust-server" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+topcoat = "0.10"
+
+[dev-dependencies]
+http = "1"
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

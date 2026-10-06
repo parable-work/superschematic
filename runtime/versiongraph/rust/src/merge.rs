@@ -47,6 +47,8 @@ fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, 
 /// are `/<column>/properties/<name>/...`, `/<column>/required/<name>` (a
 /// boolean membership) and `/<column>/<keyword>`. `base`, `ours` and `theirs`
 /// are the unit's values, each left out when the unit is absent on that side.
+/// A declared content column a row lacks is null, not absent, so a unit is
+/// absent only in an add's base or as a key or property a JSON value lacks.
 #[derive(Debug, Clone, Serialize)]
 pub struct Conflict {
     pub kind: String,
@@ -292,7 +294,7 @@ pub fn merge(
         kept[index].extend(rows.iter());
     }
     Ok(serde_json::json!({
-        "merged": tree::render(graph, kept),
+        "merged": tree::render_filled(graph, kept),
         "conflicts": conflicts,
         "entities": outcomes,
     }))
@@ -319,6 +321,9 @@ impl EntityMerge<'_> {
         let (Some(ours), Some(theirs)) = (o.live(), t.live()) else {
             return self.edit_against_delete(b, o, t);
         };
+        // Each side's content holds a declared content column its row lacks
+        // as null, so absent and null are one value in every unit. An add has
+        // no base row, so every unit is absent in its base.
         let base = b.live();
         let (bc, oc, tc) = (
             base.map(|row| row.content(kind)).unwrap_or_default(),
@@ -344,12 +349,20 @@ impl EntityMerge<'_> {
         if !self.conflicts.is_empty() {
             return Ok(Merged::State(o));
         }
-        if content == oc {
+        // A resolution that takes a unit from an add's base leaves a declared
+        // column without a value, which is null, as a side's content has it.
+        let mut filled = content.clone();
+        for column in kind.content_columns() {
+            filled.entry(column.clone()).or_insert(Value::Null);
+        }
+        if filled == oc {
             return Ok(Merged::State(o));
         }
-        if content == tc {
+        if filled == tc {
             return Ok(Merged::State(t));
         }
+        // Ours' row with the merged content. The tree written out holds a
+        // declared content column the merge left without a value as null.
         let mut value = ours.value.clone();
         value.retain(|column, _| !kind.is_content(column));
         value.extend(content);

@@ -256,6 +256,13 @@ func (t *Shelf) MaskSecrets() *Shelf {
 	return masked
 }
 
+// JSONFieldNames are the keys Shelf's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Shelf) JSONFieldNames() []string {
+	return []string{"id", "label", "createdAt", "createdBy", "updatedAt", "updatedBy", "deletedAt", "deletedBy", "_version"}
+}
+
 // Validate validates all fields in Shelf
 func (t *Shelf) Validate() ValidationErrors {
 	errors := NewValidationErrors()
@@ -537,6 +544,13 @@ func (t *Stock) MaskSecrets() *Stock {
 	masked.Version = t.Version
 
 	return masked
+}
+
+// JSONFieldNames are the keys Stock's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Stock) JSONFieldNames() []string {
+	return []string{"id", "shelf", "ingredient", "quantity", "_version"}
 }
 
 // Validate validates all fields in Stock

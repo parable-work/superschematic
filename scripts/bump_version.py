@@ -49,6 +49,13 @@ Version sites (relative to the repository root):
                                       superschematic-schema-runtime requirement
   runtime/http/rust/Cargo.lock        the superschematic-http-runtime package
                                       and the schema runtime it builds on
+  examples/acme-shop/rust/Cargo.lock  the superschematic-schema-runtime package
+  examples/acme-shop/rust-server/Cargo.lock
+                                      the superschematic-http-runtime and
+                                      superschematic-schema-runtime packages
+  examples/acme-shop/topcoat/Cargo.lock
+                                      the superschematic-http-runtime and
+                                      superschematic-schema-runtime packages
   runtime/schema/rust/Cargo.toml      [package] version
   runtime/schema/rust/Cargo.lock      the superschematic-schema-runtime package
   runtime/versiongraph/rust/Cargo.toml
@@ -283,6 +290,27 @@ def sites():
             "semver",
         )
     )
+    # examples/acme-shop's Rust client and server reach the runtimes by path
+    # through the generated crates, and check.sh builds them --locked, so
+    # their lockfiles record the runtimes' versions too.
+    out.append(
+        (
+            ROOT / "examples" / "acme-shop" / "rust" / "Cargo.lock",
+            [(r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    for app in ("rust-server", "topcoat"):
+        out.append(
+            (
+                ROOT / "examples" / "acme-shop" / app / "Cargo.lock",
+                [
+                    (r'(\[\[package\]\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1),
+                    (r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1),
+                ],
+                "semver",
+            )
+        )
     out.append(
         (
             ROOT / "runtime" / "schema" / "rust" / "Cargo.toml",

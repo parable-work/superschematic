@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
 	"github.com/parable-work/superschematic/runtime/schema/go/ptr"
 	"github.com/parable-work/superschematic/runtime/schema/go/validate"
@@ -350,7 +351,8 @@ func TestValidationErrors(t *testing.T) {
 				m := parseBody(t, rec)
 				assert.Equal(t, "Validation failed", m["detail"])
 				assert.Equal(t, "about:blank", m["type"])
-				assert.Equal(t, "Validation Failed", m["title"])
+				assert.Equal(t, "Bad Request", m["title"])
+				assert.Equal(t, "bad_request", m["code"])
 				errs := m["errors"].(map[string]any)
 				assert.Len(t, errs, 1)
 				assertNotEnveloped(t, rec.Body.Bytes())
@@ -632,20 +634,47 @@ func TestLoggedValidationErrors_WithErrorCode(t *testing.T) {
 	r := requestWithLogger("POST", "/api/widgets", logger)
 	w := httptest.NewRecorder()
 
-	LoggedValidationErrors(w, r, ve, "WA-VL-001")
+	LoggedValidationErrors(w, r, ve, "widget_invalid")
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Equal(t, "application/problem+json", w.Header().Get("Content-Type"))
 
 	m := parseBody(t, w)
 	assert.Equal(t, "Validation failed", m["detail"])
-	assert.Equal(t, "WA-VL-001", m["code"])
+	assert.Equal(t, "widget_invalid", m["code"])
 	assert.Equal(t, "test-req-id", m["requestId"])
 
 	require.Equal(t, 1, logs.Len())
 	entry := logs.All()[0]
 	fieldMap := entry.ContextMap()
-	assert.Equal(t, "WA-VL-001", fieldMap["error_code"])
+	assert.Equal(t, "widget_invalid", fieldMap["error_code"])
+}
+
+func TestLoggedInputRefusal(t *testing.T) {
+	logger, _ := newObservedLogger()
+	errors := validate.NewValidationErrors()
+	errors.AddFieldError("plan", "unknown", "unknown field")
+	for _, tc := range []struct {
+		refusal *bodyargs.InputRefusal
+		want    string
+	}{
+		{
+			refusal: bodyargs.Mismatch("unknown fields: plan", errors),
+			want: `{"type":"about:blank","title":"Bad Request","status":400,"detail":"Request body does not match the declared input",` +
+				`"code":"bad_request","requestId":"test-req-id","details":{"location":"body","reason":"unknown fields: plan"},` +
+				`"errors":{"plan":[{"validator":"unknown","message":"unknown field"}]}}`,
+		},
+		{
+			refusal: &bodyargs.InputRefusal{Detail: bodyargs.BodyRequired},
+			want:    `{"type":"about:blank","title":"Bad Request","status":400,"detail":"Request body is required","code":"bad_request","requestId":"test-req-id"}`,
+		},
+	} {
+		w := httptest.NewRecorder()
+		LoggedInputRefusal(w, requestWithLogger("POST", "/api/widgets", logger), tc.refusal)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Equal(t, "application/problem+json", w.Header().Get("Content-Type"))
+		assert.JSONEq(t, tc.want, w.Body.String())
+	}
 }
 
 // ---------------------------------------------------------------------------

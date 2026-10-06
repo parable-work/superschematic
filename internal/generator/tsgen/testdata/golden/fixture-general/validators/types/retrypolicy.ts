@@ -8,6 +8,7 @@ import {
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectNumber } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
+import { ParseError } from '../errors';
 import type { RetryPolicy } from '../../types';
 
 /**
@@ -64,12 +65,15 @@ function parseRetryPolicyInput(
       parsed = parseText(input);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`parseRetryPolicy ${sourceFormat} parse failed: ${reason}`);
+      throw new ParseError(
+        `parseRetryPolicy ${sourceFormat} parse failed: ${reason}`,
+        `not valid ${sourceFormat === 'json' ? 'JSON' : 'YAML'}`
+      );
     }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`parseRetryPolicy ${sourceFormat} expects an object input`);
+    throw new ParseError(`parseRetryPolicy ${sourceFormat} expects an object input`, 'expected an object');
   }
 
   const candidate = parsed as Record<string, unknown>;
@@ -81,8 +85,14 @@ function parseRetryPolicyInput(
       (fieldName) => !RetryPolicyKnownFields.has(fieldName)
     );
     if (unknownFields.length > 0) {
-      throw new Error(
-        `parseRetryPolicy ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`
+      const unknownErrors = newValidationErrors();
+      for (const fieldName of unknownFields) {
+        addFieldError(unknownErrors, fieldName, "unknown", "unknown field");
+      }
+      throw new ParseError(
+        `parseRetryPolicy ${sourceFormat} contains unknown fields: ${unknownFields.join(', ')}`,
+        `unknown fields: ${unknownFields.join(', ')}`,
+        unknownErrors
       );
     }
   }
@@ -90,8 +100,10 @@ function parseRetryPolicyInput(
   const typedCandidate = candidate as unknown as RetryPolicy;
   const validationResult = validateRetryPolicy(typedCandidate);
   if (validationResult !== true) {
-    throw new Error(
-      `parseRetryPolicy ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`
+    throw new ParseError(
+      `parseRetryPolicy ${sourceFormat} validation failed: ${JSON.stringify(validationResult)}`,
+      'validation failed',
+      validationResult
     );
   }
 

@@ -159,6 +159,15 @@ type TypeDef struct {
 	// other role. See [ProjectionDef].
 	Projection *ProjectionDef `json:"projection,omitempty" yaml:"projection,omitempty"`
 
+	// Stack, Server, Database and Environment are the declarations of a
+	// Stack schema's classes: @stack, @server, @database and @environment
+	// (docs/stack-model.md, section 4.1). A class has one of them, and every
+	// other type none. [StackOf] assembles them into the schema's [Stack].
+	Stack       *StackDecl       `json:"stack,omitempty" yaml:"stack,omitempty"`
+	Server      *ServerDecl      `json:"server,omitempty" yaml:"server,omitempty"`
+	Database    *DatabaseDecl    `json:"database,omitempty" yaml:"database,omitempty"`
+	Environment *EnvironmentDecl `json:"environment,omitempty" yaml:"environment,omitempty"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`

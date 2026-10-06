@@ -1,0 +1,18 @@
+name: deps-catalog
+kind: API
+types:
+  Product:
+    name: Product
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: ProductQueries
+    operations:
+      - name: listProducts
+        typeRef: { name: Product, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: products

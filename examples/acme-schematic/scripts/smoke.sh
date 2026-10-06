@@ -7,10 +7,11 @@
 # Needs: the pinned Go toolchain, the superscalar dependency built by
 # scripts/superscalar-dep.sh, the version-graph core's archive built by
 # scripts/versiongraph-archive.sh, which shop-db's generated ORM links (the
-# Makefile's `setup` runs both), and jq. Nothing is installed from the
-# network beyond Go modules. Generated output goes to the example's own
-# schemas/dist (gitignored); the core-only builds go to a temp dir that is
-# removed on exit.
+# Makefile's `setup` runs both), cargo with the wasm32-unknown-unknown
+# target, which builds the version-graph core the engine depends on, and
+# jq. Nothing is installed from the network beyond Go modules. Generated
+# output goes to the example's own schemas/dist (gitignored); the core-only
+# builds go to a temp dir that is removed on exit.
 #
 # Asserts, in order:
 #   1. the acme module builds, vets and passes its tests;
@@ -147,13 +148,13 @@ go build -o "$OUT/acme-schematic" ./cmd/acme-schematic
 
 echo "==> describe: the registry the acme binary assembles"
 "$OUT/acme-schematic" describe "$SCHEMAS" | tee "$OUT/describe.txt"
-grep -q '^kinds: API, Catalog, DB, General$' "$OUT/describe.txt"
+grep -q '^kinds: API, Catalog, DB, General, Stack$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
 grep -q '^checks: acmeIcons (every kind), acmeDocsAudience (every kind), acmeToolsClassified (API), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 grep -q '^tool invocation policy: confirm (never, always; default never)$' "$OUT/describe.txt"
-grep -q '^behaviors: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow, acme.Rating$' "$OUT/describe.txt"
+grep -q '^behaviors: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow, acme.Rating$' "$OUT/describe.txt"
 
 echo "==> build-all over the schemas root, every config importing the aliased config package"
 rm -rf "$DIST"
@@ -271,7 +272,7 @@ if "$OUT/superschematic" build "$SCHEMAS/services/shop-catalog" --naming "$OUT/s
   echo "ERROR: the core-only binary built a Catalog service" >&2
   exit 1
 fi
-grep -q 'unknown kind "Catalog" (registered kinds: API, DB, General)' "$OUT/core-kind.log"
+grep -q 'unknown kind "Catalog" (registered kinds: API, DB, General, Stack)' "$OUT/core-kind.log"
 if "$OUT/superschematic" build "$SCHEMAS/services/shop-db" --out "$OUT/core-dist" >"$OUT/core-auth.log" 2>&1; then
   echo "ERROR: the core-only binary accepted auth_provider = \"apikey\"" >&2
   exit 1
@@ -456,7 +457,7 @@ jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars
 "$OUT/acme-schematic" build "$RATINGS-ts" --emit-ir --out "$OUT/ratings-dist" >"$OUT/ratings-ts-ir.json"
 jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars": 5}}]' "$OUT/ratings-ts-ir.json" >/dev/null
 "$OUT/acme-schematic" json-schema >"$OUT/acme-schema-file.json"
-jq -e '."$defs".BehaviorRef.properties.name.enum == ["Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow", "acme.Rating"]' "$OUT/acme-schema-file.json" >/dev/null
+jq -e '."$defs".BehaviorRef.properties.name.enum == ["Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow", "acme.Rating"]' "$OUT/acme-schema-file.json" >/dev/null
 "$OUT/acme-schematic" format --to=yaml --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.yaml"
 grep -qx '          maxStars: 5' "$OUT/ratings.schema.yaml"
 "$OUT/acme-schematic" format --to=ts --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.ts"
@@ -470,7 +471,7 @@ if "$OUT/superschematic" build "$RATINGS" --emit-ir --naming "$OUT/session.toml"
   echo "ERROR: the core-only binary accepted acme.Rating" >&2
   exit 1
 fi
-grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)' "$OUT/core-ratings.log"
+grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)' "$OUT/core-ratings.log"
 
 echo "==> version graph: shop-db's Planogram, declared with no core edit"
 # The loader expands the declarations into ordinary types, marked with their
@@ -535,10 +536,12 @@ BEHAVIORS="$EXAMPLE_DIR/packages/behaviors"
 ENGINE="$REPO_ROOT/runtime/engine/typescript"
 # The implementation's copy of the declaration is the one the binary registers.
 "$OUT/acme-schematic" behaviors --extension acme --out "$BEHAVIORS/declarations" --check
-# Build the schema runtime and the engine, as the typescript CI job does; the
-# engine's build links the schema runtime's dist, and the HTTP runtime's, which
-# step 16 built, into its node_modules.
+# Build the schema runtime, the version graph and the engine, as the
+# typescript CI job does; the engine's build links the schema runtime's
+# dist, the HTTP runtime's, which step 16 built, and the version graph's,
+# whose engine the Branches behavior runs, into its node_modules.
 (cd "$REPO_ROOT/runtime/schema/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
+(cd "$REPO_ROOT/runtime/versiongraph/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 (cd "$ENGINE" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 link_module "$ENGINE" "$BEHAVIORS/node_modules/@superschematic/engine"
 for dep in typescript @types/node; do

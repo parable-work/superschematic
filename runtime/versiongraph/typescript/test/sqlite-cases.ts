@@ -132,6 +132,23 @@ function assertCanonicalID(id: unknown, what: string): void {
   assert.match(hex, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, `${what} ${String(id)} is a version-4 UUID`);
 }
 
+let layouts = 0;
+
+/**
+ * A behavior's table names no other case uses, so a caller's-transaction
+ * SQLite check the adapter keeps for another case's layout does not stand
+ * in for this one's.
+ */
+function freshLayout(): (local: string) => string {
+  const n = ++layouts;
+  return (local) => behaviorTable(`probe${n}_${local}`);
+}
+
+/** How many of the statements are the adapter's SQLite checks: the version read and the JSON functions' probe. */
+function sqliteChecks(statements: readonly string[]): number {
+  return statements.filter((sql) => /sqlite_version\(\)|json_each\('\[\[1\]\]'\)/.test(sql)).length;
+}
+
 /** A ref and a tagged commit on it, written through the adapter, for the cases that need a commit. */
 function refAndCommit(tx: SyncTx, root = bread, name = "main"): { ref: Ref; commit: string } {
   const ref = tx.createRef({ root, parent: null, base: null, name, actor: cook });
@@ -327,7 +344,8 @@ export const cases: Case[] = [
   {
     name: "the adapter writes a row's ref, root, tombstone, actor and time, never its id or version, and keeps or defaults what it lacks",
     run(binding) {
-      const s = setup(binding, { clock: () => 1_800_000_000_000_000 });
+      let now = 1_800_000_000_000_000;
+      const s = setup(binding, { clock: () => now });
       using([s], () => {
         const { ref } = s.storage.transact((tx) => refAndCommit(tx));
         const write = (row: string, tombstone = false, actor = cook) =>
@@ -358,7 +376,12 @@ export const cases: Case[] = [
         assert.equal(member(inserted, "updated_by"), '"Cook"');
         // A column the insert lacks holds null.
         assert.equal(member(inserted, "scratch"), "null");
-        const updated = write(JSON.stringify({ entity_key: "Mix", instruction: "Stir", created_by: "Somebody" }), true, "Baker");
+        now += 1_500_000;
+        const updated = write(
+          JSON.stringify({ entity_key: "Mix", instruction: "Stir", created_at: "2000-01-01T00:00:00Z", created_by: "Somebody" }),
+          true,
+          "Baker",
+        );
         assertCanonicalRow("step", updated);
         const [read] = s.storage.transact((tx) => tx.rows("step", ref.id));
         assert.equal(read, updated);
@@ -367,7 +390,9 @@ export const cases: Case[] = [
         assert.equal(member(updated, "deleted_on_ref"), "true");
         // A column the update lacks keeps its value, and the creation audit stays.
         assert.equal(member(updated, "position"), "1");
+        assert.equal(member(updated, "created_at"), '"2027-01-15T08:00:00Z"');
         assert.equal(member(updated, "created_by"), '"Cook"');
+        assert.equal(member(updated, "updated_at"), '"2027-01-15T08:00:01.5Z"');
         assert.equal(member(updated, "updated_by"), '"Baker"');
         // A row without an entity key is a new entity.
         const fresh = write(stepRow(null, "Rest"));
@@ -379,7 +404,7 @@ export const cases: Case[] = [
     },
   },
   {
-    name: "after a kind gains a column, its old rows and images read it as null, as Postgres's ADD COLUMN gives them",
+    name: "after a kind gains a column, its old rows read it as null, as Postgres's ADD COLUMN gives them, and its old images read as stored",
     run(binding) {
       const s = setup(binding);
       using([s], () => {
@@ -407,26 +432,27 @@ export const cases: Case[] = [
         assert.equal(member(whisk!, "color"), "null");
         assert.equal(member(mix!, "memo"), "null");
         assert.equal(canonicalRow(kind("utensil").columns, whisk!), whisk);
-        // An image carries the gained column as null, unless history leaves it out.
+        // An image reads as it was stored, without the gained column, as a
+        // Postgres history image does.
         const id = (row: string) => JSON.parse(member(row, "id")!) as string;
         const [whiskImage] = storage.transact((tx) => tx.images("utensil", [{ id: id(whisk!), version: 1 }]));
         const [mixImage] = storage.transact((tx) => tx.images("step", [{ id: id(mix!), version: 1 }]));
-        assert.equal(member(whiskImage!, "color"), "null");
+        const storedImage = s.client.get(`SELECT data FROM "graph_member_history" WHERE id = ?1 AND _version = 1`, [id(whisk!)]);
+        assert.equal(whiskImage, storedImage?.["data"]);
+        assert.equal(member(whiskImage!, "color"), undefined);
         assert.equal(canonicalRow(kind("utensil").columns, whiskImage!), whiskImage);
         assert.equal(member(mixImage!, "memo"), undefined);
         assert.equal(member(mixImage!, "scratch"), undefined);
-        // The commit's tree carries color as null, and hashes as a tree whose
-        // row holds it null does, which is not how one that lacks it does.
+        // The commit's tree lacks color, and the core reads it as null: it
+        // hashes as the draft's live rows, which hold it null, and as a tree
+        // whose row holds it null.
         const tree = engine.materialize(committed.commit!.id);
         const [read] = tree.tree["utensil"]!;
-        assert.equal(member(read!, "color"), "null");
+        assert.equal(member(read!, "color"), undefined);
+        assert.equal(tree.contentHash, engine.compose(draft.id).contentHash);
         const hash = (row: Record<string, unknown>) =>
           core.contentHash({ descriptor: d as never, tree: { step: tree.tree["step"]!.map((r) => JSON.parse(r) as Record<string, unknown>), utensil: [row] } }).contentHash;
-        const withNull = JSON.parse(read!) as Record<string, unknown>;
-        const without = { ...withNull };
-        delete without["color"];
-        assert.equal(tree.contentHash, hash(withNull));
-        assert.notEqual(tree.contentHash, hash(without));
+        assert.equal(tree.contentHash, hash({ ...(JSON.parse(read!) as Record<string, unknown>), color: null }));
         // An update of the old row stores the gained column, null, and its image carries it.
         const updated = engine.save(cook, draft.id, committed.ref.version, { utensil: { upsert: ['{"entity_key": "Whisk", "name": "big whisk"}'] } });
         assert.equal(member(updated.saved["utensil"]![0]!, "color"), "null");
@@ -572,7 +598,7 @@ export const cases: Case[] = [
     },
   },
   {
-    name: "two graphs in one file keep apart: each reads, names, sequences, releases and prunes only its own",
+    name: "two graphs in one file keep apart: each reads, names, sequences, releases, prunes and sweeps only its own",
     run(binding) {
       let now = 1_800_000_000_000_000;
       const clock = () => now;
@@ -639,6 +665,21 @@ export const cases: Case[] = [
         assert.equal(images("recipe"), kept);
         assert.deepEqual(a.engine.sweep({ actor: cook }).pruned, {});
         assert.equal(bEngine.compose(other.id).contentHash, a.engine.compose(main.id).contentHash);
+        // Each graph discards its draft, and a week and a day on, past the
+        // grace, menu's sweep collects its own draft's rows and leaves
+        // recipe's, which recipe's own sweep collects.
+        const rowsOf = (graph: string, ref: string) =>
+          a.client.get(`SELECT count(*) AS n FROM "graph_member" WHERE graph = ?1 AND ref_id = ?2`, [graph, ref])?.["n"];
+        a.engine.discard(cook, aw.draft.id, aw.draft.version);
+        bEngine.discard(cook, bw.draft.id, bw.draft.version);
+        assert.deepEqual([rowsOf("recipe", aw.draft.id), rowsOf("menu", bw.draft.id)], [1, 1]);
+        now += 8 * 86_400_000_000;
+        const swept = bEngine.sweep({ actor: cook });
+        assert.deepEqual([swept.collectedRefs, swept.collectedRows], [1, { step: 1 }]);
+        assert.deepEqual([rowsOf("recipe", aw.draft.id), rowsOf("menu", bw.draft.id)], [1, 0]);
+        const own = a.engine.sweep({ actor: cook });
+        assert.deepEqual([own.collectedRefs, own.collectedRows], [1, { step: 1 }]);
+        assert.equal(rowsOf("recipe", aw.draft.id), 0);
       });
     },
   },
@@ -805,18 +846,23 @@ export const cases: Case[] = [
         // not at exactly 365 days.
         now = start + 365 * 86_400_000_000;
         assert.equal(prune(0), 0);
-        // Make the row with the greatest id the oldest by a microsecond more
-        // than the next, so oldest first and id order disagree.
+        // Make the row with the middle id the oldest, and the row with the
+        // greatest id the next, so that with all three past their retention
+        // oldest first disagrees with id order either way.
         const ids = left();
-        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 2 WHERE id = ?1 AND _version = 1`, [ids[2]!]);
-        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 1 WHERE id = ?1 AND _version = 1`, [ids[1]!]);
+        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 2 WHERE id = ?1 AND _version = 1`, [ids[1]!]);
+        s.client.run(`UPDATE "graph_member_history" SET recorded_at = recorded_at - 1 WHERE id = ?1 AND _version = 1`, [ids[2]!]);
+        now += 1;
         assert.equal(prune(1), 1);
-        assert.deepEqual(left(), [ids[0], ids[1]], "the oldest went first");
-        assert.equal(prune(0), 1);
+        assert.deepEqual(left(), [ids[0], ids[2]], "the oldest went first");
+        assert.equal(prune(1), 1);
+        assert.deepEqual(left(), [ids[0]], "the next oldest went next");
+        now -= 1;
+        assert.equal(prune(0), 0);
         assert.deepEqual(left(), [ids[0]], "an image exactly 365 days old stays");
         now += 1;
         assert.equal(prune(0), 1);
-        assert.deepEqual(left(), []);
+        assert.deepEqual(left(), [], "an image a microsecond past its retention goes");
       });
     },
   },
@@ -1181,6 +1227,156 @@ export const cases: Case[] = [
         } else {
           assert.throws(build, new RegExp(refuse.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), name);
         }
+      }
+    },
+  },
+  {
+    name: "createTables and storage refuse a SQLite older than 3.37.0, or one without json_each and json_extract",
+    run(binding) {
+      const db = binding.open(":memory:");
+      try {
+        // The binding's own SQLite runs the adapter.
+        const own = new SqliteAdapter(descriptor, { graph });
+        own.createTables(db.client);
+        own.storage(db.client);
+        // A client over it that reports another version, or whose JSON
+        // functions fail or give another value.
+        const reporting = (version: string | null, json: "works" | "fails" | "wrong" = "works"): SqliteClient => ({
+          exec: (sql) => db.client.exec!(sql),
+          run: (sql, params) => db.client.run(sql, params),
+          all: (sql, params) => db.client.all(sql, params),
+          get: (sql, params) => {
+            if (/sqlite_version\(\)/.test(sql)) {
+              return { version };
+            }
+            if (/json_each/.test(sql) && json !== "works") {
+              if (json === "fails") {
+                throw new SqliteError("no such function: json_each", 1);
+              }
+              return { one: null };
+            }
+            return db.client.get(sql, params);
+          },
+        });
+        const opens = (client: SqliteClient, options: Partial<SqliteOptions> = {}) => {
+          const adapter = new SqliteAdapter(descriptor, { graph, ...options });
+          return [() => adapter.createTables(client), () => adapter.storage(client)];
+        };
+        for (const version of ["3.37.0", "3.37.2", "3.38.0", "3.100.0", "4.0.0"]) {
+          for (const open of opens(reporting(version))) {
+            open();
+          }
+        }
+        for (const version of ["3.36.9", "3.36.0", "3.9.99", "2.99.99"]) {
+          for (const open of opens(reporting(version))) {
+            assert.throws(open, new RegExp(`SQLite ${version.replace(/\./g, "\\.")} is older than 3\\.37\\.0`), version);
+          }
+        }
+        for (const version of ["3.37", "", null]) {
+          for (const open of opens(reporting(version))) {
+            assert.throws(open, /not major\.minor\.patch/, String(version));
+          }
+        }
+        for (const json of ["fails", "wrong"] as const) {
+          for (const open of opens(reporting("3.37.0", json))) {
+            assert.throws(open, /SQLite 3\.37\.0 (cannot run json_each and json_extract|gives null for json_extract over json_each)/, json);
+          }
+        }
+        // In the caller's transaction the adapter cannot read the version, a
+        // name D16 refuses a behavior, so it checks the JSON functions only.
+        // A layout whose check failed is checked again, and passes once its
+        // SQLite does.
+        const caller: Partial<SqliteOptions> = { callerTransaction: true, tableName: freshLayout() };
+        const ran: Ran[] = [];
+        inCallerTransaction(db.client, () => {
+          for (const json of ["fails", "wrong"] as const) {
+            for (const open of opens(checkedClient(reporting("3.36.0", json), "migrate"), caller)) {
+              assert.throws(open, /this SQLite (cannot run json_each and json_extract|gives null)/, json);
+            }
+          }
+          for (const open of opens(checkedClient(reporting("3.36.0"), "migrate", ran), caller)) {
+            open();
+          }
+        });
+        assert.ok(ran.some((r) => /json_each/.test(r.sql)), "the caller's transaction checks the JSON functions");
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "a SQLite check that passes runs once per client on a connection of the adapter's own and once per layout in a caller's transaction, and one that fails runs again",
+    run(binding) {
+      const db = binding.open(":memory:");
+      try {
+        /** A client over the connection that records each statement, and whose JSON functions fail while json.works is false. */
+        const recording = (ran: string[], json = { works: true }): SqliteClient => ({
+          exec: (sql) => db.client.exec!(sql),
+          run: (sql, params) => {
+            ran.push(sql);
+            return db.client.run(sql, params);
+          },
+          get: (sql, params) => {
+            ran.push(sql);
+            if (!json.works && /json_each/.test(sql)) {
+              throw new SqliteError("no such function: json_each", 1);
+            }
+            return db.client.get(sql, params);
+          },
+          all: (sql, params) => {
+            ran.push(sql);
+            return db.client.all(sql, params);
+          },
+        });
+        // On a connection of its own: once per client, whichever adapter
+        // binds it and however many operations run over it.
+        const ran: string[] = [];
+        const client = recording(ran);
+        const recipe = new SqliteAdapter(descriptor, { graph });
+        recipe.createTables(client);
+        const first = sqliteChecks(ran);
+        assert.ok(first > 0, "the first open checks the SQLite");
+        const engine = new SyncEngine(core, descriptor, recipe.storage(client), { schemaEpoch: 1, snapshotEvery: 3 });
+        const main = engine.createPrimary(cook, bread, "main");
+        engine.branch(cook, main.id, "draft");
+        new SqliteAdapter(descriptor, { graph: "menu" }).storage(client);
+        assert.equal(sqliteChecks(ran), first, "another open of the client, and the operations over it, check nothing");
+        // A check that failed is not kept.
+        const flakyRan: string[] = [];
+        const json = { works: false };
+        const flaky = recording(flakyRan, json);
+        assert.throws(() => recipe.storage(flaky), /cannot run json_each and json_extract/);
+        json.works = true;
+        const failed = sqliteChecks(flakyRan);
+        recipe.storage(flaky);
+        assert.ok(sqliteChecks(flakyRan) > failed, "a client whose check failed is checked again");
+        const passed = sqliteChecks(flakyRan);
+        recipe.storage(flaky);
+        assert.equal(sqliteChecks(flakyRan), passed, "and once it passes, not again");
+
+        // In a caller's transaction, as Branches binds the adapter: a new
+        // adapter over a new client for each call, on one connection.
+        const tableName = freshLayout();
+        inCallerTransaction(db.client, () => {
+          for (const statement of sqliteLayout(tableName)) {
+            db.client.run(statement);
+          }
+        });
+        const calls: Ran[] = [];
+        const call = <T>(fn: (engine: SyncEngine) => T): T =>
+          inCallerTransaction(db.client, () => {
+            const adapter = new SqliteAdapter(descriptor, { graph, callerTransaction: true, tableName });
+            const storage = adapter.storage(checkedClient(db.client, "write", calls));
+            return fn(new SyncEngine(core, descriptor, storage, { schemaEpoch: 1, snapshotEvery: 3 }));
+          });
+        const primary = call((e) => e.createPrimary(cook, bread, "main"));
+        const once = sqliteChecks(calls.map((r) => r.sql));
+        assert.ok(once > 0, "the first call checks the SQLite");
+        call((e) => e.branch(cook, primary.id, "draft"));
+        call((e) => e.compose(primary.id));
+        assert.equal(sqliteChecks(calls.map((r) => r.sql)), once, "a later call, on a new adapter and a new client, checks nothing");
+      } finally {
+        db.close();
       }
     },
   },

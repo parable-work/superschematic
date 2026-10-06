@@ -246,6 +246,145 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Branches"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "kinds": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "order": {
+                          "description": "The kind's integer field that orders siblings, as @graphMember's order.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "parent": {
+                          "additionalProperties": false,
+                          "description": "Containment, as @graphMember's parent: key is the kind's field, of a UUID scalar, that holds the parent row's entity key, and of is the parent's kind, this one included. Deleting a parent removes its descendants.",
+                          "properties": {
+                            "key": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "of": {
+                              "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "of"
+                          ],
+                          "type": "object"
+                        },
+                        "retentionDays": {
+                          "description": "How many days of the kind's history the sweep keeps, as @versioned's retentionDays; all of it when absent.",
+                          "maximum": 2147483647,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "singleton": {
+                          "description": "At most one live row of the kind, as @graphMember's singleton.",
+                          "type": "boolean"
+                        },
+                        "type": {
+                          "description": "The type of the schema document, besides the instance type, whose fields are the kind's content.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "units": {
+                          "additionalProperties": {
+                            "enum": [
+                              "atomic",
+                              "keyed",
+                              "jsonSchema",
+                              "excluded"
+                            ],
+                            "type": "string"
+                          },
+                          "description": "A field's conflict unit, as @conflictUnit sets it: atomic (the default), keyed (each top-level key of a JSON object), jsonSchema, or excluded (not content: never merged or hashed).",
+                          "propertyNames": {
+                            "minLength": 1
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "type": "object"
+                    },
+                    "description": "The graph's kinds, by name: camelCase, at most 64 characters.",
+                    "maxProperties": 64,
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+                    },
+                    "type": "object"
+                  },
+                  "primary": {
+                    "description": "The name of each instance's primary line; main when absent.",
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "snapshotEvery": {
+                    "description": "How many commits past the nearest snapshot on its chain a commit is snapshotted at, as @versionGraph's snapshotEvery; 64 when absent.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "sweep": {
+                    "additionalProperties": false,
+                    "description": "Turns the sweep schedule on for the schema: each run discards the drafts idle past abandonAfter, then deletes the rows of refs discarded longer ago than discardGrace, prunes each kind's history past its retentionDays and writes missing snapshots.",
+                    "properties": {
+                      "abandonAfter": {
+                        "description": "Discards a draft with no write for this many milliseconds; none when absent.",
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "discardGrace": {
+                        "description": "How long a discarded ref's rows are kept, in milliseconds; seven days when absent.",
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "intervalMs": {
+                        "description": "How often it runs, in milliseconds; at least 1000.",
+                        "minimum": 1000,
+                        "type": "integer"
+                      },
+                      "pruneBatch": {
+                        "description": "At most this many history images of each kind pruned per run; no limit when absent.",
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "intervalMs"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kinds"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Budget"
               }
             }
@@ -1488,6 +1627,7 @@
           "enum": [
             "Assignment",
             "Blueprint",
+            "Branches",
             "Budget",
             "Comments",
             "Constants",
@@ -1509,6 +1649,77 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "DNSPlacement": {
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "type": "string"
+        },
+        "values": {
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "type": "object"
+    },
+    "DatabaseDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "hosts": {
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hosts"
+      ],
+      "type": "object"
+    },
+    "DeployableRef": {
+      "additionalProperties": false,
+      "properties": {
+        "deployable": {
+          "default": "",
+          "type": "string"
+        },
+        "service": {
+          "$ref": "#/$defs/ServiceRef"
+        }
+      },
+      "type": "object"
+    },
+    "DeployableSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EnvValue"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "of": {
+          "$ref": "#/$defs/DeployableRef"
+        },
+        "platform": {
+          "default": "",
+          "type": "string"
+        },
+        "values": {
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "of"
       ],
       "type": "object"
     },
@@ -1552,7 +1763,8 @@
           "enum": [
             "API",
             "DB",
-            "General"
+            "General",
+            "Stack"
           ],
           "type": "string"
         },
@@ -1564,6 +1776,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/OperationSet"
+          },
+          "type": "array"
+        },
+        "references": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
           },
           "type": "array"
         },
@@ -1679,6 +1898,65 @@
       "required": [
         "name"
       ],
+      "type": "object"
+    },
+    "EnvValue": {
+      "additionalProperties": false,
+      "properties": {
+        "parameter": {
+          "default": "",
+          "type": "string"
+        },
+        "value": {
+          "default": null,
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "EnvironmentDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "dns": {
+          "$ref": "#/$defs/DNSPlacement"
+        },
+        "domain": {
+          "default": "",
+          "type": "string"
+        },
+        "parameters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "settings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DeployableSettings"
+          },
+          "type": "array"
+        },
+        "target": {
+          "default": "",
+          "type": "string"
+        },
+        "values": {
+          "default": {},
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "FieldDef": {
@@ -2873,6 +3151,21 @@
       ],
       "type": "object"
     },
+    "ServerDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "serves": {
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "serves"
+      ],
+      "type": "object"
+    },
     "ServiceCallers": {
       "additionalProperties": false,
       "properties": {
@@ -2893,6 +3186,28 @@
       },
       "required": [
         "mode"
+      ],
+      "type": "object"
+    },
+    "ServiceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "API",
+            "DB",
+            "General",
+            "Stack"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
       ],
       "type": "object"
     },
@@ -2920,6 +3235,26 @@
       "required": [
         "target"
       ],
+      "type": "object"
+    },
+    "StackDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "deploy": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        },
+        "expose": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DeployableRef"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "TraitConfigSchema": {
@@ -2965,6 +3300,9 @@
           "default": "",
           "type": "string"
         },
+        "database": {
+          "$ref": "#/$defs/DatabaseDecl"
+        },
         "denyUnknownFields": {
           "default": false,
           "type": "boolean"
@@ -2976,6 +3314,9 @@
         "envVars": {
           "default": false,
           "type": "boolean"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentDecl"
         },
         "extends": {
           "default": "",
@@ -3051,8 +3392,14 @@
           ],
           "type": "string"
         },
+        "server": {
+          "$ref": "#/$defs/ServerDecl"
+        },
         "source": {
           "$ref": "#/$defs/SourceRef"
+        },
+        "stack": {
+          "$ref": "#/$defs/StackDecl"
         },
         "strictJSON": {
           "default": false,

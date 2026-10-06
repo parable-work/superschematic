@@ -341,19 +341,8 @@ impl ServiceRule {
 impl Authorization {
     /// The end user, holding one of the route's permissions.
     async fn principal(&self, parts: &Parts) -> Result<Principal, ApiError> {
-        let principal = self
-            .authenticator
-            .authenticate(parts)
-            .await?
-            .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
-        if !self.permissions.is_empty()
-            && !self
-                .authenticator
-                .permits(&principal.permissions, &self.permissions)
-        {
-            return Err(ApiError::forbidden("Insufficient permissions"));
-        }
-        Ok(principal)
+        let principal = self.authenticator.authenticate(parts).await?;
+        crate::auth::admit(self.authenticator.as_ref(), principal, &self.permissions)
     }
 }
 

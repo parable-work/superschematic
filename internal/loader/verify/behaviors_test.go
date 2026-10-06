@@ -63,7 +63,7 @@ func TestBehaviorsVerify(t *testing.T) {
 		{"accepted", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit"}}, nil},
 		{"requirement listed first", []ir.BehaviorRef{{Name: "Audit"}, stock(`{"aisles":2}`)}, nil},
 		{"unknown", []ir.BehaviorRef{{Name: "Ghost"}},
-			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Assignment, Audit, Blueprint, Budget, Clearance, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Recount, Retries, Revisions, Rollups, Search, Shelved, Stock, Variants, Workflow)`}},
+			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Assignment, Audit, Blueprint, Branches, Budget, Clearance, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Recount, Retries, Revisions, Rollups, Search, Shelved, Stock, Variants, Workflow)`}},
 		{"config rejected", []ir.BehaviorRef{stock(`{"aisles":0}`)},
 			[]string{"src/item.schema.json: type Item: behavior Stock config: "}},
 		{"config missing", []ir.BehaviorRef{{Name: "Stock"}},
@@ -141,8 +141,17 @@ func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 	}
 
 	r = Run(behaviorSchema(ir.BehaviorRef{Name: "Stock"}), Input{Registry: core})
-	if want := `type Item: behavior "Stock" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`; !hasError(r, want) {
+	if want := `type Item: behavior "Stock" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`; !hasError(r, want) {
 		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
+	}
+
+	// Branches and Lease compose on one type: Branches points the release
+	// pointer with releaseCommit and Lease ends a lease with release, so no
+	// operation name is added twice.
+	branches := ir.BehaviorRef{Name: "Branches", Config: json.RawMessage(`{"kinds":{"step":{"type":"Step"}}}`)}
+	r = Run(behaviorSchema(branches, ir.BehaviorRef{Name: "Lease"}), Input{Registry: core})
+	if got := errorStrings(r); len(got) != 0 {
+		t.Fatalf("Branches and Lease: errors = %v, want none", got)
 	}
 
 	schema := behaviorSchema(workflow)

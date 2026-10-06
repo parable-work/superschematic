@@ -161,6 +161,43 @@ func TestComputeInputHashesFollowAuthDBDependencies(t *testing.T) {
 	assert.NotEqual(t, before["api"], after["api"])
 }
 
+// TestCallsJoinTheKey: a caller's generated Deps imports each callee's
+// SDK, so a change to a callee changes the caller's key; two APIs that
+// call each other hash without a cycle, and a callee's key does not follow
+// its callers.
+func TestCallsJoinTheKey(t *testing.T) {
+	repo := t.TempDir()
+	writeFile(t, filepath.Join(repo, "schemas", "package.json"), "{}")
+	writeFile(t, filepath.Join(repo, "schemas", "bun.lock"), "")
+
+	dir := func(name string) string { return filepath.Join(repo, "schemas", "services", name) }
+	for _, name := range []string{"orders", "catalog", "audit"} {
+		writeFile(t, filepath.Join(dir(name), "src", name+".schema.ts"), "export class "+name+" {}")
+	}
+	api := func(name string, calls ...string) buildplan.Service {
+		cfg := &schemaconfig.SchemaConfig{Name: name, Kind: ir.SchemaKindAPI}
+		for _, call := range calls {
+			cfg.Calls = append(cfg.Calls, schemaconfig.ServiceDependency{Name: call, Kind: ir.SchemaKindAPI})
+		}
+		return buildplan.Service{Name: name, Dir: dir(name), Config: cfg}
+	}
+	// orders and catalog call each other; audit calls orders.
+	services := []buildplan.Service{api("audit", "orders"), api("catalog", "orders"), api("orders", "catalog")}
+
+	before, err := ComputeInputHashes(services, repo, naming.Naming{})
+	require.NoError(t, err)
+	writeFile(t, filepath.Join(dir("catalog"), "src", "catalog.schema.ts"), "export class catalog2 {}")
+	after, err := ComputeInputHashes(services, repo, naming.Naming{})
+	require.NoError(t, err)
+	assert.NotEqual(t, before["catalog"], after["catalog"])
+	assert.NotEqual(t, before["orders"], after["orders"], "orders calls catalog")
+	assert.Equal(t, before["audit"], after["audit"], "audit calls orders, whose SDK does not change with catalog")
+
+	hasher := NewInputHasher(services, repo, naming.Naming{})
+	keys := hasher.HashAll(services)
+	assert.Equal(t, keys["orders"], hasher.Recompute(services[2]), "Recompute after a build that wrote nothing agrees with HashAll")
+}
+
 func TestAuthoringImportsInvalidateInputHash(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, filepath.Join(repo, "vendor", "scalars", "permissions.yml"), "{}")

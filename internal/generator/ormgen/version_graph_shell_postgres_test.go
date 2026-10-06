@@ -21,7 +21,12 @@ import (
 // together, and the fence, the seal, a missing history row, the walk
 // ceiling and the schema epoch refusing what they refuse. The second saves
 // every value class through the facade; the third releases, rolls back,
-// rebases and sweeps through it.
+// rebases and sweeps through it. Each creates a database of its own on
+// that server and drops it after (openShellDatabase): the graph's sweep
+// lock is an advisory lock, which Postgres keys to the database, and go
+// test runs pygen's, rustgen's and tsgen's facade tests, which sweep the
+// same graph, beside this one. The variable's role must be able to create
+// databases.
 func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -1394,6 +1399,12 @@ func mustShellUUID(t *testing.T, value string) types.IdentityUUID {
 	return id
 }
 
+// openShellDatabase creates a database of its own on the server dsn names,
+// drops it when the test ends, applies create.sql to it and connects the
+// ORM to it. The graph's sweep lock is an advisory lock, which Postgres
+// keys to the database, not to a schema; go test runs the other languages'
+// facade tests beside these, and in a database they shared, their sweeps
+// would make this one's skip.
 func openShellDatabase(t *testing.T, dsn string) (*Database, *pgxpool.Pool) {
 	t.Helper()
 	createSQL, err := os.ReadFile("testdata/create.sql")
@@ -1406,20 +1417,24 @@ func openShellDatabase(t *testing.T, dsn string) (*Database, *pgxpool.Pool) {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(base.Close)
-	schema := fmt.Sprintf("version_graph_shell_%d", time.Now().UnixNano())
-	if _, err := base.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
-		t.Fatalf("create schema: %v", err)
+	database := fmt.Sprintf("version_graph_shell_%d_%d", os.Getpid(), time.Now().UnixNano())
+	if _, err := base.Exec(ctx, "CREATE DATABASE "+database); err != nil {
+		t.Fatalf("create database: %v", err)
 	}
-	t.Cleanup(func() { _, _ = base.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE") })
+	t.Cleanup(func() {
+		if _, err := base.Exec(context.Background(), "DROP DATABASE IF EXISTS "+database+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop database %s: %v", database, err)
+		}
+	})
 
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("parse database URL: %v", err)
 	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
+	cfg.ConnConfig.Database = database
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
-		t.Fatalf("connect schema pool: %v", err)
+		t.Fatalf("connect to database %s: %v", database, err)
 	}
 	if _, err := pool.Exec(ctx, string(createSQL)); err != nil {
 		pool.Close()

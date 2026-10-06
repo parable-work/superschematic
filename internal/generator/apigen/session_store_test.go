@@ -12,6 +12,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -45,6 +46,8 @@ func TestSessionStoreReportsARevokedSession(t *testing.T) {
 	if err := sqlgen.WriteDDL(ddl, filepath.Join(apiDir, "testdata")); err != nil {
 		t.Fatalf("write fixture-db ddl: %v", err)
 	}
+	createSQL := filepath.Join(apiDir, "testdata", "create.sql")
+	pgtest.WriteCreateSQL(t, createSQL, createSQL)
 	if err := os.WriteFile(filepath.Join(apiDir, "session_store_test.go"), []byte(sessionStoreTest), 0o644); err != nil {
 		t.Fatalf("write session_store_test.go: %v", err)
 	}

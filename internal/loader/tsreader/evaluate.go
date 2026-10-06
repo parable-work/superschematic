@@ -2,6 +2,7 @@ package tsreader
 
 import (
 	"encoding/json"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
@@ -14,6 +15,10 @@ import (
 type serviceHandle struct {
 	name string
 	kind string
+
+	// sentinel is the sentinel file the handle was imported from, an
+	// absolute path, or "" for a service({...}) written in place.
+	sentinel string
 }
 
 // MarshalJSON renders the handle as the object service({...}) was called
@@ -205,7 +210,14 @@ func (w *walker) evaluateReference(node *astNode, depth int) (any, *SchemaError)
 		if init == nil {
 			return nil, errorAtNode(node, "const %q has no initializer to evaluate", sym.Name)
 		}
-		return w.evaluateExpressionDepth(init, depth+1)
+		v, serr := w.evaluateExpressionDepth(init, depth+1)
+		if handle, ok := v.(serviceHandle); ok && handle.sentinel == "" {
+			if file := getSourceFileOfNode(decl); file != nil && path.Base(file.FileName()) == sentinelFile {
+				handle.sentinel = file.FileName()
+				v = handle
+			}
+		}
+		return v, serr
 	}
 
 	return nil, errorAtNode(node, "%q does not statically evaluate to a literal", sym.Name)

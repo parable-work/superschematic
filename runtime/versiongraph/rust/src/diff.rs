@@ -20,9 +20,13 @@ pub fn live<'a>(rows: &BTreeMap<&str, &'a Row>, key: &str) -> Option<&'a Row> {
 /// Diff `from` against `to`, per entity. An entity live only in `to` is an
 /// `ADD`, one live in both with different content an `UPDATE`, one live only
 /// in `from` a `DELETE`. A tombstone and an absent row are the same deleted
-/// state. `ADD` and `UPDATE` carry `to`'s row; `DELETE` carries `to`'s
-/// tombstone row when it has one. Changes are ordered by kind, in descriptor
-/// order, then entity key.
+/// state, and a content column a row lacks is null, so rows that differ only
+/// by one absent on one side and null on the other are no change. `ADD` and
+/// `UPDATE` carry `to`'s row; `DELETE` carries `to`'s tombstone row when it
+/// has one. A change's row carries every content column the descriptor
+/// declares, null where the row lacks one, as an engine writes it back (see
+/// [`Row::filled`]). Changes are ordered by kind, in descriptor order, then
+/// entity key.
 pub fn diff(graph: &Graph, from: &Tree, to: &Tree) -> Value {
     let mut changes = Vec::new();
     for (kind, (from_rows, to_rows)) in graph.kinds.iter().zip(from.kinds.iter().zip(&to.kinds)) {
@@ -40,7 +44,7 @@ pub fn diff(graph: &Graph, from: &Tree, to: &Tree) -> Value {
             change.insert("entityKey".to_owned(), Value::String(key.to_owned()));
             change.insert("operation".to_owned(), Value::String(operation.to_owned()));
             if let Some(row) = row {
-                change.insert("row".to_owned(), Value::Object(row.value.clone()));
+                change.insert("row".to_owned(), Value::Object(row.filled(kind)));
             }
             changes.push(Value::Object(change));
         }

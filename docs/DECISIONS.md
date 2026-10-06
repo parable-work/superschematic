@@ -1090,8 +1090,9 @@ event stream, MCP tools, the reach and publish hook of the first
 amendment below, the runner of the second, create parameters and the
 validation hook of the last two. The core declares `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`
-(full-text, on FTS5), `Reactions`, `Constants` and `Variants`, and the
-engine registers them when it opens, which meets D10's done criterion
+(full-text, on FTS5), `Reactions`, `Constants`, `Variants` and `Branches`
+(a version graph on each instance, D32), and the engine registers them
+when it opens, which meets D10's done criterion
 (`make cli-smoke`, `test/core-behaviors.test.ts`, acme's
 `scripts/smoke.sh`). The core also
 declares the work-queue behaviors `Lease`, `Assignment`, `Queue`,
@@ -2471,6 +2472,22 @@ authoring package, the targets and the provisioners are not.
 | `RegisterDNSPlatform` registers a DNS platform: the schema of its values and a `Lower` from records to resources. A target names its default one, and `manual` is reserved for a domain that no DNS platform holds. | DNS as one more `PlatformSpec` kind, whose spec would carry a lowering that only DNS platforms set and a kind that no target places a deployable on |
 | A target also names its provisioner and registers the schema of each resource type its platforms emit. Resolution checks every node against the schema of its type, with references read as strings. | A provisioner chosen per environment; schemas registered per platform, which repeats a type that a platform and a connector share |
 
+### D30, amended: the derived fields, `Deps`, the scaffold and a build ordered by output
+
+Building the derived config fields, the Go `Deps` and the implementation
+scaffold settled what D30 left to the build (`docs/stack-model.md`,
+sections 3.3, 3.4 and 8.5). The server entrypoint, the Dockerfile, and
+`Deps` in TypeScript and Rust are not built.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| What a connector derives has a contract per edge kind, in `ir`. A database connection is a connection string or a Cloud SQL connector configuration (instance connection name, database, IAM user). A service endpoint is a base URL and an optional service credential: one of D37's sources, the settings it reads and the headers that carry it. Resolution refuses a value that breaks the contract. | A free-form value that connectors and loaders agree on in prose |
+| A derived field is one environment variable per member of its value: the field's name, an underscore and the member's path in upper snake case, with a list joined by commas. A platform sets each from an output reference, or from its secret store. | One JSON document per field, which every provisioner would have to render with references inside it, and none of whose members could come from a secret store |
+| The naming file's `[derived_fields]` templates name the fields after the service, `{SERVICE}_DATABASE` and `{SERVICE}_SERVICE` by default, and envgen and the resolver share them. A setting is refused when its name is a derived field's, or begins with it and an underscore. | Refusing only the exact name, which lets a setting take a variable that a member added later would need |
+| Go's `Deps` holds `Config` (the `@envVars` type embedded, and the derived fields), the ORM of the API's database, a Go SDK client per `calls` entry and a zap logger. `Constructor` types `New`. | A `*slog.Logger` beside the zap logger the generated `Config` takes, which gives an implementation two logger types |
+| `build --scaffold` and `build-all --scaffold` write the scaffold until the entrypoint lands. The entrypoint will scaffold each API a stack's servers serve. | Scaffolding on every build, which writes stub packages beside any Go code a tree already has, such as the examples' and the test fixtures', before anything imports them |
+| The build plan orders outputs. A caller's API server builds after each callee's SDK, so two APIs may call each other. The cache keeps one entry per service, and a caller's key adds each callee's key without the callee's own calls. | Ordering whole services and refusing a cycle of calls |
+
 ## D28. No SDK has a method for a `@webhook` operation
 
 `@webhook` marks an operation a third party calls. The Go and TypeScript
@@ -2673,7 +2690,56 @@ and each changes a D16 rule.
 Phases 1, 2 and 3 do not depend on each other; phase 4 needs all three,
 and phase 5 needs phase 4.
 
-Nothing here is built.
+Status: phases 1 to 5 are built, `Branches` last
+(`runtime/engine/README.md`, "Branches"), and so is the Later row. Go
+(package `sqlite` of the Go module, over a `database/sql` seam), Python
+(`superschematic_versiongraph.sqlite`, over the standard library's
+`sqlite3`) and Rust (module `sqlite` of the engine crate, over `rusqlite`
+behind its `rusqlite` feature) each have a SQLite adapter with the
+TypeScript one's layout, stored forms and rules. Every scenario runs on
+SQLite in all four languages, with no server.
+
+Rules settled as the Later row was built:
+
+- **Shared vectors.** Under `runtime/versiongraph/testdata/sqlite` there are:
+  - `layout.json`, the layout's statements;
+  - `typescript.sql`, a database the TypeScript adapter wrote;
+  - `typescript.json`, what it reads back as.
+
+  The TypeScript adapter writes all three. Every adapter's layout equals `layout.json` and reads `typescript.sql` as `typescript.json`. Run with the vectors' seeded ids and fixed clock, every adapter also writes `typescript.sql` byte for byte. That requires each to draw a row's id before a generated entity key, and to read the clock once in creating the tables. So a file one language writes reads the same in every other.
+- **The minimum SQLite.** Every adapter refuses a SQLite older than 3.37.0, for `STRICT`, or one where `json_each` and `json_extract` do not work, which a probe checks. Those functions are built in only from 3.38.0, and a later build can still leave them out.
+- **The time range.** Every adapter refuses a clock or a stored time outside ±(2^53−1) microseconds, the range TypeScript holds exactly.
+- **Transactions per language.** On a connection of its own, an adapter begins with `BEGIN IMMEDIATE`. A transaction inside a caller's transaction is a savepoint, as each language's Postgres binding has one, and only TypeScript's has D16's mode with no transaction control at all.
+- **Per-language settlements:**
+  - Go reads SQLite's extended result code from a driver error's `Code()`, or from a classifier the caller gives; its tests use `modernc.org/sqlite`.
+  - Python recognizes a unique violation by its message before 3.11, and runs on 3.9.
+  - Rust's binding holds its connection behind a mutex and blocks the executor while a statement runs.
+- **A canonical bug found on the way.** Python's canonical rule read a date-time in year 0's first two months as the next day. The canonical vectors now hold every language to it.
+- **CI.** A pull request runs every language's SQLite tests, which need no database.
+
+### D32, amended: Branches as it was built
+
+Building `Branches` settled six points that the entry above left open
+or put otherwise.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each field `ConfigTarget.types` gives for a scalar carries `jsonType`, the JSON type of the scalar's values as the describe document writes a field of it: what the value-class rule needs for a scalar the document defines, which "What D16 gains" did not list. That type comes from the scalar's `json_schema` mapping or its primitive and can say less than its validator holds, or contradict it (a string primitive mapped to `integer` holds no value at all), so `save` and a resolution's value are also held to each column's value class, as the adapter canonicalizes it: 1.5 of a scalar whose JSON type is `integer` passes the validator and is refused there, at its field. A merge or a rebase also holds each entity a resolution's value settled, as the ref then composes it, to its kind's type with `validate(type, value)`, as the `Branches` row has `save` hold a row. | Reading the document's scalar definitions in `parseConfig`, which has no handle on the document |
+| A scalar the document declares under a builtin's name takes the scalar catalog's class, where the `Branches` row gives it the class its JSON type gives. The engine validates such a scalar with the catalog's row, whatever the document declares, as the Go loader fills it in, and `format --to=json` declares every catalog scalar a schema uses, so the row as written would class every catalog scalar by its JSON type. | The document's JSON type, which gives `Identity.UUID` the class `string` |
+| `configChange` decides per kind: removing a kind, or changing its type, parent, order, singleton or a field's unit, is refused. `primary`, `snapshotEvery`, `sweep` and a retention may change, and a unit may be given a field the old type lacked, of which no stored row holds a value. | Refusing every change but a kind's fields and a retention, which freezes the sweep and the primary line's name for good |
+| `discard` refuses an instance's primary line, with the veto `primary_line`: the instance gets no other, so once discarded it would have no live ref to branch from. | Discarding it as the version graph engine allows |
+| `branch`'s `fromRef` is optional: left out, the draft branches from the instance's primary line. An instance created before its schema composed `Branches` gets its primary line at its first write, and every other writing operation names a ref or a commit it has none of, so its first `branch` makes the line, as the caller, and a draft of it, even where `Branches` is the schema's only writing behavior. | Only an update or another behavior's write, a dead end where `Branches` is the only writing behavior; creating each older instance's line in `afterConfigChange`, which the `Branches` rows rule out since it acts for no principal while a ref records its creator; a separate operation that only creates the line |
+| The operation that points the release pointer is `releaseCommit`, where the `Branches` row names `release`: `Lease` already has `release`, and D16 refuses two behaviors on one type that add an operation of one name, so a type could not compose `Branches` with `Lease`. It is the version graph's release under another name, with its parameters, result and refusals; `releases` and `released` keep their names. | Keeping `release`, so no type composes `Branches` with `Lease`; renaming `Lease`'s `release`, the standard term for ending a lease, which `Lease` had first; qualifying operations by behavior, which reverses D16's one namespace of operation names in routes, tools, SDKs and access-policy names |
+
+### D32, amended: a partial row and an absent content column
+
+Two rules settled after the SQLite adapter was built. A human decided
+both on 2026-10-05.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| On an insert, the SQLite adapter stores null for a column the row lacks, other than the role and audit columns the adapter writes itself, whatever default the column has in Postgres's DDL. Postgres applies the column's SQL default, or refuses a `NOT NULL` column without one. So the same partial write can store a different row on each, and the two match exactly for complete rows. The typed facades write complete rows, null where a value is unset, and `Branches` writes every field of its kind's type, null where the value leaves an optional one out. Only a raw engine call with a partial row sees the difference. The later Go, Python and Rust SQLite adapters keep the same rule. | The descriptor carrying each column's nullability and default (a constant, or the transaction's time or a new UUID), which every language's descriptor types and the core would read for an adapter only partial rows need; refusing a partial insert on SQLite, which the scenarios' omitted nullable columns would then have to spell out |
+| The core reads a content column a row lacks as null wherever it compares, merges, diffs or hashes content. After a kind gains a column (added without a `DEFAULT`, which `runtime/versiongraph/README.md` puts outside this rule), history images written before it lack the key while live rows read null, and the core had taken the two for different values. The result was that, in every language, a composed tree and its own head commit could hash differently, a row saved unchanged recorded an update, and a merge could conflict on a column one side never touched. Null fills in for absent rather than nulls dropping out, so no hash over the complete rows Postgres stores changes. Once declared, the new column is content, so a tree reads it as null in every row and hashes afresh: a commit's recorded hash is its tree's hash under the descriptor it was recorded with, and every way of reading one tree (composing a ref, materializing its head) gives one hash. The rows diff and merge return carry every declared content column, null where the input lacked one, since every engine writes them back and an adapter keeps a stored value for a column a written row lacks. Compose returns rows as given. Adapters return history images as stored, as Postgres's does; the SQLite adapter fills only live rows. | Every adapter filling absent columns on read, Postgres's included, after which a commit taken before the column was added no longer materializes to the tree its recorded hash was computed over; leaving the core as it was and recording the cases as a limit of adding a column |
 
 ## D33. The session store reports a revoked session's `DeletedAt`
 
@@ -2806,15 +2872,21 @@ initializer, so `build` loads `fixture-authdb-import`, whose config imports
 
 `checkConfigImports` in `internal/loader/tsreader/config.go` is the rule,
 and `tsreader.ReadServiceIdentity` the read that evaluates only `name` and
-`kind`. `buildplan.EnsureSentinels` is the sweep: `build-all`,
+`kind`. Beside the forms above, it refuses a default import, since a
+sentinel is a named export, and a type-only import of anything but the
+config package, since a handle is a value. Each refusal names the import
+and what it resolves to (a class, an enum, a type, a function, a namespace
+of another module). `buildplan.EnsureSentinels` is the sweep: `build-all`,
 `build --with-deps` and `migrate` run it before discovery, and `build` runs
 it when the target's config imports anything but the config package. The
 acme-shop configs import their handles. `config_imports_test.go` pins each
-form the rule accepts or refuses. The build plan's tests discover a tree
-with no sentinels before and after the sweep, and two APIs that import
-each other's sentinels, which the build plan reports as a cycle of
-`calls`. A CLI test runs each build command on a tree whose imported
-sentinel was deleted.
+form the rule accepts or refuses, with its message. The build plan's tests
+discover a tree with no sentinels before and after the sweep, and two APIs
+that import each other's sentinels, which the build plan reports as a
+cycle of `calls`. CLI tests run each build command on a tree whose
+imported sentinel was deleted, and on a config that imports a schema class
+beside its sentinel, which all three refuse with one message. A handle in
+a schema's body, rather than its config, is D41's.
 
 The rule is reversible until the first release.
 
@@ -2987,6 +3059,253 @@ whether Workers callers present the identity a service binding carries or
 sign key-pair tokens.
 
 Nothing here is built. The design is reversible until the first release.
+
+## D40. A pull request runs the quick tier; main's full run is a release candidate twice a day
+
+Every pull request ran all of `ci.yml`, about 20 minutes, most of it the Go
+tests that compile and run generated modules in four languages. Drafts and
+stacked pull requests ran it on every push, and every merge to `main` ran it
+again.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A pull request runs CI only when it targets `main` and is not a draft. On a draft every job skips and `ci-pass` reports under another name, so the required check stays expected; `ready_for_review` starts the run. A stacked pull request retargeted onto `main` starts its run at its next push, or a close and reopen. | Running drafts and stacked pull requests on every push, which spends a run on unfinished work; listening for `edited` to catch a retarget, which starts a run on every title or body edit, and that run's skipped `ci-pass` replaces the real result |
+| One `ci.yml`, two tiers. The quick tier is the lints, the drift checks, `go test -short`, the runtimes' and the version graph's own test suites and the docs build. The full tier adds the Go tests without `-short`, the CLI smoke, the acme job, `examples/engine-notes` and the version-graph scenarios through every engine. For a Go test, `testing.Short()` draws the line: a test that compiles or runs a generated module skips under `-short`. | A second workflow for the full tier, which repeats every job's setup; path filters that wake the full tier per change, which nearly every generator change would trip |
+| Merges to `main` run no CI. `release-candidate.yml` dispatches `release.yml`'s dry run on `main` at 06:00 and 18:00 UTC unless the head already passed one: the full tier, the four platform builds and the assembled release set. It cuts no tag and publishes nothing. A red candidate opens an issue that the next green one closes. | CI on every merge, which repeats the pull request's run; a `vX.Y.Z-rc.N` tag per candidate, which would publish to npm's `next` dist-tag |
+| CodeQL analyzes `main`, on every push and weekly (`codeql.yml`), and not pull requests: the ruleset requires no code-scanning result, so a pull request scan gates nothing. Code scanning's default setup stays disabled, since it rejects a workflow's results while enabled. | Default setup, which analyzes every pull request and cannot be told not to; a weekly scan alone, which leaves a merged alert unreported for up to a week |
+| Every job stays on GitHub-hosted runners, which cost nothing on a public repository. | A paid runner provider such as Blacksmith: faster and wider, but paid by the minute where GitHub's are free |
+| `main`'s ruleset, declared outside this repository with the maintainers' other repository settings, asks for one approval and a green `ci-pass`. An approval from an agent or a bot counts: code-owner review is off. Approvals survive a push, review threads need not be resolved and the branch need not be up to date. | Requiring an up-to-date branch, which made merging serial at a full run each; dismissing approvals on push, which made every follow-up push need a new one |
+
+The cost is that a change which breaks only the full tier merges, and `main`
+is red until its next candidate reports it, up to twelve hours later.
+CONTRIBUTING.md lists the full-tier checks to run before pushing a change
+they cover.
+
+## D41. A handle in a schema's decorator argument is a cache edge, not a build-order edge
+
+D34 lets a config import a sibling's sentinel. A schema file can import
+one too and pass it to a decorator: the Stack kind's `@stack({ deploy })`
+and `@environment({ settings: [{ of }] })` (`docs/stack-model.md` section
+4.1), and D37's `@requireService({ from })`. Section 12 of the stack model
+planned build-order edges from the handles a schema references, so a stack
+need not restate them in `dependencies`. Nothing recorded such a handle:
+the build cache keyed a service on its own tree, its `authDb` and its
+`dependencies`, so a stack's output would stay cached when an API it
+deploys changed. D37 needs the opposite for `from`, a handle that names a
+caller and must not order the build, since two APIs may name each other.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A service handle in a decorator argument references its service. The TypeScript reader records each one it evaluates in `ir.Schema.References`, sorted and once each, leaving out the schema itself. | Requiring the referenced service in `dependencies` as well, which restates every handle in the config, and which `validateDependencyKinds` refuses for a service that emits no packages |
+| A reference is a cache edge and not a build-order edge. What reads it is the referencing service's own build: a stack's resolution reads the referenced services' IR and configs, which the build loads from their sources, and no generated output of theirs. Sentinels are swept before discovery (D34), so the import resolves without building the service. Two services may reference each other, and `build --with-deps` builds neither for the other. | A build-order edge, as section 12 planned: it orders a build that reads no output, makes two services that name each other a cycle, and pulls every deployed API into a stack's `--with-deps` closure |
+| The input hash of a referencing service covers the tree digest of the referenced service and of every service its config reaches through `dependencies`, `authDb` and `calls`: what a stack's resolution reads, as section 4.1 joins those services to a stack. The walk collects a set, so references between services that reach each other digest without a cycle. A name no discovered service has digests as missing, so a rename changes the hash. | The referenced service's Merkle hash, which exists only once that service has been hashed, an order again, and leaves out `calls`, which no output read until now (section 3.3) and which resolution reads; the referenced service's tree alone, which misses an edit to the database its API authenticates against |
+| A decorator declares where its argument holds handles that only name a service: `DecoratorSpec.Identities`, paths of object keys (`"from"`, `"settings.of"`), a list on the way read element by element. A handle there is an identity, not a reference. An identity reads only the name and kind its sentinel holds, so the hash covers that file (`ir.Schema.IdentitySentinels`) and nothing else of the service: an edit to the service leaves the namer cached, and a rename does not. D37's `@requireService` and `@allowService` are to declare `from` when they land. | One flag per decorator, which a decorator that holds both kinds of handle cannot use; an identity that keys nothing, which keeps a schema's output naming a sibling by its old name after a rename; a marker in the handle's TypeScript type, which the data forms cannot see |
+| Discovery reads configs, not schemas, so a build persists its references and identity sentinels to `<schemas-root>/dist/.schema-references/<service>.json`, and the next hash reads it, as the authoring imports do. A new reference can only appear by editing a file the service's own tree digest covers, and a fresh worktree rebuilds a referencing service once. | Loading every schema at discovery to find its references, which costs a program per service before anything builds |
+| The data forms state their references in a top-level `references` list of `{name, kind}`, as they state `imports`, and the JSON Schema closes its kinds to the registered ones. The writer puts the list on the first document. A data form names an identity in a string, so it has no identity sentinels. | Finding handles in a data form's decorator arguments, where a handle is `{name, kind}`, a shape an argument may hold for other reasons, and where a core decorator, written as a typed IR field, never reaches the registry |
+
+`recordHandles` in `internal/loader/tsreader/walker.go` records the
+handles after a decorator applies. `buildcache.WriteSchemaReferences`
+writes the depfile, which `buildService` writes after every build, and
+`InputHasher.Recompute` reads it. `references_test.go` in `registrytest`
+loads a schema whose `@meta` references two services, one through an
+imported sentinel and one through `service({...})`, and whose `@admits`
+names a third under its identity path, in TypeScript, JSON and YAML and
+through the writer, to the same IR. The build cache's tests change a
+referenced service, the services its config reaches and an unrelated one;
+an identity's service and its sentinel; and two services that reference
+each other. A CLI test runs `build-all --cache` twice over a tree where one
+service references fixture-db, another names it as an identity, and two
+more name each other as identities, then edits fixture-db and one of the
+pair: only the referencing service and the edited ones rebuild.
+
+A kind whose schema files import sentinels sets
+`KindSpec.ImportsSiblingSentinels`, so a plain `build` sweeps first; for
+any other kind, `build` relies on the sentinel being on disk, as for a
+class imported from a sibling. If an output ever compiles against a
+referenced service's generated code, such as an entrypoint that imports a
+served API's package, that output needs a build-order edge, which nothing
+here gives.
+
+The rule is reversible until the first release.
+### D14, amended: a nested object of a dependency's type is checked by that dependency's validator
+
+The Go and Python validators check a field whose type a dependency
+declares, such as acme-shop's `PlaceOrderInput.shippingAddress`, a
+`ShippingAddress` of shop-db, with the dependency's own validator, and
+report its errors under the field. The generated TypeScript and Rust
+validators checked only a nested type of their own package or crate. So
+the TypeScript and Rust servers accepted a shipping address whose
+`country` the Go server refuses, and a TypeScript date-time field of such
+a type stayed a string after parsing.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field, list element or map value of an object type a dependency declares is checked by that dependency's generated validator in the TypeScript and Rust validators, as in Go and Python. Its errors sit under the field's path. TypeScript imports `validate<Type>` (`validate<Type>Required` in a `@strictJSON` type) and `parse<Type>FromJSON` from the dependency package's `validators`, so the nested value is parsed too. Rust calls the dependency crate's `validators::validate_<type>`. | Copying the dependency's validators into each package, where two copies of one rule could drift |
+| A dependency type its package generates without validators stays unchecked, as before: one whose role is not a table, a view, an embedded struct or an input. | |
+
+`TestANestedDependencyObjectIsValidated` builds the dependency-types
+fixture in every language. It checks that the Rust and TypeScript
+validators of shop-orders' `OrderView` report a wrong `amount` and an
+unknown `currency` under `total`, a shop-common `Money`, and pass a valid
+one. Both checks fail without the change.
+
+## D42. A refused input is one problem on every server
+
+The three servers refused an input body three ways:
+
+- **Go:** "Validation Failed", code `WA-VL-001`, with the field errors. A
+  body that failed to decode, such as a number for a string, was "Invalid
+  request body" with no field errors, and null was "input is required".
+  An undeclared key passed silently.
+- **TypeScript:** "Request body does not match the declared input",
+  without the reason or the field errors.
+- **Rust (D39):** the TypeScript detail with `details` and `errors`.
+
+An SDK that read one server's refusal misread another's, and a Go caller
+learned only from a TypeScript or Rust server that a key was undeclared.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every server refuses an input body with code `bad_request`, titled as its status ("Bad Request"). A missing body is "Request body is required" and one that is not JSON "Request body is not valid JSON". A body the input type refuses is "Request body does not match the declared input", with `details: {location: "body", reason}`. The reason is `expected an object`, `unknown fields: a, b`, `validation failed` or `does not match the declared type`. An undeclared key and a broken rule also put their field errors in the top-level `errors`, keyed by path. | Go's `WA-VL-001` and "Validation Failed", an application code no other server or SDK knew |
+| The Go server refuses a top-level key the input type does not declare, as the TypeScript and Rust servers do: `unknown` at the key, in the order the body holds them. Each generated Go type lists its keys (`JSONFieldNames`), and the runtime's `bodyargs.ReadInput` reads the body and makes the checks before the type decodes it. A nested object's undeclared keys still pass, unless its type is `@strictJSON`. | Accepting them, where a misspelt optional field is lost without a word |
+| The TypeScript parsers throw a `ParseError` with the reason and the field errors, exported from each types package's `validators`. The router copies both into the 400; its message stays as it was. | Parsing the parser's message, which carries the errors only as text |
+| The Go route's other validation refusals, of a parameter or a body argument, keep their field errors and detail. Their title becomes "Bad Request" and their code `bad_request` too. | |
+
+`bodyargs.ReadInput`, `response.LoggedInputRefusal`, the TypeScript
+runtime's input refusal and the generated TypeScript router have tests of
+the shape. The generated Go route test (`raw_body_check_routes_test.go`)
+checks a body that fails to decode, null, an empty body and two
+undeclared keys. A Go caller sending an undeclared key now gets a 400
+where it was ignored.
+
+The rule is reversible until the first release.
+
+## D43. An in-process caller runs a Rust operation by its route's rules
+
+D39 gave each operation of a Rust API a typed `Args` struct and result, so
+a Rust caller in the same process (a server-rendered page, a job, the
+Topcoat extension's crate) can call the implementation directly. The
+route's checks ran only in the router, though: the caller, its
+permissions, and each argument's rules. A direct caller had to restate
+them, and could drift from the route.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each `Args` struct has `check()`. It runs the router's `ParamSpec` of each argument on the argument's JSON (`ParamSpec::check_value`), at the argument's location, and the input type's `prepare_<type>` with undeclared keys refused (`check_input`). A refusal is the 400 the router answers a request carrying the same values. | A second set of validators written for typed values, which would drift from the router's; validating only the input, where a list bound or a scalar's rule of an argument is the route's too |
+| The crate's `operations` module declares an `OperationInfo` per operation, manual ones included: its route, whether it needs a caller, its `@requirePermission` list, `@requireOwnership` and `@manualRouteRegistration`. `OperationInfo::admit` admits a caller by the route's rule, shared with `RouteControls::authorize` through the runtime's `admit`: 401 without one, 403 when `Authenticator::permits` refuses. `OperationInfo::context` builds the `RequestContext` the route would. | Each caller reading the auth rules from the schema itself, or the extension writing them into its own crate |
+| `ApiError` implements `Display` and `std::error::Error`, as `403 forbidden: Insufficient permissions`, so `?` carries it into a caller's own error type. The crate re-exports the runtime as `runtime`, so a crate built on it shares one version of it. | |
+| An extension reads the crate as the `api` generator builds it through `registry.RustAPIOf`, with its records aliased as `RustAPI`, `RustEndpoint`, `RustParam` and `RustInput`, and its directory through `registry.APIDir`. | Recomputing the endpoints in the extension from the IR, which would repeat rustrestgen's naming and typing |
+
+The router is unchanged: it keeps decoding what a request carries, and a
+request never reaches `check()`. A cargo test on fixture-api's crate
+(`operation_check_test.go`) compares `check()`'s refusal with the router's
+problem for a query list over its bound and an input that breaks its
+type's rule, and runs an operation in-process through `admit`, `check`
+and `context`. Serializing the arguments again costs a caller what the
+router spends decoding a request.
+
+## D44. A Topcoat app reaches a Rust API through a crate of its own, written by an extension
+
+[Topcoat](https://github.com/tokio-rs/topcoat) is a Rust web framework for
+server-rendered pages. Its pages, shards and procedures run in the same
+process as a service's Rust implementations, and it leaves validation and
+authentication to the app. A Rust API already has both, per route (D39,
+D43). A Topcoat app built on such an API would restate them for each page.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `extensions/topcoat` writes, for an API service with `outputs.topcoat`, a crate at `<out>/topcoat/<service>` that a Topcoat app depends on. It is a Go module of its own, like `extensions/gcp` and `extensions/pulumi`, and the core binary does not link it: a binary that wants it passes `topcoat.Extension{}` to `cli.New`. | Linking it into `cmd/superschematic`, which would break the core-only binary's promise (`docs/extension-model.md`, goal 2) for a framework still before 1.0; a core generator beside rustrestgen |
+| The crate needs the Rust server. A service whose server is in another language skips the output with its reason, so one config serves a Go build and `build --api-language RUST`. | Refusing the config, which would fail every build of a service that is Go by default |
+| `RouterBuilder<Service>Ext::<service>(implementations, page_authenticator)` keeps the implementations in the app context and mounts the JSON API (`build_router`) at `/api/{*rest}`. A `PageAuthenticator` establishes a page's caller, from the app's session say, and is asked only when an operation needs a caller. The API's `Authenticator` still decides permissions, so a page and the JSON API admit the same callers. | A middleware that authenticates every page; a second permission rule for pages |
+| `operations::<ns>_<op>(cx, args)` runs an operation as its route does: `OperationInfo::admit`, `Args::check`, then the implementation with `OperationInfo::context`. `can_<ns>_<op>(cx)` admits the caller alone, for every operation, manual ones included. A refusal is the route's `ApiError`, which `?` carries into `topcoat::Error`. | A page calling the implementation directly, or the JSON API over HTTP from its own process |
+| A Topcoat record mirrors each object type an operation returns, and the types it nests, as the API sends it. It is built from the type's JSON, not its Rust fields. A string scalar, a UUID, a timestamp and an enum are their JSON strings, an integer scalar `i64`, a number `f64`, a map its entries, and a union or any JSON value its JSON text. `@uiHidden` fields are left out, since a record reaches the browser, and a field whose name a record reserves gets a trailing underscore. | Records of the Rust types, which hold UUIDs, timestamps, maps and enums that a record cannot; mirroring input types too |
+
+The crate is tested in the extension's module. Goldens cover fixture-api
+(operations needing callers) and fixture-nested-arrays-api (none, and
+records in lists of lists). For each, cargo clippy with warnings denied,
+then a Topcoat app driven through `Router::handle`. In fixture-api's app,
+pages call an operation in-process and render its 401, 403, the router's
+400 and its result, a guard admits a reader, and the JSON API answers
+under `/api`.
+
+Forms over input types and procedure wrappers follow, in their own
+changes. The crate pins Topcoat 0.10, which needs Rust 1.98, within the
+toolchain's 1.99.
+
+### D44, amended: a form per input type a form holds
+
+A Topcoat form posts flat, urlencoded fields, and Topcoat does not
+validate them. An operation's input type already has rules (D14), and the
+same rules give the HTML attributes a browser checks first.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An input type whose fields are each a string, a number, a boolean or an enum, alone, and which the service itself declares, gets `forms::<Input>Form`. The form holds every field as an `Option<String>`, so a refused form renders again as sent. Any other input type gets none, with the build log's reason. | Nested names (`lines[0].quantity`) for lists and objects, which Topcoat's `Form<T>` does not decode; typed fields, which would refuse a mistyped number before its field error could be shown |
+| `parse()` writes each field as the input's JSON (a whole number or a number parsed, a checkbox true when sent) and runs the generated `parse_<type>` with undeclared keys refused. Its errors, and an operation's refusal through `FormErrors::from_api`, are messages by field. | Rules restated in the form; validating only in the browser |
+| `<input>_fields(form, errors)` renders each field: its label (the `@docs` title or its name in words), its input type, and `required`, `min`/`max`, `minlength`/`maxlength` and `pattern` from the field's rules and its scalar's. A pattern is written only when a browser, which reads it anchored with the `v` flag, reads it as the server does, and never on an email or URL input, which checks its own syntax. An enum is a `<select>`, and an `@uiHidden` field is in the struct but not rendered. | Writing every pattern, where a browser refuses a pattern the `v` flag forbids (a class ending in `-`, as `Contact.Email`'s does) |
+
+The extension's fixture `fixture-forms-api`, a YAML schema, has an input
+of every kind a field takes, and one that holds a list. Its cargo test
+drives a Topcoat app: the form renders its rules as attributes, a post
+that breaks a rule or that the operation refuses renders again with 422,
+the values as sent and each field's errors, and a valid post signs up
+and redirects.
+
+### D44, amended: a procedure per operation, its refusal a record
+
+Browser code calls a server function through a Topcoat procedure. An
+`Err` from a procedure reaches the browser as a bare 500, so a 400's field
+errors, a 401 or a 403 would be lost there.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each mounted operation is a `#[procedure]` on `/_superschematic/<service>/<namespace>/<operation>`, a path that does not change with the build, registered by the app's `.discover()`. | Topcoat's default path, a hash of the item that changes when it moves; registering in `<service>(...)`, which panics beside `.discover()` |
+| The procedure takes `<Op>ArgsRecord`, a field per argument by its IR type (as records hold it) and the input as its type's record. It answers `Ok(Result<OutputRecord, ProblemRecord>)`: the route's status, code, detail and each refused field's path, rule and message, as data. | Typed arguments, which a record cannot hold (UUIDs, timestamps, maps); an `Err`, which the browser cannot read |
+| `to_args()` writes each record field as the JSON a request carries and decodes it into the `Args` struct, so a value that does not decode is the router's 400. The operation then runs in-process (D43). `call_<operation>` is the body as a plain function, which Rust code and tests call, since Topcoat turns a procedure into a unit struct. | Testing through Topcoat's wire format, which is private |
+| Every record gains `to_wire`, and the records cover the types a procedure's arguments name, inputs included. `procedures` needs records, so `records: false` leaves out both. | |
+
+A cargo test drives fixture-api's app with `.discover()`. A procedure body
+answers its result, a 401, an input's `name:minLength` refusal and a UUID
+that does not parse (`id:type`) as records. The discovered procedure path
+refuses a body that is not its JSON (400) and a GET (405), where an
+unknown path is 404.
+
+### D44, amended: superschematic.toml lists a project's Topcoat services, and acme-shop has a Topcoat app
+
+A binary that does not link the extension refuses `outputs.topcoat` in a
+config, as it refuses any outputs key no generator claims. The acme shop
+builds every service with the core binary, so its shop-orders config could
+not carry the key.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `[extension.topcoat] services = [...]` in `superschematic.toml` turns the crate on for the services it lists, with every default, as `outputs.topcoat: { enabled: true }` would. The core binary never reads an extension's table (section 3.11), so the same configs build with it. `outputs.topcoat` in a config still wins, and the table refuses a key it does not declare. | Building every service with the extension's binary, which would make the core-only example depend on an extension; a second copy of the config |
+| `extensions/topcoat/cmd/superschematic-topcoat` is the core with the extension linked, `cli.New(..., topcoat.Extension{})` and nothing else. | Asking each project to write the ten lines first |
+| acme-shop's `rust-server` becomes a library (`Shop`, `Tokens`, `implementations`) with its binary. `examples/acme-shop/topcoat` is a Topcoat app over the same implementations. It has a session sign-in and a `PageAuthenticator` over it, a reviews page that renders the reviews through a shard of their records, the form `WriteReviewInput` gives, and the 422 a refused review renders, an orders page behind `orders.read`, and the JSON API mounted at `/api`. `check.sh` builds `schemas/dist-rust` again with `superschematic-topcoat` after the core binary's build, then runs the app's tests through `Router::handle`. | A second copy of the implementations in the app |
+
+The docs site's [Pages with Topcoat](/superschematic/guides/topcoat/)
+guide quotes the app.
+### D41, amended: a stack's typed declarations give its references in every form
+
+The Stack kind writes `@stack`, `@server`, `@database` and `@environment`
+in the data forms as typed `TypeDef` fields (`Stack`, `Server`,
+`Database`, `Environment`), not as decorator arguments, so a YAML stack's
+handles never passed through D41's recording. The TypeScript form recorded
+them; the YAML form would have had to restate each one in `references`.
+Until D41 merged, a stack's config also listed every service the stack
+reaches in `dependencies`, so that a change to one rebuilt the stack.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The loader adds the handles a Stack schema's declarations hold to its references, in every form, once the schema verifies: `@stack`'s `deploy` and exposed handles, `@server`'s `serves`, `@database`'s `hosts` and each settings element's `of` (`ir.StackReferences`). A data-form stack states no `references` list, and a stack's config lists no `dependencies`: the cache key follows the references and the services their configs reach. | A `references` list in every data-form stack, which restates each handle the declarations already hold; keeping the config's `dependencies`, which also orders every reached service before the stack, an order the stack's build does not need |
+
+`runVerify` in `internal/loader/loader.go` adds them.
+`TestAStacksReferencesAreTheServicesItNames` loads the stack in TypeScript
+and YAML with no `dependencies` and gets the same three references, and
+`TestAStacksCacheKeyFollowsTheServicesItReaches` changes each service the
+stack reaches after the stack's depfile is written, as a build writes it.
+The stackgen fixtures and the sketch in section 4.1 of
+`docs/stack-model.md` no longer list `dependencies`.
 
 ### D37, amended: what building it settled
 

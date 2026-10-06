@@ -355,7 +355,7 @@ func TestCheckExposeNotServer(t *testing.T) {
 	s, services := shop()
 	s.Expose = append(s.Expose, stacktest.Of(stacktest.ShopDB))
 	_, errs := resolve(t, reg, s, services, "Staging")
-	mustFail(t, errs, stack.CodeExposeNotServer, "stack Shop exposes shop-db, a database; only a server is exposed")
+	mustFail(t, errs, stack.CodeExposeNotServer, "stack shop-stack exposes shop-db, a database; only a server is exposed")
 }
 
 func TestCheckPolicy(t *testing.T) {
@@ -493,8 +493,8 @@ func TestUnknownDeployable(t *testing.T) {
 		&ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-storefront", Kind: ir.SchemaKindAPI}}},
 	)
 	_, errs := resolve(t, reg, s, services, "Staging")
-	mustFail(t, errs, stack.CodeUnknownDeployable, "names deployable Checkout, which stack Shop does not declare")
-	mustFail(t, errs, stack.CodeUnknownDeployable, "names service shop-storefront, which is not in stack Shop")
+	mustFail(t, errs, stack.CodeUnknownDeployable, "names deployable Checkout, which stack shop-stack does not declare")
+	mustFail(t, errs, stack.CodeUnknownDeployable, "names service shop-storefront, which is not in stack shop-stack")
 }
 
 func TestTargetValuesAndPlatforms(t *testing.T) {
@@ -569,8 +569,43 @@ func TestFieldCollision(t *testing.T) {
 		cfg := service(services, "shop-api").Config
 		cfg.Fields = append(cfg.Fields, stack.ConfigField{Name: "SHOP_DB_DATABASE"})
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeFieldCollision, "server shop-api: config field SHOP_DB_DATABASE of ShopApiConfig has the name of the field edge sql:shop-api->shop-db derives")
+		mustFail(t, errs, stack.CodeFieldCollision, "server shop-api: config field SHOP_DB_DATABASE of ShopApiConfig collides with SHOP_DB_DATABASE, the field edge sql:shop-api->shop-db derives")
 	})
+	t.Run("a config field with one of a derived field's variables", func(t *testing.T) {
+		s, services := shop()
+		cfg := service(services, "shop-api").Config
+		cfg.Fields = append(cfg.Fields, stack.ConfigField{Name: "SHOP_DB_DATABASE_URL"})
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeFieldCollision, "server shop-api: config field SHOP_DB_DATABASE_URL of ShopApiConfig collides with SHOP_DB_DATABASE")
+	})
+}
+
+// TestFieldNamesFromTheNamingFile: Input.FieldNames names the derived
+// fields, and a template that names no service is refused.
+func TestFieldNamesFromTheNamingFile(t *testing.T) {
+	reg := assemble(t)
+	s, services := shop()
+	in := stack.Input{Stack: s, Services: services, Environment: "Staging",
+		FieldNames: ir.DerivedFieldNames{Database: "{SERVICE}_DB_URL", Service: "{SERVICE}_ENDPOINT"}}
+	env, err := stack.Resolve(reg, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields []string
+	for _, e := range env.Edges {
+		fields = append(fields, e.Field)
+	}
+	if got, want := strings.Join(fields, ","), "SHOP_API_ENDPOINT,SHOP_DB_DB_URL,SHOP_DB_DB_URL"; got != want {
+		t.Errorf("edge fields = %s, want %s", got, want)
+	}
+
+	in.FieldNames = ir.DerivedFieldNames{Service: "ENDPOINT"}
+	_, err = stack.Resolve(reg, in)
+	var errs *stack.Errors
+	if !errors.As(err, &errs) {
+		t.Fatalf("resolve with a template naming no service: %v", err)
+	}
+	mustFail(t, errs, stack.CodeInvalidStack, "derived_fields.service \"ENDPOINT\" must contain {SERVICE} once")
 }
 
 // TestDerivedFieldCollision: two edges of one server whose services' names
@@ -624,11 +659,11 @@ func TestInvalidStack(t *testing.T) {
 		{"unknown environment", func(s *ir.Stack, sv []stack.Service) []stack.Service {
 			s.Environments = s.Environments[1:]
 			return sv
-		}, "stack Shop has no environment Staging"},
+		}, "stack shop-stack has no environment Staging"},
 		{"unknown parent", func(s *ir.Stack, sv []stack.Service) []stack.Service {
 			s.Environments[0].Extends = "Base"
 			return sv
-		}, "environment Staging extends Base, which stack Shop does not declare"},
+		}, "environment Staging extends Base, which stack shop-stack does not declare"},
 		{"extends cycle", func(s *ir.Stack, sv []stack.Service) []stack.Service {
 			s.Environments[0].Extends = "Preview"
 			return sv
@@ -838,11 +873,16 @@ type broken struct {
 	name    any
 	address any
 	policy  func(*ir.ResolvedEnvironment) []string
+	// connection is what broken.sql derives; nil is a connection string.
+	connection any
 }
 
 func (*broken) Name() string { return "broken" }
 func (b *broken) Register(r *registry.Registry) error {
-	address, name := b.address, b.name
+	address, name, connection := b.address, b.name, b.connection
+	if connection == nil {
+		connection = ir.DatabaseConnection{URL: "postgres://shop-db:5432/shop_db"}
+	}
 	if address == nil {
 		address = "https://shop-api"
 	}
@@ -873,7 +913,7 @@ func (b *broken) Register(r *registry.Registry) error {
 	if err := r.RegisterConnector(registry.ConnectorSpec{
 		Name: "broken.sql", Edge: ir.EdgeSQL, From: "broken.run", To: "broken.sql",
 		Connect: func(registry.ConnectorContext) (registry.Connected, error) {
-			return registry.Connected{Value: "db", Resources: []*ir.Resource{{ID: "conflict", Type: "broken:thing", Properties: map[string]any{"size": float64(2)}}}}, nil
+			return registry.Connected{Value: connection, Resources: []*ir.Resource{{ID: "conflict", Type: "broken:thing", Properties: map[string]any{"size": float64(2)}}}}, nil
 		},
 	}); err != nil {
 		return err
@@ -1014,6 +1054,28 @@ func TestLoweringErrors(t *testing.T) {
 	}})
 	_, errs = resolve(t, reg, s, services, "Parent")
 	mustFail(t, errs, stack.CodeLowering, "platform broken.run returned DNS records for shop-api, which is not exposed")
+}
+
+// TestDerivedValueContract: a connector's value that is no database
+// connection is a lowering failure that names the member at fault, and
+// the free-form values connectors returned before the contract are
+// refused.
+func TestDerivedValueContract(t *testing.T) {
+	s, services := brokenStack()
+	for _, tc := range []struct {
+		connection any
+		want       string
+	}{
+		{"postgres://shop-db:5432/shop_db", `a database connection must be an object, not "postgres://shop-db:5432/shop_db"`},
+		{map[string]any{"instance": "shop-db:5432", "database": "shop_db"}, "a database connection has no member database"},
+		{ir.DatabaseConnection{CloudSQL: &ir.CloudSQLConnection{Instance: "acme:us:shop", Database: "shop_db"}}, "cloudSql.user is null"},
+	} {
+		reg := assemble(t, &broken{connection: tc.connection, lower: func(registry.PlatformContext) (registry.Lowered, error) {
+			return registry.Lowered{}, nil
+		}})
+		_, errs := resolve(t, reg, s, services, "Parent")
+		mustFail(t, errs, stack.CodeLowering, "connector broken.sql on edge sql:shop-api->shop-db derives a value for SHOP_DB_DATABASE that is no database connection (ir.DatabaseConnection): "+tc.want)
+	}
 }
 
 // TestParentResolvesForInheritedNodes: the inherited nodes of a member of

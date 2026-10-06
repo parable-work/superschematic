@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
 	"github.com/parable-work/superschematic/runtime/schema/go/validate"
@@ -34,6 +35,18 @@ type validationProblemDetail struct {
 	problemDetail
 	Errors validate.ValidationErrors `json:"errors"`
 }
+
+// inputProblemDetail is the problem of a refused input body: details says
+// where and why, and errors holds the field errors, when there are any.
+type inputProblemDetail struct {
+	problemDetail
+	Details any                       `json:"details,omitempty"`
+	Errors  validate.ValidationErrors `json:"errors,omitempty"`
+}
+
+// ValidationCode is the code of a request a route's validation refuses,
+// the bad_request every generated server, Go, TypeScript and Rust, sends.
+const ValidationCode = "bad_request"
 
 // filterProblemDetail extends problemDetail with filter-level parse errors.
 type filterProblemDetail struct {
@@ -145,18 +158,21 @@ func LoggedError(w http.ResponseWriter, r *http.Request, status int, message str
 	writeProblemJSON(w, d, status)
 }
 
-// ValidationErrors sends an RFC 9457 Problem Details validation error response.
+// ValidationErrors sends an RFC 9457 Problem Details validation error
+// response: 400, titled as its status, with the field errors in errors and
+// ValidationCode unless errorCode names another code.
 func ValidationErrors(w http.ResponseWriter, errors validate.ValidationErrors, errorCode ...string) {
 	d := validationProblemDetail{
 		problemDetail: problemDetail{
 			Type:   "about:blank",
-			Title:  "Validation Failed",
+			Title:  http.StatusText(http.StatusBadRequest),
 			Status: http.StatusBadRequest,
 			Detail: "Validation failed",
+			Code:   ValidationCode,
 		},
 		Errors: errors,
 	}
-	if len(errorCode) > 0 {
+	if len(errorCode) > 0 && errorCode[0] != "" {
 		d.Code = errorCode[0]
 	}
 	writeProblemJSON(w, d, http.StatusBadRequest)
@@ -179,15 +195,47 @@ func LoggedValidationErrors(w http.ResponseWriter, r *http.Request, errors valid
 	d := validationProblemDetail{
 		problemDetail: problemDetail{
 			Type:      "about:blank",
-			Title:     "Validation Failed",
+			Title:     http.StatusText(http.StatusBadRequest),
 			Status:    http.StatusBadRequest,
 			Detail:    "Validation failed",
+			Code:      ValidationCode,
 			RequestID: chimiddleware.GetReqID(r.Context()),
 		},
 		Errors: errors,
 	}
-	if len(errorCode) > 0 {
+	if len(errorCode) > 0 && errorCode[0] != "" {
 		d.Code = errorCode[0]
+	}
+	writeProblemJSON(w, d, http.StatusBadRequest)
+}
+
+// LoggedInputRefusal logs and writes the 400 of a refused input body, the
+// problem every generated server sends: code bad_request, the refusal's
+// detail, and for a body the input type refuses details {location: "body",
+// reason} and the field errors in errors.
+func LoggedInputRefusal(w http.ResponseWriter, r *http.Request, refusal *bodyargs.InputRefusal) {
+	logger := requestctx.LoggerFromContext(r.Context())
+	logger.Warn("http input refusal",
+		zap.Int("status", http.StatusBadRequest),
+		zap.String("error", refusal.Detail),
+		zap.String("reason", refusal.Reason),
+		zap.Int("validation_error_count", len(refusal.Errors)),
+	)
+	d := inputProblemDetail{
+		problemDetail: problemDetail{
+			Type:      "about:blank",
+			Title:     http.StatusText(http.StatusBadRequest),
+			Status:    http.StatusBadRequest,
+			Detail:    refusal.Detail,
+			Code:      ValidationCode,
+			RequestID: chimiddleware.GetReqID(r.Context()),
+		},
+	}
+	if refusal.Reason != "" {
+		d.Details = map[string]string{"location": "body", "reason": refusal.Reason}
+	}
+	if refusal.Errors.HasErrors() {
+		d.Errors = refusal.Errors
 	}
 	writeProblemJSON(w, d, http.StatusBadRequest)
 }

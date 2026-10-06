@@ -36,6 +36,8 @@ var templatesFS embed.FS
 //	├── errors.go       # Error shims over superschematic-http-runtime
 //	├── response.go     # Response shims over superschematic-http-runtime
 //	├── context.go      # Request context shims
+//	├── deps.go         # Deps and the implementation's Constructor
+//	├── config.go       # EnvConfig and its loader (settings or derived fields)
 //	├── constants.go    # SystemUserID (public schemas with a UUID scalar)
 //	└── fileupload.go   # Multipart upload helpers (only with file uploads)
 func WriteAPI(output *APIOutput, outputDir string) error {
@@ -77,6 +79,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{"errors.tmpl", "errors.go"},
 		{"response.tmpl", "response.go"},
 		{"context.tmpl", "context.go"},
+		{"deps.tmpl", "deps.go"},
 	}
 	staticTasks := make([]func() error, 0, len(staticFiles))
 	for _, file := range staticFiles {
@@ -201,7 +204,7 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 	if output.PtrReplacePath, err = naming.RelPath(outputDir, paths.Ptr); err != nil {
 		return fmt.Errorf("ptr replace path: %w", err)
 	}
-	if output.IsPublic && output.UpstreamVersionGraph {
+	if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 		if output.VersionGraphReplacePath, err = naming.RelPath(outputDir, paths.VersionGraphGo); err != nil {
 			return fmt.Errorf("version-graph binding replace path: %w", err)
 		}

@@ -25,8 +25,9 @@ From the repository root, after `make setup`:
 examples/engine-notes/scripts/check.sh
 ```
 
-It builds the schema runtime, the HTTP runtime and the engine, links them
-into `node_modules`, type-checks the example, and runs
+It builds the schema runtime, the HTTP runtime, the version graph (which
+needs cargo and the `wasm32-unknown-unknown` target) and the engine, links
+them into `node_modules`, type-checks the example, and runs
 `test/notes.test.ts` with `node --test` and with `bun test`, each serving
 the example on a free port. The `typescript` job in
 `.github/workflows/ci.yml` runs it after the engine's own tests, and so
@@ -68,8 +69,8 @@ starting.
 `hono`, `@hono/node-server`, `@modelcontextprotocol/client`, TypeScript and
 the Node.js types from the engine's `node_modules`, so the engine, the HTTP
 runtime and the example share one Hono at the version the engine pins. The
-engine's build links the schema runtime, the HTTP runtime, the schema IR
-and superscalar into the engine's own `node_modules`. Once the packages
+engine's build links the schema runtime, the HTTP runtime, the schema IR,
+the version graph and superscalar into the engine's own `node_modules`. Once the packages
 are published, a project declares `@superschematic/engine`, the four
 packages the engine README ("Runtimes") names, `hono` and
 `@modelcontextprotocol/server` for the `./http` and `./mcp` entry points,

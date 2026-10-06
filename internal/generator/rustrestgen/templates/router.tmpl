@@ -20,9 +20,10 @@ use axum::Extension;
 use axum::Router;
 use {{ .RuntimeCrateIdent }}::schema::{self, Pattern};
 use {{ .RuntimeCrateIdent }}::{
-    body_fields, error_response, input, json_body, openapi_router, operation_response,
-    path_is_percent_encoded, query_values, request_id_from_headers, request_ids, required_input,
-    ApiError, ParamKind, ParamSpec, QueryValues, RequestContext, RouterOptions, ScalarConstraints,
+    body_fields, check_input, error_response, input, json_body, openapi_router,
+    operation_response, path_is_percent_encoded, query_values, request_id_from_headers,
+    request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
+    RequestContext, RouterOptions, ScalarConstraints,
 };
 {{- if .HasAuth }}
 use {{ .RuntimeCrateIdent }}::Principal;
@@ -123,7 +124,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
 {{- range .Endpoints }}
-{{- $route := printf "%s(handle_%s_%s)" .Method (toSnakeCase .Namespace) .FunctionName }}
+{{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
     let route = RouteControls::new()
 {{- range .ControlCalls "Arc::clone(&state.implementations.authenticator)" "Arc::clone(&state.implementations.service_authenticator)" }}
@@ -195,7 +196,7 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 
 /// Decodes the arguments of {{ .Namespace }}.{{ .Name }} in the order the TypeScript
 /// router reads them: path, query, input, then body fields.
-fn decode_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName }}, ApiError> {
+fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName }}, ApiError> {
     Ok({{ .ArgsName }} {
 {{- range .PathArgs }}
         {{ .Field }}: {{ .Spec }}.path(captures)?,
@@ -211,9 +212,39 @@ fn decode_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}({{ join .DecodeParams
 {{- end }}
     })
 }
+
+impl {{ .ArgsName }} {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+{{- range .PathArgs }}
+        {{ .Spec }}.check_value(ParamLocation::Path, &self.{{ .Field }})?;
+{{- end }}
+{{- range .QueryArgs }}
+        {{ .Spec }}.check_value(ParamLocation::Query, &self.{{ .Field }})?;
+{{- end }}
+{{- with .Input }}
+{{- if .Prepare }}
+{{- if .Required }}
+        check_input(&self.input, {{ .Prepare }})?;
+{{- else }}
+        if let Some(input) = &self.input {
+            check_input(input, {{ .Prepare }})?;
+        }
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .BodyArgs }}
+        {{ .Spec }}.check_value(ParamLocation::Body, &self.{{ .Field }})?;
+{{- end }}
+        Ok(())
+    }
+}
 {{- end }}
 
-async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
+async fn handle_{{ .SnakeName }}(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
 {{- if .AllowsService }}
@@ -260,7 +291,7 @@ async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
     };
 {{- end }}
 {{- if .HasArgs }}
-    let args = match decode_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}({{ .DecodeCall }}) {
+    let args = match decode_{{ .SnakeName }}({{ .DecodeCall }}) {
         Ok(args) => args,
         Err(err) => return error_response(err),
     };
@@ -282,7 +313,7 @@ async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
     ctx.query_params = query.last_values();
     let result = state
         .implementations
-        .{{ toSnakeCase .Namespace }}
+        .{{ .ImplementationsField }}
         .{{ .FunctionName }}(ctx{{ if .HasArgs }}, args{{ end }})
         .await;
     operation_response(result, request_id.as_deref())

@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The arguments of stock.reserveStock (`POST /api/stock/reservations`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct StockReserveStockArgs {
     /// The `sku` field of the request body.
@@ -17,7 +18,8 @@ pub struct StockReserveStockArgs {
 }
 
 /// The arguments of stock.getReservation (`GET /api/stock/reservations/{id}`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct StockGetReservationArgs {
     /// The `id` path parameter.
@@ -25,7 +27,8 @@ pub struct StockGetReservationArgs {
 }
 
 /// The arguments of stock.releaseReservation (`POST /api/stock/reservations/{id}/release`),
-/// decoded and checked by the router.
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
 #[derive(Debug, Clone)]
 pub struct StockReleaseReservationArgs {
     /// The `id` path parameter.

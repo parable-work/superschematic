@@ -19,6 +19,7 @@ export type {
   Secret,
   Validate,
   ValidateConfig,
+  Wrapped,
 } from "./wrappers";
 export { behavior } from "./behavior";
 export type {
@@ -31,6 +32,9 @@ export type {
   BlueprintSource,
   BlueprintStep,
   BlueprintSteps,
+  BranchesConfig,
+  BranchesKind,
+  BranchesSweep,
   BudgetConfig,
   BudgetMeter,
   ConstantsConfig,

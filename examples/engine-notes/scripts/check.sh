@@ -5,8 +5,10 @@
 #   examples/engine-notes/scripts/check.sh
 #
 # Needs the superscalar checkout scripts/superscalar-dep.sh stands up (make
-# setup runs it), bun and Node.js 24. Installs the runtimes' pinned
-# dependencies from the npm registry (bun install --frozen-lockfile).
+# setup runs it), bun, Node.js 24, and cargo with the wasm32-unknown-unknown
+# target, which builds the version-graph core the engine depends on.
+# Installs the runtimes' pinned dependencies from the npm registry (bun
+# install --frozen-lockfile).
 #
 # The test (test/notes.test.ts) serves the example on a free port with
 # @hono/node-server, under each runtime, and drives it over HTTP, the event
@@ -18,8 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(cd "$EXAMPLE_DIR/../.." && pwd)"
 
-echo "==> build the schema runtime, the HTTP runtime and the engine"
-for runtime in schema http engine; do
+echo "==> build the schema runtime, the HTTP runtime, the version graph and the engine"
+for runtime in schema http versiongraph engine; do
   (cd "$REPO_ROOT/runtime/$runtime/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 done
 
