@@ -3,6 +3,8 @@ package gcp_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +25,8 @@ import (
 )
 
 // fakeCloud is Google Cloud in memory. It records each call that changes
-// something, so a test reads what a second run changed.
+// something, so a test reads what a second run changed, and each build
+// and job run in log too, when set, beside the provisioner's calls.
 type fakeCloud struct {
 	mu      sync.Mutex
 	changes []string
@@ -32,6 +35,27 @@ type fakeCloud struct {
 	keys    map[string]bool
 	objects map[string][]byte
 	secrets map[string]*fakeSecret
+
+	// images holds each pushed image's digest by `<repository>:<tag>`;
+	// builds and jobs what RunBuild and EnsureJob were last given; runs
+	// the arguments of each job run.
+	images map[string]string
+	builds []BuildSpecRecord
+	jobs   map[string]gcp.JobSpec
+	runs   [][]string
+
+	// failRun fails the next job run whose arguments hold the string,
+	// and failBuild every build of an image that starts with the string.
+	failRun   map[string]string
+	failBuild map[string]string
+
+	log *stacktest.FakeProvisioner
+}
+
+// BuildSpecRecord is a build the fake ran.
+type BuildSpecRecord struct {
+	Project, Region string
+	gcp.BuildSpec
 }
 
 type fakeSecret struct {
@@ -45,7 +69,75 @@ func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
 		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{},
 		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{},
+		images: map[string]string{}, jobs: map[string]gcp.JobSpec{},
+		failRun: map[string]string{}, failBuild: map[string]string{},
 	}
+}
+
+func (c *fakeCloud) record(format string, args ...any) {
+	if c.log != nil {
+		c.log.Record(format, args...)
+	}
+}
+
+func (c *fakeCloud) ImageDigest(_ context.Context, image string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if digest, ok := c.images[image]; ok {
+		return digest, nil
+	}
+	return "", fmt.Errorf("%s: %w", image, fs.ErrNotExist)
+}
+
+func (c *fakeCloud) RunBuild(_ context.Context, project, region string, spec gcp.BuildSpec) (*gcp.BuildResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.builds = append(c.builds, BuildSpecRecord{project, region, spec})
+	c.record("cloud build %s", spec.Image)
+	if _, ok := c.objects[spec.Bucket+"/"+spec.Object]; !ok {
+		return nil, fmt.Errorf("no source gs://%s/%s", spec.Bucket, spec.Object)
+	}
+	for match, msg := range c.failBuild {
+		if strings.HasPrefix(spec.Image, match) {
+			return nil, errors.New(msg)
+		}
+	}
+	sum := sha256.Sum256([]byte(spec.Image + "@" + spec.Object))
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+	c.images[spec.Image] = digest
+	c.change("push %s", spec.Image)
+	return &gcp.BuildResult{ID: "build-" + hex.EncodeToString(sum[:4]), LogURL: "https://console.cloud.google.com/cloud-build/builds/x", Digest: digest}, nil
+}
+
+func (c *fakeCloud) EnsureJob(_ context.Context, project, region string, spec gcp.JobSpec) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := project + "/" + region + "/" + spec.Name
+	if prev, ok := c.jobs[key]; ok && prev.Image == spec.Image && prev.ServiceAccount == spec.ServiceAccount && prev.Timeout == spec.Timeout {
+		return false, nil
+	}
+	c.jobs[key] = spec
+	c.change("job %s runs %s", key, spec.Image)
+	return true, nil
+}
+
+func (c *fakeCloud) RunJob(_ context.Context, project, region, job string, args []string) (*gcp.JobRun, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := project + "/" + region + "/" + job
+	if _, ok := c.jobs[key]; !ok {
+		return nil, fmt.Errorf("no job %s", key)
+	}
+	c.runs = append(c.runs, slices.Clone(args))
+	name := fmt.Sprintf("%s/executions/%d", key, len(c.runs))
+	c.record("cloud run job %s", strings.Join(args, " "))
+	for match, msg := range c.failRun {
+		if strings.Contains(strings.Join(args, " "), match) {
+			delete(c.failRun, match)
+			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: msg}, nil
+		}
+	}
+	return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Succeeded: true}, nil
 }
 
 func (c *fakeCloud) change(format string, args ...any) {
@@ -262,7 +354,7 @@ func TestDeployShopOnGCP(t *testing.T) {
 	for _, call := range f.prov.Calls() {
 		steps = append(steps, strings.SplitN(call, ":", 2)[0])
 	}
-	want := []string{"render 34 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
+	want := []string{"render 35 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
 	if !slices.Equal(steps, want) {
 		t.Errorf("ran %q, want %q", steps, want)
 	}
@@ -281,17 +373,6 @@ func TestDeployShopOnGCP(t *testing.T) {
 	}
 	if back.Status != stack.StatusDeployed || back.Databases["shop-db"]["shop-db"].Hash != "v1" || m.Run != "Staging" {
 		t.Errorf("manifest: %s, %+v", back.Status, back.Databases)
-	}
-
-	// Without a migration runner, the deploy is refused before it starts.
-	f = newDeployFixture(t, false)
-	_, err = stack.Deploy(ctx, stack.DeployOptions{
-		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
-		Images:  shopImages("acme-staging", 1),
-		Planner: shopPlanner,
-	})
-	if err == nil || !strings.Contains(err.Error(), "target gcp has no migration runner") || len(f.prov.Calls()) > 0 {
-		t.Errorf("deploy without a runner: %v, calls %v", err, f.prov.Calls())
 	}
 }
 

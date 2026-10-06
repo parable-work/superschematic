@@ -180,7 +180,7 @@ func TestDeployOrder(t *testing.T) {
 		"infrastructure (Orders.account, Orders.cloudsql-client.shop-db, Orders.cloudsql-login.shop-db, Orders.database-user.shop-db, " +
 			"Orders.reads.PaymentsSecrets.STRIPE_KEY, Orders.trace-agent, network, network.nat, network.router, network.subnet, " +
 			"secret.PaymentsSecrets.STRIPE_KEY, shop-api.account, shop-api.cloudsql-client.shop-db, shop-api.cloudsql-login.shop-db, " +
-			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.trace-agent, shop-db.database.shop-db, shop-db.instance)",
+			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.trace-agent, shop-db.database.shop-db, shop-db.instance, shop-db.migrator)",
 		"migrate expand (shop-db)",
 		"rollout 1 (shop-api, Orders.run-invoker.shop-api, shop-api.service)",
 		"rollout 2 (Orders, Orders.service)",
@@ -195,8 +195,9 @@ func TestDeployOrder(t *testing.T) {
 
 // TestPreviewInherits checks that a member of the parameterized Preview
 // creates its own servers, accounts and databases, named with the
-// parameter, and inherits the instance, the secret and the network from
-// Staging, which no step of its deploy applies.
+// parameter, and inherits the instance, its migrator's database user, the
+// secret and the network from Staging, which no step of its deploy
+// applies.
 func TestPreviewInherits(t *testing.T) {
 	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Preview")
 	var inherited []string
@@ -205,7 +206,7 @@ func TestPreviewInherits(t *testing.T) {
 			inherited = append(inherited, res.ID)
 		}
 	}
-	want := "network, network.nat, network.router, network.subnet, secret.PaymentsSecrets.STRIPE_KEY, shop-db.instance"
+	want := "network, network.nat, network.router, network.subnet, secret.PaymentsSecrets.STRIPE_KEY, shop-db.instance, shop-db.migrator"
 	if got := strings.Join(inherited, ", "); got != want {
 		t.Errorf("inherited = %s, want %s", got, want)
 	}

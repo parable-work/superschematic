@@ -12,6 +12,94 @@
   "resources": {
     "resources": [
       {
+        "id": "builder",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-builder",
+          "displayName": "Shop builder",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "builder.repository",
+        "type": "gcp:artifactregistry/repositoryIamMember:RepositoryIamMember",
+        "properties": {
+          "location": "us-east1",
+          "member": {
+            "$output": {
+              "resource": "builder",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "repository": {
+            "$output": {
+              "resource": "repository",
+              "name": "name"
+            }
+          },
+          "role": "roles/artifactregistry.writer"
+        },
+        "dependsOn": [
+          "builder",
+          "repository"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "builder.role.logging-logWriter",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "builder",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/logging.logWriter"
+        },
+        "dependsOn": [
+          "builder"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "builder.state",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": "acme-staging-superschematic-state",
+          "condition": {
+            "expression": "resource.name.startsWith(\"projects/_/buckets/acme-staging-superschematic-state/objects/superschematic/builds/\")",
+            "title": "Objects under superschematic/builds/"
+          },
+          "member": {
+            "$output": {
+              "resource": "builder",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectViewer"
+        },
+        "dependsOn": [
+          "builder"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
         "id": "deployer",
         "type": "gcp:serviceaccount/account:Account",
         "properties": {
@@ -90,6 +178,27 @@
           },
           "project": "acme-staging",
           "role": "roles/certificatemanager.owner"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.cloudbuild-builds-editor",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudbuild.builds.editor"
         },
         "dependsOn": [
           "deployer"
@@ -397,6 +506,86 @@
         ]
       },
       {
+        "id": "migrator",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-migrator",
+          "displayName": "Shop migrator",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "migrator.role.cloudsql-client",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "migrator",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "migrator"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "migrator.role.cloudsql-instanceUser",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "migrator",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "migrator"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "migrator.state",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": "acme-staging-superschematic-state",
+          "condition": {
+            "expression": "resource.name.startsWith(\"projects/_/buckets/acme-staging-superschematic-state/objects/superschematic/migrations/\")",
+            "title": "Objects under superschematic/migrations/"
+          },
+          "member": {
+            "$output": {
+              "resource": "migrator",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectViewer"
+        },
+        "dependsOn": [
+          "migrator"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
         "id": "planner",
         "type": "gcp:serviceaccount/account:Account",
         "properties": {
@@ -589,10 +778,15 @@
     {
       "step": "infrastructure",
       "resources": [
+        "builder",
+        "builder.repository",
+        "builder.role.logging-logWriter",
+        "builder.state",
         "deployer",
         "deployer.github",
         "deployer.role.artifactregistry-writer",
         "deployer.role.certificatemanager-owner",
+        "deployer.role.cloudbuild-builds-editor",
         "deployer.role.cloudsql-admin",
         "deployer.role.compute-loadBalancerAdmin",
         "deployer.role.compute-networkAdmin",
@@ -607,6 +801,10 @@
         "deployer.state-key",
         "github",
         "github.provider",
+        "migrator",
+        "migrator.role.cloudsql-client",
+        "migrator.role.cloudsql-instanceUser",
+        "migrator.state",
         "planner",
         "planner.github",
         "planner.role.iam-securityReviewer",

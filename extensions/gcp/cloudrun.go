@@ -110,7 +110,7 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 
 	container := map[string]any{
-		"image": join(v.region, "-docker.pkg.dev/", v.project, "/", kebab(env.Stack), "/", kebab(d.Name)),
+		"image": imageRepository(v, env.Stack, d.Name),
 		"ports": map[string]any{"containerPort": containerPort},
 		"resources": map[string]any{"limits": map[string]any{
 			"cpu":    settingString(d.Settings, "cpu", defaultCPU),
