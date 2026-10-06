@@ -3395,7 +3395,6 @@ no target. Building the local target and `stack dev` settled both for
 environments and their rendered programs, provisioner tests over a fake
 runner, and `TestLocalStackRuns`, which runs a container, a migration and
 two servers for real when Docker is there; `cli`'s
-`TestStackDevRunsALocalEnvironment` runs `stack dev` itself. Section 6.7's
-sentence that the core registers no spec predates this entry.
+`TestStackDevRunsALocalEnvironment` runs `stack dev` itself.
 
 The rule is reversible until the first release.
