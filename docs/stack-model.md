@@ -1503,7 +1503,9 @@ USAGE on the schemas that hold the migrator's objects, SELECT, INSERT,
 UPDATE and DELETE on its tables, SELECT on its views and USAGE and SELECT
 on its sequences, leaving out the runner's state tables, and takes every
 such privilege back from a user it gave them to that no longer connects,
-all in one transaction. The grant is table-level DML, not what each API
+all in one transaction. It takes nothing from a role the migrator is
+granted: Cloud SQL gives `cloudsqlsuperuser` CREATE on the public schema
+itself, and the first live deploy's job reported taking that back. The grant is table-level DML, not what each API
 reads. The deploy manifest records the servers each DB service's job saw
 connect, and a deploy runs the expand phase of a DB service whose servers
 changed even when its plan has no steps, before the new server rolls out
