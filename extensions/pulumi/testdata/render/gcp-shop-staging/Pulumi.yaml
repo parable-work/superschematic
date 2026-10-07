@@ -94,6 +94,8 @@ resources:
     name: Orders.service
     type: gcp:cloudrunv2/service:Service
     properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-staging/locations/us-east1/services/orders
       deletionProtection: false
       ingress: INGRESS_TRAFFIC_INTERNAL_ONLY
       invokerIamDisabled: false
@@ -108,7 +110,7 @@ resources:
               - name: MAX_LINE_ITEMS
                 value: "50"
               - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
-                value: ${shop-api-service.uri}
+                value: //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api
               - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
                 value: google-id-token
               - name: SHOP_API_SERVICE_URL
@@ -475,6 +477,8 @@ resources:
     name: shop-api.service
     type: gcp:cloudrunv2/service:Service
     properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api
       deletionProtection: false
       ingress: INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
       invokerIamDisabled: true

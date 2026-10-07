@@ -11,6 +11,8 @@ access policy with service callers (D37), the HTTP API with the event
 stream (`@superschematic/engine/http`), the behavior plug-in interface,
 the runner of reactions and schedules, the describe and tools documents,
 the behavior catalog, the MCP endpoint (`@superschematic/engine/mcp`),
+a typed client of the HTTP API with the event stream and a reconciler
+(`@superschematic/engine/client`, "The client"),
 and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
 reach other instances, `Search`, full-text search with vectors an outside
@@ -56,7 +58,9 @@ itself (D3), and this package's own build and tests get them from
 HTTP runtime's framework-free entry point, for the default permission
 matcher, and not Hono; the `./http` entry point also needs `hono`, an
 optional peer dependency, and the `./mcp` entry point `hono` and
-`@modelcontextprotocol/server`, another. It depends on
+`@modelcontextprotocol/server`, another. The `./client` entry point
+imports nothing but its own modules, so it runs in a browser and a
+worker runtime too. It depends on
 `@superschematic/versiongraph` (D32), whose engine and SQLite adapter the
 core `Branches` behavior runs over the version graph's wasm core; the
 package.json spec is a `file:` path into this checkout, as the TypeScript
@@ -3209,6 +3213,139 @@ The route validates no `Origin` header: it requires a caller, and a
 deployment that serves it to a browser on a local address puts the SDK's
 `originValidationResponse` in front of it.
 
+## The client
+
+`@superschematic/engine/client` is a typed client of the HTTP API, its
+event stream and the controller pattern over it (D16, amended). It
+imports nothing of the server side, Node.js or the HTTP runtime, so it
+runs in a browser and a worker runtime as well as a server: a test reads
+the built files for imports, and `tsconfig.client.json` compiles it with
+the DOM's globals and no Node.js types. It declares the wire's shapes
+itself; `test/client-types.test.ts` holds each to the server's type.
+
+```ts
+import { EngineClient, isVeto } from '@superschematic/engine/client';
+import { signedTokenSource } from '@superschematic/http-runtime';
+
+const client = new EngineClient({
+  baseUrl: 'https://jobs.internal/api',             // where engineApp is mounted
+  auth: { getToken: () => session.token, refreshToken: () => session.refresh() },
+  serviceCredential: { token: signedTokenSource(edgeKey, { issuer: 'indexer', subject: 'indexer', audience: 'jobs' }) },
+});
+
+const job = await client.instances.create('jobs', { title: 'Index' }, { id: 'index', behaviors: { Links: { batch: 'b1' } } });
+await client.instances.update('jobs', job.id, { title: 'Reindex' }, { expectedSeq: job.seq });
+await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: { Lease: { token: 3 } } })
+  .catch((error) => { if (isVeto(error, 'Lease', ['lapsed', 'token_stale'])) stop(); else throw error; });
+```
+
+| Calls | Route |
+| --- | --- |
+| `schemas.list`, `live`, `draft`, `version`, `define`, `publish`, `describe` | the schema routes and the describe document |
+| `instances.create` (`{ id?, behaviors? }`), `get`, `list` (`{ limit?, cursor? }`), `update`, `delete`, `invoke`, `operate`, `invokeSchema` | the instance and operation routes |
+| `events.read` (`{ after?, limit?, schema?, instanceId?, kinds?, behaviors?, exclude? }`), `events.head`, `events.subscribe` | the event route, as a page or the stream |
+| `behaviors.list`, `behaviors.describe`, `tools()`, `search(params)` | the behavior catalog, the tools document, the search across schemas |
+
+- **Options.** Every call takes `namespace` (the client's `namespace`,
+  `default`, otherwise), `signal` and `forward`. A write (`update`,
+  `delete`, `invoke`, `operate`) also takes `expectedSeq`, sent as
+  `If-Match`, and `preconditions`, sent as the `Preconditions` header.
+  `operate` returns `{ result, seq }`, the sequence from the `ETag`.
+  `timeoutMs` (30000, 0 for none) bounds each call; the stream's covers
+  its headers only.
+- **A missing instance** is a thrown 404 `not_found`, as is a delete of
+  one: over HTTP a schema with no live version answers the same 404, so
+  `get` does not return undefined as the engine's does.
+- **Problems.** A refusal is an `EngineProblem`: `status`, `code`,
+  `detail`, `requestId`, `details`, and `issues` (`details.issues`, each
+  `{ path, rule?, message }`: a JSON pointer for parameters, preconditions
+  and a schema document, a field path for an instance) and `changes`
+  (`incompatible_change`). A `vetoed` problem is an `EngineVeto` with
+  `behavior`, `action`, `reason`, `vetoCode` and `vetoDetails`;
+  `isVeto(error, behavior?, codes?)` and `isProblem(error, codes?)`
+  branch on them. An answer that is not a problem document (a proxy's
+  page) keeps its status and has no `code`. A request that got no answer
+  is an `EngineTransportError` (`timedOut` when the client's timeout ended
+  it); a caller's own abort rejects with its signal's reason.
+- **Credentials**, as the generated TypeScript SDK sends them (D15,
+  amended; D37). `auth.token` is the end user's token the client holds,
+  which `setToken`, `clearToken` and a refresh replace; while it holds
+  none, `auth.getToken` answers per request. `serviceCredential.token(fresh)`
+  goes in `Service-Authorization` (or its `headers`) on every request: the
+  HTTP runtime's `googleIdTokenSource`, `tokenFileSource` and
+  `signedTokenSource` fill it. A call's `forward` sends that end user's
+  token instead of the client's, or no `Authorization` when it has none,
+  so a service stands in for one.
+- **The retry rule.** A 401 `service_unauthorized` asks the service source
+  for a fresh token (`token(true)`) once and retries; the end-user refresh
+  does not run. Any other 401 runs `auth.refreshToken` once, shared by the
+  calls that meet it together, holds its token and retries; it never asks
+  for a fresh service token, and a forwarded user is never refreshed.
+
+### The event stream
+
+`events.subscribe(options)` reads the stream over fetch, since
+`EventSource` cannot send `Authorization` or `Service-Authorization`, and
+parses it by the HTML standard's rules (`SseParser`). Iterate it once:
+
+```ts
+const subscription = client.events.subscribe({ after: 'head', schema: 'jobs', exclude: ['heartbeat'] });
+for await (const message of subscription) {
+  if (message.type === 'ready') continue;          // { type: 'ready', cursor }, once per connection
+  handle(message.event);                           // { type: 'event', event }, each event of the log
+}
+```
+
+- It starts after `after`, a cursor or `head`, else at the start of the
+  log, with the event route's filters.
+- `cursor` is the id of the last message handed out: an event's, a
+  ready's, or one that only carries an id past events the filters dropped
+  ("The event stream" under "HTTP"). It moves as each message is handed
+  out, not as the parser reads ahead.
+- A dropped connection, or a stream the engine ended, is opened again
+  with `Last-Event-ID: <cursor>` after `reconnect`'s backoff (500 ms
+  doubling to 30 s; `false` to end instead), and `onReconnect` hears why.
+  It neither repeats nor skips an event. A 5xx, a 429 (after its
+  `Retry-After`) or a network failure is retried; a 4xx ends the
+  iteration with its problem, a policy that now refuses the caller say.
+- Breaking out of the loop, `close()` or the options' `signal` ends it
+  and cancels the connection.
+
+### Reconciling
+
+`reconcile(client, options)` is the controller pattern: a handler per
+event of a namespace's log, filtered, in log order, from where the last
+run left off.
+
+```ts
+import { reconcile } from '@superschematic/engine/client';
+
+const reconciler = reconcile(client, {
+  schema: 'projects', kinds: ['create', 'operation'],
+  cursor: { load: () => readCursor(), save: (cursor) => writeCursor(cursor) },
+  handle: async (event) => syncProject(event),
+  onError: (error, event, attempt) => log.warn({ error, cursor: event?.cursor, attempt }),
+});
+await reconciler.stop();                            // after the handler in progress returns
+```
+
+- It subscribes after the cursor `cursor.load()` returns, or at `start`
+  (`head` by default; 0 replays the log) when it returns none.
+  `memoryCursor()`, the default, keeps it in the process.
+- The handler runs once per event, one at a time, and the cursor is saved
+  once it returns: an event is handled at least once, again after a crash
+  between the handler and the save.
+- A handler that throws is retried on the same event after `retry`'s
+  backoff (500 ms doubling to 30 s) and never skipped; `onError` hears
+  each failure, and each dropped connection with no event.
+- A ready saves the stream's cursor, which may be past events the filters
+  dropped, so the next run does not scan them again.
+- `done` settles when it ends: after `stop()`, or with the problem that
+  refused the stream (which `stop()` rejects with too).
+
+The work-queue package's worker (`runtime/engine-workqueue/README.md`,
+"The worker") is built on the client.
+
 ## Development
 
 ```
@@ -3229,4 +3366,8 @@ routes through Hono's `app.request`; `test/stream.test.ts` reads the event
 stream and `test/mcp.test.ts` speaks MCP with the official client
 (`@modelcontextprotocol/client`) to a listening server,
 `@hono/node-server` on Node.js and `Bun.serve` on Bun.
-`test/tools-parity.test.ts` asserts the Go vectors.
+`test/tools-parity.test.ts` asserts the Go vectors. `test/client.test.ts`
+and `test/client-stream.test.ts` drive the client against an engine
+served in process, its fetch handing each request to the app's;
+`test/client-types.test.ts` holds the client's types to the server's and
+reads the built client for imports.

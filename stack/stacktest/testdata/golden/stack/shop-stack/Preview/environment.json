@@ -91,10 +91,12 @@
           "value": {
             "credential": {
               "audience": {
-                "$output": {
-                  "resource": "shop-api.service",
-                  "name": "url"
-                }
+                "$concat": [
+                  "shop-api-",
+                  {
+                    "$parameter": "pr"
+                  }
+                ]
               },
               "source": "google-id-token"
             },
@@ -381,10 +383,12 @@
             {
               "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
               "value": {
-                "$output": {
-                  "resource": "shop-api.service",
-                  "name": "url"
-                }
+                "$concat": [
+                  "shop-api-",
+                  {
+                    "$parameter": "pr"
+                  }
+                ]
               }
             },
             {

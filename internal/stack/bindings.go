@@ -147,8 +147,10 @@ func (r *resolver) bindConfig() {
 				}
 			}
 		}
+		callers := r.callersFields(d)
+		refused := r.checkCallersFields(d, callers, derived)
 		for _, key := range sortedKeys(d.settings.env) {
-			if _, ok := d.fields[key]; ok {
+			if _, ok := d.fields[key]; ok || refused[key] {
 				continue
 			}
 			if e, ok := derived[key]; ok {
@@ -166,6 +168,7 @@ func (r *resolver) bindConfig() {
 		for _, e := range r.edgesFrom(name) {
 			bindings = append(bindings, &ir.Binding{Field: e.res.Field, Source: ir.BindingDerived, Edge: e.res.ID})
 		}
+		bindings = append(bindings, r.callersBindings(d, callers)...)
 		slices.SortFunc(bindings, func(a, b *ir.Binding) int { return strings.Compare(a.Field, b.Field) })
 		d.res.Bindings = bindings
 	}
@@ -306,6 +309,8 @@ func (r *resolver) secrets() []*ir.StackSecret {
 // stood before any connector ran: the derived bindings without values.
 func (r *resolver) connectEdges() {
 	values := map[string]any{}
+	callees := map[string]any{}
+	ran := map[string]bool{}
 	for _, id := range sortedKeys(r.edges) {
 		e := r.edges[id]
 		ctx := registry.ConnectorContext{
@@ -331,6 +336,25 @@ func (r *resolver) connectEdges() {
 		}
 		r.checkParameters(where, values[id])
 		r.produce(id, ir.PhaseInfrastructure, connected.Resources)
+		ran[id] = true
+		if connected.Callee == nil {
+			continue
+		}
+		where = fmt.Sprintf("connector %s gives the callee of %s", e.connector.Name, id)
+		callee := r.normalize(where, connected.Callee)
+		switch {
+		case e.res.Kind != ir.EdgeHTTP || e.res.From == e.res.To:
+			r.fail(CodeLowering, "connector %s on edge %s gives the callee a caller to verify, but only an http edge between two servers has one: a call within one server carries no service credential", e.connector.Name, id)
+			continue
+		case callee == nil:
+			continue
+		}
+		if err := checkCallee(e, callee); err != nil {
+			r.fail(CodeLowering, "connector %s on edge %s gives %s a caller to verify that is no issuer of a callers field (ir.ServiceAuthIssuer): %v", e.connector.Name, id, e.res.To, err)
+			continue
+		}
+		r.checkParameters(where, callee)
+		callees[id] = callee
 	}
 	for _, id := range sortedKeys(r.edges) {
 		for _, b := range r.edges[id].from.res.Bindings {
@@ -339,4 +363,5 @@ func (r *resolver) connectEdges() {
 			}
 		}
 	}
+	r.fillCallers(callees, ran)
 }
