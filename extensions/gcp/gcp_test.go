@@ -114,49 +114,83 @@ func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack
 func TestGolden(t *testing.T) {
 	reg := assemble(t)
 	s := shop()
-	out := t.TempDir()
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			resolved := resolve(t, reg, s, stacktest.AcmeShop(), env.Name)
-			path, err := stack.Write(out, resolved)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			golden := stack.EnvironmentPath(goldenRoot, s.Name, env.Name)
-			if *update {
-				if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(golden, got, 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			want, err := os.ReadFile(golden)
-			if err != nil {
-				t.Fatalf("%v (run with -update to write it)", err)
-			}
-			if !bytes.Equal(got, want) {
-				t.Errorf("%s differs from %s; run with -update and review the diff", path, golden)
-			}
-			back, err := stack.Unmarshal(got)
-			if err != nil {
-				t.Fatal(err)
-			}
-			again, err := stack.Marshal(back)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(again, got) {
-				t.Error("environment.json does not round-trip")
-			}
-			if back.Provisioner != gcp.Provisioner {
-				t.Errorf("provisioner = %q, want %q", back.Provisioner, gcp.Provisioner)
-			}
+			checkGolden(t, reg, s, stacktest.AcmeShop(), env.Name)
 		})
+	}
+}
+
+// TestServiceAuthGolden resolves the shop with a service clause on
+// shop-api, which Orders calls: RequireShop's @requireService and
+// AllowShop's @allowService, whose shop-orders also has a clause no server
+// calls. shop-api's server gets SHOP_API_CALLERS, Google's issuer with
+// Orders's service account as the caller and shop-api's custom audience,
+// and AllowShop's Orders gets SHOP_ORDERS_CALLERS with no issuers. Preview
+// names the account and the audience under its parameter.
+func TestServiceAuthGolden(t *testing.T) {
+	reg := assemble(t)
+	for _, tc := range []struct {
+		stack    string
+		services []stack.Service
+		envs     []string
+	}{
+		{"RequireShop", stacktest.RequireServiceShop(), []string{"Staging", "Preview"}},
+		{"AllowShop", stacktest.AllowServiceShop(), []string{"Staging"}},
+	} {
+		s := shop()
+		s.Name = tc.stack
+		for _, env := range tc.envs {
+			t.Run(tc.stack+"/"+env, func(t *testing.T) {
+				checkGolden(t, reg, s, tc.services, env)
+			})
+		}
+	}
+}
+
+// checkGolden resolves env of s and checks the environment.json it writes
+// against the golden file, which -update rewrites, and that it
+// round-trips.
+func checkGolden(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack.Service, env string) {
+	t.Helper()
+	resolved := resolve(t, reg, s, services, env)
+	path, err := stack.Write(t.TempDir(), resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden := stack.EnvironmentPath(goldenRoot, s.Name, env)
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(golden, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("%v (run with -update to write it)", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("%s differs from %s; run with -update and review the diff", path, golden)
+	}
+	back, err := stack.Unmarshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := stack.Marshal(back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(again, got) {
+		t.Error("environment.json does not round-trip")
+	}
+	if back.Provisioner != gcp.Provisioner {
+		t.Errorf("provisioner = %q, want %q", back.Provisioner, gcp.Provisioner)
 	}
 }
 
