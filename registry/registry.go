@@ -167,10 +167,12 @@ type (
 	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack) and
 	// its CIEnvironments with the renderer's CIOptions, to CIFiles. A
 	// target's CI seam (CIIdentities) gives each environment a CIIdentity
-	// per CIRole, and a provisioner's spec lists the CLITools a CI job
-	// installs.
+	// per CIRole, a provisioner's spec lists the CLITools a CI job
+	// installs, and the request names the release's CIArchive for each
+	// platform, which a job that compiles a Go server links.
 	CIRendererSpec = registry.CIRendererSpec
 	CIRequest      = registry.CIRequest
+	CIArchive      = registry.CIArchive
 	CIStack        = registry.CIStack
 	CIEnvironment  = registry.CIEnvironment
 	CIOptions      = registry.CIOptions

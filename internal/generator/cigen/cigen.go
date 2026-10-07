@@ -19,11 +19,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/release"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -35,40 +35,6 @@ const Name = "ci"
 // stack takes its service's name.
 func OutDir(outputRoot, service string) string {
 	return filepath.Join(outputRoot, "ci", service)
-}
-
-// rootModule is superschematic's root module. Its version in the running
-// binary's build information is the release the workflow installs, and its
-// repository's release page is where it downloads it from.
-const rootModule = "github.com/parable-work/superschematic"
-
-// releaseVersion is the release the running binary is part of; tests
-// replace it.
-var releaseVersion = binaryRelease
-
-// binaryRelease returns the version of rootModule in the binary's build
-// information, without its `v`, or "" for a binary built from a checkout,
-// whose modules are at 0.0.0, as gcp's migration image reads its release
-// (D46).
-func binaryRelease() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return ""
-	}
-	version := ""
-	if info.Main.Path == rootModule {
-		version = info.Main.Version
-	}
-	for _, dep := range info.Deps {
-		if dep.Path == rootModule {
-			version = dep.Version
-		}
-	}
-	version = strings.TrimPrefix(version, "v")
-	if version == "" || version == "(devel)" || version == "0.0.0" {
-		return ""
-	}
-	return version
 }
 
 // Enabled reports whether the stack's config names a CI renderer.
@@ -106,6 +72,7 @@ func Generate(c registry.GenerateContext) error {
 	for _, env := range resolved {
 		envs = append(envs, c.Registry.CIEnvironment(env))
 	}
+	rel := c.Options.ReleaseInfo()
 
 	type rendered struct {
 		name    string
@@ -123,7 +90,8 @@ func Generate(c registry.GenerateContext) error {
 			Stack:        ciStack,
 			Environments: envs,
 			Options:      opts,
-			Version:      releaseVersion(),
+			Version:      rel.Version,
+			Archives:     archives(rel),
 		})
 		if err != nil {
 			return fmt.Errorf("stack %s: CI renderer %s: %w", st.Name, name, err)
@@ -165,6 +133,18 @@ func Generate(c registry.GenerateContext) error {
 	}
 	c.Done(Name, dir)
 	return nil
+}
+
+// archives are the release's static archives by platform, with where
+// each downloads from.
+func archives(r release.Release) map[string]registry.CIArchive {
+	out := map[string]registry.CIArchive{}
+	for _, platform := range release.Platforms {
+		if digest, ok := r.Archive(platform); ok {
+			out[platform] = registry.CIArchive{URL: release.DownloadURL(r.Version, release.ArchiveName(r.Version, platform)), SHA256: digest}
+		}
+	}
+	return out
 }
 
 // writeFiles writes each file under dir.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/release"
 	"github.com/parable-work/superschematic/internal/stack/local"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -58,6 +59,10 @@ const gcpWorkloadIdentity = "gcp-workload-identity"
 // pulumiTool is the pulumi provisioner's CLI, which pulumi/actions
 // installs.
 const pulumiTool = "pulumi"
+
+// runnerPlatform is the platform of the runner every job runs on,
+// ubuntu-latest, by the name the release's assets carry.
+const runnerPlatform = "linux-x64"
 
 // The expressions the jobs' conditions are made of.
 const (
@@ -225,6 +230,9 @@ func (g github) check() job {
 	st := g.req.Stack
 	servers := g.servers()
 	steps := []step{g.checkout(), g.install()}
+	if len(servers) > 0 && g.req.Version != "" {
+		steps = append(steps, g.archives())
+	}
 	if len(servers) > 0 {
 		steps = append(steps, step{
 			name: "Set up Go",
@@ -357,12 +365,41 @@ func (g github) install() step {
 			"set -euo pipefail",
 			`dir="$RUNNER_TEMP/superschematic"`,
 			`mkdir -p "$dir"`,
-			fmt.Sprintf("release=https://%s/releases/download/v%s", rootModule, v),
+			"release=" + strings.TrimSuffix(release.DownloadURL(v, ""), "/"),
 			fmt.Sprintf(`curl -fsSL -o "$dir/%[1]s.tar.gz" "$release/%[1]s.tar.gz"`, dist),
 			`curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"`,
 			`(cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)`,
 			fmt.Sprintf(`tar -xzf "$dir/%s.tar.gz" -C "$dir"`, dist),
 			fmt.Sprintf(`echo "$dir/%s" >> "$GITHUB_PATH"`, dist),
+		}, "\n"),
+	}
+}
+
+// archives downloads the release's static archives for the runner's
+// platform, checks them against the digest the binary that wrote the
+// workflow names, and points cgo's linker at them: a server links
+// superscalar's archive, and the version graph's, through cgo (D3), and
+// no module the module proxy serves carries them (D47, amended). A binary
+// the release workflow did not build names no digest, so its step fails.
+func (g github) archives() step {
+	name := "Install the static archives"
+	a, ok := g.req.Archives[runnerPlatform]
+	if !ok {
+		return step{
+			name: name,
+			run:  fmt.Sprintf(`echo "The superschematic %s that generated this workflow names no digest of its release's static archives for %s, as a binary its release workflow did not build; generate this workflow again with the release's own binary" && exit 1`, g.req.Version, runnerPlatform),
+		}
+	}
+	return step{
+		name: name,
+		run: strings.Join([]string{
+			"set -euo pipefail",
+			`dir="$RUNNER_TEMP/superschematic-archives"`,
+			`mkdir -p "$dir"`,
+			fmt.Sprintf(`curl -fsSL -o "$dir/archives.tar.gz" %s`, a.URL),
+			fmt.Sprintf(`echo "%s  $dir/archives.tar.gz" | sha256sum --check -`, a.SHA256),
+			`tar -xzf "$dir/archives.tar.gz" -C "$dir" --strip-components=1`,
+			`echo "CGO_LDFLAGS=-L$dir/lib" >> "$GITHUB_ENV"`,
 		}, "\n"),
 	}
 }
