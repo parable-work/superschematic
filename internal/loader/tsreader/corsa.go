@@ -353,6 +353,42 @@ func newDeclarationCorsaProgram(dir string, files map[string]string, roots []str
 	return &corsaProgram{program: program, checker: checker, release: release}, nil, nil
 }
 
+// parseOne parses one file with the compiler's parser, in a program of that
+// file alone: no lib files, no module resolution and no type checker. The
+// program reads text from memory under a directory of its own, never from
+// disk. It returns the parsed file and its syntax diagnostics.
+func parseOne(fileName, text string) (*astSourceFile, []*astDiagnostic, error) {
+	const dir = "/superschematic-parse"
+	name := dir + "/" + path.Base(filepath.ToSlash(fileName))
+	config, err := json.Marshal(map[string]any{
+		"compilerOptions": map[string]any{
+			"noLib":     true,
+			"noResolve": true,
+			"noEmit":    true,
+			"types":     []string{},
+			"target":    "ES2022",
+			"module":    "ESNext",
+		},
+		"files": []string{name},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	files := map[string]string{name: text, dir + "/tsconfig.json": string(config)}
+	fs := tsbundled.WrapFS(declarationFS{FS: osvfs.FS(), files: files})
+	host := tscompiler.NewCachedFSCompilerHost(dir, fs, tsbundled.LibPath(), nil, nil)
+	parsed, configDiags := tsoptions.GetParsedCommandLineOfConfigFile(dir+"/tsconfig.json", nil, nil, host, nil)
+	if len(configDiags) > 0 || parsed == nil {
+		return nil, nil, fmt.Errorf("parse %s: the parser's compiler options do not parse", fileName)
+	}
+	program := tscompiler.NewProgram(tscompiler.ProgramOptions{Host: host, Config: parsed, SingleThreaded: tscore.TSTrue})
+	file := program.GetSourceFile(name)
+	if file == nil {
+		return nil, nil, fmt.Errorf("parse %s: the compiler read no file", fileName)
+	}
+	return file, program.GetSyntacticDiagnostics(context.Background(), file), nil
+}
+
 // close releases the type checker.
 func (p *corsaProgram) close() {
 	if p.release != nil {

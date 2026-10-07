@@ -287,6 +287,50 @@ describe('instances', () => {
     await problem(call(app, 'GET', `${ORDERS}?limit=two`), 400);
     await problem(call(app, 'GET', `${ORDERS}?cursor=not-ours`), 400);
   });
+
+  test('a list filters by a where query parameter, a JSON object, and pages on with its cursor', async () => {
+    const { app } = await withOrders();
+    for (const [id, status] of [['a', 'open'], ['b', 'shipped'], ['c', 'open'], ['d', 'open']]) {
+      await data(call(app, 'POST', ORDERS, { body: { id, data: { title: `a, b/${id}`, status } } }), 201);
+    }
+    const where = (value: unknown): string => `where=${encodeURIComponent(JSON.stringify(value))}`;
+    const first = await data(call(app, 'GET', `${ORDERS}?${where({ status: 'open' })}&limit=2`));
+    assert.deepEqual(first.items.map((item: { id: string }) => item.id), ['a', 'c']);
+    const second = await data(call(app, 'GET', `${ORDERS}?${where({ status: 'open' })}&limit=2&cursor=${encodeURIComponent(first.next)}`));
+    assert.deepEqual([second.items.map((item: { id: string }) => item.id), second.next], [['d'], null]);
+    // A value travels whole, a comma and a slash in it included.
+    const titled = await data(call(app, 'GET', `${ORDERS}?${where({ title: ['a, b/b', 'a, b/d'] })}`));
+    assert.deepEqual(titled.items.map((item: { id: string }) => item.id), ['b', 'd']);
+    assert.equal((await problem(call(app, 'GET', `${ORDERS}?where=status`), 400)).code, 'bad_request');
+    assert.equal((await problem(call(app, 'GET', `${ORDERS}?${where(['open'])}`), 400)).code, 'bad_request');
+    const refused = await problem(call(app, 'GET', `${ORDERS}?${where({ lines: 'x' })}`), 400);
+    assert.equal(refused.code, 'invalid_argument');
+  });
+
+  test('lookup reads an instance by a unique value in the query, a slash and all; a repeated value is a 409 naming the field', async () => {
+    const { app } = serve();
+    const models = '/namespaces/default/schemas/Model';
+    await data(call(app, 'POST', '/namespaces/default/schemas', { body: schemaDocument('Model', [{ name: 'slug', typeRef: { name: 'string' }, unique: true }]) }));
+    await data(call(app, 'POST', `${models}/publish`));
+    const created = await data(call(app, 'POST', `${models}/instances`, { body: { id: 'm1', data: { slug: 'openai/gpt-5' } } }), 201);
+    const key = (value: unknown): string => `key=${encodeURIComponent(JSON.stringify(value))}`;
+    const found = await answer(call(app, 'GET', `${models}/lookup?${key({ slug: 'openai/gpt-5' })}`));
+    assert.equal(found.status, 200);
+    assert.deepEqual((found.body.data as { id: string }).id, 'm1');
+    assert.equal(found.headers.get('etag'), `"${created.seq}"`);
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup?${key({ slug: 'openai' })}`), 404)).code, 'not_found');
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup?${key({ title: 'x' })}`), 400)).code, 'invalid_argument');
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup?key=slug`), 400)).code, 'bad_request');
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup`), 400)).code, 'bad_request');
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup?${key({ slug: 'openai/gpt-5' })}`, { token: 'writer' }), 403)).code, 'forbidden');
+    const repeated = await problem(call(app, 'POST', `${models}/instances`, { body: { data: { slug: 'openai/gpt-5' } } }), 409);
+    assert.deepEqual([repeated.code, repeated.details], ['conflict', { fields: ['slug'] }]);
+    // Requests that race to create one value: one creates it, the rest are 409.
+    const racing = await Promise.all(
+      Array.from({ length: 8 }, (_, index) => answer(call(app, 'POST', `${models}/instances`, { body: { id: `r${index}`, data: { slug: 'race' } } })))
+    );
+    assert.deepEqual(racing.map((response) => response.status).sort(), [201, 409, 409, 409, 409, 409, 409, 409]);
+  });
 });
 
 describe('refusals', () => {
@@ -300,7 +344,7 @@ describe('refusals', () => {
     first.schemas.define(alice, gadget);
     first.schemas.publish(alice, 'Gadget');
     first.close();
-    const { app, engine } = serve({}, { path, metaSchema: openMetaSchema(), behaviors: [flag] });
+    const { app, engine } = serve({}, { path, metaSchema: openMetaSchema(), behaviors: [flag], retention: { maxEvents: 1 } });
     const post = (path: string, body: unknown) => call(app, 'POST', path, { body });
     await data(post('/namespaces/default/schemas', orderDocument()));
     await data(post('/namespaces/default/schemas/Order/publish', undefined));
@@ -312,6 +356,10 @@ describe('refusals', () => {
     engine.instances.invoke(everything, 'Item', 'i1', 'flag', { reason: 'on hold' });
     const required = clone(orderDocument()) as { types: { Order: { fields: Array<Record<string, unknown>> } } };
     required.types.Order.fields.push({ name: 'owner', typeRef: { name: 'string' }, required: true });
+    // A namespace a create made, archived; and a log retention pruned.
+    await data(post('/namespaces', { name: 'acme' }), 201);
+    await data(post('/namespaces/acme/archive', undefined));
+    assert.ok(engine.runner.prune().pruned > 0);
 
     const cases: Array<[string, () => Promise<Response>, string?]> = [
       ['invalid_argument', () => call(app, 'GET', `${ORDERS}?limit=0`)],
@@ -326,6 +374,8 @@ describe('refusals', () => {
       ['invalid_schema', () => post('/namespaces/default/schemas', { kind: 'General', types: {} }), 'issues'],
       ['invalid_instance', () => post(ORDERS, { data: { title: 3 } }), 'issues'],
       ['unavailable', () => call(app, 'GET', '/namespaces/default/schemas/Gadget/instances')],
+      ['namespace_archived', () => post('/namespaces/acme/schemas', noteDocument)],
+      ['cursor_expired', () => call(app, 'GET', '/namespaces/default/events?after=1')],
     ];
     assert.deepEqual(cases.map(([code]) => code).sort(), Object.keys(ENGINE_ERROR_STATUS).sort(), 'a case per engine error code');
     for (const [code, request, details] of cases) {
@@ -335,6 +385,8 @@ describe('refusals', () => {
         assert.ok(Array.isArray(body.details?.[details]) && body.details[details].length > 0, `${code} carries details.${details}`);
       }
     }
+    const expired = await problem(call(app, 'GET', '/namespaces/default/events?after=1'), 410);
+    assert.deepEqual(expired.details, { after: 1, floor: engine.events.floor(), head: engine.events.head() });
     const veto = await problem(call(app, 'DELETE', `${ITEMS}/i1`), 409);
     assert.deepEqual(veto.details, { behavior: 'test.Flag', action: 'delete', reason: 'it is flagged: on hold' });
     assert.equal(engine.instances.get(everything, 'Item', 'i1')?.data.title, 'Desk');
@@ -483,6 +535,64 @@ describe('namespaces', () => {
   });
 });
 
+describe('namespaces a create makes', () => {
+  test('create, read, list, archive and unarchive, as the policy allows', async () => {
+    const { app } = serve();
+    const created = await answer(call(app, 'POST', '/namespaces', { body: { name: 'acme' } }));
+    assert.equal(created.status, 201);
+    assert.equal(created.headers.get('location'), '/namespaces/acme');
+    const acme = (created.body as { data: Record<string, unknown> }).data;
+    assert.deepEqual([acme.name, acme.origin, acme.state, acme.createdBy], ['acme', 'created', 'active', 'alice']);
+    assert.deepEqual(await data(call(app, 'GET', '/namespaces/acme')), acme);
+    assert.deepEqual(
+      (await data(call(app, 'GET', '/namespaces'))).map((namespace: { name: string; origin: string; shared: boolean }) => [namespace.name, namespace.origin, namespace.shared]),
+      [
+        ['default', 'configured', false],
+        ['east', 'configured', false],
+        ['west', 'configured', false],
+        ['common', 'configured', true],
+        ['acme', 'created', false],
+      ]
+    );
+    // A created namespace serves as a configured one does, the shared
+    // schemas included.
+    await data(call(app, 'POST', '/namespaces/common/schemas', { body: noteDocument }));
+    await data(call(app, 'POST', '/namespaces/common/schemas/Note/publish'));
+    await data(call(app, 'POST', '/namespaces/acme/schemas/Note/instances', { body: { id: 'n1', data: { body: 'hi' } } }), 201);
+
+    const archived = await data(call(app, 'POST', '/namespaces/acme/archive'));
+    assert.deepEqual([archived.state, archived.archivedBy], ['archived', 'alice']);
+    const refused = await problem(call(app, 'PATCH', '/namespaces/acme/schemas/Note/instances/n1', { body: { body: 'bye' } }), 409);
+    assert.equal(refused.code, 'namespace_archived');
+    assert.equal((await data(call(app, 'GET', '/namespaces/acme/schemas/Note/instances/n1'))).data.body, 'hi');
+    assert.deepEqual(
+      (await data(call(app, 'GET', '/namespaces/acme/events'))).events.map((event: { kind: string }) => event.kind),
+      ['publish', 'create']
+    );
+    assert.equal((await data(call(app, 'POST', '/namespaces/acme/unarchive'))).state, 'active');
+    await data(call(app, 'PATCH', '/namespaces/acme/schemas/Note/instances/n1', { body: { body: 'bye' } }));
+  });
+
+  test('refusals: the body, the name, a namespace that exists or is configured, one there is not, and a caller the policy refuses', async () => {
+    const { app } = serve();
+    for (const body of [[], 'acme', { name: 7 }, { name: 'acme', shared: true }]) {
+      assert.equal((await problem(call(app, 'POST', '/namespaces', { body }), 400)).code, 'bad_request', JSON.stringify(body));
+    }
+    assert.equal((await problem(call(app, 'POST', '/namespaces', { body: { name: 'Acme' } }), 400)).code, 'invalid_argument');
+    assert.equal((await problem(call(app, 'POST', '/namespaces', { body: { name: 'acme' }, type: 'text/plain' }), 415)).code, 'unsupported_media_type');
+    assert.equal((await problem(call(app, 'POST', '/namespaces', { body: { name: 'east' } }), 409)).code, 'conflict');
+    assert.equal((await problem(call(app, 'POST', '/namespaces/east/archive'), 409)).code, 'conflict');
+    assert.equal((await problem(call(app, 'POST', '/namespaces/nowhere/archive'), 404)).code, 'unknown_namespace');
+    assert.equal((await problem(call(app, 'GET', '/namespaces/nowhere'), 404)).code, 'unknown_namespace');
+    // reader holds read, not manage: it may not create, and lists nothing.
+    assert.equal((await problem(call(app, 'POST', '/namespaces', { body: { name: 'acme' }, token: 'reader' }), 403)).code, 'forbidden');
+    assert.deepEqual(await data(call(app, 'GET', '/namespaces', { token: 'reader' })), []);
+    await problem(call(app, 'GET', '/namespaces/east', { token: 'reader' }), 403);
+    // eastern holds east:*, so it sees east alone.
+    assert.deepEqual((await data(call(app, 'GET', '/namespaces', { token: 'eastern' }))).map((namespace: { name: string }) => namespace.name), ['east']);
+  });
+});
+
 describe('events as JSON', () => {
   test('pages from a cursor, filtered by schema and instance', async () => {
     const { app } = await withOrders();
@@ -523,6 +633,38 @@ describe('events as JSON', () => {
     }
     const resumed = await data(call(app, 'GET', '/namespaces/default/events?after=head', { headers: { 'last-event-id': '0' } }));
     assert.equal(resumed.events.length, all.events.length + 1);
+  });
+
+  test('after retention, a read from a cursor before the floor is 410 cursor_expired with the floor and the head; one from the start reads from the floor', async () => {
+    const { app, engine } = serve({}, { retention: { maxEvents: 2 } });
+    await data(call(app, 'POST', '/namespaces/default/schemas', { body: orderDocument() }));
+    await data(call(app, 'POST', '/namespaces/default/schemas/Order/publish'));
+    for (const id of ['o1', 'o2']) {
+      await data(call(app, 'POST', ORDERS, { body: { id, data: { title: id } } }), 201);
+    }
+    assert.deepEqual(engine.runner.prune(), { pruned: 2 });
+    for (const path of ['/namespaces/default/events?after=1', '/namespaces/default/events?after=1&kind=create', '/namespaces/default/events?schema=Order&instanceId=o1&after=1']) {
+      const expired = await problem(call(app, 'GET', path), 410);
+      assert.equal(expired.code, 'cursor_expired');
+      assert.equal(expired.details.floor, 2);
+      assert.equal(expired.details.head, 4);
+    }
+    assert.equal((await problem(call(app, 'GET', '/namespaces/default/events', { headers: { 'last-event-id': '1' } }), 410)).code, 'cursor_expired');
+    assert.deepEqual((await data(call(app, 'GET', '/namespaces/default/events?after=2'))).events.map((event: { cursor: number }) => event.cursor), [3, 4]);
+    // From the start, with no cursor or 0, which no event has, a read
+    // takes what the log holds: it starts at the floor.
+    for (const path of ['/namespaces/default/events', '/namespaces/default/events?after=0']) {
+      const page = await data(call(app, 'GET', path));
+      assert.deepEqual([page.events.map((event: { cursor: number }) => event.cursor), page.next, page.more], [[3, 4], 4, false]);
+    }
+    assert.deepEqual(
+      (await data(call(app, 'GET', '/namespaces/default/events?schema=Order&instanceId=o1'))).events.map((event: { cursor: number }) => event.cursor),
+      [3]
+    );
+    assert.deepEqual((await data(call(app, 'GET', '/namespaces/default/events?limit=1&kind=update'))).next, 3, 'a page of nothing kept moves past the floor');
+    assert.deepEqual(await data(call(app, 'GET', '/namespaces/default/events?after=head')), { events: [], next: 4, more: false });
+    // A namespace retention has pruned nothing of reads from 0.
+    assert.deepEqual((await data(call(app, 'GET', '/namespaces/east/events'))).events, []);
   });
 });
 

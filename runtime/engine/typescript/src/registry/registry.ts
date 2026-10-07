@@ -1,7 +1,9 @@
 /*
 The schema registry, as callers use it: each method takes the principal
 it acts for and asks the access policy (`define`, `publish`, `read`)
-before it touches the catalog (catalog.ts), which holds the rules.
+before it touches the catalog (catalog.ts), which holds the rules. An
+archived namespace refuses a define and a publish once the policy has
+allowed them (namespace_archived), and is read as it was.
 */
 
 import { checkPrincipal, type Access, type Principal } from '../access.js';
@@ -55,6 +57,7 @@ export class SchemaRegistry {
     const namespace = this.namespaces.resolve(options.namespace);
     const model = this.catalog.read(input, options.source ?? 'schema');
     this.access.require(principal, 'define', namespace, model.name);
+    this.namespaces.requireWritable(namespace);
     return this.catalog.define(model, namespace, actorOf(principal), this.reads(principal, namespace), options.source ?? 'schema');
   }
 
@@ -62,6 +65,7 @@ export class SchemaRegistry {
   publish(principal: Principal, name: string, options: SchemaTarget = {}): PublishResult {
     const namespace = this.target(principal, name, options);
     this.access.require(principal, 'publish', namespace, name);
+    this.namespaces.requireWritable(namespace);
     return this.catalog.publish(name, namespace, actorOf(principal), this.reads(principal, namespace));
   }
 

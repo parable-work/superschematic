@@ -34,10 +34,11 @@ resources that the Pulumi provisioner applies.
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
+| [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
-and D30, D45 and D46 in `docs/DECISIONS.md` record the decisions.
+and D30, D45, D46 and D47 in `docs/DECISIONS.md` record the decisions.
 
 ## The model
 
@@ -286,7 +287,12 @@ export {};
 declare module "@superschematic/stack" {
   interface Targets {
     gcp: {
-      values: { project: string; region: string; production?: boolean };
+      values: {
+        project: string;
+        projectNumber?: string;
+        region: string;
+        production?: boolean;
+      };
       server: {
         minInstances?: number;
         maxInstances?: number;
@@ -351,7 +357,7 @@ TypeScript twin.
 | Key | What it sets |
 | --- | --- |
 | `target` | the target that places every deployable no setting places elsewhere: `local`, or `gcp` in the installed binary |
-| `<target>` | the target's values, under the target's name: `gcp: { project, region, production }`, or `local: { postgresImage, postgresPort }` |
+| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production }`, or `local: { postgresImage, postgresPort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
 | `settings` | per deployable: `of` a handle or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's |
@@ -603,16 +609,26 @@ the schemas root, after the stack's services are built:
 docker build -f schemas/dist/server/shop-stack/Orders/Dockerfile .
 ```
 
-It builds superscalar's static archive in a Rust stage, links the server
-against it in a Go stage, and runs the binary on distroless `cc` as a
-non-root user. A server whose modules lie outside the repository root, or
-a naming file without `[paths] scalar_go`, gets no Dockerfile, and the
-build says why.
+The server links superscalar's static archive, and the version graph's,
+through cgo, and no Go module the module proxy serves carries them. With
+[`[paths] scalar_go`](/superschematic/reference/naming/#pathsscalar_go)
+naming a superscalar checkout, the Dockerfile builds them in Rust stages
+from the checkouts. Without it, as in a project that takes the runtime
+modules from the module proxy, a release of superschematic downloads the
+ones it ships for the image's platform, checked against the digests the
+release names, and pins the runtime modules in the server's `go.mod` to
+its own release. A Go stage links the server, and the image runs it on
+distroless `cc` as a non-root user. A server whose modules lie outside
+the repository root gets no Dockerfile, as does one without `[paths]
+scalar_go` built by a superschematic built from a checkout, which ships
+no archives; the build says why.
 
 ## Deploy to Google Cloud
 
 The gcp target is `extensions/gcp`, linked in the installed binary. Its
-values are `project` and `region`, which are required, and `production`.
+values are `project` and `region`, which are required, `production`, and
+`projectNumber`, the project's number, which `stack bootstrap` records
+and the [generated CI](#generated-ci) signs in with.
 
 | Stack concept | On gcp |
 | --- | --- |
@@ -670,7 +686,20 @@ superschematic stack outputs Staging --out outputs.json
   `<stack>-deployer` and read-only `<stack>-planner` accounts, the
   `builder` account Cloud Build runs as, the `migrator` account the
   migration job runs as, and Workload Identity Federation for the GitHub
-  repository of the git remote.
+  repository of the git remote. Last, it records the project's number,
+  which the generated CI's Workload Identity Federation needs, as
+  `projectNumber` beside `project` in the environment that sets
+  `project`: Staging's, when you bootstrap Preview. It writes the value
+  when the schema has none, writes it again when it differs, leaves the
+  file alone when it matches, and prints a line for each:
+
+  ```text
+  projectNumber 123456789012: recorded on Staging in src/stack.schema.ts
+  ```
+
+  A TypeScript schema changes in that property alone, comments and
+  layout kept. A JSON or YAML schema is not edited: bootstrap prints the
+  property to add. Commit the change with the rest of the stack.
 - **`secrets set`** asks for each secret that has no value and stores it
   in Secret Manager. On a fresh environment, deploy first: its
   infrastructure step creates each secret's storage, and the deploy then
@@ -693,8 +722,13 @@ superschematic stack outputs Staging --out outputs.json
 - **`destroy`** removes a run's resources and its manifest, and
   **`outputs`** prints the applied outputs.
 
-A build's context is the repository root, cut down by the
-`Dockerfile.dockerignore` beside each server's Dockerfile. `--image
+A build's context is the repository root, or the directory the naming
+file's
+[`[paths] build_context`](/superschematic/reference/naming/#pathsbuild_context)
+names, cut down by the `Dockerfile.dockerignore` beside each server's
+Dockerfile. A context that lacks a directory the ignore file takes in,
+such as a superscalar checkout a CI runner never made, or that holds one
+under a symbolic link, is refused before anything is uploaded. `--image
 <server>=...` takes a server's image by digest instead of building it,
 and `--no-build` builds nothing. A deploy keeps the image the manifest
 records for a server whose context did not change. A parameterized
@@ -707,6 +741,91 @@ digest, in the stack's repository. None of this has run against Google
 Cloud yet. The
 [CLI reference](/superschematic/reference/cli/#stack-deploy-environment)
 has every flag, the hazard gate and the manifest.
+
+## Generated CI
+
+A stack opts in to a generated CI workflow in its config, under the name
+of the renderer that writes it. The core's is `github`, GitHub Actions:
+
+```ts
+// schemas/services/shop-stack/schema.config.ts
+export default defineConfig({
+  name: "shop-stack",
+  kind: SchemaKind.Stack,
+  outputs: { ci: { github: { branch: "main" } } }
+});
+```
+
+| Option | Default | What it sets |
+| --- | --- | --- |
+| `branch` | `main` | the branch pull requests target and a push deploys from: a branch name, not a pattern |
+| `install` | `.github/workflows` | the directory under the repository root the build installs the workflow into |
+
+Only a Stack service takes `ci`, and one naming a renderer the binary
+does not register fails to build. The build writes the workflow to
+`ci/shop-stack/github/shop-stack.yml` under the output root, and copies it
+into the install directory when that directory exists. Without the
+directory, or outside a git repository, it logs why and installs nothing,
+so an example in a repository with CI of its own adds no workflow. A stack
+without `outputs.ci` gets none. Commit the installed file, and build again
+after changing the stack.
+
+The workflow:
+
+- **On a pull request to the branch**, `check` installs superschematic,
+  the static archives its release ships for the runner, which a Go server
+  links, and the schemas root's packages (`bun install --frozen-lockfile`
+  for a `bun.lock`, `npm ci` for a `package-lock.json`), runs `build-all`,
+  which resolves every environment and checks its graph, and compiles
+  each Go server's entrypoint module with `go build -mod=mod`. It needs no
+  credentials, no Rust and no superscalar checkout.
+- After it, `plan-<environment>` runs `stack plan` for each cloud
+  environment without parameters, as the environment's `planner`
+  account, and `preview-<environment>` runs `stack deploy <environment>
+  --param <parameter>=<pull request number>` for each environment with one
+  parameter, as `deployer`. When the pull request closes, the preview job
+  runs `stack destroy` of that member instead.
+- A pull request from a fork runs `check` alone: GitHub gives its jobs
+  no identity token.
+- **On a push to the branch**, `deploy-<environment>` deploys each cloud
+  environment without parameters in the order the stack declares them,
+  each after the one before, in the GitHub environment of its name. Give
+  the `Production` environment required reviewers in the repository's
+  settings, and each production deploy waits for their approval.
+  `workflow_dispatch` runs the same on demand from the branch.
+- One deploy runs at a time per environment, and one preview job per
+  member.
+
+A local environment has no job, since `stack dev` runs it on your
+machine, and neither has an environment with several parameters. The
+workflow's header names each environment it leaves out and why.
+
+Each cloud job signs in through its target. On gcp that is Workload
+Identity Federation, through the pool `stack bootstrap` creates for the
+GitHub repository of the git remote, as `<stack>-planner` or
+`<stack>-deployer`, with `google-github-actions/auth`, whose credentials
+file gives superschematic and Pulumi application default credentials.
+The provider's name holds the project's number, `projectNumber` in the
+environment's `gcp` values, which bootstrap records and you may enter by
+hand. An environment that extends another inherits it. Until it is set,
+the environment has no cloud job, and the header names the bootstrap to
+run:
+
+```ts
+gcp: { project: "acme-staging", projectNumber: "123456789012", region: "us-east1" }
+```
+
+The cloud jobs also install the tools the environment's provisioner runs:
+the `pulumi` CLI at the release of the Pulumi SDK the binary links.
+
+The workflow installs the release of superschematic that generated it,
+from the project's release page, and checks it against the release's
+`SHA256SUMS`, so a repository's CI changes only when you build with
+another release. It checks the static archives against the digest the
+binary that generated it names. A binary built from a checkout names no release: its
+workflow's install step fails and says to generate the workflow again
+with a released superschematic. Every action is pinned by commit, and
+nothing in the file depends on when it was generated.
 
 ## DNS
 
@@ -826,8 +945,9 @@ deployed in many stacks.
 
 ## Write your own target
 
-Targets, platforms, connectors, DNS platforms and provisioners are
-registrations, so a new cloud or tool needs no core edit.
+Targets, platforms, connectors, DNS platforms, provisioners and CI
+renderers are registrations, so a new cloud, tool or CI system needs no
+core edit.
 [A deploy target](/superschematic/extending/write-an-extension/#a-deploy-target)
 lists them, and [Stack targets](/superschematic/extending/stack-targets/)
 covers writing and testing one.

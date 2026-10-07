@@ -291,6 +291,32 @@ func TestWriteContextRefusals(t *testing.T) {
 	}
 }
 
+// TestWriteContextRefusesAMissingCheckout: a context that lacks a
+// directory the generated ignore file takes in, as a CI runner's lacks a
+// superscalar checkout it never made, or that holds it under a symbolic
+// link, as a checkout linked in from outside does, is refused before
+// anything reaches the target, which would fail at the COPY.
+func TestWriteContextRefusesAMissingCheckout(t *testing.T) {
+	root, dockerfile := contextTree(t)
+	checkout := filepath.Join(root, "third_party")
+	elsewhere := filepath.Join(t.TempDir(), "third_party")
+	if err := os.Rename(checkout, elsewhere); err != nil {
+		t.Fatal(err)
+	}
+	ignore := dockerfile + ".dockerignore"
+	_, err := WriteContext(io.Discard, root, dockerfile)
+	if want := "the build context " + root + " holds no third_party/superscalar/Cargo.lock, which " + ignore + " takes in"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("a missing checkout: %v; want %q", err, want)
+	}
+	if err := os.Symlink(elsewhere, checkout); err != nil {
+		t.Fatal(err)
+	}
+	_, err = WriteContext(io.Discard, root, dockerfile)
+	if want := "third_party/superscalar/Cargo.lock, which " + ignore + " takes in for the Dockerfile to build from, lies under third_party, a symbolic link"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("a linked checkout: %v; want %q", err, want)
+	}
+}
+
 // TestWriteContextKeepsTheDockerfile: as Docker's client does, the context
 // holds the Dockerfile and its ignore file even when the ignore file
 // leaves them out, and falls back to the root's .dockerignore.

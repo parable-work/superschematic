@@ -834,8 +834,9 @@ follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the
 registering extension's `Name()`; inside `Use` the spec's `Extension` must
 be the extension whose `Register` is running, so an extension cannot
 declare a core name. An operation may not be named `create`, `get`,
-`list`, `update` or `delete`, which every schema has (D16), or declare a
-scope other than `instance` or `schema`. A `preconditionSchema` is held
+`list`, `update` or `delete`, which every schema has (D16), or `lookup`,
+which a schema with a unique field has, or declare a scope other than
+`instance` or `schema`. A `preconditionSchema` is held
 to a `paramsSchema`'s rule, and a veto code that is not lowercase snake
 case, or is listed twice, is refused (D16, amended). `Finalize`
 checks `requires`, `conflicts` and the invocation policy values, since the

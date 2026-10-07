@@ -1,11 +1,16 @@
 package servergen_test
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -33,6 +38,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/release"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 	publicregistry "github.com/parable-work/superschematic/registry"
@@ -194,9 +200,29 @@ func TestEntrypointGolden(t *testing.T) {
 		}
 	}
 
-	files := generated(repoRoot, "shop-stack", cloudStack)
+	compareGoldens(t, goldenRoot, generated(repoRoot, "shop-stack", cloudStack))
+	for _, stack := range []string{"shop-stack", cloudStack} {
+		entries, err := os.ReadDir(servergen.StackDir(out, stack))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var servers []string
+		for _, e := range entries {
+			servers = append(servers, e.Name())
+		}
+		if got := strings.Join(servers, " "); got != "Storefront shop-api" {
+			t.Errorf("%s: servers = %s, want Storefront and shop-api", stack, got)
+		}
+	}
+}
+
+// compareGoldens checks each generated file of files, by its path under
+// root, against its golden, which -update rewrites, and removes when the
+// build did not write it.
+func compareGoldens(t *testing.T, root string, files map[string]string) {
+	t.Helper()
 	for _, rel := range slices.Sorted(maps.Keys(files)) {
-		golden := filepath.Join(goldenRoot, rel)
+		golden := filepath.Join(root, rel)
 		got, err := os.ReadFile(files[rel])
 		written := err == nil
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -230,18 +256,87 @@ func TestEntrypointGolden(t *testing.T) {
 			t.Errorf("%s differs from %s; run with -update and review the diff", rel, golden)
 		}
 	}
-	for _, stack := range []string{"shop-stack", cloudStack} {
-		entries, err := os.ReadDir(servergen.StackDir(out, stack))
-		if err != nil {
-			t.Fatal(err)
+}
+
+// testRelease is a release the tests generate as, with made-up digests of
+// its static archives.
+var testRelease = release.Release{
+	Version:  "1.2.3",
+	ScalarGo: "v0.0.0-20260928143325-10cf493f485e",
+	Archives: map[string]string{
+		"darwin-arm64": strings.Repeat("1", 64),
+		"darwin-x64":   strings.Repeat("2", 64),
+		"linux-arm64":  strings.Repeat("3", 64),
+		"linux-x64":    strings.Repeat("4", 64),
+	},
+}
+
+// releaseGoldenRoot holds the entrypoint modules a release writes in a
+// project with no [paths], as the output root lays them out.
+const releaseGoldenRoot = "testdata/golden/release"
+
+// TestReleaseEntrypointGolden: in a project that takes the runtime
+// modules from the module proxy, whose naming file has no [paths], a
+// release's build pins each runtime module to the release in the server's
+// go.mod, every version the generated modules require: superschematic's
+// at the release's tag and superscalar's at the version the release links.
+// The Dockerfile downloads the release's static archives for the image's
+// platform, checked against their digests, in place of the Rust stages,
+// and the context holds no checkout. Regenerate with:
+//
+//	go test ./internal/generator/servergen -run TestReleaseEntrypointGolden -update
+func TestReleaseEntrypointGolden(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	for _, name := range append(slices.Clone(apis), "shop-stack") {
+		opts := f.options(repoRoot, naming.LocalPaths{})
+		opts.Release = &testRelease
+		if _, err := generator.Run(f.schemas[name], f.configs[name], opts); err != nil {
+			t.Fatalf("build %s: %v", name, err)
 		}
-		var servers []string
-		for _, e := range entries {
-			servers = append(servers, e.Name())
+	}
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	files := map[string]string{}
+	for _, server := range []string{"Storefront", "shop-api"} {
+		for _, file := range []string{servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
+			files[filepath.Join("server", "shop-stack", server, file)] = filepath.Join(servergen.ServerDir(out, "shop-stack", server), file)
 		}
-		if got := strings.Join(servers, " "); got != "Storefront shop-api" {
-			t.Errorf("%s: servers = %s, want Storefront and shop-api", stack, got)
-		}
+	}
+	compareGoldens(t, releaseGoldenRoot, files)
+}
+
+// TestNoArchivesNoDockerfile: without [paths] scalar_go, a binary built
+// from a checkout, which is no release, and a release binary its release
+// workflow did not build, which names no digests, have no archives for
+// the image to link, so the build writes no Dockerfile and says why.
+func TestNoArchivesNoDockerfile(t *testing.T) {
+	f := loadFixture(t, servicesRoot)
+	for _, tc := range []struct {
+		name    string
+		release release.Release
+		why     string
+	}{
+		{"checkout build", release.Release{}, "this superschematic is built from a checkout, which is no release"},
+		{"no digests", release.Release{Version: "1.2.3", ScalarGo: testRelease.ScalarGo}, "this superschematic 1.2.3, which its release workflow did not build, names no digest of them for linux-x64"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoRoot := t.TempDir()
+			var log strings.Builder
+			for _, name := range append(slices.Clone(apis), "shop-stack") {
+				opts := f.options(repoRoot, naming.LocalPaths{})
+				opts.Release, opts.Log = &tc.release, &log
+				if _, err := generator.Run(f.schemas[name], f.configs[name], opts); err != nil {
+					t.Fatalf("build %s: %v", name, err)
+				}
+			}
+			dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack", "shop-api")
+			if _, err := os.Stat(filepath.Join(dir, servergen.DockerFile)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("the build wrote a Dockerfile: %v", err)
+			}
+			if want := "server shop-api: no Dockerfile, since the naming file's [paths] scalar_go is unset, so the image links the static archives superschematic's release ships, and " + tc.why; !strings.Contains(log.String(), want) {
+				t.Errorf("the log does not say %q:\n%s", want, log.String())
+			}
+		})
 	}
 }
 
@@ -395,6 +490,42 @@ func TestNoRepositoryRootWritesNoEntrypoint(t *testing.T) {
 	}
 	if _, ok := result.Outputs["server"]; ok || !strings.Contains(strings.Join(result.Skipped, " "), "server") {
 		t.Errorf("outputs %v, skipped %v; want server skipped", result.Outputs, result.Skipped)
+	}
+}
+
+// TestTheBuildContextHoldsTheRuntimes: a project whose runtime modules lie
+// above the repository root, as an example inside a checkout does, gets no
+// Dockerfile, until the naming file's [paths] build_context names the
+// directory that holds both; the Dockerfile's paths are then relative to
+// it.
+func TestTheBuildContextHoldsTheRuntimes(t *testing.T) {
+	checkout := t.TempDir()
+	repoRoot := filepath.Join(checkout, "examples", "shop")
+	f := loadFixture(t, servicesRoot)
+	dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack", "shop-api")
+	dockerfile := filepath.Join(dir, servergen.DockerFile)
+	f.build(t, repoRoot, fakePaths(checkout))
+	if _, err := os.Stat(dockerfile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("with the runtimes outside the repository root, %s: %v; want no Dockerfile", dockerfile, err)
+	}
+
+	n := naming.Default()
+	n.Paths.BuildContext = "../.."
+	for _, name := range order {
+		opts := f.options(repoRoot, fakePaths(checkout))
+		opts.Naming = n
+		if _, err := generator.Run(f.schemas[name], f.configs[name], opts); err != nil {
+			t.Fatalf("build %s: %v", name, err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, servergen.DockerIgnoreFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"!examples/shop/schemas/dist/server/shop-stack/shop-api\n", "!third_party/superscalar/go\n", "!examples/shop/go/shop-api\n"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("%s lacks %q:\n%s", servergen.DockerIgnoreFile, want, data)
+		}
 	}
 }
 
@@ -796,6 +927,143 @@ func docker(t *testing.T, args ...string) string {
 // Docker, and builds superscalar's archive in a Rust stage, so it runs
 // only outside -short.
 func TestTheDockerfileBuildsAnImageThatServes(t *testing.T) {
+	needDocker(t)
+	repoRoot := dockerRepo(t)
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot), append(slices.Clone(apis), cloudStack)...)
+
+	image := fmt.Sprintf("superschematic-servergen-test:%d", time.Now().UnixNano())
+	dockerBuild(t, repoRoot, image, "-f", "schemas/dist/server/"+cloudStack+"/Storefront/Dockerfile")
+	expectServes(t, image)
+}
+
+// TestTheReleaseDockerfileBuildsAnImageThatServes: in a project whose
+// naming file names no superscalar checkout, Storefront's Dockerfile
+// downloads the static archives of the release that wrote it, checks them
+// against the digest the release names, and builds with no checkout in
+// its context, and the image serves. A file server in a container stands
+// in for the release page, holding archives the checkout's Dockerfile
+// builds, and the build reaches it on the Docker host's network through
+// the SUPERSCHEMATIC_RELEASE argument. superscalar's Go binding comes from
+// the module proxy at the version this binary links. It runs only outside
+// -short, where Docker runs.
+func TestTheReleaseDockerfileBuildsAnImageThatServes(t *testing.T) {
+	needDocker(t)
+	repoRoot := dockerRepo(t)
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot), append(slices.Clone(apis), cloudStack)...)
+
+	// The archive the checkout's Dockerfile builds, for the Docker host's
+	// platform, packed as a release packs it.
+	stamp := time.Now().UnixNano()
+	builder := fmt.Sprintf("superschematic-servergen-test:%d-superscalar", stamp)
+	dockerBuild(t, repoRoot, builder, "--target", "superscalar", "-f", "schemas/dist/server/"+cloudStack+"/Storefront/Dockerfile")
+	created := docker(t, "create", builder)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", created).Run() })
+	archive := filepath.Join(t.TempDir(), "libsuperscalar_ffi.a")
+	docker(t, "cp", created+":/libsuperscalar_ffi.a", archive)
+	arch := docker(t, "version", "--format", "{{.Server.Arch}}")
+	platform := release.Platform("linux", arch)
+	if platform == "" {
+		t.Skipf("a release ships no archives for linux/%s", arch)
+	}
+	r := release.Release{Version: "1.2.3", ScalarGo: scalarGoVersion(t), Archives: map[string]string{
+		"linux-x64": strings.Repeat("4", 64), "linux-arm64": strings.Repeat("3", 64),
+	}}
+	tarball := filepath.Join(t.TempDir(), release.ArchiveName(r.Version, platform))
+	r.Archives[platform] = packArchives(t, tarball, archive)
+
+	// The project: the runtime modules from its checkout, superscalar
+	// from the module proxy, and no superscalar checkout at all.
+	if err := os.RemoveAll(filepath.Join(repoRoot, "third_party")); err != nil {
+		t.Fatal(err)
+	}
+	paths := fakePaths(repoRoot)
+	paths.ScalarGo = ""
+	for _, name := range append(slices.Clone(apis), cloudStack) {
+		opts := f.options(repoRoot, paths)
+		opts.Release = &r
+		if _, err := generator.Run(f.schemas[name], f.configs[name], opts); err != nil {
+			t.Fatalf("build %s: %v", name, err)
+		}
+	}
+	dockerfile := filepath.Join(servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), cloudStack, "Storefront"), servergen.DockerFile)
+	if data, err := os.ReadFile(dockerfile); err != nil || !strings.Contains(string(data), "sum="+r.Archives[platform]) {
+		t.Fatalf("%s does not pin the archives' digest %s: %v\n%s", dockerfile, r.Archives[platform], err, data)
+	}
+
+	server := docker(t, "run", "-d", "-p", "127.0.0.1::80", "busybox:1.37", "sh", "-c", "mkdir -p /www && exec httpd -f -p 80 -h /www")
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", server).Run() })
+	docker(t, "cp", tarball, server+":/www/")
+	address := firstLine(docker(t, "port", server, "80/tcp"))
+
+	image := fmt.Sprintf("superschematic-servergen-test:%d", stamp)
+	dockerBuild(t, repoRoot, image, "--network", "host", "--build-arg", "SUPERSCHEMATIC_RELEASE=http://"+address,
+		"-f", "schemas/dist/server/"+cloudStack+"/Storefront/Dockerfile")
+	expectServes(t, image)
+}
+
+// scalarGoVersion is the version of superscalar's Go binding the root
+// module requires, the one a release built from this checkout links.
+func scalarGoVersion(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(testpaths.RepoRoot(t), "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if version, ok := strings.CutPrefix(strings.TrimSpace(line), release.ScalarGoModule+" "); ok {
+			return strings.Fields(version)[0]
+		}
+	}
+	t.Fatalf("go.mod requires no %s", release.ScalarGoModule)
+	return ""
+}
+
+// packArchives writes a release's archives tarball holding archive under
+// lib/, in the directory the tarball is named for, and returns its hex
+// SHA-256.
+func packArchives(t *testing.T, tarball, archive string) string {
+	t.Helper()
+	data, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	dir := strings.TrimSuffix(filepath.Base(tarball), ".tar.gz")
+	for _, entry := range []struct {
+		name string
+		data []byte
+	}{{dir + "/lib/", nil}, {dir + "/lib/" + filepath.Base(archive), data}} {
+		hdr := &tar.Header{Name: entry.name, Mode: 0o644, Size: int64(len(entry.data)), Typeflag: tar.TypeReg}
+		if entry.data == nil {
+			hdr.Mode, hdr.Typeflag = 0o755, tar.TypeDir
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(entry.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tarball, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	return hex.EncodeToString(sum[:])
+}
+
+// needDocker skips a test outside -short, or where Docker does not run.
+func needDocker(t *testing.T) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping docker build in -short mode")
 	}
@@ -805,6 +1073,13 @@ func TestTheDockerfileBuildsAnImageThatServes(t *testing.T) {
 	if out, err := exec.Command("docker", "info").CombinedOutput(); err != nil {
 		t.Skipf("docker is not running: %v\n%s", err, out)
 	}
+}
+
+// dockerRepo is a repository root holding the runtime modules and a
+// superscalar checkout, without its archives, as the fixture's [paths]
+// name them.
+func dockerRepo(t *testing.T) string {
+	t.Helper()
 	local := testpaths.Local(t)
 	repo := testpaths.RepoRoot(t)
 	repoRoot := t.TempDir()
@@ -821,17 +1096,34 @@ func TestTheDockerfileBuildsAnImageThatServes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	f := loadFixture(t, servicesRoot)
-	f.build(t, repoRoot, fakePaths(repoRoot), append(slices.Clone(apis), cloudStack)...)
+	return repoRoot
+}
 
-	image := fmt.Sprintf("superschematic-servergen-test:%d", time.Now().UnixNano())
-	cmd := exec.Command("docker", "build", "-q", "-f", "schemas/dist/server/"+cloudStack+"/Storefront/Dockerfile", "-t", image, ".")
-	cmd.Dir = repoRoot
+// dockerBuild builds image from the context at root with args, and removes
+// it when the test ends.
+func dockerBuild(t *testing.T, root, image string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("docker", append(append([]string{"build", "-q", "-t", image}, args...), ".")...)
+	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("docker build: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "rmi", "-f", image).Run() })
+}
 
+// firstLine is s up to its first newline.
+func firstLine(s string) string {
+	if i := strings.Index(s, "\n"); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// expectServes runs Storefront's image and checks it serves: /healthz, an
+// API's route, /readyz reporting its database down, and a clean stop on
+// docker stop.
+func expectServes(t *testing.T, image string) {
+	t.Helper()
 	container := docker(t, "run", "-d", "-p", "127.0.0.1::8080",
 		"-e", "SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1",
 		"-e", "SHOP_API_SERVICE_URL=http://127.0.0.1:9", image)

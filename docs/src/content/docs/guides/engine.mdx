@@ -36,7 +36,8 @@ rule.
   process per file.
 - A schema is one JSON document of kind `General`, with no `imports` and
   no operation sets. Every schema has the operations `create`, `get`,
-  `list`, `update` and `delete`, and its behaviors add their own.
+  `list`, `update` and `delete`, one with a unique field `lookup`, and
+  its behaviors add their own.
 - It has no roles and no default policy. Your server says who each caller
   is and what each caller may do.
 
@@ -133,7 +134,8 @@ renamed field, a new required field, a tighter bound and another type are
 refused: the engine throws `IncompatibleChangeError`, and the HTTP API
 answers 409 `incompatible_change`. To make such a change, publish it under
 a new schema name. Each behavior decides which changes to its own config a
-new version may make. The README's
+new version may make. A new `@unique` field is allowed while no two
+stored instances hold the same value, and refused while two do. The README's
 [compatibility rule](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#the-compatibility-rule)
 has the full table.
 
@@ -160,6 +162,10 @@ a draft defined over HTTP; see
   namespace, the schema and, for a behavior operation, the operation's
   name. Only `true` allows; anything else is 403 `forbidden`. The policy
   runs synchronously. There is no default: `allowAll` is there for tests.
+- Making, archiving and listing namespaces asks the action `manage`,
+  with the namespace, no schema, and the operation (`create`, `archive`,
+  `unarchive` or `list`). This example makes no namespace while it runs,
+  so its policy refuses `manage`.
 - A behavior operation asks `write` when it writes and `read` when it only
   reads. This policy lets a reader call `comment` and `propose`, and
   nothing else that writes.
@@ -194,7 +200,10 @@ a draft defined over HTTP; see
 - `engineMcp` serves the MCP endpoint at `/namespaces/{namespace}/mcp`,
   with the same options.
 - There is one namespace, `default`, unless you configure more with the
-  `namespaces` option.
+  `namespaces` option or make one while the server runs
+  (`POST /api/namespaces`, `create_namespace`), as the policy allows. An
+  archived namespace is read as it was and refuses every write (409
+  `namespace_archived`).
 
 Start the server from the example's directory:
 
@@ -335,6 +344,46 @@ the instance's `valueRefs`, and read a value when you need it from
 `GET $API/values/<hash>`, which answers a caller who may read the note's
 schema. The engine's README, `runtime/engine/README.md` ("The value
 store"), has the rules.
+
+`where` filters a list by equality, a JSON object in the query: each
+member a note's own field that holds a string, a number or a boolean, or
+a behavior's field a list filters on, such as Workflow's `status`, with
+a value or a list of values any of which the note holds:
+
+```sh
+curl -s -G $API/schemas/notes/instances -H 'authorization: Bearer carol-token' \
+  --data-urlencode 'where={"status": ["review", "published"]}' | jq '.data.items[].id'
+```
+
+A page keeps creation order. A filter an index serves, Workflow's
+`status` or a unique field, reads only the notes that match; another
+reads at most 1000 notes past the cursor per page, so its page can hold
+fewer notes than `limit`, even none, while `next` is not null. Read on
+until `next` is null.
+
+### Unique fields and lookups
+
+`@unique` or `@key` on a field of the instance type, or a unique
+`@index` over several, makes the engine refuse a second instance with the
+same value in the namespace: the create or the update is 409 `conflict`,
+with the fields in `details.fields`. An instance that lacks the field
+does not count, so any number of instances can lack it. A field like
+that is a string, a number or a boolean; the engine refuses `@unique` on
+a list or an object when you define the schema.
+
+`GET $API/schemas/{name}/lookup?key=<JSON>` returns the instance whose
+unique fields hold the key's values, or 404. The key is a JSON object in
+the query, never part of the path, so a value may hold a slash. For a
+`models` schema whose `slug` is `@unique`:
+
+```sh
+curl -s -G $API/schemas/models/lookup -H 'authorization: Bearer carol-token' \
+  --data-urlencode 'key={"slug": "openai/gpt-5"}' | jq .data.id
+```
+
+A client that syncs an outside collection looks each item up by its key
+and creates the ones it does not find; a create that races another for
+the same key is 409, after which a lookup finds it.
 
 ## Behaviors
 
@@ -655,6 +704,17 @@ it waits it sends a `: keepalive` comment every five seconds. Stop it
 with Ctrl-C. The end-to-end test reads the stream from a cursor, then
 adds a comment and receives its event.
 
+This server keeps every event. One that passes `retention` to
+`openEngine`, `{ maxAgeMs }`, `{ maxEvents }` or both, has its runner
+prune the oldest, each namespace's apart, and never one a subscription
+has yet to handle. A read from the start, with no `after` or
+`after=0`, reads what is kept, from the oldest event. A read or a
+stream's resume from a cursor retention has pruned past is 410
+`cursor_expired`, whose `details` carry the `floor` to read on from,
+taking the gap, and the `head` to start again from. The README's
+[retention](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#retention)
+section has the rules.
+
 ## Call it from TypeScript
 
 `@superschematic/engine/client` is a typed client of the HTTP API. It
@@ -682,9 +742,11 @@ try {
 }
 ```
 
-- The calls follow the engine's: `schemas` (`define`, `publish`,
-  `describe`, ...), `instances` (`create` with `behaviors`, `get`, `list`,
-  `update`, `delete`, `invoke` and the schema-level `invokeSchema`),
+- The calls follow the engine's: `namespaces` (`list`, `create`,
+  `archive`, ...), `schemas` (`define`, `publish`,
+  `describe`, ...), `instances` (`create` with `behaviors`, `get`, `list`
+  with `where`, `lookup`, `update`, `delete`, `invoke` and the
+  schema-level `invokeSchema`),
   `events`, `behaviors`, `tools()` and `search()`. A write's
   `expectedSeq` is sent as `If-Match` and its `preconditions` as the
   `Preconditions` header.
@@ -713,12 +775,15 @@ worker on it.
 ## MCP tools
 
 The MCP endpoint serves one tool per operation of every live schema the
-caller may read, and six engine tools: `list_schemas`, `describe_schema`
+caller may read, `lookup` for a schema with a unique field among them,
+and ten engine tools: `list_schemas`, `describe_schema`
 and `define_schema`, `list_behaviors` and `describe_behavior`, which
 list the behaviors the engine runs and return one's declaration, its
-config's JSON Schema included, and `get_value`, which reads a value of
-the value store by its hash. A tool's name is the schema's and the operation's,
+config's JSON Schema included, `get_value`, which reads a value of
+the value store by its hash, and `list_namespaces`, `create_namespace`,
+`archive_namespace` and `unarchive_namespace`. A tool's name is the schema's and the operation's,
 in snake case: `notes_create`, `notes_transition`, `notes_list_comments`.
+`notes_list` takes `where`, as the route does, as a JSON object.
 A tool the policy refuses the caller is left out of the caller's list, so
 carol, a reader, sees these:
 
@@ -736,6 +801,10 @@ define_schema
 list_behaviors
 describe_behavior
 get_value
+list_namespaces
+create_namespace
+archive_namespace
+unarchive_namespace
 notes_get
 notes_list
 notes_comment
@@ -748,7 +817,8 @@ notes_list_proposals
 
 The engine's tools name no schema until they are called, so everyone
 lists them and the policy answers the call; the behavior tools ask it
-nothing, since the behaviors are the server's code. Where a schema
+nothing, since the behaviors are the server's code, and this policy
+refuses every caller the namespace tools' `manage`. Where a schema
 composes `Search`, one more tool, `search`, searches every such schema the
 caller may read ([Engine behaviors](/superschematic/guides/engine-behaviors/#searching-every-schema)).
 No tool publishes: a draft that `define_schema` stores goes live only

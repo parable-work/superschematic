@@ -85,10 +85,16 @@ describe('the describe document', () => {
     assert.deepEqual(params, {
       create: [['data', 'id'], ['data']],
       get: [['id', 'valueRefs'], ['id']],
-      list: [['cursor', 'limit', 'valueRefs'], []],
+      list: [['cursor', 'limit', 'valueRefs', 'where'], []],
       update: [['expectedSeq', 'id', 'patch'], ['id', 'patch']],
       delete: [['expectedSeq', 'id'], ['id']],
     });
+    // where takes the own fields that hold a string, a number or a boolean,
+    // each a value or a list of them, never null; lines is a list.
+    const where = (operationOf(engine, 'Order', 'list').params.properties as Record<string, any>).where;
+    assert.deepEqual(Object.keys(where.properties), ['title', 'quantity', 'status']);
+    assert.deepEqual(where.properties.status.anyOf[0], { description: 'A OrderStatus value', enum: ['open', 'shipped'], type: 'string' });
+    assert.deepEqual(where.properties.status.anyOf[1], { type: 'array', items: where.properties.status.anyOf[0], minItems: 1, maxItems: 100 });
     // A patch takes any of the fields, nested objects' included.
     const patch = (operationOf(engine, 'Order', 'update').params.properties as Record<string, any>).patch;
     assert.equal(patch.required, undefined);
@@ -249,6 +255,10 @@ describe('the tools document', () => {
         ['engine.listBehaviors', 'list_behaviors', 'engine', 'listBehaviors'],
         ['engine.describeBehavior', 'describe_behavior', 'engine', 'describeBehavior'],
         ['engine.getValue', 'get_value', 'engine', 'getValue'],
+        ['engine.listNamespaces', 'list_namespaces', 'engine', 'listNamespaces'],
+        ['engine.createNamespace', 'create_namespace', 'engine', 'createNamespace'],
+        ['engine.archiveNamespace', 'archive_namespace', 'engine', 'archiveNamespace'],
+        ['engine.unarchiveNamespace', 'unarchive_namespace', 'engine', 'unarchiveNamespace'],
         ['item.create', 'item_create', 'item', 'create'],
         ['item.get', 'item_get', 'item', 'get'],
         ['item.list', 'item_list', 'item', 'list'],
@@ -332,7 +342,21 @@ describe('the tools document', () => {
     const tools = engine.tools.manifest(reader).tools;
     assert.deepEqual(
       tools.filter((entry) => !entry.mcp.hidden).map((entry) => entry.name),
-      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue', 'item.get', 'item.list', 'item.history']
+      [
+        'engine.listSchemas',
+        'engine.describeSchema',
+        'engine.defineSchema',
+        'engine.listBehaviors',
+        'engine.describeBehavior',
+        'engine.getValue',
+        'engine.listNamespaces',
+        'engine.createNamespace',
+        'engine.archiveNamespace',
+        'engine.unarchiveNamespace',
+        'item.get',
+        'item.list',
+        'item.history',
+      ]
     );
     assert.equal(
       (tool(engine, 'item.increment', reader).mcp as { hiddenReason: string }).hiddenReason,
@@ -352,7 +376,7 @@ describe('the tools document', () => {
     publish(engine, orderDocument());
     assert.deepEqual(
       engine.tools.manifest(alice).tools.map((entry) => entry.namespace),
-      ['engine', 'engine', 'engine', 'engine', 'engine', 'engine', 'order', 'order', 'order', 'order', 'order']
+      [...Array.from({ length: 10 }, () => 'engine'), 'order', 'order', 'order', 'order', 'order']
     );
   });
 });
@@ -371,6 +395,10 @@ describe('invocation policies', () => {
       'engine.listBehaviors': 'auto',
       'engine.describeBehavior': 'auto',
       'engine.getValue': 'auto',
+      'engine.listNamespaces': 'auto',
+      'engine.createNamespace': 'auto',
+      'engine.archiveNamespace': 'auto',
+      'engine.unarchiveNamespace': 'auto',
       'item.create': 'auto',
       'item.get': 'auto',
       'item.list': 'auto',
@@ -410,6 +438,10 @@ describe('invocation policies', () => {
         ['engine.listBehaviors', 'on-write'],
         ['engine.describeBehavior', 'on-write'],
         ['engine.getValue', 'on-write'],
+        ['engine.listNamespaces', 'on-write'],
+        ['engine.createNamespace', 'on-write'],
+        ['engine.archiveNamespace', 'on-write'],
+        ['engine.unarchiveNamespace', 'on-write'],
         ['item.create', 'on-write'],
         ['item.get', 'never'],
         ['item.list', 'never'],

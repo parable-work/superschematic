@@ -515,9 +515,6 @@
                 ]
               }
             ],
-            "scaling": {
-              "minInstanceCount": 0
-            },
             "serviceAccount": {
               "$output": {
                 "resource": "Orders.account",

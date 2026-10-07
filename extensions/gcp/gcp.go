@@ -94,7 +94,8 @@ func (Extension) Name() string { return Name }
 // Register adds the gcp target, its platforms, connectors and DNS
 // platform, the pinned schema of every resource type they and bootstrap
 // emit, and the target's deploy seams: the state bucket, Secret Manager,
-// bootstrap, image builds with Cloud Build and the migration job.
+// bootstrap, image builds with Cloud Build, the migration job, and the
+// generated CI's sign-in through Workload Identity Federation.
 func (e Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		{
@@ -159,6 +160,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Bootstrap:  bootstrapper{ext: e},
 		Migrations: e.migrations(),
 		Builder:    imageBuilder{ext: e},
+		CI:         ciIdentities{},
 	})
 }
 

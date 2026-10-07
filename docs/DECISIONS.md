@@ -1113,8 +1113,14 @@ typed client of its HTTP API with the event stream and a reconciler
 (`@superschematic/engine-workqueue/worker`), are built (the amendment "a
 typed client over the HTTP API, a worker and a reconciler" below). A
 large field is stored once, by hash, in a value store in the same file
-(the amendment "a large value is stored once" below). Each change that
-lands a piece updates this paragraph. The names and rules are reversible until the first release.
+(the amendment "a large value is stored once" below). The engine enforces
+`@unique`, `@key` and `@index`, finds an instance by its unique fields and
+filters a list by equality (the amendment "an instance is found by a
+unique field" below). A deployment makes and archives namespaces while
+the engine runs, and the log keeps events by age or count, pruned on the
+runner (the last two amendments below). Each change that lands a piece
+updates this paragraph. The names and rules are reversible until the
+first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -1613,6 +1619,92 @@ one process still writes it.
 | A behavior keeps an object with large members in its own tables through `values` in its context: `stow(key, object)` returns the JSON text and the pointers its row keeps and holds the values for the row named by the behavior, the call's namespace and schema, the context's instance and key; `load(json, refs)` puts them back; `release(key?)` drops them. A read loads only. `Revisions` stows each revision's fields and each proposal's patch (its migration 2 adds `value_refs`) and releases them when the instance goes. | The engine writing behaviors' tables for them, which D16 rules out; `Revisions` copying the fields as before, a large field in every revision |
 | A row or an event written before migration 9 keeps its values inline. An instance's row moves a large field to the store at its next write; an event is never rewritten. | Moving every large value in migration 9, which hashes each one inside one migration's transaction and still cannot touch the append-only log |
 | The store sets no limit of its own on a value's size: the HTTP runtime's body limit bounds what a caller sends, and dedupe and refs bound the copies. | A maximum per value, which no case has asked for and which a client that hits it can only split by hand |
+
+### D16, amended: an instance is found by a unique field, and a list filters by equality
+
+A client that syncs an external collection, a provider's models or a
+CRM's rows, or that addresses instances by a slug or a name, could find
+an instance only by its id. `list` took a limit and a cursor, so finding
+the instance with a slug read every page, and the commonest filter, the
+jobs in `doing`, had no handle at all, since a behavior's field lives in
+its own column. The engine ignored the core `@unique` and `@key`
+decorators, so nothing stopped two instances sharing a slug, and an id
+cannot hold `/`, which many natural keys do. This changes D16's
+compatibility rule: a new unique field is allowed while the stored
+instances hold no value twice, which the rule asks of the instances
+rather than of the two documents.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@unique` and `@key` on a field of the instance type, and an entry of the type's `indexes` (`@index`), become an SQLite index on `engine_instances`, led by the namespace, then each field's value (`json_extract(data, '$."<key>"')`), partial on the schema's rows in the namespace that holds it and on a value in each field. A unique one refuses, in the write's own statement, a create or an update that would give a second instance of the namespace the same values; a behavior's `update()` and `instances.create` meet it as a caller's write does. Its name is a digest of the holder, the schema, whether it is unique and its keys, so publish finds it again with no table of its own. | A table of keys per schema beside the instances, a second write per write to keep in step; a read before each write, which the index makes redundant; ignoring them, as before |
+| `@key` is a unique field. The instance's id stays its key. | `@key` as the id, which a merge patch could then change and which could not hold `/` |
+| A field an index covers is a top-level own field whose value is a string, a number or a boolean: an enum, a primitive or a scalar of those JSON types. define refuses `@unique`, `@key` and `@index` on a list, an object or a JSON value, on a field of a type other than the instance type, an index naming a field the type lacks, and a field whose JSON key holds `"` or `\`, which a JSON path cannot name. | Comparing an object by its canonical JSON, which no case asks for and every merge patch would rehash; ignoring them on a nested type, which a reader of the schema takes for enforced |
+| A unique `@index` makes its fields unique together, and a plain one is an index too, which a filter on its fields reads through. Each set of keys is one index, a unique one winning over a plain one. | Field-level `@unique` only, which leaves the commonest sync key, a source with its id there, unenforced |
+| Absent and null are no value: an instance that lacks any field of an index is not in it, so any number of instances lack a unique field, as SQL lets NULLs through a UNIQUE column and a merge patch's `null` removes the member. | Null as one value, so a second instance created without a slug is refused; requiring a unique field, which `required` says and the rule governs |
+| A value is unique within a namespace, the index's first key; a schema of the shared namespace holds each namespace to its own. | Unique across namespaces, under which one namespace learns of another's values from a refusal |
+| A write that repeats a value is `conflict` (409), `UniqueConflictError`, its `fields` the index's keys, which the problem carries as `details.fields`. It does not name the instance that holds the value. | `invalid_instance` (422) with an issue at the field, which says the instance is wrong where another instance makes it so; naming the holder, which a caller that may write the schema but not read it would learn from the refusal |
+| Adding a unique index narrows what the schema accepts across instances, not what one instance holds, so the diff of two documents cannot decide it. define and publish ask the stored instances: a unique index the new version has and the live one lacks is `incompatible_change` while instances of a namespace share its values, with the values where the namespace that holds the schema holds them. publish creates the new version's indexes and drops the ones it removes, in its transaction. Removing one, and adding a plain index, are always allowed. | Refusing a new unique field on any schema with instances, as a new required field is, which forces a new name and a copy of the data for a constraint the data already meets; enforcing it on later writes only, which leaves two instances a lookup must choose between |
+| Engine migration 10 creates the indexes of each live version published before it, and refuses to open a file whose instances break one. | Leaving those versions unenforced until their next publish, while their describe documents and lookups treat the fields as unique |
+| A field an index covers stays inline in the instance's row, whatever its length, so the index and a lookup compare the value; its events still store it by hash. publish puts back inline a value a row holds by hash under a field a new index covers. A filter on a field no index covers also matches a long string by its hash, since the row may hold it either way. | Indexing the ref, under which a string inline in one row (written before migration 9, or under a higher threshold) and by hash in another would not collide; refusing a unique string past the threshold, which makes a schema's writes depend on an engine option |
+| `engine.instances.lookup(principal, schema, key, { namespace, valueRefs })`, `GET /namespaces/{namespace}/schemas/{name}/lookup?key=<JSON>` and the tool `<schema>_lookup` return the instance whose unique fields hold `key`'s values, or `undefined`, 404, `not_found`. `key` names exactly the fields of one unique index, each with one value of its type; it asks `read`. The tool is listed for a schema with a unique field, and `lookup` joins the names no behavior operation may take. | The value in a path segment (`.../by/slug/{value}`), which a slash breaks and an encoded slash leaves to each router; `list` with a filter alone, which cannot say there is at most one |
+| `list` takes `where`, a JSON object of field values: a member keeps the instances whose field holds its value, a list of 1 to 100 values any of them, and the members together the ones every member keeps. Over HTTP it is a JSON object in the query parameter `where`, and over MCP the list tool's `where` argument, with each field's JSON Schema. | Bracket notation, `filter[field]=value`, which generated servers parse for `@filterable` routes: its values are untyped strings, its `in` splits on commas a value may hold, and its field names are `[a-zA-Z0-9_]`; a search route on POST for a read |
+| A filtered page keeps creation order and reads a bounded number of rows: through an index whose every field a member names, one range read per combination of the members' values in position order, at most 100, merged; else through the list index, at most 1000 instances past the cursor (`FILTER_SCAN_ROWS`). The members no index serves are tested in SQL on the rows read. `next` is the position up to which every instance was read, so a page can hold fewer instances than its limit, even none, while `next` is not null, as a filtered page of the event log can. | A SQL `LIMIT` on the rows kept, which scans without bound in one synchronous read for a rare value; a cursor per range, which a page merging ranges cannot give as one |
+| The typed client (`@superschematic/engine/client`) follows the routes: `instances.lookup(schema, key)`, a missing instance a thrown 404 as for `get`; `list`'s `where`; and an `EngineProblem`'s `fields`, `details.fields` of a conflict. | Leaving the client a step behind the HTTP API it types |
+| A behavior's implementation lists `filters`: its declared fields whose value is one of its columns, with the value's JSON type, which a list filters on as an own field. The engine compares the column in SQL; a migration's index on that column alone serves the filter. `Workflow` filters on `status`, and its migration 2 adds the index. | SQL each behavior writes for its filter, which the engine would check and splice like its other SQL; filtering on a field as its reader computes it, which reads every instance's behaviors to filter; every behavior field, many of which are computed from other instances |
+
+### D16, amended: namespaces made while the engine runs, and archived
+
+Namespaces were fixed in `openEngine`'s options. A deployment that
+serves several projects of its own reopened the engine with new
+options to add one, and had no way to stop the writes to one it was done
+with short of taking it out of the options, which left its data in the
+file and out of reach. Who may add a namespace is a question the access
+policy could not be asked: every question named a schema. A namespace
+is now made, archived and unarchived while the engine runs, as the
+policy allows, and an archived one is read as it was. This changes
+D16's namespaces row: the deployment configures some, and a call makes
+the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Namespaces come from two places: the options configure some, `default` always among them, and `engine.namespaces.create` makes the others, which `engine_namespaces` keeps (engine migration 11), so the next engine on the file has them. A name the options list is configured whatever the table holds for it, and only the options add or take one away. A created namespace looks names up in the shared namespace, always a configured one, under D16's rules. | Every namespace in the table, the options' inserted at open, under which a call archives what the options declare and the options and the file disagree at the next open; options only, as before |
+| A name follows the rule configured names do (`invalid_argument` otherwise). A name that is a namespace already, configured or created, archived or not, is `conflict`. There is no delete, so a name is never reused. | Reusing an archived namespace's name, which hands a new project another's data |
+| Who may create, archive, unarchive or list is the policy's: one action, `manage`, asked about the namespace itself, `{ principal, action: 'manage', namespace, operation }` with the operation `create`, `archive`, `unarchive` or `list`, and no schema. `AccessRequest` becomes a union on `action` (`SchemaAccessRequest`, `NamespaceAccessRequest`), so a policy that reads `schema` must say what it does for `manage`, and one that builds a permission from the schema's name, as the examples' do, refuses it. A create asks before it looks the name up, so a caller the policy refuses learns nothing of what exists; `list` asks of each namespace and returns the ones it allows. | An action per operation (`createNamespace`, ...), four names each policy must know where one with an operation reads as the behavior operations do; `schema: ''`, which a policy written per schema takes for a schema; any caller listing every namespace, as any caller reads the behavior catalog, which shows one project another's name; a permission the engine names, which D16's "no roles" rules out |
+| An archived namespace refuses every write a call makes there, once the policy has allowed it: a define, a publish, a create, an update, a delete and a writing operation, of an instance or a schema, are `namespace_archived` (409). Its schemas, drafts, instances, events and values read as before, and its tools document hides each tool that writes there, with the reason. | 403, which tells the caller it lacks a grant it may hold; 410, which says the namespace is gone while its reads work; 423, WebDAV's lock; refusing before the policy, which tells a caller the policy refuses that the namespace is archived |
+| `unarchive` undoes an archive. Archiving an archived namespace, or unarchiving an active one, returns it as it is; archiving or unarchiving a configured namespace is `conflict`. Nothing deletes a namespace. | No unarchive, which makes a mistaken archive final; refusing the second archive, which a retried call trips on; a delete, which must remove instances, behaviors' rows, values and events across every table, a change of its own |
+| The runner runs no reaction and no schedule in an archived namespace: `status()` shows them `archived`, and once it is unarchived a subscription picks up at its cursor, since nothing was written there meanwhile, and a schedule that came due runs once. A publish in the shared namespace still runs `afterConfigChange` for an archived namespace's instances, which keeps their derived storage in step with the version their reads use. | Running them, whose writes the namespace refuses, so each would fail, retry and halt until the unarchive; dropping their subscriptions, which loses the cursors; skipping `afterConfigChange` there, which leaves a search index that does not match the version a read uses |
+| `engine.namespaces` has `create`, `archive`, `unarchive`, `list` and `get`, each record `{ name, origin, shared, state, createdAt, createdBy, archivedAt, archivedBy }`. HTTP serves `GET` and `POST /namespaces`, `GET /namespaces/{namespace}` and `POST .../archive` and `.../unarchive`; MCP serves `list_namespaces`, `create_namespace`, `archive_namespace` and `unarchive_namespace`, engine tools with guidance in every caller's list, whose policy `tools.invocation` sets. They append no event. | Tools in one admin namespace's endpoint only, which a deployment that serves each project's endpoint alone could not reach; an event kind for them, which has no schema to ask `read` on and which migration 7's CHECKs refuse |
+| The typed client (`@superschematic/engine/client`) follows the routes: `client.namespaces` has `list`, `get`, `create`, `archive` and `unarchive`, each naming the namespace it acts on, and returns the server's record, which `test/client-types.test.ts` holds to it. | Leaving the client a step behind the HTTP API it types |
+
+### D16, amended: the log keeps what retention and its subscriptions need
+
+The log grew for good, and since the value store every large value an
+event held stayed stored for good with it: the value store's amendment
+left freeing them to retention. Four readers relied on every event being
+there: a read or a stream from 0, a subscription's start, which the
+runner read from its publish event, a reaction's `before()`, which
+folds an instance's events from its create, and the next sequence of an
+instance created again after a delete, the highest its events held. The
+log now keeps events by age or count, a namespace at a time, never past
+an event a subscription has yet to handle, and each reader needs only
+what retention keeps. This changes D16's storage row: the log is
+append-only, and retention removes its oldest events.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine option `retention: { maxAgeMs?, maxEvents?, everyMs, batchSize }` keeps events by age (the event's `at` against the engine's clock), by count (an event more than `maxEvents` cursors behind the head goes) or both, an event going when either lets it go. Without it nothing is pruned. | Retention per namespace or per schema, an option keyed by names a deployment makes while the engine runs; a count of a namespace's own events, which counts every namespace's events at each pass |
+| The runner prunes at its first pass and every `everyMs` after, `batchSize` events per transaction, yielding between batches; `runDue()` prunes when it is due, and `engine.runner.prune()` prunes to the end now, with no principal, since pruning acts for none. | Pruning inside writes, which makes a heartbeat pay for the log; a timer of the engine's own beside the runner's, a second loop to start, stop and test |
+| It prunes each namespace apart, oldest first, and stops at the first event it keeps, so what is gone is a run of cursors. A namespace's floor (`engine_log_floors`, engine migration 12) is the last cursor pruned of its events. | One floor for the log, under which one project's stuck subscription holds every project's log |
+| It never prunes past a namespace's hold: the cursor of its least advanced subscription, active, retrying, halted or archived, at its cursor or, before it has run, where it starts; one whose behavior is not registered holds once it has run. A halted subscription holds its namespace's log until it is resumed, and `status().retention` shows the hold and the subscription. | A halted subscription not holding, or holding until a deadline, after which its resume runs on with the events it failed at gone, quietly; holding only running subscriptions, which loses the events of a namespace while it is archived or a deployment's runner while it is stopped |
+| A subscription found behind its floor all the same, one whose implementation gained reactions after retention pruned past where it starts, halts with `cursor_expired`, its failure cursor the floor, and `resume` with `skip` moves it there. | Skipping silently to the floor, which hides events no reaction ran for |
+| A read from a cursor before its namespace's floor, or before the last publish pruned of the shared namespace it reads, is `cursor_expired`, `CursorExpiredError` with the floor and the head: 410 with `details: { after, floor, head }` over HTTP, a stream's resume and a JSON page alike. A stream retention passes ends, and its reconnect gets the problem. The head never moves back, so `after=head` works as before. | Reading on from the oldest event kept without a word, a gap a client cannot see; 404, which says the namespace or route is not there; 409, which a client retries |
+| A read that gives no cursor, no `after` on `events.read` or the JSON route and no `Last-Event-ID` or `after` on a stream, asks for the log from its start and starts at the floor, the oldest event kept: it is never `cursor_expired`, so a client that reads the log from the start goes on working once retention has run. `after: 0` is the same read: no event has cursor 0, and `?after=0` is how the guides and clients spell a replay from the start. A client can hold 0 as a place only as the head of a log that never held an event, and a reconnect from it after retention pruned what it missed reads on from the floor without a word; it is flagged here, as the price of 0 meaning the start. | No cursor expired once anything is pruned, under which every client that replays from the start fails at the first prune; `after: 0` as an explicit cursor, so `?after=0` fails where no `after` reads, two spellings of one request with two answers |
+| Each pruned instance event folds into its instance's base (`engine_event_bases`): the instance as the log had it after the event, or none after a delete, and its sequence. `before()` folds from the base and the events kept, and is `cursor_expired` for an event pruned; a create after a delete takes the sequence after the base's. The base holds the values it keeps. | Keeping each instance's create, which keeps every instance's whole history for as long as it lives; failing `before()` once the create is gone, which halts every `Reactions` rule on an old instance; restarting the sequence, under which an `If-Match` from the old life matches the new one |
+| A version keeps its publish's cursor (`engine_schemas.published_cursor`, migration 12 fills it from the log), from which a subscription starts and which the runner's discovery is keyed on, so pruning a publish event moves nothing. | Never pruning publish events, which keeps every schema document twice, in the log and in `engine_schemas` |
+| A pruned event drops its value holders in the prune's transaction, so a value only events held goes with the last of them. | A sweep of unheld values, which one writer and synchronous transactions leave nothing for |
+| Pruning writes the engine's own storage, appends no event and acts for no principal. D32 lets a schedule write its behavior's tables where nothing an operation returns changes. Pruning changes nothing a read of an instance, a schema or a behavior returns; a read of the log from a cursor returns every event after it or `cursor_expired`, never other events, so what it does change is announced by a code, and one from the start returns what is kept. That is why it is the runner's own work and not a behavior's schedule: no behavior owns the log. | A behavior that prunes, which writes storage that is not its own; an event per prune, which grows the log it prunes |
+| The trigger that refuses a delete of an event lets one through at or before its namespace's floor, which retention moves first in the batch's transaction, so a stray delete above the floor is still refused. | Dropping the trigger, which lets any statement in the process delete events |
+| The typed client reads a `cursor_expired` problem's `floor` and `head` into its `EngineProblem`. A subscription resuming from a cursor retention has pruned past ends with that problem, as any 4xx ends it, and so does a reconciler whose stored cursor it is: neither skips what it never handled. With no cursor, each reads from the floor. | Resuming a subscription from the floor on its own, which skips events its caller never saw, the gap the code exists to announce |
 
 ### D16, amended: a link pins a release, and shows the latest
 
@@ -4040,5 +4132,55 @@ bootstrap's `planner` and `deployer`. Designing it settled the rest.
 Status: not built. `projectNumber` is in gcp's values schema; bootstrap
 does not record it yet, the readers do not number environments, and no
 renderer, generator or CI seam exists.
+
+The rule is reversible until the first release.
+
+### D47, amended: a release ships the static archives its generated servers link
+
+The workflow's `check` job compiles each Go server, and its deploy jobs
+build images from a context the deploy writes (D46). A generated server
+links superscalar's static archive through cgo (D3), and the version
+graph's when its database declares one, and no Go module the module proxy
+serves carries either: a fresh runner, with no superscalar checkout and no
+`CGO_LDFLAGS`, failed `go build` at the link, and a project whose naming
+file names no checkout (`[paths] scalar_go`) got no Dockerfile at all. A
+checkout's server, on a runner that never made the checkout, got a
+context without it, which Cloud Build would refuse at a `COPY`. Such a
+project's server `go.mod` also required superscalar at `v1.0.0` and the
+runtime modules at the zero pseudo-version, which no proxy serves.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each release ships, per platform, `superschematic-archives_<version>_<platform>.tar.gz`: superscalar's archive, built from the pinned commit, and the version graph's, both with `tools.env`'s Rust under `lib/` (`scripts/release-archives.sh`). The release builds them before the CLIs, links each CLI against its platform's tarball, and links every tarball's SHA-256 into the CLI (`internal/release`), so the code a release generates pins what it downloads. | superscalar's own release assets, which its pipeline builds with its Rust release for musl: the version graph's archive must come from the same Rust release to link beside them, a coupling across two repositories on every bump, and superschematic would still publish the version graph's. Building from source in every workflow and image, a Rust toolchain and a cache in each, which the release does once. A WebAssembly core run by a pure-Go runtime, with no archives at all, the largest change and one in superscalar's binding. A digest read from the release's `SHA256SUMS`, which the same release page serves (D46). |
+| The workflow's `check` job installs the runner's tarball after superschematic, checks it against the digest the binary names, and points `CGO_LDFLAGS` at its `lib/`. A binary the release workflow did not build names no digests, and the step fails and says so. | An archives step in every job, though only `check` compiles; folding it into the install step, which checks the CLI against `SHA256SUMS`. |
+| A server Dockerfile without `[paths] scalar_go` downloads the release's tarball for the image's platform, `linux/amd64` or `linux/arm64`, checked against the digests it pins, from `SUPERSCHEMATIC_RELEASE`, a build argument whose default is the release's page, and builds with no Rust stage and no checkout in its context. With `[paths] scalar_go` it builds both archives from the checkouts, as before. A binary built from a checkout, or not by the release workflow, writes no Dockerfile without it, and says why. | Archives the deploy adds to the context, which the target's builder would upload with every build; a Rust stage that fetches superscalar's source by commit. |
+| A release pins each runtime module no `[paths]` key names in the server's `go.mod` and in the implementation module it scaffolds, by a replace of every version: superschematic's at the release's tag, superscalar's Go binding at the version the release links. The generated modules keep requiring them at versions only a checkout's replace resolves. | Real versions in every generator's `go.mod`, a change to every Go generator that the server, which every build of a stack goes through, does not need first. |
+| The deploy refuses a context that lacks a path its ignore file takes in by name, or holds one under a symbolic link, which a context carries as a link and not its files, before anything is uploaded. | Following links into the context, which BuildKit's rules for a local context do not. |
+
+Status: built. The release's `build-archives` job and the CLI's digests
+are in `.github/workflows/release.yml`, which no release has run yet. The
+`github` renderer's `check` job has the archives step; `servergen` writes
+the release's Dockerfile and pins, whose golden is
+`internal/generator/servergen/testdata/golden/release`, and
+`TestTheReleaseDockerfileBuildsAnImageThatServes` builds one from a stand-in
+release page and runs the image. A clean `golang` container, with a
+project of no `[paths]`, built both servers with the archives step's
+commands, the runtime modules coming from the module proxy at a commit.
+Not built: `stack dev`, and a local `go build` in such a project, still
+need `CGO_LDFLAGS` set by hand, and the other Go generators' modules
+still require the runtime modules at the zero pseudo-version.
+
+### D30, amended: a project names its build context when its runtime modules lie above it
+
+The Dockerfile's context was the repository root, the parent of the
+schemas root, and a server whose `go.mod` replaces a module outside it got
+no Dockerfile. `examples/acme-shop` points its `[paths]` at the runtime
+modules of its checkout, two levels up, so its servers had no image, and
+`stack deploy` could not build one, which the first run against Google
+Cloud found (`docs/stack-model.md`, section 14, milestone 3).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The naming file's `[paths] build_context`, relative to the parent of the schemas root like every `[paths]` key, names the build context of the stack's server images. Unset, it is the repository root. The generated Dockerfile's paths, its ignore file and the archive `stack build` and `stack deploy` send are all relative to it. `examples/acme-shop` sets `../..`. | The git work tree's root, which a source archive without `.git` lacks and which makes the generated files depend on the checkout; moving the example's implementations and its naming file to the checkout's root, which leaves the example no longer a project of its own |
 
 The rule is reversible until the first release.
