@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "comment": "The ./client subpath runs in a browser and a worker runtime: it compiles here with the DOM's globals and no Node.js types, so a use of either a Node.js API or a server module fails the typecheck.",
+  "include": ["src/client/**/*.ts"]
+}
