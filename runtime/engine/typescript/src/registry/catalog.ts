@@ -20,7 +20,8 @@ A schema's instance type may compose behaviors (behaviors/). define and
 publish check them against the registered implementations, with the
 namespace's other schemas in reach of their configs as the caller may
 read them (ConfigTarget.schemas), and the compatibility rule against
-each behavior's rule for its config. publish creates the storage of
+each behavior's rule for its config, and each type's display against
+the type and its Workflow (display.ts). publish creates the storage of
 every behavior the new version composes, in its own transaction, so a
 publish that fails leaves none behind, then runs the afterConfigChange
 of each behavior whose config the version adds, removes or changes
@@ -50,6 +51,7 @@ import type { Namespaces } from '../namespaces.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { incompatibleChanges } from './compat.js';
+import { displayIssues } from './display.js';
 import { checkSchemaName, modelOf, readSchema, type SchemaModel } from './document.js';
 import { SchemaValidator } from './validator.js';
 
@@ -318,7 +320,8 @@ export class SchemaCatalog {
     const model = readSchema(this.loader, text, source, (candidate) => {
       const composed = compose(candidate, this.behaviors);
       alone = composed.composition;
-      return composed.issues;
+      // A display is held to the behaviors once they compose (display.ts).
+      return composed.composition ? displayIssues(candidate.document, candidate.instanceType, composed.composition) : composed.issues;
     });
     if (alone !== undefined) {
       this.alone.set(model, alone);

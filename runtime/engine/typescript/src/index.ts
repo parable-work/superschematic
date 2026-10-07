@@ -208,6 +208,7 @@ export { MCP_HANDLE, MCP_HANDLE_MAX_LENGTH, ToolCatalog, UnknownToolError, kebab
 export type {
   DescribeDocument,
   DescribedBehavior,
+  DescribedField,
   DescribedOperation,
   JSONSchemaObject,
   ToolDefinition,
