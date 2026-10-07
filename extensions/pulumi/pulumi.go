@@ -23,6 +23,13 @@ import (
 // names it in TargetSpec.Provisioner.
 const Name = "pulumi"
 
+// CLIVersion is the release of the pulumi CLI the provisioner drives: the
+// release of the Pulumi Go SDK this module requires, which the Automation
+// API was released with. The provisioner declares it as its tool, so a
+// generated CI job installs that release (D47), and tools.env pins CI's at
+// it (PULUMI_VERSION).
+const CLIVersion = "3.259.0"
+
 // Extension registers the pulumi provisioner. A distribution links it
 // beside the targets whose environments it applies, and passes each
 // target's pinned provider versions:
@@ -50,12 +57,14 @@ type Extension struct {
 // Name is the extension's name.
 func (Extension) Name() string { return Name }
 
-// Register adds the pulumi provisioner.
+// Register adds the pulumi provisioner, which runs the pulumi CLI at
+// CLIVersion.
 func (e Extension) Register(r *registry.Registry) error {
 	return r.RegisterProvisioner(registry.ProvisionerSpec{
 		Name:        Name,
 		Extension:   Name,
 		Provisioner: e.Provisioner(),
+		Tools:       []registry.CLITool{{Name: "pulumi", Version: CLIVersion}},
 	})
 }
 

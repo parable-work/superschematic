@@ -20,10 +20,11 @@ import (
 // deployable is placed on a platform, an edge between two placed
 // deployables is realized by a connector, a target names a platform for
 // each deployable kind, a DNS platform holds an environment's domain
-// records, and a provisioner turns the resource graph into running
-// resources. The resolver (internal/stack) reads them. The core registers
-// one target, `local`, with its platforms, connectors and provisioner
-// (internal/stack/local); every other target is an extension's.
+// records, a provisioner turns the resource graph into running resources,
+// and a CI renderer writes a stack's workflow (stack_ci.go). The resolver
+// (internal/stack) reads them. The core registers one target, `local`,
+// with its platforms, connectors and provisioner (internal/stack/local),
+// and one CI renderer, `github`; every other target is an extension's.
 
 // StackEnvironment is the environment being resolved, as platforms,
 // connectors and DNS platforms see it. They must not modify it.
@@ -248,6 +249,11 @@ type TargetSpec struct {
 	// deploy manifest.
 	Builder ImageBuilder
 
+	// CI says how a generated CI job signs in to the target's
+	// environments (section 11.3, D47). Nil gives CI no identity, and the
+	// environments no cloud jobs.
+	CI CIIdentities
+
 	compiledValues *validator.Schema
 }
 
@@ -406,6 +412,11 @@ type ProvisionerSpec struct {
 
 	// Provisioner is the implementation.
 	Provisioner Provisioner
+
+	// Tools are the command-line tools the provisioner runs, each at the
+	// version it needs, which a generated CI job installs (D47). Nil runs
+	// none.
+	Tools []CLITool
 }
 
 // resourceType is one resource type's properties schema and what
@@ -423,6 +434,7 @@ type stackSpecs struct {
 	targets       map[string]TargetSpec
 	dnsPlatforms  map[string]DNSPlatformSpec
 	provisioners  map[string]ProvisionerSpec
+	ciRenderers   map[string]CIRendererSpec
 	resourceTypes map[string]resourceType
 }
 
@@ -433,12 +445,14 @@ func newStackSpecs() stackSpecs {
 		targets:       map[string]TargetSpec{},
 		dnsPlatforms:  map[string]DNSPlatformSpec{},
 		provisioners:  map[string]ProvisionerSpec{},
+		ciRenderers:   map[string]CIRendererSpec{},
 		resourceTypes: map[string]resourceType{},
 	}
 }
 
 // stackKeyPattern is the shape of a platform, connector, target, DNS
-// platform or provisioner name: lowercase words joined by dots or hyphens.
+// platform, provisioner or CI renderer name: lowercase words joined by dots
+// or hyphens.
 var stackKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9]*([.-][a-z0-9]+)*$`)
 
 func checkStackKey(what, name string) error {
@@ -563,10 +577,10 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 // values schema or resource type schema that does not compile, a resource
 // type another target registered with a different schema, a policy rule
 // without a name or Check, or with a repeated name, and a deploy seam it
-// cannot use: State, Bootstrap, Migrations or Builder without a
-// provisioner, and Bootstrap, Migrations or Builder without State. Finalize checks that
-// the platforms, the DNS platform and the provisioner it names are
-// registered.
+// cannot use: State, Bootstrap, Migrations, Builder or CI without a
+// provisioner, and Bootstrap, Migrations, Builder or CI without State.
+// Finalize checks that the platforms, the DNS platform and the provisioner
+// it names are registered.
 func (r *Registry) RegisterTarget(spec TargetSpec) error {
 	if err := r.registrable("target " + spec.Name); err != nil {
 		return err
@@ -693,7 +707,8 @@ func (r *Registry) RegisterDNSPlatform(spec DNSPlatformSpec) error {
 }
 
 // RegisterProvisioner adds a provisioner. It refuses a malformed or
-// duplicate name and a nil Provisioner.
+// duplicate name, a nil Provisioner, and a tool without a name or a
+// version, or named twice.
 func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 	if err := r.registrable("provisioner " + spec.Name); err != nil {
 		return err
@@ -707,6 +722,17 @@ func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 	if spec.Provisioner == nil {
 		return fmt.Errorf("registry: provisioner %q has no Provisioner", spec.Name)
 	}
+	seenTools := map[string]bool{}
+	for _, tool := range spec.Tools {
+		if tool.Name == "" || tool.Version == "" {
+			return fmt.Errorf("registry: provisioner %q has a tool without a name or a version", spec.Name)
+		}
+		if seenTools[tool.Name] {
+			return fmt.Errorf("registry: provisioner %q names tool %q twice", spec.Name, tool.Name)
+		}
+		seenTools[tool.Name] = true
+	}
+	spec.Tools = append([]CLITool(nil), spec.Tools...)
 	r.stack.provisioners[spec.Name] = spec
 	r.noteExtension(spec.Extension)
 	return nil

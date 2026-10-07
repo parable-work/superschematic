@@ -172,6 +172,22 @@ func TestParseReadsPathsTable(t *testing.T) {
 	}
 }
 
+// TestBuildContext: the server images build from the repository root unless
+// [paths] build_context names a directory, which may lie above it.
+func TestBuildContext(t *testing.T) {
+	root := filepath.Join("/checkout", "examples", "shop")
+	if got := Default().BuildContext(root); got != root {
+		t.Fatalf("BuildContext with no [paths] = %q, want the repository root %q", got, root)
+	}
+	n, err := Parse([]byte("[paths]\nbuild_context = \"../..\"\n"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := n.BuildContext(root), filepath.Join("/checkout"); got != want {
+		t.Fatalf("BuildContext = %q, want %q", got, want)
+	}
+}
+
 // TestParseRejectsAbsolutePaths: LocalPaths joins every [paths] value under
 // the repository root, so an absolute value would point generated manifests
 // at <root>/<value>, a directory that does not exist. The keys come from the
