@@ -379,7 +379,12 @@ replace, Cargo `path`, npm `file:`). Every key is optional and
 repo-relative. The repository root is the parent of the schemas root. An
 absolute value is an error that names the key. An unset key emits no path
 dependency, so the generated manifest resolves the published module; set
-the key until that module is published.
+the key until that module is published. For a Go runtime module, a
+release of superschematic pins an unset key's module in every generated
+`go.mod` to itself: superschematic's modules at the release's tag and the
+scalar library's Go module at the version the release links. A binary
+built from a checkout pins nothing, and those `go.mod` files require
+versions no module proxy serves.
 
 ### `paths.scalar_go`
 
@@ -389,8 +394,8 @@ Default: unset. This repository's own file sets
 Directory of the scalar library's Go module (`go.mod`). A stack's server
 Dockerfiles build superscalar's static archive, and the version graph's,
 from the checkout that holds it. Unset, a release of superschematic pins
-the server's runtime modules to itself and its Dockerfiles download the
-archives the release ships
+the module to the version the release links, and its server Dockerfiles
+download the archives the release ships
 ([Stacks](/superschematic/guides/stacks/)); a binary built from a
 checkout writes no Dockerfile.
 

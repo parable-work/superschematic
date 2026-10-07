@@ -4230,3 +4230,40 @@ naming golden test generates the module under a naming file whose
 
 Status: built. The command name, the naming key and every export name
 are reversible until the first release.
+
+### D47, amended: every generated Go module pins the release
+
+D47's amendment for the static archives pinned the runtime modules in a
+stack's server `go.mod` and in the implementation module it scaffolds,
+and left the other Go generators for later. Their modules, the types modules
+(`dist/types/go/<svc>`), the ORMs (`dist/orm/<db>`), the API modules
+(`dist/api/<svc>`), the standalone config module beside a service with
+no operations, and the Go SDKs (`dist/sdk/go/<svc>`), still required
+superscalar's Go binding at `v1.0.0`, which has no tag, and
+superschematic's runtime modules at the zero pseudo-version, the SDK at
+`v0.0.0`. In a project whose naming file has no `[paths]`, `go build` in
+any of them failed at module resolution; only a server's `go.mod`, whose
+replaces cover every version, built them.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every Go generator's `go.mod` pins as the server's does: each runtime module the module reaches that no `[paths]` key names a checkout of, by a replace of every version, superschematic's at the release's tag and superscalar's Go binding at the version the release links, and requires those it requires at that version. One rule, `naming.Naming.ReleasePins`, decides the pins for these modules and the server's; each generator keeps the ones its module reaches. A types module and the config module reach the scalar library and the schema IR; an ORM adds the version-graph binding when its schema has a graph; an API module reaches the HTTP runtime, the schema runtime the HTTP runtime requires, the schema IR, the scalar library, and the version-graph binding when it reads a graph; an SDK reaches the scalar library and the schema IR through its types module, and the HTTP and schema runtimes when an endpoint takes filters. | Replacing only the modules a `go.mod` requires: a runtime module requires its siblings at `v0.0.0` (the HTTP runtime the schema runtime, the schema runtime the IR) and Go takes no replace from a dependency, so a module reached through another fails as before. Replacing every runtime module in every `go.mod`, which writes replaces for modules a build never reaches. Keeping the old versions in the requires under the replaces, which builds but writes a version no proxy serves into each module, unlike the server's `go.mod`. |
+| A binary built from a checkout names no release and pins nothing, and a module a `[paths]` key names keeps its directory, so their `go.mod` files are byte for byte what they were. A module the naming file renames is no module of the release and is not pinned. | Pinning a checkout's binary to the commit it was built from, which `-buildvcs=false` leaves out of the build information. |
+
+Status: built. Each generator has a release golden of its `go.mod`, from
+a release with no `[paths]`: `typegen`'s `fixture-api-release`,
+`ormgen`'s `fixture-version-graph-db-release`, `envgen`'s
+`fixture-general-release`, `apigen`'s `fixture-api-release` and
+`gosdkgen`'s `fixture-api-release`, with one endpoint marked filterable,
+since no fixture declares one. `TestReleaseGoModulesPinTheRuntimeModules`
+builds the fixture services as such a release and reads every `go.mod`
+the build writes. Built as a release pinned at a pseudo-version of a
+commit on `main`, the nine modules of `fixture-db`, `fixture-api`,
+`fixture-version-graph-db` and `fixture-env-go` each built on their own
+with `go build -mod=mod ./...`, from `proxy.golang.org` alone, with no
+checkout and no `CGO_LDFLAGS`. The same types module with the old
+requires failed at superscalar's `v1.0.0`. Not built: linking a binary or
+a test in such a project, and `stack dev`, still need `CGO_LDFLAGS` set
+by hand.
+
+The rule is reversible until the first release.

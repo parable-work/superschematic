@@ -616,12 +616,12 @@ naming a superscalar checkout, the Dockerfile builds them in Rust stages
 from the checkouts. Without it, as in a project that takes the runtime
 modules from the module proxy, a release of superschematic downloads the
 ones it ships for the image's platform, checked against the digests the
-release names, and pins the runtime modules in the server's `go.mod` to
-its own release. A Go stage links the server, and the image runs it on
-distroless `cc` as a non-root user. A server whose modules lie outside
-the repository root gets no Dockerfile, as does one without `[paths]
-scalar_go` built by a superschematic built from a checkout, which ships
-no archives; the build says why.
+release names, and pins the runtime modules in the server's `go.mod`, as
+in every Go module it generates, to its own release. A Go stage links the
+server, and the image runs it on distroless `cc` as a non-root user. A
+server whose modules lie outside the repository root gets no Dockerfile,
+as does one without `[paths] scalar_go` built by a superschematic built
+from a checkout, which ships no archives; the build says why.
 
 ## Deploy to Google Cloud
 
