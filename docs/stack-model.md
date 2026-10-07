@@ -342,7 +342,10 @@ declared, which the generated CI deploys them in (section 11.3). The
 TypeScript reader numbers each `@environment` class
 (`EnvironmentDecl.Order`): schema files in path order, and the classes of
 a file in source order. A data form writes `order` itself, and an
-environment without one comes after those with one, by name (D47).
+environment without one comes after those with one, by name (D47); the
+kind's verification refuses two environments with one order. The
+TypeScript writer writes the environment classes last, in their order,
+and leaves the property out.
 
 Every declaration has the JSON and YAML data forms every schema has. A
 class is a type, and its declaration the key the decorator writes. A
@@ -357,6 +360,7 @@ types:
     name: Production
     role: EmbeddedStruct
     environment:
+      order: 3
       target: gcp
       values: { project: acme-prod, region: us-east1 }
       domain: acme.dev
