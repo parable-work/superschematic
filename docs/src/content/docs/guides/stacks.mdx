@@ -286,7 +286,12 @@ export {};
 declare module "@superschematic/stack" {
   interface Targets {
     gcp: {
-      values: { project: string; region: string; production?: boolean };
+      values: {
+        project: string;
+        projectNumber?: string;
+        region: string;
+        production?: boolean;
+      };
       server: {
         minInstances?: number;
         maxInstances?: number;
@@ -351,7 +356,7 @@ TypeScript twin.
 | Key | What it sets |
 | --- | --- |
 | `target` | the target that places every deployable no setting places elsewhere: `local`, or `gcp` in the installed binary |
-| `<target>` | the target's values, under the target's name: `gcp: { project, region, production }`, or `local: { postgresImage, postgresPort }` |
+| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production }`, or `local: { postgresImage, postgresPort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
 | `settings` | per deployable: `of` a handle or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's |
@@ -612,7 +617,8 @@ build says why.
 ## Deploy to Google Cloud
 
 The gcp target is `extensions/gcp`, linked in the installed binary. Its
-values are `project` and `region`, which are required, and `production`.
+values are `project` and `region`, which are required, `production`, and
+`projectNumber`, the project's number, which `stack bootstrap` records.
 
 | Stack concept | On gcp |
 | --- | --- |
@@ -670,7 +676,20 @@ superschematic stack outputs Staging --out outputs.json
   `<stack>-deployer` and read-only `<stack>-planner` accounts, the
   `builder` account Cloud Build runs as, the `migrator` account the
   migration job runs as, and Workload Identity Federation for the GitHub
-  repository of the git remote.
+  repository of the git remote. Last, it records the project's number,
+  which the generated CI's Workload Identity Federation needs, as
+  `projectNumber` beside `project` in the environment that sets
+  `project`: Staging's, when you bootstrap Preview. It writes the value
+  when the schema has none, writes it again when it differs, leaves the
+  file alone when it matches, and prints a line for each:
+
+  ```text
+  projectNumber 123456789012: recorded on Staging in src/stack.schema.ts
+  ```
+
+  A TypeScript schema changes in that property alone, comments and
+  layout kept. A JSON or YAML schema is not edited: bootstrap prints the
+  property to add. Commit the change with the rest of the stack.
 - **`secrets set`** asks for each secret that has no value and stores it
   in Secret Manager. On a fresh environment, deploy first: its
   infrastructure step creates each secret's storage, and the deploy then

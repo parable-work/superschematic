@@ -32,7 +32,11 @@ import (
 //  4. it creates each platform credential's secret directly, readable by
 //     `deployer` and `planner` only. Environments may share a credential,
 //     and the bootstrap graph of one would delete another's, so the secret
-//     is not in it.
+//     is not in it;
+//  5. it reads the project's number from Resource Manager and returns it
+//     as `projectNumber`, beside `project`, which the core records in the
+//     schema (D47): the generated CI's Workload Identity Federation names
+//     its provider by the number, which no other value gives.
 //
 // The network a calling server's Direct VPC egress needs is not here: it
 // is in the environment's graph, which only lowers it when an edge needs
@@ -301,12 +305,13 @@ type bootstrapper struct{ ext Extension }
 
 var _ registry.Bootstrapper = bootstrapper{}
 
-// Bootstrap runs the four steps above for req's environment.
-func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapRequest) error {
+// Bootstrap runs the steps above for req's environment, and returns the
+// project's number for the core to record beside `project`.
+func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapRequest) (*registry.BootstrapResult, error) {
 	env := req.Environment
 	v, err := envValues(env)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	log := req.Log
 	if log == nil {
@@ -318,7 +323,7 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 	services := servicesFor(env)
 	logf("enable %d APIs on %s", len(services), v.project)
 	if err := cloud.EnableServices(ctx, v.project, services); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Every call from here on may meet an API enabled moments ago.
@@ -331,7 +336,7 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 		return err
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logf("state bucket gs://%s: %s", bucket, createdOrKept(created))
 	err = retry("the state key", func() (err error) {
@@ -339,34 +344,34 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 		return err
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logf("state key %s: %s", stateKeyName(v), createdOrKept(created))
 
 	graph, err := BootstrapEnvironment(env, req.Repository)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if req.Repository == "" {
 		logf("no GitHub repository in the git remote: Workload Identity Federation is left out")
 	}
 	if req.Provisioner == nil || req.Dir == "" {
-		return fmt.Errorf("gcp: bootstrap needs the provisioner and a directory for its program")
+		return nil, fmt.Errorf("gcp: bootstrap needs the provisioner and a directory for its program")
 	}
 	dir := filepath.Join(req.Dir, "bootstrap")
 	if err := req.Provisioner.Render(graph, dir); err != nil {
-		return err
+		return nil, err
 	}
 	backend, err := stateStore(b).Backend(ctx, env)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logf("apply the bootstrap graph: %d nodes", len(graph.Resources.Resources))
 	err = retry("the bootstrap graph", func() error {
 		return req.Provisioner.Apply(ctx, registry.ProvisionRequest{Environment: graph, Dir: dir, Backend: backend}, *graph.DeployOrder[0])
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logf("bootstrap graph applied")
 
@@ -384,11 +389,21 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 			return cloud.GrantSecretAccess(ctx, v.project, c.Secret, members)
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		logf("credential secret %s: %s, readable by deployer and planner", c.Secret, createdOrKept(created))
 	}
-	return nil
+
+	var number string
+	err = retry("the project's number", func() (err error) {
+		number, err = cloud.ProjectNumber(ctx, v.project)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	logf("project %s is number %s", v.project, number)
+	return &registry.BootstrapResult{Values: []registry.BootstrapValue{{Key: "projectNumber", Value: number, Beside: "project"}}}, nil
 }
 
 // apiPropagation bounds how long bootstrap retries a call that an API it

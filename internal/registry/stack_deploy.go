@@ -152,9 +152,36 @@ type BootstrapRequest struct {
 
 // Bootstrapper prepares the cloud project an environment deploys to, once,
 // with an owner's credentials (section 7.3). It is idempotent: a second
-// run changes nothing that the first one made.
+// run changes nothing that the first one made. It returns what it read
+// that the schema should hold, or nil for nothing.
 type Bootstrapper interface {
-	Bootstrap(ctx context.Context, req BootstrapRequest) error
+	Bootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapResult, error)
+}
+
+// BootstrapResult is what a bootstrap read from the cloud that the
+// environment's declaration should hold.
+type BootstrapResult struct {
+	// Values are target values for the core to record in the schema
+	// source (D47), each key once.
+	Values []BootstrapValue
+}
+
+// BootstrapValue is a target value that only the cloud knows, such as the
+// GCP project's number, which bootstrap reads. The core records it in the
+// target values of the environment whose declaration sets Beside, the
+// value it comes from, so an environment that inherits that value inherits
+// this one too; it writes it when the schema has none, writes it again and
+// says so when it differs, and leaves the schema alone when it matches. A
+// person may correct it by hand like any value.
+type BootstrapValue struct {
+	// Key is the value's key in the target's values (`projectNumber`),
+	// and Value the value, a string.
+	Key   string
+	Value string
+
+	// Beside is the key of the value it belongs with (`project`); a new
+	// property is written after that one's.
+	Beside string
 }
 
 // MigrationPlan is one DB service's migration plan, as the plan document

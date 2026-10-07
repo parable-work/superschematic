@@ -19,6 +19,8 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
+	"cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
@@ -42,6 +44,11 @@ import (
 type Cloud interface {
 	// EnableServices enables APIs (`run.googleapis.com`) on a project.
 	EnableServices(ctx context.Context, project string, services []string) error
+
+	// ProjectNumber returns a project's number, from the name Resource
+	// Manager gives the project, `projects/<number>`. The provider of the
+	// generated CI's Workload Identity Federation is named by it (D47).
+	ProjectNumber(ctx context.Context, project string) (string, error)
 
 	// EnsureBucket creates a bucket with uniform access, public access
 	// prevention and object versioning, unless it exists.
@@ -177,6 +184,7 @@ type googleCloud struct {
 	kms      *kms.KeyManagementClient
 	secrets  *secretmanager.Client
 	registry *artifactregistry.Client
+	projects *resourcemanager.ProjectsClient
 	builds   *cloudbuild.Client
 	jobs     *run.JobsClient
 	clientOK bool
@@ -204,6 +212,9 @@ func (c *googleCloud) clients(ctx context.Context) error {
 	}
 	if c.registry, err = artifactregistry.NewClient(ctx); err != nil {
 		return fmt.Errorf("gcp: the Artifact Registry client: %w", err)
+	}
+	if c.projects, err = resourcemanager.NewProjectsClient(ctx); err != nil {
+		return fmt.Errorf("gcp: the Resource Manager client: %w", err)
 	}
 	if c.builds, err = cloudbuild.NewClient(ctx); err != nil {
 		return fmt.Errorf("gcp: the Cloud Build client: %w", err)
@@ -235,6 +246,21 @@ func (c *googleCloud) EnableServices(ctx context.Context, project string, servic
 		}
 	}
 	return nil
+}
+
+func (c *googleCloud) ProjectNumber(ctx context.Context, project string) (string, error) {
+	if err := c.clients(ctx); err != nil {
+		return "", err
+	}
+	p, err := c.projects.GetProject(ctx, &resourcemanagerpb.GetProjectRequest{Name: "projects/" + project})
+	if err != nil {
+		return "", fmt.Errorf("gcp: project %s: %w", project, err)
+	}
+	number, ok := strings.CutPrefix(p.GetName(), "projects/")
+	if !ok || number == "" || strings.Trim(number, "0123456789") != "" {
+		return "", fmt.Errorf("gcp: project %s is named %q, not projects/<number>", project, p.GetName())
+	}
+	return number, nil
 }
 
 func (c *googleCloud) EnsureBucket(ctx context.Context, project, bucket, location string) (bool, error) {
