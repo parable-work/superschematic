@@ -154,10 +154,10 @@ func mapFromJSONValue(data []byte) (map[string]any, error) {
 }
 
 // jsonValueMissing reports whether a required field of a scalar that holds
-// any JSON value (Generic.JSON), or a JSON array (Embedding.Vector), has
-// none: it is absent, which decodes to the zero value (a nil slice), or it
-// is the JSON null token. Every other JSON value, an empty array included,
-// is one.
+// any JSON value (Generic.JSON), or a JSON array held as a generic JSON
+// value, has none: it is absent, which decodes to the zero value, or it is
+// the JSON null token. Every other JSON value, an empty array included, is
+// one.
 func jsonValueMissing(value any) bool {
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() || rv.IsZero() {

@@ -187,8 +187,8 @@ type jsonObjectError struct {
 // type was decoded from, and returns what Validate must report, or nil when
 // there is nothing.
 func decodeJSONObjects(data []byte, fields ...jsonObjectField) *jsonObjectDecode {
-	var members map[string]json.RawMessage
-	if json.Unmarshal(data, &members) != nil {
+	members, ok := jsonObjectMembers(data, fields)
+	if !ok {
 		return nil
 	}
 	decoded := jsonObjectDecode{}
@@ -197,8 +197,9 @@ func decodeJSONObjects(data []byte, fields ...jsonObjectField) *jsonObjectDecode
 		var entry jsonObjectEntry
 		if raw, present := members[field.name]; !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			// A nil map reads as missing on its own; a struct's zero value
-			// does not.
-			entry.missing = field.required && value.Kind() == reflect.Struct
+			// does not. One the field already held before decoding is kept,
+			// as encoding/json keeps it, and is a value.
+			entry.missing = field.required && value.Kind() == reflect.Struct && value.IsZero()
 		} else {
 			inner := value
 			if field.wrapped {
@@ -217,11 +218,46 @@ func decodeJSONObjects(data []byte, fields ...jsonObjectField) *jsonObjectDecode
 	return &decoded
 }
 
+// jsonObjectMembers returns, for each of fields, the JSON of the last key
+// of data's object that encoding/json decodes into it: the key equal to the
+// field's name, or else equal to it without regard to case.
+func jsonObjectMembers(data []byte, fields []jsonObjectField) (map[string]json.RawMessage, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	members := map[string]json.RawMessage{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, false
+		}
+		key, _ := token.(string)
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return nil, false
+		}
+		for _, field := range fields {
+			if key == field.name || strings.EqualFold(key, field.name) {
+				members[field.name] = raw
+				break
+			}
+		}
+	}
+	return members, true
+}
+
 // checkJSONObjectValues checks each scalar value raw holds with superscalar
 // and returns the failures the decoded value at the same path does not show,
 // which Validate's own check of that value would therefore miss.
 func checkJSONObjectValues(scalar, path string, raw json.RawMessage, value reflect.Value, isMap bool, depth int) []jsonObjectError {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		// A null decodes to the zero value: a nil map or pointer, which reads
+		// as absent or missing on its own, or a struct's zero value, which
+		// reads as a value, so it is reported missing here (a map's value).
+		if value.Kind() == reflect.Struct {
+			return []jsonObjectError{{path: path, validator: "required", message: "required field"}}
+		}
 		return nil
 	}
 	for value.Kind() == reflect.Pointer {

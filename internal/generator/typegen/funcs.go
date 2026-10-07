@@ -130,12 +130,13 @@ func requiredAnyJSONField(field FieldInfo) bool {
 
 // requiredStructuredJSONField reports whether field is a required single
 // value of a scalar that holds a JSON array (its json_schema type mapping is
-// "array"; Embedding.Vector) and whose Go type Validate cannot call
-// (isValidatableScalarField; a JSON-object scalar is validatable). Validate
-// checks its presence: an absent value and JSON null decode to a nil slice,
-// which is "required"; an empty array is a value. Its decoder already holds
-// it to the Go type (a slice of numbers), so nothing else is checked. A list
-// of it is checked by its decoder, a map not at all.
+// "array") and whose Go type Validate cannot call: a JSON-like array scalar
+// held as a generic JSON value. No core scalar is one: Embedding.Vector is a
+// []float32 with Validate methods, and a JSON-object scalar is validatable
+// (isValidatableScalarField). Validate checks its presence: an absent value
+// and JSON null decode to the zero value, which is "required"; an empty
+// array is a value. A list of it is checked by its decoder, a map not at
+// all.
 func requiredStructuredJSONField(field FieldInfo) bool {
 	if !field.IsScalar || field.ScalarInfo == nil || field.ScalarInfo.Traits.StructuredJSON == "" ||
 		isValidatableScalarField(field) {
