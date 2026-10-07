@@ -1557,6 +1557,30 @@ process, its Hono app's `fetch` standing in for the network:
 `runtime/engine-workqueue/typescript/test/worker.test.ts`. The names and
 rules are reversible until the first release.
 
+### D16, amended: a worker beats the presence it stands for
+
+The worker of the amendment above beat no `Presence` instance, so a fleet
+that kept one per worker beat it by hand. `examples/engine-jobs` did, in a
+loop of its own over `fetch` that beat on the lease's timer while it held
+a job and between claims otherwise. That loop also polled an empty queue,
+dropped a failed heartbeat, ignored directives, worked one job at a time,
+gave its handler no signal, and read any Lease veto as the job gone, and
+the work-queues guide quoted it as the way to write a worker. The
+engine's server does not change here.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `QueueWorker` takes `presence: { schema, id, beatMs? }`, the Presence instance the worker stands for, in the worker's namespace, and beats it as the client's principal. `start()` reads that schema's describe document, which must compose Presence, and beats once before it claims; a failed or refused beat rejects the start. | Beating from the handler or on the lease's timer, which stops while no job is held and beats once per job when several are; claiming before the first beat, which runs a worker whose instance names another principal, or none, until a timed beat fails, and shows an operator a missing worker at work; a namespace of its own, when a miss releases leases only in the presence's namespace |
+| It beats on a timer of its own, every `beatMs` from when the last beat was sent: a third of the Presence `ttlMs` by default, and at most half of it, as Lease's `heartbeatMs` is at most half its `ttlMs`, so one late or failed beat is not a miss. Neither the claim loop nor a busy handler holds it back. | Beating every `ttlMs`, which a beat late by one request's length misses; beating between claims, which a long job starves |
+| The presence holds until the engine refuses a beat, a problem with a 4xx status but 408 and 429 (`not_principal`, `no_principal`, `not_found`, `forbidden`), or no beat has succeeded for the Presence `ttlMs` since the last one that did was sent, by the worker's clock. While it does not hold, the worker claims nothing and beats on, and the next beat that succeeds brings it back and looks for work at once. `onError` hears each failed beat and, once per loss, a `PresenceLostError` whose `reason` is `refused` or `lapsed`; `worker.present` says whether it holds. | Stopping the worker, which turns a re-registered worker instance or a healed partition into a fleet someone must restart; claiming on, which takes work the miss may release under it and shows a missing worker taking new work; the engine's `deadline`, which is the engine's clock |
+| The jobs the worker holds go on when its presence is lost, and their own heartbeats decide: a miss spares a lease renewed after the principal's last beat (the amendment on a live worker keeping its work) and expires the rest, which the next heartbeat finds `token_stale`. | Aborting every held job at a lost presence, which gives up work whose leases are still renewed, the case the miss's `notRenewedAfter` was made for |
+| A stop beats until it has released what the worker holds, then stops beating; the instance is missed a `ttlMs` later, with no lease left to release. | Stopping the beats first, which lets a long drain be missed; a last call that marks the worker gone, which Presence does not have |
+| `examples/engine-jobs` runs its workers on the client and `QueueWorker`, with `presence`, and its hand-written loop is deleted. Its test cuts a worker off from the engine, has the runner miss it and hand its job to another worker, and checks that the first worker's stale token stops its handler with nothing written; an operator's `cancel` directive fails a job through a terminal Retries class. The guide quotes the example. | Keeping the hand-written loop beside the worker, a second way to write one that the guide would teach with the edge cases the worker settles left open |
+
+The tests are `runtime/engine-workqueue/typescript/test/worker.test.ts`
+("the worker's presence") and `examples/engine-jobs/test/jobs.test.ts`.
+The names and rules are reversible until the first release.
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.
@@ -3917,6 +3941,28 @@ stack, where `values-schema.json` does not list it. A call between two
 APIs one server serves carries no credential, so a `@requireService`
 operation refuses it though section 9.3's check counts it, which section
 9.9 of `docs/stack-model.md` leaves open.
+
+The rule is reversible until the first release.
+
+## D47. A CI renderer writes each stack's workflow from its environments, and the project's number is a gcp value bootstrap records in the schema
+
+Milestone 6 of `docs/stack-model.md` generates a stack's CI. Section 11.3
+sketched it: a workflow per stack, checks and previews on a pull request,
+deploys on merge and approval, and Workload Identity Federation as
+bootstrap's `planner` and `deployer`. Designing it settled the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A CI renderer is a registration, `registry.CIRendererSpec`: a name, its install directory, and a `Render` from the stack, its resolved environments and the release that renders to files. The core registers `github`, GitHub Actions. A stack opts in with `outputs.ci.<renderer>` in its config; the Stack kind's `ci` generator writes the files under `<output-root>/ci/<stack>/` and installs them under the repository root (`InstallTargetDir`) when the directory exists. | Every stack writing into `.github/workflows`, which an example in a repository with CI of its own would fill with workflows nobody asked for. A `stack ci` command, a second way to write an output the build owns. The renderer in an extension module: a workflow is text, with no dependency to keep out of the core. |
+| A target says how a CI job signs in to an environment through a seam on `TargetSpec`, `CI`: for a resolved environment and a role, `planner` or `deployer`, an identity a renderer turns into its own steps. gcp's is Workload Identity Federation: the provider `projects/<projectNumber>/locations/global/workloadIdentityPools/<stack>-github/providers/github` and the role's account, `<stack>-<role>@<project>.iam.gserviceaccount.com`, both bootstrap's (section 7.3). An environment the seam gives nothing for has no cloud jobs. | Each renderer knowing each target's sign-in, so every target edits every renderer. Account names entered in the stack, which bootstrap already decides. |
+| The project's number is a gcp value, `projectNumber`, a string of digits beside `project`: the provider's name holds it, and nothing else the environment declares gives it. Bootstrap returns it, and the core records it in the schema source: on the environment whose declaration sets `project`, written when absent, written again and reported when it differs, and left alone when it matches. A TypeScript schema changes in that property's text alone, through the compiler's syntax tree; for a JSON or YAML schema the core prints the property to add. A person may correct it by hand like any value. | GitHub repository variables that bootstrap sets, which need an admin token and keep the value outside the repository. A file bootstrap writes and the build reads, which a person correcting it would edit as generated output. The engineer entering it, with nothing to record or check it. |
+| Environments keep their declaration order. The TypeScript reader numbers each `@environment` class (`EnvironmentDecl.Order`): schema files in path order, and a file's classes in source order. `ir.StackOf` orders the stack's environments by it, then by name; a data form writes `order` itself. The workflow deploys the cloud environments without parameters in that order: the first on a push to the branch, each later one after the one before, in a GitHub environment of its name, whose required reviewers approve it. | Name order, which puts Production before Staging. A trigger on each environment, or a promotion list on `@stack`, which restate what the order already says. |
+| A pull request runs a `check` job with no credentials (levels 1 to 3), `stack plan` as `planner` per cloud environment without parameters (levels 5 and 6), and a member of each environment with one parameter, deployed as `deployer` with the pull request's number and destroyed when it closes. A fork's pull request runs `check` alone. | Level 4, `stack dev` with Docker, on every pull request, which an engineer runs on their machine. A workflow per environment, whose order across files GitHub cannot express. A reusable workflow or published action, a second artifact to version beside the binary. |
+| The workflow installs the release that generated it, from the release page of the binary's module, checked against the release's `SHA256SUMS`. The version comes from the binary's build information, as gcp's migration image does (D46); a binary built from a checkout has none, and its workflow's install step fails and says to generate again with a release. | `go install`, which refuses a module with `replace` directives (section 13 of `docs/stack-model.md`). The latest release, which changes a repository's CI with no change in it. |
+
+Status: not built. `projectNumber` is in gcp's values schema; bootstrap
+does not record it yet, the readers do not number environments, and no
+renderer, generator or CI seam exists.
 
 The rule is reversible until the first release.
 

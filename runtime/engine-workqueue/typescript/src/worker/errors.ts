@@ -1,6 +1,7 @@
 /*
-What a worker's handler throws to say how its attempt failed, and what a
-job's signal aborts with.
+What a worker's handler throws to say how its attempt failed, what a
+job's signal aborts with, and what the worker reports when its presence
+is gone.
 */
 
 /** What an attempt reports to Retries beside its failure class: `recordAttempt`'s other parameters. */
@@ -76,5 +77,30 @@ export class WorkerStoppedError extends Error {
   constructor() {
     super('the worker is stopping');
     this.name = 'WorkerStoppedError';
+  }
+}
+
+/**
+ * Why a worker's presence is gone:
+ * - `refused`: the engine answered a beat with a refusal, a 4xx but 408
+ *   and 429: Presence's veto (`not_principal`, `no_principal`), a
+ *   `not_found` instance, a `forbidden` caller;
+ * - `lapsed`: no beat succeeded for the Presence config's `ttlMs` since
+ *   the last one that did was sent, by the worker's clock.
+ */
+export type PresenceLossReason = 'refused' | 'lapsed';
+
+/** The worker's presence is gone: it claims nothing until a beat succeeds, and its onError hears this once per loss. */
+export class PresenceLostError extends Error {
+  readonly reason: PresenceLossReason;
+  readonly schema: string;
+  readonly id: string;
+
+  constructor(reason: PresenceLossReason, presence: { readonly schema: string; readonly id: string }, cause?: unknown) {
+    super(`the presence ${presence.schema} ${presence.id} is gone: ${reason}; the worker claims nothing until a beat succeeds`, cause !== undefined ? { cause } : undefined);
+    this.name = 'PresenceLostError';
+    this.reason = reason;
+    this.schema = presence.schema;
+    this.id = presence.id;
   }
 }

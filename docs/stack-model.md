@@ -337,7 +337,12 @@ declaration names is an `@server` or `@database` class of the schema, so
 the data forms are held to it too. Each decorator writes a declaration on
 its class's `TypeDef` (`Stack`, `Server`, `Database` or `Environment`),
 and `ir.StackOf` assembles them into the `ir.Stack` the resolver reads,
-its deployables and environments in name order.
+its deployables in name order and its environments in the order they are
+declared, which the generated CI deploys them in (section 11.3). The
+TypeScript reader numbers each `@environment` class
+(`EnvironmentDecl.Order`): schema files in path order, and the classes of
+a file in source order. A data form writes `order` itself, and an
+environment without one comes after those with one, by name (D47).
 
 Every declaration has the JSON and YAML data forms every schema has. A
 class is a type, and its declaration the key the decorator writes. A
@@ -1115,6 +1120,10 @@ production and a parameterized preview environment.
 - `project` and `region`, which are required, and `production: true` for
   an environment the production defaults (section 7.5) and policy rules
   (section 7.6) apply to;
+- `projectNumber`, which bootstrap records (section 7.3) and a person may
+  correct later. The generated CI needs it (section 11.3): Workload
+  Identity Federation names its provider by the project's number, which no
+  other value gives;
 - `domain`, which is optional, and its DNS platform: Cloud DNS by default,
   or Cloudflare with the zone's name (`zone`) and identifier (`zoneId`),
   and an API token that bootstrap asks for (section 6.9). Cloud DNS
@@ -1207,6 +1216,14 @@ again: each step creates what is missing and leaves the rest.
    credential, so its secret is not in the bootstrap graph, whose next
    apply for another environment would delete it, and a credential asked
    for once is not asked for again.
+5. It records the project's number in the schema, as `projectNumber` in
+   the `gcp` values of the environment that declares `project`, so an
+   environment that inherits its project inherits the number too. It
+   writes the value when the schema has none, writes it again when it
+   differs and says so, and leaves the file alone when it matches. In a
+   TypeScript schema it changes only that property's text, through the
+   compiler's syntax tree; for a JSON or YAML schema it prints the value to
+   add (D47).
 
 The bootstrap graph is checked in as a golden,
 `extensions/gcp/testdata/golden/bootstrap/Staging.json`, and validates
@@ -2244,21 +2261,66 @@ servers with no image yet.
 
 ### 11.3 Generated CI
 
-A workflow per stack is installed into `.github/workflows/`, as an install
-target in the way `InstallTargetDir` serves charts:
+A CI renderer writes a workflow per stack from the stack and its resolved
+environments (D47). A stack opts in through its config, naming the
+renderer:
 
-- **On a pull request:** levels 1 to 6, plus a parameterized environment
-  when the stack declares one.
-- **On merge:** deploy the first environment.
-- **Later environments:** deploy on approval, through GitHub environments.
+```ts
+// schemas/services/shop-stack/schema.config.ts
+export default defineConfig({
+  name: "shop-stack",
+  kind: SchemaKind.Stack,
+  outputs: { ci: { github: { branch: "main" } } },
+});
+```
 
-The workflow authenticates through Workload Identity Federation, as
-`planner` for previews and `deployer` for deploys. Those are bootstrap's
-accounts, so no account name is copied by hand. Only affected servers are
-built and deployed, worked out from `.deps.json` and the stack's edges.
+The build writes the workflow under `<output-root>/ci/<stack>/` and
+installs it into the renderer's directory under the repository root,
+`.github/workflows/<stack>.yml`, when that directory exists, as
+`InstallTargetDir` installs any generator's output. GitHub Actions
+(`github`) is the first renderer. Others are registrations, as
+provisioners are. A stack without `outputs.ci` gets no workflow, so an
+example in a repository with CI of its own installs nothing.
 
-GitHub Actions is the first CI renderer. Like provisioners, others are
-registrations.
+The GitHub workflow:
+
+- **On a pull request:**
+  - A `check` job needs no credentials. It installs superschematic and
+    the schemas root's packages, builds, which resolves every environment
+    and checks its graph (levels 1 and 3), and compiles each server's
+    entrypoint (level 2).
+  - A `plan` job per cloud environment without parameters runs `stack
+    plan` as `planner`: the infrastructure diff, the migration plans and
+    their hazards (levels 5 and 6).
+  - A `preview` job per environment with one parameter runs `stack deploy
+    <environment> --param <parameter>=<pull request number>` as
+    `deployer`, a member per pull request, and `stack destroy` of that
+    member when the pull request closes (level 7). An environment with
+    more parameters has no CI job, and the workflow says so.
+  - A pull request from a fork runs `check` alone: GitHub gives its jobs
+    no identity token.
+- **On a push to the branch:** a `deploy` job per cloud environment
+  without parameters, in the order the environments are declared. The
+  first deploys at once; each later one waits for the one before, and runs
+  in a GitHub environment of its own name, so that environment's required
+  reviewers approve it. Reviewers are a setting of the repository, not of
+  the stack.
+- One run at a time per environment, and per preview member.
+- Local environments have no job. Level 4 runs on an engineer's machine.
+
+Each cloud job signs in through the target's CI identity (`TargetSpec.CI`):
+on gcp, Workload Identity Federation through the pool bootstrap creates,
+as `<stack>-planner` or `<stack>-deployer`. The provider's name holds the
+project's number, `projectNumber` (section 7.1), which bootstrap records.
+An environment without it has no cloud jobs, and the workflow names the
+bootstrap to run.
+
+The workflow installs the release of superschematic that generated it,
+checked against the release's `SHA256SUMS`. A binary built from a checkout
+is no release, so its workflow's install step fails and says to generate
+again with a released binary. Only servers whose build context changed
+are built and rolled (section 11.2), so the workflow builds and deploys
+whatever the deploy decides is affected, and needs no list of its own.
 
 ## 12. Core changes
 
