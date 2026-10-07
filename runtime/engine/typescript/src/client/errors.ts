@@ -55,6 +55,8 @@ export class EngineProblem extends Error {
   readonly issues: readonly ProblemIssue[];
   /** `details.changes` of an `incompatible_change`; empty otherwise. */
   readonly changes: readonly ProblemChange[];
+  /** `details.fields` of a `conflict` over unique fields, the fields another instance holds the values of; empty otherwise. */
+  readonly fields: readonly string[];
   /** Seconds to wait before trying again, from `Retry-After` (429). */
   readonly retryAfter: number | undefined;
   /** The document as the engine sent it; a document of `about:blank` built from the status when the answer was not one. */
@@ -71,6 +73,7 @@ export class EngineProblem extends Error {
     this.details = problem.details;
     this.issues = issuesOf(problem.details);
     this.changes = changesOf(problem.details);
+    this.fields = fieldsOf(problem.details);
     this.retryAfter = retryAfter;
     this.problem = problem;
   }
@@ -182,6 +185,13 @@ function changesOf(details: unknown): ProblemChange[] {
     const { path, message } = change as Record<string, unknown>;
     return { path: typeof path === 'string' ? path : '', message: typeof message === 'string' ? message : '' };
   });
+}
+
+function fieldsOf(details: unknown): string[] {
+  if (!isObject(details) || !Array.isArray((details as Record<string, unknown>).fields)) {
+    return [];
+  }
+  return ((details as Record<string, unknown>).fields as unknown[]).filter((field): field is string => typeof field === 'string');
 }
 
 function isObject(value: unknown): value is object {

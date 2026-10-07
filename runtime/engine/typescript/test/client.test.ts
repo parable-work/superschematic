@@ -70,6 +70,30 @@ describe('the client', () => {
     await refused(client.instances.delete('Task', 'build'), 404, 'not_found');
   });
 
+  test('filters a list with where, looks an instance up by a unique field, and reads a conflict\'s fields', async () => {
+    const { client: open, engine, requests } = serve();
+    const client = open();
+    engine.schemas.define(alice, schemaDocument('Model', [
+      { name: 'slug', typeRef: { name: 'string' }, unique: true },
+      { name: 'kind', typeRef: { name: 'string' } },
+    ]));
+    engine.schemas.publish(alice, 'Model');
+    await client.instances.create('Model', { slug: 'openai/gpt-5', kind: 'chat' }, { id: 'a' });
+    await client.instances.create('Model', { slug: 'openai/o3', kind: 'reason' }, { id: 'b' });
+    await client.instances.create('Model', { slug: 'acme/x, y', kind: 'chat' }, { id: 'c' });
+    const chat = await client.instances.list('Model', { where: { kind: 'chat' } });
+    assert.deepEqual(chat.items.map((item) => item.id), ['a', 'c']);
+    assert.equal(new URL(requests.at(-1)!.url, 'http://engine.test').searchParams.get('where'), '{"kind":"chat"}');
+    const any = await client.instances.list('Model', { where: { slug: ['acme/x, y', 'openai/o3'] }, limit: 1 });
+    assert.deepEqual(any.items.map((item) => item.id), ['b']);
+    assert.equal((await client.instances.lookup('Model', { slug: 'openai/gpt-5' })).id, 'a');
+    await refused(client.instances.lookup('Model', { slug: 'openai' }), 404, 'not_found');
+    await refused(client.instances.lookup('Model', { kind: 'chat' }), 400, 'invalid_argument');
+    const conflict = await refused(client.instances.create('Model', { slug: 'openai/o3' }), 409, 'conflict');
+    assert.deepEqual(conflict.fields, ['slug']);
+    assert.deepEqual((await refused(client.instances.create('Model', { slug: 'x' }, { id: 'a' }), 409, 'conflict')).fields, []);
+  });
+
   test('turns refusals into typed problems with their issues at their paths', async () => {
     const served = serve();
     const client = served.client();

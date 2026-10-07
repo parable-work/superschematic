@@ -718,8 +718,9 @@ try {
 ```
 
 - The calls follow the engine's: `schemas` (`define`, `publish`,
-  `describe`, ...), `instances` (`create` with `behaviors`, `get`, `list`,
-  `update`, `delete`, `invoke` and the schema-level `invokeSchema`),
+  `describe`, ...), `instances` (`create` with `behaviors`, `get`, `list`
+  with `where`, `lookup`, `update`, `delete`, `invoke` and the
+  schema-level `invokeSchema`),
   `events`, `behaviors`, `tools()` and `search()`. A write's
   `expectedSeq` is sent as `If-Match` and its `preconditions` as the
   `Preconditions` header.

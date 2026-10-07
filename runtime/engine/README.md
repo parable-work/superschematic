@@ -3515,7 +3515,7 @@ await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: 
 | Calls | Route |
 | --- | --- |
 | `schemas.list`, `live`, `draft`, `version`, `define`, `publish`, `describe` | the schema routes and the describe document |
-| `instances.create` (`{ id?, behaviors? }`), `get`, `list` (`{ limit?, cursor? }`), `update`, `delete`, `invoke`, `operate`, `invokeSchema` | the instance and operation routes |
+| `instances.create` (`{ id?, behaviors? }`), `get`, `list` (`{ limit?, cursor?, where? }`), `lookup(schema, key)`, `update`, `delete`, `invoke`, `operate`, `invokeSchema` | the instance, lookup and operation routes |
 | `events.read` (`{ after?, limit?, schema?, instanceId?, kinds?, behaviors?, exclude? }`), `events.head`, `events.subscribe` | the event route, as a page or the stream |
 | `behaviors.list`, `behaviors.describe`, `tools()`, `search(params)` | the behavior catalog, the tools document, the search across schemas |
 
@@ -3532,8 +3532,9 @@ await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: 
 - **Problems.** A refusal is an `EngineProblem`: `status`, `code`,
   `detail`, `requestId`, `details`, and `issues` (`details.issues`, each
   `{ path, rule?, message }`: a JSON pointer for parameters, preconditions
-  and a schema document, a field path for an instance) and `changes`
-  (`incompatible_change`). A `vetoed` problem is an `EngineVeto` with
+  and a schema document, a field path for an instance), `changes`
+  (`incompatible_change`) and `fields` (`details.fields` of a `conflict`
+  over unique fields). A `vetoed` problem is an `EngineVeto` with
   `behavior`, `action`, `reason`, `vetoCode` and `vetoDetails`;
   `isVeto(error, behavior?, codes?)` and `isProblem(error, codes?)`
   branch on them. An answer that is not a problem document (a proxy's

@@ -63,6 +63,13 @@ export interface CreateOptions extends CallOptions {
 export interface ListOptions extends CallOptions {
   readonly limit?: number;
   readonly cursor?: string;
+  /**
+   * Field values the instances hold, by field: a value, or a list any of
+   * which they hold; sent as a JSON object in the `where` query parameter.
+   * A filtered page can hold fewer instances than limit while next is not
+   * null.
+   */
+  readonly where?: Readonly<Record<string, unknown>>;
 }
 
 export interface ReadEventsOptions extends EventFilters, CallOptions {
@@ -216,7 +223,19 @@ export class InstanceCalls {
     if (options.cursor !== undefined) {
       query.push(['cursor', options.cursor]);
     }
+    if (options.where !== undefined) {
+      query.push(['where', JSON.stringify(options.where)]);
+    }
     return this.scope.data({ method: 'GET', path: `${this.scope.schema(options, schema)}/instances`, query, options });
+  }
+
+  /**
+   * lookup reads the instance whose unique fields hold a key's values,
+   * `{ slug: 'openai/gpt-5' }`, sent as a JSON object in the query, so a
+   * value may hold a slash; none is 404 `not_found`, as for get.
+   */
+  lookup<T = JSONObject>(schema: string, key: JSONObject, options: CallOptions = {}): Promise<Instance<T>> {
+    return this.scope.data({ method: 'GET', path: `${this.scope.schema(options, schema)}/lookup`, query: [['key', JSON.stringify(key)]], options });
   }
 
   /** update applies a JSON merge patch (RFC 7386) and returns the instance. */
