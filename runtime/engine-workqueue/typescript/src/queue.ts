@@ -10,7 +10,8 @@ claimNext, schema-level, claims the first instance the caller can claim.
 claim's checks are the real ones, read from the instance as it is: its
 status is one of the claimable states (claim.from), when the type
 composes Dependencies no blocker holds it up, and no link excludeStale
-names is pinned to a revision its target has moved past. A lapsed lease
+names is pinned to a revision or a release its target has moved past. A
+lapsed lease
 is expired first, through Lease's expire, so a holder that died leaves
 the instance in the state onExpiry moves it to before the checks read
 it. Lease's acquire refuses an active lease and an instance at
@@ -54,7 +55,8 @@ Dependencies' listBlockers, hearing its status; and, while the
 instance's copies make it a candidate but for its exclusion, to each
 value of an enclosing scope checkReserve says its answer turns on, at
 the number it says, and to the target of each link excludeStale names,
-hearing its revision cross the one past the pinned revision. A blocker's
+hearing its revision, or its release, cross the one past the pinned one.
+A blocker's
 status change invokes refresh on the dependent as the principal who made
 it. A scope's or a target's change first checks the instance's exclusion
 and invokes refresh only when the copy, or what it hears, no longer
@@ -80,6 +82,7 @@ import {
   EngineError,
   OperationParamsError,
   defineBehavior,
+  linkPin,
   type ConfigTarget,
   type FrozenJSON,
   type InstanceChange,
@@ -106,7 +109,7 @@ export interface QueueConfig {
   readonly priorityField?: string;
   readonly match: readonly string[];
   readonly maxCandidates: number;
-  /** The pinned links of the type's Links config whose staleness keeps an instance out. */
+  /** The pinned links of the type's Links config, to a revision or a release, whose staleness keeps an instance out. */
   readonly excludeStale: readonly string[];
   /** Whether the type composes Dependencies, whose blocked field a claim waits on. */
   readonly dependencies: boolean;
@@ -179,6 +182,7 @@ interface LinkRecord {
   readonly schema?: unknown;
   readonly id?: unknown;
   readonly revision?: unknown;
+  readonly release?: unknown;
   readonly stale?: unknown;
 }
 
@@ -257,8 +261,8 @@ function blockersOf(context: InstanceContext<QueueConfig>, changes: Changes): bo
 // one whose status and blockers make it one, and the values whose moves
 // can change that: until a change while Retries shows it exhausted, or
 // while a link excludeStale names is stale, with nothing to hear; else
-// each such link's target's revision, which crosses the one past the
-// pinned revision when the target moves on; and while Budget's
+// each such link's target's revision or release, which crosses the one
+// past the pinned one when the target moves on; and while Budget's
 // checkReserve says a claim's reservation does not fit, until the day
 // that alone makes it fit, else until a change does, hearing each value of
 // a scope the answer says it turns on. fields are the instance's retries
@@ -271,15 +275,17 @@ function exclusionOf(config: QueueConfig, fields: FrozenJSON, check: () => Reser
   const links = fields.links as Readonly<Record<string, LinkRecord>> | undefined;
   for (const name of config.excludeStale) {
     const link = own(links, name);
-    // Links gives stale while the target has a revision to compare: a link
-    // without it pins nothing, or points at a target being deleted.
-    if (link === undefined || typeof link.revision !== 'number' || typeof link.stale !== 'boolean' || typeof link.schema !== 'string' || typeof link.id !== 'string') {
+    // Links gives stale while the target has a revision or a release to
+    // compare: a link without it pins nothing, or points at a target being
+    // deleted.
+    const pin = typeof link?.revision === 'number' ? 'revision' : typeof link?.release === 'number' ? 'release' : undefined;
+    if (link === undefined || pin === undefined || typeof link.stale !== 'boolean' || typeof link.schema !== 'string' || typeof link.id !== 'string') {
       continue;
     }
     if (link.stale === true) {
       return { until: EXCLUDED, hearing: [] };
     }
-    hearing.push({ schema: link.schema, id: link.id, key: `${STALE} ${name}`, hears: { path: '/revision', crosses: link.revision + 1 } });
+    hearing.push({ schema: link.schema, id: link.id, key: `${STALE} ${name}`, hears: { path: `/${pin}`, crosses: (link[pin] as number) + 1 } });
   }
   if (!config.budget) {
     return { until: 0, hearing };
@@ -474,7 +480,7 @@ function checkStale(target: ConfigTarget, names: readonly string[]): void {
   if (!target.behaviors.includes('Links')) {
     throw new BehaviorConfigError('excludeStale names links of Links, which the type does not list');
   }
-  const links = (target.configs.Links as { links?: Readonly<Record<string, { pinned?: unknown }>> } | undefined)?.links;
+  const links = (target.configs.Links as { links?: Readonly<Record<string, unknown>> } | undefined)?.links;
   // A Links config of the wrong shape is Links' to refuse.
   if (links === undefined || typeof links !== 'object') {
     return;
@@ -484,14 +490,15 @@ function checkStale(target: ConfigTarget, names: readonly string[]): void {
     if (link === undefined) {
       throw new BehaviorConfigError(`excludeStale names "${name}", which is not a link of the type's Links config (its links: ${Object.keys(links).join(', ')})`);
     }
-    if (link.pinned !== true) {
+    if (linkPin(link) === undefined) {
       throw new BehaviorConfigError(`excludeStale names "${name}", a link that is not pinned, so it is never stale`);
     }
   }
 }
 
 // staleOf lists the links excludeStale names that are pinned to a
-// revision their targets have moved past, read through Links' field.
+// revision or a release their targets have moved past, read through
+// Links' field.
 function staleOf(config: QueueConfig, links: unknown): string[] {
   return config.excludeStale.filter((name) => own(links as Readonly<Record<string, LinkRecord>> | undefined, name)?.stale === true);
 }
@@ -611,12 +618,15 @@ export const queue = defineBehavior<QueueConfig>({
       }
       const stale = staleOf(config, now.links);
       if (stale.length > 0) {
+        const pins = [
+          ...new Set(stale.map((name) => (typeof own(now.links as Readonly<Record<string, LinkRecord>> | undefined, name)?.release === 'number' ? 'release' : 'revision'))),
+        ];
         throw vetoed(
           context,
           'claim',
           stale.length === 1
-            ? `its link ${stale[0]} is pinned to a revision its target has moved past`
-            : `its links ${stale.join(', ')} are pinned to revisions their targets have moved past`,
+            ? `its link ${stale[0]} is pinned to a ${pins[0]} its target has moved past`
+            : `its links ${stale.join(', ')} are pinned to ${pins.map((pin) => `${pin}s`).join(' or ')} their targets have moved past`,
           'stale_link',
           { links: stale }
         );

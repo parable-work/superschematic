@@ -262,7 +262,8 @@ curl -s $API/schemas/notes/instances \
       ],
       "status": "draft",
       "commentCount": 0,
-      "revision": 1
+      "revision": 1,
+      "pendingProposals": 0
     },
     "createdAt": 1790790700324,
     "createdBy": "alice",
@@ -277,8 +278,8 @@ curl -s $API/schemas/notes/instances \
 
 The response is 201. The note's `data` holds its own fields and, after
 them, the fields its behaviors add: Workflow's `status`, Comments'
-`commentCount` and Revisions' `revision`. Those are read-only; a create or
-an update that sets one is 422. `seq` is the sequence of the note's last
+`commentCount` and Revisions' `revision` and `pendingProposals`. Those
+are read-only; a create or an update that sets one is 422. `seq` is the sequence of the note's last
 event, and the response sends it as the `ETag`, `"1"`. Without an `id`, the
 engine makes a random UUID. The fields come back as the engine stores
 them: each scalar value in the canonical form its scalar defines (an
@@ -327,7 +328,8 @@ curl -s -X PATCH $API/schemas/notes/instances/launch \
   "body": "Ships in the fall.",
   "status": "draft",
   "commentCount": 0,
-  "revision": 2
+  "revision": 2,
+  "pendingProposals": 0
 }
 ```
 
@@ -496,7 +498,8 @@ through them.
 ### Revisions
 
 carol cannot change the note, but she can propose a change. The proposal
-is checked as the update would be, and changes nothing yet:
+is checked as the update would be, and changes none of the note's fields
+yet; `pendingProposals` counts it:
 
 ```sh
 curl -s $API/schemas/notes/instances/launch/operations/propose \
@@ -555,13 +558,17 @@ curl -s $API/schemas/notes/instances/launch -H 'authorization: Bearer carol-toke
   "body": "Ships on October 1.",
   "status": "published",
   "commentCount": 1,
-  "revision": 3
+  "revision": 3,
+  "pendingProposals": 0
 }
 ```
 
 `reject` settles a proposal without applying it, `listProposals` and
-`listRevisions` page through them, and a revision's `data` is the note's
-own fields as that change left them.
+`listRevisions` page through them, `getRevision` reads one revision by
+its number, and a revision's `data` is the note's own fields as that
+change left them. A proposal may cite `evidence`, instances the proposer
+may read, each optionally at a revision, which the reviewer reads with
+the proposal.
 
 ### Your own behaviors
 
@@ -679,10 +686,10 @@ id: 7
 data: {"cursor":7,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":5,"version":1,"actor":"carol","at":1790790700450,"change":{"behavior":"Comments","operation":"comment","params":{"body":"Which fall?"},"patch":{"commentCount":1}}}
 
 id: 8
-data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{}}}
+data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{"pendingProposals":1}}}
 
 id: 9
-data: {"cursor":9,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":7,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"body":"Ships on October 1.","revision":3}}}
+data: {"cursor":9,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":7,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"body":"Ships on October 1.","revision":3,"pendingProposals":0}}}
 
 event: ready
 id: 9
@@ -771,6 +778,47 @@ section has every call and option, and
 [Work queues](/superschematic/guides/work-queues/#write-a-worker) builds a
 worker on it.
 
+### Typed wrappers for your schemas
+
+The client is generic over schema names: `create` takes any object and an
+operation any parameters, so a misspelled field, state or link name
+reaches the server and comes back as a refusal. `superschematic
+engine-client` writes a module that types the client for your schemas,
+from their documents and the behaviors' declarations:
+
+```sh
+superschematic engine-client --out src/notes.client.ts schemas/notes.schema.json
+```
+
+```ts
+import { EngineClient } from '@superschematic/engine/client';
+import { isNoteVeto, notesClient } from './notes.client.ts';
+
+const notes = notesClient(new EngineClient({ baseUrl: 'http://127.0.0.1:8787/api', auth: { token: 'alice-token' } }));
+
+const note = await notes.create({ title: 'Launch' }, { id: 'launch' });   // data: NoteFields
+note.data.status;                                                         // 'draft' | 'review' | 'published' | 'archived'
+await notes.transition('launch', { to: 'review' });                       // { to: 'publshed' } fails to compile
+await notes.comment('launch', { body: 'Ships in the fall.' });
+await notes.propose('launch', { patch: { body: 'Ships on the first.' } }); // patch: NotePatch
+try {
+  await notes.transition('launch', { to: 'review' });
+} catch (error) {
+  if (!isNoteVeto(error, 'Workflow', 'already_in_state')) throw error;   // codes Workflow lists
+}
+```
+
+The behaviors' configs narrow the types: a `Workflow`'s states, the names
+of a `Links` config with each required link required at create, the
+schemas a `Dependencies` blocker may come from, and with `Variants` the
+type of the field for each value of the one that picks it. An operation's
+method takes its declaration's parameters and returns its result, and a
+write's `preconditions` take only the behaviors that declare one (Lease's
+`token`). The module imports the client and nothing else, so it runs in
+a browser too. The example commits `src/notes.client.ts` and uses it in
+its end-to-end test; regenerate it when the schema changes, and run
+`engine-client --check` in CI to keep it current.
+
 ## MCP tools
 
 The MCP endpoint serves one tool per operation of every live schema the
@@ -804,6 +852,7 @@ notes_list
 notes_comment
 notes_list_comments
 notes_list_revisions
+notes_get_revision
 notes_propose
 notes_list_proposals
 ```

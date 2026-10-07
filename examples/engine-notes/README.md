@@ -13,7 +13,8 @@ through it; `runtime/engine/README.md` is the reference.
 | `src/auth.ts` | The bearer-token `Authenticator` and the access policy |
 | `src/server.ts` | Opens the engine over one SQLite file, publishes the schema, and serves the HTTP API, the event stream and the MCP endpoint on one Hono app with `@hono/node-server` |
 | `src/main.ts` | Runs the server on port 8787 (`PORT`) over `notes.db` (`NOTES_DB`) |
-| `test/notes.test.ts` | End to end over a listening server: create, transition (refused without the permission, then allowed), comment, propose and approve, the event log as JSON and as a stream from a cursor, MCP tools listed and called with the official client, a refused draft, and a restart that keeps the notes and publishes a compatible change |
+| `src/notes.client.ts` | Generated: the typed wrappers `superschematic engine-client` writes for the schema (D49), `notesClient` over the engine's client with the note's fields, states, operations and veto codes |
+| `test/notes.test.ts` | End to end over a listening server: create, transition (refused without the permission, then allowed), comment, propose and approve, the event log as JSON and as a stream from a cursor, MCP tools listed and called with the official client, the same calls through `notesClient`, a refused draft, and a restart that keeps the notes and publishes a compatible change |
 | `scripts/link.sh` | Links the engine and the packages the example imports into `node_modules` |
 | `scripts/check.sh` | Builds the runtimes and the engine, links them, type-checks, and runs the test on Node.js and Bun |
 
@@ -46,6 +47,20 @@ It listens on `http://127.0.0.1:8787/api` and keeps its data in
 `notes.db` (gitignored). The routes are under
 `/api/namespaces/default`; the MCP endpoint is
 `/api/namespaces/default/mcp`.
+
+## The typed client
+
+`src/notes.client.ts` is generated from `schemas/notes.schema.json`:
+
+```sh
+superschematic engine-client --out examples/engine-notes/src/notes.client.ts examples/engine-notes/schemas/notes.schema.json
+```
+
+`notesClient(client)` wraps an `EngineClient` with the schema's types, so a
+misspelled field, state or parameter fails the typecheck. The file is a
+golden of `internal/generator/engineclientgen`: its test fails when the
+file is not what the schema generates, and `go test
+./internal/generator/engineclientgen -update` rewrites it. Do not edit it.
 
 ## Callers
 

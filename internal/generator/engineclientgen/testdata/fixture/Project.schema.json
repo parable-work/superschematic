@@ -1,0 +1,33 @@
+{
+  "kind": "General",
+  "name": "Project",
+  "description": "A project its tasks link to, which rolls them up.",
+  "types": {
+    "Project": {
+      "name": "Project",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["open", "closed"],
+            "transitions": [{ "from": "open", "to": "closed" }]
+          }
+        },
+        {
+          "name": "Rollups",
+          "config": {
+            "rollups": {
+              "tasks": { "schema": "Task", "link": "project", "function": "count" },
+              "byStatus": { "schema": "Task", "link": "project", "function": "countBy", "field": "status" },
+              "hours": { "schema": "Task", "link": "project", "function": "sum", "field": "estimate" },
+              "longest": { "schema": "Task", "link": "project", "function": "max", "field": "estimate" },
+              "finished": { "schema": "Task", "link": "project", "function": "all", "outcomes": ["success"], "gatedStates": ["closed"] }
+            }
+          }
+        }
+      ],
+      "fields": [{ "name": "name", "description": "The project's name.", "typeRef": { "name": "string" }, "required": true }]
+    }
+  }
+}

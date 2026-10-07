@@ -38,20 +38,14 @@
       "meters": {
         "additionalProperties": {
           "additionalProperties": false,
-          "not": {
-            "required": [
-              "limit",
-              "limitField"
-            ]
-          },
           "properties": {
             "limit": {
-              "description": "The most the instance may have used and reserved together; no limit of its own when neither this nor limitField is given.",
+              "description": "The most the instance may have used and reserved together; with limitField, the limit while the field holds no value of at least 0. No limit of its own when neither gives one.",
               "minimum": 1,
               "type": "integer"
             },
             "limitField": {
-              "description": "An integer field of the type that holds the instance's limit; no limit while it holds no value of at least 0. Only a principal with limitPermission changes it once the instance exists.",
+              "description": "An integer field of the type that holds the instance's limit; while it holds no value of at least 0, limit is the limit, and without limit there is none. Only a principal with limitPermission changes it once the instance exists.",
               "minLength": 1,
               "type": "string"
             },

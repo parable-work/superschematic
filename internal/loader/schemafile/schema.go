@@ -31,8 +31,9 @@ const schemaResourceName = "schema-file.json"
 //
 // The registry supplies what the structs cannot: the schema kinds, the
 // extension names and their decorators (closing every "extensions" slot),
-// the sidecar documents (closing "documents") and the behaviors (closing a
-// type's "behaviors" entries).
+// the sidecar documents (closing "documents"), the behaviors (closing a
+// type's "behaviors" entries) and @display's argument schema (a type's
+// "display").
 //
 // The root is a oneOf over the multi-definition Document and the
 // single-definition forms (a TypeDef, or an Enum / Union / Scalar /
@@ -107,6 +108,10 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 	}
 
 	if err := closeBehaviors(defs, reg); err != nil {
+		return nil, err
+	}
+
+	if err := replaceDisplayDefs(defs, reg); err != nil {
 		return nil, err
 	}
 
@@ -460,6 +465,38 @@ func closeBehaviors(defs map[string]any, reg *registry.Registry) error {
 		def["allOf"] = branches
 	}
 	defs["BehaviorRef"] = def
+	return nil
+}
+
+// replaceDisplayDefs replaces the reflected $defs/TypeDisplay and
+// $defs/DisplayState with the $defs of the registered @display spec's Args
+// (D48): a type's display is the decorator's argument, so the data forms
+// are held to the schema the TypeScript frontend holds the argument to,
+// which says what the reflection cannot (at least one member, the state
+// names, the transition keys, the closed tones). Each replacement must
+// name the members the IR struct does, so the two cannot drift apart.
+func replaceDisplayDefs(defs map[string]any, reg *registry.Registry) error {
+	spec, ok := reg.Decorator("display", registry.TargetType)
+	if !ok || spec.Args == nil {
+		return fmt.Errorf("the registry has no @display decorator with Args")
+	}
+	var args struct {
+		Defs map[string]map[string]any `json:"$defs"`
+	}
+	if err := json.Unmarshal(spec.Args, &args); err != nil {
+		return fmt.Errorf("decorator @display Args: %w", err)
+	}
+	for _, name := range []string{"TypeDisplay", "DisplayState"} {
+		reflected, err := propertiesOf(defs, name)
+		if err != nil {
+			return err
+		}
+		registered, _ := args.Defs[name]["properties"].(map[string]any)
+		if !slices.Equal(sortedKeys(reflected), sortedKeys(registered)) {
+			return fmt.Errorf("@display Args $defs/%s has the properties %v, but ir.%s has %v", name, sortedKeys(registered), name, sortedKeys(reflected))
+		}
+		defs[name] = args.Defs[name]
+	}
 	return nil
 }
 

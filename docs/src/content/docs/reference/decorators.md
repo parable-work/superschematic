@@ -26,6 +26,7 @@ as their support lands in every generator.
 | `@source(Table)` | class (API, General) | the class is a view of a table; its fields are checked against the table's | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
 | `@virtual` | field of a `@source` view | a field with no column behind it, filled in by the implementation | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
 | `@docs`, `@purpose`, `@icon` | field | presentation for a settings or form UI | [Documentation](/superschematic/reference/documentation/) |
+| `@display({ noun, plural, titleField, createLabel, summaryFields, states, transitions })` | class | how a UI shows the type's instances: what to call them, the title and summary fields, the create button, and labels and tones for its `Workflow`'s states and transitions | [Documentation](/superschematic/reference/documentation/#display-on-a-type) |
 | `@behavior(name, config?)` | class | composes an engine behavior (`Workflow`, `Links`, `Queue`, ...) on a type the engine runs; `BehaviorConfigs` types the config | [Engine behaviors](/superschematic/guides/engine-behaviors/#compose-a-behavior) |
 
 ## Tables: `@superschematic/db`
@@ -71,7 +72,7 @@ as their support lands in every generator.
 
 | Name | What it does | Covered in |
 | --- | --- | --- |
-| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
+| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs`; a Stack service's `outputs.ci` asks for its generated CI | [How it works](/superschematic/start/how-it-works/), [Stacks](/superschematic/guides/stacks/#generated-ci) |
 | `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and `calls`, and for a decorator argument that names a service, such as the `from` of `@requireService` and `@allowService`; its type carries the kind (`ServiceHandle<"API">`). Each service's build writes its handle to `src/service.generated.ts`, which a config or a schema file imports from the service's package; an API's also carries its `@envVars` class | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
 | `@envVars` | on a class of a General or API schema: its fields are the service's environment variables, with a generated loader and `values-schema.json`. On an API, it is the config of the API's server, and a stack's `env` binds its fields | [Modeling types](/superschematic/guides/modeling-types/#environment-variables), [Stacks](/superschematic/guides/stacks/#wire-the-services) |
 
@@ -80,8 +81,9 @@ as their support lands in every generator.
 A Stack service (`kind: SchemaKind.Stack`) declares what runs where over
 the services it names by their handles. Its build writes each
 environment, resolved, to `stack/<service>/<environment>/environment.json`,
-and each Go server's entrypoint and Dockerfile to
-`server/<service>/<server>/`. The stack takes its service's name. Each
+each Go server's entrypoint and Dockerfile to
+`server/<service>/<server>/`, and with `outputs.ci` its CI workflow to
+`ci/<service>/<renderer>/`. The stack takes its service's name. Each
 class of its schema carries one of these decorators and no fields.
 
 | Name | On | What it does | Covered in |

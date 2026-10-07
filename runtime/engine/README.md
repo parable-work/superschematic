@@ -15,7 +15,9 @@ the event stream (`@superschematic/engine/http`), the behavior plug-in interface
 the runner of reactions and schedules, the describe and tools documents,
 the behavior catalog, the MCP endpoint (`@superschematic/engine/mcp`),
 a typed client of the HTTP API with the event stream and a reconciler
-(`@superschematic/engine/client`, "The client"),
+(`@superschematic/engine/client`, "The client") and the typed wrappers
+`superschematic engine-client` writes for given schemas ("Typed
+wrappers"),
 and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
 reach other instances, `Search`, full-text search with vectors an outside
@@ -349,6 +351,20 @@ deployment's binary, the core's by default. The engine then requires:
   instance type's own fields whose value is a string, a number or a
   boolean, an enum's included, and an index only over fields the type
   has ("Unique fields and indexes" under "Instances").
+- each type's display (`@display`, D48 in `docs/DECISIONS.md`) held to
+  the type, as the compiler's loader holds it, with its wording, at
+  `/types/<Type>/display`: `titleField` names one of the type's own
+  fields, by its name or its JSON key, that holds a single text value (a
+  string, or a scalar whose values are strings, not a list or a map) and
+  is neither `secret` nor `uiHidden`; each `summaryFields` entry names
+  one of the type's own fields, or a field one of its behaviors adds,
+  shown to a reader the same way; and `states` and `transitions` name
+  states and transitions of the type's `Workflow` config, so a type that
+  does not compose `Workflow`, a nested type among them, takes neither.
+  The meta-schema holds the display's shape: at least one member, state
+  names, no blank text, and the tones `muted`, `active`, `success`,
+  `warning` and `danger`. A new version may change a display freely: the
+  compatibility rule ignores it.
 
 A refused document throws `SchemaDocumentError` with an issue per problem,
 each at a JSON pointer.
@@ -1349,8 +1365,9 @@ The declaration's schema is the same on every type; what a config
 admits is narrower. An implementation's `createParamsSchema(config,
 target)` returns the parameters it takes under the config, which the
 describe document and the create tool show in place of the declared
-one: `Links` a property per link name, the required ones required and a
-`revision` only for a pinned link, `Dependencies` a blocker's `schema`
+one: `Links` a property per link name, the required ones required, a
+`revision` only for a link pinned to a revision and a `release` only for
+one pinned to a release, `Dependencies` a blocker's `schema`
 from the config's `schemas`, required when the type's own schema is not
 among them. It describes what `initialize` enforces, as
 `instanceSchema` describes what `validate` enforces: the engine checks a
@@ -2334,10 +2351,11 @@ step.
 | | |
 | --- | --- |
 | Config | `review: { permission }`, optional |
-| Fields | `revision`: the latest revision's number, absent before the first |
-| Operations | `listRevisions({ limit?, cursor? })`, read-only; with review, `propose({ patch, note? })`, `approve({ proposal })`, `reject({ proposal, reason? })`, which write, and `listProposals({ state?, limit?, cursor? })`, read-only |
+| Fields | `revision`: the latest revision's number, absent before the first; `pendingProposals`: with review, how many proposals are pending, absent without it |
+| Operations | `listRevisions({ limit?, cursor? })` and `getRevision({ revision })` -> the revision, read-only; with review, `propose({ patch, note?, evidence? })`, `approve({ proposal })`, `reject({ proposal, reason? })`, which write, and `listProposals({ state?, limit?, cursor? })`, read-only |
 | Guards | without review, the four review operations are `vetoed` (`no_review`); `approve` and `reject` need the review permission (`can`), else `forbidden`, whoever calls them, and a proposal that is not pending is `vetoed` (`not_pending`, details `{ proposal, state }`) |
-| Events | a create's and an update's event carry `revision`; `propose` appends an operation event with an empty `patch`; `approve`'s carries the fields its patch changed and `revision` |
+| Refusals | `getRevision` of a revision the instance has not reached (`not_found`); `propose` with evidence that names a schema the namespace does not have, an instance that does not exist, or a revision of an instance whose schema does not compose Revisions or that it has not reached (`invalid_argument`, at `/evidence/<i>/schema`, `/id` or `/revision`), or a schema the proposer may not read (`forbidden`) |
+| Events | a create's and an update's event carry `revision`; with review, a create's event and each `propose`, `approve` and `reject` event carry `pendingProposals`; `approve`'s carries the fields its patch changed and `revision` |
 | `configChange` | `review` may be added, removed or changed. Added to a schema with instances, whose history starts at their next change; not removed from one |
 
 A create records revision 1 and every change of the own fields the next,
@@ -2348,12 +2366,19 @@ own fields as the change left them, never a behavior's field. An
 operation that changes no own field, a comment or a transition, records
 none.
 
+`getRevision({ revision })` reads one revision by its number, as
+`listRevisions` reads a page of them: a pinned link's `revision`, a
+proposal's `base` or `revision`, or a `Blueprint` definition's pin names
+one. A number the instance has not reached is `not_found`.
+
 `propose` checks its patch with `validateUpdate`: one that sets a
 behavior's field or leaves the instance invalid is `invalid_instance`,
 and one that changes nothing is `invalid_argument`. It stores the patch
-as a pending proposal and changes nothing a reader sees. Who may propose
-is the access policy's call: it is asked for `write` with the operation
-`propose`, apart from a plain update, which names no operation. `approve`
+as a pending proposal and changes no own field; `pendingProposals`,
+present while the config has review, counts it until it is settled. Who
+may propose is the access policy's call: it is asked for `write` with
+the operation `propose`, apart from a plain update, which names no
+operation. `approve`
 applies a pending proposal's patch with `update()`, so the update's
 validation and every guard run, and records the revision it makes with
 the proposal's id; a refusal leaves the proposal pending. The patch
@@ -2361,16 +2386,27 @@ applies to the instance as it is then, not as it was proposed; `base` is
 the revision it was proposed against, so a reviewer can see the instance
 moved. `reject` settles it with an optional reason. A proposal is `{ id,
 patch, note?, base?, state, createdBy, createdAt, reviewedBy?,
-reviewedAt?, reason?, revision? }`, `state` one of `pending`, `approved`
-and `rejected`; approving or rejecting one that is not pending is
-`vetoed`, and naming none is `invalid_argument`.
+reviewedAt?, reason?, revision?, evidence? }`, `state` one of `pending`,
+`approved` and `rejected`; approving or rejecting one that is not pending
+is `vetoed`, and naming none is `invalid_argument`.
+
+A proposal may cite evidence for its reviewer, at most 64 entries of
+`{ schema, id, revision? }`: the instances it rests on, each optionally
+at a revision. `propose` reads each one as the proposer, so a schema the
+proposer may not read is `forbidden`, and refuses a schema the namespace
+does not have, an instance that does not exist, and a revision of an
+instance whose schema does not compose Revisions or past its latest. It
+stores the list as given, as data: the engine records no reference, so a
+cited instance may change or go and the proposal keeps what it cited.
+Every proposal record carries it as `evidence`.
 
 A revision's fields and a proposal's patch go through the value store
 ("The value store in a behavior's tables"): a field longer than the
 threshold is stored once, whichever revisions, proposals, events and the
 instance hold it, and the rows keep its ref, with the pointers in a
 `value_refs` column its second migration adds. `listRevisions`,
-`listProposals` and `approve` read the values back. Deleting the instance
+`getRevision`, `listProposals` and `approve` read the values back. Its
+third migration adds the proposals' `evidence`. Deleting the instance
 releases what its revisions and proposals held.
 
 #### Dependencies
@@ -2444,25 +2480,40 @@ Typed links from the instance to instances of other schemas, or its own.
 
 | | |
 | --- | --- |
-| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`; at least one |
-| Fields | `links`: `{ <name>: { schema, id, revision?, stale? } }`, the links the instance holds; absent when it holds none |
-| Operations | `link({ name, id, revision? })` -> `{ name, schema, id, revision? }`, writes; `unlink({ name })` -> the link as it was, writes; schema-level `listLinked({ name, id, stale?, limit?, cursor? })` -> a page of `{ id, revision?, stale? }`, read-only |
-| Create parameters | `{ <name>: id }` or `{ <name>: { id, revision? } }`: the links the instance holds from its create, each set with `link`'s checks; every required link is among them |
+| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`; at least one. `pinned` is `true` or `"revision"`, a revision of the target's `Revisions`; `"release"`, a release of its `Branches`; `false` or absent, nothing |
+| Fields | `links`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, the links the instance holds; absent when it holds none |
+| Operations | `link({ name, id, revision?, release? })` -> `{ name, schema, id, revision?, release? }`, writes; `unlink({ name })` -> the link as it was, writes; schema-level `listLinked({ name, id, stale?, limit?, cursor? })` -> a page of `{ id, revision?, release?, latest?, stale? }`, read-only |
+| Create parameters | `{ <name>: id }` or `{ <name>: { id, revision?, release? } }`: the links the instance holds from its create, each set with `link`'s checks; every required link is among them |
 | Guards | the delete of an instance a required link points at, whoever the caller: `vetoed` (`required_target`, by `guardReference`) |
-| Refusals | a name the config does not give, a target that does not exist, a `revision` for a link that is not pinned or past the target's latest, a pinned link whose schema does not compose Revisions (`invalid_argument`); a target with no revision yet (`no_revision`), unlinking a required link (`required_link`), both `vetoed`; unlinking a link the instance does not hold (`invalid_argument`). A create without a required link, and a create's link that `link` would refuse, at `/behaviors/Links` or `/behaviors/Links/<name>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` |
+| Refusals | a name the config does not give, a target that does not exist, a `revision` for a link not pinned to a revision or past the target's latest, a `release` for one not pinned to a release or past the target's latest, a link pinned to a revision whose schema does not compose Revisions or to a release whose schema does not compose Branches (`invalid_argument`); a target with no revision yet (`no_revision`) or no release yet (`no_release`), unlinking a required link (`required_link`), all `vetoed`; unlinking a link the instance does not hold (`invalid_argument`). A create without a required link, and a create's link that `link` would refuse, at `/behaviors/Links` or `/behaviors/Links/<name>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` |
 | Deletes | an optional link's target's delete unlinks it: its reference, which hears the target's delete alone, invokes `unlink` on each instance that points at it, as the caller, each with its own event; no other change of a target asks Links anything. Deleting an instance deletes its links |
 | Events | a create's event carries the links it gives; `link`'s and `unlink`'s operation events carry `links` |
-| `configChange` | every link keeps its name and schema; `pinned` may change, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is; added to a schema with instances, which start with none, unless a link is required; not removed from one |
+| `configChange` | every link keeps its name and schema; `pinned` may change, to the other kind too, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is; added to a schema with instances, which start with none, unless a link is required; not removed from one |
 
 A link holds one target, an instance of its schema in the same namespace
 (the schema looked up as any name is: the namespace, then the shared
-one); `link` again moves it. A pinned link records the target's latest
-revision, read through its `revision` field, or the earlier one `link`
-names, and `links` reports `stale` when the target's latest revision has
-moved past it. `listLinked` answers the other way round, on the schema:
-which instances point a link at a target, and with `stale: true` only the
-pinned ones the target has moved past, which is how to find the
-instances that point at a superseded revision.
+one); `link` again moves it. A pinned link pins a revision or a release:
+
+```json
+{ "name": "Links", "config": { "links": {
+    "spec": { "schema": "documents", "pinned": true },
+    "recipe": { "schema": "recipes", "pinned": "release" } } } }
+```
+
+- **What it records.** A link pinned to a revision records the target's
+  latest revision, read through its `revision` field (`Revisions`), or
+  the earlier one `link` names; one pinned to a release, its latest
+  release, read through its `release` field (`Branches`, the release
+  pointer's version), or the earlier one `link` names. Each kind is a
+  column of its own in the row.
+- **What it reports.** `links` gives the pin, the target's latest of the
+  same kind beside it (`latest`), and `stale` when the latest has moved
+  past the pin, so a client shows "pinned 3, latest 5" with one read.
+- **The other way round.** `listLinked` answers on the schema: which
+  instances point a link at a target, each with its pin and the latest,
+  and with `stale: true` only the pinned ones the target has moved past,
+  which is how to find the instances that point at a superseded revision
+  or release.
 
 A required link is one every instance holds: every create gives it,
 which refuses an instance without it, it can be moved, never unlinked,
@@ -2472,9 +2523,10 @@ able to read. A required link to the instance's own schema, a task's
 parent task say, would leave a root nothing to point at, so a tree makes
 its parent link optional. A pinned link is read as the caller: without
 read on its target's schema, `links` cannot be read. `stale` is computed
-at each read, so a target's new revision shows in the next read of the
-instances that link to it, with no event on them. A link made before its
-spec was pinned records no revision until it is linked again.
+at each read, so a target's new revision or release shows in the next
+read of the instances that link to it, with no event on them. A link made
+before its spec was pinned, or while it was pinned to the other kind,
+records no pin of the kind until it is linked again.
 
 #### Rollups
 
@@ -2483,11 +2535,11 @@ of their schema's `Links` config: a parent's view of its children.
 
 | | |
 | --- | --- |
-| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`; at least one. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`. `countBy`, `sum`, `min` and `max` take `field`, the others none; only `all` and `any` take `gatedStates` and `outcomes` |
+| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`; at least one. `function` is `count`, `countBy`, `sum`, `min`, `max`, `latest`, `all` or `any`. `countBy`, `sum`, `min`, `max` and `latest` take `field`, the others none; only `all` and `any` take `gatedStates` and `outcomes` |
 | Fields | `rollups`: `{ <name>: value }`, computed at each read |
 | Operations | none |
 | Guards | a Workflow `transition` of the instance into a state an `all` or `any` rollup gates, whoever asks, unless the rollup holds: `vetoed` (`not_held`), naming the rollup and how many linked instances keep it from holding, details `{ rollup, to, over, linked, counted }`, `linked` and `counted` absent past the bound (`over: true`) |
-| Refusals | at define and publish (`invalid_schema`): a gated state that is not a state of the type's Workflow, or a type without Workflow; a linked schema with no live version, without `Links` or the link, or whose link points at another schema; a `countBy` field that is not a string, enum or boolean field of its type, or `status` when it composes Workflow; a `sum`, `min` or `max` field that is not a number or integer field; `all` or `any` over a schema without Workflow. A caller who may not read the linked schema cannot define or publish the rollup (`forbidden`) |
+| Refusals | at define and publish (`invalid_schema`): a gated state that is not a state of the type's Workflow, or a type without Workflow; a linked schema with no live version, without `Links` or the link, or whose link points at another schema; a `countBy` field that is not a string, enum or boolean field of its type, or `status` when it composes Workflow; a `sum`, `min` or `max` field that is not a number or integer field; a `latest` field that is not a field of its type, or `status` when it composes Workflow; `all` or `any` over a schema without Workflow. A caller who may not read the linked schema cannot define or publish the rollup (`forbidden`) |
 | Events | none of its own: a linked instance's change appends no event on this one |
 | `configChange` | nothing is stored, so rollups may be added, removed and changed, and Rollups added to or removed from a schema with instances |
 
@@ -2513,15 +2565,20 @@ would keep the project from `done`.
 | `countBy` | `{ <value>: count }` over the field's values, keys sorted; a boolean's are `"true"` and `"false"`; an instance with no value is not counted | `{}` |
 | `sum` | the sum of the field over the instances that hold a value | `0` |
 | `min`, `max` | the least or greatest value | absent |
+| `latest` | the field's value on the instance created last, by `createdAt`, the greater id on a tie; absent when that instance holds none | absent |
 | `all` | whether every one is in a terminal state of its schema's Workflow (`isTerminalState`), with an outcome `outcomes` lists when it is given (`stateOutcome`) | `true` |
 | `any` | whether some one is | `false` |
 
 The set is closed so that each function is one pass over the records it
 reads, has one JSON type, and has a rule `parseConfig` checks against
 the linked schema when the schema is defined; filters, averages or
-expressions would make the config a query language. `outcomes` is an
-argument of `all` and `any` from a closed set of three, as `field` is of
-`sum`, not a filter: it says which terminal states the two count.
+expressions would make the config a query language. `latest`'s JSON type
+is its field's, which `parseConfig` finds on the linked type; it orders
+by creation, which every instance has, not by when it was linked or
+last written, so a later link to an older instance does not change it.
+`outcomes` is an argument of `all` and `any` from a closed set of three,
+as `field` is of `sum`, not a filter: it says which terminal states the
+two count.
 
 A value is computed when the instance is read, as the caller (D16,
 amended), and nothing is stored: a linked instance's change shows at
@@ -2566,8 +2623,8 @@ from the same text.
 | --- | --- |
 | Config | `fields`: the type's own top-level fields to index, by JSON key, 1 to 16, each a string or a scalar whose values are strings; `weights`: by indexed field, above 0 and at most 1000, 1 for a field it does not name; `vectors`, optional: `dimensions` (1 to 4096), `model` (a label the engine only compares) and `permission` (what an embedder needs to settle) |
 | Fields | none: whether an instance is embedded is `staleEmbeddings`'s to say, since a settle appends no event |
-| Operations | all schema-level. Read-only: `search({ query?, vector?, model?, syntax?, limit?, cursor? })` -> a page of `{ id, rank, score?, field?, snippet?, text?, vector? }`; `similar({ id, limit?, cursor? })` -> a page of the same and `embedded`; `staleEmbeddings({ limit?, cursor? })` -> `{ model, dimensions, items: [{ id, text, sourceHash }], next }`. Writing: `settleEmbeddings({ items: [{ id, sourceHash, vector }] })` -> `{ settled, skipped: [{ id, reason }] }` |
-| Refusals | a field the type does not declare, or one that is not text (a number, an enum, a list, an object), and a weight for a field it does not index, when the schema is defined; a caller who may not `read` the schema, even one the policy lets call the operation (`forbidden`); an FTS5 expression FTS5 cannot parse, or one with a column filter (`invalid_argument`); a vector on a schema without `vectors`, of other dimensions, all zeros, with a value a 32-bit float cannot hold, or of a `model` other than the config's (`invalid_argument`); a settle by a caller without the config's permission (`forbidden`); `similar` of an instance the namespace does not have (`not_found`) |
+| Operations | all schema-level. Read-only: `search({ query?, vector?, model?, syntax?, limit?, cursor? })` -> a page of `{ id, rank, score?, field?, snippet?, text?, vector? }`; `similar({ id } or { text, vector?, model? }, limit?, cursor?)` -> a page of the same and `embedded`; `staleEmbeddings({ limit?, cursor? })` -> `{ model, dimensions, items: [{ id, text, sourceHash }], next }`. Writing: `settleEmbeddings({ items: [{ id, sourceHash, vector }] })` -> `{ settled, skipped: [{ id, reason }] }` |
+| Refusals | a field the type does not declare, or one that is not text (a number, an enum, a list, an object), and a weight for a field it does not index, when the schema is defined; a caller who may not `read` the schema, even one the policy lets call the operation (`forbidden`); an FTS5 expression FTS5 cannot parse, or one with a column filter (`invalid_argument`); a vector on a schema without `vectors`, of other dimensions, all zeros, with a value a 32-bit float cannot hold, or of a `model` other than the config's (`invalid_argument`); a settle by a caller without the config's permission (`forbidden`); `similar` of an instance the namespace does not have (`not_found`), with both or neither of `id` and `text`, or a `vector` without `text` (`invalid_argument`) |
 | Events | none: the index and the vectors are the behavior's own, the index written with the change of the instance and a vector by a settle, which records who settled it and when |
 | `configChange` | every change: `fields`, `weights` and `vectors` may change, and it may be added to or removed from a schema with instances |
 
@@ -2747,6 +2804,20 @@ ranking once its vector is settled; `embedded` says whether it was. An
 agent calls it before creating an instance like one it found, to reuse
 or link a near-duplicate instead.
 
+`similar({ text, vector?, model? })` does the same for an instance not
+yet created: a draft's text, its indexed fields that hold more than
+whitespace, in the config's order, joined by a blank line, as
+`staleEmbeddings` gives an instance's, at most 100,000 characters. The
+ranking is `similar(id)`'s, by the text's longest words and the vector
+given with it, computed with the config's model from the same text,
+with no instance to leave out; `embedded` says whether a vector ranked.
+So an agent that is about to create finds what it would duplicate:
+
+```ts
+engine.instances.invokeSchema(me, 'notes', 'similar', { text: 'Release plan\n\nDates and owners.', vector: draftVector, model: 'minilm-l6' });
+// { items: [{ id: 'n1', rank: 1, score: 0.0328, ..., text: { rank: 1 }, vector: { rank: 1, similarity: 0.97 } }], next: null, embedded: true }
+```
+
 ##### Across schemas
 
 `engine.search(principal, params, { namespace })`, the HTTP route `POST
@@ -2897,10 +2968,11 @@ whose link points at an instance that gains a revision or a release:
 
 The instances it moves are the ones `Links`' `listLinked` finds on the
 type's own schema pointing at the event's instance, as the runner's
-principal. For a pinned link and a revision, only the ones the target
-has moved past (`stale: true`), so one linked to the new revision before
-the runner hears it is left alone; an unpinned link moves every one at
-each revision. A typical use moves work whose spec changed back to
+principal. For a link pinned to a revision and a revision, or pinned to
+a release and a release, only the ones the target has moved past
+(`stale: true`), so one linked to the new revision or release before the
+runner hears it is left alone; any other link moves every one at each
+revision and each release. A typical use moves work whose spec changed back to
 review:
 
 ```json
@@ -3028,7 +3100,7 @@ release log, which `releases` reads.
 | | |
 | --- | --- |
 | Config | `kinds` (1 to 64, by name, camelCase): each `{ type, parent?, order?, singleton?, units?, retentionDays? }`, `type` a type of the document besides the instance type, whose fields are the kind's content, `parent: { key, of }`, `order` and `singleton` as `@graphMember`'s, `units` each field's conflict unit as `@conflictUnit` sets it (`atomic`, `keyed`, `jsonSchema`, `excluded`), `retentionDays` as `@versioned`'s; `primary`, the primary line's name (`main`); `snapshotEvery`, as `@versionGraph`'s (64); `sweep: { intervalMs, discardGrace?, pruneBatch?, abandonAfter? }`, milliseconds but `pruneBatch`; required |
-| Fields | none |
+| Fields | `release`: the number of the instance's latest release, the release pointer's version; absent before the first |
 | Operations | writing: `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`; read-only: `refs`, `releases`, `compose`, `materialize`, `released`, `diff`, `history`; all of instance scope |
 | Storage | the SQLite adapter's layout (`sqliteLayout` of `@superschematic/versiongraph/sqlite`) under the behavior's names, `bhv_branches__ref` to `bhv_branches__member_history`, beside `roots` (each root's instance) and `actors` (each actor's subject) |
 | Schedule | `sweep`, every `sweep.intervalMs` on a schema whose config gives `sweep`, off on any other |
@@ -3045,7 +3117,7 @@ release log, which `releases` reads.
 | `merge` | `source`, `target`, `targetVersion`, `resolutions?`, `message?`, `tag?` | `{ ref, commit, conflicts }` |
 | `rebase` | `draft`, `version`, `resolutions?` | `{ ref, commit, conflicts }` |
 | `revert` | `ref`, `version`, `toCommit` | `{ ref, commit }` |
-| `releaseCommit` | `commit`, `version` (the release pointer's, 0 for the first) | `{ commit, version }`: the release pointer moved to the commit |
+| `releaseCommit` | `commit`, `version` (the release pointer's, the `release` field, 0 for the first) | `{ commit, version }`: the release pointer moved to the commit |
 | `discard` | `ref`, `version` | the draft, discarded; the primary line is not (`primary_line`) |
 | `refs` | `limit?`, `cursor?` | the instance's live refs, the primary line first, a page at a time |
 | `releases` | `limit?`, `cursor?` | the release log: `{ version, commit, releasedAt, releasedBy }` per version of the pointer, oldest first |
@@ -3158,6 +3230,11 @@ times as UTC date-times; a tree is rows by kind.
   first time a schema that composes `Branches` is composed.
 - **Lease.** The operation that points the release pointer is
   `releaseCommit`, not `release`, because `Lease` has `release`.
+- **The release field.** `release` reads the release pointer's version
+  from the behavior's own table at each read, so a `releaseCommit`'s
+  event carries it in its `patch`, a rollback included. `Links` pins a
+  release through it, as it pins a revision through `Revisions`'
+  `revision`, and `Queue`'s `excludeStale` hears it move.
 
 ## Namespaces
 
@@ -3509,6 +3586,8 @@ a schema's live version:
 {
   "namespace": "default", "name": "Item", "schemaNamespace": "default",
   "version": 1, "hash": "9f2c...", "instanceType": "Item",
+  "display": {"noun": "Item", "plural": "Items", "titleField": "title", "summaryFields": ["count"]},
+  "fields": [{"name": "title", "title": "Title", "icon": "text"}],
   "instance": {
     "type": "object", "additionalProperties": false,
     "properties": {
@@ -3522,16 +3601,28 @@ a schema's live version:
                  "fields": [{"name": "count", "description": "The count."}], "operations": ["increment"],
                  "vetoes": [{"code": "at_limit", "description": "The count is at its config's limit."}]}],
   "operations": [
-    {"name": "create", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
+    {"name": "create", "title": "Create Item", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
      "params": {"type": "object", "additionalProperties": false, "properties": {"data": {...}, "id": {...}}, "required": ["data"]},
      "result": {...}, "tool": "item.create",
      "guidance": {"useWhen": "Use to create a new Item: ...", "doNotUseWhen": "...", "success": "...", "errors": []}},
-    {"name": "increment", "behavior": "test.Counter", "scope": "instance", "description": "Adds to the count.", "writes": true,
+    {"name": "increment", "behavior": "test.Counter", "scope": "instance", "title": "Item: increment", "description": "Adds to the count.", "writes": true,
      "invocationPolicy": "auto", "params": {...}, "result": {...}, "tool": "item.increment", "guidance": {...}}
   ]
 }
 ```
 
+- `display` is the instance type's `@display` (D48 in
+  `docs/DECISIONS.md`), as the document holds it, with `titleField` and
+  `summaryFields` naming each field by its key in an instance's `data`:
+  what a UI calls one instance and several, its title and summary fields,
+  what a create button says, and the labels of its `Workflow`'s states
+  (`label`, `activeForm`, `tone`) and transitions (by the state a
+  transition leaves, then the one it enters). It is absent when the type
+  declares none.
+- `fields` lists the instance type's own fields in declaration order, each
+  by its key in an instance's `data`, with its `title` (`@docs({ title
+  })`) and its `icon` (`@icon`) where it declares them. A behavior's
+  fields are under `behaviors`.
 - `instance` is the JSON Schema of an instance's `data`: closed, its own
   fields, then its behaviors' fields, `readOnly` and without a type, since
   a declaration gives a field only a name and a description. Under
@@ -3564,7 +3655,9 @@ a schema's live version:
   what it returns (an instance, a page, `null` for a delete, a behavior
   operation's `resultSchema`), and the invocation policy sits under the
   policy's key. A behavior's operation carries `behavior` and `scope`,
-  `instance` or `schema`. Each carries `guidance`, its tool's.
+  `instance` or `schema`. Each carries `title` and `guidance`, its
+  tool's. No operation carries an icon: a schema declares no operations,
+  and a behavior's declaration gives its operations none.
 
 A field's JSON Schema is what the SDK generators write for the same field
 as a tool argument (`internal/generator/toolsutil`), keyed by the field's
@@ -3714,15 +3807,15 @@ in `@superschematic/engine-workqueue`):
 | --- | --- |
 | `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; create's initial status, that update does not set `status`, and list's `where` on it |
 | `Comments` | the thread; `comment` and `listComments` |
-| `Revisions` | that every change records a revision, and the review permission; without review, that the review operations are refused (`no_review`) |
+| `Revisions` | that every change records a revision, which `getRevision` reads by number, the review permission, `evidence` and `pendingProposals`; without review, that the review operations are refused (`no_review`) |
 | `Dependencies` | the blocker schemas, the gated states, the outcomes that finish a blocker; `blocked` on `transition`, the edge refusals on `addBlocker` and `create` |
-| `Links` | each link with its schema, required and pinned; what `create`, `link` and `unlink` take and refuse |
+| `Links` | each link with its schema, required and what it pins, a revision or a release; what `create`, `link` and `unlink` take and refuse |
 | `Rollups` | what each rollup computes over which link, and the moves a rollup gates; `not_held` on `transition` |
-| `Search` | the fields and their weights, and the vectors' model, dimensions and permission; that `staleEmbeddings` and `settleEmbeddings` need vectors |
+| `Search` | the fields and their weights, and the vectors' model, dimensions and permission; that `staleEmbeddings` and `settleEmbeddings` need vectors; `similar` by an id or a draft's text before a `create` |
 | `Reactions` | each rule, what sets it off and the move it makes |
 | `Constants` | the fields that keep their create's value, and the permission that changes them |
 | `Variants` | the type the field holds for each value |
-| `Branches` | the kinds and the primary line, and each operation's version-graph refusals |
+| `Branches` | the kinds and the primary line, the `release` field, and each operation's version-graph refusals |
 | `Lease` | the length, the heartbeat interval, the longest hold, what an expiry and the last expiry do, the token; its refusals on every write its guard holds |
 | `Assignment` | who may assign whom; `assigned_to_another` on `acquire` and `claim` |
 | `Queue` | the claim states, the order, the match fields, what keeps work out; `claim_required` on `acquire` |
@@ -4036,6 +4129,57 @@ await reconciler.stop();                            // after the handler in prog
 The work-queue package's worker (`runtime/engine-workqueue/README.md`,
 "The worker") is built on the client.
 
+### Typed wrappers
+
+The client is generic over schema names and takes `unknown` data and
+parameters. `superschematic engine-client --out <file.ts> <schema file>...`
+(D49 in `docs/DECISIONS.md`; the CLI reference has the command) writes a
+module that types it for given schemas, from their documents and the
+behavior declarations the binary registers:
+
+```ts
+import { EngineClient } from '@superschematic/engine/client';
+import { taskClient } from './engine.client.ts';
+
+const tasks = taskClient(new EngineClient({ baseUrl, auth }));
+const task = await tasks.create(
+  { title: 'Index', kind: 'build', detail: { target: 'index' } },     // TaskFields: detail is a BuildDetail for kind build
+  { id: 't1', behaviors: { Links: { project: 'p1' } } }              // TaskCreateParams: project is a required link
+);
+task.data.status;                                                     // TaskState
+await tasks.transition('t1', { to: 'doing' });                        // to: TaskState
+await tasks.listLinked({ name: 'project', id: 'p1' });                // a schema-level operation; name: TaskLinkName
+const { result, seq } = await tasks.operate('t1', 'addBlocker', { schema: 'Spec', id: 's1' });
+```
+
+- Per schema: `<T>Fields` (own fields, a create's data), `<T>` (a read's
+  data: the own fields and the behaviors' fields, `readonly`, absent where
+  the engine leaves a field out), `<T>Patch`, `<T>CreateParams` and
+  `<T>Preconditions` by behavior name, `<T><Op>Params` and
+  `<T><Op>Result` per operation, `<T>Operations`, `<T>Vetoes` with
+  `is<T>Veto`, and the wrapper `<Schema>Client` with its factory.
+- The core's behaviors narrow what their declarations say under their
+  configs: `Workflow` the status and `transition`'s states (`<T>State`);
+  `Links` its names (`<T>LinkName`), the create parameters as
+  `createParamsSchema(config)` narrows them, and the `links` field per
+  link with its target's schema; `Dependencies` the blocker schemas, a
+  blocker's schema required when the type's own is not among them;
+  `Rollups` each rollup's value by its function; `Revisions` a
+  proposal's patch (`<T>Patch`) and a revision's data (`<T>Fields`);
+  `Variants` the own fields as a union by `by`, with `field` typed per
+  value and none for another value. `Comments`, `Dependencies` and
+  `Assignment` type their fields, and the work-queue behaviors' object
+  fields are `JSONObject`. Any other behavior keeps its declaration's
+  shapes and its fields are `unknown`.
+- The generator narrows the create parameters in Go, and the engine in
+  `createParamsSchema`; `runtime/engine/testdata/client_codegen_parity.json`,
+  which `go test ./internal/generator/engineclientgen -update` writes,
+  holds the two to one shape, and the field types to what reads return
+  (`test/client-codegen.test.ts`).
+- A scalar is typed as its JSON on the wire, not by its library's symbol:
+  `Temporal.DateTime` is a string, `Generic.JSON` `unknown`, an object
+  scalar `JSONObject`.
+
 ## Development
 
 ```
@@ -4060,4 +4204,8 @@ stream and `test/mcp.test.ts` speaks MCP with the official client
 and `test/client-stream.test.ts` drive the client against an engine
 served in process, its fetch handing each request to the app's;
 `test/client-types.test.ts` holds the client's types to the server's and
-reads the built client for imports.
+reads the built client for imports. `test/client-codegen.test.ts` runs
+the modules `superschematic engine-client` writes (`test/generated/`,
+which `go test ./internal/generator/engineclientgen -update` rewrites)
+against an engine, and its `typos()` holds a misspelled field, state,
+link and parameter to a compile error.

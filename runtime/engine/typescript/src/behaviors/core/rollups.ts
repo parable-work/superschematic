@@ -10,6 +10,9 @@ function from a closed set:
   instance with no value is not counted;
 - sum, min and max: of a number or integer field, over the instances
   that hold a value. min and max of none have no value;
+- latest: the value of a field of their type, or status, on the
+  instance created last (createdAt, then the greater id on a tie), and
+  no value when it holds none or there is none;
 - all and any: whether every one, or some one, is in a terminal state of
   its schema's Workflow (isTerminalState) and, when the rollup lists
   outcomes, one whose outcome (stateOutcome) it lists. all of none holds;
@@ -17,9 +20,10 @@ function from a closed set:
   from the same closed set of three, not a filter over the instances.
 
 The set is closed so that each function is one pass over the records it
-reads, has one JSON type, and has a rule parseConfig can check against
-the linked schema when the schema is defined. Filters, averages or
-expressions would make the config a query language.
+reads, has one JSON type (latest's is its field's), and has a rule
+parseConfig can check against the linked schema when the schema is
+defined. Filters, averages or expressions would make the config a query
+language.
 
 One read-only field, rollups, holds every rollup's value, since a
 declaration's fields are fixed and the config's names are not. It is
@@ -53,7 +57,8 @@ the caller may read it (ConfigTarget.schemas): the schema has a live
 version and composes Links with the link pointing at this schema;
 countBy's field is a string, enum or boolean field of its type, or status
 when it composes Workflow; sum's, min's and max's is a number or integer
-field; all and any need its Workflow. A later version of the linked
+field; latest's is any field of its type, or status when it composes
+Workflow; all and any need its Workflow. A later version of the linked
 schema cannot drop the link, change its schema or change a field's type
 while it has instances (Links' configChange, the compatibility rule);
 without instances it may, and the rollup then reads what is there.
@@ -71,7 +76,7 @@ import { rollupsGuidance } from './guidance/rollups.js';
 import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
 /** The functions a rollup computes. */
-export type RollupFunction = 'count' | 'countBy' | 'sum' | 'min' | 'max' | 'all' | 'any';
+export type RollupFunction = 'count' | 'countBy' | 'sum' | 'min' | 'max' | 'latest' | 'all' | 'any';
 
 /** One rollup of a Rollups config. */
 export interface RollupSpec {
@@ -80,7 +85,7 @@ export interface RollupSpec {
   /** The link of that schema's Links config they point through. */
   readonly link: string;
   readonly function: RollupFunction;
-  /** countBy's, sum's, min's and max's field of the linked instances. */
+  /** countBy's, sum's, min's, max's and latest's field of the linked instances. */
   readonly field?: string;
   /** For all and any, the states of the type's Workflow a transition into waits for the rollup to hold; none when absent. */
   readonly gatedStates: readonly string[];
@@ -197,6 +202,19 @@ function compute(spec: RollupSpec, set: Linked): Computed {
         return { over: false, total };
       }
       return { over: false, value: spec.function === 'min' ? Math.min(...numbers) : Math.max(...numbers), total };
+    }
+    case 'latest': {
+      // The instance created last, the greater id on a tie; one listLinked
+      // gave whose instance is gone has no createdAt and is passed over.
+      let last: InstanceRecord | undefined;
+      for (const id of set.ids) {
+        const record = set.records.get(id);
+        if (record !== undefined && (last === undefined || record.createdAt > last.createdAt || (record.createdAt === last.createdAt && record.id > last.id))) {
+          last = record;
+        }
+      }
+      const value = last?.data[spec.field as string];
+      return { over: false, ...(value === undefined || value === null ? {} : { value }), total };
     }
     case 'all':
     case 'any': {
@@ -331,6 +349,11 @@ function checkLinked(name: string, spec: RollupSpec, target: ConfigTarget, sourc
       }
       return;
     }
+    case 'latest':
+      if (!hasOwn(source.fields, field) && !(field === 'status' && workflow)) {
+        throw new BehaviorConfigError(`${at}: ${spec.schema} has no field ${field}; latest takes a field of its type, or status when it composes Workflow`);
+      }
+      return;
     default:
       return;
   }

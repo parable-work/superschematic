@@ -41,6 +41,13 @@ engine's release under another name: Lease, which a type may compose
 beside Branches, has release, and a type's behaviors share one namespace
 of operation names.
 
+One read-only field, release, holds the number of the instance's latest
+release, the release pointer's version, read from the behavior's own
+table at each read; it is absent before the first release. So a
+releaseCommit's event carries it, and Links pins a release, and reports
+the latest, through it, as it pins a revision through Revisions'
+revision.
+
 The graph's tables are the behavior's own: the SQLite adapter's fixed
 layout (sqliteLayout) under sql.table's names, which its migration
 creates, beside roots, which maps each root to its instance, and actors,
@@ -1279,6 +1286,18 @@ export const branches = defineBehavior<BranchesConfig>({
     history(context, params) {
       const graph = graphOf(context);
       return guarded(context, 'history', () => ({ commits: commitsOf(graph, graph.engine.history(ownRef(context, graph, 'history', 'ref', params.ref))) }));
+    },
+  },
+
+  fields: {
+    // The release pointer's version, through its unique index on the
+    // graph and the root; absent before the first release.
+    release: (view) => {
+      const row = view.sql.get(`SELECT _version FROM ${view.sql.table('release')} WHERE graph = ? AND root_id = ?`, [
+        `${view.namespace}/${view.schema}`,
+        rootOf(view.id),
+      ]);
+      return row === undefined ? undefined : Number(row._version);
     },
   },
 

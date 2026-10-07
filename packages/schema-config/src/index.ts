@@ -99,11 +99,34 @@ export type SqlOutputConfig = {
   readonly dialects?: readonly SqlDialect[];
 };
 
+/**
+ * One CI renderer's options for a Stack service's generated workflow.
+ */
+export type CiRendererConfig = {
+  /**
+   * The branch pull requests target and a push deploys from: a branch name, not a pattern. Unset is "main".
+   */
+  readonly branch?: string;
+  /**
+   * The directory, relative to the repository root, the build installs the workflow into when it exists. Unset is the renderer's own, .github/workflows for github.
+   */
+  readonly install?: string;
+};
+
+/**
+ * The CI a Stack service's build writes, keyed by the renderer that writes it: github for GitHub Actions, or a renderer an extension registers. Only a Stack service sets it. The build writes each workflow under <out>/ci/<stack>/.
+ */
+export type CiOutputConfig = {
+  readonly github?: CiRendererConfig;
+  readonly [renderer: string]: CiRendererConfig | undefined;
+};
+
 export type SchemaOutputs = {
   readonly types?: TypesOutputConfig;
   readonly api?: ApiOutputConfig;
   readonly sdk?: SdkOutputConfig;
   readonly sql?: SqlOutputConfig;
+  readonly ci?: CiOutputConfig;
 };
 
 /**

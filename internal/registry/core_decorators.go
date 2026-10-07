@@ -229,6 +229,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	})
 	specs = append(specs, docsDecorators(r.ToolInvocationPolicy)...)
 	specs = append(specs, behaviorDecorator(r.Behavior, r.BehaviorNames))
+	specs = append(specs, displayDecorator())
 	return specs
 }
 

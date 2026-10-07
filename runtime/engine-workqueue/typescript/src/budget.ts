@@ -8,12 +8,14 @@ plus what it holds for the instances inside it; the own part is kept
 apart, with the lease token it was made under, so settling releases
 exactly that.
 
-A meter's limit is the config's limit, or the instance's limitField, or
-the one setLimit set; with none, the meter counts without a limit of its
-own. A reservation fits while used plus reserved plus the amount is
-within the limit. What a claim reserves of a meter is the instance's
-reserveField when it holds a positive integer, else the config's reserve,
-as Lease's maxHoldField falls back to maxHoldMs.
+A meter's limit is the instance's limitField while it holds a count, else
+the config's limit; without limitField, the one setLimit set, else the
+config's limit, as reserveField falls back to reserve. With none, the
+meter counts without a limit of its own. A reservation fits while used
+plus reserved plus the amount is within the limit. What a claim
+reserves of a meter is the instance's reserveField when it holds a
+positive integer, else the config's reserve, as Lease's maxHoldField
+falls back to maxHoldMs.
 
 Scopes. A meter may name a scope: a link of the type's Links config whose
 target encloses the instance, a pool its work draws on, say. The target's
@@ -277,13 +279,22 @@ function usedNow(view: InstanceView<BudgetConfig>, spec: BudgetMeter, meter: Met
   return rolled(view, spec, meter) ? 0 : meter.used;
 }
 
-/** limitOf is the one rule for a meter's limit on an instance: its limitField, setLimit's, or the config's; null for none. */
+/**
+ * limitOf is the one rule for a meter's limit on an instance: its
+ * limitField while it holds a count, else the config's; without
+ * limitField, setLimit's, else the config's; null for none.
+ */
 function limitOf(view: InstanceView<BudgetConfig>, spec: BudgetMeter, meter: Meter): number | null {
   if (spec.limitField !== undefined) {
-    const value = view.data[spec.limitField];
-    return isCount(value) ? value : null;
+    return fieldLimit(spec, view.data[spec.limitField]);
   }
   return meter.limitValue ?? spec.limit ?? null;
+}
+
+// fieldLimit is the limit of a meter with limitField when the field
+// holds value: the value when it is a count, else the config's limit.
+function fieldLimit(spec: BudgetMeter, value: unknown): number | null {
+  return isCount(value) ? value : (spec.limit ?? null);
 }
 
 function recordOf(view: InstanceView<BudgetConfig>, spec: BudgetMeter, meter: Meter): MeterRecord {
@@ -921,8 +932,9 @@ export const budget = defineBehavior<BudgetConfig>({
       return undefined;
     }
     // limitField changes as a limit does: with limitPermission, and never
-    // below what the instance has used and reserved. setLimit's own
-    // update() was asked already.
+    // below what the instance has used and reserved, the config's limit
+    // counting for a field the change empties. setLimit's own update() was
+    // asked already.
     if (request.kind === 'update' && request.caller !== NAME) {
       for (const [meter, spec] of Object.entries(view.config.meters)) {
         const field = spec.limitField;
@@ -936,10 +948,10 @@ export const budget = defineBehavior<BudgetConfig>({
         if (!view.can(permission)) {
           throw forbidden(view, `change ${field}, the limit of meter ${meter}, of`, permission);
         }
-        const limit = request.after[field];
+        const limit = fieldLimit(spec, request.after[field]);
         const row = rowOf(view, meter);
         const committed = usedNow(view, spec, row) + row.reserved;
-        if (isCount(limit) && limit < committed) {
+        if (limit !== null && limit < committed) {
           return { reason: `meter ${meter} has ${committed} used and reserved, more than the limit ${limit}`, code: 'below_committed', details: { meter, committed } };
         }
       }

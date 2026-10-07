@@ -232,16 +232,22 @@ func archiveEntries(path string) ([]string, error) {
 }
 
 // FakeBootstrap is a bootstrap that creates nothing: it records the
-// request in the provisioner's call log.
+// request in the provisioner's call log, and returns Values for the core
+// to record in the schema.
 type FakeBootstrap struct {
 	log *FakeProvisioner
+
+	// Values are what each bootstrap returns: nothing when empty, else
+	// values such as gcp's project number (D47), which the fake target's
+	// values take as `projectNumber`, beside `project`.
+	Values []registry.BootstrapValue
 }
 
 var _ registry.Bootstrapper = (*FakeBootstrap)(nil)
 
 // Bootstrap records the environment, the repository and the credentials'
-// secrets.
-func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapRequest) error {
+// secrets, and returns Values.
+func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapRequest) (*registry.BootstrapResult, error) {
 	var secrets []string
 	for _, c := range req.Credentials {
 		secrets = append(secrets, c.Secret)
@@ -249,5 +255,8 @@ func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapReque
 	if b.log != nil {
 		b.log.Record("bootstrap %s: repository %s, credentials %s", req.Environment.Environment, req.Repository, strings.Join(secrets, ", "))
 	}
-	return nil
+	if len(b.Values) == 0 {
+		return nil, nil
+	}
+	return &registry.BootstrapResult{Values: slices.Clone(b.Values)}, nil
 }

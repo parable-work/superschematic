@@ -189,6 +189,7 @@ export {
   SEARCH_SCHEMAS_PARAMS,
   SIMILAR_TERMS,
   isTerminalState,
+  linkPin,
   stateOutcome,
   uuidV5,
 } from './behaviors/core/index.js';
@@ -205,6 +206,8 @@ export type {
   ConstantsConfig,
   DependenciesConfig,
   DependentRecord,
+  EvidenceRecord,
+  LinkPin,
   LinkRecord,
   LinkSpec,
   LinksConfig,
@@ -248,6 +251,7 @@ export { MCP_HANDLE, MCP_HANDLE_MAX_LENGTH, ToolCatalog, UnknownToolError, kebab
 export type {
   DescribeDocument,
   DescribedBehavior,
+  DescribedField,
   DescribedOperation,
   JSONSchemaObject,
   ToolDefinition,

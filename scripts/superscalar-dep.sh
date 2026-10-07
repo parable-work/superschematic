@@ -23,8 +23,13 @@
 #
 # Usage:
 #   scripts/superscalar-dep.sh            # checkout + build, print CGO_LDFLAGS
+#   scripts/superscalar-dep.sh --archive  # checkout + the Go archive alone
 #   scripts/superscalar-dep.sh --print    # print CGO_LDFLAGS only
 #   eval "$(scripts/superscalar-dep.sh --export)"   # export CGO_LDFLAGS
+#
+# --archive skips the TypeScript binding, for the release's static archives
+# (scripts/release-archives.sh), and leaves the stamp below as it was, so a
+# later full run still builds the binding.
 #
 # When superscalar publishes a release, replace step 2 with that
 # repository's fetch_release_archive.sh and drop the Rust requirement.
@@ -54,6 +59,7 @@ goos="$(go env GOOS)"
 goarch="$(go env GOARCH)"
 ldflags="-L$DEP/go/lib/${goos}_${goarch}"
 
+archive_only=0
 case "${1:-}" in
   --print)
     echo "$ldflags"
@@ -62,6 +68,9 @@ case "${1:-}" in
   --export)
     echo "export CGO_LDFLAGS=\"$ldflags\""
     exit 0
+    ;;
+  --archive)
+    archive_only=1
     ;;
   "")
     ;;
@@ -94,6 +103,12 @@ fi
 
 if [ ! -f "$DEP/go/lib/${goos}_${goarch}/libsuperscalar_ffi.a" ] || [ "$rebuild" = "1" ]; then
   (cd "$DEP" && bash go/scripts/build_ffi.sh)
+fi
+
+if [ "$archive_only" = "1" ]; then
+  echo "superscalar $commit archive ready under $DEP/go/lib/${goos}_${goarch}" >&2
+  echo "$ldflags"
+  exit 0
 fi
 
 TS="$DEP/bindings/typescript"

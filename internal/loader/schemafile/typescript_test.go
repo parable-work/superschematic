@@ -43,9 +43,9 @@ func TestTypeScriptDeclarationsRefuseWhatTheyCannotExpress(t *testing.T) {
 	}{
 		"a keyword outside the subset": {
 			edit: func(root map[string]any) {
-				defProperties(root, "TypeRef")["name"].(map[string]any)["pattern"] = "^[A-Z]"
+				defProperties(root, "TypeRef")["name"].(map[string]any)["format"] = "uri"
 			},
-			want: `$defs/TypeRef/properties/name: unsupported JSON Schema keyword "pattern"`,
+			want: `$defs/TypeRef/properties/name: unsupported JSON Schema keyword "format"`,
 		},
 		"a type union": {
 			edit: func(root map[string]any) {
