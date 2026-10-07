@@ -3998,3 +3998,29 @@ does not record it yet, the readers do not number environments, and no
 renderer, generator or CI seam exists.
 
 The rule is reversible until the first release.
+
+### D46, amended: a failed migration job reports the runner's error, which the deploy reads from Cloud Logging
+
+D46 had a failed execution of the migration job fail the step with its
+name and logs. The first run against Google Cloud showed that Cloud Run's
+account of the failure is only that the task failed with exit code 1 and
+the container exited with an error: the runner's own error, which it
+writes to stderr, was in Cloud Logging alone. And `RunJob` read every error
+from its wait for the execution as a failed execution, so a dropped
+connection would have read as a failed migration.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A failed execution's error is the runner's. Once Cloud Run reports the failure, the deploy reads what the execution's task wrote to stderr from Cloud Logging, through a new `Cloud` method, `ExecutionStderr`: the entries of the job's `run.googleapis.com/stderr` log labeled with the execution's name, from a minute before it was created, oldest first, at most 100. Cloud Logging receives them seconds after the execution ends, so it reads again for up to 30 seconds while there are none. The step's error carries the last line that begins `superschematic-migrate: `, which the runner writes when it fails, else the first line, such as a panic's, with the execution's name and its logs' URL. With no line, or none it can read, it carries Cloud Run's message and says why. | A result document the runner writes beside the job document in the state bucket: structured and immediate, but only what the runner returns, so nothing of a panic or of a task that never started. Its location could not come from the job document, since an unreadable job document is one of the failures to report, so it needs a new flag, which every runner image built before it refuses with a usage error found only in Cloud Logging; and it needs the migrator to write to the bucket, the runner a write path, and the deploy to delete a stale result before each run. Cloud Run's Tasks API, whose last attempt holds the exit code and the same message, and no output. |
+| `deployer` gains the Logs Viewer role (`roles/logging.viewer`), which reads every log of the project except the private ones. It holds project IAM admin already, so the role gives it nothing it could not grant itself; `migrator` is unchanged. A deploy whose account lacks the role reports Cloud Run's message, the read's error and the role. | A log view over the jobs' stderr and `roles/logging.viewAccessor` conditioned on it, two more resource types to pin for an account that can read everything already; a custom role with `logging.logEntries.list` alone, which reads as much |
+| `RunJob` tells a failed execution from a failed wait. The operation that runs an execution ends with an error when the execution fails, so an error while the operation is not done is the wait's own, from the transport or the context: `RunJob` returns it as an error that names the execution and says it may still be running. The deploy reads no logs, records the phase as pending (D45), and the next deploy runs the phase again, which the runner resumes. | Reading every error as a failed execution, which reported a dropped connection or an interrupted deploy as a failed migration; polling the execution again after a transport error, which an interrupted deploy should not do |
+
+Status: built. `extensions/gcp`'s `TestMigrationJobReportsTheRunnerError`
+covers the runner's error, a failed step's, a usage error's, a panic's, no
+stderr, stderr it cannot read and a failed wait through the fake `Cloud`;
+`cloud_internal_test.go` covers the wait's two kinds of error against a
+fake operation, the Cloud Logging filter and the reading of an entry; the
+bootstrap golden holds the new role; and the runner's `TestFailureLine`
+holds the line the deploy reads. None of it has run against Google Cloud.
+
+The rule is reversible until the first release.

@@ -1194,7 +1194,8 @@ again: each step creates what is missing and leaves the rest.
      resource and IAM policy a preview refreshes and sees whether a secret
      has a value, without reading one; it writes objects in the bucket,
      since a preview takes the stack's lock. `deployer` also runs Cloud
-     Build builds and the migration job, as the next two accounts;
+     Build builds and the migration job, as the next two accounts, and
+     reads a failed execution's stderr with the Logs Viewer role;
    - a `builder` account, `<stack>-builder`, that image builds run as
      (section 11.2): it pushes to the stack's repository, writes its
      logs, and reads the build contexts in the state bucket, under
@@ -1484,8 +1485,16 @@ through the target's `Migrations` seam:
    `migrator` account (section 7.3), with one task, no retry and an hour to
    finish, and runs it once with the document's `gs://` URL as its
    argument, `superschematic-migrate job --job <url>`. It waits for the
-   execution, and a failed one fails the step with the execution's name
-   and logs.
+   execution, and a failed one fails the step with the execution's name,
+   its logs' URL and the runner's error. Cloud Run says only that the
+   container exited with an error, so the deploy reads what the task wrote
+   to stderr from Cloud Logging, for up to 30 seconds while none has
+   arrived, and reports the runner's error, the last line that begins
+   `superschematic-migrate: `, else the first line, such as a panic's.
+   With no line, or none it can read, it reports Cloud Run's message and
+   says why. An error while waiting is not a failed execution: the step
+   fails saying the execution may still be running, and the next deploy
+   runs the phase again, which the runner resumes.
 3. The job reads the document and the plans through Cloud Storage's API,
    and reaches each database through the Cloud SQL Go connector, with IAM
    database authentication as the migrator's IAM database user, so there

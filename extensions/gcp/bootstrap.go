@@ -41,7 +41,8 @@ import (
 // bootstrap's own (Service Usage, Resource Manager, IAM and its
 // credentials and token exchange for Workload Identity Federation,
 // Storage and KMS for the state, Artifact Registry for the images), Cloud
-// Build and Cloud Logging for the image builds, and Secret Manager.
+// Build and Cloud Logging for the image builds, Cloud Logging for the
+// migration job's errors too, and Secret Manager.
 var apiServices = []string{
 	"artifactregistry.googleapis.com",
 	"cloudbuild.googleapis.com",
@@ -85,8 +86,8 @@ func servicesFor(env *ir.ResolvedEnvironment) []string {
 // The roles of the two accounts that run the generated CI (section 11.3).
 var (
 	// deployerRoles let `deployer` apply every resource the gcp target
-	// emits, push images, run image builds and migration jobs, and enable
-	// APIs.
+	// emits, push images, run image builds and migration jobs, read a
+	// failed execution's stderr from Cloud Logging, and enable APIs.
 	deployerRoles = []string{
 		"roles/artifactregistry.writer",
 		"roles/certificatemanager.owner",
@@ -97,6 +98,7 @@ var (
 		"roles/dns.admin",
 		"roles/iam.serviceAccountAdmin",
 		"roles/iam.serviceAccountUser",
+		"roles/logging.viewer",
 		"roles/resourcemanager.projectIamAdmin",
 		"roles/run.admin",
 		"roles/secretmanager.admin",
