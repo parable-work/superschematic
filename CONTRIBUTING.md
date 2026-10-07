@@ -205,9 +205,13 @@ export SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TES
 
 Golden files under `testdata/golden`, the scalar catalogs
 (`runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts`,
-`runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py`)
-and the schema-file JSON Schema and TypeScript types
-(`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) are
+`runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py`),
+the schema-file JSON Schema and TypeScript types
+(`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) and
+the modules `superschematic engine-client` writes for the engine's tests
+and the engine-notes example (`runtime/engine/typescript/test/generated/`,
+`examples/engine-notes/src/notes.client.ts`) with their parity vector
+(`runtime/engine/testdata/client_codegen_parity.json`) are
 regenerated, not edited. Change the generator or the pin, run
 `make go-goldens`, `go run ./internal/tools/scalarcatalog` or
 `go run ./internal/tools/schemafiletypes`, review the diff by eye, and

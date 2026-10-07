@@ -13,7 +13,9 @@ stream (`@superschematic/engine/http`), the behavior plug-in interface,
 the runner of reactions and schedules, the describe and tools documents,
 the behavior catalog, the MCP endpoint (`@superschematic/engine/mcp`),
 a typed client of the HTTP API with the event stream and a reconciler
-(`@superschematic/engine/client`, "The client"),
+(`@superschematic/engine/client`, "The client") and the typed wrappers
+`superschematic engine-client` writes for given schemas ("Typed
+wrappers"),
 and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
 reach other instances, `Search`, full-text search with vectors an outside
@@ -3493,6 +3495,57 @@ await reconciler.stop();                            // after the handler in prog
 The work-queue package's worker (`runtime/engine-workqueue/README.md`,
 "The worker") is built on the client.
 
+### Typed wrappers
+
+The client is generic over schema names and takes `unknown` data and
+parameters. `superschematic engine-client --out <file.ts> <schema file>...`
+(D49 in `docs/DECISIONS.md`; the CLI reference has the command) writes a
+module that types it for given schemas, from their documents and the
+behavior declarations the binary registers:
+
+```ts
+import { EngineClient } from '@superschematic/engine/client';
+import { taskClient } from './engine.client.ts';
+
+const tasks = taskClient(new EngineClient({ baseUrl, auth }));
+const task = await tasks.create(
+  { title: 'Index', kind: 'build', detail: { target: 'index' } },     // TaskFields: detail is a BuildDetail for kind build
+  { id: 't1', behaviors: { Links: { project: 'p1' } } }              // TaskCreateParams: project is a required link
+);
+task.data.status;                                                     // TaskState
+await tasks.transition('t1', { to: 'doing' });                        // to: TaskState
+await tasks.listLinked({ name: 'project', id: 'p1' });                // a schema-level operation; name: TaskLinkName
+const { result, seq } = await tasks.operate('t1', 'addBlocker', { schema: 'Spec', id: 's1' });
+```
+
+- Per schema: `<T>Fields` (own fields, a create's data), `<T>` (a read's
+  data: the own fields and the behaviors' fields, `readonly`, absent where
+  the engine leaves a field out), `<T>Patch`, `<T>CreateParams` and
+  `<T>Preconditions` by behavior name, `<T><Op>Params` and
+  `<T><Op>Result` per operation, `<T>Operations`, `<T>Vetoes` with
+  `is<T>Veto`, and the wrapper `<Schema>Client` with its factory.
+- The core's behaviors narrow what their declarations say under their
+  configs: `Workflow` the status and `transition`'s states (`<T>State`);
+  `Links` its names (`<T>LinkName`), the create parameters as
+  `createParamsSchema(config)` narrows them, and the `links` field per
+  link with its target's schema; `Dependencies` the blocker schemas, a
+  blocker's schema required when the type's own is not among them;
+  `Rollups` each rollup's value by its function; `Revisions` a
+  proposal's patch (`<T>Patch`) and a revision's data (`<T>Fields`);
+  `Variants` the own fields as a union by `by`, with `field` typed per
+  value and none for another value. `Comments`, `Dependencies` and
+  `Assignment` type their fields, and the work-queue behaviors' object
+  fields are `JSONObject`. Any other behavior keeps its declaration's
+  shapes and its fields are `unknown`.
+- The generator narrows the create parameters in Go, and the engine in
+  `createParamsSchema`; `runtime/engine/testdata/client_codegen_parity.json`,
+  which `go test ./internal/generator/engineclientgen -update` writes,
+  holds the two to one shape, and the field types to what reads return
+  (`test/client-codegen.test.ts`).
+- A scalar is typed as its JSON on the wire, not by its library's symbol:
+  `Temporal.DateTime` is a string, `Generic.JSON` `unknown`, an object
+  scalar `JSONObject`.
+
 ## Development
 
 ```
@@ -3517,4 +3570,8 @@ stream and `test/mcp.test.ts` speaks MCP with the official client
 and `test/client-stream.test.ts` drive the client against an engine
 served in process, its fetch handing each request to the app's;
 `test/client-types.test.ts` holds the client's types to the server's and
-reads the built client for imports.
+reads the built client for imports. `test/client-codegen.test.ts` runs
+the modules `superschematic engine-client` writes (`test/generated/`,
+which `go test ./internal/generator/engineclientgen -update` rewrites)
+against an engine, and its `typos()` holds a misspelled field, state,
+link and parameter to a compile error.

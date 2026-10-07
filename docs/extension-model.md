@@ -933,7 +933,13 @@ the run with `generator: <name> does not render behaviors yet: type <T>
 composes behavior <B>`. The check covers core and extension generators
 alike; document generators, which render their documents, are not asked.
 No core generator sets the flag. `build --emit-ir`, `format` and
-`json-schema` run no generator and accept the schema.
+`json-schema` run no generator and accept the schema. The one generator
+that renders behaviors is a command of its own, not in a pipeline:
+`engine-client` types the engine's client for engine schemas (D49). It
+narrows the core's behaviors by their configs; an extension's behavior
+it types by its declaration, its operations' parameters and results,
+create parameters, precondition and veto codes as declared and its
+fields as any JSON.
 
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`

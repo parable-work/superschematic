@@ -1111,8 +1111,9 @@ with create parameters narrowed by them (an amendment below on each). A
 typed client of its HTTP API with the event stream and a reconciler
 (`@superschematic/engine/client`), and a worker over the client
 (`@superschematic/engine-workqueue/worker`), are built (the amendment "a
-typed client over the HTTP API, a worker and a reconciler" below). A
-large field is stored once, by hash, in a value store in the same file
+typed client over the HTTP API, a worker and a reconciler" below), and
+`superschematic engine-client` types the client for given schemas
+(D49). A large field is stored once, by hash, in a value store in the same file
 (the amendment "a large value is stored once" below). Each change that
 lands a piece updates this paragraph. The names and rules are reversible until the first release.
 
@@ -3998,3 +3999,47 @@ does not record it yet, the readers do not number environments, and no
 renderer, generator or CI seam exists.
 
 The rule is reversible until the first release.
+
+## D49. A generator types the engine's client for given schemas, narrowing the core's behaviors in Go
+
+The engine's typed client (D16, amended: a typed client over the HTTP
+API) knows the HTTP API and no schema: `instances.create('tasks', data)`
+takes any object, an operation any parameters, and a misspelled field,
+link name, create parameter or transition target reaches the server and
+comes back as a refusal. A schema's shape is known before it runs. Its
+document gives the instance type's own fields and the other types; the
+behavior declarations the binary registers give each behavior's fields,
+operations with their parameters and results, create parameters,
+preconditions and veto codes; and each behavior's config narrows them:
+a Workflow's states, a Links config's names, the types a Variants config
+picks. `superschematic engine-client` writes them down as one TypeScript
+module of typed wrappers over the client.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The generator is Go: `internal/generator/engineclientgen`, which the command `superschematic engine-client --out <file.ts> <schema file>...` runs. It reads each document through the loader (`loader.LoadDocument`: a JSON or YAML file on its own, a `.schema.ts` file in its service, as `format` reads it) with the loader's checks, the behaviors' configs against their declarations included, takes the declarations from the binary's registry, and imports the client from the package the naming key `engine_npm_package` names (default `@superschematic/engine`). | A bin in `@superschematic/engine` that loads the schemas into an in-memory engine and types its describe document, which would narrow the create parameters with the engine's own `createParamsSchema` and so once. But the describe document lacks what the types need most: a Workflow's states, the link names `link` takes and a behavior field's type, since a declaration gives a field a name only. Each would need a new hook on every behavior. It also could not read a `.schema.ts` file, would sit outside the naming file and the goldens, and would be the one generator not in Go. |
+| The generator narrows the core's behaviors in Go, keyed by their bare names: `Workflow` (`<T>State` for `status` and `transition`), `Links` (`<T>LinkName`, the create parameters, the `links` field per link with its target's schema), `Dependencies` (the blocker schemas, a blocker's schema required when the type's own is not among them), `Rollups` (each rollup's value by its function), `Revisions` (a proposal's patch, a revision's data), `Variants` (below), and the fields of `Comments`, `Assignment` and the work-queue behaviors. Any other behavior, an extension's among them, keeps its declaration's shapes, and its fields are `unknown`. | A seam on `BehaviorSpec` through which an extension narrows its own behaviors: a later change, when one needs it. A narrowing declared in the declaration, a JSON Schema that reads the config, which changes every declaration and the registry's checks for one reader. The engine narrowing operations' parameters in the describe document, which changes the tools document and every tool's digest. |
+| The create parameters are narrowed twice, in Go here and in TypeScript by `createParamsSchema(config)`. `runtime/engine/testdata/client_codegen_parity.json`, which the Go test writes (`-update`), holds the generator's narrowing for fixture and example schemas; the engine's suite (`test/client-codegen.test.ts`) publishes the same documents and holds its describe document's create parameters to it, shape for shape with descriptions aside, and validates the behavior fields its reads return against the generator's types. A drift on either side fails the engine's suite. | Comparing descriptions too, which each side words for its own reader; no check, so a narrowing that drifts types a create the engine refuses |
+| A command of its own, not a `build` target. D16's row "until a generator renders behaviors, it refuses a type that declares one" is lifted for this generator alone: it runs in no kind's pipeline, and every pipeline generator still refuses such a type (`refuseBehaviors`). | A generator in `General`'s pipeline: an engine schema has no `schema.config` and no service, and one module types schemas that link to each other |
+| One module for the schemas given, a section per schema in name order. Per schema: `<T>Fields` (the own fields, a create's data), `<T>` (a read's data: `<T>Fields` and the behaviors' fields, `readonly`), `<T>Patch`, the narrowings' aliases, `<T>CreateParams` and `<T>Preconditions` by behavior name, `<T><Op>Params` and `<T><Op>Result` per operation, `<T>Operations`, `<T>Vetoes` with `is<T>Veto`, `<T>CreateOptions` and `<T>WriteOptions`, and the wrapper interface `<Schema>Client` with its factory `<schema>Client(client)`: `create`, `get`, `list`, `update`, `delete`, `operate` and a method per behavior operation. `<T>` is the instance type's name, and the document's other enums and types keep theirs. Two exports of one name, across schemas or with a document type, are refused. | A module per schema, which repeats the shared imports and splits schemas that link to each other; a namespace per schema, which a module that Node.js runs by stripping types may hold only as types; names prefixed by the schema, which read worse for the common case of one schema |
+| A behavior field is optional unless the engine returns it on every read: it leaves out a field whose reader returns nothing, as `Revisions`' `revision` before the first revision. `status`, `commentCount`, `blocked` and `rollups` are always there, and `links` when a link is required. | Every behavior field required, which a read of a fresh instance contradicts |
+| A create's entry for a behavior is required when its narrowed schema requires a member, as a required link's: the engine checks a missing entry as `{}`. `<T>CreateOptions` then requires `behaviors`, and `create` requires its options. | Every entry optional, so a create that leaves out a required link compiles |
+| With `Variants`, `<T>Fields` is the other own fields joined with a union by `by`: per listed value, `by` that value and `field` its type; then, unless `field` is required, `by` another value of its enum, any string, or none, and `field` none. `<T>Patch` types `field` as any listed type, since a patch that leaves `by` alone does not show which applies. | `field` as `unknown` everywhere, the Variants check left to the engine |
+| A scalar field is typed by its JSON on the wire: its `json_schema` mapping or primitive, `unknown` for any JSON and `JSONObject` for an object. | Its scalar library's symbol (D25), which is a `Date` for `Temporal.DateTime` where the JSON holds a string, and would import the scalar library into a module that otherwise imports only the client |
+| A patch's nested object value is the whole type, and its required fields are required, as the describe document's `patch` has it. | A deep partial, which a merge patch allows over HTTP but the tool schema refuses |
+| The module imports the client's types and `isVeto` and nothing else, uses only erasable syntax, and ends each method in a call of the client, so it runs where the client runs. Its header names `engineclientgen`, as `sdkgen`'s names `sdkgen`. | Classes and enums, which Node.js does not strip |
+
+The goldens are the modules `examples/engine-notes` uses
+(`src/notes.client.ts`, in its end-to-end test) and the engine's suite
+typechecks and runs (`runtime/engine/typescript/test/generated/`: the
+notes schema, the engine-jobs example's three schemas, and a fixture of
+`Spec`, `Task` and `Project` that covers Variants, required and pinned
+links, cross-schema blockers, rollups, nested types, enums, lists and
+scalars); `go test ./internal/generator/engineclientgen -update`
+rewrites them. The suite's `typos()` holds a misspelled field, state,
+link, parameter, precondition and veto code to a compile error. The
+naming golden test generates the module under a naming file whose
+`engine_npm_package` differs and scans it for the default.
+
+Status: built. The command name, the naming key and every export name
+are reversible until the first release.
