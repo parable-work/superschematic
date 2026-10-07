@@ -394,7 +394,11 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 		logf("credential secret %s: %s, readable by deployer and planner", c.Secret, createdOrKept(created))
 	}
 
-	number, err := cloud.ProjectNumber(ctx, v.project)
+	var number string
+	err = retry("the project's number", func() (err error) {
+		number, err = cloud.ProjectNumber(ctx, v.project)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
