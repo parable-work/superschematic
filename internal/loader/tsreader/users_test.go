@@ -184,6 +184,16 @@ export abstract class Person implements User<{ login: "email" }> ` + table,
 			want: []string{`a.schema.ts:4:1: Person: the User trait is only allowed on a DB table of a DB schema (this type has role Trait)`},
 		},
 		{
+			name: "a @jsonField type",
+			kind: "DB",
+			source: `import { Contact, Identity } from "superscalar";
+import { jsonField } from "@superschematic/schema";
+import { User, key, unique } from "@superschematic/db";
+@jsonField
+export abstract class Person implements User<{ login: "email" }> ` + table,
+			want: []string{`a.schema.ts:4:1: Person: the User trait is only allowed on a DB table of a DB schema (a @jsonField type is stored as JSON and gets no table)`},
+		},
+		{
 			name: "a General schema",
 			kind: "General",
 			source: `import { Contact } from "superscalar";
