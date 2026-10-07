@@ -1557,6 +1557,30 @@ process, its Hono app's `fetch` standing in for the network:
 `runtime/engine-workqueue/typescript/test/worker.test.ts`. The names and
 rules are reversible until the first release.
 
+### D16, amended: a worker beats the presence it stands for
+
+The worker of the amendment above beat no `Presence` instance, so a fleet
+that kept one per worker beat it by hand. `examples/engine-jobs` did, in a
+loop of its own over `fetch` that beat on the lease's timer while it held
+a job and between claims otherwise. That loop also polled an empty queue,
+dropped a failed heartbeat, ignored directives, worked one job at a time,
+gave its handler no signal, and read any Lease veto as the job gone, and
+the work-queues guide quoted it as the way to write a worker. The
+engine's server does not change here.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `QueueWorker` takes `presence: { schema, id, beatMs? }`, the Presence instance the worker stands for, in the worker's namespace, and beats it as the client's principal. `start()` reads that schema's describe document, which must compose Presence, and beats once before it claims; a failed or refused beat rejects the start. | Beating from the handler or on the lease's timer, which stops while no job is held and beats once per job when several are; claiming before the first beat, which runs a worker whose instance names another principal, or none, until a timed beat fails, and shows an operator a missing worker at work; a namespace of its own, when a miss releases leases only in the presence's namespace |
+| It beats on a timer of its own, every `beatMs` from when the last beat was sent: a third of the Presence `ttlMs` by default, and at most half of it, as Lease's `heartbeatMs` is at most half its `ttlMs`, so one late or failed beat is not a miss. Neither the claim loop nor a busy handler holds it back. | Beating every `ttlMs`, which a beat late by one request's length misses; beating between claims, which a long job starves |
+| The presence holds until the engine refuses a beat, a problem with a 4xx status but 408 and 429 (`not_principal`, `no_principal`, `not_found`, `forbidden`), or no beat has succeeded for the Presence `ttlMs` since the last one that did was sent, by the worker's clock. While it does not hold, the worker claims nothing and beats on, and the next beat that succeeds brings it back and looks for work at once. `onError` hears each failed beat and, once per loss, a `PresenceLostError` whose `reason` is `refused` or `lapsed`; `worker.present` says whether it holds. | Stopping the worker, which turns a re-registered worker instance or a healed partition into a fleet someone must restart; claiming on, which takes work the miss may release under it and shows a missing worker taking new work; the engine's `deadline`, which is the engine's clock |
+| The jobs the worker holds go on when its presence is lost, and their own heartbeats decide: a miss spares a lease renewed after the principal's last beat (the amendment on a live worker keeping its work) and expires the rest, which the next heartbeat finds `token_stale`. | Aborting every held job at a lost presence, which gives up work whose leases are still renewed, the case the miss's `notRenewedAfter` was made for |
+| A stop beats until it has released what the worker holds, then stops beating; the instance is missed a `ttlMs` later, with no lease left to release. | Stopping the beats first, which lets a long drain be missed; a last call that marks the worker gone, which Presence does not have |
+| `examples/engine-jobs` runs its workers on the client and `QueueWorker`, with `presence`, and its hand-written loop is deleted. Its test cuts a worker off from the engine, has the runner miss it and hand its job to another worker, and checks that the first worker's stale token stops its handler with nothing written; an operator's `cancel` directive fails a job through a terminal Retries class. The guide quotes the example. | Keeping the hand-written loop beside the worker, a second way to write one that the guide would teach with the edge cases the worker settles left open |
+
+The tests are `runtime/engine-workqueue/typescript/test/worker.test.ts`
+("the worker's presence") and `examples/engine-jobs/test/jobs.test.ts`.
+The names and rules are reversible until the first release.
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.
