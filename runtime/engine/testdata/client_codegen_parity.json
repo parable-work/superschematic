@@ -517,7 +517,7 @@
         "rollups": {
           "schema": {
             "additionalProperties": false,
-            "description": "Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, or a boolean. A rollup whose link holds more than 500 instances is {\"over\": true} instead; a min or max with no value to compare is absent.",
+            "description": "Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {\"over\": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent.",
             "properties": {
               "byStatus": {
                 "anyOf": [
@@ -700,6 +700,12 @@
           },
           "present": true
         },
+        "pendingProposals": {
+          "schema": {
+            "description": "With review in the config, how many of the instance's proposals are pending; absent without review."
+          },
+          "present": false
+        },
         "revision": {
           "schema": {
             "description": "The number of the instance's latest revision.",
@@ -846,7 +852,7 @@
         "links": {
           "schema": {
             "additionalProperties": false,
-            "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision it records and whether the target has moved past it.",
+            "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it.",
             "properties": {
               "parent": {
                 "additionalProperties": false,
@@ -894,6 +900,10 @@
                 "properties": {
                   "id": {
                     "type": "string"
+                  },
+                  "latest": {
+                    "description": "The target's latest revision.",
+                    "type": "integer"
                   },
                   "revision": {
                     "description": "The target's revision the link records.",
@@ -948,6 +958,12 @@
             "type": "integer"
           },
           "present": true
+        },
+        "pendingProposals": {
+          "schema": {
+            "description": "With review in the config, how many of the instance's proposals are pending; absent without review."
+          },
+          "present": false
         },
         "revision": {
           "schema": {

@@ -127,7 +127,7 @@ describe('the generated client', () => {
     const project = engine.instances.get(editor, 'Project', 'p1')?.data as Record<string, any>;
     assert.deepEqual(project.rollups, { tasks: 3, byStatus: { todo: 2, doing: 1 }, hours: 3, longest: 3, finished: false });
     const task = engine.instances.get(editor, 'Task', 't1')?.data as Record<string, any>;
-    assert.deepEqual(task.links, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, stale: true } });
+    assert.deepEqual(task.links, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, latest: 2, stale: true } });
   });
 
   test('wraps the client with the schemas types, and the engine takes what they allow', async () => {
@@ -159,7 +159,7 @@ describe('the generated client', () => {
       { title: 'Index', kind: 'build', detail: { target: 'index', flags: ['fast'] } },
       { id: 't1', behaviors: { Links: { project: 'p1', spec: { id: 's1', revision: 1 } } } }
     );
-    assert.deepEqual(built.data.links, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, stale: false } });
+    assert.deepEqual(built.data.links, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, latest: 1, stale: false } });
     if (built.data.kind === 'build') {
       assert.equal(built.data.detail?.target, 'index');
     }

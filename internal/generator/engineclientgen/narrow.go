@@ -326,7 +326,9 @@ type linkSpec struct {
 	name     string
 	schema   string
 	required bool
-	pinned   bool
+	// pin is what the link pins of its target, "revision" or "release",
+	// or "" for a link that pins nothing (the engine's linkPin).
+	pin string
 }
 
 func linksOf(config map[string]any) []linkSpec {
@@ -336,16 +338,30 @@ func linksOf(config map[string]any) []linkSpec {
 		spec, _ := links[name].(map[string]any)
 		schema, _ := spec["schema"].(string)
 		required, _ := spec["required"].(bool)
-		pinned, _ := spec["pinned"].(bool)
-		out = append(out, linkSpec{name: name, schema: schema, required: required, pinned: pinned})
+		out = append(out, linkSpec{name: name, schema: schema, required: required, pin: linkPin(spec["pinned"])})
 	}
 	return out
 }
 
+// linkPin reads a link's pinned as the engine does: true or "revision"
+// pins a revision of Revisions, "release" a release of Branches, and any
+// other value nothing.
+func linkPin(pinned any) string {
+	switch pinned {
+	case true, "revision":
+		return "revision"
+	case "release":
+		return "release"
+	}
+	return ""
+}
+
 // Links: the names are the config's; the create parameters are the
 // engine's narrowing (linksCreateParams): a property per link, the
-// required ones required, a revision only for a pinned link; the field
-// holds each link the instance has, with its target's schema.
+// required ones required, the revision or release it records only for a
+// pinned link; the field holds each link the instance has, with its
+// target's schema, and for a pinned link its pin, the target's latest of
+// that kind and whether the target has moved past the pin.
 func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error {
 	links := linksOf(config)
 	names := make([]string, 0, len(links))
@@ -367,11 +383,12 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 			"id":     map[string]any{"type": "string"},
 		}
 		description := fmt.Sprintf("The %s instance %s points at: its id.", link.schema, link.name)
-		if link.pinned {
-			targetProperties["revision"] = map[string]any{"description": "The target's revision to record, one it has had; its latest when absent.", "type": "integer", "minimum": json.Number("1")}
-			recordProperties["revision"] = map[string]any{"description": "The target's revision the link records.", "type": "integer"}
-			recordProperties["stale"] = map[string]any{"description": "Whether the target has moved past that revision.", "type": "boolean"}
-			description = fmt.Sprintf("The %s instance %s points at: its id, or an object with its id and the revision to record.", link.schema, link.name)
+		if pin := link.pin; pin != "" {
+			targetProperties[pin] = map[string]any{"description": fmt.Sprintf("The target's %s to record, one it has had; its latest when absent.", pin), "type": "integer", "minimum": json.Number("1")}
+			recordProperties[pin] = map[string]any{"description": fmt.Sprintf("The target's %s the link records.", pin), "type": "integer"}
+			recordProperties["latest"] = map[string]any{"description": fmt.Sprintf("The target's latest %s.", pin), "type": "integer"}
+			recordProperties["stale"] = map[string]any{"description": fmt.Sprintf("Whether the target has moved past that %s.", pin), "type": "boolean"}
+			description = fmt.Sprintf("The %s instance %s points at: its id, or an object with its id and the %s to record.", link.schema, link.name, pin)
 		}
 		createProperties[link.name] = map[string]any{
 			"description":          description,

@@ -7,7 +7,7 @@
 // Schema notes: NotesClient, notesClient.
 
 import { isVeto } from '@superschematic/engine/client';
-import type { CallOptions, CreateOptions, EngineClient, EngineVeto, Instance, InstancePage, ListOptions, OperationOutcome, WriteOptions } from '@superschematic/engine/client';
+import type { CallOptions, CreateOptions, EngineClient, EngineVeto, Instance, InstancePage, JSONObject, ListOptions, OperationOutcome, WriteOptions } from '@superschematic/engine/client';
 
 // The notes schema.
 
@@ -29,6 +29,8 @@ export type Note = NoteFields & {
   readonly commentCount: number;
   /** Revisions: The number of the instance's latest revision. */
   readonly revision?: number;
+  /** Revisions: With review in the config, how many of the instance's proposals are pending; absent without review. */
+  readonly pendingProposals?: unknown;
 };
 
 /** A merge patch of a Note's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations. */
@@ -126,8 +128,37 @@ export type NoteListRevisionsResult = {
   next: string | null;
 };
 
+/** The parameters of Revisions' getRevision: Reads one of the instance's revisions by its number: the own fields as that change left them. A number the instance has not reached is not_found. */
+export type NoteGetRevisionParams = {
+  /** The revision's number. */
+  revision: number;
+};
+
+/** The revision. */
+export type NoteGetRevisionResult = {
+  /** When, in epoch milliseconds. */
+  createdAt: number;
+  /** The subject of the caller whose change it records. */
+  createdBy: string;
+  /** The instance's own fields as the change left them. */
+  data: JSONObject;
+  /** The proposal whose approval made it. */
+  proposal?: number;
+  /** Its number: 1, 2, 3, ... */
+  revision: number;
+};
+
 /** The parameters of Revisions' propose: Proposes a change to the instance's own fields as a JSON merge patch, for a reviewer to approve or reject. The patch must change the instance and leave it valid; nothing changes until a reviewer approves it. */
 export type NoteProposeParams = {
+  /** Instances the proposal cites, for the reviewer: each one must exist and the proposer must be able to read its schema, and a revision must be one it has had, of a schema that composes Revisions. They are kept as given; a later change of an instance cited leaves them as they are. */
+  evidence?: Array<{
+    /** The instance's id. */
+    id: string;
+    /** The revision of it the proposal rests on. */
+    revision?: number;
+    /** The schema of the instance cited. */
+    schema: string;
+  }>;
   /** Why, for the reviewer. */
   note?: string;
   /** A JSON merge patch (RFC 7386) of the instance's own fields. */
@@ -140,6 +171,8 @@ export type NoteProposeResult = {
   base?: number;
   createdAt: number;
   createdBy: string;
+  /** The instances the proposal cites. */
+  evidence?: Array<{ id: string; revision?: number; schema: string }>;
   /** The proposal's number on the instance: 1, 2, 3, ... */
   id: number;
   note?: string;
@@ -162,6 +195,8 @@ export type NoteApproveResult = {
   base?: number;
   createdAt: number;
   createdBy: string;
+  /** The instances the proposal cites. */
+  evidence?: Array<{ id: string; revision?: number; schema: string }>;
   id: number;
   note?: string;
   patch: NotePatch;
@@ -186,6 +221,8 @@ export type NoteRejectResult = {
   base?: number;
   createdAt: number;
   createdBy: string;
+  /** The instances the proposal cites. */
+  evidence?: Array<{ id: string; revision?: number; schema: string }>;
   id: number;
   note?: string;
   patch: NotePatch;
@@ -212,6 +249,7 @@ export type NoteListProposalsResult = {
     base?: number;
     createdAt: number;
     createdBy: string;
+    evidence?: Array<{ id: string; revision?: number; schema: string }>;
     id: number;
     note?: string;
     patch: NotePatch;
@@ -231,6 +269,7 @@ export type NoteOperations = {
   comment: { scope: 'instance'; params: NoteCommentParams; result: NoteCommentResult };
   listComments: { scope: 'instance'; params: NoteListCommentsParams; result: NoteListCommentsResult };
   listRevisions: { scope: 'instance'; params: NoteListRevisionsParams; result: NoteListRevisionsResult };
+  getRevision: { scope: 'instance'; params: NoteGetRevisionParams; result: NoteGetRevisionResult };
   propose: { scope: 'instance'; params: NoteProposeParams; result: NoteProposeResult };
   approve: { scope: 'instance'; params: NoteApproveParams; result: NoteApproveResult };
   reject: { scope: 'instance'; params: NoteRejectParams; result: NoteRejectResult };
@@ -238,7 +277,7 @@ export type NoteOperations = {
 };
 
 /** The name of an operation on one Note. */
-export type NoteInstanceOperation = 'transition' | 'comment' | 'listComments' | 'listRevisions' | 'propose' | 'approve' | 'reject' | 'listProposals';
+export type NoteInstanceOperation = 'transition' | 'comment' | 'listComments' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals';
 
 /** The codes the vetoes of a Note's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type NoteVetoes = {
@@ -280,6 +319,8 @@ export interface NotesClient {
   listComments(id: string, params?: NoteListCommentsParams, options?: NoteWriteOptions): Promise<NoteListCommentsResult>;
   /** Revisions' listRevisions: Lists the instance's revisions, oldest first, one page at a time. */
   listRevisions(id: string, params?: NoteListRevisionsParams, options?: NoteWriteOptions): Promise<NoteListRevisionsResult>;
+  /** Revisions' getRevision: Reads one of the instance's revisions by its number: the own fields as that change left them. A number the instance has not reached is not_found. */
+  getRevision(id: string, params: NoteGetRevisionParams, options?: NoteWriteOptions): Promise<NoteGetRevisionResult>;
   /** Revisions' propose: Proposes a change to the instance's own fields as a JSON merge patch, for a reviewer to approve or reject. The patch must change the instance and leave it valid; nothing changes until a reviewer approves it. */
   propose(id: string, params: NoteProposeParams, options?: NoteWriteOptions): Promise<NoteProposeResult>;
   /** Revisions' approve: Approves a pending proposal: applies its patch to the instance as an update, whose checks run, and records the revision it makes. Needs the review permission. */
@@ -322,6 +363,9 @@ export function notesClient(client: EngineClient): NotesClient {
     },
     listRevisions(id, params, options) {
       return client.instances.invoke<NoteListRevisionsResult>('notes', id, 'listRevisions', params ?? {}, options);
+    },
+    getRevision(id, params, options) {
+      return client.instances.invoke<NoteGetRevisionResult>('notes', id, 'getRevision', params, options);
     },
     propose(id, params, options) {
       return client.instances.invoke<NoteProposeResult>('notes', id, 'propose', params, options);

@@ -23,7 +23,7 @@ export type ProjectFields = {
 export type Project = ProjectFields & {
   /** Workflow: The state the instance is in. */
   readonly status: ProjectState;
-  /** Rollups: Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare is absent. */
+  /** Rollups: Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent. */
   readonly rollups: {
     /** countBy over the Task instances whose project points here. */
     byStatus: { [key: string]: number } | { over: true };
@@ -146,6 +146,8 @@ export type Spec = SpecFields & {
   readonly status: SpecState;
   /** Revisions: The number of the instance's latest revision. */
   readonly revision?: number;
+  /** Revisions: With review in the config, how many of the instance's proposals are pending; absent without review. */
+  readonly pendingProposals?: unknown;
   /** Dependencies: Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
   readonly blocked: boolean;
 };
@@ -213,8 +215,37 @@ export type SpecListRevisionsResult = {
   next: string | null;
 };
 
+/** The parameters of Revisions' getRevision: Reads one of the instance's revisions by its number: the own fields as that change left them. A number the instance has not reached is not_found. */
+export type SpecGetRevisionParams = {
+  /** The revision's number. */
+  revision: number;
+};
+
+/** The revision. */
+export type SpecGetRevisionResult = {
+  /** When, in epoch milliseconds. */
+  createdAt: number;
+  /** The subject of the caller whose change it records. */
+  createdBy: string;
+  /** The instance's own fields as the change left them. */
+  data: JSONObject;
+  /** The proposal whose approval made it. */
+  proposal?: number;
+  /** Its number: 1, 2, 3, ... */
+  revision: number;
+};
+
 /** The parameters of Revisions' propose: Proposes a change to the instance's own fields as a JSON merge patch, for a reviewer to approve or reject. The patch must change the instance and leave it valid; nothing changes until a reviewer approves it. */
 export type SpecProposeParams = {
+  /** Instances the proposal cites, for the reviewer: each one must exist and the proposer must be able to read its schema, and a revision must be one it has had, of a schema that composes Revisions. They are kept as given; a later change of an instance cited leaves them as they are. */
+  evidence?: Array<{
+    /** The instance's id. */
+    id: string;
+    /** The revision of it the proposal rests on. */
+    revision?: number;
+    /** The schema of the instance cited. */
+    schema: string;
+  }>;
   /** Why, for the reviewer. */
   note?: string;
   /** A JSON merge patch (RFC 7386) of the instance's own fields. */
@@ -227,6 +258,8 @@ export type SpecProposeResult = {
   base?: number;
   createdAt: number;
   createdBy: string;
+  /** The instances the proposal cites. */
+  evidence?: Array<{ id: string; revision?: number; schema: string }>;
   /** The proposal's number on the instance: 1, 2, 3, ... */
   id: number;
   note?: string;
@@ -249,6 +282,8 @@ export type SpecApproveResult = {
   base?: number;
   createdAt: number;
   createdBy: string;
+  /** The instances the proposal cites. */
+  evidence?: Array<{ id: string; revision?: number; schema: string }>;
   id: number;
   note?: string;
   patch: SpecPatch;
@@ -273,6 +308,8 @@ export type SpecRejectResult = {
   base?: number;
   createdAt: number;
   createdBy: string;
+  /** The instances the proposal cites. */
+  evidence?: Array<{ id: string; revision?: number; schema: string }>;
   id: number;
   note?: string;
   patch: SpecPatch;
@@ -299,6 +336,7 @@ export type SpecListProposalsResult = {
     base?: number;
     createdAt: number;
     createdBy: string;
+    evidence?: Array<{ id: string; revision?: number; schema: string }>;
     id: number;
     note?: string;
     patch: SpecPatch;
@@ -382,6 +420,7 @@ export type SpecListDependentsResult = {
 export type SpecOperations = {
   transition: { scope: 'instance'; params: SpecTransitionParams; result: SpecTransitionResult };
   listRevisions: { scope: 'instance'; params: SpecListRevisionsParams; result: SpecListRevisionsResult };
+  getRevision: { scope: 'instance'; params: SpecGetRevisionParams; result: SpecGetRevisionResult };
   propose: { scope: 'instance'; params: SpecProposeParams; result: SpecProposeResult };
   approve: { scope: 'instance'; params: SpecApproveParams; result: SpecApproveResult };
   reject: { scope: 'instance'; params: SpecRejectParams; result: SpecRejectResult };
@@ -393,7 +432,7 @@ export type SpecOperations = {
 };
 
 /** The name of an operation on one Spec. */
-export type SpecInstanceOperation = 'transition' | 'listRevisions' | 'propose' | 'approve' | 'reject' | 'listProposals' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
+export type SpecInstanceOperation = 'transition' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
 
 /** The codes the vetoes of a Spec's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type SpecVetoes = {
@@ -431,6 +470,8 @@ export interface SpecClient {
   transition(id: string, params: SpecTransitionParams, options?: SpecWriteOptions): Promise<SpecTransitionResult>;
   /** Revisions' listRevisions: Lists the instance's revisions, oldest first, one page at a time. */
   listRevisions(id: string, params?: SpecListRevisionsParams, options?: SpecWriteOptions): Promise<SpecListRevisionsResult>;
+  /** Revisions' getRevision: Reads one of the instance's revisions by its number: the own fields as that change left them. A number the instance has not reached is not_found. */
+  getRevision(id: string, params: SpecGetRevisionParams, options?: SpecWriteOptions): Promise<SpecGetRevisionResult>;
   /** Revisions' propose: Proposes a change to the instance's own fields as a JSON merge patch, for a reviewer to approve or reject. The patch must change the instance and leave it valid; nothing changes until a reviewer approves it. */
   propose(id: string, params: SpecProposeParams, options?: SpecWriteOptions): Promise<SpecProposeResult>;
   /** Revisions' approve: Approves a pending proposal: applies its patch to the instance as an update, whose checks run, and records the revision it makes. Needs the review permission. */
@@ -475,6 +516,9 @@ export function specClient(client: EngineClient): SpecClient {
     },
     listRevisions(id, params, options) {
       return client.instances.invoke<SpecListRevisionsResult>('Spec', id, 'listRevisions', params ?? {}, options);
+    },
+    getRevision(id, params, options) {
+      return client.instances.invoke<SpecGetRevisionResult>('Spec', id, 'getRevision', params, options);
     },
     propose(id, params, options) {
       return client.instances.invoke<SpecProposeResult>('Spec', id, 'propose', params, options);
@@ -557,7 +601,7 @@ export type Task = TaskFields & {
   readonly status: TaskState;
   /** Comments: How many comments the instance has. */
   readonly commentCount: number;
-  /** Links: The links the instance holds, by name: each target's schema and id, and for a pinned link the revision it records and whether the target has moved past it. */
+  /** Links: The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it. */
   readonly links: {
     /** The Task instance parent points at. */
     parent?: { id: string; schema: 'Task' };
@@ -566,6 +610,8 @@ export type Task = TaskFields & {
     /** The Spec instance spec points at. */
     spec?: {
       id: string;
+      /** The target's latest revision. */
+      latest?: number;
       /** The target's revision the link records. */
       revision?: number;
       schema: 'Spec';
@@ -691,13 +737,15 @@ export type TaskListCommentsResult = {
   next: string | null;
 };
 
-/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision, or the one given. */
+/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
 export type TaskLinkParams = {
   /** The target's id. */
   id: string;
   /** The link's name in the config. */
   name: TaskLinkName;
-  /** For a pinned link, the target's revision to record, one it has had; its latest when absent. */
+  /** For a link pinned to a release, the target's release to record, one it has had; its latest when absent. */
+  release?: number;
+  /** For a link pinned to a revision, the target's revision to record, one it has had; its latest when absent. */
   revision?: number;
 };
 
@@ -705,7 +753,9 @@ export type TaskLinkParams = {
 export type TaskLinkResult = {
   id: string;
   name: TaskLinkName;
-  /** The target's revision a pinned link records. */
+  /** The target's release a link pinned to a release records. */
+  release?: number;
+  /** The target's revision a link pinned to a revision records. */
   revision?: number;
   schema: string;
 };
@@ -717,9 +767,15 @@ export type TaskUnlinkParams = {
 };
 
 /** The link as it was. */
-export type TaskUnlinkResult = { id: string; name: TaskLinkName; revision?: number; schema: string };
+export type TaskUnlinkResult = {
+  id: string;
+  name: TaskLinkName;
+  release?: number;
+  revision?: number;
+  schema: string;
+};
 
-/** The parameters of Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision each records and whether the target has moved past it. */
+/** The parameters of Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it. */
 export type TaskListLinkedParams = {
   /** The next of the previous page. */
   cursor?: string;
@@ -729,7 +785,7 @@ export type TaskListLinkedParams = {
   limit?: number;
   /** The link's name in the config. */
   name: TaskLinkName;
-  /** Only the pinned links whose target has moved past the revision they record. */
+  /** Only the pinned links whose target has moved past the revision or the release they record. */
   stale?: boolean;
 };
 
@@ -738,9 +794,13 @@ export type TaskListLinkedResult = {
   items: Array<{
     /** The id of the instance that holds the link. */
     id: string;
-    /** The target's revision a pinned link records. */
+    /** The target's latest revision or release, of the kind the link pins. */
+    latest?: number;
+    /** The target's release a link pinned to a release records. */
+    release?: number;
+    /** The target's revision a link pinned to a revision records. */
     revision?: number;
-    /** Whether the target has moved past that revision. */
+    /** Whether the target has moved past the one the link records. */
     stale?: boolean;
   }>;
   /** The cursor of the next page; null after the last. */
@@ -834,7 +894,7 @@ export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 
 export type TaskVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
   Comments: never;
-  Links: 'no_revision' | 'required_link' | 'required_target';
+  Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target';
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
   Constants: never;
   Variants: never;
@@ -871,11 +931,11 @@ export interface TaskClient {
   comment(id: string, params: TaskCommentParams, options?: TaskWriteOptions): Promise<TaskCommentResult>;
   /** Comments' listComments: Lists the instance's comments, oldest first, one page at a time. */
   listComments(id: string, params?: TaskListCommentsParams, options?: TaskWriteOptions): Promise<TaskListCommentsResult>;
-  /** Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision, or the one given. */
+  /** Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
   link(id: string, params: TaskLinkParams, options?: TaskWriteOptions): Promise<TaskLinkResult>;
   /** Links' unlink: Clears an optional link. A required link cannot be unlinked, only moved. */
   unlink(id: string, params: TaskUnlinkParams, options?: TaskWriteOptions): Promise<TaskUnlinkResult>;
-  /** Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision each records and whether the target has moved past it. */
+  /** Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it. */
   listLinked(params: TaskListLinkedParams, options?: CallOptions): Promise<TaskListLinkedResult>;
   /** Dependencies' addBlocker: Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished. */
   addBlocker(id: string, params: TaskAddBlockerParams, options?: TaskWriteOptions): Promise<TaskAddBlockerResult>;

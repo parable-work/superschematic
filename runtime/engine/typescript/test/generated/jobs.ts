@@ -27,7 +27,7 @@ export type Batch = BatchFields & {
   readonly status: BatchState;
   /** Blueprint: What was stamped: children, each step's key and its child's id, in the order they were created; absent until the instance is stamped. */
   readonly blueprint?: JSONObject;
-  /** Rollups: Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare is absent. */
+  /** Rollups: Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent. */
   readonly rollups: {
     /** countBy over the jobs instances whose batch points here. */
     steps: { [key: string]: number } | { over: true };
@@ -157,7 +157,7 @@ export type Job = JobFields & {
   readonly budget?: JSONObject;
   /** Retries: The instance's retries: total (failures counted), classAttempts (failures counted by class), bestScore (null when no scored result is kept), exhausted and stuck. */
   readonly retries?: JSONObject;
-  /** Links: The links the instance holds, by name: each target's schema and id, and for a pinned link the revision it records and whether the target has moved past it. */
+  /** Links: The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it. */
   readonly links?: {
     /** The batches instance batch points at. */
     batch?: { id: string; schema: 'batches' };
@@ -593,13 +593,15 @@ export type JobRecordAttemptResult = {
   total: number;
 };
 
-/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision, or the one given. */
+/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
 export type JobLinkParams = {
   /** The target's id. */
   id: string;
   /** The link's name in the config. */
   name: JobLinkName;
-  /** For a pinned link, the target's revision to record, one it has had; its latest when absent. */
+  /** For a link pinned to a release, the target's release to record, one it has had; its latest when absent. */
+  release?: number;
+  /** For a link pinned to a revision, the target's revision to record, one it has had; its latest when absent. */
   revision?: number;
 };
 
@@ -607,7 +609,9 @@ export type JobLinkParams = {
 export type JobLinkResult = {
   id: string;
   name: JobLinkName;
-  /** The target's revision a pinned link records. */
+  /** The target's release a link pinned to a release records. */
+  release?: number;
+  /** The target's revision a link pinned to a revision records. */
   revision?: number;
   schema: string;
 };
@@ -619,9 +623,15 @@ export type JobUnlinkParams = {
 };
 
 /** The link as it was. */
-export type JobUnlinkResult = { id: string; name: JobLinkName; revision?: number; schema: string };
+export type JobUnlinkResult = {
+  id: string;
+  name: JobLinkName;
+  release?: number;
+  revision?: number;
+  schema: string;
+};
 
-/** The parameters of Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision each records and whether the target has moved past it. */
+/** The parameters of Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it. */
 export type JobListLinkedParams = {
   /** The next of the previous page. */
   cursor?: string;
@@ -631,7 +641,7 @@ export type JobListLinkedParams = {
   limit?: number;
   /** The link's name in the config. */
   name: JobLinkName;
-  /** Only the pinned links whose target has moved past the revision they record. */
+  /** Only the pinned links whose target has moved past the revision or the release they record. */
   stale?: boolean;
 };
 
@@ -640,9 +650,13 @@ export type JobListLinkedResult = {
   items: Array<{
     /** The id of the instance that holds the link. */
     id: string;
-    /** The target's revision a pinned link records. */
+    /** The target's latest revision or release, of the kind the link pins. */
+    latest?: number;
+    /** The target's release a link pinned to a release records. */
+    release?: number;
+    /** The target's revision a link pinned to a revision records. */
     revision?: number;
-    /** Whether the target has moved past that revision. */
+    /** Whether the target has moved past the one the link records. */
     stale?: boolean;
   }>;
   /** The cursor of the next page; null after the last. */
@@ -753,19 +767,25 @@ export type JobSearchResult = {
   next: string | null;
 };
 
-/** The parameters of Search's similar: Lists the instances nearest to an existing one, leaving it out: by its own indexed text and, once its vector is settled, by its vector, the two rankings fused, each hit saying how it matched. Call it before creating an instance like this one, to find near-duplicates to reuse or link instead. */
+/** The parameters of Search's similar: Lists the instances nearest to an existing one, leaving it out: by its own indexed text and, once its vector is settled, by its vector, the two rankings fused, each hit saying how it matched. Given text in place of an id, the text of an instance not yet created, it ranks the same way by that text and the vector given with it, if any. Call it before creating an instance, to find near-duplicates to reuse or link instead. */
 export type JobSimilarParams = {
   /** The next of the previous page. */
   cursor?: string;
   /** The instance whose neighbours to list. */
-  id: string;
+  id?: string;
   /** At most this many instances; 50 when absent. */
   limit?: number;
-};
+  /** The model the vector was computed with; refused when it is not the config's. */
+  model?: string;
+  /** In place of id, the text of an instance not yet created: its indexed fields that hold more than whitespace, in the config's order, joined by a blank line, as an embedder is given an instance's. */
+  text?: string;
+  /** With text, the text's vector: as many numbers as the config's dimensions, computed with its model. */
+  vector?: number[];
+} & ({ id: string } | { text: string });
 
 /** What Search's similar returns. */
 export type JobSimilarResult = {
-  /** Whether the instance's vector is settled, so the ranking used it. */
+  /** Whether a vector ranked: the instance's, once it is settled, or the one given with text. */
   embedded: boolean;
   items: Array<{
     field?: string;
@@ -870,7 +890,7 @@ export type JobVetoes = {
   Queue: 'not_claimable' | 'blocked' | 'stale_link' | 'claim_required';
   Budget: 'over_limit' | 'not_leased' | 'scope_moved' | 'scope_reserved' | 'below_committed' | 'exceeds_reservation' | 'not_configured';
   Retries: 'exhausted' | 'limits_fixed' | 'not_configured';
-  Links: 'no_revision' | 'required_link' | 'required_target';
+  Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target';
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
   Constants: never;
   Search: never;
@@ -945,11 +965,11 @@ export interface JobsClient {
   recordUsageFor(id: string, params: JobRecordUsageForParams, options?: JobWriteOptions): Promise<JobRecordUsageForResult>;
   /** Retries' recordAttempt: Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission. */
   recordAttempt(id: string, params?: JobRecordAttemptParams, options?: JobWriteOptions): Promise<JobRecordAttemptResult>;
-  /** Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision, or the one given. */
+  /** Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
   link(id: string, params: JobLinkParams, options?: JobWriteOptions): Promise<JobLinkResult>;
   /** Links' unlink: Clears an optional link. A required link cannot be unlinked, only moved. */
   unlink(id: string, params: JobUnlinkParams, options?: JobWriteOptions): Promise<JobUnlinkResult>;
-  /** Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision each records and whether the target has moved past it. */
+  /** Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it. */
   listLinked(params: JobListLinkedParams, options?: CallOptions): Promise<JobListLinkedResult>;
   /** Dependencies' addBlocker: Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished. */
   addBlocker(id: string, params: JobAddBlockerParams, options?: JobWriteOptions): Promise<JobAddBlockerResult>;
@@ -961,7 +981,7 @@ export interface JobsClient {
   listDependents(id: string, params?: JobListDependentsParams, options?: JobWriteOptions): Promise<JobListDependentsResult>;
   /** Search's search: Searches the schema's instances in the caller's namespace and returns the matching ids, best match first, one page at a time: by query, by vector, or by both, whose rankings are fused. A query is plain words by default: an instance matches when its indexed fields hold every word, and quotes and operators in the query are text. With syntax fts5 the query is an SQLite FTS5 expression (phrases, AND, OR, NOT, NEAR, prefix*), without column filters. A vector, computed with the config's model from the text to search for, ranks the instances whose vectors are settled by cosine similarity. With a vector, each hit says how it matched. */
   search(params: JobSearchParams, options?: CallOptions): Promise<JobSearchResult>;
-  /** Search's similar: Lists the instances nearest to an existing one, leaving it out: by its own indexed text and, once its vector is settled, by its vector, the two rankings fused, each hit saying how it matched. Call it before creating an instance like this one, to find near-duplicates to reuse or link instead. */
+  /** Search's similar: Lists the instances nearest to an existing one, leaving it out: by its own indexed text and, once its vector is settled, by its vector, the two rankings fused, each hit saying how it matched. Given text in place of an id, the text of an instance not yet created, it ranks the same way by that text and the vector given with it, if any. Call it before creating an instance, to find near-duplicates to reuse or link instead. */
   similar(params: JobSimilarParams, options?: CallOptions): Promise<JobSimilarResult>;
   /** Search's staleEmbeddings: Lists the instances whose vector is missing or stale, in the order they were first indexed: each one's id, the text to compute its vector from (its indexed fields, joined by a blank line) and the hash of that text and the model, which a settle presents. Needs vectors in the config. */
   staleEmbeddings(params?: JobStaleEmbeddingsParams, options?: CallOptions): Promise<JobStaleEmbeddingsResult>;
