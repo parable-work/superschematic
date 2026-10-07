@@ -11,8 +11,11 @@ Everything here is schema-agnostic. The generated package owns the operation
 table (paths, parameter specs, strict body parsers, auth requirements); this
 module owns how those specs are applied to one request, and the service
 caller's verifier and credential sources (D37), which import nothing from
-node: so they run on Workers too. ./hono.ts binds it to Hono; nothing in
-this file imports a framework.
+node: so they run on Workers too. It also holds what a generated server's
+entrypoint reads (D51): the readers of the config fields a stack derives
+(stackconfig.ts), which map a loaded credential onto those sources, and
+the JSON-lines logger. ./hono.ts binds it to Hono and ./postgres.ts opens a
+database's pg Pool; nothing in this file imports a framework or pg.
 */
 
 export { ErrorCode, HttpProblem, problemBody, problemResponse, statusText } from './problem.js';
@@ -62,3 +65,25 @@ export type {
   TokenFileSourceOptions,
 } from './credentials.js';
 export type { OperationAuth, OperationInput, OperationServiceCallers, OperationSpec, RequestContext } from './operation.js';
+export {
+  CALLERS_SUFFIX,
+  CREDENTIAL_SOURCES,
+  SERVICE_AUTHORIZATION_HEADER,
+  StackConfigError,
+  loadCallers,
+  loadDatabase,
+  loadService,
+  serviceCredentialFor,
+} from './stackconfig.js';
+export type {
+  CloudSqlConnection,
+  Database,
+  Service,
+  ServiceCredential,
+  ServiceCredentialConfig,
+  ServiceCredentialOptions,
+  ServiceCredentialSource,
+  StackEnv,
+} from './stackconfig.js';
+export { LOG_LEVELS, createLogger } from './logger.js';
+export type { LogFields, LogLevel, Logger, LoggerOptions } from './logger.js';

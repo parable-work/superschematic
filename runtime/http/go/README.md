@@ -15,7 +15,7 @@ depends on a generated type.
 | `session` | the core auth provider's runtime: session store, middleware and permission checks |
 | `serviceauth` | the service step (D37): the `Authenticator` seam and `Caller`, the standard JWT `Verifier` over a `Config` of issuers, keys and callers (RS256, ES256, EdDSA, with a JWKS cache), the route gate (`Authenticate`, `Require`, `AllowOr`), end-user forwarding (`ForwardedToken`), and the client credential sources (`GoogleIDToken`, `TokenFile`, `SignedToken`) |
 | `filterparse` | list-endpoint filter expression parsing |
-| `stackconfig` | the config fields an API's edges derive in a stack: a database connection and a service endpoint, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4) |
+| `stackconfig` | the config fields an API's edges derive in a stack: a database connection, a service endpoint and an API's callers field, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4), which the TypeScript runtime's readers twin |
 | `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path; and a list argument of a `GET` operation from the query string (`QueryList`), with the same rules |
 
 The generated API package keeps `Config`, `Implementations`, the route table,
@@ -48,3 +48,19 @@ key fetcher that returns `jwks[url]` and fails for any other URL, sends
 saw, and whether the end-user stub ran. The file's `comment` states the
 harness in full. Every token in it is deterministic, so `-update` on an
 unchanged corpus rewrites the same bytes.
+
+## Stack config parity vectors
+
+`runtime/http/testdata/stackconfig_parity.json` holds the vectors the Go
+and TypeScript runtimes read with their `stackconfig` readers (D51). The
+`stackconfig` package writes it from `ir.DerivedVariables`:
+
+```
+cd runtime/http/go && go test ./stackconfig -run TestWriteParityVectors -update
+```
+
+Each vector names a reader (`database`, `service` or `callers`) and a
+field, and holds an `ir` derived value, the variables `ir.DerivedVariables`
+makes of it, edits to them for an environment no value encodes, and the
+loaded value or the messages of the refusal. The file's `comment` states
+the harness in full.
