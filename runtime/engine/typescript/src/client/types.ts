@@ -128,9 +128,47 @@ export interface DescribeDocument {
   hash: string;
   instanceType: string;
   description?: string;
+  /** The instance type's display; absent when it declares none. */
+  display?: TypeDisplay;
+  /** The instance type's own fields, in declaration order. */
+  fields: DescribedField[];
   instance: JSONObject;
   behaviors: DescribedBehavior[];
   operations: DescribedOperation[];
+}
+
+/**
+ * How a UI shows a schema's instances, the instance type's @display (D48):
+ * titleField and summaryFields name fields by their keys in an instance's
+ * data, and transitions are by the state a transition leaves, then the one
+ * it enters.
+ */
+export interface TypeDisplay {
+  noun?: string;
+  plural?: string;
+  titleField?: string;
+  createLabel?: string;
+  summaryFields?: string[];
+  states?: { [state: string]: DisplayState };
+  transitions?: { [from: string]: { [to: string]: string } };
+}
+
+/** How a UI shows one Workflow state. */
+export interface DisplayState {
+  label?: string;
+  /** The present-progressive form a UI shows while an instance is in the state. */
+  activeForm?: string;
+  tone?: DisplayTone;
+}
+
+/** What a state means to a reader, which a UI maps onto its own colors. */
+export type DisplayTone = 'muted' | 'active' | 'success' | 'warning' | 'danger';
+
+/** One of the instance type's own fields: its key in an instance's data, with its title and icon where declared. */
+export interface DescribedField {
+  name: string;
+  title?: string;
+  icon?: string;
 }
 
 /** A behavior a schema composes, with its config as the schema holds it. */
@@ -150,6 +188,8 @@ export interface DescribedOperation {
   name: string;
   behavior?: string;
   scope?: 'instance' | 'schema';
+  /** Its tool's title. */
+  title: string;
   description: string;
   writes: boolean;
   params: JSONObject;

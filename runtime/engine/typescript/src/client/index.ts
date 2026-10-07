@@ -38,7 +38,10 @@ export type {
   BehaviorSummary,
   DescribeDocument,
   DescribedBehavior,
+  DescribedField,
   DescribedOperation,
+  DisplayState,
+  DisplayTone,
   EngineEvent,
   EventCause,
   EventKind,
@@ -59,4 +62,5 @@ export type {
   ToolGuidance,
   ToolMCPRecord,
   ToolManifest,
+  TypeDisplay,
 } from './types.js';
