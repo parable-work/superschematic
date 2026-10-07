@@ -1108,6 +1108,10 @@ The engine's event log starts at its head, filters and logs defines, its
 HTTP and MCP mounts take service callers (D37), it serves the behaviors
 it runs, and each tool carries guidance its behaviors' configs give,
 with create parameters narrowed by them (an amendment below on each). A
+typed client of its HTTP API with the event stream and a reconciler
+(`@superschematic/engine/client`), and a worker over the client
+(`@superschematic/engine-workqueue/worker`), are built (the amendment "a
+typed client over the HTTP API, a worker and a reconciler" below). A
 large field is stored once, by hash, in a value store in the same file
 (the amendment "a large value is stored once" below). Each change that
 lands a piece updates this paragraph. The names and rules are reversible until the first release.
@@ -1518,6 +1522,42 @@ where an SDK tool carries its `@docs` guidance.
 | An implementation's `createParamsSchema(config, target)` narrows its declaration's: `Links` a property per link, the required ones required and a revision only for a pinned link; `Dependencies` a blocker's schema from the config's, required when the type's own is not among them. The describe document and the create tool show it in place of the declared one. Only a behavior whose declaration takes create parameters has the hook, and what it returns has the declaration's shape. | One schema for every config, which names no link and requires none; the engine narrowing per behavior, which D16 rules out, since the engine names no behavior |
 | The narrowed schema is display only, as `instanceSchema` is: the engine checks a create against the declared schema, and `initialize` refuses what the config refuses, with its own messages. | Checking the narrowed schema too, which moves a config's refusals, a required link not given, a link the config lacks, ahead of every guard, and replaces each behavior's message with the validator's: a change to refusals this does not make. A test holds each core narrowing to what its `initialize` refuses |
 | `Rollups`' gate vetoes with `not_held`, details `{ rollup, to, over, linked, counted }`, `linked` and `counted` absent past the read bound. | `gated`, Dependencies' code for another refusal, which a client reads beside `blocked` on the same transition; no details, which leaves a client parsing the reason for the rollup |
+
+### D16, amended: a typed client over the HTTP API, a worker and a reconciler
+
+Every process that worked a queue wrote the same loop by hand: claim the
+next instance, heartbeat at the lease's interval, acknowledge directives,
+check before each outside effect that it still holds the lease, record the
+attempt, and release or abandon. A controller that watched the event log
+and acted wrote another. Each copy got an edge case wrong in its own way:
+it wrote on after its lease lapsed or its token went stale, acknowledged
+each directive with a write of its own, let its leases lapse at shutdown,
+polled an empty queue, or replayed the log at every start. There was no
+typed client for the HTTP API, and nothing sent D37's service credentials
+to an engine. The engine's server does not change here.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The client is the `./client` subpath of `@superschematic/engine`. It imports nothing at run time but its own modules, which a test reads in the built files, and it compiles with the DOM's globals and no Node.js types (`tsconfig.client.json`), so it runs in a browser and a worker runtime. | A package of its own, `@superschematic/engine-client`, which adds a version site, a pack step and a CI step for code that versions with the engine anyway; it can still split off before the first release |
+| It declares the wire's shapes itself (`Instance`, `EngineEvent`, the describe and tools documents, the catalog), and a type test holds each to the server's type, member for member, so a change to one fails `tsc` until the other follows. | Importing the server's types, whose declarations reach `node:sqlite`, the schema runtime and the HTTP runtime, so a browser's compile would need all three |
+| Calls are grouped as the engine's are: `schemas` (with `describe`), `instances` (with `invoke`, `operate` and `invokeSchema`), `events`, `behaviors`, `tools()` and `search()`, in the namespace the client names unless a call names another. A write's `expectedSeq` is `If-Match` and its `preconditions` the `Preconditions` header. A missing instance is a thrown 404 `not_found`, where the engine's `get` returns undefined. | `get` returning undefined on a 404, which would hide a schema with no live version, which answers the same 404, behind an instance that is not there |
+| A refusal is an `EngineProblem`: the status, the problem's `code`, `detail`, `requestId` and `details`, with `details.issues` and `details.changes` read into `issues` and `changes`, each at its path. A `vetoed` problem is an `EngineVeto` with the behavior, the action, the reason and the veto's code and details, as `BehaviorVetoError` carries them in the process; `isVeto(error, 'Lease', ['lapsed', 'token_stale'])` is how a worker branches. An answer that is not a problem document keeps its status and has no code; a request with no answer is an `EngineTransportError`; a caller's own abort rejects with its reason. | A class per engine code, which the client would keep in step with the engine's table; the problem document alone, which leaves each caller to parse `details` |
+| Credentials follow the generated TypeScript SDK (D15, amended; D37): the end user's token (held, else `getToken`'s, with `refreshToken`), a `serviceCredential` whose `token(fresh)` is the shape the HTTP runtime's sources return, and a per-call `forward`. A 401 `service_unauthorized` asks the service source for a fresh token once and never refreshes the end user; any other 401 refreshes once, shared by concurrent calls, and never asks for a fresh service token; a forwarded user is never refreshed. | Importing the HTTP runtime's `ServiceTokenSource`, an optional peer dependency's type in every consumer's compile, for one function's shape; the SDK's token storage in `localStorage`, which a server has no use for |
+| The event stream is read over fetch and parsed by the HTML standard's rules, as an async iterable of the log's events and a `ready` per connection. Its cursor moves as each message is handed out, an id-only one's included. A dropped connection, or a stream the engine ended, is opened again with `Last-Event-ID` after a backoff that doubles; a 4xx ends the subscription with its problem, and a 5xx, a 429 or a network failure is retried. | `EventSource`, which cannot send `Authorization` or `Service-Authorization`; moving the cursor as the parser reads ahead, which on a reconnect skips what the caller never received |
+| `reconcile(client, { handle, cursor, ...filters })` is the controller pattern. It subscribes after the cursor its store holds, at the head on a first run, runs the handler once per event in log order and saves the cursor once the handler returns, so an event is handled at least once. A handler that throws is retried on the same event with the backoff and never skipped, and a ready saves the stream's cursor past events the filters dropped. It is in the client, since it needs no work-queue behavior. | Skipping an event whose handler failed, which breaks what the controller maintains without anyone deciding to; halting after some attempts, as the runner does, where a process outside the engine has no status an operator reads; a helper in the work-queue package |
+| The worker is the `./worker` subpath of `@superschematic/engine-workqueue`: a `QueueWorker` over an `EngineClient`, which it alone imports, so a worker process loads no SQLite and no behavior. `start()` reads the describe document: the schema must compose `Queue` and `Lease`, `Retries` decides whether attempts are recorded, and the worker's `ttlMs`, else Lease's, is the lease's length. | A worker over the in-process `Engine`, which runs only in the one process that writes the file (D16), where no fleet of workers runs |
+| It claims with `claimNext` (`match`, `assignedOnly`, `ttlMs`), up to `concurrency` jobs at once. An empty queue is watched: the schema's event stream, heartbeats excluded, wakes it, and between events it looks after a backoff that doubles, with the read-only `countClaimable`, and claims only when that counts work. | Polling `claimNext`, a writing operation that takes the file's write lock at every look at an empty queue; waking on events alone, which misses work that time makes claimable without an event, a daily budget's new day |
+| Each job heartbeats at the claim's `heartbeatMs`, or the worker's shorter one, presenting the token as Lease's precondition, and acknowledges in the heartbeat the directives its listeners (`job.onDirective`) heard, once each and in order; one sent before a listener is added waits for it. The handler writes the claimed instance through `job.instance`, which adds the token to each write, and anything else through `job.client`. | An `acknowledge` per directive, a write and an event each; the token on every call of the client, which another instance's Lease refuses (`token_stale`) and a schema without Lease does not take (`invalid_argument`) |
+| The lease is lost on Lease's `lapsed`, `token_stale`, `not_holder` or `not_leased` veto of a heartbeat or a fenced write, on a heartbeat's `not_found`, and when no heartbeat has succeeded for the lease's length since the last renewing request was sent, by the worker's clock. `job.signal` then aborts with a `LeaseLostError`, a fenced write throws it unsent, and the worker writes nothing more for the job, no attempt and no release. | Waiting for the engine's refusal alone, which lets a worker a partition cut off write when the partition heals; the claim's `expiresAt`, which is the engine's clock; losing the lease at one failed heartbeat, which gives up live work for a dropped request; a handler's `not_found`, which an operation the type lacks also answers |
+| The handler's outcome is the terminal step. `{ transition }` records a successful attempt when the type composes Retries, moves the status through Workflow and releases. `{ release: true }`, or nothing, hands the job back. A thrown `WorkFailure` records its Retries class and hands the job back, or abandons it (`release({ abandon: true })`, an expiry toward `maxExpiries`) when it says so; any other error abandons it. A refused step is reported, and the job still ends with its release. | Handing the job back on an error no one classified, which a job no worker can finish repeats forever without a count; counting every failure as an expiry, which leaves Retries' classes and caps unused |
+| `stop()` claims nothing more, waits for the jobs it holds up to a timeout (30 seconds; `drain: false` waits for none), then aborts the rest with a `WorkerStoppedError`, releases their leases, which counts nothing and moves them by `onExpiry`, and refuses their handlers' later writes. | Leaving them to lapse, which holds the work for a lease's length and counts an expiry for each job a deploy interrupts; waiting without end for a handler that ignores its signal |
+
+The tests run the client and the worker against an engine served in
+process, its Hono app's `fetch` standing in for the network:
+`runtime/engine/typescript/test/client.test.ts`,
+`client-stream.test.ts` and `client-types.test.ts`, and
+`runtime/engine-workqueue/typescript/test/worker.test.ts`. The names and
+rules are reversible until the first release.
 
 ### D16, amended: a large value is stored once
 
@@ -3871,5 +3911,44 @@ Cloud Storage by a fake of its API. None of it has run against Google
 Cloud. Not built: a deploy lock beyond the provisioner's and the
 runner's, and a lifecycle rule that prunes old contexts and job documents
 from the bucket.
+
+### D37, amended: the callee's callers field, which the connectors write and the entrypoint verifies against
+
+D37 said each inbound edge's connector writes what the callee checks into
+the callee's config, and its first amendment left that config, the
+connectors writing it and the generated entrypoint reading it unbuilt,
+for one change to define together. Building them for the local and gcp
+connectors and the Go entrypoint settled the contract, and changed two of
+D37's choices on Cloud Run.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A served API with a service clause has a callers field, `<API>_CALLERS` by the core's rule: the API's name in upper snake case and `_CALLERS`, which begins with no other derived field's name, so a server that serves an API and calls it holds both. The loader's verify pass and the resolver refuse a setting or an env key that takes it or one of its variables. | One field per server, the union over its inbound edges: without `from`, a route lists every server with a `calls` edge to its API, and the union would pass a server whose edge reaches another API of the callee. `{SERVICE}_SERVICE_AUTH`, which the caller's `{SERVICE}_SERVICE` claims on a server that serves and calls one API. A `[derived_fields]` template, which the naming file can add later; the resolver's own templates come from no naming file yet. |
+| Its value, `ir.ServiceAuth`, is the runtimes' `serviceauth` config: issuers, each with its issuer and aliases, audience, algorithms, JWKS URL or keys, subject claim, maximum lifetime and callers, each a subject, the deployable it is and the APIs it serves. The callers are a list, not a map keyed by subject, since a subject may be a reference, and a key is its JWK's JSON, since it may be an output. `ir.CheckServiceAuth` and `ir.CheckServiceAuthIssuer` hold the contract. | A value of the local and gcp shapes only, which every later platform would have to widen. |
+| Each http edge between two servers gives the callee an issuer listing the edge's caller alone, `registry.Connected.Callee`. Resolution checks it, with the edge's caller and that caller's APIs, merges the entries of the edges to an API by issuer, which must agree on all but their callers, and binds the field with `callersOf` and the edges it comes from. An edge to an API with a service clause whose connector gives no entry fails as `lowering`. An API no other server calls gets the field with no issuers, so its server starts and refuses every service credential. | Refusing to resolve a server with a clause and no inbound edge: the API is deployed in many stacks, and section 9.3's check already refuses an edge it cannot use. Leaving the field unset there, which the entrypoint could not tell from a platform that forgot it. |
+| `ir.DerivedVariables` encodes a list of objects as a variable holding its length and each object's members under the list's name and the object's index, and a whole number as its decimal. `stackconfig.LoadCallers` reads the field into a `serviceauth.Config` and refuses a variable under the field's name that is no member. | The field as one JSON document, which section 3.4 refuses for every derived field. Variables keyed by the caller's name, which an upper snake case name can make two of one. |
+| The local connector gives the caller as an issuer of its own: its deployable as issuer and subject, the edge's key pair's `publicJwk` output as its key, the callee's deployable as audience, EdDSA and 300 seconds at most. | |
+| On Cloud Run the audience is the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, which every service lists and every caller asks the metadata server for. This replaces D37's audience, the callee's URL: that is an output of the callee's own service, which its callers field cannot reference without the service depending on itself. | The deterministic `run.app` URL, which needs the project's number, which no environment value holds. Reading the service's URL at run time, which puts Google's metadata into the provider-neutral runtime (D6). |
+| On Cloud Run the callee knows the caller by its service account's email in the token's `email` claim, `<service>@<project>.iam.gserviceaccount.com`, a name resolution composes. This replaces D37's unique id in `sub`. | The unique id, an output of the caller's account node, which every callee's config would reference; the environment owns the account its email names. |
+| The Go entrypoint's `serviceAuthenticator(api)`, which main.go calls once per API with a clause, lives in `serviceauth.go` beside `main.go`, and returns a `serviceauth.Verifier` over the API's callers field. A server without the field refuses to start and says which variable is missing. | Keeping it in `main.go`, which every other feature of the entrypoint edits. |
+
+`internal/stack`'s tests cover the merge, an API no server calls, a call
+within one server, the collisions and each broken entry; the local and gcp
+goldens resolve the shop with `@requireService` and `@allowService` on
+shop-api (`stacktest.RequireServiceShop` and `AllowServiceShop`);
+servergen's golden and compiled tests cover `serviceauth.go`; and `cli`'s
+`TestStackDevVerifiesServiceCallers` runs three Go servers with `stack
+dev`. There the caller is admitted with its end user forwarded, a request
+with no credential, from a server with no edge, or for another audience is
+401 `service_unauthorized`, and a caller the route's `from` leaves out is
+403 `service_forbidden`. The stack has no database, so the run needs no
+Docker. The parity vectors are unchanged.
+
+Not built: the TypeScript and Rust entrypoints, which will read the same
+field; the generic connector; key rotation; and the field outside a
+stack, where `values-schema.json` does not list it. A call between two
+APIs one server serves carries no credential, so a `@requireService`
+operation refuses it though section 9.3's check counts it, which section
+9.9 of `docs/stack-model.md` leaves open.
 
 The rule is reversible until the first release.

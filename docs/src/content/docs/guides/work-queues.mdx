@@ -196,6 +196,85 @@ After the test's run, a job that timed out reads:
 }
 ```
 
+## Write a worker
+
+The example's `JobWorker` writes the loop above by hand, over `fetch`, to
+show each step. A worker written that way gets edge cases wrong in its
+own way. This one polls an empty queue every `idleMs`, drops a failed
+heartbeat, so it learns the lease is gone only when a later write is
+refused, and does not act on directives; others write on after the lease
+lapsed, acknowledge each directive with a write of its own, or let their
+leases lapse at shutdown. The package's `./worker` subpath runs the loop
+for you, on the engine's typed client
+([The engine](/superschematic/guides/engine/#call-it-from-typescript)).
+It imports only `@superschematic/engine/client`, so a worker process
+loads no SQLite and no behavior:
+
+```ts
+import { EngineClient } from '@superschematic/engine/client';
+import { QueueWorker, WorkFailure } from '@superschematic/engine-workqueue/worker';
+import { signedTokenSource } from '@superschematic/http-runtime';
+
+const client = new EngineClient({
+  baseUrl: 'https://jobs.internal/api',
+  serviceCredential: { token: signedTokenSource(edgeKey, { issuer: 'indexer', subject: 'indexer', audience: 'jobs' }) },
+});
+
+const worker = new QueueWorker(client, {
+  schema: 'jobs',
+  match: { topic: 'search' },
+  concurrency: 4,
+  handle: async (job) => {
+    job.onDirective((directive) => {
+      if (directive.name === 'budgetExceeded') slowDown();
+    });
+    const { data } = await job.instance.get();
+    const result = await index(data, { signal: job.signal });   // aborts when the lease is lost
+    if (!result.ok) {
+      throw new WorkFailure('timed out', { failure: 'timeout', attempt: { detail: result.detail } });
+    }
+    await job.instance.invoke('recordUsage', { meter: 'cpuSeconds', amount: result.seconds });
+    return { transition: 'done' };
+  },
+  onError: (error, job) => console.warn(job?.id, error),
+});
+await worker.start();
+process.on('SIGTERM', () => worker.stop());
+```
+
+- **Claims.** `start()` reads the schema's describe document and claims
+  with `claimNext` until it holds `concurrency` jobs. An empty queue is
+  watched, not polled: the schema's event stream wakes the worker, and
+  between events it looks again with `countClaimable`, a read that takes
+  no write lock, after a backoff that doubles (`idle`).
+- **The job.** `job.instance` reads the claimed instance and presents
+  the lease's token on every write; `job.client` reaches everything else,
+  without it. Each job heartbeats at the claim's interval, and the
+  directives a heartbeat returns go to `job.onDirective`'s listeners, once
+  each; the next heartbeat acknowledges them in its own write.
+- **A lost lease.** A `lapsed` or `token_stale` refusal of a heartbeat or
+  a write, a deleted instance, or no heartbeat for the lease's length
+  aborts `job.signal` with a `LeaseLostError`. Pass the signal to what
+  the handler waits on. A write through `job.instance` after that throws
+  without being sent, and the worker writes nothing more for the job.
+- **How it ends.** `{ transition: 'done' }` records a successful attempt
+  when the schema composes `Retries`, moves the status and releases.
+  Returning nothing hands the job back. A `WorkFailure` records its
+  failure class and hands the job back, or abandons it with `abandon:
+  true`, which counts toward `maxExpiries`; any other error abandons it,
+  so a job no worker can finish escalates instead of coming back forever.
+- **Stopping.** `stop()` claims nothing more, waits up to 30 seconds for
+  the jobs it holds (`timeoutMs`; `drain: false` waits for none), then
+  aborts the rest and releases their leases, which counts nothing, so a
+  deploy hands work back at once instead of letting it lapse.
+- **Presence is yours.** The worker beats no `Presence` instance. A fleet
+  that keeps one per worker, as the example's does, beats it on a timer
+  of its own, at most the presence `ttlMs` apart.
+
+The package's
+[README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md#the-worker)
+has every option.
+
 ## Lease
 
 An exclusive, time-bounded lease on the instance, held by one principal.

@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/engine-workqueue",
   "version": "0.0.0",
-  "description": "Claimable work for @superschematic/engine (D16): the implementations of the core's work-queue behaviors, Lease, Assignment, Queue, Presence, Blueprint, Budget and Retries, which a deployment registers with the engine it opens. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs.",
+  "description": "Claimable work for @superschematic/engine (D16): the implementations of the core's work-queue behaviors, Lease, Assignment, Queue, Presence, Blueprint, Budget and Retries, which a deployment registers with the engine it opens. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs. The ./worker subpath runs a handler over the instances a process claims through the engine's HTTP API, importing only @superschematic/engine/client.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker/index.d.ts",
+      "import": "./dist/worker/index.js"
     }
   },
   "files": [
@@ -19,7 +23,7 @@
   },
   "scripts": {
     "link-deps": "node scripts/link-local-deps.mjs",
-    "typecheck": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json --noEmit",
+    "typecheck": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json",
     "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
     "test": "bun run build && bun run test:node && bun run test:bun",
     "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",

@@ -1,11 +1,14 @@
 // Package stackconfig holds the config fields an API's edges derive in a
 // stack (docs/stack-model.md, section 3.4): a database connection for the
-// API's database and a service endpoint for each API it calls. The
-// generated config loader reads each from the environment variables a
-// platform sets, one per member of the value the edge's connector derived:
-// the field's name, an underscore and the member's path in upper snake
-// case (SHOP_DB_DATABASE_URL, SHOP_API_SERVICE_CREDENTIAL_SOURCE). The
-// members are those of ir.DatabaseConnection and ir.ServiceEndpoint.
+// API's database, a service endpoint for each API it calls, and for an API
+// with a service clause its callers field, what its server verifies a
+// service credential against. The generated config loader and entrypoint
+// read each from the environment variables a platform sets, one per member
+// of the value the edges' connectors derived: the field's name, an
+// underscore and the member's path in upper snake case
+// (SHOP_DB_DATABASE_URL, SHOP_API_SERVICE_CREDENTIAL_SOURCE,
+// SHOP_API_CALLERS_ISSUERS_0_AUDIENCE). The members are those of
+// ir.DatabaseConnection, ir.ServiceEndpoint and ir.ServiceAuth.
 package stackconfig
 
 import (
