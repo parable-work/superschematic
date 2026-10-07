@@ -235,6 +235,11 @@ type ModuleOutput struct {
 	// declares, each written as src/versiongraph_<name>.rs.
 	VersionGraphs []VersionGraphInfo
 
+	// IdentityDescriptor is the schema's identity descriptor (D50) as a
+	// Rust raw string literal, the IDENTITY_DESCRIPTOR constant of
+	// src/identity.rs. Empty when the schema has no User table.
+	IdentityDescriptor string
+
 	// VersionGraphDepPath is the Cargo.toml path entry for the version
 	// graph's Rust engine crate (Naming.VersionGraphRustCrate), relative to
 	// the output directory, set by SetVersionGraphPath. Empty names the
@@ -389,6 +394,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 	if output.VersionGraphs, err = versionGraphs(schema, output.Types); err != nil {
+		return nil, err
+	}
+	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
 		return nil, err
 	}
 	output.UsesHashMap = hasMapFields(output.Types)

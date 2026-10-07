@@ -12,6 +12,9 @@ This crate contains Rust types generated from the `{{.SchemaName}}` schema.
 {{- range .VersionGraphs}}
 - `src/versiongraph_{{.FileName}}.rs` - the {{.Name}} version graph's typed facade over `{{$.Naming.VersionGraphRustCrate}}`
 {{- end}}
+{{- if .IdentityDescriptor}}
+- `src/identity.rs` - `IDENTITY_DESCRIPTOR`, the identity descriptor (D50)
+{{- end}}
 {{if gt (len .Unions) 0}}- `src/unions.rs` - union enums{{end}}
 {{- if gt (len .RuntimeSchemas) 0}}
 - `schemas/<Type>.json` - the schema IR of each `@jsonField` payload type and the definitions it reaches
