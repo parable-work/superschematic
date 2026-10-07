@@ -1,0 +1,96 @@
+{
+  "kind": "General",
+  "name": "Task",
+  "description": "A task of a project: its kind picks the shape of its detail, it pins the spec it builds, and it waits for its blockers.",
+  "scalars": {
+    "Generic.JSON": { "name": "Generic.JSON", "languagePrimitive": "string" },
+    "Generic.Int64": { "name": "Generic.Int64", "languagePrimitive": "number" },
+    "Generic.StringMap": { "name": "Generic.StringMap", "languagePrimitive": "string" },
+    "Temporal.DateTime": { "name": "Temporal.DateTime", "languagePrimitive": "string" }
+  },
+  "enums": {
+    "TaskKind": {
+      "name": "TaskKind",
+      "description": "What a task is.",
+      "values": [{ "name": "Build", "serializedAs": "build" }, { "name": "Review", "serializedAs": "review" }, { "name": "Chore", "serializedAs": "chore" }]
+    },
+    "Size": { "name": "Size", "values": [{ "name": "SMALL" }, { "name": "LARGE" }] }
+  },
+  "types": {
+    "Task": {
+      "name": "Task",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["todo", "doing", "done", "failed"],
+            "transitions": [
+              { "from": "todo", "to": "doing" },
+              { "from": "doing", "to": "done" },
+              { "from": "doing", "to": "failed" }
+            ],
+            "outcomes": { "failed": "failure" }
+          }
+        },
+        { "name": "Comments" },
+        {
+          "name": "Links",
+          "config": {
+            "links": {
+              "project": { "schema": "Project", "required": true },
+              "parent": { "schema": "Task" },
+              "spec": { "schema": "Spec", "pinned": true }
+            }
+          }
+        },
+        { "name": "Dependencies", "config": { "schemas": ["Task", "Spec"] } },
+        { "name": "Constants", "config": { "fields": ["kind"] } },
+        { "name": "Variants", "config": { "field": "detail", "by": "kind", "types": { "build": "BuildDetail", "review": "ReviewDetail" } } }
+      ],
+      "fields": [
+        { "name": "title", "description": "What the task does.", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "kind", "description": "What the task is.", "typeRef": { "name": "TaskKind" }, "required": true },
+        { "name": "detail", "description": "The task's detail, of its kind's type.", "typeRef": { "name": "Generic.JSON" } },
+        { "name": "estimate", "description": "Hours.", "typeRef": { "name": "number" } },
+        { "name": "attempts", "typeRef": { "name": "Generic.Int64" } },
+        { "name": "due", "typeRef": { "name": "Temporal.DateTime" } },
+        { "name": "size", "typeRef": { "name": "Size" } },
+        { "name": "labels", "typeRef": { "name": "string", "isArray": true } },
+        { "name": "grid", "typeRef": { "name": "number", "isArray": true, "isArrayOfArrays": true } },
+        { "name": "box", "typeRef": { "name": "Box" } },
+        { "name": "meta", "typeRef": { "name": "Generic.StringMap" } }
+      ]
+    },
+    "Box": {
+      "name": "Box",
+      "role": "EmbeddedStruct",
+      "description": "Where the task's parts go.",
+      "fields": [
+        { "name": "w", "typeRef": { "name": "number" }, "required": true },
+        { "name": "parts", "typeRef": { "name": "Part", "isArray": true }, "required": true },
+        { "name": "inner", "typeRef": { "name": "Box" } }
+      ]
+    },
+    "Part": {
+      "name": "Part",
+      "role": "EmbeddedStruct",
+      "fields": [{ "name": "name", "typeRef": { "name": "string" }, "required": true }]
+    },
+    "BuildDetail": {
+      "name": "BuildDetail",
+      "role": "EmbeddedStruct",
+      "description": "What a build task builds.",
+      "fields": [
+        { "name": "target", "typeRef": { "name": "string" }, "required": true },
+        { "name": "flags", "typeRef": { "name": "string", "isArray": true } }
+      ]
+    },
+    "ReviewDetail": {
+      "name": "ReviewDetail",
+      "role": "EmbeddedStruct",
+      "description": "What a review task reviews.",
+      "fields": [{ "name": "pullRequest", "typeRef": { "name": "number" }, "required": true }]
+    }
+  }
+}

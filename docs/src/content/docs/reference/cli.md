@@ -18,8 +18,9 @@ set. Extensions that implement `cli.CommandProvider` add subcommands at
 resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
-The core has seven commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors` and the `stack` group, beside
+The core has eight commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors`, `engine-client` and the `stack`
+group, beside
 cobra's own `help` and `completion`. The installed `superschematic` links
 the official extensions (the gcp target, the Cloudflare DNS platform and
 the Pulumi provisioner), which add none. The migration runner,
@@ -52,9 +53,10 @@ message naming the import, in every build command:
 `schema.config.ts imports Product from "@acme/shop-db", which is a class, not a service sentinel; a config imports only @superschematic/schema-config and other services' sentinels (D34)`.
 
 A type that composes a behavior (`behaviors` in the data forms) loads,
-and `--emit-ir` prints it, but no generator renders behaviors yet: the
-build fails and names the first generator that would run, the type and the
-behavior.
+and `--emit-ir` prints it, but no generator of a build renders behaviors:
+the build fails and names the first generator that would run, the type and
+the behavior. An engine runs such a schema; `engine-client` (below) types
+the engine's client for it.
 
 A generated package that imports a package the build does not generate
 fails the build:
@@ -433,6 +435,57 @@ implement them: `Workflow`, `Comments`, `Revisions`, `Dependencies`,
 @superschematic/engine-workqueue` (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
+
+## `engine-client --out <file.ts> <schema file>...`
+
+Write one TypeScript module of typed wrappers over the engine's client
+(`@superschematic/engine/client`) for engine schemas (D49). Per schema it
+exports:
+
+| Export | What it is |
+| --- | --- |
+| `<T>Fields` | the instance type's own fields, as a create gives them; with `Variants`, a union by the field that picks the type |
+| `<T>` | an instance's data as a read returns it: `<T>Fields` and each behavior's fields, `readonly` |
+| `<T>Patch` | a merge patch of the own fields |
+| `<T>State`, `<T>LinkName` | a `Workflow`'s states and a `Links` config's names, where the type composes them |
+| `<T>CreateParams`, `<T>Preconditions` | each behavior's create parameters and preconditions, by behavior name; an entry is required when its schema requires something, such as a required link |
+| `<T><Op>Params`, `<T><Op>Result`, `<T>Operations` | each behavior operation's parameters and result |
+| `<T>Vetoes`, `is<T>Veto` | the codes each behavior's vetoes carry, and `isVeto` typed by them |
+| `<Schema>Client`, `<schema>Client(client)` | the wrapper: `create`, `get`, `list`, `update`, `delete`, `operate` and a method per behavior operation |
+
+`<T>` is the instance type's name, the type named like the schema or its
+only type, and `<Schema>` the schema's name in PascalCase. A behavior's
+config narrows its declaration's shapes for the core's behaviors:
+`Workflow`'s states, `Links`' names and targets, `Dependencies`' blocker
+schemas, `Rollups`' values, `Revisions`' patches and `Variants`' types.
+Another behavior, an extension's among them, is typed by its declaration,
+and its fields hold any JSON. A scalar is typed by the JSON its values
+are on the wire (`Temporal.DateTime` a string), not by its scalar
+library's symbol.
+
+```
+superschematic engine-client --out src/notes.client.ts schemas/notes.schema.json
+superschematic engine-client --out src/jobs.client.ts schemas/batches.schema.json schemas/jobs.schema.json schemas/workers.schema.json
+superschematic engine-client --out src/notes.client.ts --check schemas/notes.schema.json
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--out` | (required) | the TypeScript file the module is written to |
+| `--check` | false | write nothing; fail when the file is not what would be written |
+| `--naming` | the `superschematic.toml` found walking up from the first file | naming config file |
+
+Each file is one schema document as the engine takes it: `kind: General`,
+a `name`, no imports and no operation sets. A `.schema.json` or
+`.schema.yaml` file is read on its own, and a `.schema.ts` file in the
+context of its service, as `format` reads it. The command runs the
+loader's checks, the behaviors' configs against their declarations
+included, and refuses what the engine refuses: a map or union field, and
+two schemas whose exports share a name. The module imports the client
+from `engine_npm_package`'s `/client` entry point and nothing else, so it
+runs wherever the client does. It is a command of its own rather than a
+`build` target: an engine schema has no service config, and one module
+types schemas that link to each other.
 
 ## `stack dev [<stack-service-dir>]`
 

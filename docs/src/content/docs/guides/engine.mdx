@@ -772,6 +772,47 @@ section has every call and option, and
 [Work queues](/superschematic/guides/work-queues/#write-a-worker) builds a
 worker on it.
 
+### Typed wrappers for your schemas
+
+The client is generic over schema names: `create` takes any object and an
+operation any parameters, so a misspelled field, state or link name
+reaches the server and comes back as a refusal. `superschematic
+engine-client` writes a module that types the client for your schemas,
+from their documents and the behaviors' declarations:
+
+```sh
+superschematic engine-client --out src/notes.client.ts schemas/notes.schema.json
+```
+
+```ts
+import { EngineClient } from '@superschematic/engine/client';
+import { isNoteVeto, notesClient } from './notes.client.ts';
+
+const notes = notesClient(new EngineClient({ baseUrl: 'http://127.0.0.1:8787/api', auth: { token: 'alice-token' } }));
+
+const note = await notes.create({ title: 'Launch' }, { id: 'launch' });   // data: NoteFields
+note.data.status;                                                         // 'draft' | 'review' | 'published' | 'archived'
+await notes.transition('launch', { to: 'review' });                       // { to: 'publshed' } fails to compile
+await notes.comment('launch', { body: 'Ships in the fall.' });
+await notes.propose('launch', { patch: { body: 'Ships on the first.' } }); // patch: NotePatch
+try {
+  await notes.transition('launch', { to: 'review' });
+} catch (error) {
+  if (!isNoteVeto(error, 'Workflow', 'already_in_state')) throw error;   // codes Workflow lists
+}
+```
+
+The behaviors' configs narrow the types: a `Workflow`'s states, the names
+of a `Links` config with each required link required at create, the
+schemas a `Dependencies` blocker may come from, and with `Variants` the
+type of the field for each value of the one that picks it. An operation's
+method takes its declaration's parameters and returns its result, and a
+write's `preconditions` take only the behaviors that declare one (Lease's
+`token`). The module imports the client and nothing else, so it runs in
+a browser too. The example commits `src/notes.client.ts` and uses it in
+its end-to-end test; regenerate it when the schema changes, and run
+`engine-client --check` in CI to keep it current.
+
 ## MCP tools
 
 The MCP endpoint serves one tool per operation of every live schema the

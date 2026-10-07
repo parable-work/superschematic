@@ -200,6 +200,14 @@ Python import name of the Python version-graph runtime. A generated
 facade (`<module>/versiongraph_<name>.py`) imports the facade base from
 its `facade` module.
 
+### `engine_npm_package`
+
+Default: `@superschematic/engine`
+
+npm package name of the engine. The module `superschematic engine-client`
+writes imports the typed client from its `/client` entry point
+([CLI](/superschematic/reference/cli/#engine-client---out-filets-schema-file)).
+
 ### `ptr_go_module`
 
 Default: `github.com/parable-work/superschematic/runtime/schema/go/ptr`

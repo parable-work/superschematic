@@ -111,6 +111,10 @@ type Naming struct {
 	// TypeScript types import when their schema declares a graph.
 	VersionGraphNpmPackage string `toml:"versiongraph_npm_package"`
 
+	// EngineNpmPackage is the engine (D16), whose ./client subpath the
+	// module `superschematic engine-client` writes imports (D49).
+	EngineNpmPackage string `toml:"engine_npm_package"`
+
 	// VersionGraphPyPIDist and VersionGraphPythonModule are the Python
 	// version-graph runtime (D19): the engine, its Postgres adapter and the
 	// facade base, which the generated Python types depend on and import
@@ -510,6 +514,7 @@ func Default() Naming {
 		PtrGoModule:              "github.com/parable-work/superschematic/runtime/schema/go/ptr",
 		HTTPRuntimeNpmPackage:    "@superschematic/http-runtime",
 		VersionGraphNpmPackage:   "@superschematic/versiongraph",
+		EngineNpmPackage:         "@superschematic/engine",
 		VersionGraphPyPIDist:     "superschematic-versiongraph",
 		VersionGraphPythonModule: "superschematic_versiongraph",
 		SchemaLanguage:           "Superschematic",
@@ -566,6 +571,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.PtrGoModule, d.PtrGoModule)
 	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
 	fill(&n.VersionGraphNpmPackage, d.VersionGraphNpmPackage)
+	fill(&n.EngineNpmPackage, d.EngineNpmPackage)
 	fill(&n.VersionGraphPyPIDist, d.VersionGraphPyPIDist)
 	fill(&n.VersionGraphPythonModule, d.VersionGraphPythonModule)
 	fill(&n.SchemaLanguage, d.SchemaLanguage)
