@@ -177,8 +177,8 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, repository string) (*ir.R
 			return nil, fmt.Errorf("gcp: the service account id %s is %d characters, and GCP allows 30; name the stack with at most %d", id, len(id), 30-len(role)-1)
 		}
 	}
-	if len(stack)+len("-github") > 32 {
-		return nil, fmt.Errorf("gcp: the workload identity pool id %s-github is longer than GCP's 32 characters; name the stack with at most 25", stack)
+	if pool := workloadIdentityPool(env.Stack); len(pool) > 32 {
+		return nil, fmt.Errorf("gcp: the workload identity pool id %s is longer than GCP's 32 characters; name the stack with at most 25", pool)
 	}
 	var nodes []*ir.Resource
 	add := func(id, typ string, props map[string]any) {
@@ -259,14 +259,14 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, repository string) (*ir.R
 	if repository != "" {
 		add("github", TypeWorkloadIdentityPool, map[string]any{
 			"project":                v.project,
-			"workloadIdentityPoolId": stack + "-github",
+			"workloadIdentityPoolId": workloadIdentityPool(env.Stack),
 			"displayName":            "GitHub Actions",
 			"description":            fmt.Sprintf("The CI of %s", repository),
 		})
 		add("github.provider", TypeWorkloadIdentityProvider, map[string]any{
 			"project":                        v.project,
 			"workloadIdentityPoolId":         ir.Output{Resource: "github", Name: "workloadIdentityPoolId"},
-			"workloadIdentityPoolProviderId": "github",
+			"workloadIdentityPoolProviderId": workloadIdentityProvider,
 			"displayName":                    "GitHub",
 			"attributeMapping": map[string]any{
 				"google.subject":       "assertion.sub",
