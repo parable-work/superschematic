@@ -71,12 +71,7 @@
           "source": "derived",
           "value": {
             "credential": {
-              "audience": {
-                "$output": {
-                  "resource": "shop-api.service",
-                  "name": "url"
-                }
-              },
+              "audience": "shop-api",
               "source": "google-id-token"
             },
             "url": {
@@ -339,12 +334,7 @@
             },
             {
               "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
-              "value": {
-                "$output": {
-                  "resource": "shop-api.service",
-                  "name": "url"
-                }
-              }
+              "value": "shop-api"
             },
             {
               "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",

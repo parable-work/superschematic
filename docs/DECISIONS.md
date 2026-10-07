@@ -3879,4 +3879,43 @@ Cloud. Not built: a deploy lock beyond the provisioner's and the
 runner's, and a lifecycle rule that prunes old contexts and job documents
 from the bucket.
 
+### D37, amended: the callee's callers field, which the connectors write and the entrypoint verifies against
+
+D37 said each inbound edge's connector writes what the callee checks into
+the callee's config, and its first amendment left that config, the
+connectors writing it and the generated entrypoint reading it unbuilt,
+for one change to define together. Building them for the local and gcp
+connectors and the Go entrypoint settled the contract, and changed two of
+D37's choices on Cloud Run.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A served API with a service clause has a callers field, `<API>_CALLERS` by the core's rule: the API's name in upper snake case and `_CALLERS`, which begins with no other derived field's name, so a server that serves an API and calls it holds both. The loader's verify pass and the resolver refuse a setting or an env key that takes it or one of its variables. | One field per server, the union over its inbound edges: without `from`, a route lists every server with a `calls` edge to its API, and the union would pass a server whose edge reaches another API of the callee. `{SERVICE}_SERVICE_AUTH`, which the caller's `{SERVICE}_SERVICE` claims on a server that serves and calls one API. A `[derived_fields]` template, which the naming file can add later; the resolver's own templates come from no naming file yet. |
+| Its value, `ir.ServiceAuth`, is the runtimes' `serviceauth` config: issuers, each with its issuer and aliases, audience, algorithms, JWKS URL or keys, subject claim, maximum lifetime and callers, each a subject, the deployable it is and the APIs it serves. The callers are a list, not a map keyed by subject, since a subject may be a reference, and a key is its JWK's JSON, since it may be an output. `ir.CheckServiceAuth` and `ir.CheckServiceAuthIssuer` hold the contract. | A value of the local and gcp shapes only, which every later platform would have to widen. |
+| Each http edge between two servers gives the callee an issuer listing the edge's caller alone, `registry.Connected.Callee`. Resolution checks it, with the edge's caller and that caller's APIs, merges the entries of the edges to an API by issuer, which must agree on all but their callers, and binds the field with `callersOf` and the edges it comes from. An edge to an API with a service clause whose connector gives no entry fails as `lowering`. An API no other server calls gets the field with no issuers, so its server starts and refuses every service credential. | Refusing to resolve a server with a clause and no inbound edge: the API is deployed in many stacks, and section 9.3's check already refuses an edge it cannot use. Leaving the field unset there, which the entrypoint could not tell from a platform that forgot it. |
+| `ir.DerivedVariables` encodes a list of objects as a variable holding its length and each object's members under the list's name and the object's index, and a whole number as its decimal. `stackconfig.LoadCallers` reads the field into a `serviceauth.Config` and refuses a variable under the field's name that is no member. | The field as one JSON document, which section 3.4 refuses for every derived field. Variables keyed by the caller's name, which an upper snake case name can make two of one. |
+| The local connector gives the caller as an issuer of its own: its deployable as issuer and subject, the edge's key pair's `publicJwk` output as its key, the callee's deployable as audience, EdDSA and 300 seconds at most. | |
+| On Cloud Run the audience is the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, which every service lists and every caller asks the metadata server for. This replaces D37's audience, the callee's URL: that is an output of the callee's own service, which its callers field cannot reference without the service depending on itself. | The deterministic `run.app` URL, which needs the project's number, which no environment value holds. Reading the service's URL at run time, which puts Google's metadata into the provider-neutral runtime (D6). |
+| On Cloud Run the callee knows the caller by its service account's email in the token's `email` claim, `<service>@<project>.iam.gserviceaccount.com`, a name resolution composes. This replaces D37's unique id in `sub`. | The unique id, an output of the caller's account node, which every callee's config would reference; the environment owns the account its email names. |
+| The Go entrypoint's `serviceAuthenticator(api)`, which main.go calls once per API with a clause, lives in `serviceauth.go` beside `main.go`, and returns a `serviceauth.Verifier` over the API's callers field. A server without the field refuses to start and says which variable is missing. | Keeping it in `main.go`, which every other feature of the entrypoint edits. |
+
+`internal/stack`'s tests cover the merge, an API no server calls, a call
+within one server, the collisions and each broken entry; the local and gcp
+goldens resolve the shop with `@requireService` and `@allowService` on
+shop-api (`stacktest.RequireServiceShop` and `AllowServiceShop`);
+servergen's golden and compiled tests cover `serviceauth.go`; and `cli`'s
+`TestStackDevVerifiesServiceCallers` runs three Go servers with `stack
+dev`. There the caller is admitted with its end user forwarded, a request
+with no credential, from a server with no edge, or for another audience is
+401 `service_unauthorized`, and a caller the route's `from` leaves out is
+403 `service_forbidden`. The stack has no database, so the run needs no
+Docker. The parity vectors are unchanged.
+
+Not built: the TypeScript and Rust entrypoints, which will read the same
+field; the generic connector; key rotation; and the field outside a
+stack, where `values-schema.json` does not list it. A call between two
+APIs one server serves carries no credential, so a `@requireService`
+operation refuses it though section 9.3's check counts it, which section
+9.9 of `docs/stack-model.md` leaves open.
+
 The rule is reversible until the first release.
