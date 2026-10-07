@@ -148,20 +148,42 @@ type (
 	// keeps its provisioner's state backend and each Run's deploy
 	// manifest, its SecretStore the values of secrets and platform
 	// Credentials, its Bootstrapper prepares a cloud project
-	// (BootstrapRequest), its MigrationRunner runs MigrationPlans
-	// (MigrationRequest) between the deploy's steps, and its ImageBuilder
-	// builds a server's image (BuildRequest) before them.
+	// (BootstrapRequest) and returns the BootstrapValues the core records
+	// in the schema (BootstrapResult), its MigrationRunner runs
+	// MigrationPlans (MigrationRequest) between the deploy's steps, and its
+	// ImageBuilder builds a server's image (BuildRequest) before them.
 	Run              = registry.Run
 	StateStore       = registry.StateStore
 	SecretStore      = registry.SecretStore
 	Bootstrapper     = registry.Bootstrapper
 	BootstrapRequest = registry.BootstrapRequest
+	BootstrapResult  = registry.BootstrapResult
+	BootstrapValue   = registry.BootstrapValue
 	MigrationRunner  = registry.MigrationRunner
 	MigrationRequest = registry.MigrationRequest
 	MigrationPlan    = registry.MigrationPlan
 	ImageBuilder     = registry.ImageBuilder
 	BuildRequest     = registry.BuildRequest
 	Credential       = registry.Credential
+
+	// The generated CI (docs/stack-model.md, section 11.3, D47): a CI
+	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack) and
+	// its CIEnvironments with the renderer's CIOptions, to CIFiles. A
+	// target's CI seam (CIIdentities) gives each environment a CIIdentity
+	// per CIRole, a provisioner's spec lists the CLITools a CI job
+	// installs, and the request names the release's CIArchive for each
+	// platform, which a job that compiles a Go server links.
+	CIRendererSpec = registry.CIRendererSpec
+	CIRequest      = registry.CIRequest
+	CIArchive      = registry.CIArchive
+	CIStack        = registry.CIStack
+	CIEnvironment  = registry.CIEnvironment
+	CIOptions      = registry.CIOptions
+	CIFile         = registry.CIFile
+	CIIdentities   = registry.CIIdentities
+	CIIdentity     = registry.CIIdentity
+	CIRole         = registry.CIRole
+	CLITool        = registry.CLITool
 
 	Naming             = registry.Naming
 	Options            = registry.Options
@@ -191,6 +213,15 @@ const (
 	// database platform declares.
 	SQLDialectPostgres = registry.SQLDialectPostgres
 	SQLDialectSQLite   = registry.SQLDialectSQLite
+
+	// CIPlanner and CIDeployer are the roles a CI job signs in as;
+	// PackageManagerBun and PackageManagerNPM the package managers a
+	// CIStack names; DefaultCIBranch the branch CIOptions default to.
+	CIPlanner         = registry.CIPlanner
+	CIDeployer        = registry.CIDeployer
+	PackageManagerBun = registry.PackageManagerBun
+	PackageManagerNPM = registry.PackageManagerNPM
+	DefaultCIBranch   = registry.DefaultCIBranch
 
 	// OpenAPIDocsKey is the vendor-extension key an operation's @docs record
 	// is written under in the OpenAPI document; an OpenAPIHook renames it.

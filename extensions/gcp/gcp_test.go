@@ -27,8 +27,10 @@ var update = flag.Bool("update", false, "rewrite the golden environment.json fil
 // a build writes them: stack/<stack>/<environment>/environment.json.
 const goldenRoot = "testdata/golden"
 
-// pulumiStub registers a provisioner under the name the gcp target names.
-// The real one is the pulumi extension's; a distribution links both.
+// pulumiStub registers a provisioner under the name the gcp target names,
+// with the tool the real one declares, the pulumi CLI at its SDK's
+// release. The real one is the pulumi extension's; a distribution links
+// both.
 type pulumiStub struct{}
 
 func (pulumiStub) Name() string { return "pulumi-stub" }
@@ -36,6 +38,7 @@ func (pulumiStub) Name() string { return "pulumi-stub" }
 func (pulumiStub) Register(r *registry.Registry) error {
 	return r.RegisterProvisioner(registry.ProvisionerSpec{
 		Name: gcp.Provisioner, Extension: "pulumi-stub", Provisioner: &stacktest.FakeProvisioner{},
+		Tools: []registry.CLITool{{Name: "pulumi", Version: "3.259.0"}},
 	})
 }
 
