@@ -171,7 +171,7 @@ func TestBootstrap(t *testing.T) {
 		return stackdeploy.BootstrapOptions{Options: f.options(t, env, nil), Repository: "acme/shop", Prompter: term}
 	}
 	term := &terminal{answers: []string{"dns-token"}}
-	if err := stackdeploy.Bootstrap(ctx, options(term)); err != nil {
+	if _, err := stackdeploy.Bootstrap(ctx, options(term)); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.calls(0); !slices.Equal(got, []string{"bootstrap Staging: repository acme/shop, credentials shop-stack-fake-dns-acme_dev"}) {
@@ -184,7 +184,7 @@ func TestBootstrap(t *testing.T) {
 		t.Errorf("stored %q", got)
 	}
 	term = &terminal{}
-	if err := stackdeploy.Bootstrap(ctx, options(term)); err != nil {
+	if _, err := stackdeploy.Bootstrap(ctx, options(term)); err != nil {
 		t.Fatal(err)
 	}
 	if len(term.prompts) > 0 {
@@ -193,7 +193,7 @@ func TestBootstrap(t *testing.T) {
 
 	// Without a terminal, a missing credential fails.
 	f = newFixture(t)
-	if err := stackdeploy.Bootstrap(ctx, stackdeploy.BootstrapOptions{Options: f.options(t, env, nil)}); err == nil || !strings.Contains(err.Error(), "no terminal") {
+	if _, err := stackdeploy.Bootstrap(ctx, stackdeploy.BootstrapOptions{Options: f.options(t, env, nil)}); err == nil || !strings.Contains(err.Error(), "no terminal") {
 		t.Errorf("bootstrap without a terminal: %v", err)
 	}
 }
