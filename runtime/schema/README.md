@@ -143,12 +143,15 @@ although the row says `String`:
   passes the value through parse, and validates only that it is a JSON
   value. A null or missing required one is `required`.
 - A scalar whose mapping is `object` or `array` (`Generic.StringMap`,
-  `Embedding.Vector`) holds that JSON object or array, or its JSON text
-  (`ir.ScalarDef.StructuredJSONType`, `structuredJSONType`,
+  `Geo.Location`, `Embedding.Vector`) holds that JSON object or array, or
+  its JSON text (`ir.ScalarDef.StructuredJSONType`, `structuredJSONType`,
   `ScalarDef.structured_json_type`). Parse reads the text into the object
   or array; validation refuses any other JSON type as `type` and hands the
-  scalar core the value's JSON text. A scalar that also has a pattern or a
-  length (`Geo.Location`) keeps the `String` checks.
+  scalar core the value's JSON text, which names what it refuses its own
+  way (`pattern` in the Go runtime, the core's name in the TypeScript
+  runtime, `custom` in the Python runtime, whose registry reads a scalar's
+  flat name as its canonical one). An empty string is no value. A scalar
+  that also has a pattern or a length keeps the `String` checks.
 
 The TypeScript catalog also exports `BUILTIN_SCALAR_VALUE_CLASSES`, keyed
 as `BUILTIN_SCALARS` is: the value class (D19) the graph descriptor gives

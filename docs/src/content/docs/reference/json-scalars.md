@@ -1,23 +1,22 @@
 ---
 title: JSON-valued scalars
-description: The scalars whose value is not a string (Generic.JSON, Generic.StringMap, Embedding.Vector), what each target types them as, how they are validated, and what a scalar of your own that holds JSON declares.
+description: The scalars whose value is not a string (Generic.JSON, Generic.StringMap, Geo.Location, Embedding.Vector), what each target types them as, how they are validated, and what a scalar of your own that holds JSON declares.
 sidebar:
   order: 6
 ---
 
-Most scalars hold a string or a number. Three in the core catalog hold a
-JSON value instead, and one is not settled yet. superscalar's metadata
-gives all four the `String` primitive; their `json_schema` type mapping
-says what they hold, and every validator keys off that mapping, not the
-scalar's name
+Most scalars hold a string or a number. Four in the core catalog hold a
+JSON value instead. superscalar's metadata gives all four the `String`
+primitive; their `json_schema` type mapping says what they hold, and every
+validator keys off that mapping, not the scalar's name
 ([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-a-json-object-or-array-scalar-holds-that-object-or-array)).
 
 | Scalar | `json_schema` | Value on the wire |
 |--------|---------------|-------------------|
 | `Generic.JSON` | `any` | Any JSON value; null only when optional |
 | `Generic.StringMap` | `object` | A JSON object of string values, such as `{"region": "eu"}` |
+| `Geo.Location` | `object` | A point, a JSON object of two numbers in degrees: `{"lat": 37.7749, "lon": -122.4194}` ([below](#geolocation)) |
 | `Embedding.Vector` | `array` | A JSON array of numbers, such as `[0.12, -0.5]` |
-| `Geo.Location` | `object` | Not settled: see [below](#geolocation) |
 
 ## A scalar of your own that holds JSON
 
@@ -25,7 +24,7 @@ A scalar whose language primitive is `object` says what JSON it holds
 through its `json_schema` type mapping: `object`, `array` or `any`. The
 validators take the mapping as the only sign that a scalar holds JSON, and
 a pattern or a length, which are rules on a string, cancels `object` or
-`array`, as it does for `Geo.Location`. Without one of them, the schema
+`array`. Without one of them, the schema
 runtimes and the engine would check the scalar's values as strings, while
 the generated Go, TypeScript, Python and Rust types hold an object
 ([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-a-scalar-that-holds-json-says-which-json)).
@@ -71,45 +70,54 @@ lengths or other rules, and the engine checks none of them.
 
 ## What each target generates
 
-| Target | `Generic.StringMap` | `Embedding.Vector` |
-|--------|---------------------|--------------------|
-| Go types | `map[string]string` | `[]float32` |
-| TypeScript types | `Record<string, string>` | `number[]` |
-| Python types | `Dict[str, str]` | `list[float]` |
-| Rust types | `HashMap<String, String>` | `Vec<f32>` |
-| OpenAPI | `object` with string values | `array` of numbers |
-| SQL | `JSONB` | `TEXT` |
+| Target | `Generic.StringMap` | `Geo.Location` | `Embedding.Vector` |
+|--------|---------------------|----------------|--------------------|
+| Go types | `map[string]string` | superscalar's `GeoLocation`, a struct whose `Lat` and `Lon` are tagged `json:"lat"` and `json:"lon"` | `[]float32` |
+| TypeScript types | `Record<string, string>` | `{ lat: number; lon: number }` | `number[]` |
+| Python types | `Dict[str, str]` | superscalar's `GeoLocation` `TypedDict`, or `Dict[str, Any]` where superscalar is not installed | `list[float]` |
+| Rust types | `HashMap<String, String>` | `superscalar::metadata::geo_location::Location`, under the scalar crate's name | `Vec<f32>` |
+| OpenAPI | `object` with string values | `object` | `array` of numbers |
+| SQL | `JSONB` | `POINT` | `TEXT` |
 
 The generated Go `Parse<Symbol>` reads the value's JSON text:
-`ParseEmbeddingVector("[0.5, 1]")` returns `[]float32{0.5, 1}`.
+`ParseEmbeddingVector("[0.5, 1]")` returns `[]float32{0.5, 1}`, and
+`ParseGeoLocation("{\"lon\": -122.4194, \"lat\": 37.7749}")` returns
+`GeoLocation{Lat: 37.7749, Lon: -122.4194}`.
 
 ## Validation
 
-For `Generic.StringMap` and `Embedding.Vector`, every validator (the Go,
-TypeScript and Python schema runtimes and the generated Go, TypeScript,
-Python and Rust validators) follows one rule:
+For `Generic.StringMap`, `Geo.Location` and `Embedding.Vector`, every
+validator (the Go, TypeScript and Python schema runtimes and the generated
+Go, TypeScript, Python and Rust validators) follows one rule:
 
-- The JSON object (for `Generic.StringMap`) or JSON array (for
-  `Embedding.Vector`) is a value. So is an empty one.
+- The JSON object (for `Generic.StringMap` and `Geo.Location`) or JSON
+  array (for `Embedding.Vector`) is a value. So is an empty one, where the
+  scalar allows it.
 - A string holding the value's JSON text, such as `"{\"region\": \"eu\"}"`,
   is accepted on input. The runtimes' parse step reads it into the object
   or array. An empty string is no value.
 - Any other JSON type is one `type` error at the field's path: a number, a
-  boolean, an array for `Generic.StringMap`, an object for
-  `Embedding.Vector`.
+  boolean, an array for `Generic.StringMap` or `Geo.Location`, an object
+  for `Embedding.Vector`.
 - A null or missing required value is `required`, a null optional one is
   absent, and a null list element is `required` at its index.
 - What the value holds is superscalar's check: a `Generic.StringMap` value
-  must be a string, an `Embedding.Vector` element a number. Each validator
-  names that failure as it names any failure only the scalar core finds
-  ([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)),
-  so the name differs between validators.
+  must be a string, an `Embedding.Vector` element a number, and a
+  `Geo.Location` has exactly `lat` and `lon`, each a number in range. Each
+  validator names that failure as it names any failure only the scalar
+  core finds
+  ([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)):
+  the generated Go, TypeScript and Rust validators and the TypeScript
+  runtime use the core's name (`parse`, `custom`, `range`), the Go runtime
+  says `pattern`, the Python runtime `custom`, and the generated Python
+  validator `invalid`, once at the field for a list. The parity matrix
+  holds `Geo.Location`'s failures under each validator's name.
 
 The typed decoders take only the object or array: the generated Go types,
 the Go API routes and the TypeScript API server answer the JSON text with
 `type`, or fail to decode it. The generated Rust validators pass the JSON
 text, and `parse_<type>` then fails to decode it, since serde reads the
-field as a map or a vector. The generated Python types read the JSON text
+field as a map, a struct or a vector. The generated Python types read the JSON text
 into the value, and so does the Python SDK, which types a body argument of
 either scalar as the types package's alias and sends the object or array
 the text holds.
@@ -154,18 +162,28 @@ lists or map that is null is absent, as any other list or map is. A
 
 ## Geo.Location
 
-`Geo.Location`'s metadata contradicts itself: its `json_schema` is `object`,
-its SQL type `POINT` and its TypeScript type `{ lat: number; lon: number }`,
-but it also has the pattern `^-?\d+(\.\d+)?,-?\d+(\.\d+)?$` and the example
-`37.7749,-122.4194`. The generated types do not agree on its wire form:
+`Geo.Location` is a point: a JSON object of two numbers in decimal
+degrees, `{"lat": 37.7749, "lon": -122.4194}`, with `lat` from -90 to 90
+and `lon` from -180 to 180, each bound included, and no other key.
+superscalar checks it, so the `"lat,lon"` string, an unknown, missing or
+duplicate key, a member that is not a number and a degree out of range are
+refused. Its canonical text writes each number as `JSON.stringify` does:
+`{"lat": 90.0, "lon": -180}` reads back as `{"lat":90,"lon":-180}`
+([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-geolocation-is-a-lat-lon-object)).
 
-- The Go type is a struct with no JSON tags, so it writes
-  `{"Lat": 37.7749, "Lon": -122.4194}` and refuses `"37.7749,-122.4194"`.
-  The generated Go `Validate` tests the pattern on the struct and does not
-  build.
-- The generated TypeScript, Python and Rust validators test the pattern, so they
-  accept `"37.7749,-122.4194"` and refuse `{"lat": 37.7749, "lon": -122.4194}`.
-- The schema runtimes check it as a string with that pattern.
+`{"lat": 0, "lon": 0}` is a location, not a missing one. The generated Go
+types tell it apart from an absent or null value: a type's `UnmarshalJSON`
+notes a required `Geo.Location` the JSON left out, which `Validate`
+reports as `required`, and checks each value's own JSON with superscalar,
+so an unknown or missing key, which `encoding/json` would drop or zero-fill,
+is refused at its path as `custom`. A value set after decoding is checked
+as set.
 
-Until superscalar's metadata agrees with itself, every validator checks it
-as a string, and a schema that needs Go types should not use it.
+In Postgres a `Geo.Location` column is a `POINT`, which is `(x, y)`: x is
+the longitude and y the latitude, so `{"lat": 37.7749, "lon": -122.4194}`
+is stored as `point(-122.4194, 37.7749)`. The generated Go ORM writes and
+reads it that way, its versioned history included, and the column needs no
+PostGIS. The ORM does not yet read or write a list of locations
+(`POINT[]`). A version graph cannot hold one: no value class reads
+`POINT`, so the graph generator and the engine's `Branches` refuse a
+member field of `Geo.Location`.

@@ -3879,3 +3879,56 @@ operation refuses it though section 9.3's check counts it, which section
 9.9 of `docs/stack-model.md` leaves open.
 
 The rule is reversible until the first release.
+
+### D14, amended: Geo.Location is a {lat, lon} object
+
+The amendment that made a JSON object or array scalar hold that object or
+array left `Geo.Location` as it was: its row declared an object but also
+a `"lat,lon"` pattern, so every validator checked it as a string, and the
+generated types disagreed on its wire form. superscalar#55 settles the row,
+and this repository moves to it: `superscalar.pin`, and the nine `go.mod`
+files that require `github.com/parable-work/superscalar/go`, are at
+`8bb3cbb31da512b9252d4d4f856b4648ff7c9ec6`, which also carries
+superscalar#56's `Contact.PhoneNumber` example. The catalogs are
+regenerated from it.
+
+`Geo.Location` is now a point, the JSON object `{"lat": <number>, "lon":
+<number>}` in decimal degrees: `lat` in [-90, 90] and `lon` in [-180, 180],
+and no other key. superscalar refuses the `"lat,lon"` string, an unknown
+or duplicate key, a missing one, a member that is not a number and a
+degree out of range, and writes each number of its canonical text as
+`JSON.stringify` does. Its row has the `String` primitive, `json_schema`
+`object`, no pattern, the parse hook, and the object as its example; Go
+types it as a struct tagged `json:"lat"` and `json:"lon"`, TypeScript as
+`{ lat: number; lon: number }`, Python as `superscalar.GeoLocation`, Rust as
+`superscalar::metadata::geo_location::Location`, and SQL as `POINT`. With
+no pattern, `StructuredJSONType` reads it as an object, so it takes
+`Generic.StringMap`'s path in every validator with no change to them.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `{"lat": 0, "lon": 0}` is a location, and the generated Go types tell it from an absent or null value. A JSON-object scalar (`Generic.StringMap`, `Geo.Location`) is a validatable field, so `Validate` hands every value, required, optional, in a list, a list of lists, a map or an `InputField`, to the scalar package's `Validate` or `ValidateRequired`, which treats a zero `GeoLocation` as a value. A type with such fields checks each value's own JSON with superscalar in `UnmarshalJSON` and records, in an unexported pointer that is nil for a valid payload, what the decoded value cannot show: a failure only the JSON has (an unknown, missing or duplicate key, which `encoding/json` drops, zero-fills or overwrites) and a required struct value the JSON left absent or null. `Validate` reports the record under the core's name, or `required`, while the field still holds the value decoded; a field set afterwards is checked as set. | `jsonValueMissing`, which read the zero struct as missing. A pointer for a required location, which changes the Go type of every required field. Refusing an absent or null one in `UnmarshalJSON`, which a type without `@strictJSON` leaves to `Validate`. A defined type with an `UnmarshalJSON` of its own in each types package, which ends the zero-cast interoperability the scalar aliases give between packages. Refusing a failing value at decode, which the parity matrix would see as a decode refusal rather than a named failure. |
+| rustgen keeps the catalog's type path and rewrites the `superscalar::` prefix to the scalar crate's name, as it does for `Uuid` and `DateTime`, so a generated crate aliases the struct and a renamed scalar crate still names it. | `serde_json::Value`, which the loader gave it while the row declared a struct instead of naming a type |
+| pygen gives the scalar the type its Python mapping names in the scalar library, imported from the configured scalar Python module inside a `try`, with `Dict[str, Any]` for an object scalar when the library is absent; a JSON-parsed scalar skips the name-based location branch and is parsed by superscalar; its example is the decoded object. | The `Dict[str, float]` that read `"lat,lon"` strings by the scalar's name and never called the parser it defined |
+| The parity matrix holds `Geo.Location` (`LocationMatrix`), core-only failures included. A vector lists the paths only the scalar core fails in `core`, and `want` names them as the core does (`parse`, `custom`, `range`), which the generated Go, TypeScript and Rust validators and the TypeScript runtime report. The harness renames them for the others, as D14 recorded: the generated Python validator says `invalid`, once at the field for a list it checks whole; the Go runtime `pattern` and the Python runtime `custom`, which their suites read from the corpus's `core`. The generated Python driver runs in `runtime/schema/python`'s environment, which has superscalar. | Leaving core-only failures out of the matrix, which is how `Geo.Location`'s old row went unnoticed |
+| The Python runtime's scalar registry reads a flat name (`Geo_Location`, as the schema JSON form keys a scalar) as its canonical one, as the TypeScript registries do, so it reaches the core; an empty string, no JSON text, is a missing value it does not ask the core about. | Keeping the gap D14 recorded, under which the Python runtime never checked what a JSON-object scalar holds |
+| The Go ORM reads and writes a `Geo.Location` column through a `pgtype.Point`, as a date goes through a `pgtype.Date`: a `POINT` is `(x, y)`, x the longitude and y the latitude, and the versioned history decoder reads the `"(x,y)"` text `to_jsonb` writes. sqlgen no longer requires PostGIS for `POINT`, a type of Postgres's own; `geography` and `geometry` still do. | Handing pgx the struct, which sent its JSON text to the column and refused every write; storing the location as `JSONB`, a column type change |
+| A version graph still cannot hold a `Geo.Location`: no value class reads `POINT`. graphdesc's refusal now names what the value holds, `Geo.Location holds a JSON object but is stored as POINT`, where it named a JSON string. | A value class for `POINT`, which needs a canonical form for the version graph's rows first |
+
+`TestCatalogRustTypes` builds a crate against superscalar's struct, and
+`TestRemapScalarLibTypeFollowsTheScalarCrate` renames the crate.
+`TestGeneratedGeoLocationIsAnObject` (tsgen) and
+`TestGeneratedGeoLocationIsATypedObject` (pygen, with and without
+superscalar importable) run the generated packages.
+`TestGeneratedJSONObjectScalarsCheckTheirJSON` builds a Go types module
+with `Geo.Location` in every field shape and pins each verdict.
+`LocationMatrix`'s vectors run through the four generated validators and
+the three runtimes. `TestGeoLocationColumnsOnPostgres` writes and reads
+locations through the generated ORM against Postgres, `{0, 0}` among them,
+checks the stored point's coordinates with SQL and reads the history.
+
+Not built: the ORM does not read or write a list of locations (`POINT[]`),
+and a `POINT` column's generated filter is the string filter, whose
+equality Postgres cannot evaluate for a point.
+
+The rule is reversible until the first release.
