@@ -71,15 +71,17 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | --- | --- | --- | --- |
 | database | one or more DB schemas | a SQL connection per hosted schema | nothing |
 | server | one or more API schemas | an HTTP endpoint per served API | a connection to each served API's database; the address of each service it calls |
+| job | one `@job` of an API schema | a run to completion, on a schedule or on demand | its API's needs: the same connection and addresses (D52) |
 
-Jobs, scheduled jobs, buckets, queues and static sites come later. Each
-lands the same way: a deployable kind, a platform per target that realizes
-it (section 6.1), and the edges it takes part in.
+Workers, buckets, queues and static sites come later. Each lands the same
+way: a deployable kind, a platform per target that realizes it (section
+6.1), and the edges it takes part in.
 
 ### 3.2 Defaults
 
-With nothing declared, each API service in a stack is one server and each
-DB service is one database. A deployable is declared only to change that:
+With nothing declared, each API service in a stack is one server, each
+`@job` of an API service is one job, and each DB service is one database.
+A deployable is declared only to change that:
 
 - to run several APIs in one process;
 - to host several DB schemas on one database.
@@ -1311,7 +1313,8 @@ server at `<output-root>/server/<stack>/<server>/`, holding `main.go`,
 `go.mod` and a Dockerfile (section 8.2). A server takes its name in the
 stack: a declared server's class name, or the API service a default server
 serves. The output root's `server/<stack>` directory holds only what the
-last build wrote, and a TypeScript or Rust server gets no entrypoint yet.
+last build wrote. A TypeScript server gets its entrypoint from the same
+generator, on Bun (section 8.6, D51), and a Rust server gets none yet.
 
 `main` reads its whole configuration from the environment, and:
 
@@ -1607,8 +1610,8 @@ found with no declaration:
 - **Signature.** The API generator writes `Deps` and the constructor's
   signature in `deps.go`: `type Constructor func(deps Deps)
   (Implementations, error)`, which the scaffold asserts with `var _
-  api.Constructor = New`. TypeScript and Rust get the equivalent later
-  (section 12). `Deps` is typed and filled by the entrypoint:
+  api.Constructor = New`. TypeScript gets the equivalent with its
+  entrypoint (section 8.6), and Rust later (section 12). `Deps` is typed and filled by the entrypoint:
 
   ```go
   type Deps struct {
@@ -1641,6 +1644,93 @@ Not taken:
   servers would still need a convention.
 - A `main` the engineer writes, calling a generated `Run(impl)`. That brings
   hand wiring back, and the server still has to name its main package.
+
+### 8.6 TypeScript servers
+
+A TypeScript server runs on Bun, which runs the generated packages' `.ts`
+as they are, with no build step (D51). The pieces mirror Go's:
+
+- **Derived config.** The API package's `loadEnvConfig()` joins the types
+  package's `@envVars` loader with the derived fields of section 3.4,
+  which the HTTP runtime reads (`loadDatabase`, `loadService`,
+  `loadCallers`) from the same variables as Go's `stackconfig`. Vectors
+  shared by both runtimes hold them to one encoding.
+- **Implementation.** `[implementation_paths] typescript` defaults to
+  `typescript/{service}`. The API generator writes `Deps` and the
+  constructor's type in `deps.ts`, and the scaffold writes the package
+  once, as Go's does (section 8.5). `deps.db` is a `pg` Pool opened from
+  the derived connection; a TypeScript ORM, when one exists, adds a typed
+  client on the same pool.
+- **Packages.** One Bun workspace spans the generated TypeScript packages,
+  the servers and the implementations, so every import resolves with
+  `workspace:*`.
+- **Entrypoint.** `<output-root>/server/<stack>/<server>/` holds
+  `package.json`, `main.ts` and a Dockerfile. `main.ts` does what Go's
+  `main` does (section 8.1):
+  - loads each API's config and opens a pool per database, through the
+    Cloud SQL Node connector when some environment places the database
+    there;
+  - builds an SDK client per `calls` edge with its credential source, and
+    calls each constructor;
+  - mounts each API's `buildRouter`, with `authenticateService` for an API
+    with a service clause;
+  - serves `/healthz` and `/readyz` on `$PORT` with `Bun.serve`, and
+    drains for ten seconds on SIGTERM.
+  
+  It logs JSON lines through the HTTP runtime's logger.
+- **Image.** A Rust stage builds superscalar's Node addon for Linux, as
+  Go's image builds its archive, and the image installs the workspace on
+  `oven/bun` and runs `main.ts`.
+
+`stack dev` runs a TypeScript server with Bun beside the Go servers.
+acme-shop's storefront is the proof: its implementation moves to
+`typescript/shop-storefront`, and `shop-stack` deploys and exposes it.
+
+### 8.7 Jobs
+
+A job is a run to completion that an API service declares, with `@job` on
+a class of its schema (D52):
+
+```ts
+@job({ schedule: "*/15 * * * *", timeZone: "UTC", timeout: "10m", retries: 1 })
+export abstract class ExpireCarts {}
+```
+
+- **Code.** The API's implementation package implements it, with the same
+  `Deps` as the API: the API generator writes a `Jobs` interface, a method
+  per job taking a context and returning an error, and the scaffold writes
+  a method that returns the not-implemented error.
+- **Deployable.** Each job of an API in the stack is a deployable of kind
+  `job` by default, named after its API and its class
+  (`shop-orders-expire-carts`). Its edges are its API's, so it connects to
+  the same database and calls the same services.
+- **Identity.** A job serves its API in a callee's callers field. A
+  callee's `from: [ShopOrders]` therefore admits ShopOrders' server and
+  its jobs alike, and `Caller.Deployable` tells them apart.
+- **Entrypoint.** A job gets a module of its own at
+  `<output-root>/server/<stack>/<job>/`: a `main` that builds `Deps` as a
+  server's does, runs the job with a context SIGTERM cancels, and exits
+  non-zero when it fails. Its image is built and pinned as a server's is.
+- **Schedule.** The decorator's schedule, a five-field cron in its time
+  zone (UTC unless set), is the default. An environment's settings change
+  it or turn it off. A member of a parameterized environment runs no
+  schedule unless its settings turn one on. A job with no schedule runs
+  only on demand.
+- **Running.** `stack dev` runs each schedule beside the servers, never
+  two runs of one job at once, with the job's name before each line of its
+  output. A job that exits never stops the environment. `superschematic
+  stack run <environment> <job>` runs a job once: against the running
+  `stack dev`, or in the cloud through the target, waiting for it and
+  reporting its error.
+- **gcp.**
+  - A job is a Cloud Run job, with its own account, its API's Cloud SQL
+    and egress, one task, and the decorator's timeout and retries.
+  - An enabled schedule is a Cloud Scheduler job that runs it through the
+    Cloud Run Admin API as an account that may run only that job.
+  - Bootstrap enables Cloud Scheduler.
+
+Workers, which run until stopped, come with queues. A job that runs on
+every deploy is not built.
 
 ## 9. End-user auth and service auth
 
@@ -2124,9 +2214,11 @@ The callers field has its own tests:
 
 ### 9.9 Open
 
-- A deployable that serves no API, such as a job (section 3.1), has no
-  handle to put in `from`. Until jobs land with a way to name one, it may
-  call only operations whose `from` is empty.
+- A deployable that serves no API has no handle to put in `from`, and may
+  call only operations whose `from` is empty. A job is not one: it serves
+  its API in a callee's callers field, so `from` names it by its API
+  (section 8.7, D52). A worker, when queues land, may follow the same
+  rule.
 - A credential the callee config cannot express, such as a service mesh's
   mTLS identity in `X-Forwarded-Client-Cert`. A deployment can pass its
   own service authenticator today; a platform kind of credential can come
