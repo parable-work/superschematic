@@ -5,7 +5,9 @@ about another. An instance is written with the live version of its schema
 (its own namespace's, or the shared one's) and validated by it; its row
 records that version. update is a JSON merge patch (RFC 7386, patch.ts),
 validated after the merge. Each write appends its event in the same
-transaction (events/log.ts).
+transaction (events/log.ts). A write in an archived namespace, a create,
+an update, a delete or a writing operation, is refused
+(namespace_archived) once the policy has allowed it; reads go on.
 
 The behaviors of the live version run with every call (behaviors/): a
 create and an update ask their validate about the fields the write would
@@ -65,7 +67,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
 
-import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
+import { checkPrincipal, type Access, type Principal, type SchemaAction } from '../access.js';
 import type { BoundBehavior } from '../behaviors/composition.js';
 import type { FrozenJSON, GuardRequest, InstanceChange, Reference, ValidationRequest } from '../behaviors/behavior.js';
 import {
@@ -84,8 +86,9 @@ import {
 import { deepFreeze } from '../behaviors/json.js';
 import type { OperationSpec } from '../behaviors/registry.js';
 import { synchronous } from '../behaviors/storage.js';
-import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, UniqueConflictError, type ValidationIssue } from '../errors.js';
-import { actorOf, appendEvent, nextSeq, type EngineEvent, type OperationChange } from '../events/log.js';
+import { BehaviorError, BehaviorVetoError, CursorExpiredError, EngineError, InstanceValidationError, UniqueConflictError, type ValidationIssue } from '../errors.js';
+import { actorOf, appendEvent, logFloor, logHead, nextSeq, type EngineEvent, type OperationChange } from '../events/log.js';
+import { foldEvent, instanceBase } from '../events/retention.js';
 import type { Namespaces } from '../namespaces.js';
 import { pageSize } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, VersionRuntime } from '../registry/catalog.js';
@@ -599,6 +602,9 @@ export class InstanceStore {
     checkSchemaName(schema);
     const { record, runtime, spec } = this.operation(principal, namespace, schema, operation, 'instance');
     this.access.require(principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
+    if (spec.writes) {
+      this.namespaces.requireWritable(namespace);
+    }
     checkExpectedSeq(options.expectedSeq);
     const checked = checkParams(spec, params);
     const preconditions = checkPreconditions(runtime.composition, schema, options.preconditions);
@@ -626,6 +632,9 @@ export class InstanceStore {
     checkSchemaName(schema);
     const { record, runtime, spec } = this.operation(principal, namespace, schema, operation, 'schema');
     this.access.require(principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
+    if (spec.writes) {
+      this.namespaces.requireWritable(namespace);
+    }
     const checked = checkParams(spec, params);
     return this.runSchemaOperation(this.chain(principal, namespace), record, runtime, spec, checked);
   }
@@ -849,7 +858,9 @@ export class InstanceStore {
   // read on the event's schema. The log records each change as a merge
   // patch of what a read returns (a create the whole instance, an update
   // its patch, an operation its patch), so folding them from its last
-  // create gives it.
+  // create gives it. Retention folds the events it prunes into the
+  // instance's base, which the fold starts from; an event retention has
+  // pruned is cursor_expired.
   private beforeFor(chain: Chain, from: string, event: EngineEvent): FrozenJSON | undefined {
     if (
       typeof event !== 'object' ||
@@ -866,26 +877,22 @@ export class InstanceStore {
     }
     checkSchemaName(event.schema);
     this.access.require(chain.principal, 'read', chain.namespace, event.schema);
+    const base = instanceBase(this.storage, chain.namespace, event.schema, event.instanceId);
+    if (base !== undefined && event.seq <= base.seq) {
+      const floor = logFloor(this.storage, this.namespaces, chain.namespace, false);
+      throw new CursorExpiredError(chain.namespace, event.cursor, floor, logHead(this.storage));
+    }
     const rows = this.storage.all(
       `SELECT kind, change, value_refs FROM engine_events INDEXED BY engine_events_instance
        WHERE namespace = ? AND schema = ? AND instance_id = ? AND seq < ? ORDER BY seq`,
       [chain.namespace, event.schema, event.instanceId, event.seq]
     );
-    let data: unknown;
+    let data: unknown = base?.data;
     for (const row of rows) {
       // A change the log keeps in the value store gets its values back
       // before it folds in, since a later patch may merge into one.
       const change: unknown = row.change === null ? null : this.values.fill(JSON.parse(String(row.change)) as unknown, refsOf(row.value_refs));
-      const kind = String(row.kind);
-      if (kind === 'create') {
-        data = change;
-      } else if (kind === 'update') {
-        data = mergePatch(data ?? {}, change);
-      } else if (kind === 'operation') {
-        data = mergePatch(data ?? {}, (change as OperationChange).patch);
-      } else {
-        data = undefined;
-      }
+      data = foldEvent(data, String(row.kind), change);
     }
     return data === undefined ? undefined : deepFreeze(data as FrozenJSON);
   }
@@ -1011,11 +1018,16 @@ export class InstanceStore {
     return new Chain(principal, namespace, this.clock(), this.permissions);
   }
 
-  private target(principal: Principal, action: Action, schema: string, options: InstanceTarget): string {
+  // target resolves a call's namespace and asks the policy; a write is
+  // then refused in an archived namespace.
+  private target(principal: Principal, action: SchemaAction, schema: string, options: InstanceTarget): string {
     checkPrincipal(principal);
     const namespace = this.namespaces.resolve(options.namespace);
     checkSchemaName(schema);
     this.access.require(principal, action, namespace, schema);
+    if (action === 'write') {
+      this.namespaces.requireWritable(namespace);
+    }
     return namespace;
   }
 

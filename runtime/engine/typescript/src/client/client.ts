@@ -1,8 +1,8 @@
 /*
 A typed client for the engine's HTTP API (runtime/engine/README.md,
-"HTTP"), grouped as the engine's own calls are: schemas, instances,
-events and behaviors, beside the tools document and the search across a
-namespace's schemas. Each call unwraps the success envelope, sends the
+"HTTP"), grouped as the engine's own calls are: namespaces, schemas,
+instances, events and behaviors, beside the tools document and the
+search across a namespace's schemas. Each call unwraps the success envelope, sends the
 sequence a write expects as If-Match and its preconditions in the
 Preconditions header, and turns a refusal into an EngineProblem
 (errors.ts). Credentials and the retry rule are the transport's.
@@ -19,6 +19,7 @@ import type {
   Instance,
   InstancePage,
   JSONObject,
+  NamespaceRecord,
   Preconditions,
   PublishResult,
   SchemaSummary,
@@ -73,7 +74,12 @@ export interface ListOptions extends CallOptions {
 }
 
 export interface ReadEventsOptions extends EventFilters, CallOptions {
-  /** Events after this cursor; `head` for an empty page whose next is the log's last event; 0 when absent. */
+  /**
+   * Events after this cursor; `head` for an empty page whose next is the
+   * log's last event. Absent or 0, the start of the log: after retention,
+   * the oldest event it kept. A cursor retention has pruned past is 410
+   * `cursor_expired`, whose problem carries the floor and the head.
+   */
   readonly after?: number | 'head';
   /** How many events to scan, 50 by default and at most 500. */
   readonly limit?: number;
@@ -91,6 +97,7 @@ const segment = encodeURIComponent;
 
 /** The engine's HTTP API, typed. */
 export class EngineClient {
+  readonly namespaces: NamespaceCalls;
   readonly schemas: SchemaCalls;
   readonly instances: InstanceCalls;
   readonly events: EventCalls;
@@ -104,6 +111,7 @@ export class EngineClient {
     this.transport = new Transport(options);
     this.namespace = options.namespace ?? DEFAULT_NAMESPACE;
     this.scope = new Scope(this.transport, this.namespace);
+    this.namespaces = new NamespaceCalls(this.scope);
     this.schemas = new SchemaCalls(this.scope);
     this.instances = new InstanceCalls(this.scope);
     this.events = new EventCalls(this.scope);
@@ -152,6 +160,40 @@ class Scope {
 
   async data<T>(spec: RequestSpec): Promise<T> {
     return (await this.transport.json<T>(spec)).data;
+  }
+}
+
+/**
+ * The namespaces themselves: list, read, create, archive and unarchive,
+ * as the engine's access policy allows (`manage`). Each names the
+ * namespace it acts on, whatever the client's namespace is.
+ */
+export class NamespaceCalls {
+  constructor(private readonly scope: Scope) {}
+
+  /** list returns the namespaces the caller may list. */
+  list(options: CallOptions = {}): Promise<NamespaceRecord[]> {
+    return this.scope.data({ method: 'GET', path: '/namespaces', options });
+  }
+
+  /** get reads one namespace; one there is not is 404 `unknown_namespace`. */
+  get(name: string, options: CallOptions = {}): Promise<NamespaceRecord> {
+    return this.scope.data({ method: 'GET', path: `/namespaces/${segment(name)}`, options });
+  }
+
+  /** create makes a namespace; a name that is one already is 409 `conflict`. */
+  create(name: string, options: CallOptions = {}): Promise<NamespaceRecord> {
+    return this.scope.data({ method: 'POST', path: '/namespaces', body: { name }, options });
+  }
+
+  /** archive archives a namespace a create made: it is read as it was, and every write is 409 `namespace_archived`. */
+  archive(name: string, options: CallOptions = {}): Promise<NamespaceRecord> {
+    return this.scope.data({ method: 'POST', path: `/namespaces/${segment(name)}/archive`, options });
+  }
+
+  /** unarchive lets an archived namespace be written again. */
+  unarchive(name: string, options: CallOptions = {}): Promise<NamespaceRecord> {
+    return this.scope.data({ method: 'POST', path: `/namespaces/${segment(name)}/unarchive`, options });
   }
 }
 

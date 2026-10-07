@@ -256,7 +256,7 @@ const engine = openEngine({
   runner: { principal: { subject: 'runner', permissions: ['projects.close'] } },
 });
 engine.runner.start();     // runs what is due, then wakes on each commit and timer
-engine.runner.status();    // { running, principal, head, subscriptions, schedules, error }
+engine.runner.status();    // { running, principal, head, subscriptions, schedules, retention?, error }
 engine.runner.stop();      // engine.close() stops it too
 ```
 
@@ -295,13 +295,25 @@ engine.runner.stop();      // engine.close() stops it too
 - **Events record their cause.** An event the runner's work writes
   carries `cause`: `{ behavior, event, depth }` for a reaction, or
   `{ behavior, schedule, depth }` for a schedule.
+- **An archived namespace runs nothing.** Its subscriptions and schedules
+  wait, `archived` in `status()`, until the namespace is unarchived, then
+  pick up where they stopped.
+- **It prunes the log, with `retention`.** An engine opened with
+  `retention: { maxAgeMs?, maxEvents? }` has the runner prune the oldest
+  events at its first pass and every `everyMs` (a minute) after, a
+  namespace at a time, and never past an event a subscription there has
+  yet to handle, halted ones included. `engine.runner.prune()` prunes now
+  and needs no principal. A reaction's `before()` still reads an instance
+  whose create was pruned, and a read of the log from the start reads
+  what is kept.
 - **`runDue()` drives it by hand.** It runs everything due now, started or
-  not, and returns `{ handled, skipped, failed, scheduled }`. Tests use it
-  with a clock they move.
+  not, and returns `{ handled, skipped, failed, scheduled }`, and
+  `pruned` with retention. Tests use it with a clock they move.
 
-`status()` lists each subscription (`active`, `retrying`, `halted` or
-`inactive`) and schedule (`active`, `retrying`, `off` or `inactive`), with
-its last failure. It is not served over
+`status()` lists each subscription (`active`, `retrying`, `halted`,
+`archived` or `inactive`) and schedule (`active`, `retrying`, `off`,
+`archived` or `inactive`), with its last failure, and with retention
+each namespace's floor and the subscription that holds it. It is not served over
 HTTP or MCP, since it spans every namespace; expose it on a health route
 of your own.
 

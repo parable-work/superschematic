@@ -4,8 +4,8 @@ registry and the instance store ask the policy first). A schema name has
 one draft and a line of published versions in each namespace. define
 stores the draft, replacing the one before it, and appends a define event
 with the draft's hash; publish makes the draft the next live version (1,
-2, 3, ...) and appends a publish event. Instances are read and written
-with the live version, the newest one.
+2, 3, ...) and appends a publish event, whose cursor the version keeps.
+Instances are read and written with the live version, the newest one.
 
 Both refuse a document the engine does not take (document.ts) and a
 version the compatibility rule refuses against the live one (compat.ts),
@@ -248,7 +248,7 @@ export class SchemaCatalog {
         namespaces: namespace === this.namespaces.shared ? this.namespaces.names : [namespace],
         runtime: { composition, validator: lazyValidator(model, composition) },
       });
-      appendEvent(this.storage, {
+      const cursor = appendEvent(this.storage, {
         kind: 'publish',
         namespace,
         schema: name,
@@ -259,6 +259,9 @@ export class SchemaCatalog {
         at: now,
         change: model.canonical,
       });
+      // The version keeps its publish's cursor, where a subscription that
+      // the version starts begins, after retention prunes the event.
+      this.storage.run('UPDATE engine_schemas SET published_cursor = ? WHERE namespace = ? AND name = ? AND version = ?', [cursor, namespace, name, version]);
       return { namespace, name, version, published: true };
     });
   }

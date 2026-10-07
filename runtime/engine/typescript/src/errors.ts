@@ -13,6 +13,13 @@ export type EngineErrorCode =
   | 'name_taken'
   | 'not_found'
   | 'unknown_namespace'
+  /** The namespace is archived: it is read as it was, and refuses every write. */
+  | 'namespace_archived'
+  /**
+   * A read of the event log from a cursor retention has pruned past: the
+   * events after it are no longer all there (CursorExpiredError).
+   */
+  | 'cursor_expired'
   | 'invalid_argument'
   /** The access policy refuses the call, or a behavior a caller without the permission its config names. */
   | 'forbidden'
@@ -38,6 +45,31 @@ export class EngineError extends Error {
     super(message);
     this.name = 'EngineError';
     this.code = code;
+  }
+}
+
+/**
+ * A read of the event log, or a stream's resume, from a cursor before a
+ * namespace's floor: retention pruned events after the cursor, so the
+ * read would not be complete. floor is the earliest cursor a read of the
+ * namespace may start from, head the log's last; a client that can take
+ * the gap reads on from floor, and one that cannot starts again from
+ * head.
+ */
+export class CursorExpiredError extends EngineError {
+  readonly after: number;
+  readonly floor: number;
+  readonly head: number;
+
+  constructor(namespace: string, after: number, floor: number, head: number) {
+    super(
+      'cursor_expired',
+      `the event log of namespace ${namespace} no longer holds every event after cursor ${after}: retention pruned it through ${floor}; read from ${floor} to take what is left, or from head`
+    );
+    this.name = 'CursorExpiredError';
+    this.after = after;
+    this.floor = floor;
+    this.head = head;
   }
 }
 

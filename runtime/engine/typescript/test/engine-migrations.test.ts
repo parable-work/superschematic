@@ -10,6 +10,7 @@ import { loadSchemaFile } from '@superschematic/schema-runtime';
 
 import {
   ENGINE_OWNER,
+  EngineError,
   Storage,
   UniqueConflictError,
   allowAll,
@@ -23,7 +24,7 @@ import {
 import { counter, itemDocument, openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { holder } from './reach-fixtures.ts';
 import { ledger, ledgerDocument, mark, probe, resetProbe, runnerPrincipal } from './runner-fixtures.ts';
-import { alice, cleanup, drivers, freshPath, orderDocument, schemaDocument, track } from './helpers.ts';
+import { alice, cleanup, drivers, freshPath, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(() => {
   resetProbe();
@@ -363,6 +364,81 @@ const seeds: Record<number, Seed> = {
       assert.throws(() => engine.instances.create(alice, 'Model', { slug: 'models/plain' }), UniqueConflictError);
       engine.instances.create(alice, 'Model', { slug: 'models/new' }, { id: 'c' });
       checkOperationEvents(engine, 4, 'create');
+    },
+  },
+  // Version 10 had no namespaces but the configured ones, kept every
+  // event, and found where a subscription starts from its publish event.
+  10: {
+    write(storage) {
+      const order = canonical(orderDocument());
+      storage.run(
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
+      );
+      storage.run(
+        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 'o1', 'default', 1, 2, '{"title":"Lamp"}', 300, 'alice', 400, 'alice']
+      );
+      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
+      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']);
+      storage.run(insert, ['update', 'default', 'Order', 'o1', 2, 1, 'alice', 400, '{"title":"Lamp"}']);
+    },
+    check(engine) {
+      // The version keeps its publish's cursor, which the migration read
+      // from the log.
+      assert.equal(engine.storage.get("SELECT published_cursor FROM engine_schemas WHERE name = 'Order' AND version = 1")?.published_cursor, 1);
+      // The namespaces are the configured ones, and a create makes one.
+      assert.deepEqual(engine.namespaces.list(alice).map((namespace) => [namespace.name, namespace.origin]), [['default', 'configured']]);
+      assert.equal(engine.namespaces.create(alice, 'acme').origin, 'created');
+      // The log is append-only above a namespace's floor and gives way at
+      // or before it, as retention moves it.
+      engine.storage.run("INSERT INTO engine_log_floors (namespace, floor) VALUES ('default', 2)");
+      assert.throws(() => engine.storage.run('DELETE FROM engine_events WHERE cursor = 3'), /engine_events is append-only/);
+      engine.storage.run('DELETE FROM engine_events WHERE cursor <= 2');
+      assert.equal(thrown(() => engine.events.read(alice, { after: 1 }), EngineError).code, 'cursor_expired');
+      assert.deepEqual(
+        engine.events.read(alice, { after: 2 }).events.map((event) => [event.cursor, event.kind]),
+        [[3, 'update']]
+      );
+      const updated = engine.instances.update(alice, 'Order', 'o1', { title: 'Chair' }, { expectedSeq: 2 });
+      assert.deepEqual([updated.seq, updated.data], [3, { title: 'Chair' }]);
+      checkOperationEvents(engine, 4);
+    },
+  },
+  // Version 11 kept the namespaces a create made, and every event.
+  11: {
+    write(storage) {
+      const order = canonical(orderDocument());
+      storage.run('INSERT INTO engine_namespaces (name, created_at, created_by, archived_at, archived_by) VALUES (?, ?, ?, ?, ?)', ['acme', 100, 'alice', 200, 'bob']);
+      storage.run('INSERT INTO engine_namespaces (name, created_at, created_by) VALUES (?, ?, ?)', ['beta', 150, 'alice']);
+      storage.run(
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['beta', 'Order', 1, order.text, order.hash, 160, 'alice', 170, 'alice']
+      );
+      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      storage.run(insert, ['publish', 'beta', 'Order', null, null, 1, 'alice', 170, order.text]);
+    },
+    check(engine) {
+      assert.deepEqual(engine.namespaces.names, ['default', 'acme', 'beta']);
+      assert.deepEqual(engine.namespaces.get(alice, 'acme'), {
+        name: 'acme',
+        origin: 'created',
+        shared: false,
+        state: 'archived',
+        createdAt: 100,
+        createdBy: 'alice',
+        archivedAt: 200,
+        archivedBy: 'bob',
+      });
+      assert.equal(engine.storage.get("SELECT published_cursor FROM engine_schemas WHERE namespace = 'beta' AND name = 'Order'")?.published_cursor, 1);
+      assert.equal(thrown(() => engine.schemas.define(alice, orderDocument(), { namespace: 'acme' }), EngineError).code, 'namespace_archived');
+      assert.equal(engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1', namespace: 'beta' }).seq, 1);
+      assert.equal(engine.namespaces.unarchive(alice, 'acme').state, 'active');
+      assert.equal(engine.schemas.define(alice, orderDocument(), { namespace: 'acme' }).namespace, 'acme');
     },
   },
 };
