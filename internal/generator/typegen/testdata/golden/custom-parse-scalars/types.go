@@ -445,6 +445,8 @@ type CustomParseScalars struct {
 
 	GenericStringMap GenericStringMap `json:"genericStringMap"`
 
+	GeoLocation GeoLocation `json:"geoLocation"`
+
 	IdentityUUID IdentityUUID `json:"identityUUID"`
 
 	IdentityUserID IdentityUserID `json:"identityUserID"`
@@ -478,6 +480,8 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 
 	masked.GenericStringMap = t.GenericStringMap
 
+	masked.GeoLocation = t.GeoLocation
+
 	masked.IdentityUUID = t.IdentityUUID
 
 	masked.IdentityUserID = t.IdentityUserID
@@ -503,7 +507,7 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*CustomParseScalars) JSONFieldNames() []string {
-	return []string{"financeMoney", "genericInt64", "genericStringMap", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalMilliseconds", "temporalMinutes", "temporalSeconds"}
+	return []string{"financeMoney", "genericInt64", "genericStringMap", "geoLocation", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalMilliseconds", "temporalMinutes", "temporalSeconds"}
 }
 
 // Validate validates all fields in CustomParseScalars
@@ -525,6 +529,11 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 	// Validate genericStringMap (required): a JSON object, which may be empty.
 	if jsonValueMissing(t.GenericStringMap) {
 		errors.AddFieldError("genericStringMap", "required", "required field")
+	}
+
+	// Validate geoLocation (required): a JSON object, which may be empty.
+	if jsonValueMissing(t.GeoLocation) {
+		errors.AddFieldError("geoLocation", "required", "required field")
 	}
 
 	// Validate identityUUID (required)

@@ -69,6 +69,24 @@ func ParseGenericStringMap(s string) (GenericStringMap, error) {
 	return parsed, nil
 }
 
+// Geo.Location - Geographic location with latitude and longitude
+type GeoLocation = scalars.GeoLocation
+
+// ParseGeoLocation parses a string and returns a Geo.Location scalar.
+func ParseGeoLocation(s string) (GeoLocation, error) {
+	canonical, err := scalars.ParseGeoLocation(s)
+	if err != nil {
+		var zero GeoLocation
+		return zero, err
+	}
+	var parsed GeoLocation
+	if err := json.Unmarshal([]byte(canonical), &parsed); err != nil {
+		var zero GeoLocation
+		return zero, err
+	}
+	return parsed, nil
+}
+
 // Identity.UUID - UUID v4 with automatic base62 encoding for client-facing APIs
 type IdentityUUID = scalars.IdentityUUID
 
