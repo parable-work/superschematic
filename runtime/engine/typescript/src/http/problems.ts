@@ -3,7 +3,8 @@ How an engine refusal crosses HTTP. Each EngineError code has one status,
 and the problem document carries the code as its `code` member; a refused
 schema document, instance, operation's parameters, create's parameters
 or preconditions carries its issues as `details.issues`, a refused
-version its changes as `details.changes`, and a behavior's veto the
+version its changes as `details.changes`, a write that repeats a unique
+field's value the fields as `details.fields`, and a behavior's veto the
 behavior, what it refused and why as `details`, with the veto's own code
 and details, when it gives them, as `details.code` and `details.details`:
 a client branches on `code: "vetoed"` and then on the behavior and its
@@ -25,6 +26,7 @@ import {
   OperationParamsError,
   PreconditionsError,
   SchemaDocumentError,
+  UniqueConflictError,
   type EngineErrorCode,
 } from '../errors.js';
 
@@ -82,6 +84,9 @@ function detailsOf(error: EngineError): { details?: unknown } {
   }
   if (error instanceof IncompatibleChangeError) {
     return { details: { changes: error.changes } };
+  }
+  if (error instanceof UniqueConflictError) {
+    return { details: { fields: error.fields } };
   }
   return {};
 }

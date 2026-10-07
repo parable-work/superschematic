@@ -61,6 +61,9 @@ export class SqliteError extends Error {
 /** SQLITE_BUSY: another connection holds the lock past the busy timeout. */
 export const SQLITE_BUSY = 5;
 
+/** SQLITE_CONSTRAINT_UNIQUE: a write would repeat the values of a UNIQUE index. */
+export const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
 // The structural subset of DatabaseSync and bun:sqlite's Database the
 // adapters call.
 interface RawStatement {

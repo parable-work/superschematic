@@ -32,12 +32,12 @@ as their support lands in every generator.
 
 | Name | On | What it does | Covered in |
 | --- | --- | --- | --- |
-| `@key` | field | the primary key | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
+| `@key` | field | the primary key; a unique field in the engine | [Database tables](/superschematic/guides/database-tables/#tables-and-keys), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `AutoGenerate<T>` | field | the database generates the value on insert | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
-| `@unique` | field | a unique constraint on the column | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
+| `@unique` | field | a unique constraint on the column; in the engine, on the field within a namespace, which `lookup` reads by | [Database tables](/superschematic/guides/database-tables/#tables-and-keys), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `Relation<T, { onDelete }>` | field | a foreign key to table `T`; `onDelete` is `CASCADE` (the default), `RESTRICT` or `NO ACTION` | [Database tables](/superschematic/guides/database-tables/#relations) |
 | `HasMany<T>` | field | the rows of `T` whose relation points at this row | [Database tables](/superschematic/guides/database-tables/#one-to-many) |
-| `@index<T>(keys, { unique?, name? })` | class | an index over the listed fields | [Database tables](/superschematic/guides/database-tables/#indexes) |
+| `@index<T>(keys, { unique?, name? })` | class | an index over the listed fields, in the engine too | [Database tables](/superschematic/guides/database-tables/#indexes), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `@searchField` | field | joins the field into a trigram-indexed `search_text` column | [Database tables](/superschematic/guides/database-tables/#text-search) |
 | `@jsonField`, `JsonField<T>` | field | stores the field as `JSONB` | [Database tables](/superschematic/guides/database-tables/#json-columns) |
 | `@sourceMustProject` | field | warns when a `@source` view leaves the field out | [API routes](/superschematic/guides/api-routes/#responses-and-views) |

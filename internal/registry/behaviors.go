@@ -127,9 +127,11 @@ type Behavior struct {
 	configRequired bool
 }
 
-// builtinOperations are the operations an engine gives every schema's
-// instance type (D16). A behavior operation cannot take one of these names.
-var builtinOperations = []string{"create", "get", "list", "update", "delete"}
+// builtinOperations are the operations an engine serves on a schema's
+// instance type itself (D16): every type has create, get, list, update and
+// delete, and one with a unique field lookup. A behavior operation cannot
+// take one of these names.
+var builtinOperations = []string{"create", "get", "list", "update", "delete", "lookup"}
 
 // The scopes an operation declares: an instance, the default, or its
 // schema as a whole.
@@ -299,7 +301,7 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 			return fmt.Errorf("registry: behavior %s operation name %q is not camelCase", decl.Name, op.Name)
 		}
 		if slices.Contains(builtinOperations, op.Name) {
-			return fmt.Errorf("registry: behavior %s operation %q has the name of an operation every schema has (%s)", decl.Name, op.Name, strings.Join(builtinOperations, ", "))
+			return fmt.Errorf("registry: behavior %s operation %q has the name of an operation the engine serves on a schema (%s)", decl.Name, op.Name, strings.Join(builtinOperations, ", "))
 		}
 		if seen[op.Name] {
 			return fmt.Errorf("registry: behavior %s declares operation %q twice", decl.Name, op.Name)

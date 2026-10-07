@@ -28,7 +28,7 @@ schema that composes one until a deployment registers that package.
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
-| `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
+| `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
 | `Comments` | comments on the instance | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |

@@ -49,8 +49,16 @@ records who holds each one, an instance's row, an event or a row of a
 behavior's tables, by namespace and schema, and a value goes when its
 last holder does. value_refs on an instance and an event lists the JSON
 pointers of the members that hold a ref in place of their value.
+
+The indexes of an instance type's own fields (@unique, @key, @index) are
+indexes on engine_instances named engine_unique_<digest> and
+engine_index_<digest>, partial on one schema's rows, which publish
+creates and drops as versions add and remove them (instances/indexes.ts);
+migration 10 creates the ones of the versions published before it.
 */
 
+import { clashMessage, ownIndexes, syncOwnIndexes } from './instances/indexes.js';
+import { modelOf } from './registry/document.js';
 import type { MigrationSet } from './storage/migrations.js';
 
 export const ENGINE_OWNER = 'engine';
@@ -346,6 +354,38 @@ CREATE INDEX engine_payload_holders_holder ON engine_payload_holders (namespace,
 ALTER TABLE engine_instances ADD COLUMN value_refs TEXT CHECK (value_refs IS NULL OR json_valid(value_refs));
 ALTER TABLE engine_events ADD COLUMN value_refs TEXT CHECK (value_refs IS NULL OR json_valid(value_refs));
 `);
+      },
+    },
+    {
+      version: 10,
+      name: 'unique fields and indexes',
+      // The engine ignored @unique, @key and @index before. Each live
+      // version gets the indexes publish now creates (instances/indexes.ts),
+      // with the values under their keys put back inline first. A unique
+      // index the stored instances break stops the file from opening: an
+      // operator makes the values distinct, or drops the field's @unique in
+      // a new version, with the engine before this one. A field the engine
+      // refuses @unique on now (a list, an object, a nested type's) stays
+      // unenforced in the version that has it, as the define of its next
+      // version refuses it.
+      up(storage) {
+        const live = storage.all(
+          `SELECT namespace, name, document FROM engine_schemas AS s
+           WHERE version = (SELECT MAX(version) FROM engine_schemas AS t WHERE t.namespace = s.namespace AND t.name = s.name) AND version > 0
+           ORDER BY namespace, name`
+        );
+        for (const row of live) {
+          const holder = String(row.namespace);
+          const model = modelOf(String(row.document));
+          const clashes = syncOwnIndexes(storage, holder, model.name, [], ownIndexes(model, holder));
+          if (clashes.length > 0) {
+            throw new Error(
+              `engine migration 10: schema ${model.name} in namespace ${holder} has unique fields its stored instances break: ${clashes
+                .map((clash) => clashMessage(clash, clash.namespace, model.instanceType))
+                .join('; ')}. Make the values distinct, or publish a version without the unique field, with the engine before this one`
+            );
+          }
+        }
       },
     },
   ],

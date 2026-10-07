@@ -22,6 +22,9 @@ has no instance to fence and ignores the header; its body carries
 
 A schema-level behavior operation, which has no instance, has a route of
 its own under the schema; it sends no ETag, since it names no instance.
+A list's where and a lookup's key are JSON objects in a query parameter,
+so a value travels whole, its type and any slash or comma in it included,
+and never in a path segment.
 Besides the instances and the event log, the routes serve a schema's
 describe document, the namespace's tools document (tools/catalog.ts) and
 the behaviors the engine runs, which are the same in every namespace, so
@@ -201,12 +204,39 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
 
   route(
     spec('listInstances', 'GET', INSTANCES, {
-      queryParams: [{ name: 'limit', kind: 'integer', required: false }, { name: 'cursor', kind: 'string', required: false }, VALUE_REFS],
+      queryParams: [
+        { name: 'limit', kind: 'integer', required: false },
+        { name: 'cursor', kind: 'string', required: false },
+        { name: 'where', kind: 'string', required: false },
+        VALUE_REFS,
+      ],
     }),
     (ctx, { path, query }) => {
       const { namespace, name } = path as { namespace: string; name: string };
-      const { limit, cursor, valueRefs } = query as { limit?: number; cursor?: string; valueRefs?: boolean };
-      return engine.instances.list(principalOf(ctx), name, { namespace, limit, cursor, valueRefs });
+      const { limit, cursor, where, valueRefs } = query as { limit?: number; cursor?: string; where?: string; valueRefs?: boolean };
+      return engine.instances.list(principalOf(ctx), name, {
+        namespace,
+        limit,
+        cursor,
+        valueRefs,
+        ...(where === undefined ? {} : { where: jsonObjectParam('where', where) }),
+      });
+    }
+  );
+
+  // The instance whose unique fields hold a key's values: the key is a
+  // JSON object in the query, never a path segment, so a value may hold
+  // a slash.
+  route(
+    spec('lookupInstance', 'GET', `${SCHEMA}/lookup`, {
+      queryParams: [{ name: 'key', kind: 'string', required: true }, VALUE_REFS],
+    }),
+    (ctx, { path, query }) => {
+      const { namespace, name } = path as { namespace: string; name: string };
+      const { key, valueRefs } = query as { key: string; valueRefs?: boolean };
+      const record = engine.instances.lookup(principalOf(ctx), name, jsonObjectParam('key', key), { namespace, valueRefs });
+      if (!record) throw notFound(`no ${name} in namespace ${namespace} holds ${key}`);
+      return new OperationResult(record, 200, { etag: etagOf(record) });
     }
   );
 
@@ -436,6 +466,20 @@ function mediaTypeRefusal(ctx: RequestContext, expected: string): Response | und
     response.headers.set('accept-patch', expected);
   }
   return response;
+}
+
+/** A query parameter that carries a JSON object: a list's where, a lookup's key. Anything else is 400. */
+function jsonObjectParam(name: string, text: string): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw badRequest(`${name} is a JSON object of field values, by field`);
+  }
+  if (!isPlainObject(value)) {
+    throw badRequest(`${name} is a JSON object of field values, by field`);
+  }
+  return value;
 }
 
 /** The `after` query parameter: an event cursor, or `head` for the log's last event. */

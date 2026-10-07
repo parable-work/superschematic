@@ -170,9 +170,17 @@ export class ValueStore {
    * JSON is longer than the threshold stored by hash and a ref in its
    * place. prefix is the pointer of the object in what is stored (an
    * operation's params are at /params); known lists the pointers of
-   * members that already hold a ref, which are kept as they are.
+   * members that already hold a ref, which are kept as they are; inline
+   * names members kept as they are whatever their length: the fields an
+   * index of the instance type covers, in an instance's row
+   * (instances/indexes.ts).
    */
-  stow(object: Readonly<Record<string, unknown>>, prefix = '', known: ReadonlySet<string> = NO_REFS): Stowed {
+  stow(
+    object: Readonly<Record<string, unknown>>,
+    prefix = '',
+    known: ReadonlySet<string> = NO_REFS,
+    inline: ReadonlySet<string> = NO_REFS
+  ): Stowed {
     const value: Record<string, unknown> = {};
     const refs: string[] = [];
     const hashes = new Set<string>();
@@ -191,7 +199,7 @@ export class ValueStore {
         hashes.add(hash);
         continue;
       }
-      if (!this.over(member)) {
+      if (inline.has(key) || !this.over(member)) {
         setMember(value, key, member);
         continue;
       }
