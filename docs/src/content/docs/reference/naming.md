@@ -472,6 +472,19 @@ Default: unset.
 Directory of the `ptr` Go module when it is a module of its own rather
 than a package of the schema runtime.
 
+### `paths.build_context`
+
+Default: unset, the repository root. `examples/acme-shop` sets `../..`.
+
+The build context of a stack's server images: the directory the generated
+`Dockerfile` copies from, and the root `stack build` and `stack deploy`
+archive for each build
+([The commands](/superschematic/guides/stacks/#the-commands)). Every
+module a server's `go.mod` replaces must lie under it, or the server gets
+no `Dockerfile`. Set it when the runtime modules the other keys name lie
+above the repository root, as in an example inside a checkout of
+superschematic.
+
 ## `[deps]`
 
 ### `deps.copy`

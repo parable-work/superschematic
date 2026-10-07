@@ -3919,3 +3919,18 @@ operation refuses it though section 9.3's check counts it, which section
 9.9 of `docs/stack-model.md` leaves open.
 
 The rule is reversible until the first release.
+
+### D30, amended: a project names its build context when its runtime modules lie above it
+
+The Dockerfile's context was the repository root, the parent of the
+schemas root, and a server whose `go.mod` replaces a module outside it got
+no Dockerfile. `examples/acme-shop` points its `[paths]` at the runtime
+modules of its checkout, two levels up, so its servers had no image, and
+`stack deploy` could not build one, which the first run against Google
+Cloud found (`docs/stack-model.md`, section 14, milestone 3).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The naming file's `[paths] build_context`, relative to the parent of the schemas root like every `[paths]` key, names the build context of the stack's server images. Unset, it is the repository root. The generated Dockerfile's paths, its ignore file and the archive `stack build` and `stack deploy` send are all relative to it. `examples/acme-shop` sets `../..`. | The git work tree's root, which a source archive without `.git` lacks and which makes the generated files depend on the checkout; moving the example's implementations and its naming file to the checkout's root, which leaves the example no longer a project of its own |
+
+The rule is reversible until the first release.

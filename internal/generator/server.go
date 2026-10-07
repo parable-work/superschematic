@@ -132,7 +132,7 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []s
 		Server:         s.Name,
 		Dir:            servergen.ServerDir(r.Options.OutputRoot, stackName, s.Name),
 		Naming:         r.Options.Naming,
-		RepositoryRoot: r.Options.RepositoryRoot,
+		RepositoryRoot: r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
 		ScalarGo:       r.Options.Paths.ScalarGo,
 		CloudSQL:       cloudSQL,
 	}

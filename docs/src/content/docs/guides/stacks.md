@@ -659,8 +659,11 @@ superschematic stack outputs Staging --out outputs.json
 - **`destroy`** removes a run's resources and its manifest, and
   **`outputs`** prints the applied outputs.
 
-A build's context is the repository root, cut down by the
-`Dockerfile.dockerignore` beside each server's Dockerfile. `--image
+A build's context is the repository root, or the directory the naming
+file's
+[`[paths] build_context`](/superschematic/reference/naming/#pathsbuild_context)
+names, cut down by the `Dockerfile.dockerignore` beside each server's
+Dockerfile. `--image
 <server>=...` takes a server's image by digest instead of building it,
 and `--no-build` builds nothing. A deploy keeps the image the manifest
 records for a server whose context did not change. A parameterized
