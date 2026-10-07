@@ -280,7 +280,11 @@ them, the fields its behaviors add: Workflow's `status`, Comments'
 `commentCount` and Revisions' `revision`. Those are read-only; a create or
 an update that sets one is 422. `seq` is the sequence of the note's last
 event, and the response sends it as the `ETag`, `"1"`. Without an `id`, the
-engine makes a random UUID. A body may also carry `behaviors`, the
+engine makes a random UUID. The fields come back as the engine stores
+them: each scalar value in the canonical form its scalar defines (an
+email lowercased, a color as `#RRGGBBAA`), and each absent field that
+declares a default with it, on a create; an update fills no default. A
+body may also carry `behaviors`, the
 parameters a create gives the note's behaviors by name, such as the links
 and blockers it holds from its create;
 [create parameters](/superschematic/guides/engine-behaviors/#create-parameters)
@@ -699,8 +703,10 @@ adds a comment and receives its event.
 
 This server keeps every event. One that passes `retention` to
 `openEngine`, `{ maxAgeMs }`, `{ maxEvents }` or both, has its runner
-prune the oldest, each namespace's apart, and never one a subscription
-has yet to handle. A read from the start, with no `after` or
+prune the oldest, each namespace's apart, a count being each namespace's
+own, and never one a subscription has yet to handle; `maxHoldMs` bounds
+how long a halted subscription, or one in an archived namespace, holds
+them. A read from the start, with no `after` or
 `after=0`, reads what is kept, from the oldest event. A read or a
 stream's resume from a cursor retention has pruned past is 410
 `cursor_expired`, whose `details` carry the `floor` to read on from,
@@ -790,14 +796,9 @@ curl -s $API/mcp -H 'authorization: Bearer carol-token' -H 'content-type: applic
 ```
 list_schemas
 describe_schema
-define_schema
 list_behaviors
 describe_behavior
 get_value
-list_namespaces
-create_namespace
-archive_namespace
-unarchive_namespace
 notes_get
 notes_list
 notes_comment
@@ -807,10 +808,15 @@ notes_propose
 notes_list_proposals
 ```
 
-The engine's tools name no schema until they are called, so everyone
-lists them and the policy answers the call; the behavior tools ask it
-nothing, since the behaviors are the server's code, and this policy
-refuses every caller the namespace tools' `manage`. Where a schema
+`define_schema` and the namespace tools name their schema or namespace
+only when called, so the list asks the policy whether the caller may
+`define`, or `manage` namespaces, at all: this policy gives `define` to
+`schemas.define` alone and refuses every caller `manage`, so carol sees
+neither, and a call she makes all the same is still refused. The tools
+that only read are in every list, each answering with what the caller
+may read; the behavior tools ask the policy nothing, since the behaviors
+are the server's code. `engineMcp`'s `tools` option narrows a caller's
+list further, a session limited to one schema's tools say. Where a schema
 composes `Search`, one more tool, `search`, searches every such schema the
 caller may read ([Engine behaviors](/superschematic/guides/engine-behaviors/#searching-every-schema)).
 No tool publishes: a draft that `define_schema` stores goes live only
