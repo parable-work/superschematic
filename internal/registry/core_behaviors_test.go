@@ -115,13 +115,14 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
 		}
 	}
-	// Branches makes each instance a version graph's root: no field, no
-	// requirement, and sixteen operations, all of instance scope, of which
-	// the nine that write the graph write and the seven that read it read.
+	// Branches makes each instance a version graph's root: one field, the
+	// release pointer's version, no requirement, and sixteen operations, all
+	// of instance scope, of which the nine that write the graph write and
+	// the seven that read it read.
 	branches, _ := reg.Behavior("Branches")
-	if branches.Package != EnginePackage || !branches.ConfigRequired() || len(branches.Requires) != 0 || len(branches.Fields) != 0 ||
+	if branches.Package != EnginePackage || !branches.ConfigRequired() || len(branches.Requires) != 0 || len(branches.Fields) != 1 || branches.Fields[0].Name != "release" ||
 		len(branches.PreconditionSchema) != 0 || len(branches.CreateParamsSchema) != 0 {
-		t.Errorf("Branches = %+v, want the engine's, a config, and no requirement, field or parameter", branches)
+		t.Errorf("Branches = %+v, want the engine's, a config, the field release, and no requirement or parameter", branches)
 	}
 	var branchOps []string
 	for _, op := range branches.Operations {
@@ -176,7 +177,7 @@ func TestCoreBehaviors(t *testing.T) {
 	}{
 		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
 		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
-		{links, []string{"no_revision", "required_link", "required_target"}},
+		{links, []string{"no_revision", "no_release", "required_link", "required_target"}},
 		{rollups, []string{"not_held"}},
 		{revisions, []string{"no_review", "not_pending"}},
 		{retries, []string{"exhausted", "limits_fixed", "not_configured"}},
@@ -235,6 +236,8 @@ func TestCoreBehaviors(t *testing.T) {
 		{dependencies, `{"satisfiedBy": ["done"]}`, "behavior Dependencies config: "},
 		{dependencies, `{"satisfiedBy": ["success", "success"]}`, "behavior Dependencies config: "},
 		{links, `{"links": {"spec": {"schema": "documents", "pinned": true}, "parent": {"schema": "tasks", "required": true}}}`, ""},
+		{links, `{"links": {"spec": {"schema": "documents", "pinned": "revision"}, "recipe": {"schema": "recipes", "pinned": "release"}, "note": {"schema": "notes", "pinned": false}}}`, ""},
+		{links, `{"links": {"spec": {"schema": "documents", "pinned": "tag"}}}`, "behavior Links config: "},
 		{links, ``, "behavior Links config: "},
 		{links, `{"links": {}}`, "behavior Links config: "},
 		{links, `{"links": {"Spec": {"schema": "documents"}}}`, "behavior Links config: "},
@@ -251,7 +254,9 @@ func TestCoreBehaviors(t *testing.T) {
 			"finished": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"]},
 			"started": {"schema": "tasks", "link": "project", "function": "any"},
 			"succeeded": {"schema": "tasks", "link": "project", "function": "all", "outcomes": ["success", "neutral"], "gatedStates": ["done"]},
-			"failed": {"schema": "tasks", "link": "project", "function": "any", "outcomes": ["failure"]}}}`, ""},
+			"failed": {"schema": "tasks", "link": "project", "function": "any", "outcomes": ["failure"]},
+			"lastResult": {"schema": "tasks", "link": "project", "function": "latest", "field": "result"}}}`, ""},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "latest"}}}`, "behavior Rollups config: "},
 		{rollups, ``, "behavior Rollups config: "},
 		{rollups, `{"rollups": {}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"Tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, "behavior Rollups config: "},
@@ -406,7 +411,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{budget, `{"meters": {}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"CpuSeconds": {}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"limit": 0}}}`, "behavior Budget config: "},
-		{budget, `{"meters": {"cpuSeconds": {"limit": 10, "limitField": "cpuLimit"}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {"limit": 10, "limitField": "cpuLimit"}}}`, ""},
 		{budget, `{"meters": {"cpuSeconds": {}}, "escalate": {"transition": "paused"}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {}}, "escalate": {"transition": "paused", "from": []}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"reset": "weekly"}}}`, "behavior Budget config: "},

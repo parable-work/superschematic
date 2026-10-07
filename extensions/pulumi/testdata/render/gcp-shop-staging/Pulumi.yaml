@@ -150,8 +150,6 @@ resources:
             volumeMounts:
               - mountPath: /cloudsql
                 name: cloudsql
-        scaling:
-          minInstanceCount: 0
         serviceAccount: ${Orders-account.email}
         volumes:
           - cloudSqlInstance:
@@ -525,8 +523,6 @@ resources:
             volumeMounts:
               - mountPath: /cloudsql
                 name: cloudsql
-        scaling:
-          minInstanceCount: 0
         serviceAccount: ${shop-api-account.email}
         volumes:
           - cloudSqlInstance:

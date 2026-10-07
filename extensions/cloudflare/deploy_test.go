@@ -50,7 +50,7 @@ func TestBootstrapAndDeployReadTheToken(t *testing.T) {
 	options := stack.Options{Registry: reg, Run: registry.Run{Environment: env}, Dir: t.TempDir(), Log: log}
 
 	term := &terminal{answers: []string{"cf-token-value"}}
-	if err := stack.Bootstrap(ctx, stack.BootstrapOptions{Options: options, Repository: "acme/shop", Prompter: term}); err != nil {
+	if _, err := stack.Bootstrap(ctx, stack.BootstrapOptions{Options: options, Repository: "acme/shop", Prompter: term}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := ext.Provisioner.Calls(), []string{"bootstrap Staging: repository acme/shop, credentials " + secret}; !slices.Equal(got, want) {

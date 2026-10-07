@@ -1,0 +1,26 @@
+{
+  "kind": "General",
+  "name": "Spec",
+  "description": "A spec tasks pin a revision of. Its blockers are tasks, so a blocker names its schema.",
+  "types": {
+    "Spec": {
+      "name": "Spec",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["draft", "final"],
+            "transitions": [{ "from": "draft", "to": "final" }]
+          }
+        },
+        { "name": "Revisions" },
+        { "name": "Dependencies", "config": { "schemas": ["Task"] } }
+      ],
+      "fields": [
+        { "name": "title", "description": "What the spec specifies.", "typeRef": { "name": "string" }, "required": true },
+        { "name": "body", "typeRef": { "name": "string" } }
+      ]
+    }
+  }
+}

@@ -49,6 +49,9 @@ type fakeCloud struct {
 	failRun   map[string]string
 	failBuild map[string]string
 
+	// numbers holds each project's number.
+	numbers map[string]string
+
 	log *stacktest.FakeProvisioner
 }
 
@@ -71,6 +74,7 @@ func newFakeCloud() *fakeCloud {
 		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{},
 		images: map[string]string{}, jobs: map[string]gcp.JobSpec{},
 		failRun: map[string]string{}, failBuild: map[string]string{},
+		numbers: map[string]string{"acme-staging": "123456789012", "acme-prod": "210987654321"},
 	}
 }
 
@@ -160,6 +164,16 @@ func (c *fakeCloud) EnableServices(_ context.Context, project string, services [
 		}
 	}
 	return nil
+}
+
+func (c *fakeCloud) ProjectNumber(_ context.Context, project string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	number, ok := c.numbers[project]
+	if !ok {
+		return "", fmt.Errorf("project %s does not exist", project)
+	}
+	return number, nil
 }
 
 func (c *fakeCloud) EnsureBucket(_ context.Context, project, bucket, location string) (bool, error) {
@@ -438,8 +452,9 @@ func TestStores(t *testing.T) {
 
 // TestBootstrap bootstraps Staging's project twice: the first run enables
 // the APIs, creates the state bucket and key, applies the bootstrap graph
-// and creates each credential's secret; the second changes nothing and
-// applies the same graph.
+// and creates each credential's secret, and returns the project's number to
+// record beside project (D47); the second changes nothing, applies the
+// same graph and returns the same number.
 func TestBootstrap(t *testing.T) {
 	f := newDeployFixture(t, false)
 	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
@@ -451,8 +466,13 @@ func TestBootstrap(t *testing.T) {
 		Credentials: []registry.Credential{cred, cred},
 		Provisioner: f.prov, Dir: t.TempDir(),
 	}
-	if err := target.Bootstrap.Bootstrap(ctx, req); err != nil {
+	result, err := target.Bootstrap.Bootstrap(ctx, req)
+	if err != nil {
 		t.Fatal(err)
+	}
+	wantNumber := []registry.BootstrapValue{{Key: "projectNumber", Value: "123456789012", Beside: "project"}}
+	if result == nil || !slices.Equal(result.Values, wantNumber) {
+		t.Errorf("bootstrap returned %+v, want %+v", result, wantNumber)
 	}
 	first := f.cloud.Changes()
 	for _, want := range []string{
@@ -474,8 +494,12 @@ func TestBootstrap(t *testing.T) {
 	graph := f.prov.Rendered()
 	applied := f.prov.Calls()
 
-	if err := target.Bootstrap.Bootstrap(ctx, req); err != nil {
+	result, err = target.Bootstrap.Bootstrap(ctx, req)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result == nil || !slices.Equal(result.Values, wantNumber) {
+		t.Errorf("the second bootstrap returned %+v, want %+v", result, wantNumber)
 	}
 	if again := f.cloud.Changes(); len(again) != len(first) {
 		t.Errorf("the second bootstrap changed %v", again[len(first):])

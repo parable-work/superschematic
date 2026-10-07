@@ -59,6 +59,23 @@ export interface SchemaVersion {
   publishedBy: string | null;
 }
 
+/** A namespace, as `GET /namespaces` lists it (runtime/engine/README.md, "Namespaces"). */
+export interface NamespaceRecord {
+  name: string;
+  /** configured: the engine's options name it; created: a create made it while the engine ran. */
+  origin: 'configured' | 'created';
+  /** Whether it is the shared namespace, which every other one looks schema names up in after itself. */
+  shared: boolean;
+  /** active, or archived: read as it was, refusing every write until it is unarchived. */
+  state: 'active' | 'archived';
+  /** When a create made it, and who; null for a configured one. */
+  createdAt: number | null;
+  createdBy: string | null;
+  /** When it was archived, and who; null unless it is archived. */
+  archivedAt: number | null;
+  archivedBy: string | null;
+}
+
 /** A schema name a namespace reaches. */
 export interface SchemaSummary {
   namespace: string;

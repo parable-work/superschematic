@@ -14,6 +14,7 @@ export {
   EngineClient,
   EventCalls,
   InstanceCalls,
+  NamespaceCalls,
   SchemaCalls,
 } from './client.js';
 export type { CreateOptions, EngineClientOptions, ListOptions, OperationOutcome, ReadEventsOptions, WriteOptions } from './client.js';
@@ -50,6 +51,7 @@ export type {
   InstancePage,
   JSONObject,
   JSONSchema,
+  NamespaceRecord,
   OperationChange,
   Preconditions,
   PublishResult,

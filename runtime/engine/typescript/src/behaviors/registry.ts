@@ -6,8 +6,9 @@ parameter, parameter, result and precondition schemas, and refuses an
 implementation whose operations, schema-level operations or fields are
 not exactly the ones its declaration names, whose migrations are
 malformed (an index over a column no migration up to its own adds among
-them), or whose reactions or schedules are not functions the runner can
-call. A name registers once.
+them), whose filters name a field it does not declare or a column its
+migrations do not add, or whose reactions or schedules are not functions
+the runner can call. A name registers once.
 
 A behavior whose storage already exists in the file (a schema that
 composes it was published before) has its storage brought up to its
@@ -23,6 +24,7 @@ import { migrate } from '../storage/migrations.js';
 import type { Storage } from '../storage/storage.js';
 import type {
   AnyBehaviorImplementation,
+  BehaviorFilter,
   BehaviorImplementation,
   BehaviorMigration,
   ColumnSpec,
@@ -54,6 +56,12 @@ export interface OperationSpec {
   readonly result: ValidateFunction;
 }
 
+/** A field a behavior lets a list filter on, checked. */
+export interface RegisteredFilter extends BehaviorFilter {
+  /** The behavior's own name of an index on the column alone, when a migration lists one. */
+  readonly index?: string;
+}
+
 /** A registered implementation, checked and compiled. */
 export class RegisteredBehavior {
   readonly operations: ReadonlyMap<string, OperationSpec>;
@@ -76,7 +84,13 @@ export class RegisteredBehavior {
     readonly columns: readonly string[],
     readonly migrations: readonly BehaviorMigration[],
     /** The compiled preconditionSchema; undefined when the behavior takes no precondition. */
-    readonly precondition: ValidateFunction | undefined
+    readonly precondition: ValidateFunction | undefined,
+    /**
+     * The fields a list may filter on, by field name: the column that
+     * holds each, its JSON type and the index its migrations list on that
+     * column alone, by the behavior's own names.
+     */
+    readonly filters: ReadonlyMap<string, RegisteredFilter> = new Map()
   ) {
     this.operations = new Map(operations.map((operation) => [operation.name, { ...operation, behavior: this }]));
     this.vetoCodes = new Set((declaration.vetoes ?? []).map((veto) => veto.code));
@@ -224,6 +238,7 @@ export class BehaviorRegistry {
     }
     const migrations = implementation.migrations ?? [];
     const columns = checkMigrations(migrations, problems);
+    const filters = checkFilters(implementation.filters, declaration, migrations, columns, problems);
     checkReactions(implementation.reactions, problems);
     checkSchedules(implementation.schedules, problems);
 
@@ -240,7 +255,8 @@ export class BehaviorRegistry {
       fields,
       columns,
       Object.freeze([...migrations]),
-      precondition
+      precondition,
+      filters
     );
   }
 
@@ -283,6 +299,50 @@ function matchNames(key: string, implemented: Map<string, unknown>, declared: st
   if (extra.length > 0) {
     problems.push(`it implements ${key} its declaration does not name: ${extra.join(', ')}`);
   }
+}
+
+const FILTER_TYPES: readonly string[] = ['string', 'number', 'integer', 'boolean'];
+
+// checkFilters holds filters to declared fields, each over a column the
+// migrations add, with a JSON type a where compares; it returns them with
+// the index a migration lists on the column alone.
+function checkFilters(
+  filters: unknown,
+  declaration: BehaviorDeclaration,
+  migrations: readonly BehaviorMigration[],
+  columns: readonly string[],
+  problems: string[]
+): Map<string, RegisteredFilter> {
+  const checked = new Map<string, RegisteredFilter>();
+  if (filters === undefined) {
+    return checked;
+  }
+  if (typeof filters !== 'object' || filters === null || Array.isArray(filters)) {
+    problems.push('filters is an object of { column, type } by field name');
+    return checked;
+  }
+  const fields = (declaration.fields ?? []).map((field) => field.name);
+  for (const [field, filter] of Object.entries(filters as Record<string, unknown>)) {
+    const at = `filter ${field}`;
+    if (!fields.includes(field)) {
+      problems.push(`${at} names a field its declaration does not (${fields.join(', ') || 'none'})`);
+      continue;
+    }
+    const { column, type } = (typeof filter === 'object' && filter !== null ? filter : {}) as { column?: unknown; type?: unknown };
+    if (typeof column !== 'string' || !columns.includes(column)) {
+      problems.push(`${at}: column is one of its migrations' columns (${columns.join(', ') || 'none'})`);
+      continue;
+    }
+    if (typeof type !== 'string' || !FILTER_TYPES.includes(type)) {
+      problems.push(`${at}: type is one of ${FILTER_TYPES.join(', ')}`);
+      continue;
+    }
+    const index = migrations
+      .flatMap((migration) => Object.entries(migration.indexes ?? {}))
+      .find(([, list]) => list.length === 1 && list[0] === column)?.[0];
+    checked.set(field, { column, type: type as BehaviorFilter['type'], ...(index === undefined ? {} : { index }) });
+  }
+  return checked;
 }
 
 /** The shortest interval a schedule takes, in milliseconds. */

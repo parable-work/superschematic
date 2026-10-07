@@ -33,12 +33,12 @@ as their support lands in every generator.
 
 | Name | On | What it does | Covered in |
 | --- | --- | --- | --- |
-| `@key` | field | the primary key | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
+| `@key` | field | the primary key; a unique field in the engine | [Database tables](/superschematic/guides/database-tables/#tables-and-keys), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `AutoGenerate<T>` | field | the database generates the value on insert | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
-| `@unique` | field | a unique constraint on the column | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
+| `@unique` | field | a unique constraint on the column; in the engine, on the field within a namespace, which `lookup` reads by | [Database tables](/superschematic/guides/database-tables/#tables-and-keys), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `Relation<T, { onDelete }>` | field | a foreign key to table `T`; `onDelete` is `CASCADE` (the default), `RESTRICT` or `NO ACTION` | [Database tables](/superschematic/guides/database-tables/#relations) |
 | `HasMany<T>` | field | the rows of `T` whose relation points at this row | [Database tables](/superschematic/guides/database-tables/#one-to-many) |
-| `@index<T>(keys, { unique?, name? })` | class | an index over the listed fields | [Database tables](/superschematic/guides/database-tables/#indexes) |
+| `@index<T>(keys, { unique?, name? })` | class | an index over the listed fields, in the engine too | [Database tables](/superschematic/guides/database-tables/#indexes), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `@searchField` | field | joins the field into a trigram-indexed `search_text` column | [Database tables](/superschematic/guides/database-tables/#text-search) |
 | `@jsonField`, `JsonField<T>` | field | stores the field as `JSONB` | [Database tables](/superschematic/guides/database-tables/#json-columns) |
 | `@sourceMustProject` | field | warns when a `@source` view leaves the field out | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
@@ -72,7 +72,7 @@ as their support lands in every generator.
 
 | Name | What it does | Covered in |
 | --- | --- | --- |
-| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
+| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs`; a Stack service's `outputs.ci` asks for its generated CI | [How it works](/superschematic/start/how-it-works/), [Stacks](/superschematic/guides/stacks/#generated-ci) |
 | `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and `calls`, and for a decorator argument that names a service, such as the `from` of `@requireService` and `@allowService`; its type carries the kind (`ServiceHandle<"API">`). Each service's build writes its handle to `src/service.generated.ts`, which a config or a schema file imports from the service's package; an API's also carries its `@envVars` class | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
 | `@envVars` | on a class of a General or API schema: its fields are the service's environment variables, with a generated loader and `values-schema.json`. On an API, it is the config of the API's server, and a stack's `env` binds its fields | [Modeling types](/superschematic/guides/modeling-types/#environment-variables), [Stacks](/superschematic/guides/stacks/#wire-the-services) |
 
@@ -81,8 +81,9 @@ as their support lands in every generator.
 A Stack service (`kind: SchemaKind.Stack`) declares what runs where over
 the services it names by their handles. Its build writes each
 environment, resolved, to `stack/<service>/<environment>/environment.json`,
-and each Go server's entrypoint and Dockerfile to
-`server/<service>/<server>/`. The stack takes its service's name. Each
+each Go server's entrypoint and Dockerfile to
+`server/<service>/<server>/`, and with `outputs.ci` its CI workflow to
+`ci/<service>/<renderer>/`. The stack takes its service's name. Each
 class of its schema carries one of these decorators and no fields.
 
 | Name | On | What it does | Covered in |

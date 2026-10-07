@@ -17,8 +17,10 @@ func (nopState) Backend(context.Context, *ir.ResolvedEnvironment) (StateBackend,
 func (nopState) ReadManifest(context.Context, Run) ([]byte, error) { return nil, ErrNoManifest }
 func (nopState) WriteManifest(context.Context, Run, []byte) error  { return nil }
 func (nopState) DeleteManifest(context.Context, Run) error         { return nil }
-func (nopState) Bootstrap(context.Context, BootstrapRequest) error { return nil }
-func (nopState) Migrate(context.Context, MigrationRequest) error   { return nil }
+func (nopState) Bootstrap(context.Context, BootstrapRequest) (*BootstrapResult, error) {
+	return nil, nil
+}
+func (nopState) Migrate(context.Context, MigrationRequest) error { return nil }
 func (nopState) Build(context.Context, BuildRequest) (string, error) {
 	return "", nil
 }
@@ -33,10 +35,10 @@ func TestRegisterTargetDeploySeams(t *testing.T) {
 	}{
 		{"state without provisioner", TargetSpec{Name: "fake", State: nopState{}}, `target "fake" has State but names no provisioner`},
 		{"bootstrap without provisioner", TargetSpec{Name: "fake", State: nopState{}, Bootstrap: nopState{}}, "has State, Bootstrap but names no provisioner"},
-		{"bootstrap without state", TargetSpec{Name: "fake", Provisioner: "fake", Bootstrap: nopState{}}, "has Bootstrap, Migrations or Builder but no State"},
-		{"migrations without state", TargetSpec{Name: "fake", Provisioner: "fake", Migrations: nopState{}}, "has Bootstrap, Migrations or Builder but no State"},
+		{"bootstrap without state", TargetSpec{Name: "fake", Provisioner: "fake", Bootstrap: nopState{}}, "has Bootstrap, Migrations, Builder or CI but no State"},
+		{"migrations without state", TargetSpec{Name: "fake", Provisioner: "fake", Migrations: nopState{}}, "has Bootstrap, Migrations, Builder or CI but no State"},
 		{"builder without provisioner", TargetSpec{Name: "fake", State: nopState{}, Builder: nopState{}}, "has State, Builder but names no provisioner"},
-		{"builder without state", TargetSpec{Name: "fake", Provisioner: "fake", Builder: nopState{}}, "has Bootstrap, Migrations or Builder but no State"},
+		{"builder without state", TargetSpec{Name: "fake", Provisioner: "fake", Builder: nopState{}}, "has Bootstrap, Migrations, Builder or CI but no State"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

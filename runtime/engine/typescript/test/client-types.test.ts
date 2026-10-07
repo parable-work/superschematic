@@ -24,6 +24,7 @@ export type Checks = [
   Holds<Equal<keyof Omit<server.SchemaRecord, 'canonical'>, keyof client.SchemaVersion>>,
   Holds<SameShape<Omit<server.SchemaRecord, 'canonical' | 'document'>, Omit<client.SchemaVersion, 'document'>>>,
   Holds<SameShape<server.SchemaSummary, client.SchemaSummary>>,
+  Holds<SameShape<server.NamespaceRecord, client.NamespaceRecord>>,
   Holds<SameShape<server.PublishResult, client.PublishResult>>,
   Holds<Equal<server.EventKind, client.EventKind>>,
   Holds<SameShape<server.EngineEvent, client.EngineEvent>>,

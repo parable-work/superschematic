@@ -228,6 +228,22 @@ func TestValidateShapeChecksCalls(t *testing.T) {
 	}
 }
 
+// TestValidateShapeTakesCIOnAStackOnly: outputs.ci writes a stack's
+// workflow (D47), so a config of another kind that sets it is refused.
+func TestValidateShapeTakesCIOnAStackOnly(t *testing.T) {
+	ci := map[string]any{"ci": map[string]any{"github": map[string]any{}}}
+	kinds := append(kindList{}, coreKinds...)
+	kinds = append(kinds, string(ir.SchemaKindStack))
+	_, err := ValidateShapeWith(&SchemaConfig{Name: "shop-api", Kind: ir.SchemaKindAPI, Outputs: ci}, kinds)
+	want := "schema config for shop-api sets outputs.ci, which only a Stack service may set: the generated CI deploys a stack's environments (this service is kind API)"
+	if err == nil || err.Error() != want {
+		t.Errorf("ValidateShapeWith error = %v, want %q", err, want)
+	}
+	if _, err := ValidateShapeWith(&SchemaConfig{Name: "shop-stack", Kind: ir.SchemaKindStack, Outputs: ci}, kinds); err != nil {
+		t.Errorf("a stack with outputs.ci: %v", err)
+	}
+}
+
 func TestValidateShapeRejectsUnknownKind(t *testing.T) {
 	_, err := ValidateShapeWith(&SchemaConfig{Name: "x", Kind: ir.SchemaKind("DBB")}, coreKinds)
 	if err == nil {

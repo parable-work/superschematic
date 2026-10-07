@@ -55,7 +55,10 @@ scores 1 / (RRF_K + its place) in each ranking it is in, and the scores
 add. Such hits carry the score, their place in each ranking and their
 cosine similarity, so a client can explain the order. similar ranks the
 instances nearest to one by its own vector and a full-text search for its
-longest words, fused the same way, leaving it out.
+longest words, fused the same way, leaving it out; given text in place of
+an instance, a draft's before it is created, it ranks the same way by
+the text's longest words and the vector given with it, if any, with no
+instance to leave out.
 
 searchSchemas is the engine-level search across a namespace's schemas
 (engine.search, the HTTP route and the MCP tool): it runs search on every
@@ -622,20 +625,47 @@ function vectorsOf(context: SchemaContext<SearchConfig>, operation: string, path
   return context.config.vectors;
 }
 
-// queryVector checks a search's vector against the config's and returns
-// it at unit length.
-function queryVector(context: SchemaContext<SearchConfig>, params: FrozenJSON): Float32Array {
-  const vectors = vectorsOf(context, 'search', '/vector');
+// queryVector checks the vector a search or a similar is given against
+// the config's and returns it at unit length.
+function queryVector(context: SchemaContext<SearchConfig>, operation: string, params: FrozenJSON): Float32Array {
+  const vectors = vectorsOf(context, operation, '/vector');
   if (params.model !== undefined && params.model !== vectors.model) {
-    throw new OperationParamsError(NAME, 'search', [
+    throw new OperationParamsError(NAME, operation, [
       { path: '/model', message: `is ${JSON.stringify(params.model)}, and ${context.schema}'s vectors come from ${JSON.stringify(vectors.model)}` },
     ]);
   }
   const vector = unit(params.vector as readonly number[], vectors.dimensions);
   if (typeof vector === 'string') {
-    throw new OperationParamsError(NAME, 'search', [{ path: '/vector', message: vector }]);
+    throw new OperationParamsError(NAME, operation, [{ path: '/vector', message: vector }]);
   }
   return vector;
+}
+
+// nearest ranks the instances near a text and, when there is one, a
+// vector, as similar does: a full-text search for the text's longest
+// words, fused with the vector's ranking, leaving out a row (the
+// instance's own, for similar of an instance).
+function nearest(
+  context: SchemaContext<SearchConfig>,
+  text: string,
+  vector: Float32Array | undefined,
+  limit: number,
+  after: number,
+  exclude?: number
+): Page<SearchHit> {
+  const { config, sql, namespace, schema } = context;
+  const match = likeness(text);
+  if (vector === undefined) {
+    if (match === undefined) {
+      return { items: [], next: null };
+    }
+    return textPage(matches(sql, config, namespace, schema, match, 'words', limit + 1, after, exclude), limit, after, config.fields);
+  }
+  if (match === undefined) {
+    return vectorPage(vectorIndex.nearest(sql, namespace, schema, vector, after + limit + 1, exclude), limit, after);
+  }
+  const ranked = matches(sql, config, namespace, schema, match, 'words', RRF_WINDOW, 0, exclude);
+  return fusedPage(fuse(ranked, vectorIndex.nearest(sql, namespace, schema, vector, RRF_WINDOW, exclude)), limit, after, config.fields);
 }
 
 // ownText is an instance's text, as the index holds its fields.
@@ -771,7 +801,7 @@ export const search = defineBehavior<SearchConfig>({
         }
         return textPage(matches(sql, config, namespace, schema, match, syntax, limit + 1, after), limit, after, config.fields);
       }
-      const vector = queryVector(context, params);
+      const vector = queryVector(context, 'search', params);
       if (query === undefined) {
         return vectorPage(vectorIndex.nearest(sql, namespace, schema, vector, after + limit + 1), limit, after);
       }
@@ -779,10 +809,17 @@ export const search = defineBehavior<SearchConfig>({
       return fusedPage(fuse(text, vectorIndex.nearest(sql, namespace, schema, vector, RRF_WINDOW)), limit, after, config.fields);
     },
 
+    // similar of an instance ranks by its own text and vector and leaves it
+    // out; of a text, by the text and the vector given with it, with no
+    // instance to leave out.
     similar(context, params) {
       mayRead(context);
       const { config, sql, namespace, schema } = context;
       const { limit, after } = pageRequest(NAME, 'similar', params);
+      if (params.text !== undefined) {
+        const vector = params.vector === undefined ? undefined : queryVector(context, 'similar', params);
+        return { ...nearest(context, params.text as string, vector, limit, after), embedded: vector !== undefined };
+      }
       const id = params.id as string;
       const own = sql.get(`SELECT row, vector FROM ${sql.table('rows')} WHERE namespace = ? AND schema = ? AND id = ?`, key(namespace, schema, id));
       if (!own) {
@@ -790,20 +827,7 @@ export const search = defineBehavior<SearchConfig>({
       }
       const row = Number(own.row);
       const vector = config.vectors === undefined ? undefined : decode(own.vector);
-      const match = likeness(ownText(sql, config, row));
-      if (vector === undefined) {
-        if (match === undefined) {
-          return { items: [], next: null, embedded: false };
-        }
-        const text = matches(sql, config, namespace, schema, match, 'words', limit + 1, after, row);
-        return { ...textPage(text, limit, after, config.fields), embedded: false };
-      }
-      if (match === undefined) {
-        return { ...vectorPage(vectorIndex.nearest(sql, namespace, schema, vector, after + limit + 1, row), limit, after), embedded: true };
-      }
-      const text = matches(sql, config, namespace, schema, match, 'words', RRF_WINDOW, 0, row);
-      const near = vectorIndex.nearest(sql, namespace, schema, vector, RRF_WINDOW, row);
-      return { ...fusedPage(fuse(text, near), limit, after, config.fields), embedded: true };
+      return { ...nearest(context, ownText(sql, config, row), vector, limit, after, row), embedded: vector !== undefined };
     },
 
     staleEmbeddings(context, params) {
