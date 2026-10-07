@@ -54,6 +54,13 @@ type (
 	// Prompter asks a person for a secret value.
 	Prompter = stackdeploy.Prompter
 
+	// SchemaSource is the stack's schema and its directory, where
+	// bootstrap records the values its target returns; RecordedValue is
+	// what it did with one, a RecordOutcome.
+	SchemaSource  = stackdeploy.SchemaSource
+	RecordedValue = stackdeploy.RecordedValue
+	RecordOutcome = stackdeploy.RecordOutcome
+
 	// RunOutputs is an outputs file: what one run exported, which the
 	// bindings generator reads.
 	RunOutputs = stackdeploy.RunOutputs
@@ -112,9 +119,20 @@ func Destroy(ctx context.Context, o Options) error { return stackdeploy.Destroy(
 // Outputs returns a run's outputs file; see internal/stackdeploy.Outputs.
 func Outputs(ctx context.Context, o Options) (*RunOutputs, error) { return stackdeploy.Outputs(ctx, o) }
 
-// Bootstrap prepares the cloud project an environment deploys to; see
+// What bootstrap did with a value its target returned.
+const (
+	ValueRecorded = stackdeploy.ValueRecorded
+	ValueUpdated  = stackdeploy.ValueUpdated
+	ValueMatches  = stackdeploy.ValueMatches
+	ValueByHand   = stackdeploy.ValueByHand
+)
+
+// Bootstrap prepares the cloud project an environment deploys to, and
+// records the values its target returns in the schema; see
 // internal/stackdeploy.Bootstrap.
-func Bootstrap(ctx context.Context, o BootstrapOptions) error { return stackdeploy.Bootstrap(ctx, o) }
+func Bootstrap(ctx context.Context, o BootstrapOptions) ([]RecordedValue, error) {
+	return stackdeploy.Bootstrap(ctx, o)
+}
 
 // SetSecrets asks for and stores secret values; see
 // internal/stackdeploy.SetSecrets.

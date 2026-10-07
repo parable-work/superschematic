@@ -532,8 +532,27 @@ creates the state bucket and its KMS key, applies the Artifact Registry
 repository, the `deployer` and `planner` accounts, the `builder` account
 image builds run as, the `migrator` account the migration job runs as,
 and Workload Identity Federation for the GitHub repository, and creates
-the secret of each platform credential the environment needs. Then it asks for each
-credential with no value, with the terminal's echo off.
+the secret of each platform credential the environment needs.
+
+Then it records in the stack's schema the values only the cloud knows: on
+gcp, the project's number, as `projectNumber` in the gcp values of the
+environment whose declaration sets `project`, the bootstrapped one or the
+nearest one it extends. It writes the value when the schema has none,
+writes it again when it differs, and leaves the file alone when it
+matches. A TypeScript schema changes in that property's text alone; a
+JSON or YAML schema is not edited. It prints one line per value on
+standard output, its progress going to standard error:
+
+```
+projectNumber 123456789012: recorded on Staging in src/stack.schema.ts
+projectNumber 123456789012: updated from 111111111111 on Staging in src/stack.schema.ts
+projectNumber 123456789012: matches Staging in src/stack.schema.ts
+projectNumber 123456789012: not recorded: bootstrap edits no YAML schema; in src/stack.schema.yaml, add projectNumber: "123456789012" beside project in the environment values of Staging
+```
+
+A TypeScript declaration the edit cannot change, such as values held in a
+constant, prints `not recorded:` with what to set by hand. Last, it asks
+for each credential with no value, with the terminal's echo off.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |

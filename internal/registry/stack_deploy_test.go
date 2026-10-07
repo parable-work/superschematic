@@ -17,8 +17,10 @@ func (nopState) Backend(context.Context, *ir.ResolvedEnvironment) (StateBackend,
 func (nopState) ReadManifest(context.Context, Run) ([]byte, error) { return nil, ErrNoManifest }
 func (nopState) WriteManifest(context.Context, Run, []byte) error  { return nil }
 func (nopState) DeleteManifest(context.Context, Run) error         { return nil }
-func (nopState) Bootstrap(context.Context, BootstrapRequest) error { return nil }
-func (nopState) Migrate(context.Context, MigrationRequest) error   { return nil }
+func (nopState) Bootstrap(context.Context, BootstrapRequest) (*BootstrapResult, error) {
+	return nil, nil
+}
+func (nopState) Migrate(context.Context, MigrationRequest) error { return nil }
 func (nopState) Build(context.Context, BuildRequest) (string, error) {
 	return "", nil
 }

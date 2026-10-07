@@ -195,6 +195,7 @@ const targetValues = `{
   "required": ["project", "region"],
   "properties": {
     "project": {"type": "string", "minLength": 1},
+    "projectNumber": {"type": "string", "minLength": 1},
     "region": {"type": "string", "minLength": 1},
     "production": {"type": "boolean"}
   },
