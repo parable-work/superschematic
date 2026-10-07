@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
 sidebar:
   order: 7
 ---
@@ -119,6 +119,44 @@ the JSON form to hand to the engine. A behavior an extension adds joins
 `BehaviorConfigs` by module augmentation;
 [Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
 shows how.
+
+## Display
+
+A UI, or an agent, that renders a schema's instances reads how to show
+them from the schema: `@display` on the type, from
+`@superschematic/schema`. It names one instance and several, the title
+and summary fields, what a create button says, and labels for the
+`Workflow`'s states and transitions:
+
+```ts
+@display({
+  noun: "Task",
+  plural: "Tasks",
+  titleField: "title",
+  createLabel: "New task",
+  summaryFields: ["status"],
+  states: {
+    todo: { label: "To do", tone: "muted" },
+    doing: { label: "Do", activeForm: "Doing", tone: "active" },
+    done: { label: "Done", tone: "success" },
+    dropped: { label: "Dropped", tone: "danger" },
+  },
+  transitions: {
+    todo: { doing: "Start", dropped: "Drop" },
+    doing: { done: "Finish", dropped: "Drop" },
+  },
+})
+```
+
+The JSON form writes the same object under the type's `display` key. A
+UI showing an instance's moves reads `transitions[status]`. `define`
+refuses a title that is not one of the type's own text fields, a summary
+field that is neither the type's nor its behaviors', and a state or a
+transition the `Workflow` config does not list, with the compiler's
+wording. The describe document carries the instance type's display, its
+fields with their `@docs` titles and `@icon`s, and each operation's
+title. [Documentation decorators](/superschematic/reference/documentation/#display-on-a-type)
+has every rule.
 
 ## Create parameters
 
@@ -299,10 +337,13 @@ engine.runner.stop();      // engine.close() stops it too
   wait, `archived` in `status()`, until the namespace is unarchived, then
   pick up where they stopped.
 - **It prunes the log, with `retention`.** An engine opened with
-  `retention: { maxAgeMs?, maxEvents? }` has the runner prune the oldest
-  events at its first pass and every `everyMs` (a minute) after, a
-  namespace at a time, and never past an event a subscription there has
-  yet to handle, halted ones included. `engine.runner.prune()` prunes now
+  `retention: { maxAgeMs?, maxEvents?, maxHoldMs? }` has the runner prune
+  the oldest events at its first pass and every `everyMs` (a minute)
+  after, a namespace at a time, `maxEvents` counting each namespace's
+  own, and never past an event a subscription there has yet to handle,
+  halted ones included; with `maxHoldMs`, a halted or archived one holds
+  no event older than that, and `status()` shows how far each hold
+  reaches and until when. `engine.runner.prune()` prunes now
   and needs no principal. A reaction's `before()` still reads an instance
   whose create was pruned, and a read of the log from the start reads
   what is kept.
@@ -413,8 +454,10 @@ engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: '
 - `link` again moves a link to another target.
 - A **required** link is given at every create, so every instance holds
   it: a create without it is refused, it can be moved but not unlinked,
-  and its target cannot be deleted while it points there. A new version
-  cannot make a link required, as it cannot make a field required.
+  and its target cannot be deleted while it points there. While the
+  schema has instances, a new version cannot make a link required, as it
+  cannot make a field required; with none, in any namespace that reads
+  it, a new version may change its links in any way.
 - An **optional** link is cleared when its target is deleted, with an
   `unlink` event on each instance that pointed there.
 - A **pinned** link records the target's revision, or with `pinned:
@@ -762,10 +805,11 @@ engine.instances.update(me, 'Step', lint.id, { kind: 'review' });
 - **Strict at every depth.** A result is held to its type as a field of
   that type would be: its fields' types and bounds, and no key the type
   does not declare, down through nested objects and lists.
-- **New versions.** A new version keeps `field`, `by` and each kind's
-  type, and the types themselves are held to the compatibility rule as a
-  field's type is: `VerifyResult` can gain an optional field, not a
-  required one. `Constants` can change freely.
+- **New versions.** While the schema has instances, a new version keeps
+  `field`, `by` and each kind's type, and the types themselves are held
+  to the compatibility rule as a field's type is: `VerifyResult` can gain
+  an optional field, not a required one. With none, any of them may
+  change. `Constants` can change freely.
 - **What a client sees.** The describe document's instance and the
   create and update tools carry an `if`/`then` per kind under `allOf`, so
   an MCP client or an agent sees which shape each kind takes before it
@@ -901,7 +945,9 @@ engine.instances.get(me, "Recipe", id)?.data.release;              // 1: the rel
   as the compatibility rule allows a field to change, and change a
   retention, `primary`, `snapshotEvery` and `sweep`; removing a kind or
   changing a kind's type, parent, order, singleton or a field's unit is
-  refused, and so is a version without `Branches`. Every stored row reads
+  refused while the schema has instances, and so is a version without
+  `Branches`. With none, deleting the last instance having deleted its
+  graph, the kinds may change in any way. Every stored row reads
   a field a version adds as null, and a null field hashes as an absent
   one, so `materialize` of a commit made before returns the `contentHash`
   the commit stored and `history` returns; a value written to the field

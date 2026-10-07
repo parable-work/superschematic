@@ -13,6 +13,7 @@ export type {
   AccessPolicy,
   AccessRequest,
   Action,
+  ListingAccessRequest,
   NamespaceAccessRequest,
   NamespaceOperation,
   Principal,
@@ -33,6 +34,7 @@ export {
   PreconditionsError,
   SchemaDocumentError,
   UniqueConflictError,
+  ValueTooLargeError,
 } from './errors.js';
 export type { EngineErrorCode, SchemaChange, SchemaIssue, ValidationIssue, Veto } from './errors.js';
 
@@ -60,6 +62,7 @@ export type { RetentionOptions } from './events/retention.js';
 // The value store (runtime/engine/README.md, "The value store").
 export {
   DEFAULT_VALUE_CACHE_BYTES,
+  DEFAULT_VALUE_MAX_BYTES,
   DEFAULT_VALUE_THRESHOLD,
   MIN_VALUE_THRESHOLD,
   SqliteValueDriver,
@@ -82,6 +85,7 @@ export {
 } from './runner/runner.js';
 export type {
   PruneResult,
+  RetentionNamespaceStatus,
   RetentionStatus,
   RunnerOptions,
   RunnerPass,
@@ -108,6 +112,7 @@ export type {
   BehaviorSchedule,
   BehaviorScope,
   ColumnSpec,
+  ConfigChange,
   Columns,
   ConfigSchema,
   ConfigSchemas,
@@ -186,7 +191,10 @@ export {
   SIMILAR_TERMS,
   isTerminalState,
   linkPin,
+  linkedTo,
+  movedOn,
   stateOutcome,
+  targetMove,
   uuidV5,
 } from './behaviors/core/index.js';
 export type {
@@ -227,6 +235,7 @@ export type {
   SearchHit,
   SearchVectors,
   SnippetPart,
+  TargetMove,
   VariantsConfig,
   WorkflowConfig,
   WorkflowOutcome,
@@ -247,11 +256,14 @@ export { MCP_HANDLE, MCP_HANDLE_MAX_LENGTH, ToolCatalog, UnknownToolError, kebab
 export type {
   DescribeDocument,
   DescribedBehavior,
+  DescribedField,
   DescribedOperation,
   JSONSchemaObject,
   ToolDefinition,
+  ToolFilter,
   ToolMCPRecord,
   ToolManifest,
+  ToolSummary,
   ToolTarget,
 } from './tools/catalog.js';
 export type { BehaviorDocument, BehaviorOperationDocument, BehaviorSummary } from './tools/behaviors.js';

@@ -255,6 +255,19 @@ for (const driver of drivers) {
       assert.match(removed.changes[0].message, /the instances would lose their status/);
     });
 
+    test('with no instance, a new version may drop a state; once the last one goes, it may again', () => {
+      const engine = published();
+      const version = (config: unknown) => {
+        engine.schemas.define(alice, orderSchema(config));
+        return engine.schemas.publish(alice, 'Order').version;
+      };
+      const fewer = { states: ['draft', 'open', 'shipped'], transitions: [{ from: 'draft', to: 'open' }, { from: 'open', to: 'shipped' }] };
+      assert.match(thrown(() => version(fewer), IncompatibleChangeError).changes[0].message, /an instance may be in "cancelled", which the new config drops/);
+      engine.instances.delete(alice, 'Order', 'o1');
+      assert.equal(version(fewer), 2);
+      assert.equal(version({ states: ['draft', 'open'], transitions: [{ from: 'draft', to: 'open' }] }), 3);
+    });
+
     test('Workflow joins a schema with no instances, and not one that has them', () => {
       const engine = open();
       const plain = clone(orderSchema()) as { types: { Order: Record<string, unknown> } };

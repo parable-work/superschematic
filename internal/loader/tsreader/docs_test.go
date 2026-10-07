@@ -131,3 +131,38 @@ func TestInvalidOperationMCPIsALocatedSchemaError(t *testing.T) {
 		t.Fatalf("diagnostic should carry file:line:col, got: %s", msg)
 	}
 }
+
+// TestDisplayLoadsIntoIR: @display from @superschematic/schema writes the
+// type's display, with its states and transitions by key.
+func TestDisplayLoadsIntoIR(t *testing.T) {
+	schema, _, err := LoadService(filepath.Join("testdata", "services", "fixture-display"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	display := schema.Types["Ticket"].Display
+	if display == nil || display.Noun != "Ticket" || display.TitleField != "title" || strings.Join(display.SummaryFields, ",") != "status,assignee" {
+		t.Fatalf("Ticket display = %+v", display)
+	}
+	if state := display.States["implementing"]; state.ActiveForm != "Implementing" || state.Tone != ir.DisplayToneActive {
+		t.Fatalf("implementing = %+v", state)
+	}
+	if display.Transitions["review"]["done"] != "Accept" {
+		t.Fatalf("transitions = %+v", display.Transitions)
+	}
+}
+
+// TestInvalidDisplayIsALocatedSchemaError: an argument @display's schema
+// refuses fails the load with a diagnostic at the decorator.
+func TestInvalidDisplayIsALocatedSchemaError(t *testing.T) {
+	_, _, err := LoadService(filepath.Join("testdata", "services", "broken-display"))
+	if err == nil {
+		t.Fatal("expected schema errors")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "@display argument: ") || !strings.Contains(msg, "items at 0 and 1 are equal") {
+		t.Fatalf("unexpected error: %s", msg)
+	}
+	if !regexp.MustCompile(`broken\.schema\.ts:\d+:\d+:`).MatchString(msg) {
+		t.Fatalf("diagnostic should carry file:line:col, got: %s", msg)
+	}
+}

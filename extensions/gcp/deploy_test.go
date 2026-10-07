@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -38,21 +39,41 @@ type fakeCloud struct {
 
 	// images holds each pushed image's digest by `<repository>:<tag>`;
 	// builds and jobs what RunBuild and EnsureJob were last given; runs
-	// the arguments of each job run.
-	images map[string]string
-	builds []BuildSpecRecord
-	jobs   map[string]gcp.JobSpec
-	runs   [][]string
+	// the arguments of each job run; stderr what each failed execution
+	// wrote to stderr, by its name, and stderrReads each read of it.
+	images      map[string]string
+	builds      []BuildSpecRecord
+	jobs        map[string]gcp.JobSpec
+	runs        [][]string
+	stderr      map[string][]string
+	stderrReads []stderrRead
 
 	// failRun fails the next job run whose arguments hold the string,
 	// and failBuild every build of an image that starts with the string.
-	failRun   map[string]string
-	failBuild map[string]string
+	// failWait fails the wait for the next job run, which the fake starts;
+	// failStderr fails each read of an execution's stderr.
+	failRun    map[string]fakeFailure
+	failBuild  map[string]string
+	failWait   error
+	failStderr error
 
 	// numbers holds each project's number.
 	numbers map[string]string
 
 	log *stacktest.FakeProvisioner
+}
+
+// fakeFailure is an execution that fails: Cloud Run's message, and the
+// lines its task wrote to stderr.
+type fakeFailure struct {
+	message string
+	stderr  []string
+}
+
+// stderrRead is a read of an execution's stderr.
+type stderrRead struct {
+	execution string
+	wait      time.Duration
 }
 
 // BuildSpecRecord is a build the fake ran.
@@ -72,8 +93,8 @@ func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
 		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{},
 		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{},
-		images: map[string]string{}, jobs: map[string]gcp.JobSpec{},
-		failRun: map[string]string{}, failBuild: map[string]string{},
+		images: map[string]string{}, jobs: map[string]gcp.JobSpec{}, stderr: map[string][]string{},
+		failRun: map[string]fakeFailure{}, failBuild: map[string]string{},
 		numbers: map[string]string{"acme-staging": "123456789012", "acme-prod": "210987654321"},
 	}
 }
@@ -135,13 +156,28 @@ func (c *fakeCloud) RunJob(_ context.Context, project, region, job string, args 
 	c.runs = append(c.runs, slices.Clone(args))
 	name := fmt.Sprintf("%s/executions/%d", key, len(c.runs))
 	c.record("cloud run job %s", strings.Join(args, " "))
-	for match, msg := range c.failRun {
+	if err := c.failWait; err != nil {
+		c.failWait = nil
+		return nil, fmt.Errorf("gcp: job %s: waiting for execution %s, which may still be running: %w", key, name, err)
+	}
+	for match, fail := range c.failRun {
 		if strings.Contains(strings.Join(args, " "), match) {
 			delete(c.failRun, match)
-			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: msg}, nil
+			c.stderr[name] = fail.stderr
+			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: fail.message}, nil
 		}
 	}
 	return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Succeeded: true}, nil
+}
+
+func (c *fakeCloud) ExecutionStderr(_ context.Context, run *gcp.JobRun, wait time.Duration) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stderrReads = append(c.stderrReads, stderrRead{run.Name, wait})
+	if c.failStderr != nil {
+		return nil, c.failStderr
+	}
+	return slices.Clone(c.stderr[run.Name]), nil
 }
 
 func (c *fakeCloud) change(format string, args ...any) {

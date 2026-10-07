@@ -344,7 +344,7 @@ describe('refusals', () => {
     first.schemas.define(alice, gadget);
     first.schemas.publish(alice, 'Gadget');
     first.close();
-    const { app, engine } = serve({}, { path, metaSchema: openMetaSchema(), behaviors: [flag], retention: { maxEvents: 1 } });
+    const { app, engine } = serve({}, { path, metaSchema: openMetaSchema(), behaviors: [flag], retention: { maxEvents: 1 }, values: { thresholdBytes: 1024, maxBytes: 1024 } });
     const post = (path: string, body: unknown) => call(app, 'POST', path, { body });
     await data(post('/namespaces/default/schemas', orderDocument()));
     await data(post('/namespaces/default/schemas/Order/publish', undefined));
@@ -376,6 +376,7 @@ describe('refusals', () => {
       ['unavailable', () => call(app, 'GET', '/namespaces/default/schemas/Gadget/instances')],
       ['namespace_archived', () => post('/namespaces/acme/schemas', noteDocument)],
       ['cursor_expired', () => call(app, 'GET', '/namespaces/default/events?after=1')],
+      ['value_too_large', () => post(ORDERS, { data: { title: 'x'.repeat(2_000) } })],
     ];
     assert.deepEqual(cases.map(([code]) => code).sort(), Object.keys(ENGINE_ERROR_STATUS).sort(), 'a case per engine error code');
     for (const [code, request, details] of cases) {
@@ -387,6 +388,8 @@ describe('refusals', () => {
     }
     const expired = await problem(call(app, 'GET', '/namespaces/default/events?after=1'), 410);
     assert.deepEqual(expired.details, { after: 1, floor: engine.events.floor(), head: engine.events.head() });
+    const tooLarge = await problem(post(ORDERS, { data: { title: 'x'.repeat(2_000) } }), 413);
+    assert.deepEqual(tooLarge.details, { path: '/title', bytes: 2_002, maxBytes: 1_024 });
     const veto = await problem(call(app, 'DELETE', `${ITEMS}/i1`), 409);
     assert.deepEqual(veto.details, { behavior: 'test.Flag', action: 'delete', reason: 'it is flagged: on hold' });
     assert.equal(engine.instances.get(everything, 'Item', 'i1')?.data.title, 'Desk');

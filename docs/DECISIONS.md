@@ -1117,12 +1117,23 @@ typed client over the HTTP API, a worker and a reconciler" below), and
 (the amendment "a large value is stored once" below). The engine enforces
 `@unique`, `@key` and `@index`, finds an instance by its unique fields and
 filters a list by equality (the amendment "an instance is found by a
-unique field" below). A deployment makes and archives namespaces while
-the engine runs, and the log keeps events by age or count, pruned on the
-runner (the amendments "namespaces made while the engine runs, and archived"
-and "the log keeps what retention and its subscriptions need" below). Each change that lands a piece
-updates this paragraph. The names and rules are reversible until the
-first release.
+unique field" below), on Assignment's assignee, Lease's holder and
+Retries' exhaustion too, and on no value (the amendment "a list filters
+on who holds the work" below). A deployment makes and archives
+namespaces while the engine runs, and the log keeps events by age or
+count, pruned on the runner (the amendments "namespaces made while the
+engine runs, and archived" and "the log keeps what retention and its
+subscriptions need" below). Display metadata is the core `@display`
+decorator (D48), which the describe document carries. Lease tells a
+holder that a linked target moved (`directOn`), and a behavior's
+`configChange` sees whether the schema has instances (the amendments "a
+lease's holder hears that a linked target moved" and "a config change
+sees whether the schema has instances" below). A write that changes
+nothing writes nothing, a write stores what the schema's parse makes of
+it, each caller's tools are the ones it may use, and retention and the
+value store have bounds (the four amendments of those names below). Each
+change that lands a piece updates this paragraph. The names and rules are
+reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -1751,6 +1762,157 @@ of the draft it was about to create.
 | `Rollups`' `latest`, `{ function: "latest", field }`, is the field's value on the linked instance created last, by `createdAt`, the greater id on a tie; absent when that instance holds none or there is none. The field is any field of the linked type, or `status` when it composes `Workflow`, which `parseConfig` checks. It is one pass over the records a rollup reads and its JSON type is its field's, so the set stays closed. | Ordering by when the link was made, which Rollups cannot read without Links' tables; the latest instance that holds a value, which is a filter; `first` beside it, which no case needs yet |
 | `Budget`'s `limit` and `limitField` go together: `limit` is the limit while the field holds no value of at least 0, as `reserve` is the amount beside `reserveField`. A change that empties the field is held to `limit`, never below what is used and reserved. The declaration drops the `not` that refused both. | Exclusive keys, which leave an instance without a limit until its field is set; falling back to the limit `setLimit` stored, which a meter with `limitField` never writes |
 | `Search`'s `similar` takes `text` in place of `id`, with an optional `vector` and `model`: the text of an instance not yet created, its indexed fields joined as `staleEmbeddings` joins them, at most 100,000 characters. It ranks as `similar(id)` does, by the text's longest words fused with the vector's ranking, with no instance to leave out, and `embedded` says whether a vector ranked. The parameters take one of `id` and `text`, and a vector only with text. | An operation of its own, a second tool for one question; the text as a `search` query, which every word must then match; a vector with `id`, whose own vector is the one that ranks |
+
+### D16, amended: a list filters on who holds the work, and on what ran out
+
+The amendment on finding an instance by a unique field gave a
+behavior's column a filter, and Workflow's `status` the first one. The questions a client asks of a work queue next
+had none: the work assigned to me, the work no one has, the leases a
+worker holds when it restarts, the free instances, the jobs whose
+retries ran out. `Assignment`'s assignee is a column with no filter, and
+`Lease`'s holder and `Retries`' exhaustion are members of object fields,
+which a filter could not name. And `where` refused null, so "no one" and
+"free" could not be asked at all. This changes that amendment's `where`
+row: null is a value a member may give.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior's filter may name `<field>.<member>`, a camelCase member of a declared field whose value is an object, as well as a declared field: `lease.holder`, `retries.exhausted`. Registration holds the field to the declaration and the member to camelCase. A filter may carry a `description`, which the list tool's `where` shows, the declared field's when absent. | A filter name that is no field (`holder`), which a read never shows; a field per member, one more member of every read; a JSON pointer (`/lease/holder`), which no other `where` key uses |
+| A `where` member may give null, alone or in a list: it keeps the instances whose field holds no value, absent or null for an own field and a null column for a behavior's. `{ "assignee": [null, "wren"] }` is wren's work and the work no one holds. The list tool's `where` takes null; a lookup's `key` still refuses it. | Refusing null, which leaves "unassigned" and "free" unaskable; a `missing` list beside `where`; a negation (`not`), which makes equality an expression language |
+| A behavior's index on its column serves null as one more range. An own index is partial on a value in each field, so it serves no member that lists null, whose page reads the list index, at most `FILTER_SCAN_ROWS` instances. | Own indexes over null too, which changes what a unique index holds and how it treats an instance without the value |
+| `Assignment` filters on `assignee`, through an index on its column (its migration 2). | |
+| `Lease` filters on `lease.holder`, its holder column, through an index on it alone (migration 4), since `held` leads with the holder and orders by `expires_at`. A lapsed lease keeps its holder until its expiry is applied, as the field reads it, which the runner's sweep does within `sweepMs`; null is a free instance. `active` turns false with the clock, which no column holds, so it is not filtered on; a worker that lists its leases at a restart reads `active` on each. | A filter on `active`, which needs the time in SQL and each instance's `maxHoldField`; a column the sweep sets, which lags as the holder does; a filter for "held by anyone", which equality cannot say |
+| `Retries` filters on `retries.exhausted`, a column only an attempt sets and nothing resets, through an index on it (its migration 2). | `stuck` as well, which no client has asked for |
+| `Dependencies`' `blocked` is not filtered on. It is computed at each read from the blockers, as the caller, under the live config (`satisfiedBy`, each blocker schema's outcomes), which a publish changes with no write. A copy would make Dependencies hear every blocker's status and append an event on each of its dependents at each change, the cost the amendment on what a reference hears removed, and would still go stale at a publish. Queue's copy is safe where this one is not: a stale copy costs `claimNext` a candidate it skips, and the claim checks again; a list has nothing that checks again. | A copied column, at that cost; a filter on Queue's copy, which is Queue's, on types that compose Queue only |
+| No engine migration: each index is a behavior migration, numbered per behavior. | |
+
+### D16, amended: a lease's holder hears that a linked target moved
+
+A worker holding a step pinned to a plan revision kept working when the
+plan moved on. `Reactions`' `revised` moves a status when a link's target
+gains a revision or a release, but D16 declined actions besides a
+transition, and a core behavior cannot name the work-queue package's
+`direct`. The holder is Lease's to tell, so Lease's config says when.
+The engine's runner gains one rule for it: a behavior's reactions can be
+off on a schema.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Lease` takes `directOn: [{ revised: { link }, name, data? }]`, one entry per link of the type's `Links`. When the link's target moves on, the runner sends directive `name` to the holder of each instance the move reaches. | A Reactions `then: { direct }`, which names a work-queue operation in the core; a rule on the target's schema, which would name every schema that links to it |
+| What moves a target on, and which instances it reaches, is `Reactions`' `revised` rule, which the engine exports and Reactions now calls: `targetMove` reads a revision of `Revisions` (an update or an operation whose change carries `revision`) or a release of `Branches` (`releaseCommit`, with the release pointer's version its patch carries), and `movedOn` lists the instances that point at the target through `Links`' `listLinked`, only the stale ones where the link pins what the move made, a revision or a release (the amendment "a link pins a release"). A target schema with neither is a failure at run. | A copy in the work-queue package, which would drift from the rule it restates |
+| It is Lease's reactions, on the runner, as its principal, and each directive is Lease's `direct`, invoked, so its guard asks `directPermission`, or `overridePermission` when that is absent. `parseConfig` refuses `directOn` when the config names neither. A runner principal that lacks it fails the subscription, `forbidden`, where `engine.runner.status()` shows it, as any refusal of the policy does. | A way past the permission for the runner, which the guard cannot tell from any other caller; `call()`, which a reaction has no instance to make from |
+| The directive's data is the entry's, with `revised` set to what moved: `{ link, schema, id, revision }`, or `{ link, schema, id, release, commit }` for a release, `release` the pointer's version as a link pins it. An entry's `data` may not hold `revised`. | The entry's data alone, which leaves the holder to read the target to learn what moved and to what |
+| Its `dedupeKey` is `direct`'s: `revised <link> <revision>`, or `released <link> <release>`, the release pointer's version the release made. A holder hears each move once per lease, and two moves twice. | One key per link, under which a second move finds the first directive standing, acknowledged or not, and is never sent |
+| An instance whose lease is free hears nothing, and neither does its next holder: the runner reads Lease's holder column and invokes only where one is recorded, and a lapsed lease's `direct` is refused, which the reaction passes over, as Reactions passes over a veto. A directive belongs to a lease's token, and a new token deletes the last lease's directives; the next holder takes the instance after the move and reads its links as they are, and with Queue's `excludeStale` an instance pinned to a superseded revision or release is not claimed at all. | Queueing it for the next holder, a directive outside any lease, which would tell a worker to redo work it had not started |
+| A behavior's `watches` may return null, which turns its reactions off on the schema, as a schedule's `everyMs` function returning null turns a schedule off (D32): the runner reads none of the schema's events for it, `status()` shows a subscription that has run as `off`, and one that never ran not at all. A subscription starts at the publish of the earliest version of the run of versions, up to the live one, that compose the behavior with its reactions on, so a version that turns them on starts at its own publish. An off subscription holds no retention (the amendment "the log keeps what retention and its subscriptions need"): it handles nothing, and turned on it starts past what was pruned. Lease's are off without `directOn`. | Reactions on every schema that composes Lease, so the runner reads every heartbeat of every leased schema, each holds its namespace's log against retention, and a deployment that upgrades replays the log from when each schema composed Lease, telling holders of moves long past; an `enabled(config)` hook beside `watches` |
+| With `directOn`, the subscription hears its own schema's events too, as every subscription does, and passes over them. | A `watches` that leaves out the schema itself, a change to every behavior's reactions for one case |
+
+### D16, amended: a config change sees whether the schema has instances
+
+A behavior's `configChange` saw two configs, so it refused a change that
+only stored instances could break on a schema that had none. Links
+refused making a link required, or a new required one, on an empty
+schema, and Workflow refused dropping a state, so a schema still being
+shaped needed a new name. The engine already asked whether instances
+exist before it asked a behavior about being added or removed.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `configChange(before, after, change)`: `change.instances` says whether an instance of the schema exists. It is true for an added or removed behavior, which is asked about only then. | A publish-time hook of its own; the count of instances, which no rule needs |
+| Any namespace that reads the version counts: for a schema of the shared namespace, every namespace that looks it up, since one published config serves them all. It is the question an add or a remove already asks. | The defining namespace alone, under which the shared namespace, which holds the schema and no instance of it, would let a link become required while another namespace's instances lack it |
+| It is read when the behavior reads it, at define and again at publish, in the publish's transaction, so a version defined while the schema was empty is refused at publish once an instance exists. | Reading it for every define, a query per namespace that no behavior may ask for |
+| With no instance, `Links` allows any change (a link made required, a new required link, a link gone, another schema; a pin's kind changes with instances too, as the amendment on release pins has it); `Workflow` a dropped state; `Variants` a new `field`, `by` or type for a value; `Branches` a removed kind and a kind's type, parent, order, singleton or unit, since deleting an instance deletes its graph; `Budget` a removed meter; `Presence` a new `principalField`. The other behaviors refuse no config change. | Leaving each as it was |
+| The field rule, which refuses a field made required and a new required field, is the engine's and stays as it is, instances or not. | Relaxing it too, beyond this change, which would change D16's compatibility rule for every schema |
+
+### D16, amended: a write that changes nothing writes nothing
+
+Every writing operation appended an event and moved the instance's
+sequence, even when it changed nothing: the engine cannot see what a
+handler wrote in its behavior's own tables. A sweep that found a lease
+active, a presence miss that found the deadline ahead, a directive whose
+dedupe key was sent already and a refresh that found Queue's copies
+right each grew the log, woke every reaction on the schema and staled
+every reader's `ETag`, so a client holding an `If-Match` lost to a write
+that did nothing. An update whose patch changes nothing already wrote
+nothing. A handler now says the same of its call, and the engine holds
+it to that.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A writing operation's handler says its call changed nothing with `context.unchanged()`. The engine then appends no event, leaves `seq`, `updatedAt`, `updatedBy` and the row's version alone, and runs no `afterChange` and no `afterReferenceChange`, so no reaction and no reference hears it; `operate` and the operation route answer the sequence the instance was at, the `ETag` a reader holds. The result is returned and checked as ever. In a read-only operation it does nothing. | A result marker (`return unchanged(result)`), which wraps every result type the declaration checks; the engine comparing the row's columns before and after, which cannot see a behavior's own tables or references; a flag in the declaration, which cannot say which calls of an operation changed something |
+| The claim is checked: the engine reads SQLite's `total_changes()` before and after the handler, and a call that wrote any row and says it changed nothing is a `BehaviorError`, which rolls it back. Every write a call can make counts: its columns, its tables, its values and references, the instance's own fields through `update()`, an operation it calls or invokes and an instance it creates. A call that invokes a writing operation of another instance changes that instance, whose own event records it, and is still no unchanged call. | Trusting the claim, under which a handler that wrote its columns and said it changed nothing would leave a change the log cannot replay; tracking each handle's writes in the engine, which `total_changes()` gives for one read |
+| What runs before the handler stands: the policy, the parameters, the preconditions, `expectedSeq`, every guard and, for a writing operation, every `guardReference`. Any of them refuses an unchanged call as any other: the engine cannot know a call changes nothing before its handler has run. | Asking no guard, as an update whose patch changes nothing asks none; an update knows before its guards, an operation only after its handler |
+| A called operation's claim is its own. The operation that called it appends its event unless it says so too, and holds to it only if the called one wrote nothing. | The called operation's claim covering its caller, which wrote things of its own |
+| Where an operation changes nothing, the work-queue package says so: `Lease`'s `expire` that expires nothing, `direct` whose dedupe key was sent under the lease, `acknowledge` of directives every one of which is acknowledged, `resetExpiries` of no expiries; `Presence`'s `miss` that misses nothing; `Queue`'s `refresh` that finds its copies and what they hear as they should be, which now writes only the columns that are not; and `Budget`'s `settleFor` that releases nothing. A sweep and a reference's hook call each of them on many instances where most change nothing. | Leaving the work queue's calls to append, which is most of the events a quiet queue writes |
+| A refusal that changes nothing stays a veto: Workflow's `transition` to the state the instance is in (`already_in_state`) and Assignment's `assign` to its assignee (`already_assigned`). A veto writes nothing either, and the code tells a caller its read was stale or its retry landed. Making them unchanged calls would run the other behaviors' guards on a move that is no move, so a gate (`blocked`, `not_held`) could refuse what changes nothing. | Idempotent success for both, which hides a stale read and asks guards about a move the instance does not make |
+| `Links`' `link` to the target and revision the link holds still writes. `Blueprint` stamps an unstamped instance on any `link` of its `from` link, and a link made again is how a schema that gained Blueprint asks for the stamp. | An unchanged `link`, which would make that stamp unreachable |
+
+### D16, amended: a write stores what the schema's parse makes of it
+
+A create and an update only validated, and stored the fields as given.
+The schema runtime's parse, which a generated server runs on every
+request, puts a scalar's value in the canonical form the scalar defines
+and fills a field's default; the engine never ran it. So two instances
+held one email in two cases and a unique field let both through, a
+`Generic.StringMap` given as its JSON text was stored as text, and a
+field's `default` meant nothing. A write now stores what the parse makes
+of it. The runtimes' parse also read a default of the IR's `number` and
+`boolean` as its text, where D14's loader reads a number and a boolean;
+they now read it as the loader does.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every write of an instance's own fields runs the schema runtime's strict parse of the instance type before the version validates them: a create, an update, a behavior's `update()` and `instances.create`, `validateUpdate()`, and `schemas.validate`, which answers as a create. Each scalar value takes the canonical form its scalar's normalize and parse steps give it, at every depth. | Normalizing in validation, which the runtimes keep apart from parse; normalizing only scalars the engine names, a list of its own beside the catalog's flags |
+| What the parse cannot read is left as given, for the version to refuse under its own rule (`type`, `unknown`, `readOnly`), so its issues are what they were. A value its scalar's parser refuses where the version's rules let it through is refused with the parser's rule, `parse`, reported only when the version finds nothing, so a value is never refused twice. | The parse's issues beside the version's, under two names for one problem; storing a value its parser refused, un-normalized |
+| Defaults fill on a create only, in nested objects and list elements too, read as D14's loader reads the IR's text. A merge patch fills none: a member its `null` removes stays removed, and a field a later version adds stays absent on the instances before it, as the compatibility rule promised them. A list's default is not filled, as no runtime's parse fills one. | Filling on an update, which undoes a `null` that removes a field with a default and writes values no caller sent; filling the instances that predate a new default at their next write |
+| An update normalizes its patch, not the instance: a member the patch leaves alone keeps its stored value and its ref in the value store. The event records the patch as stored, so the log still replays to what a read returns, and a patch that normalizes to what the instance holds changes nothing and writes nothing. | Normalizing the merged instance, which rewrites members no caller touched and needs a diff to log |
+| What a client sees is what is stored: the create's and update's answer, every read, the event's change, the value store's hash of a large field (a value hashes in the form the row stores) and the comparisons of a unique index. A `lookup` key's and a list's `where` values on own fields are normalized before they compare, so the form a client sent finds what it stored. | Comparing as given, under which an instance created with `Ada@Example.COM` is not found by it |
+| The compatibility rule is unchanged: a version's default may change, since a default applies at a create, and a stored value satisfied the version that normalized it. A row written before keeps its values as given until a write sets them; a unique field's old value does not collide with its normalized form, and a lookup by the normalized form does not find it. Flagged: a deployment that needs them normalized rewrites the field with an update. | A migration that normalizes every row, which rewrites instances without an event, so the log no longer replays to them |
+| The Go, TypeScript and Python schema runtimes read a default of the IR's `number` as a number, of `boolean` as a boolean and of `string` as its text, as they read `Float`, `Boolean` and `String`. | Leaving the text, which every validator then refuses as `type` |
+
+### D16, amended: each caller's tools are the ones it may use
+
+Every MCP caller listed `define_schema` and the four namespace tools,
+including a caller the policy refuses all of them, since they name no
+schema until called and the policy answered only the call. An agent
+saw tools it could never use and spent turns learning so. And a
+deployment that gives an agent a session for one job could not narrow
+the session to that job's schema: the list was every tool the policy
+allowed the principal anywhere in the namespace. This changes the rows
+of the amendments "the engine serves the behaviors it runs" and
+"namespaces made while the engine runs" that put those tools in every
+caller's list.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The tools document asks the policy a listing question of each engine tool that names its schema or namespace only when called: `{ principal, action: 'define', namespace, listing: true }` for `define_schema`, `{ principal, action: 'manage', namespace, operation, listing: true }` for `list_namespaces`, `create_namespace`, `archive_namespace` and `unarchive_namespace`, the operation `list`, `create`, `archive` or `unarchive`. A refusal hides the tool with `hiddenReason`, as a refused schema tool is hidden. `AccessRequest` gains the member (`ListingAccessRequest`), which names no schema. | Asking `define` about a schema the namespace holds, which says nothing of a new name and nothing in an empty namespace; a wildcard schema (`*`), which a policy that builds a permission from the name turns into a permission no one holds, or worse one someone does; a separate policy for tools beside the access policy, a second place a deployment states who may define |
+| A hidden engine tool can still be called by its handle, and the call asks the question its call asks, with the name it gives, as a hidden schema tool's call does. A policy that cannot answer a listing question without a name answers false and loses only the listing. | Refusing the call of a hidden tool, which makes the listing question decide calls it cannot see the name of |
+| The engine tools that only read stay in every caller's list: `list_schemas`, `describe_schema` and `get_value` answer with what the policy lets the caller read, and the behavior tools ask nothing (that amendment's rule). | Hiding them from a caller who may read no schema now, which a publish changes without the list knowing |
+| `engineMcp` and `engineApp` take `tools`, a `ToolFilter`: `(principal, tool, namespace) => boolean`, asked of each tool with `{ handle, name, schema?, operation, behavior?, writes }`. A tool it leaves out is hidden from that caller with a reason in the tools document, absent from `tools/list`, and a `tools/call` of it is `UnknownToolError`, the invalid-params error of a tool the namespace does not have. So a session limited to one schema's operations, or to its reads, reaches nothing else through the endpoint. It narrows only: a tool the policy hides stays hidden, and a kept tool's call is still the policy's to allow. | A filter on the engine, which every mount would share where each endpoint serves a different audience; a list of handles in the options, which cannot follow a schema's tools as versions add operations; hiding without refusing the call, which leaves the narrower set a suggestion |
+| On the HTTP mount the filter narrows the tools document only: the routes answer as the policy says. | Refusing routes by tool, which would make the filter a second access policy for HTTP |
+
+### D16, amended: retention and the value store have bounds
+
+Retention and the value store each left an unbounded case. A halted
+subscription, or one in an archived namespace, held its namespace's log
+until someone resumed it, and with the log every large value its events
+held; the status named the hold but not how far back it reached.
+`maxEvents` counted cursors behind the global head, so one busy
+namespace pushed a quiet one's events out. A stored value had no size
+of its own, and a write through a driver outside the file's
+transactions that rolled back left a value nothing held. This changes
+the amendments "the log keeps what retention and its subscriptions
+need" (its hold and count rows) and "a large value is stored once" (its
+size and driver rows).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `retention.maxHoldMs` bounds a subscription that does not advance: halted, in an archived namespace, or whose behavior the engine no longer runs. It holds no event older than `maxHoldMs` that age or count lets go. A subscription that advances, active or retrying, holds whatever its age. Past the bound retention prunes on, and the subscription, behind its floor, halts with `cursor_expired` when it next runs (after its resume, or its namespace's unarchive), the rule that amendment gave a subscription found behind its floor; `resume` with `skip` moves it there. Without the option such a hold lasts until the subscription advances, as before. | A time since the halt or the archive, which needs a timestamp per state and none exists for an unregistered behavior, and which lets a slow subscription's old events outlive the bound; dropping a halted subscription's hold at once, which loses the events it failed at before anyone looks |
+| `status().retention` shows the bound (`maxHoldMs`) and, per namespace, beside the holding subscription, its state (`heldState`), when the oldest event it keeps was appended (`heldSince`), and for a hold the bound applies to, the time it lasts to (`heldUntil`). An operator sees how far back a halt reaches and when its events start to go. | The cursor alone, as before, from which an operator cannot tell a day's hold from a year's |
+| `maxEvents` counts a namespace's own events: each keeps its newest `maxEvents`. The runner counts a namespace's events once, at its first pass, and after that adds what was appended since its last count (one indexed range read past it) and takes away what it pruned, in memory, since one process writes the file. | Distance from the global head, as before, under which one namespace's traffic prunes another's; a count column kept at every append, a second write in every write transaction for an engine without retention too; counting every event at every pass, the cost that amendment declined |
+| Creating, archiving and unarchiving a namespace append no event, in its own log or another's. A namespace's log is read per schema, `read` asked of each event's schema, and a namespace's change names none, so its readers would need a rule of their own and its CHECKs a rebuild of `engine_events`. A writer learns of an archive from its next write's `namespace_archived`, and a reader reads on, since an archive stops no read. The shared namespace's log would show a project another's name, which `list` hides from it. | An event kind in the namespace's own log, read with `manage`, which a stream filtered by schema never sees and which needs the log rebuilt; one in the shared namespace's log |
+| `values.maxBytes` caps a stored value: 16 MiB of canonical JSON by default, at least the threshold. A write that would store a longer top-level member, of an instance's own fields, an event's change or an object a behavior stows, inline under an index or by hash, is refused as a whole: `ValueTooLargeError`, `value_too_large`, 413 over HTTP with `details: { path, bytes, maxBytes }`, the path the member's pointer in what would be stored. | No cap, as before, where only the HTTP body limit bounded a value and nothing bounded one a behavior computes; a cap per schema, an option keyed by names a deployment makes while the engine runs; the HTTP runtime's `payload_too_large`, which names the request body |
+| A driver outside the file's transactions has its writes settled around them: once the outermost transaction ends, committed or rolled back, the store removes each value the driver wrote in it that no holder references (`Storage.afterTransaction`, which a savepoint's rollback does not drop). So a rolled-back write leaves nothing. A crash between a driver's write and the end of its transaction can still leave one: `engine.values.sweep()` pages through the driver's optional `list(after, limit)` and removes each value no holder references, acting for no principal, as retention's prune does. A deployment runs it after a crash; the default driver lists too and leaves nothing to sweep. | A sweep on a runner schedule, which runs per behavior and schema and needs a principal; keeping the rolled-back values, as before, which a driver over object storage pays for in storage until someone looks; a list on every driver, which a write-only store cannot give |
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -4187,6 +4349,34 @@ Cloud found (`docs/stack-model.md`, section 14, milestone 3).
 
 The rule is reversible until the first release.
 
+## D48. A type's display is the core `@display` decorator, checked against the type and its Workflow
+
+D16 says display metadata a UI reads is written with decorators, as
+documentation is (D10), and fields have theirs: `@docs({ title })`,
+`@purpose` and `@icon`, core on D18's ground. A type had none. A UI, or
+an agent, that renders a schema's instances could not learn from the
+schema what to call one or many, which field is an instance's title, what
+a create button says, which fields summarize it in a list, or how to
+label its `Workflow`'s states and transitions. The engine's describe
+document carried each field's description but not its title or icon,
+though the stored schema holds both.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A core type decorator, `@display({ noun, plural, titleField, createLabel, summaryFields, states, transitions })` from `@superschematic/schema`, on a class of any kind. It writes `TypeDef.Display` (`ir.TypeDisplay`), after `behaviors`, omitted when absent, so IR JSON without it is the same bytes. Every member is optional, `{}` is refused, and a type takes one. It adds no field, operation or storage. | A decorator per member (`@noun`, `@titleField`, ...), a spec and an export each for one concept; a behavior, which D16 rules out; an `extensions` slot, which would make a concept every UI reads look like one distribution's data |
+| It is core IR on D18's rule: it means the same in every deployment, the core checks it, and every form writes it. A distribution's own display concepts (a role a UI shows a type to, a home page, link defaults, an icon set) stay its extension's: a type decorator of its own that writes `extensions.<name>`, and a check (D10) for a rule over `@display`'s values. | Open members a distribution fills with its own keys, which no UI could rely on |
+| One JSON Schema. The registered spec's `Args` is the schema of the decorator's argument, and the data forms write the argument verbatim under `display`, so the schema-file JSON Schema takes its `$defs/TypeDisplay` and `$defs/DisplayState` from the spec in place of the reflected ones. The TypeScript frontend, the JSON and YAML readers, `superschematic json-schema` and the engine's strict loader check one schema, and generation fails when the IR struct and the schema name different members. The schema-file types emitter learns the keywords that only narrow a value (`pattern`, lengths, `uniqueItems`, `minProperties`, `propertyNames`). `ir.ValidateTypeDisplay` holds IR built in Go to the same shape. | Reflection with patches, as the docs records have, which cannot say `minProperties` or `propertyNames`; a second copy of the rules in the loader, which would drift |
+| A state's `tone` is one of a closed set: `muted`, `active`, `success`, `warning`, `danger`. A tone says what a state means to a reader; a UI maps each onto its own colors. | An open string or a color, which ties the schema to one UI's palette; more tones (`info`, `neutral`) with no case that needs them yet |
+| `transitions` is keyed by the state a transition leaves, then the state it enters: `{ todo: { doing: "Start" } }`. A UI showing an instance's moves reads `transitions[status]`, and `propertyNames` checks both keys as state names. | `"<from>-><to>"` keys, which parse and which Go's JSON encoder, and so `format --to=json`, writes as `"todo->doing"`; a list of `{ from, to, label }`, which can repeat a pair |
+| `titleField` names one of the type's own fields, by its name or its JSON key, holding a single text value: `string`, or a scalar whose values are strings (its language primitive is string and its `json_schema` mapping is not `any`, `object` or `array`, as `Identity.Name`, not `Generic.JSON`). Not a list, a map, a number, an enum, a `Secret` field or a `@uiHidden` one. An optional field may be the title; a UI falls back to the noun and the id. | Any field, which a UI must then format; an enum, whose value names a group, not an instance; a field a behavior adds, whose declaration gives it no type |
+| `summaryFields` names, in order and each once, the type's own fields or fields its behaviors add by their declarations, neither secret nor hidden. | The type's own fields only, which would leave out `Workflow`'s `status`, the field a list shows most |
+| `states` and `transitions` label the type's `Workflow`: each state and transition must be one its config lists, and a type that does not compose `Workflow` takes neither. The compiler's loader checks it in every form (`verify.checkDisplays`) from the config the type holds, with the field rules above, and the engine checks the same at define and publish with the same wording, against the parsed config, after the behaviors compose. A compiled schema's types compose no behavior while generators refuse them (D16), so outside the engine `states` and `transitions` cannot appear; `build --emit-ir` and `format` still catch a wrong one before a define. | Leaving them unchecked outside the engine; labels for an enum field's values, a compiled type's own status, which needs a key naming the field and can come later |
+| No generator renders it, as none renders a field's `@docs` title, so every golden is unchanged. A test builds the DB, API and General fixtures with every type language, SDK and server, as loaded and with a display on every type, and compares the trees byte for byte; the one difference is the Rust types crate's `schemas/<Type>.json`, which copies the IR of each `@jsonField` payload and so carries its display, as it carries its fields' titles. `format --to=ts` writes it. | A golden per generator for a fixture with displays, which would pin the same bytes again |
+| The engine's describe document carries the instance type's `display`, with `titleField` and `summaryFields` naming fields by their keys in an instance's `data`; `fields`, the type's own fields in declaration order with their `title` and `icon` where declared; and each operation's `title`, its tool's. No operation carries an icon: an engine schema declares no operations, and a behavior's declaration gives its operations none. A new version may change a display freely: the compatibility rule ignores it. | Field titles as JSON Schema `title` inside `instance`, which would make it differ from create's `data` and from the tool parameters the Go generators write; an icon field on behavior declarations, an engine change beyond this one |
+
+The names, the tone set and the key shapes are reversible until the first
+release.
+
 ## D49. A generator types the engine's client for given schemas, narrowing the core's behaviors in Go
 
 The engine's typed client (D16, amended: a typed client over the HTTP
@@ -4230,6 +4420,30 @@ naming golden test generates the module under a naming file whose
 
 Status: built. The command name, the naming key and every export name
 are reversible until the first release.
+
+### D46, amended: a failed migration job reports the runner's error, which the deploy reads from Cloud Logging
+
+D46 had a failed execution of the migration job fail the step with its
+name and logs. The first run against Google Cloud showed that Cloud Run's
+account of the failure is only that the task failed with exit code 1 and
+the container exited with an error: the runner's own error, which it
+writes to stderr, was in Cloud Logging alone. And `RunJob` read every error
+from its wait for the execution as a failed execution, so a dropped
+connection would have read as a failed migration.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A failed execution's error is the runner's. Once Cloud Run reports the failure, the deploy reads what the execution's task wrote to stderr from Cloud Logging, through a new `Cloud` method, `ExecutionStderr`: the entries of the job's `run.googleapis.com/stderr` log labeled with the execution's name, from a minute before it was created, oldest first, at most 100. Cloud Logging receives them seconds after the execution ends, so it reads again for up to 30 seconds while there are none. The step's error carries the last line that begins `superschematic-migrate: `, which the runner writes when it fails, else the first line, such as a panic's, with the execution's name and its logs' URL. With no line, or none it can read, it carries Cloud Run's message and says why. | A result document the runner writes beside the job document in the state bucket: structured and immediate, but only what the runner returns, so nothing of a panic or of a task that never started. Its location could not come from the job document, since an unreadable job document is one of the failures to report, so it needs a new flag, which every runner image built before it refuses with a usage error found only in Cloud Logging; and it needs the migrator to write to the bucket, the runner a write path, and the deploy to delete a stale result before each run. Cloud Run's Tasks API, whose last attempt holds the exit code and the same message, and no output. |
+| `deployer` gains the Logs Viewer role (`roles/logging.viewer`), which reads every log of the project except the private ones. It holds project IAM admin already, so the role gives it nothing it could not grant itself; `migrator` is unchanged. A deploy whose account lacks the role reports Cloud Run's message, the read's error and the role. | A log view over the jobs' stderr and `roles/logging.viewAccessor` conditioned on it, two more resource types to pin for an account that can read everything already; a custom role with `logging.logEntries.list` alone, which reads as much |
+| `RunJob` tells a failed execution from a failed wait. The operation that runs an execution ends with an error when the execution fails, so an error while the operation is not done is the wait's own, from the transport or the context: `RunJob` returns it as an error that names the execution and says it may still be running. The deploy reads no logs, records the phase as pending (D45), and the next deploy runs the phase again, which the runner resumes. | Reading every error as a failed execution, which reported a dropped connection or an interrupted deploy as a failed migration; polling the execution again after a transport error, which an interrupted deploy should not do |
+
+Status: built. `extensions/gcp`'s `TestMigrationJobReportsTheRunnerError`
+covers the runner's error, a failed step's, a usage error's, a panic's, no
+stderr, stderr it cannot read and a failed wait through the fake `Cloud`;
+`cloud_internal_test.go` covers the wait's two kinds of error against a
+fake operation, the Cloud Logging filter and the reading of an entry; the
+bootstrap golden holds the new role; and the runner's `TestFailureLine`
+holds the line the deploy reads. None of it has run against Google Cloud.
 
 ### D47, amended: every generated Go module pins the release
 

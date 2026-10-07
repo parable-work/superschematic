@@ -1,13 +1,13 @@
 ---
 title: Documentation decorators
-description: The @docs decorator on operations, @docs, @purpose and @icon on fields, what they write, and how an extension adds its own rules.
+description: The @docs decorator on operations, @docs, @purpose and @icon on fields, @display on a type, what they write, and how an extension adds its own rules.
 sidebar:
   order: 3
 ---
 
 Documentation decorators attach reader-facing text to a schema: the name
-and description a reader sees, facts about an operation's lifecycle, and a
-field's label, purpose and icon.
+and description a reader sees, facts about an operation's lifecycle, a
+field's label, purpose and icon, and how a UI shows a type's instances.
 They write typed IR fields that the generators read. They change no wire
 format and no validation of request or response data.
 
@@ -155,6 +155,85 @@ The schema runtimes carry the three fields. The TypeScript runtime's
 `x-icon` in the legacy JSON Schema form and `parseSchemaIR` reads `title`,
 `purpose` and `icon` from the IR; the Python runtime's `parse_schema` reads
 the legacy keys into `FieldDef.title`, `purpose` and `icon`.
+
+## `@display` on a type
+
+From `@superschematic/schema`, on a class of any kind. It says how a UI,
+or an agent, shows the type's instances:
+
+```ts
+import { behavior, display, docs } from "@superschematic/schema";
+
+@behavior("Workflow", {
+  states: ["todo", "implementing", "review", "done"],
+  transitions: [
+    { from: "todo", to: "implementing" },
+    { from: "implementing", to: "review" },
+    { from: "review", to: "done" },
+  ],
+})
+@display({
+  noun: "Ticket",
+  plural: "Tickets",
+  titleField: "title",
+  createLabel: "New ticket",
+  summaryFields: ["status", "assignee"],
+  states: {
+    todo: { label: "To do", tone: "muted" },
+    implementing: { label: "Implement", activeForm: "Implementing", tone: "active" },
+    done: { label: "Done", tone: "success" },
+  },
+  transitions: {
+    todo: { implementing: "Start" },
+    review: { done: "Accept" },
+  },
+})
+export abstract class Ticket {
+  @docs({ title: "Title" })
+  title: string;
+
+  assignee?: string;
+}
+```
+
+| Key | Rule |
+| --- | --- |
+| `noun`, `plural` | what to call one instance and several; non-blank |
+| `titleField` | the field whose value is an instance's title: one of the type's own fields, holding a single text value (`string`, or a scalar whose values are strings, such as `Identity.Name`; not a list, a map, a number, an enum or a JSON scalar), neither `Secret` nor `@uiHidden` |
+| `createLabel` | what a button that creates an instance says; non-blank |
+| `summaryFields` | the fields that summarize an instance in a list, in order, each once: the type's own fields, or fields its behaviors add (`Workflow`'s `status`), neither secret nor hidden |
+| `states` | a label per `Workflow` state: `label`, `activeForm` (the present-progressive form a UI shows while an instance is in the state, "Implementing") and `tone`, at least one of the three |
+| `transitions` | a label per `Workflow` transition, by the state it leaves, then the state it enters |
+
+A `tone` is what a state means to a reader, which a UI maps onto its own
+colors: `muted` (nothing happens in it), `active` (work is under way),
+`success`, `warning` (it needs attention) or `danger`. The set is closed.
+
+Every key is optional, but `@display({})` is an error, and a type takes
+one `@display`. `states` and `transitions` label the type's `Workflow`
+behavior, so a type that does not compose `Workflow` takes neither, and
+each state and transition must be one its config lists. The loader checks
+every rule in every form, and the engine checks them again when a schema
+is defined:
+
+```
+src/ticket.schema.ts: type Ticket: @display states labels "lost", which is not a state of its Workflow (todo, implementing, review, done)
+```
+
+The record is `TypeDef.display` (`ir.TypeDisplay`). The JSON and YAML
+forms write the decorator's argument under the type's `display` key, and
+`superschematic json-schema` checks it with the same schema the
+TypeScript frontend checks the argument with. It is presentation only:
+no generator renders it, as none renders a field's title, and it adds no
+field, operation or storage. The engine's describe document carries it
+for the schema's instance type, with each field's title and icon
+([Engine behaviors](/superschematic/guides/engine-behaviors/#display)).
+
+A distribution's own display concepts, such as a role a UI shows a type
+to, a home page or link defaults, are its extension's: a type decorator
+of its own that writes its slot, `extensions.<name>`, as a field
+directive does, and a check over `@display` for a rule on its values
+(D18 and D10 in `docs/DECISIONS.md`).
 
 ## Rules an extension adds
 

@@ -221,7 +221,7 @@ function hearsKey(hears: Reference['hears']): string {
 // listBlockers, a page at a time, keeps a reference to each that exists,
 // hearing its status, drops the references to the rest, and reports
 // whether one is open.
-function blockersOf(context: InstanceContext<QueueConfig>): boolean {
+function blockersOf(context: InstanceContext<QueueConfig>, changes: Changes): boolean {
   const found = new Map<string, { schema: string; id: string }>();
   let open = false;
   let cursor: string | undefined;
@@ -243,6 +243,7 @@ function blockersOf(context: InstanceContext<QueueConfig>): boolean {
   for (const reference of context.references.list().filter((one) => one.key === '')) {
     if (!found.has(refKey(reference))) {
       context.references.remove(reference.schema, reference.id, reference.key);
+      changes.made = true;
     } else if (hearsKey(reference.hears) === hearsKey(STATUS)) {
       held.add(refKey(reference));
     }
@@ -250,6 +251,7 @@ function blockersOf(context: InstanceContext<QueueConfig>): boolean {
   for (const [key, blocker] of found) {
     if (!held.has(key)) {
       context.references.add(blocker.schema, blocker.id, '', STATUS);
+      changes.made = true;
     }
   }
   return open;
@@ -307,13 +309,13 @@ function fieldsRead(config: QueueConfig): string[] {
 // its own priority field, and the status, lease, assignee, retries and
 // links fields and the budget check of the behaviors that keep them, read
 // as the caller; and the values whose moves can change its exclusion.
-function factsOf(context: InstanceContext<QueueConfig>): { facts: Facts; hearing: readonly Hearing[] } {
+function factsOf(context: InstanceContext<QueueConfig>, changes: Changes): { facts: Facts; hearing: readonly Hearing[] } {
   const { config } = context;
   const fields = context.instances.get(context.schema, context.id, { fields: fieldsRead(config) })?.data ?? {};
   const lease = fields.lease as { expiries?: unknown } | undefined;
   const priority = config.priorityField === undefined ? undefined : context.data[config.priorityField];
   const status = typeof fields.status === 'string' ? fields.status : null;
-  const blocked = config.dependencies && blockersOf(context) ? 1 : 0;
+  const blocked = config.dependencies && blockersOf(context, changes) ? 1 : 0;
   // An instance no claim can take for its status or a blocker is no
   // candidate whatever else holds it: nothing to check, and nothing to hear.
   const exclusion =
@@ -340,13 +342,14 @@ function heard(view: InstanceView<QueueConfig>): Reference[] {
 
 // hear keeps the references the exclusion wants, each hearing what it
 // says, and no other but the blockers'.
-function hear(context: InstanceContext<QueueConfig>, hearing: readonly Hearing[]): void {
+function hear(context: InstanceContext<QueueConfig>, hearing: readonly Hearing[], changes: Changes): void {
   const wanted = new Map(hearing.map((one) => [refKey(one), one]));
   const held = new Set<string>();
   for (const reference of heard(context)) {
     const want = wanted.get(refKey(reference));
     if (want === undefined) {
       context.references.remove(reference.schema, reference.id, reference.key);
+      changes.made = true;
     } else if (hearsKey(reference.hears) === hearsKey(want.hears)) {
       held.add(refKey(reference));
     }
@@ -354,15 +357,38 @@ function hear(context: InstanceContext<QueueConfig>, hearing: readonly Hearing[]
   for (const [key, one] of wanted) {
     if (!held.has(key)) {
       context.references.add(one.schema, one.id, one.key, one.hears);
+      changes.made = true;
     }
   }
 }
 
-// refresh brings Queue's columns, and what it hears, in line with the instance.
-function refresh(context: InstanceContext<QueueConfig>): void {
-  const { facts, hearing } = factsOf(context);
-  context.columns.set({ ...facts });
-  hear(context, hearing);
+// Whether a refresh wrote: a column or a reference that was not as it
+// should be.
+interface Changes {
+  made: boolean;
+}
+
+// refresh brings Queue's columns, and what it hears, in line with the
+// instance, and returns whether it changed any: it writes only a column
+// that is not as it should be, so a refresh that finds its copies right
+// writes nothing.
+function refresh(context: InstanceContext<QueueConfig>): boolean {
+  const changes: Changes = { made: false };
+  const { facts, hearing } = factsOf(context, changes);
+  const columns = context.columns.get();
+  const moved = Object.fromEntries(Object.entries(facts).filter(([name, value]) => !sameColumn(columns[name], value)));
+  if (Object.keys(moved).length > 0) {
+    context.columns.set(moved);
+    changes.made = true;
+  }
+  hear(context, hearing, changes);
+  return changes.made;
+}
+
+// sameColumn compares a column as SQLite returns it with the value a fact
+// gives it.
+function sameColumn(stored: unknown, value: string | number | null): boolean {
+  return stored === null || stored === undefined ? value === null : value !== null && String(stored) === String(value);
 }
 
 // outdated reports whether a change of a value the instance hears leaves
@@ -618,8 +644,12 @@ export const queue = defineBehavior<QueueConfig>({
       return { id: context.id, token: taken.token, expiresAt: taken.expiresAt, heartbeatMs: taken.heartbeatMs };
     },
 
+    // A refresh that finds the copies right changes nothing, and says so:
+    // a reference's hook asks for one on every move it hears.
     refresh(context) {
-      refresh(context);
+      if (!refresh(context)) {
+        context.unchanged();
+      }
       return {};
     },
   },

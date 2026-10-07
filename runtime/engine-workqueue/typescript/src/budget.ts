@@ -91,8 +91,9 @@ not_leased, scope_moved, scope_reserved, below_committed,
 exceeds_reservation, not_configured), but a permission the caller lacks,
 which is forbidden.
 
-configChange: a meter cannot be removed, since instances and scopes hold
-it; limits, reservations, scopes, resets and the rest may change. A
+configChange: a meter cannot be removed while the schema has instances,
+since instances and scopes hold it, and can with none; limits,
+reservations, scopes, resets and the rest may change. A
 reservation is always released where it was held. Budget can be added to
 a schema that has instances, whose rows start empty, and cannot be
 removed from one: their budgets, and what scopes hold for them, would
@@ -862,12 +863,16 @@ export const budget = defineBehavior<BudgetConfig>({
     };
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before === undefined) {
       return undefined;
     }
     if (after === undefined) {
       return 'the budgets its instances hold, and what enclosing scopes hold for them, would stay behind';
+    }
+    // No instance holds a meter, nor a scope one for an instance.
+    if (!change.instances) {
+      return undefined;
     }
     for (const name of Object.keys(before.meters)) {
       if (own(after.meters, name) === undefined) {
@@ -1063,6 +1068,9 @@ export const budget = defineBehavior<BudgetConfig>({
       if (released > 0) {
         hold(context, meter, inner, held - released);
         release(context, meter, released, 0);
+      } else {
+        // Nothing held here is the inner instance's to release.
+        context.unchanged();
       }
       return { released };
     },

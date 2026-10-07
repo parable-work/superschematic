@@ -597,6 +597,39 @@ for (const driver of drivers) {
       assert.equal(subscription(engine, 'Order').state, 'active');
     });
 
+    test('a watches that returns null turns the reactions off on the schema; turned on, the subscription starts at that publish', () => {
+      const engine = openRunnerEngine({ driver });
+      const seen: string[] = [];
+      probe.react = (_context, event) => {
+        if (event.cause === undefined) {
+          seen.push(`${event.kind} ${event.instanceId}`);
+        }
+      };
+      publish(engine, ledgerDocument('Order', { off: true }));
+      engine.instances.create(alice, 'Order', { title: 'Off' }, { id: 'o1' });
+      assert.equal(engine.runner.runDue().handled, 0);
+      // Off and never run, it is not listed.
+      assert.deepEqual(engine.runner.status().subscriptions, []);
+
+      publish(engine, ledgerDocument('Order'));
+      engine.instances.create(alice, 'Order', { title: 'On' }, { id: 'o2' });
+      engine.runner.runDue();
+      assert.deepEqual(seen, ['create o2']);
+      assert.equal(subscription(engine, 'Order').state, 'active');
+
+      // Off again: the subscription that ran shows off and hears nothing.
+      publish(engine, ledgerDocument('Order', { off: true }));
+      engine.instances.create(alice, 'Order', { title: 'Off again' }, { id: 'o3' });
+      engine.runner.runDue();
+      assert.equal(subscription(engine, 'Order').state, 'off');
+      // On again, it starts at the publish that turned it on, past o3.
+      publish(engine, ledgerDocument('Order', { watch: [] }));
+      engine.instances.create(alice, 'Order', { title: 'Back' }, { id: 'o4' });
+      engine.runner.runDue();
+      assert.deepEqual(seen, ['create o2', 'create o4']);
+      assert.equal(subscription(engine, 'Order').state, 'active');
+    });
+
     test('a reaction reads an instance as the log had it before an event, and invokes schema-level operations', () => {
       const engine = openRunnerEngine({ driver });
       publish(engine, ledgerDocument('Order'));
@@ -659,7 +692,10 @@ for (const driver of drivers) {
       probe.watches = () => ['Order', 3 as unknown as string];
       clock.now += 1_000;
       engine.runner.runDue();
-      assert.equal(subscription(engine, 'Order').failure?.error, 'BehaviorError: behavior test.Ledger: reactions.watches returns a list of schema names');
+      assert.equal(
+        subscription(engine, 'Order').failure?.error,
+        'BehaviorError: behavior test.Ledger: reactions.watches returns a list of schema names, or null to turn the reactions off'
+      );
 
       delete probe.watches;
       clock.now += 2_000;

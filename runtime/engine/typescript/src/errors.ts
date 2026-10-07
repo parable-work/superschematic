@@ -31,6 +31,8 @@ export type EngineErrorCode =
   | 'seq_mismatch'
   /** A behavior's guard refuses the change. */
   | 'vetoed'
+  /** A value the write would store is longer than the engine stores (ValueTooLargeError, values.maxBytes). */
+  | 'value_too_large'
   /**
    * The schema's live version composes a behavior this engine cannot run:
    * no implementation is registered for it, or the registered one refuses
@@ -70,6 +72,26 @@ export class CursorExpiredError extends EngineError {
     this.after = after;
     this.floor = floor;
     this.head = head;
+  }
+}
+
+/**
+ * A write that would store a value longer than the engine's values.maxBytes:
+ * a top-level member of an instance's own fields, of an event's change or
+ * of an object a behavior keeps, at path, a JSON pointer into what is
+ * stored (`/body`, `/params/result`), whose canonical JSON is bytes long.
+ */
+export class ValueTooLargeError extends EngineError {
+  readonly path: string;
+  readonly bytes: number;
+  readonly maxBytes: number;
+
+  constructor(path: string, bytes: number, maxBytes: number) {
+    super('value_too_large', `the value at ${path} is ${bytes} bytes of JSON, more than the engine stores, ${maxBytes} (values.maxBytes)`);
+    this.name = 'ValueTooLargeError';
+    this.path = path;
+    this.bytes = bytes;
+    this.maxBytes = maxBytes;
   }
 }
 

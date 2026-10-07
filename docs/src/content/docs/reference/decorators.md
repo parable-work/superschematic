@@ -26,6 +26,7 @@ as their support lands in every generator.
 | `@source(Table)` | class (API, General) | the class is a view of a table; its fields are checked against the table's | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
 | `@virtual` | field of a `@source` view | a field with no column behind it, filled in by the implementation | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
 | `@docs`, `@purpose`, `@icon` | field | presentation for a settings or form UI | [Documentation](/superschematic/reference/documentation/) |
+| `@display({ noun, plural, titleField, createLabel, summaryFields, states, transitions })` | class | how a UI shows the type's instances: what to call them, the title and summary fields, the create button, and labels and tones for its `Workflow`'s states and transitions | [Documentation](/superschematic/reference/documentation/#display-on-a-type) |
 | `@behavior(name, config?)` | class | composes an engine behavior (`Workflow`, `Links`, `Queue`, ...) on a type the engine runs; `BehaviorConfigs` types the config | [Engine behaviors](/superschematic/guides/engine-behaviors/#compose-a-behavior) |
 
 ## Tables: `@superschematic/db`

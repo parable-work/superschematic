@@ -42,7 +42,8 @@ principalField once it holds a value is refused, whoever asks
 not_principal).
 
 configChange: any config may change except principalField, which names
-where every instance's principal is held. A new ttlMs applies from each
+where every instance's principal is held, and which changes only on a
+schema with no instances. A new ttlMs applies from each
 instance's next beat. Presence can be added to a schema that has
 instances, which have no deadline until their first beat, and cannot be
 removed from one: the deadlines and misses they hold would stay behind
@@ -286,11 +287,11 @@ export const presence = defineBehavior<PresenceConfig>({
     };
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before !== undefined && after === undefined) {
       return 'the deadlines and misses its instances hold would stay behind and come back if it were added again';
     }
-    if (before !== undefined && after !== undefined && before.principalField !== after.principalField) {
+    if (before !== undefined && after !== undefined && before.principalField !== after.principalField && change.instances) {
       return `principalField is where every instance holds its principal: it stays ${before.principalField}`;
     }
     return undefined;
@@ -348,7 +349,9 @@ export const presence = defineBehavior<PresenceConfig>({
 
     miss(context) {
       const current = state(context);
+      // Missed already, or not due: nothing changes.
       if (current.missed || current.deadline === null || context.now < current.deadline) {
+        context.unchanged();
         return { missed: false };
       }
       context.columns.set({ missed: 1 });

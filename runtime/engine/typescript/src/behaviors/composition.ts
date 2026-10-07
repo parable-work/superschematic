@@ -35,7 +35,10 @@ registration refuses its declaration.
 configChanges is the behaviors' half of the compatibility rule: a new
 version keeps a behavior's config unless the implementation allows the
 change, and adds or removes a behavior on a schema with instances only
-when the implementation opts in. checkedTypes names the types a
+when the implementation opts in. configChange reads whether the schema
+has instances (ConfigChange.instances), in any namespace that reads the
+version, so a change only stored instances could break is refused only
+while there are some. checkedTypes names the types a
 behavior's validate holds values to under both versions, and readTypes
 the types the live version's behaviors read through ConfigTarget.types,
 which the rule (registry/compat.ts) then diffs as it diffs a type a field
@@ -51,6 +54,7 @@ import { arrayDepth, fieldTypeIssue, jsonKey, pointer, reachableTypes, refKind }
 import { FieldSchemas, renderProperty } from '../tools/schema.js';
 import {
   BehaviorConfigError,
+  type ConfigChange,
   type ConfigSchema,
   type ConfigSchemas,
   type ConfigTarget,
@@ -269,7 +273,9 @@ export function compose(
 
 /**
  * configChanges lists what a new version does to the instance type's
- * behaviors that the rule refuses. hasInstances is asked at most once.
+ * behaviors that the rule refuses. hasInstances is asked at most once,
+ * and only when a behavior is added or removed or a configChange reads
+ * it.
  */
 export function configChanges(
   before: ComposeTarget,
@@ -292,7 +298,7 @@ export function configChanges(
       if (jsonEqual(earlier.config ?? {}, ref.config ?? {})) {
         continue;
       }
-      const reason = decide(behavior, earlier.config, before, ref.config, after, 'it allows no config change');
+      const reason = decide(behavior, earlier.config, before, ref.config, after, 'it allows no config change', populated);
       if (reason !== undefined) {
         changes.push({
           path,
@@ -300,7 +306,7 @@ export function configChanges(
         });
       }
     } else if (populated()) {
-      const reason = decide(behavior, undefined, undefined, ref.config, after, 'it cannot be added to a schema that has instances');
+      const reason = decide(behavior, undefined, undefined, ref.config, after, 'it cannot be added to a schema that has instances', populated);
       if (reason !== undefined) {
         changes.push({ path, message: `behavior ${ref.name} cannot be added to type ${type}, which has instances: ${reason}` });
       }
@@ -310,7 +316,7 @@ export function configChanges(
     if (afterRefs.some((candidate) => candidate.name === ref.name) || !populated()) {
       continue;
     }
-    const reason = decide(registry.lookup(ref.name), ref.config, before, undefined, undefined, 'it cannot be removed from a schema that has instances');
+    const reason = decide(registry.lookup(ref.name), ref.config, before, undefined, undefined, 'it cannot be removed from a schema that has instances', populated);
     if (reason !== undefined) {
       changes.push({
         path: `${type}.behaviors.${ref.name}`,
@@ -604,13 +610,16 @@ function configsOf(refs: ReadonlyArray<{ readonly name: string; readonly config?
 }
 
 // decide asks an implementation's configChange; undefined allows.
+// populated says whether the schema has instances, asked only when the
+// implementation reads change.instances.
 function decide(
   behavior: RegisteredBehavior | undefined,
   beforeJSON: unknown,
   beforeTarget: ComposeTarget | undefined,
   afterJSON: unknown,
   afterTarget: ComposeTarget | undefined,
-  refusal: string
+  refusal: string,
+  populated: () => boolean
 ): string | undefined {
   if (!behavior) {
     return 'no implementation is registered to allow it';
@@ -628,10 +637,16 @@ function decide(
       return side.problem;
     }
   }
+  const change: ConfigChange = Object.freeze({
+    get instances(): boolean {
+      return populated();
+    },
+  });
   const answer: unknown = configChange.call(
     behavior.implementation,
     before === undefined ? undefined : (before as { config: unknown }).config,
-    after === undefined ? undefined : (after as { config: unknown }).config
+    after === undefined ? undefined : (after as { config: unknown }).config,
+    change
   );
   synchronous(behavior.name, 'configChange', answer);
   if (answer === undefined || answer === null) {

@@ -303,8 +303,23 @@ describe('tools/list', () => {
     const { client } = await connect(endpoint(url), 'reader');
     assert.deepEqual(
       (await client.listTools()).tools.map((tool) => tool.name),
-      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'list_namespaces', 'create_namespace', 'archive_namespace', 'unarchive_namespace', 'item_get', 'item_list', 'item_history']
+      ['list_schemas', 'describe_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'item_get', 'item_list', 'item_history']
     );
+  });
+
+  test("the mount's tools filter narrows a caller's list, and a call of a tool it leaves out is a tool the namespace does not have", async () => {
+    const { url } = await served({}, { tools: (principal, tool) => principal.subject !== 'alice' || (tool.schema === 'Item' && !tool.writes) });
+    const { client } = await connect(endpoint(url));
+    assert.deepEqual(
+      (await client.listTools()).tools.map((tool) => tool.name),
+      ['item_get', 'item_list', 'item_history']
+    );
+    assert.equal(((await client.callTool({ name: 'item_get', arguments: { id: 'i1' } })) as CallToolResult).isError, undefined);
+    await assert.rejects(client.callTool({ name: 'item_increment', arguments: { id: 'i1' } }), /no tool "item_increment"/);
+    await assert.rejects(client.callTool({ name: 'list_schemas', arguments: {} }), /no tool "list_schemas"/);
+    // A caller the filter keeps whole lists what the policy shows it.
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    assert.ok((await reader.listTools()).tools.some((tool) => tool.name === 'list_schemas'));
   });
 });
 
@@ -444,8 +459,8 @@ describe('tools/call', () => {
     const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
     assert.deepEqual(
       [...byName.keys()],
-      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'list_namespaces', 'create_namespace', 'archive_namespace', 'unarchive_namespace'],
-      'reader may read no schema, and still lists the engine tools'
+      ['list_schemas', 'describe_schema', 'list_behaviors', 'describe_behavior', 'get_value'],
+      'reader may read no schema, and still lists the engine tools that only read; define and manage the policy refuses it'
     );
     assert.deepEqual(byName.get('list_behaviors')?.annotations, { readOnlyHint: true });
     assert.deepEqual(byName.get('describe_behavior')?.inputSchema.required, ['name']);
@@ -482,6 +497,9 @@ describe('tools/call', () => {
     assert.match(String((lookup?._meta as Record<string, any>)['superschematic/operation-guidance'].useWhen), /Use when you know the slug of the Model to read/);
     const where = (tools.find((tool) => tool.name === 'model_list')?.inputSchema.properties as Record<string, any>).where;
     assert.deepEqual(Object.keys(where.properties), ['slug', 'kind', 'status']);
+    // A filter takes null, for no value; a lookup's key does not.
+    assert.deepEqual(where.properties.status.anyOf[0].type, ['string', 'null']);
+    assert.deepEqual((lookup?.inputSchema.properties as Record<string, any>).key.properties.slug.type, 'string');
     const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as CallToolResult;
     assert.equal((((await call('model_lookup', { key: { slug: 'org/b' } })).structuredContent) as { id: string }).id, 'b');
     assert.equal(problemOf(await call('model_lookup', { key: { slug: 'org/c' } })).code, 'not_found');
@@ -490,6 +508,8 @@ describe('tools/call', () => {
     assert.deepEqual(listed.items.map((item) => item.id), ['b']);
     const kinds = (await call('model_list', { where: { kind: ['y', 'x'] } })).structuredContent as { items: Array<{ id: string }> };
     assert.deepEqual(kinds.items.map((item) => item.id), ['a', 'b']);
+    const none = (await call('model_list', { where: { kind: [null, 'y'] } })).structuredContent as { items: Array<{ id: string }> };
+    assert.deepEqual(none.items.map((item) => item.id), ['b']);
     const { client: writer } = await connect(endpoint(url));
     const repeated = problemOf((await writer.callTool({ name: 'model_create', arguments: { data: { slug: 'org/a' } } })) as CallToolResult);
     assert.deepEqual([repeated.status, repeated.code, repeated.details], [409, 'conflict', { fields: ['slug'] }]);

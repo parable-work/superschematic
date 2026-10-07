@@ -103,10 +103,16 @@ export class SchemaRegistry {
 
   /**
    * validate checks a value as an instance of a name's live version, or of
-   * the given version. It throws not_found when there is no such version.
+   * the given version, as a create would: the value as the version stores
+   * it, its scalars' values normalized and its defaults filled, then, when
+   * the version refuses nothing, what a scalar's parser refused. It throws
+   * not_found when there is no such version.
    */
   validate(principal: Principal, name: string, value: unknown, options: ValidateOptions = {}): ValidationIssue[] {
-    return this.validator(principal, name, options).validate(value);
+    const validator = this.validator(principal, name, options);
+    const normalized = validator.normalize(value, 'create');
+    const issues = validator.validate(normalized.value);
+    return issues.length > 0 ? issues : normalized.issues;
   }
 
   /**

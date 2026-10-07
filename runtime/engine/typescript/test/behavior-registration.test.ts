@@ -147,6 +147,14 @@ describe('behavior registration refuses', () => {
 
   test('filters on a field it does not declare, a column its migrations do not add, or another type', () => {
     assert.match(refusal({ ...counter, filters: { total: { column: 'count', type: 'integer' } } }), /filter total names a field its declaration does not \(count\)/);
+    // A member of a declared field is <field>.<member>, the member camelCase.
+    assert.match(refusal({ ...counter, filters: { 'total.value': { column: 'count', type: 'integer' } } }), /filter total.value names a field its declaration does not/);
+    assert.match(refusal({ ...counter, filters: { 'count.Value': { column: 'count', type: 'integer' } } }), /filter count.Value names a field .*the member camelCase/);
+    assert.match(refusal({ ...counter, filters: { 'count.a.b': { column: 'count', type: 'integer' } } }), /filter count.a.b names a field/);
+    assert.match(
+      refusal({ ...counter, filters: { 'count.value': { column: 'count', type: 'integer', description: ' ' } } }),
+      /filter count.value: description is text when it is given/
+    );
     assert.match(refusal({ ...counter, filters: { count: { column: 'total', type: 'integer' } } }), /filter count: column is one of its migrations' columns \(count\)/);
     assert.match(refusal({ ...counter, filters: { count: { column: 'count', type: 'date' } } } as never), /filter count: type is one of string, number, integer, boolean/);
     assert.match(refusal({ ...counter, filters: [] } as never), /filters is an object of \{ column, type \} by field name/);

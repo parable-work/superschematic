@@ -21,6 +21,8 @@ export type {
   ValidateConfig,
   Wrapped,
 } from "./wrappers";
+export { display } from "./display";
+export type { DisplayConfig, DisplayState, DisplayTone } from "./display";
 export { behavior } from "./behavior";
 export type {
   AssignmentConfig,
@@ -40,6 +42,7 @@ export type {
   ConstantsConfig,
   DependenciesConfig,
   LeaseConfig,
+  LeaseDirectOn,
   LeaseTransition,
   LinkConfig,
   LinksConfig,

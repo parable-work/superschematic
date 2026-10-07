@@ -625,6 +625,46 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "directOn": {
+                    "description": "Directives the engine's runner sends the holder of an instance's active lease when the target of one of the instance's links moves on: a new revision of Revisions, or a release of Branches; for a pinned link, a revision tells only the instances the target moved past. The runner sends each with direct, as its principal, which needs directPermission, or overridePermission when that is absent, once per lease and move (dedupeKey). An instance with no lease held hears nothing, and its next holder nothing either. Needs Links on the type; one entry per link.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "data": {
+                          "description": "Its data, beside revised, which the runner sets: the link, the target's schema and id, and its revision or the release's commit.",
+                          "type": "object"
+                        },
+                        "name": {
+                          "description": "The directive's name, as direct takes it.",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+                          "type": "string"
+                        },
+                        "revised": {
+                          "additionalProperties": false,
+                          "description": "The link whose target's move sends the directive.",
+                          "properties": {
+                            "link": {
+                              "description": "A link of the type's Links config.",
+                              "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "link"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "revised",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array"
+                  },
                   "directPermission": {
                     "description": "The permission a principal needs to send the holder a directive; overridePermission when absent. With neither, direct is refused.",
                     "minLength": 1,
@@ -1833,6 +1873,35 @@
       "required": [
         "of"
       ],
+      "type": "object"
+    },
+    "DisplayState": {
+      "additionalProperties": false,
+      "description": "How a UI shows one Workflow state: its label, the present-progressive form it shows while an instance is in the state, and a tone, what the state means to a reader.",
+      "minProperties": 1,
+      "properties": {
+        "activeForm": {
+          "default": "",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "tone": {
+          "default": "",
+          "enum": [
+            "muted",
+            "active",
+            "success",
+            "warning",
+            "danger"
+          ],
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "Document": {
@@ -3529,6 +3598,9 @@
           "default": "",
           "type": "string"
         },
+        "display": {
+          "$ref": "#/$defs/TypeDisplay"
+        },
         "envVars": {
           "default": false,
           "type": "boolean"
@@ -3660,6 +3732,81 @@
         "name",
         "role"
       ],
+      "type": "object"
+    },
+    "TypeDisplay": {
+      "additionalProperties": false,
+      "description": "What a UI reads to render the instances of a type (@display): what to call one and many, which field is an instance's title, what a create button says, which fields summarize it in a list, and the labels of its Workflow's states and transitions.",
+      "minProperties": 1,
+      "properties": {
+        "createLabel": {
+          "default": "",
+          "description": "What a button that creates an instance says.",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "noun": {
+          "default": "",
+          "description": "What to call one instance.",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "plural": {
+          "default": "",
+          "description": "What to call several.",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "states": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DisplayState"
+          },
+          "default": {},
+          "description": "Labels of states of the type's Workflow, by state.",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
+          "type": "object"
+        },
+        "summaryFields": {
+          "default": [],
+          "description": "The fields that summarize an instance in a list, in order: the type's own, or fields its behaviors add.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "titleField": {
+          "default": "",
+          "description": "The field whose value is an instance's title: one of the type's own, a single text value.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "transitions": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "minProperties": 1,
+            "propertyNames": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Labels of transitions of the type's Workflow, by the state a transition leaves, then by the state it enters.",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "TypeRef": {

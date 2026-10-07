@@ -19,6 +19,8 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	logging "cloud.google.com/go/logging/apiv2"
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
 	"cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	run "cloud.google.com/go/run/apiv2"
@@ -28,8 +30,11 @@ import (
 	serviceusage "cloud.google.com/go/serviceusage/apiv1"
 	"cloud.google.com/go/serviceusage/apiv1/serviceusagepb"
 	"cloud.google.com/go/storage"
+	"github.com/googleapis/gax-go/v2"
+	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/parable-work/superschematic/registry"
@@ -103,8 +108,17 @@ type Cloud interface {
 	EnsureJob(ctx context.Context, project, region string, spec JobSpec) (changed bool, err error)
 
 	// RunJob runs a job once, with args in place of its container's, and
-	// returns once the execution finished, whether it succeeded or not.
+	// returns once the execution finished, whether it succeeded or not. An
+	// error means it could not start the execution or wait for it to
+	// finish, which may still be running.
 	RunJob(ctx context.Context, project, region, job string, args []string) (*JobRun, error)
+
+	// ExecutionStderr returns the lines the task of run, an execution
+	// RunJob finished, wrote to stderr, oldest first, from Cloud Logging.
+	// Cloud Logging receives them seconds after the execution ends, so it
+	// reads again until it finds some or wait has passed, and then returns
+	// none.
+	ExecutionStderr(ctx context.Context, run *JobRun, wait time.Duration) ([]string, error)
 }
 
 // BuildSpec is a Cloud Build build of a Docker image.
@@ -165,8 +179,12 @@ type JobRun struct {
 	Name   string
 	LogURI string
 
-	// Succeeded is whether its one task succeeded; Message says why it
-	// did not.
+	// Created is when the execution was created, so a read of its logs
+	// looks no further back; zero when Cloud Run did not say.
+	Created time.Time
+
+	// Succeeded is whether its one task succeeded; Message is Cloud Run's
+	// account of why it did not.
 	Succeeded bool
 	Message   string
 }
@@ -187,6 +205,7 @@ type googleCloud struct {
 	projects *resourcemanager.ProjectsClient
 	builds   *cloudbuild.Client
 	jobs     *run.JobsClient
+	logs     *logging.Client
 	clientOK bool
 }
 
@@ -221,6 +240,9 @@ func (c *googleCloud) clients(ctx context.Context) error {
 	}
 	if c.jobs, err = run.NewJobsClient(ctx); err != nil {
 		return fmt.Errorf("gcp: the Cloud Run jobs client: %w", err)
+	}
+	if c.logs, err = logging.NewClient(ctx); err != nil {
+		return fmt.Errorf("gcp: the Cloud Logging client: %w", err)
 	}
 	c.clientOK = true
 	return nil
@@ -716,24 +738,162 @@ func (c *googleCloud) RunJob(ctx context.Context, project, region, job string, a
 	if err != nil {
 		return nil, fmt.Errorf("gcp: run job %s: %w", name, err)
 	}
+	return waitExecution(ctx, name, op)
+}
+
+// executionOperation is what RunJob reads of the operation that runs an
+// execution, a run.RunJobOperation, which a test fakes.
+type executionOperation interface {
+	Wait(ctx context.Context, opts ...gax.CallOption) (*runpb.Execution, error)
+	Done() bool
+	Metadata() (*runpb.Execution, error)
+}
+
+// waitExecution waits for the execution op runs. The operation ends with
+// an error when the execution fails, which the JobRun reports. An error
+// while the operation is not done is the wait's own, from the transport
+// or ctx, and the execution may still be running.
+func waitExecution(ctx context.Context, job string, op executionOperation) (*JobRun, error) {
 	execution, err := op.Wait(ctx)
-	if err != nil {
-		// The execution failed: its metadata says where its logs are.
-		out := &JobRun{Message: err.Error()}
-		if meta, merr := op.Metadata(); merr == nil && meta != nil {
-			out.Name, out.LogURI = meta.GetName(), meta.GetLogUri()
+	if err == nil {
+		out := executionRun(execution)
+		out.Succeeded = execution.GetSucceededCount() == 1 && execution.GetFailedCount() == 0
+		if !out.Succeeded {
+			for _, cond := range execution.GetConditions() {
+				if cond.GetMessage() != "" {
+					out.Message = cond.GetMessage()
+					break
+				}
+			}
 		}
 		return out, nil
 	}
-	out := &JobRun{Name: execution.GetName(), LogURI: execution.GetLogUri()}
-	out.Succeeded = execution.GetSucceededCount() == 1 && execution.GetFailedCount() == 0
-	if !out.Succeeded {
-		for _, cond := range execution.GetConditions() {
-			if cond.GetMessage() != "" {
-				out.Message = cond.GetMessage()
-				break
-			}
+	// The metadata is the execution as the last poll saw it.
+	meta, _ := op.Metadata()
+	if !op.Done() {
+		what := "its execution"
+		if meta.GetName() != "" {
+			what = "execution " + meta.GetName()
 		}
+		return nil, fmt.Errorf("gcp: job %s: waiting for %s, which may still be running: %w", job, what, err)
+	}
+	out := executionRun(meta)
+	out.Message = err.Error()
+	if s, ok := status.FromError(err); ok && s.Message() != "" {
+		out.Message = s.Message()
 	}
 	return out, nil
+}
+
+// executionRun is the JobRun of an execution, without its outcome.
+func executionRun(execution *runpb.Execution) *JobRun {
+	out := &JobRun{Name: execution.GetName(), LogURI: execution.GetLogUri()}
+	if created := execution.GetCreateTime(); created != nil {
+		out.Created = created.AsTime()
+	}
+	return out
+}
+
+// stderrLines is the most lines ExecutionStderr returns.
+const stderrLines = 100
+
+func (c *googleCloud) ExecutionStderr(ctx context.Context, run *JobRun, wait time.Duration) ([]string, error) {
+	project, filter, err := stderrFilter(run)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.clients(ctx); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(wait)
+	pause := 2 * time.Second
+	for {
+		lines, err := c.logLines(ctx, project, filter)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: Cloud Logging: %w", err)
+		}
+		if len(lines) > 0 || time.Now().Add(pause).After(deadline) {
+			return lines, nil
+		}
+		t := time.NewTimer(pause)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+		pause = min(2*pause, 8*time.Second)
+	}
+}
+
+// logLines returns the lines of the log entries filter matches in a
+// project, oldest first, at most stderrLines of them.
+func (c *googleCloud) logLines(ctx context.Context, project, filter string) ([]string, error) {
+	it := c.logs.ListLogEntries(ctx, &loggingpb.ListLogEntriesRequest{
+		ResourceNames: []string{"projects/" + project},
+		Filter:        filter,
+		OrderBy:       "timestamp asc",
+		PageSize:      stderrLines,
+	})
+	var lines []string
+	for len(lines) < stderrLines {
+		entry, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if status.Code(err) == codes.PermissionDenied {
+			return nil, fmt.Errorf("%w (the deployer reads logs with roles/logging.viewer, which stack bootstrap gives it)", err)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if line := entryLine(entry); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, nil
+}
+
+// stderrFilter returns the project of run's execution and the Cloud
+// Logging filter of the lines its task wrote to stderr: Cloud Run logs
+// each as an entry of the job's resource, labeled with the execution.
+func stderrFilter(run *JobRun) (project, filter string, err error) {
+	// projects/<project>/locations/<region>/jobs/<job>/executions/<execution>
+	parts := strings.Split(run.Name, "/")
+	if len(parts) != 8 || parts[0] != "projects" || parts[2] != "locations" || parts[4] != "jobs" || parts[6] != "executions" || slices.Contains(parts, "") {
+		return "", "", fmt.Errorf("gcp: %q names no execution of a Cloud Run job", run.Name)
+	}
+	project = parts[1]
+	clauses := []string{
+		fmt.Sprintf("logName=%q", "projects/"+project+"/logs/run.googleapis.com%2Fstderr"),
+		`resource.type="cloud_run_job"`,
+		fmt.Sprintf("resource.labels.location=%q", parts[3]),
+		fmt.Sprintf("resource.labels.job_name=%q", parts[5]),
+		fmt.Sprintf(`labels."run.googleapis.com/execution_name"=%q`, parts[7]),
+	}
+	if !run.Created.IsZero() {
+		// A minute early, for the task's clock against Cloud Run's.
+		clauses = append(clauses, fmt.Sprintf("timestamp>=%q", run.Created.Add(-time.Minute).UTC().Format(time.RFC3339)))
+	}
+	return project, strings.Join(clauses, " AND "), nil
+}
+
+// entryLine is the line a log entry holds: its text, or the message of a
+// JSON line, which Cloud Run logs as a JSON payload.
+func entryLine(entry *loggingpb.LogEntry) string {
+	if text := entry.GetTextPayload(); text != "" {
+		return strings.TrimSpace(text)
+	}
+	payload := entry.GetJsonPayload()
+	if payload == nil {
+		return ""
+	}
+	if msg := payload.GetFields()["message"].GetStringValue(); msg != "" {
+		return strings.TrimSpace(msg)
+	}
+	data, err := protojson.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }

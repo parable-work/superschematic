@@ -350,7 +350,21 @@ deployment's binary, the core's by default. The engine then requires:
 - `@unique`, `@key` and `@index` (a type's `indexes`) only on the
   instance type's own fields whose value is a string, a number or a
   boolean, an enum's included, and an index only over fields the type
-  has ("Unique fields and indexes" under "Instances").
+  has ("Unique fields and indexes" under "Instances");
+- each type's display (`@display`, D48 in `docs/DECISIONS.md`) held to
+  the type, as the compiler's loader holds it, with its wording, at
+  `/types/<Type>/display`: `titleField` names one of the type's own
+  fields, by its name or its JSON key, that holds a single text value (a
+  string, or a scalar whose values are strings, not a list or a map) and
+  is neither `secret` nor `uiHidden`; each `summaryFields` entry names
+  one of the type's own fields, or a field one of its behaviors adds,
+  shown to a reader the same way; and `states` and `transitions` name
+  states and transitions of the type's `Workflow` config, so a type that
+  does not compose `Workflow`, a nested type among them, takes neither.
+  The meta-schema holds the display's shape: at least one member, state
+  names, no blank text, and the tones `muted`, `active`, `success`,
+  `warning` and `danger`. A new version may change a display freely: the
+  compatibility rule ignores it.
 
 A refused document throws `SchemaDocumentError` with an issue per problem,
 each at a JSON pointer.
@@ -431,6 +445,47 @@ validator itself. Both are the version's own rules: a behavior's
 `validate`, which judges a write ("Validating fields" under
 "Behaviors"), is not asked.
 
+A write stores what the schema's parse makes of it (D16, amended).
+Before the version validates them, the own fields a write gives go
+through the schema runtime's strict parse of the instance type
+(`parseType`), the step a generated server runs on a request: each
+scalar value takes the canonical form its scalar's normalize and parse
+steps give it, at every depth, and each absent field that declares a
+default takes it. So `Contact.Email` stores `ada@example.com` for
+`Ada@Example.COM`, `Design.Color` stores `#FF0000FF` for `red`,
+`Identity.UUID` its base62 form, `Temporal.DateTime` its RFC 3339 text
+with the sub-seconds trimmed, and `Generic.StringMap` the object for its
+JSON text.
+
+- **Where.** A create, an update, a behavior's `update()` and
+  `instances.create`, and `validateUpdate()`, which reports what
+  `update()` would. `schemas.validate` answers as a create would.
+- **Defaults on create only.** A create fills each absent field's
+  default, in nested objects and list elements too; the text reads as
+  D14's loader reads it: the text for a string, an enum or a string
+  scalar, a number or a boolean for those types (a list's default is
+  not filled, as the runtimes' parse fills none). An update's merge
+  patch fills none, so a field a patch removes with `null` stays
+  removed, and a field a later version adds stays absent on the
+  instances before it.
+- **What the parse cannot read** is left as given for the version to
+  refuse with its own rule: a value of the wrong type (`type`), a key no
+  type declares (`unknown`), a field a behavior adds (`readOnly`). A
+  value its scalar's parser refuses where the version's rules let it
+  through is refused with the parser's rule (`parse`), a
+  `Temporal.DateTime` of the 30th of February say.
+- **What a client sees is what is stored.** The create's and the
+  update's answer, every later read, the event's change (an update's
+  patch with its values as stored) and the value store's hash of a large
+  field are the normalized form. An update whose patch normalizes to
+  what the instance holds changes nothing and writes nothing. A unique
+  index compares the stored form, and a `lookup` key's and a list's
+  `where` values on own fields are normalized before they compare.
+- **Rows written before.** An instance written before the engine
+  normalized keeps its values as given until a write sets them again; a
+  unique field's old value does not collide with its normalized form,
+  and a lookup by the normalized form does not find it.
+
 ## Instances
 
 `engine.instances` stores instances of a schema's instance type. An
@@ -441,8 +496,11 @@ followed by letters, digits, `.`, `_`, `:` and `-`, at most 256
 characters. A schema a namespace reaches through the shared namespace
 holds instances in the namespace that creates them.
 
-- `create` validates the instance against the schema's live version,
-  then asks its behaviors' `validate`, and refuses an id the namespace
+- `create` stores the instance as the schema's parse makes it, each
+  scalar value in its canonical form and each absent field's default
+  filled ("Validation" under "Schemas"), validates it against the
+  schema's live version, then asks its behaviors' `validate`, and
+  refuses an id the namespace
   already has for the schema, and a unique field's value another
   instance holds (`conflict`).
   `behaviors` gives the type's behaviors their parameters, by behavior
@@ -466,8 +524,10 @@ holds instances in the namespace that creates them.
 - `update` takes a JSON merge patch (RFC 7386), the engine's update rule: a
   member replaces the instance's member, a nested object merges, `null`
   removes the member, and a list or any other value replaces what was
-  there. The result is validated against the live version, then by the
-  behaviors' `validate`; a patch that changes nothing writes nothing. The
+  there. The patch's values are normalized as a create's are, with no
+  default filled, and the result is validated against the live version,
+  then by the behaviors' `validate`; a patch that changes nothing, once
+  normalized, writes nothing. The
   behaviors' guards may veto it, and a unique field's value another
   instance holds refuses it (`conflict`).
 - `delete` removes the instance and returns whether there was one. The
@@ -493,7 +553,9 @@ the value store's threshold, 64 KiB by default, is stored once by hash,
 and the row keeps a ref in its place; every read puts the value back
 ("The value store"). Its `seq` is the sequence of its
 last event, so every write that appends one moves it: a create, an update
-that changes something and a writing behavior operation.
+that changes something and a writing behavior operation, unless its
+handler says it changed nothing ("Instances and events" under
+"Behaviors").
 
 Every operation on a schema with no live version is `not_found`. A row
 records the schema version it was last written with; the compatibility
@@ -536,7 +598,7 @@ one on the same fields.
 
 `lookup(principal, schema, key, { namespace, valueRefs })` asks `read`
 and returns the instance whose fields hold `key`'s values, through the
-index. `key` names exactly the fields of one unique index, each with one
+index, each value normalized as a write stores it first. `key` names exactly the fields of one unique index, each with one
 value of its type: `{ slug: 'openai/gpt-5' }`, or `{ source: 'crm',
 externalId: 42 }` for a unique `@index` on both. Any other key, a value
 of another type, null, and a schema with no unique field are
@@ -545,25 +607,36 @@ in a path segment, so a value may hold `/`.
 
 ### Filters
 
-`list`'s `where` is a JSON object of field values: a member keeps the
-instances whose field holds its value, a list of 1 to 100 values any of
-them (`MAX_FILTER_VALUES`), and the members together the instances every
-member keeps. `{}` filters nothing.
+`list`'s `where` is a JSON object of field values, each on an own field
+normalized as a write stores it: a member keeps the instances whose
+field holds its value, `null` the ones whose field holds none (absent or
+null), a list of 1 to 100 values any of them (`MAX_FILTER_VALUES`), and
+the members together the instances every member keeps. `{}` filters
+nothing. `{ "assignee": [null, "wren"] }` is the work wren holds and the
+work no one holds.
 
 - A field is a top-level own field whose value is a string, a number or
   a boolean, as for an index, or one a behavior lets a list filter on
   (its implementation's `filters`, "The implementation" under
-  "Behaviors"): `Workflow`'s `status`. A value has the field's JSON type,
-  an integer for an integer scalar; null, another type, an empty list and
-  a field that is not one of these are `invalid_argument`, the message
-  listing the fields.
+  "Behaviors"): `Workflow`'s `status`, and in the work-queue package
+  `Assignment`'s `assignee`, `Lease`'s `lease.holder` and `Retries`'
+  `retries.exhausted`, the last two members of the behavior's field. A
+  value has the field's JSON type, an integer for an integer scalar, or
+  is null; another type, an empty list and a field that is not one of
+  these are `invalid_argument`, the message listing the fields.
+- A behavior's field computed from other instances is not filtered on:
+  a column copied from them would have to hear every change of each, the
+  cost "What a reference hears" removes, and would go stale when a
+  config changes with no write. `Dependencies`' `blocked` is one.
 - A page keeps creation order. It reads through an index whose every
   field a member names, unique first, then the one with the fewest
   combinations of values: each combination is one indexed range read
   past the cursor in position order, at most 100 of them
   (`MAX_FILTER_RANGES`), merged. A unique index answers a combination
   with one instance at most, and a behavior's index serves its filter
-  (`Workflow`'s on `status`). With none, the page reads the list index,
+  (`Workflow`'s on `status`), null being one more range. An own index
+  holds no instance without a value in each of its fields, so it serves
+  no member that lists null. With none, the page reads the list index,
   at most 1000 instances past the cursor (`FILTER_SCAN_ROWS`). The
   members no index serves are tested in SQL on the rows read.
 - `next` is the position up to which every instance was read. So a page
@@ -752,14 +825,41 @@ written by a schema-level operation or a schedule, which append no
 event, goes with its last row.
 
 Where the values live is a driver (`values.driver`, a `ValueDriver`):
-`read(hash)`, `write(hash, json)` and `remove(hash)`, synchronous, as
-everything in a write is (D16). The default, `SqliteValueDriver`, writes
-`engine_payloads` in the write's transaction (`transactional: true`). A
-driver over other storage is not transactional: the engine removes a
-value only after the commit that dropped its last holder, so a
-rolled-back write never loses one, and a write that rolls back can leave
-a value nothing holds. The holders stay in the engine's file whatever the
-driver. No driver over object storage ships yet.
+`read(hash)`, `write(hash, json)`, `remove(hash)` and, optionally,
+`list(after, limit)`, synchronous, as everything in a write is (D16). The
+default, `SqliteValueDriver`, writes `engine_payloads` in the write's
+transaction (`transactional: true`), and a rollback undoes its writes. A
+driver over other storage is not transactional, and the engine settles
+what it did around the file's transactions:
+
+- it removes a value only after the commit that dropped its last holder,
+  so a rolled-back write never loses one;
+- once the outermost transaction ends, committed or rolled back, it
+  removes each value the driver wrote in it that no holder references
+  then, so a write that rolled back leaves no value behind;
+- what a crash leaves between a driver's write and the end of its
+  transaction, `engine.values.sweep()` removes: it pages through the
+  driver's `list` and removes each value no holder references, and
+  returns `{ removed }`. It acts for no principal, needs no open
+  transaction and a driver with `list`; a deployment runs it at start,
+  after a crash. The default driver has `list` and leaves nothing to
+  sweep.
+
+Such a driver must keep what `write` was given under its hash, return it
+from `read` unchanged, take a `write` of a hash it has as a no-op and a
+`remove` of one it lacks the same, and list its hashes in order if it is
+to be swept. The holders stay in the engine's file whatever the driver.
+No driver over object storage ships yet.
+
+No value is longer than `values.maxBytes`, 16 MiB of canonical JSON by
+default and at least the threshold. A write that would store a longer
+top-level member, an instance's own field, a member of an event's change
+or of an object a behavior stows, is refused as a whole with
+`ValueTooLargeError` (`value_too_large`, 413 over HTTP), whose `path` is
+the member's pointer in what would be stored (`/body`, `/params/doc`),
+with its `bytes` and the `maxBytes`. The HTTP runtime's body limit bounds
+what a request carries first; the engine's bounds what any write stores,
+a behavior's included.
 
 ## Retention
 
@@ -778,12 +878,17 @@ engine.events.floor('default'); // the earliest cursor a read of default may sta
 | Option | Default | What it is |
 | --- | --- | --- |
 | `maxAgeMs` | none | an event older than this, by its `at` and the engine's clock, goes |
-| `maxEvents` | none | an event more than this many cursors behind the head goes, so the log keeps about this many |
+| `maxEvents` | none | a namespace's events past its newest this many go, so each namespace keeps about this many |
+| `maxHoldMs` | none | the longest a subscription that does not advance (halted, in an archived namespace, or whose behavior the engine no longer runs) holds the log: it keeps no event older than this that age or count lets go |
 | `everyMs` | 60000 | how often the started runner prunes, at least 1000 |
 | `batchSize` | 1000 | events pruned in one transaction, after which the runner yields, at most 10000 |
 
 One of `maxAgeMs` and `maxEvents` is required; with both, an event goes
 when either lets it go. `openEngine` refuses anything else (`TypeError`).
+A namespace's count is its own: one busy namespace never pushes a quiet
+one's events out. The runner counts a namespace's events once, at its
+first pass, and after that only what was appended since, so a pass reads
+what is new, not the whole log.
 
 - **A namespace at a time, oldest first.** Retention prunes each
   namespace's events apart, from its oldest, and stops at the first
@@ -797,11 +902,22 @@ when either lets it go. `openEngine` refuses anything else (`TypeError`).
   ("Subscriptions" under "The runner"): one whose schema's live version
   composes a behavior with reactions, at its cursor, or where it starts
   before it has run, whether it is active, retrying, halted or in an
-  archived namespace; and one whose behavior is not registered, once it
-  has run. Retention prunes none of the namespace's events after it, and
+  archived namespace, but not one whose `watches` turns its reactions off
+  (`Lease` without `directOn`), which starts at the publish that turns
+  them on; and one whose behavior is not registered, once it has run. Retention prunes none of the namespace's events after it, and
   holds no other namespace's. So a halted subscription holds its
-  namespace's log, and `status()` shows by whom
-  ("Status" under "The runner"), until it is resumed.
+  namespace's log, and `status()` shows by whom, in what state, and since
+  when ("Status" under "The runner"), until it is resumed.
+- **A hold that does not move is bounded by `maxHoldMs`.** A subscription
+  that does not advance, halted, in an archived namespace, or whose
+  behavior the engine no longer runs, holds no event older than
+  `maxHoldMs` once age or count lets it go; one that advances, active or
+  retrying, holds whatever its age, since it is working through it. Past
+  the bound retention prunes on, and the subscription, behind its floor,
+  halts with `cursor_expired` when it next runs, after its `resume` or
+  its namespace's unarchive; `resume(key, { skip: true })` moves it to the
+  floor. `status()` shows when that happens (`heldUntil`). Without
+  `maxHoldMs` such a hold lasts until the subscription advances.
 - **A read from a cursor before the floor is `cursor_expired`.**
   `events.read` from a cursor before the floor of its namespace, or
   before the last publish pruned of the shared namespace it reads,
@@ -907,7 +1023,14 @@ that made the schema compose the behavior on: the publish of the earliest
 version of the run of versions, up to the live one, that compose it. A
 schema whose live version stops composing the behavior leaves its
 subscription `inactive`; composed again, it starts over at that publish,
-and the events between belong to no subscription.
+and the events between belong to no subscription. A `watches` that
+returns `null` for the schema's config turns the reactions off there, as
+a schedule's `everyMs` function does a schedule: the runner hands them no
+event, shows a subscription that has run as `off` (one that never ran is
+not listed), and a version whose config turns them on starts the
+subscription at its publish, so `react` never sees an event from while
+they were off. `Lease` turns its reactions off when its config has no
+`directOn`.
 
 - **Database effects once per event.** The subscription's cursor is a row
   of `engine_subscriptions`. Each event's reaction runs in a savepoint of
@@ -992,9 +1115,9 @@ later, with no `previous`.
 | | |
 | --- | --- |
 | `running`, `principal`, `head` | whether it is started, the principal's subject, and the log's last cursor, which retention never moves back |
-| `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` (after `maxAttempts` failures, or behind its namespace's floor), `archived` (its namespace is) or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
+| `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` (after `maxAttempts` failures, or behind its namespace's floor), `off` (its `watches` returns `null` for the schema's config; listed once it has run), `archived` (its namespace is) or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
 | `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying`, `off` (its function returns `null` for the schema's config), `archived` (its namespace is) or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema; an `off` schedule has no `previous` and its `next` is null |
-| `retention` | on an engine with retention: `{ maxAgeMs, maxEvents, everyMs, previous, next, namespaces }`, when the runner last finished pruning and prunes next (null before its first pass), and per namespace pruned or held `{ namespace, floor, pruned, heldAt, heldBy }`, its floor, the events pruned of it, and the cursor and subscription that hold it, or null |
+| `retention` | on an engine with retention: `{ maxAgeMs, maxEvents, maxHoldMs, everyMs, previous, next, namespaces }`, when the runner last finished pruning and prunes next (null before its first pass), and per namespace pruned or held `{ namespace, floor, pruned, heldAt, heldBy, heldState, heldSince, heldUntil }`: its floor, the events pruned of it, the cursor and subscription that hold it, that subscription's state (`active` or `retrying`, which advance; `halted`, `archived` or `inactive`, which do not), when the oldest event it keeps was appended, and, for one that does not advance under `maxHoldMs`, the time its hold lasts to, after which retention prunes past it; each null when none holds it |
 | `error` | the runner's own last error outside any reaction (a busy file, say), cleared by the next pass that works |
 
 The status is not served over HTTP or MCP: it spans every namespace and
@@ -1016,7 +1139,19 @@ A question about a namespace itself names no schema:
 union on `action` (`SchemaAccessRequest`, `NamespaceAccessRequest`), so
 a policy that reads `schema` says what it does for `manage`; one that
 builds a permission from the schema's name, as the examples' do, refuses
-it. Only `true` allows, and anything else is `forbidden`. It runs synchronously. There is no default
+it.
+
+The tools document asks a third kind while it lists a caller's tools
+(`ListingAccessRequest`): of an engine tool that names its schema or
+namespace only when called, whether the caller may do that at all here.
+It is `{ principal, action: 'define', namespace, listing: true }` for
+`define_schema`, and `{ principal, action: 'manage', namespace,
+operation, listing: true }` for the namespace tools, the operation
+`list`, `create`, `archive` or `unarchive`, and it names no schema. A
+refusal hides the tool from the caller; a call of it asks the question
+its call asks, with the name it gives. A policy that cannot answer
+without a name answers false. Only `true` allows, and anything else is
+`forbidden`. It runs synchronously. There is no default
 policy: `allowAll` is explicit, for tests and local use. The engine has
 no roles; a policy can hold the principal's `permissions` to whatever
 rule the deployment has, through the HTTP runtime's `PermissionMatcher`
@@ -1070,7 +1205,9 @@ version's or a behavior's `validate`'s),
 `name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`,
 `namespace_archived` (a write in an archived namespace), `cursor_expired`
 (`CursorExpiredError`: a read of the log from a cursor retention has
-pruned past, with its `floor` and the `head`),
+pruned past, with its `floor` and the `head`), `value_too_large`
+(`ValueTooLargeError`: a value longer than `values.maxBytes`, with its
+`path`, `bytes` and the `maxBytes`),
 `invalid_argument` (`OperationParamsError` for an operation's parameters,
 `CreateParamsError` for a create's and `PreconditionsError` for a call's
 preconditions, with their issues), `seq_mismatch`, `vetoed`
@@ -1144,7 +1281,7 @@ function is synchronous (D16): one that returns a promise is a
 | --- | --- |
 | `declaration` | the declaration the compiler registers, as its JSON file holds it |
 | `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), the document's other `types` (their `names`, and `get(name)`, each one's fields, which holds the type to the version's checks: "Other types"), every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
-| `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
+| `configChange(before, after, change)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. `change.instances` says whether an instance of the schema exists, in any namespace that reads the version (every namespace that looks a shared schema up), read at define and again in the publish's transaction, so a change only stored instances could break is refused only while there are some; it is true for an add or a remove, which are asked only then. Absent, only an identical config, and no adding or removing while there are instances |
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
 | `initialize(context, params)` | sets up its state for a new instance; `params` is its own entry of the create's parameters, `{}` when the create gives none ("Create parameters"); it refuses with a `BehaviorVetoError`, whose code its declaration lists |
@@ -1157,7 +1294,7 @@ function is synchronous (D16): one that returns a promise is a
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext`, whose `sql` writes the behavior's own tables in a writing one ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
-| `filters` | the declared fields a list filters on, `{ <field>: { column, type } }`: each one's value is one of its columns, by its own name, and `type` is its JSON type, `string`, `number`, `integer` or `boolean`. A list's `where` compares the column in SQL, so the field's reader must return what the column holds; a migration's index on that column alone serves the filter ("Filters" under "Instances") |
+| `filters` | what a list filters on, `{ <name>: { column, type, description? } }`: a declared field, or `<field>.<member>`, a camelCase member of a declared field whose value is an object (`lease.holder`), whose value is one of its columns, by its own name; `type` is its JSON type, `string`, `number`, `integer` or `boolean`, and `description` what the list tool's `where` says of it, the declared field's when absent. A list's `where` compares the column in SQL, a null column holding no value, so the field's reader must return what the column holds, and nothing (absent or null) for null; a migration's index on that column alone serves the filter ("Filters" under "Instances") |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
 | `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"), as a guard does; the view is the referencing instance's, and the request carries no precondition |
 | `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference. Its context's `writing` says the referencing instance's own write made the change |
@@ -1173,7 +1310,7 @@ has no `run`; a declaration of the wrong shape, with an operation named
 `create`, `get`, `list`, `update`, `delete` or `lookup`, or with a schema
 that does not compile; malformed migrations, columns or indexes, an index
 over a column no migration up to its own adds included; a filter on a
-field it does not declare or a column its migrations do not add; a veto code that is
+field it does not declare, or a member of one whose name is not `<field>.<member>` with a camelCase member, or a column its migrations do not add; a veto code that is
 not lowercase snake case of at most 64 characters, or is listed twice.
 An operation's `paramsSchema` sets
 `additionalProperties: false`, so the handler and every guard read the
@@ -1492,9 +1629,10 @@ read-only relation, the event log, another behavior's storage or the
 connection: a status one behavior owns changes at another's request only
 through its operations, whose guards run, on this instance or another.
 
-An operation's context (`OperationContext`) adds two more, so a
+An operation's context (`OperationContext`) adds three more: two so a
 behavior that changes the instance on a caller's behalf, approving a
-proposed change say, runs the checks an update runs:
+proposed change say, runs the checks an update runs, and one that says
+the call changed nothing:
 
 - `update(patch)` applies a JSON merge patch to the instance's own fields
   and returns them after it. A behavior's field in the patch is refused
@@ -1510,6 +1648,9 @@ proposed change say, runs the checks an update runs:
 - `validateUpdate(patch)` returns the issues `update(patch)` would refuse
   the patch for, the behaviors' `validate`'s included, without writing or
   asking a guard.
+- `unchanged()` says the call changed nothing, so the engine appends no
+  event for it ("Instances and events"). It does nothing in a read-only
+  operation.
 
 `validate` gets a narrower context of its own ("Validating fields"):
 `behavior`, `config`, `namespace`, `schema`, `version`, `id`,
@@ -1966,12 +2107,12 @@ every call on the schema `unavailable` until one registers.
 
 | Call | Order, in one transaction for a write |
 | --- | --- |
-| `create` | validate (a behavior field is `readOnly`) -> each `validate` (`kind: 'create'`) -> check `behaviors` against each `createParamsSchema` -> insert -> every guard (`kind: 'create'`) -> each `initialize`, with its parameters -> each `afterChange` -> event |
+| `create` | normalize (the parse, with defaults) -> validate (a behavior field is `readOnly`) -> each `validate` (`kind: 'create'`) -> check `behaviors` against each `createParamsSchema` -> insert -> every guard (`kind: 'create'`) -> each `initialize`, with its parameters -> each `afterChange` -> event |
 | `get`, `list` | each field reader |
-| `update` | refuse a behavior field (`readOnly`) -> check `preconditions` against each `preconditionSchema` -> check `expectedSeq` -> merge and validate -> each `validate` (`kind: 'update'`) -> nothing more if nothing changed -> every guard, each with its precondition -> write -> each `afterChange` -> event |
-| an operation's `update()` | refuse a behavior field (`readOnly`) -> merge and validate -> each `validate`, with `caller` -> nothing more if nothing changed -> every guard, with no precondition -> write; `validateUpdate()` stops before the guards and writes nothing |
+| `update` | refuse a behavior field (`readOnly`) -> check `preconditions` against each `preconditionSchema` -> check `expectedSeq` -> normalize the patch (no defaults), merge and validate -> each `validate` (`kind: 'update'`) -> nothing more if nothing changed -> every guard, each with its precondition -> write -> each `afterChange` -> event |
+| an operation's `update()` | refuse a behavior field (`readOnly`) -> normalize the patch, merge and validate -> each `validate`, with `caller` -> nothing more if nothing changed -> every guard, with no precondition -> write; `validateUpdate()` stops before the guards and writes nothing |
 | `delete` | check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition, then each referencing behavior's `guardReference` -> the row goes -> each `afterChange` -> its references go -> event -> each `afterReferenceChange` -> no reference to it may remain |
-| `invoke` | policy -> parameters against `paramsSchema` -> check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
+| `invoke` | policy -> parameters against `paramsSchema` -> check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> nothing more if the handler said it changed nothing (`unchanged()`) and wrote no row -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
 | `invokeSchema` | policy -> parameters against `paramsSchema` -> the handler -> its result against `resultSchema`; no guard, no event |
 | a behavior's `instances.create` | policy (`write`) -> as `create`, in a savepoint of the calling call's transaction |
 | `publish` (`schemas`) | policy -> the compatibility rule, with each `configChange` -> each `parseConfig` with `target.schemas` (`read` on each schema it reaches) -> each composed behavior's migrations -> the version -> each `afterConfigChange` of a behavior it adds, removes or changes, per namespace -> event |
@@ -2017,6 +2158,28 @@ changed in its behavior's own tables. An `update`, `delete` or
 operation that expects the sequence from before the operation is refused
 (`seq_mismatch`) before any guard is asked. A read-only operation checks
 `expectedSeq` against the sequence it reads and moves nothing.
+
+A write that changes nothing writes nothing (D16, amended). An update
+whose patch changes nothing asks no guard and appends nothing. A writing
+operation's handler says the same of its call with `unchanged()`: an
+expire that finds the lease active, a sweep's miss that finds the
+deadline ahead, a directive whose dedupe key was sent already. The
+engine then appends no event: the instance keeps its `seq`, so a reader's
+`ETag` stays good, and its `updatedAt` and `updatedBy`; no `afterChange`
+and no `afterReferenceChange` runs, and no reaction hears it. What ran
+before the handler stands: the policy, the parameters, the
+preconditions, `expectedSeq`, every guard and `guardReference`, any of
+which can refuse it; and the result is checked and returned as ever. The
+claim is checked: the engine counts the rows the connection writes while
+the handler runs (SQLite's `total_changes()`), and a call that wrote
+any, its own columns, tables, values or references, the instance's own
+fields, an operation it called or invoked or an instance it created, and
+says it changed nothing is a `BehaviorError`, which rolls it back. A
+called operation's claim is its own: the operation that called it
+appends its event unless it says so too. A refusal stays a veto: a
+transition to the state the instance is in (`already_in_state`) and an
+assign to the assignee (`already_assigned`) write nothing either, and
+tell a caller its read is stale.
 
 ### Core behaviors
 
@@ -2133,7 +2296,7 @@ A state machine on the instance's `status`.
 | Operations | `transition({ to })` -> `{ from, to }`, writes |
 | Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in (`already_in_state`), a transition the config does not list (`transition_not_allowed`, details `{ from, to, allowed }`) and a move out of a terminal state (`terminal_state`) are `vetoed`, as is an instance without a status (`no_status`); a transition that names a permission the caller lacks (`can`) is `forbidden` |
 | Events | `transition`'s operation event, `patch: { status }` |
-| `configChange` | every old state stays; transitions, permissions, `initial` and `outcomes` may change. Not added to or removed from a schema with instances |
+| `configChange` | every old state stays while the schema has instances, and with none a state may go; transitions, permissions, `initial` and `outcomes` may change. Not added to or removed from a schema with instances |
 
 A new instance starts in `initial`. The status is Workflow's own column,
 so a create or an update that sets it is refused (`readOnly`), and
@@ -2271,7 +2434,7 @@ Blockers between instances, which hold up the type's Workflow.
 | | |
 | --- | --- |
 | Config | `schemas`: the schemas a blocker may be an instance of, each composing Workflow (the type's own when absent); `gatedStates`: the states of the type's Workflow a transition into waits for every blocker to finish, terminal or not (every terminal state when absent); `satisfiedBy`: the outcomes of a blocker's terminal state that finish it (`["success"]` when absent). Requires `Workflow` |
-| Fields | `blocked`: whether a blocker is not finished |
+| Fields | `blocked`: whether a blocker is not finished. A list does not filter on it: it is computed from the blockers at each read, as the caller, and a copy would have to hear every blocker's status ("Filters") |
 | Operations | `addBlocker({ schema?, id })` -> `{ schema, id, status?, open }`, writes; `removeBlocker({ schema?, id })` -> `{ schema, id }`, writes; `listBlockers({ limit?, cursor? })` -> a page of `{ schema, id, status?, open }`, read-only; `listDependents({ limit?, cursor? })` -> a page of `{ schema, id }`, read-only |
 | Create parameters | `{ blockers?: [{ schema?, id }] }`, at most 500: the instance's blockers from its create, each added with `addBlocker`'s checks, against the Workflow's initial state: open until it finishes by `satisfiedBy`, and refused while open when the initial state is gated and no transition leaves it |
 | Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed` (`blocked`), naming the open blockers, details `{ blockers: [{ schema, id, status? }] }` |
@@ -2343,7 +2506,7 @@ Typed links from the instance to instances of other schemas, or its own.
 | Refusals | a name the config does not give, a target that does not exist, a `revision` for a link not pinned to a revision or past the target's latest, a `release` for one not pinned to a release or past the target's latest, a link pinned to a revision whose schema does not compose Revisions or to a release whose schema does not compose Branches (`invalid_argument`); a target with no revision yet (`no_revision`) or no release yet (`no_release`), unlinking a required link (`required_link`), all `vetoed`; unlinking a link the instance does not hold (`invalid_argument`). A create without a required link, and a create's link that `link` would refuse, at `/behaviors/Links` or `/behaviors/Links/<name>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` |
 | Deletes | an optional link's target's delete unlinks it: its reference, which hears the target's delete alone, invokes `unlink` on each instance that points at it, as the caller, each with its own event; no other change of a target asks Links anything. Deleting an instance deletes its links |
 | Events | a create's event carries the links it gives; `link`'s and `unlink`'s operation events carry `links` |
-| `configChange` | every link keeps its name and schema; `pinned` may change, to the other kind too, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is; added to a schema with instances, which start with none, unless a link is required; not removed from one |
+| `configChange` | while the schema has instances, every link keeps its name and schema; `pinned` may change, to the other kind too, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is. With no instance in any namespace that reads the schema, any change. Added to a schema with instances, which start with none, unless a link is required; not removed from one |
 
 A link holds one target, an instance of its schema in the same namespace
 (the schema looked up as any name is: the namespace, then the shared
@@ -2839,6 +3002,17 @@ No transition makes a revision or a release, so a `revised` rule never
 sets itself off; its moves chain only through other rules, which the
 depth limit stops.
 
+The rule for what moves a link's target on, and which instances it moves
+on, is exported for a behavior of another package to hear the same way,
+as `Lease`'s `directOn` does: `targetMove(scope, behavior, form, link,
+schema, event)` reads an event as a `{ kind: 'revision', revision }` or a
+`{ kind: 'release', release, commit }`, `release` the pointer's version
+the release made, or undefined, and refuses a schema with neither
+`Revisions` nor `Branches` (a `BehaviorError`); `movedOn(scope, link,
+pin, id, move)`, `pin` as `linkPin` reads the link, lists the instances
+of the scope's schema it moves on, through `listLinked`, and `linkedTo`
+lists them with or without `stale`.
+
 #### Constants
 
 Fields of the type that its create sets and nothing changes after.
@@ -2891,7 +3065,7 @@ A field typed by another field's value.
 | Validates | while `by` holds a value `types` lists, `field`, when it holds one, against that value's type, strictly (`checkType`); while `by` holds another value or none, `field` holds none (rule `variant`). Both on a create and an update (`invalid_instance`) |
 | Refusals at define | a `field` or `by` that is not one of the type's own, the two the same, a `field` whose values are not open objects (a string, a list, a type of the document), a `by` that is not a string or an enum, a type that is not one of the document's besides the instance type, a value that is not a member of `by`'s enum, and a type whose fields the schema runtime cannot check (`invalid_schema`) |
 | Describe | an `if`/`then` per listed value and one for every other value, under the instance's `allOf`, in create's `data` and, in patch form, in update's `patch` |
-| `configChange` | `field` and `by` stay; each listed value keeps its type, and another value may gain one; removed from a schema with instances, not added to one |
+| `configChange` | while the schema has instances, `field` and `by` stay and each listed value keeps its type, and another value may gain one; with none, any change. Removed from a schema with instances, not added to one |
 
 A step's result has a different shape for each kind of step. The engine
 refuses a union field, which the schema runtime does not check, so
@@ -2961,7 +3135,7 @@ release log, which `releases` reads.
 | Schedule | `sweep`, every `sweep.intervalMs` on a schema whose config gives `sweep`, off on any other |
 | Vetoes | the version graph engine's codes: `version_conflict`, `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`, `entity_not_found`, `invalid_tree` (the core's findings in `details.findings`), `merge_into_itself`, `no_parent`, `not_tagged`, `walk_ceiling`; and `primary_line`, a `discard` of the primary line |
 | Refusals at define | a kind whose type is no type of the document besides the instance type; a field whose JSON key is a role or audit column's; a field of a scalar no value class reads (`Geo.Location`); a parent that is no kind of the config, or whose key is not a field of the kind's type holding a UUID; an order that is not an integer field; a unit on a field the type lacks, a `keyed` or `jsonSchema` unit on a field that is not JSON, an excluded order or parent key; and what else the version graph's core refuses in the descriptor (`invalid_schema`) |
-| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change, and a unit be given a field the old type lacked; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused. Added to a schema with instances, not removed from one. A field a version adds moves no earlier commit's hash ("A field a version adds") |
+| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change, and a unit be given a field the old type lacked; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused while the schema has instances, and allowed with none, since deleting an instance deletes its graph. Added to a schema with instances, not removed from one. A field a version adds moves no earlier commit's hash ("A field a version adds") |
 
 | Operation | Takes | Returns |
 | --- | --- | --- |
@@ -3148,8 +3322,15 @@ engine.namespaces.get(admin, 'acme');
   unarchiving an active one, changes nothing and returns it as it is.
   Nothing is deleted: there is no delete of a namespace.
 
-A create, an archive and an unarchive append no event: the log's events
-belong to a schema, and the record carries who did it and when.
+A create, an archive and an unarchive append no event, in the
+namespace's own log or any other. The record carries who did it and
+when. The log's events are read per schema, `read` asked of each event's
+schema, and a namespace's change names none, so a reader of the log
+would need a rule of its own; a writer learns of an archive from its
+next write's `namespace_archived`, and a reader reads on as before, since
+an archive stops no read. Putting it in another namespace's log, the
+shared one's, would show one project another's name, which `list` hides
+from it (D16, amended: retention and the value store have bounds).
 
 ## HTTP
 
@@ -3181,7 +3362,8 @@ serve({ fetch: app.fetch, port: 8080 });
 The options are the HTTP runtime's router options (`authenticate`,
 `authenticateService`, `permissionMatcher`, `onError`, `bodyLimitBytes`,
 `rateLimit`), with `rateLimitPerMinute` and `timeoutSeconds` for every
-route and `stream: { pageSize, heartbeatMs }`. The deployment's `onError`
+route, `stream: { pageSize, heartbeatMs }` and `tools`, a filter of the
+tools document per caller ("MCP"). The deployment's `onError`
 sees what the engine does not raise.
 
 ### Routes
@@ -3234,7 +3416,8 @@ parameters, by behavior name ("Create parameters" under "Behaviors");
 with `Accept-Patch` on PATCH. An operation's body is its parameters, and
 no body is `{}`; its result, whatever JSON it is, is the envelope's
 `data`, and the instance's sequence after the call its `ETag`, which a
-read-only operation leaves where it was. A schema-level operation's route
+read-only operation, and a call that changed nothing, leave where it
+was. A schema-level operation's route
 takes its parameters the same way and answers its result with no `ETag`,
 since it names no instance; each operation route answers 404 for an
 operation of the other scope.
@@ -3249,6 +3432,11 @@ or `after=0`, reads from the floor.
 
 A namespace's create takes `{"name": "<namespace>"}` and nothing else
 (400 `bad_request` otherwise); its archive and unarchive take no body.
+
+The tools route answers the tools document as the caller sees it. The
+`tools` option narrows it per caller as the MCP endpoint's does ("MCP"):
+a tool it leaves out is hidden, with the reason. It narrows only the
+document; each route still answers as the access policy says.
 
 The behavior routes carry no namespace: the behaviors an engine runs are
 the same in every namespace.
@@ -3273,6 +3461,7 @@ the same in every namespace.
 | 410 | `cursor_expired` | an event read or a stream's resume from a cursor before the namespace's floor; `details` is `{after, floor, head}` |
 | 412 | `seq_mismatch` | `If-Match` names a sequence the instance is no longer at; a failed precondition is the behavior's veto, 409 |
 | 413 | `payload_too_large` | the body exceeds `bodyLimitBytes` |
+| 413 | `value_too_large` | a value the write would store is longer than `values.maxBytes`; `details` is `{path, bytes, maxBytes}` |
 | 415 | `unsupported_media_type` | the body is not of the route's media type |
 | 422 | `invalid_schema` | the document is refused; `details.issues` |
 | 422 | `invalid_instance` | the instance, or an update's result, is refused by the live version or a behavior's `validate`; `details.issues` |
@@ -3330,7 +3519,7 @@ only that the instance exist; a weak tag never matches. An instance that does no
 `If-Match` says: RFC 9110 evaluates a precondition only where the request
 would otherwise succeed. A writing behavior operation moves `seq` too
 ("Instances and events" under "Behaviors"), so a tag read before it no
-longer matches.
+longer matches, unless it changed nothing and said so.
 
 `If-Match` cannot hold across writes that move `seq` while a caller
 works, a lease's heartbeats say. What a caller assumes of one behavior
@@ -3426,6 +3615,8 @@ a schema's live version:
 {
   "namespace": "default", "name": "Item", "schemaNamespace": "default",
   "version": 1, "hash": "9f2c...", "instanceType": "Item",
+  "display": {"noun": "Item", "plural": "Items", "titleField": "title", "summaryFields": ["count"]},
+  "fields": [{"name": "title", "title": "Title", "icon": "text"}],
   "instance": {
     "type": "object", "additionalProperties": false,
     "properties": {
@@ -3439,16 +3630,28 @@ a schema's live version:
                  "fields": [{"name": "count", "description": "The count."}], "operations": ["increment"],
                  "vetoes": [{"code": "at_limit", "description": "The count is at its config's limit."}]}],
   "operations": [
-    {"name": "create", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
+    {"name": "create", "title": "Create Item", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
      "params": {"type": "object", "additionalProperties": false, "properties": {"data": {...}, "id": {...}}, "required": ["data"]},
      "result": {...}, "tool": "item.create",
      "guidance": {"useWhen": "Use to create a new Item: ...", "doNotUseWhen": "...", "success": "...", "errors": []}},
-    {"name": "increment", "behavior": "test.Counter", "scope": "instance", "description": "Adds to the count.", "writes": true,
+    {"name": "increment", "behavior": "test.Counter", "scope": "instance", "title": "Item: increment", "description": "Adds to the count.", "writes": true,
      "invocationPolicy": "auto", "params": {...}, "result": {...}, "tool": "item.increment", "guidance": {...}}
   ]
 }
 ```
 
+- `display` is the instance type's `@display` (D48 in
+  `docs/DECISIONS.md`), as the document holds it, with `titleField` and
+  `summaryFields` naming each field by its key in an instance's `data`:
+  what a UI calls one instance and several, its title and summary fields,
+  what a create button says, and the labels of its `Workflow`'s states
+  (`label`, `activeForm`, `tone`) and transitions (by the state a
+  transition leaves, then the one it enters). It is absent when the type
+  declares none.
+- `fields` lists the instance type's own fields in declaration order, each
+  by its key in an instance's `data`, with its `title` (`@docs({ title
+  })`) and its `icon` (`@icon`) where it declares them. A behavior's
+  fields are under `behaviors`.
 - `instance` is the JSON Schema of an instance's `data`: closed, its own
   fields, then its behaviors' fields, `readOnly` and without a type, since
   a declaration gives a field only a name and a description. Under
@@ -3481,7 +3684,9 @@ a schema's live version:
   what it returns (an instance, a page, `null` for a delete, a behavior
   operation's `resultSchema`), and the invocation policy sits under the
   policy's key. A behavior's operation carries `behavior` and `scope`,
-  `instance` or `schema`. Each carries `guidance`, its tool's.
+  `instance` or `schema`. Each carries `title` and `guidance`, its
+  tool's. No operation carries an icon: a schema declares no operations,
+  and a behavior's declaration gives its operations none.
 
 A field's JSON Schema is what the SDK generators write for the same field
 as a tool argument (`internal/generator/toolsutil`), keyed by the field's
@@ -3539,9 +3744,13 @@ same parts in snake case (`line_item_add_note`). A handle `@mcp` would
 refuse (not lowercase snake case, longer than 48 characters), one two
 tools derive, or an engine tool's hides the tool with its reason in
 `hiddenReason`; the engine's tools keep theirs. A tool the access policy
-refuses the principal is hidden too, with that reason, and so is, in an
-archived namespace, every tool that writes there, the namespace tools
-aside: the namespace refuses the write. `requiresAuth` is
+refuses the principal is hidden too, with that reason: a schema's tool
+asks what its call asks, and `define_schema` and the namespace tools,
+which name their schema or namespace only when called, ask a listing
+question ("Access"). So is, in an archived namespace, every tool that
+writes there, the namespace tools aside: the namespace refuses the
+write; and every tool a mount's `tools` filter leaves out of the
+caller's set ("MCP"). `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
 `replay` is `read_only`, `inputSchemaDigest` hashes the arguments as
 the Go encoder writes them, and `guidance` is the tool's guidance
@@ -3762,16 +3971,38 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
   invocation policy under the policy's key. The list is the caller's: a
   tool the policy refuses is not in it, nor, in an archived namespace, a
-  tool that writes there. The schema tools (`list_schemas`,
-  `describe_schema`, `define_schema`), the behavior tools
-  (`list_behaviors`, `describe_behavior`), `get_value` and the namespace
-  tools (`list_namespaces`, `create_namespace`, `archive_namespace`,
-  `unarchive_namespace`) are in every caller's list, since they name no
-  schema until they are called: the access policy answers the call, not
-  the listing, and asks nothing of the behavior tools. The namespace
-  tools act on the namespace they name, whichever namespace's endpoint
-  serves them. `search` is in the list of a caller who may read a
-  schema that composes Search, and searches the ones it may read.
+  tool that writes there. `define_schema` and the namespace tools
+  (`list_namespaces`, `create_namespace`, `archive_namespace`,
+  `unarchive_namespace`) name their schema or namespace only when
+  called, so the list asks the policy a listing question for each
+  (`define`, or `manage` with what the tool does; "Access"): a caller the
+  policy would refuse does not see them, and a call of one still asks
+  the question its call asks. The tools that only read, `list_schemas`,
+  `describe_schema`, the behavior tools (`list_behaviors`,
+  `describe_behavior`) and `get_value`, are in every caller's list: each
+  answers with what the policy lets the caller read, and the behavior
+  tools ask it nothing. The namespace tools act on the namespace they
+  name, whichever namespace's endpoint serves them. `search` is in the
+  list of a caller who may read a schema that composes Search, and
+  searches the ones it may read.
+- `tools`, an option of the mount, narrows each caller's tools further:
+  `(principal, tool, namespace) => boolean`, asked of every tool with
+  `{ handle, name, schema?, operation, behavior?, writes }`, true to keep
+  it. A tool it leaves out is not in that caller's `tools/list`, and a
+  `tools/call` of it is the invalid-params error of a tool the namespace
+  does not have, so a deployment gives an agent's session a narrower set,
+  one schema's operations say, with nothing else to call:
+
+  ```ts
+  app.route('/api', engineMcp(engine, {
+    ...options,
+    tools: (principal, tool) => principal.claims?.session !== 'agent' || tool.schema === 'jobs',
+  }));
+  ```
+
+  It narrows only: a tool the policy hides stays hidden, and what a kept
+  tool's call may do is still the policy's. It is synchronous, and only
+  `true` keeps a tool.
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:
   `isError`, with the problem document the HTTP API answers with as text

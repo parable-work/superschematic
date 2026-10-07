@@ -105,7 +105,9 @@ for (const driver of drivers) {
       assert.equal(engine.instances.update(alice, 'Note', 'n1', { title: 'first' }).seq, 2);
       assert.deepEqual(cursors(engine, 3), [4, 5, 6, 7]);
       assert.deepEqual(engine.runner.prune(), { pruned: 1 });
-      assert.deepEqual(retentionOf(engine).namespaces, [{ namespace: 'default', floor: 4, pruned: 4, heldAt: null, heldBy: null }]);
+      assert.deepEqual(retentionOf(engine).namespaces, [
+        { namespace: 'default', floor: 4, pruned: 4, heldAt: null, heldBy: null, heldState: null, heldSince: null, heldUntil: null },
+      ]);
       assert.deepEqual(engine.runner.prune(), { pruned: 0 });
     });
 
@@ -183,6 +185,103 @@ for (const driver of drivers) {
       engine.runner.prune();
       assert.equal(engine.events.floor(), engine.events.head() - 1);
       assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.data.notes, [`create ${halted.failure?.cursor}`]);
+    });
+
+    test("by count, each namespace keeps its own newest maxEvents: a busy namespace's events do not push a quiet one's out", () => {
+      const engine = open({ namespaces: { names: ['east'] }, retention: { maxEvents: 3 } });
+      publish(engine, plainDocument('Note'));
+      engine.schemas.define(alice, plainDocument('Note'), { namespace: 'east' });
+      engine.schemas.publish(alice, 'Note', { namespace: 'east' });
+      engine.instances.create(alice, 'Note', { title: 'quiet' }, { id: 'q1', namespace: 'east' });
+      for (let at = 1; at <= 10; at += 1) {
+        engine.instances.create(alice, 'Note', { title: `n${at}` }, { id: `n${at}` });
+      }
+      // default holds 12 events and keeps 3; east holds 3, all kept, though
+      // they are far more than 3 cursors behind the head.
+      assert.deepEqual(engine.runner.prune(), { pruned: 9 });
+      assert.equal(cursors(engine, engine.events.floor()).length, 3);
+      assert.equal(engine.events.floor('east'), 0);
+      assert.equal(cursors(engine, 0, 'east').length, 3);
+      // What is appended later counts on from there.
+      engine.instances.create(alice, 'Note', { title: 'quiet again' }, { id: 'q2', namespace: 'east' });
+      engine.instances.create(alice, 'Note', { title: 'n11' }, { id: 'n11' });
+      assert.deepEqual(engine.runner.prune(), { pruned: 2 });
+      assert.equal(cursors(engine, engine.events.floor('east'), 'east').length, 3);
+      assert.equal(cursors(engine, engine.events.floor()).length, 3);
+    });
+
+    test('maxHoldMs bounds a halted subscription: the status shows the hold, and past the bound retention prunes on and the subscription halts behind its floor', () => {
+      const clock = testClock(1_000_000);
+      const engine = open({
+        clock,
+        retention: { maxEvents: 1, maxHoldMs: 60_000 },
+        runner: { principal: { subject: 'runner', permissions: [] }, maxAttempts: 1 },
+      });
+      assert.throws(() => open({ retention: { maxEvents: 1, maxHoldMs: 0 } }), /retention.maxHoldMs is an integer from 1/);
+      publish(engine, ledgerDocument('Order'));
+      probe.react = () => {
+        throw new Error('not yet');
+      };
+      engine.instances.create(alice, 'Order', { title: 'o1' }, { id: 'o1' });
+      engine.runner.runDue();
+      const halted = engine.runner.status().subscriptions[0];
+      assert.equal(halted.state, 'halted');
+      clock.now += 10_000;
+      engine.instances.create(alice, 'Order', { title: 'o2' }, { id: 'o2' });
+      engine.runner.prune();
+      // It holds the events after its cursor, and the status says since
+      // when and until when.
+      const held = retentionOf(engine).namespaces[0];
+      assert.deepEqual(
+        [held.heldAt, held.heldBy, held.heldState, held.heldSince, held.heldUntil],
+        [halted.cursor, { behavior: 'test.Ledger', namespace: 'default', schema: 'Order' }, 'halted', 1_000_000, 1_060_000]
+      );
+      assert.equal(engine.events.floor(), halted.cursor);
+      assert.equal(retentionOf(engine).maxHoldMs, 60_000);
+      // Past the bound, the event it failed at goes, and the next, younger
+      // than the bound, stays.
+      clock.now = 1_060_000;
+      engine.runner.prune();
+      assert.equal(engine.events.floor(), halted.cursor, 'held up to heldUntil');
+      clock.now = 1_060_001;
+      engine.runner.prune();
+      assert.equal(engine.events.floor(), halted.failure?.cursor);
+      // Resumed, it finds itself behind the floor and halts with
+      // cursor_expired; resume with skip moves it to the floor.
+      probe.react = () => undefined;
+      engine.runner.resume({ behavior: 'test.Ledger', namespace: 'default', schema: 'Order' });
+      engine.runner.runDue();
+      const expired = engine.runner.status().subscriptions[0];
+      assert.deepEqual([expired.state, expired.failure?.cursor], ['halted', engine.events.floor()]);
+      assert.match(expired.failure?.error ?? '', /^cursor_expired/);
+      engine.runner.resume({ behavior: 'test.Ledger', namespace: 'default', schema: 'Order' }, { skip: true });
+      engine.runner.runDue();
+      const caught = engine.runner.status().subscriptions[0];
+      assert.deepEqual([caught.state, caught.cursor], ['active', engine.events.head()]);
+    });
+
+    test('maxHoldMs bounds a subscription in an archived namespace, and a running one holds whatever its age', () => {
+      const clock = testClock(1_000_000);
+      const engine = open({ clock, namespaces: { names: ['default'] }, retention: { maxEvents: 1, maxHoldMs: 1_000 } });
+      engine.namespaces.create(alice, 'acme');
+      engine.schemas.define(alice, ledgerDocument('Order'), { namespace: 'acme' });
+      engine.schemas.publish(alice, 'Order', { namespace: 'acme' });
+      engine.instances.create(alice, 'Order', { title: 'o1' }, { id: 'o1', namespace: 'acme' });
+      engine.instances.create(alice, 'Order', { title: 'o2' }, { id: 'o2', namespace: 'acme' });
+      // Not yet run: the subscription advances, and holds where it starts however old its events are.
+      clock.now += 10_000;
+      engine.runner.prune();
+      const start = engine.events.floor('acme');
+      assert.equal(retentionOf(engine).namespaces.find((entry) => entry.namespace === 'acme')?.heldState, 'active');
+      assert.equal(retentionOf(engine).namespaces.find((entry) => entry.namespace === 'acme')?.heldUntil, null);
+      assert.equal(cursors(engine, start, 'acme').length, 2);
+      // Archived, it does not advance: its events older than the bound go.
+      engine.namespaces.archive(alice, 'acme');
+      const archived = retentionOf(engine).namespaces.find((entry) => entry.namespace === 'acme');
+      assert.equal(archived?.heldState, 'archived');
+      assert.equal(typeof archived?.heldUntil, 'number');
+      engine.runner.prune();
+      assert.equal(cursors(engine, engine.events.floor('acme'), 'acme').length, 1);
     });
 
     test("a reaction's before() reads the instance as the log had it, though retention pruned its create; a pruned event's is cursor_expired", () => {

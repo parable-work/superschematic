@@ -32,6 +32,8 @@ export type Checks = [
   Holds<SameShape<server.OperationChange, client.OperationChange>>,
   Holds<SameShape<server.EventPage, client.EventPage>>,
   Holds<SameShape<server.DescribeDocument, client.DescribeDocument>>,
+  Holds<SameShape<NonNullable<server.DescribeDocument['display']>, client.TypeDisplay>>,
+  Holds<SameShape<server.DescribedField, client.DescribedField>>,
   Holds<SameShape<server.DescribedBehavior, client.DescribedBehavior>>,
   Holds<SameShape<server.DescribedOperation, client.DescribedOperation>>,
   Holds<SameShape<server.BehaviorSummary, client.BehaviorSummary>>,

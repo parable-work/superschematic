@@ -208,7 +208,12 @@ test('an operator cancels a running job: the worker hears the directive, stops t
 
   // A directive goes to the lease's holder; its next heartbeat delivers it.
   await operator.instances.invoke('jobs', 'crawl', 'direct', { name: 'cancel' });
-  await until(async () => (await operator.instances.get<Data>('jobs', 'crawl')).data.status === 'failed', 'the cancel');
+  // The failed attempt moves the job to failed, and the worker's release
+  // follows in a call of its own: the cancel is over once both are in.
+  await until(async () => {
+    const { status, lease } = (await operator.instances.get<Data>('jobs', 'crawl')).data;
+    return status === 'failed' && lease.holder === null;
+  }, 'the cancel');
   assert.ok(stopped !== undefined && !(stopped instanceof LeaseLostError), String(stopped));
   const crawl = (await operator.instances.get<Data>('jobs', 'crawl')).data;
   assert.deepEqual(

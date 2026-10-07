@@ -6,7 +6,9 @@ or preconditions carries its issues as `details.issues`, a refused
 version its changes as `details.changes`, a write that repeats a unique
 field's value the fields as `details.fields`, a read from a cursor
 retention has pruned past the cursor, the floor and the head as
-`details.after`, `details.floor` and `details.head`, and a behavior's
+`details.after`, `details.floor` and `details.head`, a value longer than
+the engine stores its pointer, length and the most as `details.path`,
+`details.bytes` and `details.maxBytes`, and a behavior's
 veto the behavior, what it refused and why as `details`, with the veto's
 own code and details, when it gives them, as `details.code` and
 `details.details`:
@@ -31,6 +33,7 @@ import {
   PreconditionsError,
   SchemaDocumentError,
   UniqueConflictError,
+  ValueTooLargeError,
   type EngineErrorCode,
 } from '../errors.js';
 
@@ -47,6 +50,7 @@ export const ENGINE_ERROR_STATUS: Readonly<Record<EngineErrorCode, number>> = {
   incompatible_change: 409,
   vetoed: 409,
   seq_mismatch: 412,
+  value_too_large: 413,
   invalid_schema: 422,
   invalid_instance: 422,
   unavailable: 503,
@@ -96,6 +100,9 @@ function detailsOf(error: EngineError): { details?: unknown } {
   }
   if (error instanceof CursorExpiredError) {
     return { details: { after: error.after, floor: error.floor, head: error.head } };
+  }
+  if (error instanceof ValueTooLargeError) {
+    return { details: { path: error.path, bytes: error.bytes, maxBytes: error.maxBytes } };
   }
   return {};
 }
