@@ -284,9 +284,10 @@ func nonEmpty(m map[string]any) map[string]any {
 // section 4.1), in every form: the schema declares one @stack class, every
 // class declares exactly one of @stack, @server, @database and
 // @environment and holds no fields, only an @environment class extends
-// another and then another @environment class, and every class a
-// declaration names is an @server or @database class of the schema.
-// Resolution checks the handles against the services they name.
+// another and then another @environment class, every class a declaration
+// names is an @server or @database class of the schema, and no two
+// environments share an order. Resolution checks the handles against the
+// services they name.
 func verifyStack(schema *ir.Schema, r VerifyReporter) {
 	names := make([]string, 0, len(schema.Types))
 	for name := range schema.Types {
@@ -294,6 +295,10 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 	}
 	sort.Strings(names)
 	var stacks []string
+	// ordered holds the environment that took each order first, by name.
+	// The TypeScript reader numbers the classes, so only a data form
+	// writes two alike.
+	ordered := map[int]string{}
 	for _, name := range names {
 		td := schema.Types[name]
 		if td == nil {
@@ -357,6 +362,15 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 				if settings != nil {
 					checkRef(fmt.Sprintf("@environment class %s settings[%d] of", name, i), settings.Of)
 				}
+			}
+			switch order := td.Environment.Order; {
+			case order < 0:
+				r.Errorf(td.Owner, "@environment class %s has order %d; an order counts from 1, and an environment without one leaves it out", name, order)
+			case order == 0:
+			case ordered[order] != "":
+				r.Errorf(td.Owner, "@environment classes %s and %s both have order %d; each environment takes its own place in the order", ordered[order], name, order)
+			default:
+				ordered[order] = name
 			}
 		}
 	}
