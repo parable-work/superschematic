@@ -157,16 +157,22 @@ six seams on its `TargetSpec`, each an interface in `registry`:
 | `Secrets` | `SecretStore` | sets, gets, lists and checks secret values, keyed by a secret's identity (`PaymentsSecrets.STRIPE_KEY`) or a platform credential's secret name |
 | `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs |
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
-| `Builder` | `ImageBuilder` | builds a server's image from the build context the deploy writes, and returns it by digest |
+| `Builder` | `ImageBuilder` | builds a server's image from the Dockerfile a stack's build writes, and returns it by digest |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
 
 A target with none of them resolves and does not deploy. `RegisterTarget`
-refuses any of them but `Secrets` without a provisioner, and
-`Bootstrap`, `Migrations`, `Builder` or `CI` without `State`. With no
-`Migrations`, a deploy that has a migration to run is refused;
-`gcp.Extension{Migrations: ...}` takes a runner of your own. Each
-operation works on a `registry.Run`: the resolved environment and the
-values of its parameters.
+refuses `State`, `Bootstrap`, `Migrations`, `Builder` or `CI` without a
+provisioner, and `Bootstrap`, `Migrations`, `Builder` or `CI` without
+`State`. With no `Migrations`, a deploy that has a migration to run is
+refused; with no `Builder`, every server's image comes from `--image` or
+the deploy manifest. The gcp target fills all six: its migrations run
+each phase as an execution of the stack's Cloud Run job, which runs
+`superschematic-migrate` on Cloud SQL (`gcp.Extension{Migrations: ...}`
+takes a runner of your own instead), its builder builds each changed
+server's image on Cloud Build (D46), and its CI identity signs a job in
+through Workload Identity Federation (D47). Each operation works on a
+`registry.Run`: the resolved environment and the values of its
+parameters.
 
 A `CIIdentity` is a kind and its fields, which a CI renderer turns into
 its own sign-in steps. gcp's kind is `gcp-workload-identity`, with
