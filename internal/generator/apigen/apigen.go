@@ -378,6 +378,22 @@ func (o *APIOutput) HasBodyArgs() bool {
 	return false
 }
 
+// RoutesNeedScalars gates the scalar Go module's import in routes.go, as
+// scalars: a body argument or a query-string list of a JSON-object scalar
+// is built with superscalar's check of the scalar (BodyArg.ChecksJSON).
+func (o *APIOutput) RoutesNeedScalars() bool {
+	for _, endpoint := range o.Endpoints {
+		for _, args := range [][]BodyArg{endpoint.BodyArgs, endpoint.QueryListArgs} {
+			for _, arg := range args {
+				if arg.ChecksJSON() {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // RoutesNeedTypes gates the types import in routes.go: only a handler
 // factory (written for every endpoint, mounted or not) references the
 // generated types module, as handlerUsesTypes lists.

@@ -4034,6 +4034,7 @@ generators, the runtimes and the ORM still fell short of the object.
 | The Python runtime's validator, parse and normalize registries read a flat name (`Geo_Location`, as the schema JSON form keys a scalar) as its canonical one, as the TypeScript registries do, so validation and parsing reach the core; an empty string, no JSON text, is a missing value it does not ask the core about. | Keeping the gap D14 recorded, under which the Python runtime never checked what a JSON-object scalar holds, nor parsed one to its canonical form |
 | The Go ORM reads and writes a `Geo.Location` column through a `pgtype.Point`, as a date goes through a `pgtype.Date`: a `POINT` is `(x, y)`, x the longitude and y the latitude, and the versioned history decoder reads the `"(x,y)"` text `to_jsonb` writes. sqlgen no longer requires PostGIS for `POINT`, a type of Postgres's own; `geography` and `geometry` still do. | Handing pgx the struct, which sent its JSON text to the column and refused every write; storing the location as `JSONB`, a column type change |
 | A version graph still cannot hold a `Geo.Location`: no value class reads `POINT`. graphdesc's refusal now names what the value holds, `Geo.Location holds a JSON object but is stored as POINT`, where it named a JSON string. | A value class for `POINT`, which needs a canonical form for the version graph's rows first |
+| A Go API route checks a body argument of a JSON-object scalar (`Generic.StringMap`, `Geo.Location`), alone, in a list, a list of lists, a map or a map of lists, on its own JSON. `bodyargs.CheckJSON` takes a `func(raw string) error`, which the route passes in from the scalar Go module (`scalars.ValidatorFor("Geo.Location")`), and runs it on each value's JSON text once the value is a JSON object, before any other rule and before decoding. Its failure is the value's one error, named by the core's kind (`parse`, `custom`, `range`) as the generated types name one. `routes.go` imports the scalar module as `scalars` only for such an argument, and a raw-body check may no longer import its package under that name. | `runtime/http/go` importing superscalar, a direct dependency it has not had; checking after decoding, so the decoded value's failure came first, which names a member that is not a number `type` where every validator says `custom`; checking only `Geo.Location`, which leaves a `Generic.StringMap` value that is not a string `type` in a route and `custom` in every validator |
 
 `TestCatalogRustTypes` builds a crate against superscalar's struct, and
 `TestRemapScalarLibTypeFollowsTheScalarCrate` renames the crate.
@@ -4046,13 +4047,14 @@ with `Geo.Location` in every field shape and pins each verdict.
 the three runtimes. `TestGeoLocationColumnsOnPostgres` writes and reads
 locations through the generated ORM against Postgres, `{0, 0}` among them,
 checks the stored point's coordinates with SQL and reads the history.
+`TestLocationArgsRoutesCheckTheirJSON` (apigen) runs a generated API
+module whose route takes `Geo.Location` in every body-argument shape, and
+`TestWriteAPIGoldenLocationArgs` pins its `routes.go`;
+`TestCheckJSONChecksAValuesOwnJSONBeforeItIsDecoded` pins where
+`bodyargs` runs the check.
 
 Not built: the ORM does not read or write a list of locations (`POINT[]`),
 and a `POINT` column's generated filter is the string filter, whose
-equality Postgres cannot evaluate for a point. A Go API route decodes a
-body argument with `bodyargs`, which checks a `Geo.Location` as its Go
-value: an out-of-range degree is refused, but an unknown key is dropped
-and a missing one reads as 0. Checking it on its JSON needs a raw-JSON
-check in `bodyargs`, which knows no scalar today.
+equality Postgres cannot evaluate for a point.
 
 The rule is reversible until the first release.

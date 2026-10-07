@@ -530,8 +530,10 @@ func TestAGenericJSONListTakesAnyElementButNull(t *testing.T) {
 
 // A JSON object or array scalar (Generic.StringMap, Embedding.Vector) takes
 // that object or array, alone and in a list, and not its JSON text, which
-// the route answers with type. A value that is the wrong JSON type, or
-// that holds one, is one type error at the argument's path.
+// the route answers with type. A value that is the wrong JSON type is one
+// type error at the argument's path, and so is an array that holds one. A
+// JSON object scalar's value is checked on its own JSON by superscalar
+// first, so an object that holds the wrong type is the core's custom.
 func TestAJSONObjectOrArrayScalarTakesThatObjectOrArray(t *testing.T) {
 	server, impl := serve(t)
 	const labels, vector = `{"en": "Hello", "fr": "Bonjour"}`, `[0.5, -1, 0]`
@@ -552,7 +554,8 @@ func TestAJSONObjectOrArrayScalarTakesThatObjectOrArray(t *testing.T) {
 	}{
 		{`{"labels": "{\"en\": \"Hello\"}"}`, fieldError{"labels", "type", "expected an object"}},
 		{`{"labels": ["en"]}`, fieldError{"labels", "type", "expected an object"}},
-		{`{"labels": {"en": 1}}`, fieldError{"labels", "type", "does not match the declared type"}},
+		{`{"labels": {"en": 1}}`, fieldError{"labels", "custom", `custom: value for key "en" is not a string`}},
+		{`{"labels": {}, "labelSets": [{"en": "Hello"}, {"fr": true}]}`, fieldError{"labelSets[1]", "custom", `custom: value for key "fr" is not a string`}},
 		{`{"labels": {}, "vector": "[0.5]"}`, fieldError{"vector", "type", "expected an array"}},
 		{`{"labels": {}, "vector": {"x": 1}}`, fieldError{"vector", "type", "expected an array"}},
 		{`{"labels": {}, "vector": [1, true]}`, fieldError{"vector", "type", "does not match the declared type"}},

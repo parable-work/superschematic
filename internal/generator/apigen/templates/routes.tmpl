@@ -45,6 +45,9 @@ import (
 {{- if .HasBodyArgs }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/bodyargs"
 {{- end }}
+{{- if .RoutesNeedScalars }}
+	scalars "{{ $.Naming.ScalarGoModule }}"
+{{- end }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 	runtimerouting "{{ $.Naming.HTTPRuntimeGoModule }}/routing"
 {{- if .HasServiceCallers }}
