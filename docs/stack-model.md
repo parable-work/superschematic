@@ -1176,7 +1176,10 @@ again: each step creates what is missing and leaves the rest.
    Build and Cloud Logging), the accounts and Workload Identity
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager and Cloud DNS as the graph's resource types need
-   them, Cloud Run with any database for its migration job.
+   them, Cloud Run with any database for its migration job. An API
+   enabled moments ago can refuse calls as one the project has not
+   enabled, so each later step retries such a refusal for up to five
+   minutes.
 2. It creates the state bucket and the KMS key directly, since Pulumi needs
    them before it can run: the bucket `<project>-superschematic-state`,
    with uniform access, public access prevention and object versioning,
