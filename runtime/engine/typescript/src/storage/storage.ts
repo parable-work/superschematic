@@ -33,6 +33,7 @@ export const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 export class Storage {
   private depth = 0;
   private committed: Array<() => void> = [];
+  private ended: Array<() => void> = [];
 
   private constructor(
     /** The database file. */
@@ -88,6 +89,16 @@ export class Storage {
   }
 
   /**
+   * changes is how many rows the connection's statements have inserted,
+   * updated or deleted since it opened, rolled back ones included
+   * (SQLite's total_changes()): two readings around a call that agree say
+   * it wrote no row.
+   */
+  changes(): number {
+    return Number(this.driver.get('SELECT total_changes() AS changes')?.changes ?? 0);
+  }
+
+  /**
    * transaction runs fn in a transaction, commits when it returns and rolls
    * back when it throws. Called inside another transaction, it runs in a
    * savepoint.
@@ -110,6 +121,9 @@ export class Storage {
       this.depth -= 1;
       this.committed.length = queued;
       this.rollback(savepoint);
+      if (this.depth === 0) {
+        this.settle();
+      }
       throw error;
     }
     this.depth -= 1;
@@ -122,6 +136,7 @@ export class Storage {
     } catch (error) {
       this.committed.length = queued;
       this.rollback(savepoint);
+      this.settle();
       throw error;
     }
     for (const work of this.committed.splice(0)) {
@@ -132,7 +147,33 @@ export class Storage {
         // that, and its failure is not the writer's.
       }
     }
+    this.settle();
     return result;
+  }
+
+  /**
+   * afterTransaction queues work to run once the outermost transaction
+   * ends, committed or rolled back, after any afterCommit work. A
+   * savepoint's rollback does not drop it. It needs an open transaction.
+   * What a write did outside the file, which no rollback undoes, is
+   * settled this way (values/store.ts).
+   */
+  afterTransaction(work: () => void): void {
+    if (this.depth === 0) {
+      throw new Error('afterTransaction needs an open transaction');
+    }
+    this.ended.push(work);
+  }
+
+  // settle runs the work queued for the end of the outermost transaction.
+  private settle(): void {
+    for (const work of this.ended.splice(0)) {
+      try {
+        work();
+      } catch {
+        // The transaction has ended; its outcome stands.
+      }
+    }
   }
 
   /**

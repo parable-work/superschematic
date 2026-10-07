@@ -255,22 +255,19 @@ describe('the describe and tools routes', () => {
     const tools = (await data(call(app, 'GET', '/namespaces/default/tools', { token: 'reader' }))).data;
     assert.deepEqual(tools, engine.tools.manifest({ subject: 'reader', permissions: ['read'] }));
     const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
-    assert.deepEqual(visible, [
-      'engine.listSchemas',
-      'engine.describeSchema',
-      'engine.defineSchema',
-      'engine.listBehaviors',
-      'engine.describeBehavior',
-      'engine.getValue',
-      'engine.listNamespaces',
-      'engine.createNamespace',
-      'engine.archiveNamespace',
-      'engine.unarchiveNamespace',
-      'item.get',
-      'item.list',
-      'item.history',
-    ]);
+    // The policy refuses reader define and manage, so define_schema and the namespace tools are hidden too.
+    assert.deepEqual(visible, ['engine.listSchemas', 'engine.describeSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue', 'item.get', 'item.list', 'item.history']);
     await problem(call(app, 'GET', '/namespaces/nowhere/tools'), 404);
+  });
+
+  test("the tools route answers through the mount's tool filter", async () => {
+    const { engine } = withItem();
+    const app = engineApp(engine, { authenticate, tools: (principal, tool) => principal.subject !== 'reader' || tool.schema === 'Item' });
+    const tools = (await data(call(app, 'GET', '/namespaces/default/tools', { token: 'reader' }))).data;
+    const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
+    assert.deepEqual(visible, ['item.get', 'item.list', 'item.history']);
+    const listSchemas = tools.tools.find((tool: { name: string }) => tool.name === 'engine.listSchemas');
+    assert.equal(listSchemas.mcp.hiddenReason, "this mount's tool filter leaves it out of reader's tools");
   });
 });
 

@@ -340,7 +340,12 @@ archive and unarchive namespaces (`list_namespaces`, `create_namespace`,
 `archive_namespace`, `unarchive_namespace`), as the access policy's
 `manage` allows, and in an archived namespace every tool that writes
 there is hidden; and where a schema composes `Search`, one more,
-`search`, searches every such schema the caller may read. Where an SDK
+`search`, searches every such schema the caller may read. Each caller's
+list holds what the policy lets it use: `define_schema` and the
+namespace tools, which name their schema or namespace only when called,
+are hidden from a caller the policy refuses `define` or `manage` there,
+and a mount's `tools` filter narrows a caller's set further, refusing a
+call of a tool it leaves out. Where an SDK
 tool's guidance is its operation's `@docs`, the engine writes its own:
 fixed for its tools, a base for the operations every schema has, and
 what each behavior the type composes says under its config: the states

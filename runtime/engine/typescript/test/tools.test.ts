@@ -18,6 +18,8 @@ import {
   type EngineOptions,
   type Principal,
   type ToolDefinition,
+  type ToolFilter,
+  type ToolSummary,
 } from '../dist/index.js';
 import { counterDeclaration, flagDeclaration, hold, holdDeclaration, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown, track } from './helpers.ts';
@@ -342,29 +344,58 @@ describe('the tools document', () => {
     const tools = engine.tools.manifest(reader).tools;
     assert.deepEqual(
       tools.filter((entry) => !entry.mcp.hidden).map((entry) => entry.name),
-      [
-        'engine.listSchemas',
-        'engine.describeSchema',
-        'engine.defineSchema',
-        'engine.listBehaviors',
-        'engine.describeBehavior',
-        'engine.getValue',
-        'engine.listNamespaces',
-        'engine.createNamespace',
-        'engine.archiveNamespace',
-        'engine.unarchiveNamespace',
-        'item.get',
-        'item.list',
-        'item.history',
-      ]
+      ['engine.listSchemas', 'engine.describeSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue', 'item.get', 'item.list', 'item.history']
     );
     assert.equal(
       (tool(engine, 'item.increment', reader).mcp as { hiddenReason: string }).hiddenReason,
       'the access policy refuses reader write on Item (increment)'
     );
+    // define_schema and the namespace tools ask the listing question their
+    // calls would answer: the policy refuses reader define and manage.
+    assert.equal((tool(engine, 'engine.defineSchema', reader).mcp as { hiddenReason: string }).hiddenReason, 'the access policy refuses reader define in namespace default');
+    assert.equal(
+      (tool(engine, 'engine.archiveNamespace', reader).mcp as { hiddenReason: string }).hiddenReason,
+      'the access policy refuses reader manage (archive) of namespaces'
+    );
+    // A hidden engine tool can still be called; the call asks its own question.
+    assert.equal(thrown(() => engine.tools.call(reader, 'define_schema', { document: schemaDocument('Other', []) }), EngineError).code, 'forbidden');
     assert.equal((tool(engine, 'item.create', reader).mcp as { hiddenReason: string }).hiddenReason, 'the access policy refuses reader write on Item');
     assert.ok(!tools.some((entry) => entry.name.startsWith('secret.')));
     assert.ok(tool(engine, 'secret.create', alice));
+  });
+
+  test("a mount's filter narrows a caller's tools: hidden with its reason, and its call is a tool the namespace does not have", () => {
+    const engine = openBehaviorEngine({ policy });
+    publishItem(engine, [{ name: 'test.Counter' }]);
+    publish(engine, schemaDocument('Other', [{ name: 'code', typeRef: { name: 'string' } }]));
+    const seen: ToolSummary[] = [];
+    // An agent's session: Item's operations alone, and nothing that writes but increment.
+    const filter: ToolFilter = (principal, summary) => {
+      seen.push(summary);
+      return principal.subject !== 'agent' || (summary.schema === 'Item' && (!summary.writes || summary.operation === 'increment'));
+    };
+    const agent: Principal = { subject: 'agent', permissions: ['read', 'write'] };
+    const visible = engine.tools
+      .manifest(agent, { filter })
+      .tools.filter((entry) => !entry.mcp.hidden)
+      .map((entry) => entry.name);
+    assert.deepEqual(visible, ['item.get', 'item.list', 'item.increment', 'item.history']);
+    assert.equal(
+      (engine.tools.manifest(agent, { filter }).tools.find((entry) => entry.name === 'other.get')?.mcp as { hiddenReason: string }).hiddenReason,
+      "this mount's tool filter leaves it out of agent's tools"
+    );
+    assert.deepEqual(
+      seen.find((summary) => summary.name === 'item.increment'),
+      { handle: 'item_increment', name: 'item.increment', schema: 'Item', operation: 'increment', behavior: 'test.Counter', writes: true }
+    );
+    assert.deepEqual(seen.find((summary) => summary.name === 'engine.listSchemas'), { handle: 'list_schemas', name: 'engine.listSchemas', operation: 'listSchemas', writes: false });
+    engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
+    assert.deepEqual(engine.tools.call(agent, 'item_increment', { id: 'i1' }, { filter }), { count: 1 });
+    assert.ok(thrown(() => engine.tools.call(agent, 'item_create', { data: { title: 'Desk' } }, { filter }), UnknownToolError));
+    assert.ok(thrown(() => engine.tools.call(agent, 'list_schemas', {}, { filter }), UnknownToolError));
+    // Another caller through the same filter keeps every tool, and with no filter the agent does too.
+    assert.ok(engine.tools.manifest(alice, { filter }).tools.every((entry) => !entry.mcp.hidden));
+    assert.equal((engine.tools.call(agent, 'list_schemas', {}) as unknown[]).length, 2);
   });
 
   test('lists no tool of a schema whose behaviors the engine cannot run', () => {

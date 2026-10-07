@@ -58,7 +58,7 @@ import type { Storage } from '../storage/storage.js';
 import { incompatibleChanges } from './compat.js';
 import { displayIssues } from './display.js';
 import { checkSchemaName, modelOf, readSchema, type SchemaModel } from './document.js';
-import { SchemaValidator } from './validator.js';
+import { SchemaValidator, type NormalizeMode } from './validator.js';
 
 /** A stored draft or published version of a schema. */
 export interface SchemaRecord {
@@ -532,6 +532,7 @@ function lazyValidator(model: SchemaModel, composition: Composition): InstanceVa
     (validator ??= new SchemaValidator(model, new Map([...composition.fields].map(([field, bound]) => [field, bound.behavior.name]))));
   return {
     validate: (value: unknown) => built().validate(value),
+    normalize: (value: unknown, mode: NormalizeMode) => built().normalize(value, mode),
     validateType: (type: string, value: unknown, path: string) => built().validateType(type, value, path),
   };
 }

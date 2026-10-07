@@ -169,8 +169,10 @@ holder's heartbeat, release, acknowledgement and writes are refused
 (`lapsed`), and other principals' writes go through as on a free
 instance. Only its expiry can follow. `expire` applies it, and any
 principal who may write the instance may call it; on an instance whose
-lease is free or active it returns `{ expired: false }`, and its event is
-all it writes. `acquire` over a lapsed lease applies its expiry first,
+lease is free or active it returns `{ expired: false }` and writes
+nothing: it says it changed nothing (D16, amended: a write that changes
+nothing writes nothing), so it appends no event and the instance's
+sequence stays. `acquire` over a lapsed lease applies its expiry first,
 and so does Queue's `claim`.
 
 An expiry clears the holder, advances the token and counts the expiry,
@@ -290,9 +292,12 @@ the token, stops it. `heartbeat({ acknowledge: ids })` acknowledges them
 in the heartbeat's own write, before it lists the rest, so a worker pays
 no write and no event of its own per acknowledgement. With `dedupeKey`, a
 directive already sent under the lease with the key, acknowledged or not,
-stands: `direct` returns its id with `created: false` and sends nothing,
-so a sender that runs on every change (an alert, a watchdog) does not
-queue the same message twice for one lease.
+stands: `direct` returns its id with `created: false`, sends nothing
+and appends no event, so a sender that runs on every change (an alert, a
+watchdog) neither queues the same message twice for one lease nor moves
+its sequence. An `acknowledge` of directives every one of which is
+acknowledged already writes nothing either, and so does a
+`resetExpiries` of an instance with none.
 When the token advances, by a release, an expiry or a new acquire, the
 directives of the lease it ends are deleted, so none reaches the next
 holder. Deleting the instance deletes its directives.
@@ -364,7 +369,7 @@ counts them.
 | Operations | `claim({ ttlMs? })` -> `{ id, token, expiresAt, heartbeatMs }`, writes; `refresh()` -> `{}`, writes; schema-level `claimNext({ match?, assignedOnly?, ttlMs? })` -> `{ claimed }`, the claim or null, writes; schema-level `countClaimable({ match?, assignedOnly? })` -> `{ count }`, read-only. A `match` value is a value or a list of values |
 | Guards | Lease's `acquire` by anything but Queue's own claim: `vetoed` (`claim_required`), so the lease of a claimable instance is taken only by claiming it |
 | Refusals | `claim` of an instance whose status is not one of `claim.from` (`not_claimable`, details `{ status, from }`), that a blocker holds up (`blocked`), or one of whose `excludeStale` links is pinned to a revision or a release its target has moved past (`stale_link`, details `{ links }`), and whatever Lease's `acquire`, Budget's `reserve`, Workflow's `transition` and the instance's guards refuse; `claimNext` and `countClaimable` with a `match` field the config does not name, or `assignedOnly` on a type without Assignment (`invalid_argument`); `claimNext` whose every candidate's claim was `forbidden` to the caller (that `forbidden`). Each code is a veto's (`vetoed`) |
-| Events | `claim`'s operation event carries the lease and the status; a blocker's status change appends a `refresh` event on each instance it holds up, and an enclosing budget scope's change, or a pinned link's target's new revision or release, one on each instance whose exclusion it moves |
+| Events | `claim`'s operation event carries the lease and the status; a blocker's status change appends a `refresh` event on each instance it holds up whose copies it changes, and an enclosing budget scope's change, or a pinned link's target's new revision or release, one on each instance whose exclusion it moves. A `refresh` that finds the copies and what they hear as they should be writes nothing and appends no event |
 | `configChange` | `claim`, `priorityField`, `match`, `maxCandidates` and `excludeStale` may change. Not added to a schema with instances, which would have no copies for `claimNext` to find them by, and not removed from one |
 
 ```json
@@ -544,8 +549,9 @@ leaves them, and records `released: {}`. A status move a guard vetoes leaves the
 it is and the instance missed all the same; any other refusal fails the
 miss and leaves the instance as it was. Any principal who may write the
 instance may call `miss`; on any other instance it returns `{ missed:
-false }`. A missed instance stays missed, whatever its status, until it
-beats.
+false }` and writes nothing, so a sweep that finds the deadline ahead
+appends no event. A missed instance stays missed, whatever its status,
+until it beats.
 
 `parseConfig` checks that `principalField` is a string field of the
 type, that the type lists Workflow for `onMissed` and `onBeat`, that
@@ -808,6 +814,8 @@ reads the instance's `budget` field first: it releases at most what it
 holds for the instance beyond what the instance still has reserved,
 holds no more than the instance has reserved, and takes reservations and
 usage only from an instance whose scope link for the meter points at it.
+A `settleFor` that releases nothing writes nothing and appends no event
+on the scope.
 A scope link does not move while a reservation is held through it.
 
 ### Settlement

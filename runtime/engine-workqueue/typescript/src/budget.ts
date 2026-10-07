@@ -1068,6 +1068,9 @@ export const budget = defineBehavior<BudgetConfig>({
       if (released > 0) {
         hold(context, meter, inner, held - released);
         release(context, meter, released, 0);
+      } else {
+        // Nothing held here is the inner instance's to release.
+        context.unchanged();
       }
       return { released };
     },

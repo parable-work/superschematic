@@ -337,10 +337,13 @@ engine.runner.stop();      // engine.close() stops it too
   wait, `archived` in `status()`, until the namespace is unarchived, then
   pick up where they stopped.
 - **It prunes the log, with `retention`.** An engine opened with
-  `retention: { maxAgeMs?, maxEvents? }` has the runner prune the oldest
-  events at its first pass and every `everyMs` (a minute) after, a
-  namespace at a time, and never past an event a subscription there has
-  yet to handle, halted ones included. `engine.runner.prune()` prunes now
+  `retention: { maxAgeMs?, maxEvents?, maxHoldMs? }` has the runner prune
+  the oldest events at its first pass and every `everyMs` (a minute)
+  after, a namespace at a time, `maxEvents` counting each namespace's
+  own, and never past an event a subscription there has yet to handle,
+  halted ones included; with `maxHoldMs`, a halted or archived one holds
+  no event older than that, and `status()` shows how far each hold
+  reaches and until when. `engine.runner.prune()` prunes now
   and needs no principal. A reaction's `before()` still reads an instance
   whose create was pruned, and a read of the log from the start reads
   what is kept.

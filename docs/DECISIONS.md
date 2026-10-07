@@ -1126,9 +1126,14 @@ engine runs, and archived" and "the log keeps what retention and its
 subscriptions need" below). Display metadata is the core `@display`
 decorator (D48), which the describe document carries. Lease tells a
 holder that a linked target moved (`directOn`), and a behavior's
-`configChange` sees whether the schema has instances (the last two
-amendments below). Each change that lands a piece updates this
-paragraph. The names and rules are reversible until the first release.
+`configChange` sees whether the schema has instances (the amendments "a
+lease's holder hears that a linked target moved" and "a config change
+sees whether the schema has instances" below). A write that changes
+nothing writes nothing, a write stores what the schema's parse makes of
+it, each caller's tools are the ones it may use, and retention and the
+value store have bounds (the four amendments of those names below). Each
+change that lands a piece updates this paragraph. The names and rules are
+reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -1818,6 +1823,96 @@ exist before it asked a behavior about being added or removed.
 | It is read when the behavior reads it, at define and again at publish, in the publish's transaction, so a version defined while the schema was empty is refused at publish once an instance exists. | Reading it for every define, a query per namespace that no behavior may ask for |
 | With no instance, `Links` allows any change (a link made required, a new required link, a link gone, another schema; a pin's kind changes with instances too, as the amendment on release pins has it); `Workflow` a dropped state; `Variants` a new `field`, `by` or type for a value; `Branches` a removed kind and a kind's type, parent, order, singleton or unit, since deleting an instance deletes its graph; `Budget` a removed meter; `Presence` a new `principalField`. The other behaviors refuse no config change. | Leaving each as it was |
 | The field rule, which refuses a field made required and a new required field, is the engine's and stays as it is, instances or not. | Relaxing it too, beyond this change, which would change D16's compatibility rule for every schema |
+
+### D16, amended: a write that changes nothing writes nothing
+
+Every writing operation appended an event and moved the instance's
+sequence, even when it changed nothing: the engine cannot see what a
+handler wrote in its behavior's own tables. A sweep that found a lease
+active, a presence miss that found the deadline ahead, a directive whose
+dedupe key was sent already and a refresh that found Queue's copies
+right each grew the log, woke every reaction on the schema and staled
+every reader's `ETag`, so a client holding an `If-Match` lost to a write
+that did nothing. An update whose patch changes nothing already wrote
+nothing. A handler now says the same of its call, and the engine holds
+it to that.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A writing operation's handler says its call changed nothing with `context.unchanged()`. The engine then appends no event, leaves `seq`, `updatedAt`, `updatedBy` and the row's version alone, and runs no `afterChange` and no `afterReferenceChange`, so no reaction and no reference hears it; `operate` and the operation route answer the sequence the instance was at, the `ETag` a reader holds. The result is returned and checked as ever. In a read-only operation it does nothing. | A result marker (`return unchanged(result)`), which wraps every result type the declaration checks; the engine comparing the row's columns before and after, which cannot see a behavior's own tables or references; a flag in the declaration, which cannot say which calls of an operation changed something |
+| The claim is checked: the engine reads SQLite's `total_changes()` before and after the handler, and a call that wrote any row and says it changed nothing is a `BehaviorError`, which rolls it back. Every write a call can make counts: its columns, its tables, its values and references, the instance's own fields through `update()`, an operation it calls or invokes and an instance it creates. A call that invokes a writing operation of another instance changes that instance, whose own event records it, and is still no unchanged call. | Trusting the claim, under which a handler that wrote its columns and said it changed nothing would leave a change the log cannot replay; tracking each handle's writes in the engine, which `total_changes()` gives for one read |
+| What runs before the handler stands: the policy, the parameters, the preconditions, `expectedSeq`, every guard and, for a writing operation, every `guardReference`. Any of them refuses an unchanged call as any other: the engine cannot know a call changes nothing before its handler has run. | Asking no guard, as an update whose patch changes nothing asks none; an update knows before its guards, an operation only after its handler |
+| A called operation's claim is its own. The operation that called it appends its event unless it says so too, and holds to it only if the called one wrote nothing. | The called operation's claim covering its caller, which wrote things of its own |
+| Where an operation changes nothing, the work-queue package says so: `Lease`'s `expire` that expires nothing, `direct` whose dedupe key was sent under the lease, `acknowledge` of directives every one of which is acknowledged, `resetExpiries` of no expiries; `Presence`'s `miss` that misses nothing; `Queue`'s `refresh` that finds its copies and what they hear as they should be, which now writes only the columns that are not; and `Budget`'s `settleFor` that releases nothing. A sweep and a reference's hook call each of them on many instances where most change nothing. | Leaving the work queue's calls to append, which is most of the events a quiet queue writes |
+| A refusal that changes nothing stays a veto: Workflow's `transition` to the state the instance is in (`already_in_state`) and Assignment's `assign` to its assignee (`already_assigned`). A veto writes nothing either, and the code tells a caller its read was stale or its retry landed. Making them unchanged calls would run the other behaviors' guards on a move that is no move, so a gate (`blocked`, `not_held`) could refuse what changes nothing. | Idempotent success for both, which hides a stale read and asks guards about a move the instance does not make |
+| `Links`' `link` to the target and revision the link holds still writes. `Blueprint` stamps an unstamped instance on any `link` of its `from` link, and a link made again is how a schema that gained Blueprint asks for the stamp. | An unchanged `link`, which would make that stamp unreachable |
+
+### D16, amended: a write stores what the schema's parse makes of it
+
+A create and an update only validated, and stored the fields as given.
+The schema runtime's parse, which a generated server runs on every
+request, puts a scalar's value in the canonical form the scalar defines
+and fills a field's default; the engine never ran it. So two instances
+held one email in two cases and a unique field let both through, a
+`Generic.StringMap` given as its JSON text was stored as text, and a
+field's `default` meant nothing. A write now stores what the parse makes
+of it. The runtimes' parse also read a default of the IR's `number` and
+`boolean` as its text, where D14's loader reads a number and a boolean;
+they now read it as the loader does.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every write of an instance's own fields runs the schema runtime's strict parse of the instance type before the version validates them: a create, an update, a behavior's `update()` and `instances.create`, `validateUpdate()`, and `schemas.validate`, which answers as a create. Each scalar value takes the canonical form its scalar's normalize and parse steps give it, at every depth. | Normalizing in validation, which the runtimes keep apart from parse; normalizing only scalars the engine names, a list of its own beside the catalog's flags |
+| What the parse cannot read is left as given, for the version to refuse under its own rule (`type`, `unknown`, `readOnly`), so its issues are what they were. A value its scalar's parser refuses where the version's rules let it through is refused with the parser's rule, `parse`, reported only when the version finds nothing, so a value is never refused twice. | The parse's issues beside the version's, under two names for one problem; storing a value its parser refused, un-normalized |
+| Defaults fill on a create only, in nested objects and list elements too, read as D14's loader reads the IR's text. A merge patch fills none: a member its `null` removes stays removed, and a field a later version adds stays absent on the instances before it, as the compatibility rule promised them. A list's default is not filled, as no runtime's parse fills one. | Filling on an update, which undoes a `null` that removes a field with a default and writes values no caller sent; filling the instances that predate a new default at their next write |
+| An update normalizes its patch, not the instance: a member the patch leaves alone keeps its stored value and its ref in the value store. The event records the patch as stored, so the log still replays to what a read returns, and a patch that normalizes to what the instance holds changes nothing and writes nothing. | Normalizing the merged instance, which rewrites members no caller touched and needs a diff to log |
+| What a client sees is what is stored: the create's and update's answer, every read, the event's change, the value store's hash of a large field (a value hashes in the form the row stores) and the comparisons of a unique index. A `lookup` key's and a list's `where` values on own fields are normalized before they compare, so the form a client sent finds what it stored. | Comparing as given, under which an instance created with `Ada@Example.COM` is not found by it |
+| The compatibility rule is unchanged: a version's default may change, since a default applies at a create, and a stored value satisfied the version that normalized it. A row written before keeps its values as given until a write sets them; a unique field's old value does not collide with its normalized form, and a lookup by the normalized form does not find it. Flagged: a deployment that needs them normalized rewrites the field with an update. | A migration that normalizes every row, which rewrites instances without an event, so the log no longer replays to them |
+| The Go, TypeScript and Python schema runtimes read a default of the IR's `number` as a number, of `boolean` as a boolean and of `string` as its text, as they read `Float`, `Boolean` and `String`. | Leaving the text, which every validator then refuses as `type` |
+
+### D16, amended: each caller's tools are the ones it may use
+
+Every MCP caller listed `define_schema` and the four namespace tools,
+including a caller the policy refuses all of them, since they name no
+schema until called and the policy answered only the call. An agent
+saw tools it could never use and spent turns learning so. And a
+deployment that gives an agent a session for one job could not narrow
+the session to that job's schema: the list was every tool the policy
+allowed the principal anywhere in the namespace. This changes the rows
+of the amendments "the engine serves the behaviors it runs" and
+"namespaces made while the engine runs" that put those tools in every
+caller's list.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The tools document asks the policy a listing question of each engine tool that names its schema or namespace only when called: `{ principal, action: 'define', namespace, listing: true }` for `define_schema`, `{ principal, action: 'manage', namespace, operation, listing: true }` for `list_namespaces`, `create_namespace`, `archive_namespace` and `unarchive_namespace`, the operation `list`, `create`, `archive` or `unarchive`. A refusal hides the tool with `hiddenReason`, as a refused schema tool is hidden. `AccessRequest` gains the member (`ListingAccessRequest`), which names no schema. | Asking `define` about a schema the namespace holds, which says nothing of a new name and nothing in an empty namespace; a wildcard schema (`*`), which a policy that builds a permission from the name turns into a permission no one holds, or worse one someone does; a separate policy for tools beside the access policy, a second place a deployment states who may define |
+| A hidden engine tool can still be called by its handle, and the call asks the question its call asks, with the name it gives, as a hidden schema tool's call does. A policy that cannot answer a listing question without a name answers false and loses only the listing. | Refusing the call of a hidden tool, which makes the listing question decide calls it cannot see the name of |
+| The engine tools that only read stay in every caller's list: `list_schemas`, `describe_schema` and `get_value` answer with what the policy lets the caller read, and the behavior tools ask nothing (that amendment's rule). | Hiding them from a caller who may read no schema now, which a publish changes without the list knowing |
+| `engineMcp` and `engineApp` take `tools`, a `ToolFilter`: `(principal, tool, namespace) => boolean`, asked of each tool with `{ handle, name, schema?, operation, behavior?, writes }`. A tool it leaves out is hidden from that caller with a reason in the tools document, absent from `tools/list`, and a `tools/call` of it is `UnknownToolError`, the invalid-params error of a tool the namespace does not have. So a session limited to one schema's operations, or to its reads, reaches nothing else through the endpoint. It narrows only: a tool the policy hides stays hidden, and a kept tool's call is still the policy's to allow. | A filter on the engine, which every mount would share where each endpoint serves a different audience; a list of handles in the options, which cannot follow a schema's tools as versions add operations; hiding without refusing the call, which leaves the narrower set a suggestion |
+| On the HTTP mount the filter narrows the tools document only: the routes answer as the policy says. | Refusing routes by tool, which would make the filter a second access policy for HTTP |
+
+### D16, amended: retention and the value store have bounds
+
+Retention and the value store each left an unbounded case. A halted
+subscription, or one in an archived namespace, held its namespace's log
+until someone resumed it, and with the log every large value its events
+held; the status named the hold but not how far back it reached.
+`maxEvents` counted cursors behind the global head, so one busy
+namespace pushed a quiet one's events out. A stored value had no size
+of its own, and a write through a driver outside the file's
+transactions that rolled back left a value nothing held. This changes
+the amendments "the log keeps what retention and its subscriptions
+need" (its hold and count rows) and "a large value is stored once" (its
+size and driver rows).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `retention.maxHoldMs` bounds a subscription that does not advance: halted, in an archived namespace, or whose behavior the engine no longer runs. It holds no event older than `maxHoldMs` that age or count lets go. A subscription that advances, active or retrying, holds whatever its age. Past the bound retention prunes on, and the subscription, behind its floor, halts with `cursor_expired` when it next runs (after its resume, or its namespace's unarchive), the rule that amendment gave a subscription found behind its floor; `resume` with `skip` moves it there. Without the option such a hold lasts until the subscription advances, as before. | A time since the halt or the archive, which needs a timestamp per state and none exists for an unregistered behavior, and which lets a slow subscription's old events outlive the bound; dropping a halted subscription's hold at once, which loses the events it failed at before anyone looks |
+| `status().retention` shows the bound (`maxHoldMs`) and, per namespace, beside the holding subscription, its state (`heldState`), when the oldest event it keeps was appended (`heldSince`), and for a hold the bound applies to, the time it lasts to (`heldUntil`). An operator sees how far back a halt reaches and when its events start to go. | The cursor alone, as before, from which an operator cannot tell a day's hold from a year's |
+| `maxEvents` counts a namespace's own events: each keeps its newest `maxEvents`. The runner counts a namespace's events once, at its first pass, and after that adds what was appended since its last count (one indexed range read past it) and takes away what it pruned, in memory, since one process writes the file. | Distance from the global head, as before, under which one namespace's traffic prunes another's; a count column kept at every append, a second write in every write transaction for an engine without retention too; counting every event at every pass, the cost that amendment declined |
+| Creating, archiving and unarchiving a namespace append no event, in its own log or another's. A namespace's log is read per schema, `read` asked of each event's schema, and a namespace's change names none, so its readers would need a rule of their own and its CHECKs a rebuild of `engine_events`. A writer learns of an archive from its next write's `namespace_archived`, and a reader reads on, since an archive stops no read. The shared namespace's log would show a project another's name, which `list` hides from it. | An event kind in the namespace's own log, read with `manage`, which a stream filtered by schema never sees and which needs the log rebuilt; one in the shared namespace's log |
+| `values.maxBytes` caps a stored value: 16 MiB of canonical JSON by default, at least the threshold. A write that would store a longer top-level member, of an instance's own fields, an event's change or an object a behavior stows, inline under an index or by hash, is refused as a whole: `ValueTooLargeError`, `value_too_large`, 413 over HTTP with `details: { path, bytes, maxBytes }`, the path the member's pointer in what would be stored. | No cap, as before, where only the HTTP body limit bounded a value and nothing bounded one a behavior computes; a cap per schema, an option keyed by names a deployment makes while the engine runs; the HTTP runtime's `payload_too_large`, which names the request body |
+| A driver outside the file's transactions has its writes settled around them: once the outermost transaction ends, committed or rolled back, the store removes each value the driver wrote in it that no holder references (`Storage.afterTransaction`, which a savepoint's rollback does not drop). So a rolled-back write leaves nothing. A crash between a driver's write and the end of its transaction can still leave one: `engine.values.sweep()` pages through the driver's optional `list(after, limit)` and removes each value no holder references, acting for no principal, as retention's prune does. A deployment runs it after a crash; the default driver lists too and leaves nothing to sweep. | A sweep on a runner schedule, which runs per behavior and schema and needs a principal; keeping the rolled-back values, as before, which a driver over object storage pays for in storage until someone looks; a list on every driver, which a write-only store cannot give |
 
 ## D17. A version graph over versioned tables, with one merge core
 

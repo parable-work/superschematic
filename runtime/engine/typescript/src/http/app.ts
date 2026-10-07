@@ -71,6 +71,7 @@ import type { EventKind } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject } from '../instances/patch.js';
 import type { SchemaRecord } from '../registry/catalog.js';
+import type { ToolFilter } from '../tools/catalog.js';
 import { callerAuthenticator, principalOf } from './callers.js';
 import { engineProblem } from './problems.js';
 import { checkStreamOptions, eventStream, type StreamOptions } from './stream.js';
@@ -86,6 +87,13 @@ export interface EngineHttpOptions extends RouterRuntimeOptions {
   timeoutSeconds?: number;
   /** The event stream's page size and heartbeat. */
   stream?: StreamOptions;
+  /**
+   * Narrows the tools document each caller gets, as the MCP endpoint's
+   * `tools` option does (EngineMcpOptions.tools): a tool it leaves out is
+   * hidden from that caller, with the reason. It narrows only the tools
+   * document; the routes themselves answer as the access policy says.
+   */
+  tools?: ToolFilter;
 }
 
 /** The media type of a JSON body. */
@@ -332,7 +340,9 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     }
   );
 
-  route(spec('listTools', 'GET', TOOLS), (ctx, { path }) => engine.tools.manifest(principalOf(ctx), { namespace: path.namespace as string }));
+  route(spec('listTools', 'GET', TOOLS), (ctx, { path }) =>
+    engine.tools.manifest(principalOf(ctx), { namespace: path.namespace as string, ...(options.tools === undefined ? {} : { filter: options.tools }) })
+  );
 
   // The behaviors this engine runs: every caller may read them.
   route(spec('listBehaviors', 'GET', BEHAVIORS), (ctx) => engine.tools.listBehaviors(principalOf(ctx)));

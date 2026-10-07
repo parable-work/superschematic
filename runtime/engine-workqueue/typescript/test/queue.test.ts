@@ -318,6 +318,20 @@ for (const driver of drivers) {
       assert.equal(next(engine, worker), 'j1');
     });
 
+    test('a refresh that finds the copies right changes nothing and appends no event; one that finds them wrong writes', () => {
+      const { engine } = world({ extra: [{ name: 'Dependencies', config: { schemas: ['Job', 'Step'] } }] });
+      publish(engine, { kind: 'General', name: 'Step', types: { Step: { name: 'Step', role: 'EmbeddedStruct', behaviors: [{ name: 'Workflow', config: stepFlow }], fields: [{ name: 'title', typeRef: { name: 'string' }, required: true }] } } });
+      engine.instances.create(alice, 'Step', { title: 'Approve' }, { id: 's1' });
+      engine.instances.create(alice, 'Job', { title: 'j1' }, { id: 'j1', behaviors: { Dependencies: { blockers: [{ schema: 'Step', id: 's1' }] } } });
+      const seq = engine.instances.get(alice, 'Job', 'j1')?.seq;
+      assert.deepEqual(engine.instances.operate(alice, 'Job', 'j1', 'refresh', {}), { result: {}, seq });
+      assert.deepEqual(engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.map((event) => event.kind), ['create']);
+      // A copy out of step, as one a version before the copies kept would be, is set right by a refresh with its event.
+      engine.storage.run(`UPDATE engine_instances SET bhv_queue__blocked = 0 WHERE schema = 'Job' AND id = 'j1'`);
+      assert.deepEqual(engine.instances.operate(alice, 'Job', 'j1', 'refresh', {}), { result: {}, seq: (seq as number) + 1 });
+      assert.equal(engine.storage.get(`SELECT bhv_queue__blocked AS blocked FROM engine_instances WHERE schema = 'Job' AND id = 'j1'`)?.blocked, 1);
+    });
+
     test("a blocker's change refreshes a dependent another principal holds the lease of: Lease's guard lets refresh through", () => {
       const { engine } = world({ extra: [{ name: 'Dependencies', config: { schemas: ['Job', 'Step'] } }] });
       publish(engine, { kind: 'General', name: 'Step', types: { Step: { name: 'Step', role: 'EmbeddedStruct', behaviors: [{ name: 'Workflow', config: stepFlow }], fields: [{ name: 'title', typeRef: { name: 'string' }, required: true }] } } });
