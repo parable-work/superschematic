@@ -190,7 +190,10 @@ In Postgres a `Geo.Location` column is a `POINT`, which is `(x, y)`: x is
 the longitude and y the latitude, so `{"lat": 37.7749, "lon": -122.4194}`
 is stored as `point(-122.4194, 37.7749)`. The generated Go ORM writes and
 reads it that way, its versioned history included, and the column needs no
-PostGIS. The ORM does not yet read or write a list of locations
-(`POINT[]`). A version graph cannot hold one: no value class reads
+PostGIS. A list of locations is a `POINT[]` of the same points; as in any
+list, a NULL element is refused on read. A location's ORM filter,
+`GeoPointFilter`, has `IsNull` only: Postgres has no `=` for a point, and
+its `~=` compares coordinates within 1e-6 on a plane. A version graph
+cannot hold a location: no value class reads
 `POINT`, so the graph generator and the engine's `Branches` refuse a
 member field of `Geo.Location`.
