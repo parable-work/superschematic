@@ -863,6 +863,31 @@ for (const driver of drivers) {
     });
   });
 
+  describe(`Lease: a call that changes nothing writes nothing (${driver})`, () => {
+    // seqAndEvents is the job's sequence and how many events it has.
+    const seqAndEvents = (engine: Engine) => [
+      engine.instances.get(alice, 'Job', 'j1')?.seq,
+      engine.events.read(alice, { schema: 'Job', instanceId: 'j1', limit: 500 }).events.length,
+    ];
+
+    test('an expire that expires nothing, a directive sent already, an acknowledgement made already and a reset of no expiries append no event', () => {
+      const { engine } = world({ overridePermission: 'jobs.override', directPermission: 'jobs.direct' });
+      invoke(engine, worker, 'acquire');
+      invoke(engine, sender, 'direct', { name: 'cancel', dedupeKey: 'once' });
+      invoke(engine, worker, 'acknowledge', { ids: [1] }, 'j1', 1);
+      const before = seqAndEvents(engine);
+      assert.deepEqual(invoke(engine, other, 'expire'), { expired: false });
+      assert.deepEqual(invoke(engine, operator, 'expire', { holder: 'someone-else' }), { expired: false });
+      assert.deepEqual(invoke(engine, operator, 'expire', { holder: 'wren', notRenewedAfter: T0 - 1 }), { expired: false });
+      assert.deepEqual(invoke(engine, sender, 'direct', { name: 'cancel', dedupeKey: 'once' }), { id: 1, created: false });
+      assert.deepEqual(invoke(engine, worker, 'acknowledge', { ids: [1] }, 'j1', 1), {});
+      assert.deepEqual(invoke(engine, operator, 'resetExpiries'), { expiries: 0 });
+      assert.deepEqual(seqAndEvents(engine), before);
+      // An If-Match read before them still matches.
+      engine.instances.update(worker, 'Job', 'j1', { title: 'Same tag' }, { expectedSeq: before[0] as number });
+    });
+  });
+
   describe(`Lease: its config (${driver})`, () => {
     function refusal(engine: Engine, config: Record<string, unknown>, behaviors?: BehaviorRef[]): string {
       const document = jobsDocument(behaviors ?? [{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config }, { name: 'Comments' }]);

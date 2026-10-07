@@ -348,7 +348,9 @@ export const presence = defineBehavior<PresenceConfig>({
 
     miss(context) {
       const current = state(context);
+      // Missed already, or not due: nothing changes.
       if (current.missed || current.deadline === null || context.now < current.deadline) {
+        context.unchanged();
         return { missed: false };
       }
       context.columns.set({ missed: 1 });

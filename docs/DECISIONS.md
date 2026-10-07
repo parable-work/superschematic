@@ -1706,6 +1706,29 @@ append-only, and retention removes its oldest events.
 | The trigger that refuses a delete of an event lets one through at or before its namespace's floor, which retention moves first in the batch's transaction, so a stray delete above the floor is still refused. | Dropping the trigger, which lets any statement in the process delete events |
 | The typed client reads a `cursor_expired` problem's `floor` and `head` into its `EngineProblem`. A subscription resuming from a cursor retention has pruned past ends with that problem, as any 4xx ends it, and so does a reconciler whose stored cursor it is: neither skips what it never handled. With no cursor, each reads from the floor. | Resuming a subscription from the floor on its own, which skips events its caller never saw, the gap the code exists to announce |
 
+### D16, amended: a write that changes nothing writes nothing
+
+Every writing operation appended an event and moved the instance's
+sequence, even when it changed nothing: the engine cannot see what a
+handler wrote in its behavior's own tables. A sweep that found a lease
+active, a presence miss that found the deadline ahead, a directive whose
+dedupe key was sent already and a refresh that found Queue's copies
+right each grew the log, woke every reaction on the schema and staled
+every reader's `ETag`, so a client holding an `If-Match` lost to a write
+that did nothing. An update whose patch changes nothing already wrote
+nothing. A handler now says the same of its call, and the engine holds
+it to that.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A writing operation's handler says its call changed nothing with `context.unchanged()`. The engine then appends no event, leaves `seq`, `updatedAt`, `updatedBy` and the row's version alone, and runs no `afterChange` and no `afterReferenceChange`, so no reaction and no reference hears it; `operate` and the operation route answer the sequence the instance was at, the `ETag` a reader holds. The result is returned and checked as ever. In a read-only operation it does nothing. | A result marker (`return unchanged(result)`), which wraps every result type the declaration checks; the engine comparing the row's columns before and after, which cannot see a behavior's own tables or references; a flag in the declaration, which cannot say which calls of an operation changed something |
+| The claim is checked: the engine reads SQLite's `total_changes()` before and after the handler, and a call that wrote any row and says it changed nothing is a `BehaviorError`, which rolls it back. Every write a call can make counts: its columns, its tables, its values and references, the instance's own fields through `update()`, an operation it calls or invokes and an instance it creates. A call that invokes a writing operation of another instance changes that instance, whose own event records it, and is still no unchanged call. | Trusting the claim, under which a handler that wrote its columns and said it changed nothing would leave a change the log cannot replay; tracking each handle's writes in the engine, which `total_changes()` gives for one read |
+| What runs before the handler stands: the policy, the parameters, the preconditions, `expectedSeq`, every guard and, for a writing operation, every `guardReference`. Any of them refuses an unchanged call as any other: the engine cannot know a call changes nothing before its handler has run. | Asking no guard, as an update whose patch changes nothing asks none; an update knows before its guards, an operation only after its handler |
+| A called operation's claim is its own. The operation that called it appends its event unless it says so too, and holds to it only if the called one wrote nothing. | The called operation's claim covering its caller, which wrote things of its own |
+| Where an operation changes nothing, the work-queue package says so: `Lease`'s `expire` that expires nothing, `direct` whose dedupe key was sent under the lease, `acknowledge` of directives every one of which is acknowledged, `resetExpiries` of no expiries; `Presence`'s `miss` that misses nothing; `Queue`'s `refresh` that finds its copies and what they hear as they should be, which now writes only the columns that are not; and `Budget`'s `settleFor` that releases nothing. A sweep and a reference's hook call each of them on many instances where most change nothing. | Leaving the work queue's calls to append, which is most of the events a quiet queue writes |
+| A refusal that changes nothing stays a veto: Workflow's `transition` to the state the instance is in (`already_in_state`) and Assignment's `assign` to its assignee (`already_assigned`). A veto writes nothing either, and the code tells a caller its read was stale or its retry landed. Making them unchanged calls would run the other behaviors' guards on a move that is no move, so a gate (`blocked`, `not_held`) could refuse what changes nothing. | Idempotent success for both, which hides a stale read and asks guards about a move the instance does not make |
+| `Links`' `link` to the target and revision the link holds still writes. `Blueprint` stamps an unstamped instance on any `link` of its `from` link, and a link made again is how a schema that gained Blueprint asks for the stamp. | An unchanged `link`, which would make that stamp unreachable |
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.

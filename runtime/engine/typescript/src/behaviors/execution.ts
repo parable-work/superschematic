@@ -20,8 +20,11 @@ on other instances and create; a read-only operation gets one whose
 writes refuse and whose call() and invoke reach only read-only
 operations. An operation's context also has update(), which changes the
 instance's own fields with instances.update's checks and every guard,
-and validateUpdate(). A called operation runs in a savepoint, so a
-failure the caller catches leaves nothing of it behind.
+validateUpdate(), and unchanged(), with which a handler says the call
+changed nothing, so the engine appends no event for it; operate holds
+the claim to the rows the connection wrote meanwhile (Storage.changes),
+and one that wrote any is a BehaviorError. A called operation runs in a
+savepoint, so a failure the caller catches leaves nothing of it behind.
 
 A guard vetoes with a reason, or a Veto with a code its declaration lists
 (vetoes) and details; a handler, initialize and afterChange throw a
@@ -445,18 +448,36 @@ export class Execution {
    * its behavior as caller and has no preconditions.
    */
   invoke(operation: OperationSpec, params: FrozenJSON, caller?: string, preconditions?: Preconditions): unknown {
+    return this.operate(operation, params, caller, preconditions).result;
+  }
+
+  /**
+   * operate is invoke, saying also whether the handler said it changed
+   * nothing (OperationContext.unchanged), which the engine has held to the
+   * rows the call wrote: none.
+   */
+  operate(operation: OperationSpec, params: FrozenJSON, caller?: string, preconditions?: Preconditions): { result: unknown; unchanged: boolean } {
     return this.chain.nest(operation.behavior.name, `operation ${operation.name}`, () => {
       const request = { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, writes: operation.writes } as const;
       this.guard(caller === undefined ? request : { ...request, caller }, operation.writes, caller === undefined ? preconditions : undefined);
       const bound = this.composition.bound(operation.behavior.name) as BoundBehavior;
+      const said = { unchanged: false };
+      const before = this.storage.changes();
       const result: unknown = declaredVetoes(this.composition, () =>
         (operation.handler as OperationHandler<unknown>).call(
           bound.behavior.implementation.operations,
-          this.operationContext(bound, operation.writes && this.writable),
+          this.operationContext(bound, operation.writes && this.writable, said),
           params
         )
       );
-      return checkResult(operation, result);
+      const checked = checkResult(operation, result);
+      if (said.unchanged && this.storage.changes() !== before) {
+        throw new BehaviorError(
+          operation.behavior.name,
+          `operation ${operation.name} said it changed nothing (unchanged()), and it wrote: a call that writes appends its event`
+        );
+      }
+      return { result: checked, unchanged: said.unchanged && operation.writes };
     });
   }
 
@@ -596,13 +617,17 @@ export class Execution {
   }
 
   // operationContext is an operation handler's context: a context with
-  // update() and validateUpdate().
-  private operationContext(bound: BoundBehavior, writes: boolean): OperationContext<unknown> {
+  // update(), validateUpdate() and unchanged(), which records the claim
+  // in said for operate to hold to what the call wrote.
+  private operationContext(bound: BoundBehavior, writes: boolean, said: { unchanged: boolean }): OperationContext<unknown> {
     const writable = writes && this.writable;
     return this.frozen({
       ...this.contextMembers(bound, writable),
       update: (patch: FrozenJSON) => this.update(bound, writable, patch),
       validateUpdate: (patch: FrozenJSON) => this.merge(bound, patch).issues,
+      unchanged: () => {
+        said.unchanged = true;
+      },
     });
   }
 

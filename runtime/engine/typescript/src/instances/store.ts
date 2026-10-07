@@ -581,7 +581,9 @@ export class InstanceStore {
    * operation that writes runs in a transaction and appends an operation
    * event, which moves the instance's seq, its entity tag, as an update
    * does. It moves it even when no field changes, since the engine cannot
-   * see what the operation changed in its behavior's own tables. A schema
+   * see what the operation changed in its behavior's own tables, unless
+   * the handler says it changed nothing (unchanged()) and wrote no row:
+   * then nothing is appended and nothing moves. A schema
    * or operation the namespace does not have is not_found to a principal
    * that may read the schema, and forbidden to one that may not; so is a
    * schema-level operation, which invokeSchema calls. With expectedSeq,
@@ -594,7 +596,7 @@ export class InstanceStore {
   /**
    * operate is invoke, returning the result with the instance's sequence
    * after the call: the next one for an operation that writes, the one it
-   * read for an operation that does not.
+   * read for an operation that does not or a call that changed nothing.
    */
   operate(principal: Principal, schema: string, id: string, operation: string, params: unknown = {}, options: InvokeOptions = {}): OperationOutcome {
     checkPrincipal(principal);
@@ -706,7 +708,13 @@ export class InstanceStore {
       // large value.
       const execution = this.execution(chain, runtime, record, id, this.loader(row), true);
       const before = execution.fields();
-      const result = execution.invoke(spec, checked, undefined, preconditions);
+      const { result, unchanged } = execution.operate(spec, checked, undefined, preconditions);
+      // A call that says it changed nothing, and wrote nothing, writes
+      // nothing more: no afterChange, no seq, no event, no hook of a
+      // reference, as an update whose patch changes nothing.
+      if (unchanged) {
+        return { result, seq: Number(row.seq) };
+      }
       // An operation may change the instance's own fields through update();
       // afterChange gets them from before it, and the event carries the change.
       const own = execution.ownBefore();

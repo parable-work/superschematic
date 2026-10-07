@@ -656,6 +656,18 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
    * it. Empty when it would validate.
    */
   validateUpdate(patch: FrozenJSON): readonly ValidationIssue[];
+  /**
+   * Says this call changed nothing, as an update whose patch changes
+   * nothing writes nothing: the engine appends no event for it, the
+   * instance keeps its seq (its ETag), updatedAt and updatedBy, and no
+   * afterChange or afterReferenceChange runs. The handler still returns
+   * its result. The call must write no row anywhere: its columns, tables,
+   * values and references, the instance's own fields, and the operations
+   * it calls or invokes and the instances it creates. One that wrote and
+   * says so is a BehaviorError, which rolls it back. In a read-only
+   * operation, which appends nothing anyway, it does nothing.
+   */
+  unchanged(): void;
 }
 
 /**

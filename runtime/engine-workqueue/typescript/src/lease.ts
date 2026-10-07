@@ -550,9 +550,10 @@ function expireOne(context: BehaviorScope<LeaseConfig>, id: string, params: { ho
 }
 
 // acknowledgeDirectives marks directives of the lease handled, for
-// acknowledge and heartbeat's acknowledge; an id not sent under its token
+// acknowledge and heartbeat's acknowledge, and returns how many it marked:
+// none when each was handled already. An id not sent under its token
 // refuses the call.
-function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation: string, path: string, lease: Held, ids: readonly number[]): void {
+function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation: string, path: string, lease: Held, ids: readonly number[]): number {
   const table = context.sql.table('directives');
   const marks = ids.map(() => '?').join(', ');
   const found = new Set(
@@ -568,9 +569,11 @@ function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation
   if (missing.length > 0) {
     throw new OperationParamsError(NAME, operation, [{ path, message: `no directive ${missing.join(', ')} was sent under token ${lease.token}` }]);
   }
-  context.sql.run(
-    `UPDATE ${table} SET acknowledged_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND directive IN (${marks}) AND acknowledged_at IS NULL`,
-    [context.now, ...key(context), lease.token, ...ids]
+  return Number(
+    context.sql.run(
+      `UPDATE ${table} SET acknowledged_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND directive IN (${marks}) AND acknowledged_at IS NULL`,
+      [context.now, ...key(context), lease.token, ...ids]
+    ).changes
   );
 }
 
@@ -848,12 +851,15 @@ export const lease = defineBehavior<LeaseConfig>({
         requireOverride(context, 'expire the lease of another holder of');
       }
       const lease = held(context);
+      // A lease it does not expire is left as it was: no event, no seq.
       if (lease.holder === null || (holder === undefined ? isActive(context, lease) : lease.holder !== holder)) {
+        context.unchanged();
         return { expired: false };
       }
       const active = isActive(context, lease);
       // Its holder renewed it after the time: the process holding it is alive.
       if (active && notRenewedAfter !== undefined && (lease.renewedAt ?? lease.acquiredAt ?? 0) > notRenewedAfter) {
+        context.unchanged();
         return { expired: false };
       }
       const reason: ExpiryReason = active ? 'holder' : lapseReason(context, lease);
@@ -879,6 +885,8 @@ export const lease = defineBehavior<LeaseConfig>({
           dedupeKey,
         ]);
         if (sent !== undefined) {
+          // Sent already: the directive stands as it was sent.
+          context.unchanged();
           return { id: Number(sent.directive), created: false };
         }
       }
@@ -908,7 +916,10 @@ export const lease = defineBehavior<LeaseConfig>({
     acknowledge(context, params) {
       const lease = held(context);
       checkGuarded(context, 'acknowledge', lease);
-      acknowledgeDirectives(context, 'acknowledge', '/ids', lease, params.ids as number[]);
+      // Every one acknowledged already: nothing changes.
+      if (acknowledgeDirectives(context, 'acknowledge', '/ids', lease, params.ids as number[]) === 0) {
+        context.unchanged();
+      }
       return {};
     },
 
@@ -921,6 +932,10 @@ export const lease = defineBehavior<LeaseConfig>({
         throw forbidden(context, 'reset the expiries of', permission);
       }
       const { expiries } = held(context);
+      if (expiries === 0) {
+        context.unchanged();
+        return { expiries };
+      }
       context.columns.set({ expiries: 0 });
       return { expiries };
     },

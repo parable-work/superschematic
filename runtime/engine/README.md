@@ -491,7 +491,9 @@ the value store's threshold, 64 KiB by default, is stored once by hash,
 and the row keeps a ref in its place; every read puts the value back
 ("The value store"). Its `seq` is the sequence of its
 last event, so every write that appends one moves it: a create, an update
-that changes something and a writing behavior operation.
+that changes something and a writing behavior operation, unless its
+handler says it changed nothing ("Instances and events" under
+"Behaviors").
 
 Every operation on a schema with no live version is `not_found`. A row
 records the schema version it was last written with; the compatibility
@@ -1489,9 +1491,10 @@ read-only relation, the event log, another behavior's storage or the
 connection: a status one behavior owns changes at another's request only
 through its operations, whose guards run, on this instance or another.
 
-An operation's context (`OperationContext`) adds two more, so a
+An operation's context (`OperationContext`) adds three more: two so a
 behavior that changes the instance on a caller's behalf, approving a
-proposed change say, runs the checks an update runs:
+proposed change say, runs the checks an update runs, and one that says
+the call changed nothing:
 
 - `update(patch)` applies a JSON merge patch to the instance's own fields
   and returns them after it. A behavior's field in the patch is refused
@@ -1507,6 +1510,9 @@ proposed change say, runs the checks an update runs:
 - `validateUpdate(patch)` returns the issues `update(patch)` would refuse
   the patch for, the behaviors' `validate`'s included, without writing or
   asking a guard.
+- `unchanged()` says the call changed nothing, so the engine appends no
+  event for it ("Instances and events"). It does nothing in a read-only
+  operation.
 
 `validate` gets a narrower context of its own ("Validating fields"):
 `behavior`, `config`, `namespace`, `schema`, `version`, `id`,
@@ -1968,7 +1974,7 @@ every call on the schema `unavailable` until one registers.
 | `update` | refuse a behavior field (`readOnly`) -> check `preconditions` against each `preconditionSchema` -> check `expectedSeq` -> merge and validate -> each `validate` (`kind: 'update'`) -> nothing more if nothing changed -> every guard, each with its precondition -> write -> each `afterChange` -> event |
 | an operation's `update()` | refuse a behavior field (`readOnly`) -> merge and validate -> each `validate`, with `caller` -> nothing more if nothing changed -> every guard, with no precondition -> write; `validateUpdate()` stops before the guards and writes nothing |
 | `delete` | check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition, then each referencing behavior's `guardReference` -> the row goes -> each `afterChange` -> its references go -> event -> each `afterReferenceChange` -> no reference to it may remain |
-| `invoke` | policy -> parameters against `paramsSchema` -> check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
+| `invoke` | policy -> parameters against `paramsSchema` -> check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> nothing more if the handler said it changed nothing (`unchanged()`) and wrote no row -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
 | `invokeSchema` | policy -> parameters against `paramsSchema` -> the handler -> its result against `resultSchema`; no guard, no event |
 | a behavior's `instances.create` | policy (`write`) -> as `create`, in a savepoint of the calling call's transaction |
 | `publish` (`schemas`) | policy -> the compatibility rule, with each `configChange` -> each `parseConfig` with `target.schemas` (`read` on each schema it reaches) -> each composed behavior's migrations -> the version -> each `afterConfigChange` of a behavior it adds, removes or changes, per namespace -> event |
@@ -2014,6 +2020,28 @@ changed in its behavior's own tables. An `update`, `delete` or
 operation that expects the sequence from before the operation is refused
 (`seq_mismatch`) before any guard is asked. A read-only operation checks
 `expectedSeq` against the sequence it reads and moves nothing.
+
+A write that changes nothing writes nothing (D16, amended). An update
+whose patch changes nothing asks no guard and appends nothing. A writing
+operation's handler says the same of its call with `unchanged()`: an
+expire that finds the lease active, a sweep's miss that finds the
+deadline ahead, a directive whose dedupe key was sent already. The
+engine then appends no event: the instance keeps its `seq`, so a reader's
+`ETag` stays good, and its `updatedAt` and `updatedBy`; no `afterChange`
+and no `afterReferenceChange` runs, and no reaction hears it. What ran
+before the handler stands: the policy, the parameters, the
+preconditions, `expectedSeq`, every guard and `guardReference`, any of
+which can refuse it; and the result is checked and returned as ever. The
+claim is checked: the engine counts the rows the connection writes while
+the handler runs (SQLite's `total_changes()`), and a call that wrote
+any, its own columns, tables, values or references, the instance's own
+fields, an operation it called or invoked or an instance it created, and
+says it changed nothing is a `BehaviorError`, which rolls it back. A
+called operation's claim is its own: the operation that called it
+appends its event unless it says so too. A refusal stays a veto: a
+transition to the state the instance is in (`already_in_state`) and an
+assign to the assignee (`already_assigned`) write nothing either, and
+tell a caller its read is stale.
 
 ### Core behaviors
 
@@ -3171,7 +3199,8 @@ parameters, by behavior name ("Create parameters" under "Behaviors");
 with `Accept-Patch` on PATCH. An operation's body is its parameters, and
 no body is `{}`; its result, whatever JSON it is, is the envelope's
 `data`, and the instance's sequence after the call its `ETag`, which a
-read-only operation leaves where it was. A schema-level operation's route
+read-only operation, and a call that changed nothing, leave where it
+was. A schema-level operation's route
 takes its parameters the same way and answers its result with no `ETag`,
 since it names no instance; each operation route answers 404 for an
 operation of the other scope.
@@ -3267,7 +3296,7 @@ only that the instance exist; a weak tag never matches. An instance that does no
 `If-Match` says: RFC 9110 evaluates a precondition only where the request
 would otherwise succeed. A writing behavior operation moves `seq` too
 ("Instances and events" under "Behaviors"), so a tag read before it no
-longer matches.
+longer matches, unless it changed nothing and said so.
 
 `If-Match` cannot hold across writes that move `seq` while a caller
 works, a lease's heartbeats say. What a caller assumes of one behavior

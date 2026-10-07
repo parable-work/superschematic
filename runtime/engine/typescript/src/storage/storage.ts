@@ -88,6 +88,16 @@ export class Storage {
   }
 
   /**
+   * changes is how many rows the connection's statements have inserted,
+   * updated or deleted since it opened, rolled back ones included
+   * (SQLite's total_changes()): two readings around a call that agree say
+   * it wrote no row.
+   */
+  changes(): number {
+    return Number(this.driver.get('SELECT total_changes() AS changes')?.changes ?? 0);
+  }
+
+  /**
    * transaction runs fn in a transaction, commits when it returns and rolls
    * back when it throws. Called inside another transaction, it runs in a
    * savepoint.
