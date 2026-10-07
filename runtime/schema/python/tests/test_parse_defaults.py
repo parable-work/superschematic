@@ -44,6 +44,15 @@ def test_default_string_passthrough():
     assert ok and v == "hello"
 
 
+def test_default_ir_primitives():
+    v, ok = apply_default(_field("n", "number", "2.5"), None)
+    assert ok and v == 2.5
+    v, ok = apply_default(_field("b", "boolean", "false"), None)
+    assert ok and v is False
+    v, ok = apply_default(_field("s", "string", "7"), None)
+    assert ok and v == "7"
+
+
 def test_default_scalar_kind_uses_scalar_primitive():
     scalar = ScalarDef(name="Custom", primitive="Int")
     v, ok = apply_default(_field("n", "Custom", "7"), scalar)

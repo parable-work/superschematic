@@ -100,3 +100,16 @@ func TestApplyDefault_NilDefault(t *testing.T) {
 	_, ok := applyDefault(field, nil)
 	assert.False(t, ok)
 }
+
+func TestApplyDefault_IRPrimitives(t *testing.T) {
+	number, boolean, text := "2.5", "false", "7"
+	v, ok := applyDefault(&ir.FieldDef{Name: "ratio", TypeRef: ir.TypeRef{Name: "number"}, Default: &number}, nil)
+	assert.True(t, ok)
+	assert.InDelta(t, 2.5, v.(float64), 1e-9)
+	v, ok = applyDefault(&ir.FieldDef{Name: "enabled", TypeRef: ir.TypeRef{Name: "boolean"}, Default: &boolean}, nil)
+	assert.True(t, ok)
+	assert.Equal(t, false, v)
+	v, ok = applyDefault(&ir.FieldDef{Name: "label", TypeRef: ir.TypeRef{Name: "string"}, Default: &text}, nil)
+	assert.True(t, ok)
+	assert.Equal(t, "7", v)
+}

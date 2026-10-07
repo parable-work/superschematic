@@ -13,9 +13,16 @@ from ..validation.types import FieldDef, ScalarDef
 
 
 def primitive_for_builtin(name: str) -> str:
+    """The primitive a builtin name stands for: a GraphQL scalar's, or the
+    IR's ``number``, ``boolean`` and ``string``, whose default text reads as
+    a number, a boolean and the text itself; ``""`` for any other name."""
     if name in ("Int", "Float", "Boolean"):
         return name
-    if name in ("String", "ID"):
+    if name == "number":
+        return "Float"
+    if name == "boolean":
+        return "Boolean"
+    if name in ("String", "ID", "string"):
         return "String"
     return ""
 
