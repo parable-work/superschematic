@@ -521,6 +521,8 @@ export interface TypeDef {
   stack?: StackDecl;
   strictJSON?: boolean;
   traitConfig?: TraitConfigSchema;
+  user?: UserTrait;
+  userRole?: UserRoleTrait;
   versionGraph?: VersionGraphConfig;
   versioned?: boolean;
   versionedConfig?: VersionedConfig;
@@ -547,6 +549,14 @@ export interface UnionFile {
   kind: 'Union';
   name: string;
   types: string[];
+}
+
+export interface UserRoleTrait {
+}
+
+export interface UserTrait {
+  login: string;
+  name?: string;
 }
 
 export interface VersionGraphConfig {
