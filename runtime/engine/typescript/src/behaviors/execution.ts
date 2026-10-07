@@ -92,7 +92,7 @@ import type { EngineEvent, EventCause } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject, jsonEqual, mergePatch, setMember } from '../instances/patch.js';
 import { pointer } from '../registry/document.js';
-import { readOnlyIssue } from '../registry/validator.js';
+import { readOnlyIssue, type NormalizeMode, type Normalized } from '../registry/validator.js';
 import type { SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import type { SqlMode } from './sql.js';
@@ -147,6 +147,8 @@ export type Preconditions = ReadonlyMap<string, FrozenJSON>;
 /** Checks an instance's own fields against the live version (registry/validator.ts). */
 export interface InstanceValidator {
   validate(value: unknown): ValidationIssue[];
+  /** The own fields a write stores, as the schema's parse makes them, with what a scalar's parser refused (registry/validator.ts). */
+  normalize(value: unknown, mode: NormalizeMode): Normalized;
   /** Checks a value against one of the document's types besides the instance type, with issues under path. */
   validateType(type: string, value: unknown, path: string): ValidationIssue[];
 }
@@ -561,21 +563,23 @@ export class Execution {
     if (!('value' in copied) || !isPlainObject(copied.value)) {
       throw new BehaviorError(from.behavior.name, 'update() takes a JSON merge patch of the instance: a JSON object');
     }
-    const value = copied.value;
     const issues: ValidationIssue[] = [];
-    for (const key of Object.keys(value)) {
+    for (const key of Object.keys(copied.value)) {
       const owner = this.composition.fields.get(key);
       if (owner !== undefined) {
         issues.push(readOnlyIssue(key, owner.behavior.name));
       }
     }
+    // The patch's values as the version stores them; it fills no default.
+    const normalized = this.runtime.validator.normalize(copied.value, 'patch');
+    const value = normalized.value as Record<string, unknown>;
     const merged = mergePatch(this.data, value) as Record<string, unknown>;
     if (issues.length > 0) {
       return { patch: value, merged, issues };
     }
     const own = this.runtime.validator.validate(merged);
-    if (own.length > 0) {
-      return { patch: value, merged, issues: own };
+    if (own.length > 0 || normalized.issues.length > 0) {
+      return { patch: value, merged, issues: own.length > 0 ? own : normalized.issues };
     }
     const request: ValidationRequest = { kind: 'update', before: this.data, after: freezeCopy(merged), caller: from.behavior.name };
     return { patch: value, merged, issues: validationIssues(this.runtime, this.chain, this.target, request) };

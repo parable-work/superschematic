@@ -316,10 +316,13 @@ export class InstanceStore {
     return chain.write(schema, id, () => {
       const record = this.live(namespace, schema);
       const runtime = this.catalog.runtimeOf(record);
-      this.validate(namespace, record, runtime, data);
-      this.validateBehaviors(chain, record, runtime, id, { kind: 'create', data: JSON.parse(JSON.stringify(data)) as FrozenJSON });
+      // What the create stores: each value as its scalar's parse makes it,
+      // each absent field's default filled.
+      const normalized = runtime.validator.normalize(data, 'create');
+      this.validate(namespace, record, runtime, normalized.value, normalized.issues);
+      this.validateBehaviors(chain, record, runtime, id, { kind: 'create', data: JSON.parse(JSON.stringify(normalized.value)) as FrozenJSON });
       const params = checkCreateParams(runtime.composition, schema, behaviors);
-      const own = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
+      const own = JSON.parse(JSON.stringify(normalized.value)) as Record<string, unknown>;
       const seq = nextSeq(this.storage, namespace, schema, id);
       const stowed = this.values.stow(own, '', undefined, runtime.inline);
       const inserted = this.unique(namespace, schema, runtime, own, () => this.storage.run(
@@ -399,7 +402,7 @@ export class InstanceStore {
     const record = this.live(namespace, schema);
     const runtime = this.catalog.runtimeOf(record);
     const chain = this.chain(principal, namespace);
-    const terms = parseWhere(options.where, runtime.filters, schema);
+    const terms = parseWhere(normalizedFilter(runtime, options.where), runtime.filters, schema);
     let items: Row[];
     let next: string | null;
     if (terms.length === 0) {
@@ -439,7 +442,7 @@ export class InstanceStore {
     const namespace = this.target(principal, 'read', schema, options);
     const record = this.live(namespace, schema);
     const runtime = this.catalog.runtimeOf(record);
-    const { index, values } = parseLookupKey(key, runtime.indexes, runtime.filters, schema);
+    const { index, values } = parseLookupKey(normalizedFilter(runtime, key), runtime.indexes, runtime.filters, schema);
     const row = this.storage.get(`SELECT ${COLUMNS} FROM engine_instances WHERE ${lookupCondition(record.namespace, schema, index)} LIMIT 1`, [
       namespace,
       ...values.map(bind),
@@ -481,8 +484,12 @@ export class InstanceStore {
         // own copies; frozen is what the behaviors see of the row.
         const current = this.ownOf(row, true);
         const frozen = deepFreeze(this.ownOf(row, false));
-        const merged = mergePatch(current, patch) as Record<string, unknown>;
-        this.validate(namespace, record, runtime, merged);
+        // The patch's values as the version stores them; an update fills
+        // no default. The event and the guards get the patch as stored.
+        const normalized = runtime.validator.normalize(patch, 'patch');
+        const given = normalized.value as Record<string, unknown>;
+        const merged = mergePatch(current, given) as Record<string, unknown>;
+        this.validate(namespace, record, runtime, merged, normalized.issues);
         this.validateBehaviors(chain, record, runtime, id, {
           kind: 'update',
           before: frozen,
@@ -492,11 +499,11 @@ export class InstanceStore {
           return this.read(chain, runtime, record, row, { copy: true });
         }
         const execution = this.execution(chain, runtime, record, id, () => frozen, true);
-        const frozenPatch = deepFreeze(JSON.parse(JSON.stringify(patch)) as FrozenJSON);
+        const frozenPatch = deepFreeze(JSON.parse(JSON.stringify(given)) as FrozenJSON);
         execution.guard({ kind: 'update', patch: frozenPatch, after: deepFreeze(JSON.parse(JSON.stringify(merged)) as FrozenJSON) }, true, preconditions);
         const before = execution.fields();
         const seq = Number(row.seq) + 1;
-        this.writeOwn(namespace, schema, id, merged, new Set(Object.keys(patch)), runtime);
+        this.writeOwn(namespace, schema, id, merged, new Set(Object.keys(given)), runtime);
         this.storage.run(
           `UPDATE engine_instances
            SET version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
@@ -1047,10 +1054,13 @@ export class InstanceStore {
     return record;
   }
 
-  private validate(namespace: string, record: SchemaRecord, runtime: VersionRuntime, data: unknown): void {
+  // validate refuses what the live version refuses in data, or, when it
+  // refuses nothing, what a scalar's parser refused as the write was
+  // normalized (parsed).
+  private validate(namespace: string, record: SchemaRecord, runtime: VersionRuntime, data: unknown, parsed: readonly ValidationIssue[] = []): void {
     const issues = runtime.validator.validate(data);
-    if (issues.length > 0) {
-      throw new InstanceValidationError(namespace, record.name, record.version as number, issues);
+    if (issues.length > 0 || parsed.length > 0) {
+      throw new InstanceValidationError(namespace, record.name, record.version as number, issues.length > 0 ? issues : [...parsed]);
     }
   }
 
@@ -1239,6 +1249,25 @@ function toInstance(row: Row, own: Readonly<Record<string, unknown>>, fields: Re
     updatedAt: Number(row.updated_at),
     updatedBy: String(row.updated_by),
   };
+}
+
+// normalizedFilter puts each value of a list's where, or of a lookup's key,
+// on an own field in the form a write stores it, so it compares with what
+// is stored: an email lowercased finds the instance created with it in
+// capitals. A value on a behavior's field, or of the wrong type, is left
+// as it is, for parseWhere and parseLookupKey to judge.
+function normalizedFilter(runtime: VersionRuntime, given: unknown): unknown {
+  if (!isPlainObject(given)) {
+    return given;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(given)) {
+    if (value !== undefined) {
+      const one = (each: unknown): unknown => runtime.validator.normalizeField(key, each);
+      setMember(out, key, Array.isArray(value) ? value.map(one) : one(value));
+    }
+  }
+  return out;
 }
 
 // rowHolder is who holds the values of an instance's row.

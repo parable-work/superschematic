@@ -1729,6 +1729,29 @@ it to that.
 | A refusal that changes nothing stays a veto: Workflow's `transition` to the state the instance is in (`already_in_state`) and Assignment's `assign` to its assignee (`already_assigned`). A veto writes nothing either, and the code tells a caller its read was stale or its retry landed. Making them unchanged calls would run the other behaviors' guards on a move that is no move, so a gate (`blocked`, `not_held`) could refuse what changes nothing. | Idempotent success for both, which hides a stale read and asks guards about a move the instance does not make |
 | `Links`' `link` to the target and revision the link holds still writes. `Blueprint` stamps an unstamped instance on any `link` of its `from` link, and a link made again is how a schema that gained Blueprint asks for the stamp. | An unchanged `link`, which would make that stamp unreachable |
 
+### D16, amended: a write stores what the schema's parse makes of it
+
+A create and an update only validated, and stored the fields as given.
+The schema runtime's parse, which a generated server runs on every
+request, puts a scalar's value in the canonical form the scalar defines
+and fills a field's default; the engine never ran it. So two instances
+held one email in two cases and a unique field let both through, a
+`Generic.StringMap` given as its JSON text was stored as text, and a
+field's `default` meant nothing. A write now stores what the parse makes
+of it. The runtimes' parse also read a default of the IR's `number` and
+`boolean` as its text, where D14's loader reads a number and a boolean;
+they now read it as the loader does.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every write of an instance's own fields runs the schema runtime's strict parse of the instance type before the version validates them: a create, an update, a behavior's `update()` and `instances.create`, `validateUpdate()`, and `schemas.validate`, which answers as a create. Each scalar value takes the canonical form its scalar's normalize and parse steps give it, at every depth. | Normalizing in validation, which the runtimes keep apart from parse; normalizing only scalars the engine names, a list of its own beside the catalog's flags |
+| What the parse cannot read is left as given, for the version to refuse under its own rule (`type`, `unknown`, `readOnly`), so its issues are what they were. A value its scalar's parser refuses where the version's rules let it through is refused with the parser's rule, `parse`, reported only when the version finds nothing, so a value is never refused twice. | The parse's issues beside the version's, under two names for one problem; storing a value its parser refused, un-normalized |
+| Defaults fill on a create only, in nested objects and list elements too, read as D14's loader reads the IR's text. A merge patch fills none: a member its `null` removes stays removed, and a field a later version adds stays absent on the instances before it, as the compatibility rule promised them. A list's default is not filled, as no runtime's parse fills one. | Filling on an update, which undoes a `null` that removes a field with a default and writes values no caller sent; filling the instances that predate a new default at their next write |
+| An update normalizes its patch, not the instance: a member the patch leaves alone keeps its stored value and its ref in the value store. The event records the patch as stored, so the log still replays to what a read returns, and a patch that normalizes to what the instance holds changes nothing and writes nothing. | Normalizing the merged instance, which rewrites members no caller touched and needs a diff to log |
+| What a client sees is what is stored: the create's and update's answer, every read, the event's change, the value store's hash of a large field (a value hashes in the form the row stores) and the comparisons of a unique index. A `lookup` key's and a list's `where` values on own fields are normalized before they compare, so the form a client sent finds what it stored. | Comparing as given, under which an instance created with `Ada@Example.COM` is not found by it |
+| The compatibility rule is unchanged: a version's default may change, since a default applies at a create, and a stored value satisfied the version that normalized it. A row written before keeps its values as given until a write sets them; a unique field's old value does not collide with its normalized form, and a lookup by the normalized form does not find it. Flagged: a deployment that needs them normalized rewrites the field with an update. | A migration that normalizes every row, which rewrites instances without an event, so the log no longer replays to them |
+| The Go, TypeScript and Python schema runtimes read a default of the IR's `number` as a number, of `boolean` as a boolean and of `string` as its text, as they read `Float`, `Boolean` and `String`. | Leaving the text, which every validator then refuses as `type` |
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.

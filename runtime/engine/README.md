@@ -429,6 +429,47 @@ validator itself. Both are the version's own rules: a behavior's
 `validate`, which judges a write ("Validating fields" under
 "Behaviors"), is not asked.
 
+A write stores what the schema's parse makes of it (D16, amended).
+Before the version validates them, the own fields a write gives go
+through the schema runtime's strict parse of the instance type
+(`parseType`), the step a generated server runs on a request: each
+scalar value takes the canonical form its scalar's normalize and parse
+steps give it, at every depth, and each absent field that declares a
+default takes it. So `Contact.Email` stores `ada@example.com` for
+`Ada@Example.COM`, `Design.Color` stores `#FF0000FF` for `red`,
+`Identity.UUID` its base62 form, `Temporal.DateTime` its RFC 3339 text
+with the sub-seconds trimmed, and `Generic.StringMap` the object for its
+JSON text.
+
+- **Where.** A create, an update, a behavior's `update()` and
+  `instances.create`, and `validateUpdate()`, which reports what
+  `update()` would. `schemas.validate` answers as a create would.
+- **Defaults on create only.** A create fills each absent field's
+  default, in nested objects and list elements too; the text reads as
+  D14's loader reads it: the text for a string, an enum or a string
+  scalar, a number or a boolean for those types (a list's default is
+  not filled, as the runtimes' parse fills none). An update's merge
+  patch fills none, so a field a patch removes with `null` stays
+  removed, and a field a later version adds stays absent on the
+  instances before it.
+- **What the parse cannot read** is left as given for the version to
+  refuse with its own rule: a value of the wrong type (`type`), a key no
+  type declares (`unknown`), a field a behavior adds (`readOnly`). A
+  value its scalar's parser refuses where the version's rules let it
+  through is refused with the parser's rule (`parse`), a
+  `Temporal.DateTime` of the 30th of February say.
+- **What a client sees is what is stored.** The create's and the
+  update's answer, every later read, the event's change (an update's
+  patch with its values as stored) and the value store's hash of a large
+  field are the normalized form. An update whose patch normalizes to
+  what the instance holds changes nothing and writes nothing. A unique
+  index compares the stored form, and a `lookup` key's and a list's
+  `where` values on own fields are normalized before they compare.
+- **Rows written before.** An instance written before the engine
+  normalized keeps its values as given until a write sets them again; a
+  unique field's old value does not collide with its normalized form,
+  and a lookup by the normalized form does not find it.
+
 ## Instances
 
 `engine.instances` stores instances of a schema's instance type. An
@@ -439,8 +480,11 @@ followed by letters, digits, `.`, `_`, `:` and `-`, at most 256
 characters. A schema a namespace reaches through the shared namespace
 holds instances in the namespace that creates them.
 
-- `create` validates the instance against the schema's live version,
-  then asks its behaviors' `validate`, and refuses an id the namespace
+- `create` stores the instance as the schema's parse makes it, each
+  scalar value in its canonical form and each absent field's default
+  filled ("Validation" under "Schemas"), validates it against the
+  schema's live version, then asks its behaviors' `validate`, and
+  refuses an id the namespace
   already has for the schema, and a unique field's value another
   instance holds (`conflict`).
   `behaviors` gives the type's behaviors their parameters, by behavior
@@ -464,8 +508,10 @@ holds instances in the namespace that creates them.
 - `update` takes a JSON merge patch (RFC 7386), the engine's update rule: a
   member replaces the instance's member, a nested object merges, `null`
   removes the member, and a list or any other value replaces what was
-  there. The result is validated against the live version, then by the
-  behaviors' `validate`; a patch that changes nothing writes nothing. The
+  there. The patch's values are normalized as a create's are, with no
+  default filled, and the result is validated against the live version,
+  then by the behaviors' `validate`; a patch that changes nothing, once
+  normalized, writes nothing. The
   behaviors' guards may veto it, and a unique field's value another
   instance holds refuses it (`conflict`).
 - `delete` removes the instance and returns whether there was one. The
@@ -536,7 +582,7 @@ one on the same fields.
 
 `lookup(principal, schema, key, { namespace, valueRefs })` asks `read`
 and returns the instance whose fields hold `key`'s values, through the
-index. `key` names exactly the fields of one unique index, each with one
+index, each value normalized as a write stores it first. `key` names exactly the fields of one unique index, each with one
 value of its type: `{ slug: 'openai/gpt-5' }`, or `{ source: 'crm',
 externalId: 42 }` for a unique `@index` on both. Any other key, a value
 of another type, null, and a schema with no unique field are
@@ -545,8 +591,9 @@ in a path segment, so a value may hold `/`.
 
 ### Filters
 
-`list`'s `where` is a JSON object of field values: a member keeps the
-instances whose field holds its value, a list of 1 to 100 values any of
+`list`'s `where` is a JSON object of field values, each on an own field
+normalized as a write stores it: a member keeps the instances whose
+field holds its value, a list of 1 to 100 values any of
 them (`MAX_FILTER_VALUES`), and the members together the instances every
 member keeps. `{}` filters nothing.
 
@@ -1969,10 +2016,10 @@ every call on the schema `unavailable` until one registers.
 
 | Call | Order, in one transaction for a write |
 | --- | --- |
-| `create` | validate (a behavior field is `readOnly`) -> each `validate` (`kind: 'create'`) -> check `behaviors` against each `createParamsSchema` -> insert -> every guard (`kind: 'create'`) -> each `initialize`, with its parameters -> each `afterChange` -> event |
+| `create` | normalize (the parse, with defaults) -> validate (a behavior field is `readOnly`) -> each `validate` (`kind: 'create'`) -> check `behaviors` against each `createParamsSchema` -> insert -> every guard (`kind: 'create'`) -> each `initialize`, with its parameters -> each `afterChange` -> event |
 | `get`, `list` | each field reader |
-| `update` | refuse a behavior field (`readOnly`) -> check `preconditions` against each `preconditionSchema` -> check `expectedSeq` -> merge and validate -> each `validate` (`kind: 'update'`) -> nothing more if nothing changed -> every guard, each with its precondition -> write -> each `afterChange` -> event |
-| an operation's `update()` | refuse a behavior field (`readOnly`) -> merge and validate -> each `validate`, with `caller` -> nothing more if nothing changed -> every guard, with no precondition -> write; `validateUpdate()` stops before the guards and writes nothing |
+| `update` | refuse a behavior field (`readOnly`) -> check `preconditions` against each `preconditionSchema` -> check `expectedSeq` -> normalize the patch (no defaults), merge and validate -> each `validate` (`kind: 'update'`) -> nothing more if nothing changed -> every guard, each with its precondition -> write -> each `afterChange` -> event |
+| an operation's `update()` | refuse a behavior field (`readOnly`) -> normalize the patch, merge and validate -> each `validate`, with `caller` -> nothing more if nothing changed -> every guard, with no precondition -> write; `validateUpdate()` stops before the guards and writes nothing |
 | `delete` | check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition, then each referencing behavior's `guardReference` -> the row goes -> each `afterChange` -> its references go -> event -> each `afterReferenceChange` -> no reference to it may remain |
 | `invoke` | policy -> parameters against `paramsSchema` -> check `preconditions` -> check `expectedSeq` -> every guard, each with its precondition (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> nothing more if the handler said it changed nothing (`unchanged()`) and wrote no row -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
 | `invokeSchema` | policy -> parameters against `paramsSchema` -> the handler -> its result against `resultSchema`; no guard, no event |
