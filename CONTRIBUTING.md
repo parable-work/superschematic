@@ -199,6 +199,32 @@ export SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATA
 export SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL"
 ```
 
+### A deploy to Google Cloud
+
+No CI job deploys to Google Cloud. A maintainer proves the gcp target
+(milestone 3 of `docs/stack-model.md`) with a run from a checkout, against
+a fresh project they own, signed in with `gcloud auth login` and
+`gcloud auth application-default login`:
+
+1. `make build`, and the `pulumi` CLI on `PATH`.
+2. Give `examples/acme-shop`'s `shop-stack` a gcp environment, beside
+   `Dev`, with the project and region, and the gcp target's types (the
+   stacks guide, "Type a target's values"). Keep the edit local: the
+   example builds with the core binary, which refuses a gcp environment.
+3. From `examples/acme-shop`, `../../bin/superschematic stack bootstrap
+   <environment> --repository ""`, which needs no GitHub repository.
+4. `export SUPERSCHEMATIC_MIGRATE_IMAGE="$(scripts/migrate-dev-image.sh
+   <project> <region> shop-stack)"` from the checkout's root, since a
+   binary built from a checkout names no release whose runner image the
+   deploy could build.
+5. `stack plan`, `stack deploy`, then call the APIs at the `run.app` URLs
+   `stack outputs` prints, and `stack destroy` (`--yes` away from a
+   terminal). Bootstrap's resources and the stack's images stay until the
+   project goes.
+
+`third_party` must be a directory, not a link to another checkout: a
+build's context keeps a link as a link, as Docker's does.
+
 ## Rules
 
 ### Generated files are never hand-edited

@@ -1226,7 +1226,8 @@ again: each step creates what is missing and leaves the rest.
    - Workload Identity Federation for the GitHub repository the git remote
      names: a pool, a provider for GitHub Actions' tokens that admits only
      that repository, and the right of both accounts to be used from it.
-     Without a GitHub remote it is left out, and `--repository` names one.
+     Without a GitHub remote it is left out, `--repository` names one,
+     and `--repository ""` leaves it out.
 4. It creates the secret of each platform credential the environment
    needs (a DNS platform's API token, section 6.9) in Secret Manager,
    where only `deployer` and `planner` can read it, and asks for each
@@ -1571,7 +1572,7 @@ onto distroless static. `runtime/migrate/go` carries no `replace`
 directive, so `go install` takes it. The release is the one the binary is
 part of; a binary built from a checkout names none, and
 `SUPERSCHEMATIC_MIGRATE_IMAGE` names an image of the runner by digest in
-its place. The local target runs the runner on the host (section 8.3).
+its place, which `scripts/migrate-dev-image.sh` builds from the checkout. The local target runs the runner on the host (section 8.3).
 
 ### 8.5 Where the implementation lives
 
@@ -2624,7 +2625,49 @@ model, or retired, when it lands.
    Cloud DNS and Cloudflare DNS platforms, the Pulumi provisioner, Cloud
    Build, secrets, `plan` and `deploy`. Done when
    a fresh project plus a project id and a region gives a live acme-shop.
-   A nightly job proves it against a sandbox project.
+   A run from a maintainer's machine proves it, with an owner's
+   application default credentials: no CI job, no secret in CI and no
+   sandbox kept between runs. Done on 2026-10-07, from a binary built from
+   a checkout, on a fresh project in `us-central1`. acme-shop's stack took
+   a gcp environment beside `Dev` for the run only, since the example
+   builds with the core binary, which links no target but `local`. The
+   migration runner's image came from `scripts/migrate-dev-image.sh`, since
+   no release exists to build it from. `stack bootstrap` ran with
+   `--repository ""`, leaving Workload Identity Federation out, then
+   `stack plan`, `stack build` and `stack deploy`. The deploy took seven
+   minutes: Cloud SQL and the accounts, the migration job, which applied
+   shop-db's 20 expand steps as the migrator's IAM database user with
+   `cloudsqlsuperuser` and gave both servers their privileges, then both
+   Cloud Run services. A client then signed a user in through the ORM,
+   over the Cloud SQL Go connector as shop-api's IAM database user, and
+   called `CreateProduct`, `ListProducts` and `PlaceOrder` through the
+   generated Go SDKs at the `run.app` URLs, as `TestStackDevRunsTheShop`
+   does locally. A second deploy built both images inside the deploy and
+   rolled them out with no migration, and `plan` then showed no change.
+   `stack destroy` removed the run in three minutes. It left what the
+   stack's runs in the project share: bootstrap's state bucket, KMS key
+   ring and key (which Google Cloud never deletes), Artifact Registry
+   repository with the images, and its four accounts; the migration job;
+   the build contexts and job documents in the bucket; and the enabled
+   APIs. Deleting the project removes them all.
+
+   The run found five bugs, each fixed in a pull request of its own:
+   acme-shop's servers had no Dockerfile, since their runtime modules lie
+   above the example (`[paths] build_context`, D30 amended); bootstrap
+   failed on Cloud KMS until enabling its API reached every server, so it
+   retries such a refusal; the operation of a build in a region answered
+   NotFound, so the deploy polls the build by name; both Cloud Run
+   services planned an update on every preview, from a
+   `minInstanceCount` of 0 that Cloud Run does not return; and the
+   migration job reported taking back Cloud SQL's own grant to
+   `cloudsqlsuperuser`. A failed job execution failed its step with only
+   Cloud Run's "The container exited with an error", the execution's name
+   and the URL of its logs, where the runner's own error was; the deploy
+   now reads that error from Cloud Logging (D46, amended). Not run: a
+   domain, its load balancer and either DNS platform, secrets (acme-shop
+   has none), Workload Identity Federation, a parameterized environment,
+   and a calling server's network, which waits for a stack with `calls`
+   edges (milestone 4).
 4. **Service auth.** Admission and identity (section 9) on Cloud Run.
 5. **Database lifecycle.** The `sqlgen` migration plan and apply step in
    deploys, the hazard gate and the deploy manifest.
