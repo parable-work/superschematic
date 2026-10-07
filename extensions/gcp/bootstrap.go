@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -320,13 +321,24 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 		return err
 	}
 
+	// Every call from here on may meet an API enabled moments ago.
+	retry := func(what string, do func() error) error { return untilEnabled(ctx, logf, what, do) }
+
 	bucket := stateBucket(v.project)
-	created, err := cloud.EnsureBucket(ctx, v.project, bucket, v.region)
+	var created bool
+	err = retry("the state bucket", func() (err error) {
+		created, err = cloud.EnsureBucket(ctx, v.project, bucket, v.region)
+		return err
+	})
 	if err != nil {
 		return err
 	}
 	logf("state bucket gs://%s: %s", bucket, createdOrKept(created))
-	if created, err = cloud.EnsureKey(ctx, v.project, v.region, stateKeyRing, stateKey); err != nil {
+	err = retry("the state key", func() (err error) {
+		created, err = cloud.EnsureKey(ctx, v.project, v.region, stateKeyRing, stateKey)
+		return err
+	})
+	if err != nil {
 		return err
 	}
 	logf("state key %s: %s", stateKeyName(v), createdOrKept(created))
@@ -350,9 +362,13 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 		return err
 	}
 	logf("apply the bootstrap graph: %d nodes", len(graph.Resources.Resources))
-	if err := req.Provisioner.Apply(ctx, registry.ProvisionRequest{Environment: graph, Dir: dir, Backend: backend}, *graph.DeployOrder[0]); err != nil {
+	err = retry("the bootstrap graph", func() error {
+		return req.Provisioner.Apply(ctx, registry.ProvisionRequest{Environment: graph, Dir: dir, Backend: backend}, *graph.DeployOrder[0])
+	})
+	if err != nil {
 		return err
 	}
+	logf("bootstrap graph applied")
 
 	members := []string{accountMember(v, env.Stack, "deployer"), accountMember(v, env.Stack, "planner")}
 	seen := map[string]bool{}
@@ -361,16 +377,54 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 			continue
 		}
 		seen[c.Secret] = true
-		created, err := cloud.EnsureSecret(ctx, v.project, c.Secret)
+		err := retry("credential secret "+c.Secret, func() (err error) {
+			if created, err = cloud.EnsureSecret(ctx, v.project, c.Secret); err != nil {
+				return err
+			}
+			return cloud.GrantSecretAccess(ctx, v.project, c.Secret, members)
+		})
 		if err != nil {
-			return err
-		}
-		if err := cloud.GrantSecretAccess(ctx, v.project, c.Secret, members); err != nil {
 			return err
 		}
 		logf("credential secret %s: %s, readable by deployer and planner", c.Secret, createdOrKept(created))
 	}
 	return nil
+}
+
+// apiPropagation bounds how long bootstrap retries a call that an API it
+// has just enabled refuses, and apiRetry is the wait between tries.
+var apiPropagation, apiRetry = 5 * time.Minute, 15 * time.Second
+
+// untilEnabled runs do until it succeeds, fails for another reason than an
+// API that is not enabled, or apiPropagation passes. Enabling an API
+// finishes before every Google server sees it, and for some minutes the
+// API may refuse a call as one the project has not enabled: the first
+// bootstrap of a fresh project met it from Cloud KMS, both on creating
+// the key ring and, through the provisioner, on reading the key's IAM
+// policy.
+func untilEnabled(ctx context.Context, logf func(string, ...any), what string, do func() error) error {
+	deadline := time.Now().Add(apiPropagation)
+	for {
+		err := do()
+		if err == nil || !serviceDisabled(err) || time.Now().After(deadline) {
+			return err
+		}
+		logf("%s: an API enabled moments ago refuses calls yet; retry in %s", what, apiRetry)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(apiRetry):
+		}
+	}
+}
+
+// serviceDisabled reports whether err is Google's refusal of a call to an
+// API the project has not enabled, by the text both the client libraries'
+// and the provisioner's errors carry: the 403's message, or its
+// SERVICE_DISABLED reason.
+func serviceDisabled(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "SERVICE_DISABLED") || strings.Contains(msg, "before or it is disabled")
 }
 
 func createdOrKept(created bool) string {
