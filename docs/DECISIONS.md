@@ -3998,3 +3998,40 @@ does not record it yet, the readers do not number environments, and no
 renderer, generator or CI seam exists.
 
 The rule is reversible until the first release.
+
+### D47, amended: a release ships the static archives its generated servers link
+
+The workflow's `check` job compiles each Go server, and its deploy jobs
+build images from a context the deploy writes (D46). A generated server
+links superscalar's static archive through cgo (D3), and the version
+graph's when its database declares one, and no Go module the module proxy
+serves carries either: a fresh runner, with no superscalar checkout and no
+`CGO_LDFLAGS`, failed `go build` at the link, and a project whose naming
+file names no checkout (`[paths] scalar_go`) got no Dockerfile at all. A
+checkout's server, on a runner that never made the checkout, got a
+context without it, which Cloud Build would refuse at a `COPY`. Such a
+project's server `go.mod` also required superscalar at `v1.0.0` and the
+runtime modules at the zero pseudo-version, which no proxy serves.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each release ships, per platform, `superschematic-archives_<version>_<platform>.tar.gz`: superscalar's archive, built from the pinned commit, and the version graph's, both with `tools.env`'s Rust under `lib/` (`scripts/release-archives.sh`). The release builds them before the CLIs, links each CLI against its platform's tarball, and links every tarball's SHA-256 into the CLI (`internal/release`), so the code a release generates pins what it downloads. | superscalar's own release assets, which its pipeline builds with its Rust release for musl: the version graph's archive must come from the same Rust release to link beside them, a coupling across two repositories on every bump, and superschematic would still publish the version graph's. Building from source in every workflow and image, a Rust toolchain and a cache in each, which the release does once. A WebAssembly core run by a pure-Go runtime, with no archives at all, the largest change and one in superscalar's binding. A digest read from the release's `SHA256SUMS`, which the same release page serves (D46). |
+| The workflow's `check` job installs the runner's tarball after superschematic, checks it against the digest the binary names, and points `CGO_LDFLAGS` at its `lib/`. A binary the release workflow did not build names no digests, and the step fails and says so. | An archives step in every job, though only `check` compiles; folding it into the install step, which checks the CLI against `SHA256SUMS`. |
+| A server Dockerfile without `[paths] scalar_go` downloads the release's tarball for the image's platform, `linux/amd64` or `linux/arm64`, checked against the digests it pins, from `SUPERSCHEMATIC_RELEASE`, a build argument whose default is the release's page, and builds with no Rust stage and no checkout in its context. With `[paths] scalar_go` it builds both archives from the checkouts, as before. A binary built from a checkout, or not by the release workflow, writes no Dockerfile without it, and says why. | Archives the deploy adds to the context, which the target's builder would upload with every build; a Rust stage that fetches superscalar's source by commit. |
+| A release pins each runtime module no `[paths]` key names in the server's `go.mod` and in the implementation module it scaffolds, by a replace of every version: superschematic's at the release's tag, superscalar's Go binding at the version the release links. The generated modules keep requiring them at versions only a checkout's replace resolves. | Real versions in every generator's `go.mod`, a change to every Go generator that the server, which every build of a stack goes through, does not need first. |
+| The deploy refuses a context that lacks a path its ignore file takes in by name, or holds one under a symbolic link, which a context carries as a link and not its files, before anything is uploaded. | Following links into the context, which BuildKit's rules for a local context do not. |
+
+Status: built. The release's `build-archives` job and the CLI's digests
+are in `.github/workflows/release.yml`, which no release has run yet. The
+`github` renderer's `check` job has the archives step; `servergen` writes
+the release's Dockerfile and pins, whose golden is
+`internal/generator/servergen/testdata/golden/release`, and
+`TestTheReleaseDockerfileBuildsAnImageThatServes` builds one from a stand-in
+release page and runs the image. A clean `golang` container, with a
+project of no `[paths]`, built both servers with the archives step's
+commands, the runtime modules coming from the module proxy at a commit.
+Not built: `stack dev`, and a local `go build` in such a project, still
+need `CGO_LDFLAGS` set by hand, and the other Go generators' modules
+still require the runtime modules at the zero pseudo-version.
+
+The rule is reversible until the first release.

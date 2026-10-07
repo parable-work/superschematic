@@ -1390,32 +1390,57 @@ docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
 
 `Dockerfile.dockerignore` beside it cuts the context down to the
 directories the build reads: the server's module, the generated modules,
-the runtime modules, the implementations' modules and the superscalar
-checkout. A server whose modules lie outside the repository root, or a
-naming file without `[paths] scalar_go`, gets no Dockerfile, and the build
-says why.
+the runtime modules and the implementations' modules that the server's
+`go.mod` replaces with a directory, and the superscalar checkout when the
+image builds from one. A server whose modules lie outside the repository
+root gets no Dockerfile, and the build says why.
 
 The generated Go code links superscalar's static archive through cgo (D3),
-so the binary cannot be a `CGO_ENABLED=0` build. The image is built in
-stages:
+so the binary cannot be a `CGO_ENABLED=0` build, and a server whose
+database declares a version graph links the version graph's archive too.
+No Go module the module proxy serves carries either, so they come from
+one of two places (D47, amended):
 
-- a Rust stage builds the archive for the image's platform from the
-  checkout `[paths] scalar_go` names, with `tools.env`'s Rust release, the
-  one the host's archives are built with. A second stage builds the
-  version graph's archive when a database the server connects to declares
-  a version graph;
-- a Go stage, on the Go release `tools.env` pins, puts each archive where
-  its binding's cgo flags look, then builds the server with `-mod=mod`;
-- the binary runs on distroless `cc`, which holds the glibc and libgcc
-  the archives need and nothing else, as a non-root user.
+- **A checkout.** With the naming file's `[paths] scalar_go` naming a
+  superscalar checkout, a Rust stage builds superscalar's archive for the
+  image's platform from it, with `tools.env`'s Rust release, the one the
+  host's archives are built with, and a second stage builds the version
+  graph's from the crate beside `[paths] versiongraph_go`. A Go stage puts
+  each archive where its binding's cgo flags look.
+- **The release.** Without `[paths] scalar_go`, as in a project that
+  takes the runtime modules from the module proxy, the image takes the
+  archives the release of superschematic that wrote the Dockerfile ships:
+  `superschematic-archives_<version>_<platform>.tar.gz` beside the CLI on
+  the release page, both archives built with one Rust release under
+  `lib/`. The release builds them before the CLIs and links each CLI with
+  every platform's digest (`internal/release`), so the Dockerfile pins the
+  digest for `linux/amd64` and `linux/arm64`. The Go stage downloads the
+  tarball for its platform from `SUPERSCHEMATIC_RELEASE`, a build argument
+  whose default is the release's page, checks it, and points
+  `CGO_LDFLAGS` at it. The server's `go.mod` replaces each runtime module
+  no `[paths]` key names, every version of it, with the module at the
+  release: superschematic's at the release's tag and superscalar's Go
+  binding at the version the release links, since the generated modules
+  require them at versions only a checkout's replace resolves. A binary
+  built from a checkout is no release, and one the release workflow did
+  not build names no digests: neither writes a Dockerfile without `[paths]
+  scalar_go`, and the build says why.
+
+Either way the Go stage, on the Go release `tools.env` pins, builds the
+server with `-mod=mod`, and the binary runs on distroless `cc`, which
+holds the glibc and libgcc the archives need and nothing else, as a
+non-root user.
 
 TypeScript and Rust servers get their own Dockerfiles with their
 entrypoints.
 
 Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
-the scalar library allows; and fetching a prebuilt archive, which
-superscalar does not publish yet. When it does, the Rust stage becomes a
-download.
+the scalar library allows; the archives superscalar's own release
+pipeline publishes, which it builds with its own Rust release and for
+musl, while a server links them beside the version graph's archive, which
+must come from the same Rust release; and building the archives from
+source in every image without a checkout, which the release already
+does once.
 
 ### 8.3 Local stack
 
@@ -2236,7 +2261,11 @@ executable bit, so the same files give the same archive on any machine.
 The digest of its tar stream decides whether the server changed: it
 covers the server's entrypoint module, the generated and runtime modules,
 the implementations and the superscalar checkout the image builds from,
-and nothing the ignore file leaves out. On gcp the builder uploads the
+or the Dockerfile that pins the release's archives, and nothing the
+ignore file leaves out. A context that lacks a path the ignore file takes
+in by name, such as a superscalar checkout a CI runner never made, or
+holds one under a symbolic link, which a context carries as a link and
+not its files, is refused before the upload. On gcp the builder uploads the
 archive to the state bucket, under `superschematic/builds/`, and runs a
 Cloud Build build of the Dockerfile with BuildKit, as the `builder`
 account (section 7.3), which pushes to the stack's repository with the tag
@@ -2318,12 +2347,16 @@ read.
 The GitHub workflow:
 
 - **On a pull request:**
-  - A `check` job needs no credentials. It installs superschematic and
-    the schemas root's packages, by the root's lockfile (`bun install
-    --frozen-lockfile` or `npm ci`), runs `build-all` over the services
-    root, which resolves every environment and checks its graph (levels 1
-    and 3), and compiles each Go server's entrypoint module with `go build
-    -mod=mod` (level 2). It runs on a push too.
+  - A `check` job needs no credentials. It installs superschematic, the
+    static archives the release ships for the runner's platform (section
+    8.2), checked against the digest the binary names, with
+    `CGO_LDFLAGS` pointing at them, and the schemas root's packages, by
+    the root's lockfile (`bun install --frozen-lockfile` or `npm ci`),
+    runs `build-all` over the services root, which resolves every
+    environment and checks its graph (levels 1 and 3), and compiles each
+    Go server's entrypoint module with `go build -mod=mod` (level 2). It
+    runs on a push too. A binary the release workflow did not build names
+    no digests, and its archives step fails.
   - A `plan` job per cloud environment without parameters runs `stack
     plan` as `planner`, after `check`: the infrastructure diff, the
     migration plans and their hazards (levels 5 and 6).

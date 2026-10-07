@@ -149,6 +149,21 @@ type CIRequest struct {
 	// workflow's install step then fails and says to render it again with
 	// a release.
 	Version string
+
+	// Archives are the static archives the release ships beside the
+	// binary, by platform (`linux-x64`), which a job that compiles a Go
+	// server downloads and links: superscalar's and the version graph's
+	// (D47, amended). Empty for a binary the release workflow did not
+	// build, which names no digests.
+	Archives map[string]CIArchive
+}
+
+// CIArchive is one platform's static archives in a release: a tarball at
+// URL whose hex SHA-256 is SHA256, holding one directory whose lib/ holds
+// the archives.
+type CIArchive struct {
+	URL    string
+	SHA256 string
 }
 
 // CIFile is one file a CI renderer writes.

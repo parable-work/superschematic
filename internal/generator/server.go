@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -134,6 +135,7 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []s
 		Naming:         r.Options.Naming,
 		RepositoryRoot: r.Options.RepositoryRoot,
 		ScalarGo:       r.Options.Paths.ScalarGo,
+		Release:        r.Options.ReleaseInfo(),
 		CloudSQL:       cloudSQL,
 	}
 	var scaffolds []scaffold
@@ -281,8 +283,25 @@ func (r run) implementation(service string) (impl servergen.Implementation, newM
 // with its directory: its own module, the types modules it reaches, the
 // ORM of its database, the SDK of each API it calls, and the runtime
 // modules. The API module and the packages its Deps imports are direct.
+// A runtime module no [paths] key names a checkout of is pinned to the
+// release that generates the server, which the module proxy serves:
+// superschematic's at the release's tag, superscalar's at the version the
+// release links and builds its static archives from (D47, amended). A
+// binary built from a checkout names no release, and pins none.
 func (r run) goServerModules(o *apigen.APIOutput) []servergen.Module {
 	out, paths, n := r.Options.OutputRoot, r.Options.Paths, r.Options.Naming
+	rel, defaults := r.Options.ReleaseInfo(), naming.Default()
+	runtimeModule := func(module, dir string, direct bool) servergen.Module {
+		m := servergen.Module{Path: module, Dir: dir, Direct: direct}
+		if dir == "" && rel.Version != "" && slices.Contains([]string{defaults.HTTPRuntimeGoModule, defaults.SchemaRuntimeGoModule, defaults.SchemaIRGoModule, defaults.VersionGraphGoModule}, module) {
+			m.Version, m.Pinned = rel.ModuleVersion(), true
+		}
+		return m
+	}
+	scalar := servergen.Module{Path: n.ScalarGoModule, Dir: paths.ScalarGo, Version: "v1.0.0"}
+	if paths.ScalarGo == "" && rel.Version != "" && rel.ScalarGo != "" && n.ScalarGoModule == defaults.ScalarGoModule {
+		scalar.Version, scalar.Pinned = rel.ScalarGo, true
+	}
 	modules := []servergen.Module{
 		{Path: o.ModulePath, Dir: APIDir(out, o.SchemaName), Direct: true},
 		{Path: o.TypesModule, Dir: TypesDir(out, LangGo, o.SchemaName)},
@@ -300,13 +319,13 @@ func (r run) goServerModules(o *apigen.APIOutput) []servergen.Module {
 		modules = append(modules, servergen.Module{Path: call.Module, Dir: SDKDir(out, LangGo, call.Service), Direct: true})
 	}
 	modules = append(modules,
-		servergen.Module{Path: n.HTTPRuntimeGoModule, Dir: paths.HTTPRuntimeGo, Direct: true},
-		servergen.Module{Path: n.SchemaRuntimeGoModule, Dir: paths.SchemaRuntimeGo},
-		servergen.Module{Path: n.SchemaIRGoModule, Dir: paths.SchemaIR},
-		servergen.Module{Path: n.ScalarGoModule, Dir: paths.ScalarGo, Version: "v1.0.0"},
+		runtimeModule(n.HTTPRuntimeGoModule, paths.HTTPRuntimeGo, true),
+		runtimeModule(n.SchemaRuntimeGoModule, paths.SchemaRuntimeGo, false),
+		runtimeModule(n.SchemaIRGoModule, paths.SchemaIR, false),
+		scalar,
 	)
 	if (o.IsPublic && o.UpstreamVersionGraph) || o.Deps.VersionGraph {
-		modules = append(modules, servergen.Module{Path: n.VersionGraphGoModule, Dir: paths.VersionGraphGo})
+		modules = append(modules, runtimeModule(n.VersionGraphGoModule, paths.VersionGraphGo, false))
 	}
 	return modules
 }

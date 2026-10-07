@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -109,6 +110,10 @@ func TestCIGolden(t *testing.T) {
 		Environments: envs,
 		Options:      registry.CIOptions{}.WithDefaults(renderer),
 		Version:      "1.2.3",
+		Archives: map[string]registry.CIArchive{"linux-x64": {
+			URL:    "https://github.com/parable-work/superschematic/releases/download/v1.2.3/superschematic-archives_1.2.3_linux-x64.tar.gz",
+			SHA256: strings.Repeat("4", 64),
+		}},
 	})
 	if err != nil {
 		t.Fatal(err)

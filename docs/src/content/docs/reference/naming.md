@@ -378,7 +378,13 @@ the key until that module is published.
 Default: unset. This repository's own file sets
 `third_party/superscalar/go`.
 
-Directory of the scalar library's Go module (`go.mod`).
+Directory of the scalar library's Go module (`go.mod`). A stack's server
+Dockerfiles build superscalar's static archive, and the version graph's,
+from the checkout that holds it. Unset, a release of superschematic pins
+the server's runtime modules to itself and its Dockerfiles download the
+archives the release ships
+([Stacks](/superschematic/guides/stacks/)); a binary built from a
+checkout writes no Dockerfile.
 
 ### `paths.scalar_typescript`
 

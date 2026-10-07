@@ -253,8 +253,12 @@ root's package manager, all relative to the repository root; its
 environments in declaration order, each resolved, with the identity its
 target's `CI` seam gives each role and its provisioner's tools; the
 renderer's options from the config (`branch` and `install`, with their
-defaults applied); and `Version`, the release of superschematic that
-renders, empty for a binary built from a checkout. Each `CIFile` is a
+defaults applied); `Version`, the release of superschematic that
+renders, empty for a binary built from a checkout; and `Archives`, by
+platform (`linux-x64`), the URL and SHA-256 of the static archives the
+release ships, which a job that compiles a Go server installs and points
+`CGO_LDFLAGS` at, empty for a binary the release workflow did not build.
+Each `CIFile` is a
 path relative to the install directory and its bytes. The Stack kind's
 `ci` generator writes them under `<output-root>/ci/<stack>/<renderer>/`
 and installs them when the directory exists. The core's `github`

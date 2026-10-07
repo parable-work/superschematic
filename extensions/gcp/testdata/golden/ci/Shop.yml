@@ -49,6 +49,15 @@ jobs:
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
+      - name: Install the static archives
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/superschematic-archives"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/archives.tar.gz" https://github.com/parable-work/superschematic/releases/download/v1.2.3/superschematic-archives_1.2.3_linux-x64.tar.gz
+          echo "4444444444444444444444444444444444444444444444444444444444444444  $dir/archives.tar.gz" | sha256sum --check -
+          tar -xzf "$dir/archives.tar.gz" -C "$dir" --strip-components=1
+          echo "CGO_LDFLAGS=-L$dir/lib" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

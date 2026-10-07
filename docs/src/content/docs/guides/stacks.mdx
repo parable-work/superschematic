@@ -609,11 +609,19 @@ the schemas root, after the stack's services are built:
 docker build -f schemas/dist/server/shop-stack/Orders/Dockerfile .
 ```
 
-It builds superscalar's static archive in a Rust stage, links the server
-against it in a Go stage, and runs the binary on distroless `cc` as a
-non-root user. A server whose modules lie outside the repository root, or
-a naming file without `[paths] scalar_go`, gets no Dockerfile, and the
-build says why.
+The server links superscalar's static archive, and the version graph's,
+through cgo, and no Go module the module proxy serves carries them. With
+[`[paths] scalar_go`](/superschematic/reference/naming/#pathsscalar_go)
+naming a superscalar checkout, the Dockerfile builds them in Rust stages
+from the checkouts. Without it, as in a project that takes the runtime
+modules from the module proxy, a release of superschematic downloads the
+ones it ships for the image's platform, checked against the digests the
+release names, and pins the runtime modules in the server's `go.mod` to
+its own release. A Go stage links the server, and the image runs it on
+distroless `cc` as a non-root user. A server whose modules lie outside
+the repository root gets no Dockerfile, as does one without `[paths]
+scalar_go` built by a superschematic built from a checkout, which ships
+no archives; the build says why.
 
 ## Deploy to Google Cloud
 
@@ -715,7 +723,10 @@ superschematic stack outputs Staging --out outputs.json
   **`outputs`** prints the applied outputs.
 
 A build's context is the repository root, cut down by the
-`Dockerfile.dockerignore` beside each server's Dockerfile. `--image
+`Dockerfile.dockerignore` beside each server's Dockerfile. A context that
+lacks a directory the ignore file takes in, such as a superscalar
+checkout a CI runner never made, or that holds one under a symbolic link,
+is refused before anything is uploaded. `--image
 <server>=...` takes a server's image by digest instead of building it,
 and `--no-build` builds nothing. A deploy keeps the image the manifest
 records for a server whose context did not change. A parameterized
@@ -759,12 +770,13 @@ after changing the stack.
 
 The workflow:
 
-- **On a pull request to the branch**, `check` installs superschematic
-  and the schemas root's packages (`bun install --frozen-lockfile` for a
-  `bun.lock`, `npm ci` for a `package-lock.json`), runs `build-all`,
+- **On a pull request to the branch**, `check` installs superschematic,
+  the static archives its release ships for the runner, which a Go server
+  links, and the schemas root's packages (`bun install --frozen-lockfile`
+  for a `bun.lock`, `npm ci` for a `package-lock.json`), runs `build-all`,
   which resolves every environment and checks its graph, and compiles
   each Go server's entrypoint module with `go build -mod=mod`. It needs no
-  credentials.
+  credentials, no Rust and no superscalar checkout.
 - After it, `plan-<environment>` runs `stack plan` for each cloud
   environment without parameters, as the environment's `planner`
   account, and `preview-<environment>` runs `stack deploy <environment>
@@ -807,7 +819,8 @@ the `pulumi` CLI at the release of the Pulumi SDK the binary links.
 The workflow installs the release of superschematic that generated it,
 from the project's release page, and checks it against the release's
 `SHA256SUMS`, so a repository's CI changes only when you build with
-another release. A binary built from a checkout names no release: its
+another release. It checks the static archives against the digest the
+binary that generated it names. A binary built from a checkout names no release: its
 workflow's install step fails and says to generate the workflow again
 with a released superschematic. Every action is pinned by commit, and
 nothing in the file depends on when it was generated.
