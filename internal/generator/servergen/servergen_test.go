@@ -725,64 +725,6 @@ func withServiceClause(f fixture) {
 	}
 }
 
-// TestAServiceClauseTakesTheServiceAuthenticator: an API whose operations
-// have a service clause gets its Config's service authenticator from the
-// entrypoint's serviceAuthenticator, and an API without one gets none.
-func TestAServiceClauseTakesTheServiceAuthenticator(t *testing.T) {
-	repoRoot := t.TempDir()
-	f := loadFixture(t, servicesRoot)
-	withServiceClause(f)
-	f.build(t, repoRoot, fakePaths(repoRoot), "shop-stack")
-	out := filepath.Join(repoRoot, "schemas", "dist")
-	main, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, "shop-stack", "shop-api"), servergen.MainFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`shopApiServiceAuthenticator, err := serviceAuthenticator("shop-api")`,
-		"ServiceAuthenticator: shopApiServiceAuthenticator,",
-		"func serviceAuthenticator(api string) (serviceauth.Authenticator, error) {",
-	} {
-		if !strings.Contains(string(main), want) {
-			t.Errorf("shop-api's main.go lacks %q:\n%s", want, main)
-		}
-	}
-	storefront, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, "shop-stack", "Storefront"), servergen.MainFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(storefront), "serviceAuthenticator") {
-		t.Errorf("Storefront, whose APIs have no service clause, has a service authenticator:\n%s", storefront)
-	}
-}
-
-// TestAServiceClauseRefusesToStartWithoutTheServiceAuthField: until a
-// connector derives the service-auth field, the server of an API with a
-// service clause does not start, and says why.
-func TestAServiceClauseRefusesToStartWithoutTheServiceAuthField(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping compile check in -short mode")
-	}
-	paths := testpaths.Local(t)
-	repoRoot := t.TempDir()
-	f := loadFixture(t, servicesRoot)
-	withServiceClause(f)
-	f.build(t, repoRoot, paths)
-	dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack", "shop-api")
-	goCommand(t, dir, "mod", "tidy")
-	binary := filepath.Join(t.TempDir(), "shop-api")
-	goCommand(t, dir, "build", "-o", binary, ".")
-	cmd := exec.Command(binary)
-	cmd.Env = append(os.Environ(), "PORT="+freePort(t), "SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("shop-api started:\n%s", out)
-	}
-	if want := "shop-api has operations with a service clause, and no environment derives the service-auth field"; !strings.Contains(string(out), want) {
-		t.Errorf("shop-api stopped without saying %q:\n%s", want, out)
-	}
-}
-
 // TestToolchainPinsMatchToolsEnv: the go directive the modules state and
 // the images the Dockerfile builds in are tools.env's pins.
 func TestToolchainPinsMatchToolsEnv(t *testing.T) {

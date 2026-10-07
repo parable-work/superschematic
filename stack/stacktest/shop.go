@@ -73,6 +73,50 @@ func AcmeShop() []stack.Service {
 	}
 }
 
+// RequireServiceShop returns AcmeShop with an operation of shop-api that
+// only the server of shop-orders may call, with no end user:
+// StockMutations.reindex, @requireService({ from: [ShopOrders] }). The
+// server of shop-api then verifies its callers against SHOP_API_CALLERS.
+func RequireServiceShop() []stack.Service {
+	services := AcmeShop()
+	for i := range services {
+		if services[i].Name == "shop-api" {
+			services[i].Operations = append(services[i].Operations, stack.Operation{
+				Name:           "StockMutations.reindex",
+				ServiceCallers: &ir.ServiceCallers{Mode: ir.ServiceCallersRequire, From: []string{"shop-orders"}},
+			})
+		}
+	}
+	return services
+}
+
+// AllowServiceShop returns AcmeShop with an operation of shop-api that an
+// end user who may, or the server of shop-orders on its own, may call:
+// StockMutations.release, @allowService({ from: [ShopOrders] }) beside a
+// user clause. shop-orders gains OrderMutations.refund, which the server
+// of shop-api may call on its own, though no server does: its callers
+// field has no issuers.
+func AllowServiceShop() []stack.Service {
+	services := AcmeShop()
+	for i := range services {
+		switch services[i].Name {
+		case "shop-api":
+			services[i].Operations = append(services[i].Operations, stack.Operation{
+				Name:           "StockMutations.release",
+				UserClause:     true,
+				ServiceCallers: &ir.ServiceCallers{Mode: ir.ServiceCallersAllow, From: []string{"shop-orders"}},
+			})
+		case "shop-orders":
+			services[i].Operations = append(services[i].Operations, stack.Operation{
+				Name:           "OrderMutations.refund",
+				UserClause:     true,
+				ServiceCallers: &ir.ServiceCallers{Mode: ir.ServiceCallersAllow, From: []string{"shop-api"}},
+			})
+		}
+	}
+	return services
+}
+
 // Handles to the acme-shop services.
 var (
 	ShopDB     = ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}

@@ -134,20 +134,18 @@ POST /namespaces/default/schemas/jobs/operations/claimNext                 {"mat
 POST /namespaces/default/schemas/jobs/instances/{id}/operations/heartbeat  Preconditions: {"Lease": {"token": 1}}
 ```
 
-The example's worker claims the best queued job, highest priority first,
-then oldest; the claim takes the lease, reserves the budget and moves
-the status to running, all in one transaction. It renews the lease on a
-timer while it works, presents the token on every write, reports usage
-and the attempt by failure class, finishes the job and gives the lease
-back:
-
-<Snippet example="engine-jobs" file="src/worker.ts" symbol="JobWorker" />
+A claim takes the best queued job, highest priority first, then oldest:
+it takes the lease, reserves the budget and moves the status to running,
+all in one transaction. The holder renews the lease while it works,
+presents the token on every write, reports usage and the attempt by
+failure class, finishes the job and gives the lease back. The example's
+workers leave that loop to the package's worker
+([Write a worker](#write-a-worker)).
 
 A heartbeat's result also carries the directives sent to the holder and
 not yet acknowledged, and `heartbeat({ acknowledge: ids })` acknowledges
-the ones handled in the same write; this worker does not act on them. A
-failed attempt's result carries its class's `hint`, which can steer the
-next attempt.
+the ones handled in the same write. A failed attempt's result carries its
+class's `hint`, which can steer the next attempt.
 
 A large result, a field whose JSON is longer than 64 KiB that
 `recordAttempt` keeps or the worker writes, is stored once in the
@@ -167,9 +165,12 @@ stops:
                "code": "token_stale", "details": { "token": 1, "current": 3 } } }
 ```
 
-The example's worker reads any `Lease` veto as the job being gone:
-
-<Snippet example="engine-jobs" file="src/worker.ts" symbol="leaseGone" />
+The engine's client reads it as an `EngineVeto`, and
+`isVeto(error, 'Lease', ['lapsed', 'token_stale'])` branches on it. Not
+every `Lease` veto means the lease is gone: `held_by_another` refuses a
+principal that never held it. The worker below takes `lapsed`,
+`token_stale`, `not_holder` and `not_leased`, and a deleted instance, as
+the lease lost.
 
 An agent that works the queue over MCP reads the same from the tools:
 each tool's guidance, in its `_meta`, says what the job's config means
@@ -195,6 +196,73 @@ After the test's run, a job that timed out reads:
   "retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "bestScore": null, "exhausted": false, "stuck": false }
 }
 ```
+
+## Write a worker
+
+The package's `./worker` subpath runs the loop above for you, on the
+engine's typed client
+([The engine](/superschematic/guides/engine/#call-it-from-typescript)).
+It imports only `@superschematic/engine/client`, so a worker process
+loads no SQLite and no behavior. The example's workers run on it: each
+process calls as its own principal, beats the worker instance that stands
+for it, claims the jobs of its topic, and runs a handler over each, which
+an operator's `cancel` directive stops:
+
+<Snippet example="engine-jobs" file="src/worker.ts" symbol={['jobWorker', 'work']} />
+
+A process makes its client and starts the worker; a stop hands back what
+it holds:
+
+```ts
+import { EngineClient } from '@superschematic/engine/client';
+import { jobWorker } from './worker.ts';
+
+const client = new EngineClient({ baseUrl: 'http://127.0.0.1:8788/api', auth: { token: 'worker-1-token' } });
+const worker = jobWorker(client, 'worker-1', async ({ job, signal }) => crawl(job, { signal }), { topic: 'search' });
+await worker.start();
+process.on('SIGTERM', () => worker.stop());
+```
+
+- **Claims.** `start()` reads the schema's describe document and claims
+  with `claimNext` until it holds `concurrency` jobs. An empty queue is
+  watched, not polled: the schema's event stream wakes the worker, and
+  between events it looks again with `countClaimable`, a read that takes
+  no write lock, after a backoff that doubles (`idle`).
+- **Presence.** With `presence`, the worker beats that instance as its
+  principal before it claims, then on a timer of its own, a third of the
+  Presence `ttlMs` apart by default, whatever its handlers are doing.
+  While the engine refuses a beat, or none succeeds for the `ttlMs`, it
+  claims nothing, `onError` hears a `PresenceLostError`, and the next beat
+  that succeeds brings it back. The jobs it holds go on: their own
+  heartbeats keep their leases, and a miss expires only the leases not
+  renewed since the last beat.
+- **The job.** `job.instance` reads the claimed instance and presents
+  the lease's token on every write; `job.client` reaches everything else,
+  without it. Each job heartbeats at the claim's interval, and the
+  directives a heartbeat returns go to `job.onDirective`'s listeners, once
+  each; the next heartbeat acknowledges them in its own write.
+- **A lost lease.** A `lapsed` or `token_stale` refusal of a heartbeat or
+  a write, a deleted instance, or no heartbeat for the lease's length
+  aborts `job.signal` with a `LeaseLostError`. Pass the signal to what
+  the handler waits on. A write through `job.instance` after that throws
+  without being sent, and the worker writes nothing more for the job.
+- **How it ends.** `{ transition: 'done' }` records a successful attempt
+  when the schema composes `Retries`, with the `attempt` given (the
+  example's `result`), moves the status and releases. Returning nothing
+  hands the job back. A `WorkFailure` records its failure class and hands
+  the job back, or abandons it with `abandon: true`, which counts toward
+  `maxExpiries`; any other error abandons it, so a job no worker can
+  finish escalates instead of coming back forever. The example's cancel
+  is a failure of a terminal class, so `Retries` fails the job for good.
+- **Stopping.** `stop()` claims nothing more, waits up to 30 seconds for
+  the jobs it holds (`timeoutMs`; `drain: false` waits for none), then
+  aborts the rest and releases their leases, which counts nothing, so a
+  deploy hands work back at once instead of letting it lapse. It beats
+  until nothing is held.
+
+The package's
+[README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md#the-worker)
+has every option.
 
 ## Lease
 
@@ -381,9 +449,14 @@ Without `read`, the sweep fails `forbidden` and keeps retrying. A later
 `beat` clears the miss.
 
 The example's test shows it on a clock it moves, with a worker
-`ttlMs` of 15 seconds and a lease of 30:
+`ttlMs` of 15 seconds and a lease of 30. worker-1 holds a job when the
+test cuts it off from the engine:
 
-<Snippet example="engine-jobs" file="test/jobs.test.ts" from="// worker-1 dies holding the job" to="assert.equal(taken.token, 3);" />
+<Snippet example="engine-jobs" file="test/jobs.test.ts" from="// worker-1 is cut off holding the job" to="assert.equal(second.worker.jobs[0]?.token, 3);" />
+
+When worker-1 comes back, its next heartbeat presents token 1, which
+Lease refuses (`token_stale`, details `{ token: 1, current: 3 }`): the
+worker aborts its handler, and writes nothing more for the job.
 
 ## Blueprint
 

@@ -55,7 +55,7 @@ SDK refuses the request the server would refuse.
 | Types shared across a polyglot stack | a General schema | the same types and validators in all four languages, and a typed loader for environment variables |
 | Row history, branches and merges | `@versioned` and `@versionGraph` on tables | history tables and version-fenced writes; a tree of tables you can branch, commit, merge, release and rebase, with an engine in each language |
 | A backend without generated code | a schema as JSON, published to a running server | [`@superschematic/engine`](runtime/engine/README.md): instances, an event log and access control, with workflow, comments, revisions, links, rollups, full-text and vector search, branches and work queues, over HTTP, an event stream and MCP |
-| The tree, running | a Stack schema: what runs where, in which environments | a Go entrypoint and Dockerfile per server; `stack dev` runs an environment on your machine, with Postgres in Docker and its migrations applied; `stack plan` and `stack deploy` apply one to Cloud Run and Cloud SQL through the gcp target and Pulumi |
+| The tree, running | a Stack schema: what runs where, in which environments | a Go entrypoint and Dockerfile per server; `stack dev` runs an environment on your machine, with Postgres in Docker and its migrations applied; `stack plan` and `stack deploy` apply one to Cloud Run and Cloud SQL through the gcp target and Pulumi, building changed images on Cloud Build and running migrations between steps |
 | Your own conventions | a Go extension | new schema kinds, decorators, generators, auth providers and commands, without forking the core |
 
 ## A quick look
@@ -215,8 +215,9 @@ install` at a version refuses them; build from a checkout as above, or
 download a release's `superschematic_<version>_<platform>.tar.gz`.
 
 Then build and test the example shop end to end. It compiles the generated
-Go, type-checks the generated TypeScript, and runs clients in all four
-languages against the Go server:
+Go, type-checks the generated TypeScript, runs clients in all four
+languages against the Go and Rust servers, and, when Docker is running,
+runs the shop's stack with `superschematic stack dev`:
 
 ```sh
 examples/acme-shop/scripts/check.sh
@@ -254,7 +255,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [Database tables](docs/src/content/docs/guides/database-tables.mdx): keys, relations, indexes, text search, JSON columns, soft delete, transactions, and changing tables that hold data.
 - [API routes](docs/src/content/docs/guides/api-routes.mdx): operation sets, the implementation and its `Deps`, parameters, bodies, views, errors, encrypted payloads, traffic controls, webhooks and the Rust server.
 - [Auth and permissions](docs/src/content/docs/guides/auth-and-permissions.mdx): which routes need a caller, permissions, service callers, and credentials in each SDK.
-- [Stacks and deploys](docs/src/content/docs/guides/stacks.md): declare what runs where, run an environment locally with `stack dev`, and deploy one to Google Cloud.
+- [Stacks and deploys](docs/src/content/docs/guides/stacks.mdx): declare what runs where, run an environment locally with `stack dev`, and deploy one to Google Cloud.
 - [Client SDKs](docs/src/content/docs/guides/client-sdks.mdx): generate and call a client in Go, TypeScript, Python and Rust.
 - [The engine](docs/src/content/docs/guides/engine.mdx): run a schema with no generated code, over HTTP, an event stream and MCP.
 - [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches.
@@ -310,10 +311,10 @@ records every design decision (cited as D1, D2, ... in code and commits).
 
 | Example | What it shows | Run it |
 | --- | --- | --- |
-| [`examples/acme-shop`](examples/acme-shop/) | The tutorial's shop on the core binary: five services, a Go and a TypeScript server, and clients in all four languages | `examples/acme-shop/scripts/check.sh` |
+| [`examples/acme-shop`](examples/acme-shop/) | The tutorial's shop on the core binary: six services, Go, Rust and TypeScript servers, clients in all four languages, a Topcoat app, and a stack that `stack dev` runs locally | `examples/acme-shop/scripts/check.sh` |
 | [`examples/acme-schematic`](examples/acme-schematic/) | The same shop with an extension that adds a kind, decorators, a generator, an auth provider, a behavior and commands, without editing the core | `examples/acme-schematic/scripts/smoke.sh` |
 | [`examples/engine-notes`](examples/engine-notes/) | A notes server on the engine: workflow, comments and revisions over HTTP, an event stream and MCP | `examples/engine-notes/scripts/check.sh` |
-| [`examples/engine-jobs`](examples/engine-jobs/) | A job runner on the engine and its work-queue behaviors: workers that claim jobs under leases over HTTP, retries, budgets, a missed worker's jobs put back, and batches whose steps run in order and settle them | `examples/engine-jobs/scripts/check.sh` |
+| [`examples/engine-jobs`](examples/engine-jobs/) | A job runner on the engine and its work-queue behaviors: workers on the package's `QueueWorker` that claim jobs under leases over HTTP and beat their presence, retries, budgets, a cancel sent as a directive, a missed worker's jobs put back, and batches whose steps run in order and settle them | `examples/engine-jobs/scripts/check.sh` |
 | [`examples/migrations`](examples/migrations/) | Two versions of a DB service: `migrate plan` between them for Postgres and SQLite, its phases and hazards, and `superschematic-migrate` applying it to a database with rows | `examples/migrations/scripts/check.sh` |
 | [`extensions/deploy`](extensions/deploy/), [`extensions/platform`](extensions/platform/) | Two small extensions: Helm values from `@envVars`, and a kind that groups services | `go test ./extensions/...` |
 | [`extensions/topcoat`](extensions/topcoat/) | A Go module of its own: for a Rust API, a crate a [Topcoat](https://github.com/tokio-rs/topcoat) app calls the operations through in-process, by each route's rules, with records of their results | `cd extensions/topcoat && go test ./...` |

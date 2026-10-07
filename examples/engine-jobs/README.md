@@ -4,23 +4,25 @@ A job runner on `@superschematic/engine` and
 `@superschematic/engine-workqueue` (D16 in `docs/DECISIONS.md`). Workers
 claim jobs in priority order and hold them under leases they renew; a
 failed attempt is retried by its failure class; each claim reserves CPU
-seconds from the job's budget. A worker that stops beating is missed, and
-the jobs it held go back in the queue. A batch stamps a job per step, each
-waiting on the one before, and the engine's runner settles the batch when
-its steps finish. The docs site's work-queues guide
+seconds from the job's budget; an operator cancels a running job with a
+directive. A worker that stops beating is missed, and the jobs it held go
+back in the queue. A batch stamps a job per step, each waiting on the one
+before, and the engine's runner settles the batch when its steps finish.
+The workers are the work-queue package's `QueueWorker` on the engine's
+typed client. The docs site's work-queues guide
 (`docs/src/content/docs/guides/work-queues.mdx`) quotes it;
 `runtime/engine-workqueue/README.md` is the reference.
 
 | Path | What it is |
 |---|---|
-| `schemas/jobs.schema.json` | A `Job` that composes `Workflow` (whose `failed` is a failure outcome), `Lease`, `Queue`, `Budget`, `Retries`, `Links` and `Dependencies` (a step's batch and the steps before it), `Constants` and `Search` |
+| `schemas/jobs.schema.json` | A `Job` that composes `Workflow` (whose `failed` is a failure outcome), `Lease`, `Queue`, `Budget`, `Retries` (with a terminal `cancelled` class), `Links` and `Dependencies` (a step's batch and the steps before it), `Constants` and `Search` |
 | `schemas/workers.schema.json` | A `Worker` with `Presence`, whose miss releases the leases its principal holds on jobs |
 | `schemas/batches.schema.json` | A `Batch` whose `Blueprint` stamps three steps, with a `Rollups` count of them by status and `Reactions` rules that settle it |
 | `src/auth.ts` | The bearer-token `Authenticator`, the runner's principal and the access policy |
 | `src/server.ts` | Opens the engine over one SQLite file with the work-queue behaviors registered and a principal for the runner, publishes the schemas, registers the workers, and serves the HTTP API on a Hono app with `@hono/node-server` |
 | `src/main.ts` | Runs the server on port 8788 (`PORT`) over `jobs.db` (`JOBS_DB`), and starts the runner |
-| `src/worker.ts` | A worker over HTTP: it beats, claims the next job, renews the lease on a timer, presents the lease's token in the `Preconditions` header, records usage and the attempt, finishes the job and releases it |
-| `test/jobs.test.ts` | End to end over a listening server on a clock the test moves: a worker finishes the most urgent job, a held job refuses another worker, a worker that stops beating loses its job and its stale token is refused, and a batch runs its steps in order, retries a transient failure and settles, or fails with a step |
+| `src/worker.ts` | `jobWorker`, a worker process's `QueueWorker` over an `EngineClient`: it beats the worker instance of its principal, claims the next job of its topic, and runs a handler that reports usage and returns its result; an operator's `cancel` directive stops the handler and fails the job |
+| `test/jobs.test.ts` | End to end over a listening server on a clock the test moves: a worker finishes the most urgent job, a held job refuses another worker, a cancel fails a running job, a worker cut off from the engine is missed and loses its job to another and its stale token is refused, and a batch runs its steps in order, retries a transient failure and settles, or fails with a step |
 | `scripts/link.sh` | Links the engine, the work-queue package and the packages the example imports into `node_modules` |
 | `scripts/check.sh` | Builds the runtimes, the engine and the work-queue package, links them, type-checks, and runs the test on Node.js and Bun |
 
@@ -64,11 +66,26 @@ curl -X POST http://127.0.0.1:8788/api/namespaces/default/schemas/jobs/operation
 The claim answers the lease's token. Every write to the job presents it,
 `-H 'preconditions: {"Lease": {"token": 1}}'`; left alone, the lease
 lapses after 30 seconds and the runner's sweep puts the job back in the
-queue. `JobWorker` in `src/worker.ts` does the whole loop:
+queue. `jobWorker` in `src/worker.ts` does the whole loop, beating
+`worker-1`'s worker instance while it runs:
 
 ```ts
-const worker = new JobWorker('http://127.0.0.1:8788/api/namespaces/default', 'worker-1', 'worker-1-token');
-await worker.run(async ({ job }) => `Done: ${job.title}`, { topic: 'search', signal: AbortSignal.timeout(60_000) });
+import { EngineClient } from '@superschematic/engine/client';
+import { jobWorker } from './src/worker.ts';
+
+const client = new EngineClient({ baseUrl: 'http://127.0.0.1:8788/api', auth: { token: 'worker-1-token' } });
+const worker = jobWorker(client, 'worker-1', async ({ job }) => `Done: ${job.title}`, { topic: 'search' });
+await worker.start();
+process.once('SIGTERM', () => worker.stop());
+```
+
+A cancel goes to the job's lease holder as a directive, which its next
+heartbeat delivers:
+
+```sh
+curl -X POST http://127.0.0.1:8788/api/namespaces/default/schemas/jobs/instances/reindex/operations/direct \
+  -H 'authorization: Bearer operator-token' -H 'content-type: application/json' \
+  -d '{"name": "cancel"}'
 ```
 
 ## Callers
@@ -78,7 +95,7 @@ which no token names:
 
 | Token | Subject | Permissions | May |
 |---|---|---|---|
-| `operator-token` | operator | `schemas`, `jobs`, `workers`, `batches` | define schemas, queue jobs and batches, and override a lease (`jobs.override`) |
+| `operator-token` | operator | `schemas`, `jobs`, `workers`, `batches` | define schemas, queue jobs and batches, override a lease and send its holder a directive (`jobs.override`) |
 | `worker-1-token`, `worker-2-token` | worker-1, worker-2 | `jobs.read`, `jobs.work`, `workers.read`, `workers.work` | read jobs; claim, renew, report, finish and release them; beat its own worker instance |
 | none | runner | read and write on the three schemas, and `jobs.override` | in the server's process: expire lapsed leases, miss silent workers and release their leases, and settle batches |
 
@@ -93,7 +110,9 @@ The engine's runner runs `Lease`'s sweep and `Presence`'s miss every five
 seconds, and the batches' `Reactions` after each commit, as `runner`.
 `src/main.ts` starts it. The test opens the engine with a `clock` it moves
 and calls `engine.runner.runDue()` itself, so a worker's 15 seconds pass at
-once and nothing waits on a timer.
+once and nothing waits on the engine's time. The workers' own timers,
+their heartbeats, beats and idle backoff, run on the process's clock; the
+test sets them to 20 milliseconds.
 
 ## Until the packages are published
 

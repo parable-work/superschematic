@@ -655,6 +655,61 @@ it waits it sends a `: keepalive` comment every five seconds. Stop it
 with Ctrl-C. The end-to-end test reads the stream from a cursor, then
 adds a comment and receives its event.
 
+## Call it from TypeScript
+
+`@superschematic/engine/client` is a typed client of the HTTP API. It
+imports nothing of the engine's server side or of Node.js, so it runs in
+a browser and a worker runtime as well as in another server:
+
+```ts
+import { EngineClient, isVeto } from '@superschematic/engine/client';
+
+const client = new EngineClient({
+  baseUrl: 'http://127.0.0.1:8787/api',
+  auth: { token: 'alice-token' },
+});
+
+const note = await client.instances.create('notes', { title: 'Launch' }, { id: 'launch' });
+await client.instances.update('notes', note.id, { body: 'Ships in the fall.' }, { expectedSeq: note.seq });
+try {
+  await client.instances.invoke('notes', note.id, 'transition', { to: 'published' });
+} catch (error) {
+  if (isVeto(error, 'Workflow', 'transition_not_allowed')) {
+    // a refusal to branch on, with error.vetoDetails
+  } else {
+    throw error;
+  }
+}
+```
+
+- The calls follow the engine's: `schemas` (`define`, `publish`,
+  `describe`, ...), `instances` (`create` with `behaviors`, `get`, `list`,
+  `update`, `delete`, `invoke` and the schema-level `invokeSchema`),
+  `events`, `behaviors`, `tools()` and `search()`. A write's
+  `expectedSeq` is sent as `If-Match` and its `preconditions` as the
+  `Preconditions` header.
+- A refusal is an `EngineProblem` with the status, the problem's `code`
+  and `issues` at their paths; a behavior's veto is an `EngineVeto` with
+  `behavior`, `vetoCode` and `vetoDetails`.
+- Credentials are a generated SDK's: an end user's token with
+  `refreshToken` on a 401, and a calling service's `serviceCredential`,
+  which the HTTP runtime's token sources fill. A 401
+  `service_unauthorized` asks the service source for a fresh token once
+  and never refreshes the end user.
+- `client.events.subscribe({ after: 'head' })` is the event stream as an
+  async iterable of events and a `ready` per connection. It resumes after
+  a dropped connection with `Last-Event-ID`, so it neither repeats nor
+  skips an event.
+- `reconcile(client, { handle, cursor })` runs a handler per event, in log
+  order, from the cursor its store keeps, retrying a failing event rather
+  than skipping it: a controller's loop.
+
+The README's
+[client](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#the-client)
+section has every call and option, and
+[Work queues](/superschematic/guides/work-queues/#write-a-worker) builds a
+worker on it.
+
 ## MCP tools
 
 The MCP endpoint serves one tool per operation of every live schema the
@@ -761,7 +816,7 @@ field the file lacks goes live over HTTP, the next start refuses the file.
   runner, schema-level operations, and the Dependencies, Links, Rollups,
   Search, Reactions, Constants, Variants and Branches behaviors.
 - [Work queues](/superschematic/guides/work-queues/): claimable work with
-  `@superschematic/engine-workqueue`.
+  `@superschematic/engine-workqueue`, and a worker over the client.
 - The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md):
   the storage, the routes and statuses, the event stream, the describe and
   tools documents, and the behavior interface.

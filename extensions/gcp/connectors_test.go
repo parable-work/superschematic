@@ -142,7 +142,8 @@ func TestSQLConnectorRefusesRust(t *testing.T) {
 
 // TestHTTPConnectorGrants checks the Cloud Run to Cloud Run connector on
 // an exposed callee: the caller's account invokes the callee, the caller
-// reaches the callee's run.app URL with a Google ID token for it in
+// reaches the callee's run.app URL with a Google ID token for the
+// callee's custom audience, which the callee's service lists, in
 // Service-Authorization alone, since the callee's invoker check is off,
 // and the caller's traffic leaves through the environment's VPC.
 func TestHTTPConnectorGrants(t *testing.T) {
@@ -159,9 +160,10 @@ func TestHTTPConnectorGrants(t *testing.T) {
 		`{"location":"us-east1","member":{"$output":{"resource":"Orders.account","name":"member"}},"name":{"$output":{"resource":"shop-api.service","name":"name"}},"project":"acme-staging","role":"roles/run.invoker"}`)
 
 	wantJSON(t, "derived endpoint", binding(t, env, "Orders", "SHOP_API_SERVICE").Value,
-		`{"credential":{"audience":{"$output":{"resource":"shop-api.service","name":"uri"}},"source":"google-id-token"},"url":{"$output":{"resource":"shop-api.service","name":"uri"}}}`)
+		`{"credential":{"audience":"//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api","source":"google-id-token"},"url":{"$output":{"resource":"shop-api.service","name":"uri"}}}`)
 
 	callee := node(t, env, "shop-api.service").Properties
+	wantJSON(t, "callee's custom audiences", callee["customAudiences"], `["//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api"]`)
 	if callee["ingress"] != "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" || callee["invokerIamDisabled"] != true {
 		t.Errorf("exposed shop-api takes %v with invokerIamDisabled %v, want the load balancer's traffic with the check off", callee["ingress"], callee["invokerIamDisabled"])
 	}
@@ -172,6 +174,55 @@ func TestHTTPConnectorGrants(t *testing.T) {
 	}
 	if got := strings.Join(node(t, env, "network.nat").Owners, ", "); got != "Orders" {
 		t.Errorf("the network's owners are %s, want the one calling server, Orders", got)
+	}
+}
+
+// TestHTTPConnectorGivesTheCalleeItsCaller checks what the connector
+// gives a callee with a service clause: SHOP_API_CALLERS holds Google's
+// issuer and keys, shop-api's custom audience, which Orders's token is
+// for, and Orders's service account by the email claim, as the deployable
+// Orders that serves shop-orders. On the server, the field is one variable
+// per member, the lists of objects counted and indexed.
+func TestHTTPConnectorGivesTheCalleeItsCaller(t *testing.T) {
+	env := resolve(t, assemble(t), shop(), stacktest.RequireServiceShop(), "Staging")
+	callers := binding(t, env, "shop-api", "SHOP_API_CALLERS")
+	if callers.Source != ir.BindingDerived || callers.CallersOf != "shop-api" || strings.Join(callers.Edges, ",") != "http:Orders->shop-api" {
+		t.Errorf("SHOP_API_CALLERS = %+v, want the derived callers of shop-api from edge http:Orders->shop-api", callers)
+	}
+	wantJSON(t, "SHOP_API_CALLERS", callers.Value,
+		`{"issuers":[{"algorithms":["RS256"],"audience":"//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api","callers":[{"deployable":"Orders","serves":["shop-orders"],"subject":"orders@acme-staging.iam.gserviceaccount.com"}],"issuer":"https://accounts.google.com","issuerAliases":["accounts.google.com"],"jwksUrl":"https://www.googleapis.com/oauth2/v3/certs","subjectClaim":"email"}]}`)
+	if err := ir.CheckServiceAuth(callers.Value); err != nil {
+		t.Error(err)
+	}
+	token := binding(t, env, "Orders", "SHOP_API_SERVICE").Value.(map[string]any)["credential"].(map[string]any)["audience"]
+	if token != callers.Value.(map[string]any)["issuers"].([]any)[0].(map[string]any)["audience"] {
+		t.Errorf("Orders's token is for %v, which shop-api does not accept", token)
+	}
+
+	envs, _ := node(t, env, "shop-api.service").Properties["template"].(map[string]any)["containers"].([]any)[0].(map[string]any)["envs"].([]any)
+	vars := map[string]any{}
+	for _, e := range envs {
+		m := e.(map[string]any)
+		vars[m["name"].(string)] = m["value"]
+	}
+	for name, want := range map[string]any{
+		"SHOP_API_CALLERS_ISSUERS":                        "1",
+		"SHOP_API_CALLERS_ISSUERS_0_ISSUER":               "https://accounts.google.com",
+		"SHOP_API_CALLERS_ISSUERS_0_ISSUER_ALIASES":       "accounts.google.com",
+		"SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS":           "RS256",
+		"SHOP_API_CALLERS_ISSUERS_0_JWKS_URL":             "https://www.googleapis.com/oauth2/v3/certs",
+		"SHOP_API_CALLERS_ISSUERS_0_SUBJECT_CLAIM":        "email",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS":              "1",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT":    "orders@acme-staging.iam.gserviceaccount.com",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES":     "shop-orders",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
+	} {
+		if got := vars[name]; got != want {
+			t.Errorf("shop-api's service sets %s to %v, want %v", name, got, want)
+		}
+	}
+	if _, ok := vars["SHOP_API_CALLERS_ISSUERS_0_AUDIENCE"]; !ok {
+		t.Error("shop-api's service does not set its audience")
 	}
 }
 
@@ -192,7 +243,7 @@ func internalShop() *ir.Stack {
 func TestHTTPConnectorInternalCallee(t *testing.T) {
 	env := resolve(t, assemble(t), internalShop(), stacktest.AcmeShop(), "Staging")
 	wantJSON(t, "derived endpoint", binding(t, env, "Orders", "SHOP_API_SERVICE").Value,
-		`{"credential":{"audience":{"$output":{"resource":"shop-api.service","name":"uri"}},"headers":["Service-Authorization","X-Serverless-Authorization"],"source":"google-id-token"},"url":{"$output":{"resource":"shop-api.service","name":"uri"}}}`)
+		`{"credential":{"audience":"//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api","headers":["Service-Authorization","X-Serverless-Authorization"],"source":"google-id-token"},"url":{"$output":{"resource":"shop-api.service","name":"uri"}}}`)
 	callee := node(t, env, "shop-api.service").Properties
 	if callee["ingress"] != "INGRESS_TRAFFIC_INTERNAL_ONLY" || callee["invokerIamDisabled"] != false {
 		t.Errorf("internal shop-api takes %v with invokerIamDisabled %v, want internal traffic with the check on", callee["ingress"], callee["invokerIamDisabled"])
