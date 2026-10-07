@@ -1,6 +1,6 @@
 {
   "name": "Branches",
-  "description": "Makes each instance the root of a version graph: refs, a primary line and drafts of it, over rows of the kinds the config names, each kind's content a type of the schema document; commits, merges, rebases and reverts; and a release pointer whose history is the release log. The instance's own fields stay outside the graph. The graph lives in the behavior's own tables, and deleting the instance deletes it. With sweep in its config, a schedule discards idle drafts and keeps the graph's storage in bounds.",
+  "description": "Makes each instance the root of a version graph: refs, a primary line and drafts of it, over rows of the kinds the config names, each kind's content a type of the schema document; commits, merges, rebases and reverts; and a release pointer whose history is the release log, its version the release field. The instance's own fields stay outside the graph. The graph lives in the behavior's own tables, and deleting the instance deletes it. With sweep in its config, a schedule discards idle drafts and keeps the graph's storage in bounds.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -124,6 +124,12 @@
     ],
     "type": "object"
   },
+  "fields": [
+    {
+      "name": "release",
+      "description": "The number of the instance's latest release: the release pointer's version, which releaseCommit names to move it. Absent before the first release."
+    }
+  ],
   "operations": [
     {
       "name": "branch",

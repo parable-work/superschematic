@@ -139,13 +139,21 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if len(envs) > 0 {
 		container["envs"] = envs
 	}
-	scaling := map[string]any{"minInstanceCount": settingNumber(d.Settings, "minInstances", 0)}
+	// Cloud Run returns no minInstanceCount for a service without a
+	// minimum, so a 0 in the template would differ from the service on
+	// every preview: a minimum goes in only when it is above 0.
+	scaling := map[string]any{}
+	if n, ok := d.Settings["minInstances"]; ok && fmt.Sprint(n) != "0" {
+		scaling["minInstanceCount"] = n
+	}
 	if n, ok := d.Settings["maxInstances"]; ok {
 		scaling["maxInstanceCount"] = n
 	}
 	template := map[string]any{
 		"serviceAccount": ir.Output{Resource: account, Name: "email"},
-		"scaling":        scaling,
+	}
+	if len(scaling) > 0 {
+		template["scaling"] = scaling
 	}
 	if n, ok := d.Settings["concurrency"]; ok {
 		template["maxInstanceRequestConcurrency"] = n
@@ -237,13 +245,6 @@ func envString(v any) (string, error) {
 func settingString(settings map[string]any, key, def string) string {
 	if s, ok := settings[key].(string); ok {
 		return s
-	}
-	return def
-}
-
-func settingNumber(settings map[string]any, key string, def any) any {
-	if n, ok := settings[key]; ok {
-		return n
 	}
 	return def
 }

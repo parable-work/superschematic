@@ -4,9 +4,12 @@ entry point takes the principal it acts for and asks the policy before it
 reads or writes: `read` for a schema or its instances and events, `write`
 to create, update or delete an instance, `define` for a draft, `publish`
 for a new version. A behavior operation asks `write` when its declaration
-says it writes and `read` otherwise, and names the operation. The engine
-has no roles and no default policy; `allowAll` is explicit, for tests and
-local use.
+says it writes and `read` otherwise, and names the operation. Those
+questions name a schema. One names none: `manage`, asked about a
+namespace itself, with what is done to it as its operation (`create`,
+`archive`, `unarchive`, or `list` to see it among the namespaces). The
+engine has no roles and no default policy; `allowAll` is explicit, for
+tests and local use.
 
 Principal has the shape of the HTTP runtime's (@superschematic/http-runtime),
 so a principal its Authenticator returns can be passed on as it is. This
@@ -70,18 +73,43 @@ export function servicePrincipal(caller: { readonly deployable: string; readonly
   };
 }
 
-export type Action = 'read' | 'write' | 'define' | 'publish';
+/** What a question about one schema asks. */
+export type SchemaAction = 'read' | 'write' | 'define' | 'publish';
 
-/** One question the engine asks the policy. */
-export interface AccessRequest {
+/** Every action the policy answers: a schema's, or `manage`, a namespace's own. */
+export type Action = SchemaAction | 'manage';
+
+/** What `manage` asks to do with a namespace: make it, archive it, unarchive it, or see it among the namespaces. */
+export type NamespaceOperation = 'create' | 'archive' | 'unarchive' | 'list';
+
+/** One question the engine asks the policy: about a schema of a namespace, or about a namespace itself. */
+export type AccessRequest = SchemaAccessRequest | NamespaceAccessRequest;
+
+/** A question about one schema of a namespace: its instances, events, drafts and versions. */
+export interface SchemaAccessRequest {
   readonly principal: Principal;
-  readonly action: Action;
+  readonly action: SchemaAction;
   /** The namespace the call names. */
   readonly namespace: string;
   /** The schema name the call is about. */
   readonly schema: string;
   /** For a behavior operation, its name; absent for every other call. */
   readonly operation?: string;
+}
+
+/**
+ * A question about a namespace itself, which names no schema: whether the
+ * principal may create it, archive it, unarchive it, or see it when it
+ * lists the namespaces.
+ */
+export interface NamespaceAccessRequest {
+  readonly principal: Principal;
+  readonly action: 'manage';
+  /** The namespace: the one a create would make, or the one archived, unarchived or listed. */
+  readonly namespace: string;
+  readonly operation: NamespaceOperation;
+  /** None: a namespace's own question names no schema. */
+  readonly schema?: undefined;
 }
 
 /** Answers true to allow. It runs synchronously, before the engine's transaction. */
@@ -137,22 +165,36 @@ export class Access {
     }
   }
 
-  /** allows asks the policy; only a literal true allows. */
-  allows(principal: Principal, action: Action, namespace: string, schema: string, operation?: string): boolean {
-    const answer: unknown = this.policy(
-      operation === undefined ? { principal, action, namespace, schema } : { principal, action, namespace, schema, operation }
-    );
-    if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
-      throw new TypeError('an access policy is synchronous: it returned a promise');
-    }
-    return answer === true;
+  /** allows asks the policy about a schema; only a literal true allows. */
+  allows(principal: Principal, action: SchemaAction, namespace: string, schema: string, operation?: string): boolean {
+    return this.ask(operation === undefined ? { principal, action, namespace, schema } : { principal, action, namespace, schema, operation });
   }
 
-  /** require throws forbidden unless the policy allows the action. */
-  require(principal: Principal, action: Action, namespace: string, schema: string, operation?: string): void {
+  /** require throws forbidden unless the policy allows the action on the schema. */
+  require(principal: Principal, action: SchemaAction, namespace: string, schema: string, operation?: string): void {
     if (!this.allows(principal, action, namespace, schema, operation)) {
       const what = operation === undefined ? `${action} ${schema}` : `call ${operation} (${action}) on ${schema}`;
       throw new EngineError('forbidden', `${principal.subject} may not ${what} in namespace ${namespace}`);
     }
+  }
+
+  /** allowsManage asks the policy about a namespace itself (`manage`); only a literal true allows. */
+  allowsManage(principal: Principal, namespace: string, operation: NamespaceOperation): boolean {
+    return this.ask({ principal, action: 'manage', namespace, operation });
+  }
+
+  /** requireManage throws forbidden unless the policy allows the operation on the namespace. */
+  requireManage(principal: Principal, namespace: string, operation: NamespaceOperation): void {
+    if (!this.allowsManage(principal, namespace, operation)) {
+      throw new EngineError('forbidden', `${principal.subject} may not ${operation} namespace ${namespace}`);
+    }
+  }
+
+  private ask(request: AccessRequest): boolean {
+    const answer: unknown = this.policy(request);
+    if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
+      throw new TypeError('an access policy is synchronous: it returned a promise');
+    }
+    return answer === true;
   }
 }

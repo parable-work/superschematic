@@ -205,9 +205,13 @@ export SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TES
 
 Golden files under `testdata/golden`, the scalar catalogs
 (`runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts`,
-`runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py`)
-and the schema-file JSON Schema and TypeScript types
-(`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) are
+`runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py`),
+the schema-file JSON Schema and TypeScript types
+(`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) and
+the modules `superschematic engine-client` writes for the engine's tests
+and the engine-notes example (`runtime/engine/typescript/test/generated/`,
+`examples/engine-notes/src/notes.client.ts`) with their parity vector
+(`runtime/engine/testdata/client_codegen_parity.json`) are
 regenerated, not edited. Change the generator or the pin, run
 `make go-goldens`, `go run ./internal/tools/scalarcatalog` or
 `go run ./internal/tools/schemafiletypes`, review the diff by eye, and
@@ -267,6 +271,16 @@ install <package>@vX.Y.Z` refuses a module that has any, so the installed
 binary is not `go install`able: users download it from the release or run
 `make build` in a checkout. `superschematic-migrate`, whose module has
 none, installs that way.
+
+A generated Go server links superscalar's static archive, and the version
+graph's, through cgo, and no module the module proxy serves carries them.
+Each release ships them as `superschematic-archives_<version>_<platform>.tar.gz`
+beside the CLI, built by `scripts/release-archives.sh` with `RUST_VERSION`
+in the release's `build-archives` job, before the CLIs: each CLI links its
+platform's tarball and every tarball's SHA-256 (`internal/release`), which
+the Dockerfiles and workflows it generates pin
+([`docs/stack-model.md`](docs/stack-model.md), section 8.2; D47, amended).
+A CLI built any other way names no digests.
 
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"

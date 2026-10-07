@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.19.0
+	cloud.google.com/go/resourcemanager v1.17.0
 	cloud.google.com/go/run v1.23.0
 	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/serviceusage v1.16.0

@@ -31,6 +31,40 @@
       ],
       "type": "object"
     },
+    "CiOutputConfig": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/CiRendererConfig"
+          },
+          {
+            "not": {}
+          }
+        ]
+      },
+      "description": "The CI a Stack service's build writes, keyed by the renderer that writes it: github for GitHub Actions, or a renderer an extension registers. Only a Stack service sets it. The build writes each workflow under <out>/ci/<stack>/.",
+      "properties": {
+        "github": {
+          "$ref": "#/definitions/CiRendererConfig"
+        }
+      },
+      "type": "object"
+    },
+    "CiRendererConfig": {
+      "additionalProperties": false,
+      "description": "One CI renderer's options for a Stack service's generated workflow.",
+      "properties": {
+        "branch": {
+          "description": "The branch pull requests target and a push deploys from: a branch name, not a pattern. Unset is \"main\".",
+          "type": "string"
+        },
+        "install": {
+          "description": "The directory, relative to the repository root, the build installs the workflow into when it exists. Unset is the renderer's own, .github/workflows for github.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "ExtensionKind": {
       "description": "The name of a kind an extension registers (\"Platform\"). The authoring packages cannot see the registry, so the name is any string here; superschematic checks it against the registered kinds when it loads the config.",
       "type": "string"
@@ -101,6 +135,9 @@
       "properties": {
         "api": {
           "$ref": "#/definitions/ApiOutputConfig"
+        },
+        "ci": {
+          "$ref": "#/definitions/CiOutputConfig"
         },
         "sdk": {
           "$ref": "#/definitions/SdkOutputConfig"
