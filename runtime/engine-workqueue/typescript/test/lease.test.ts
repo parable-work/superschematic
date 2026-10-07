@@ -102,6 +102,42 @@ for (const driver of drivers) {
       assert.deepEqual(leaseOf(engine), { holder: 'wren', token: 3, acquiredAt: T0 + 0, renewedAt: T0 + 30000, expiresAt: T0 + 90000, active: false, expiries: 0, ended: null });
     });
 
+    test("a heartbeat neither rewrites nor loads a large field the value store holds: the job's row keeps its ref", () => {
+      // A value driver that counts its reads and writes, with no cache.
+      const stored = new Map<string, string>();
+      const counts = { reads: 0, writes: 0 };
+      const values = {
+        read: (hash: string) => {
+          counts.reads += 1;
+          return stored.get(hash);
+        },
+        write: (hash: string, json: string) => {
+          counts.writes += 1;
+          stored.set(hash, json);
+        },
+        remove: (hash: string) => {
+          stored.delete(hash);
+        },
+      };
+      const clock = new Clock(T0);
+      const engine = openTestEngine({ driver, clock: clock.now, values: { thresholdBytes: 1024, driver: values, cacheBytes: 0 } });
+      publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease' }, { name: 'Comments' }]));
+      const topic = 'build log '.repeat(200);
+      engine.instances.create(alice, 'Job', { title: 'Build', topic }, { id: 'j1' });
+      const row = () => engine.storage.get("SELECT data, value_refs FROM engine_instances WHERE id = 'j1'");
+      const before = row();
+      assert.equal(before?.value_refs, '["/topic"]');
+      assert.deepEqual(counts, { reads: 0, writes: 1 });
+      invoke(engine, worker, 'acquire');
+      for (let beat = 1; beat <= 3; beat += 1) {
+        clock.advance(10000);
+        invoke(engine, worker, 'heartbeat', {}, 'j1', 1);
+      }
+      assert.deepEqual(row(), before);
+      assert.deepEqual(counts, { reads: 0, writes: 1 });
+      assert.equal(engine.instances.get(alice, 'Job', 'j1')?.data.topic, topic);
+    });
+
     test('release ends the lease and advances the token, so the next acquire is two tokens on', () => {
       const { engine } = world();
       invoke(engine, worker, 'acquire');

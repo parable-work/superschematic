@@ -10,7 +10,8 @@ with it.
 
 The context reaches the behavior's own tables, with writes, and the
 schema's instances in the namespace, read 500 at a time in creation
-order, each with its own fields only. It has no principal and asks no
+order, each with its own fields only, the values the value store holds
+put back. It has no principal and asks no
 policy: the publish was allowed, and what the behavior reads goes into
 its own storage, never back to the publisher. A search index is rebuilt
 this way when the fields it indexes change. Its validate(type, value)
@@ -24,6 +25,8 @@ import type { ConfigTransition } from './composition.js';
 import { typeCheck, type Runtime } from './execution.js';
 import { deepFreeze } from './json.js';
 import { BehaviorSql, prefixOf, storedKey, synchronous } from './storage.js';
+import { behaviorValues } from '../values/behavior.js';
+import { refsOf, valuesOf } from '../values/store.js';
 
 /** How many instances eachInstance reads at a time. */
 const BATCH = 500;
@@ -64,6 +67,7 @@ export function afterConfigChanges(storage: Storage, transitions: readonly Confi
         version: target.version,
         now: target.now,
         sql: new BehaviorSql(storage, behavior.name, prefix, 'write'),
+        values: behaviorValues(storage, { behavior: behavior.name, namespace, schema: target.schema, id: '' }),
         eachInstance: (visit: (instance: StoredInstance) => void) =>
           eachInstance(storage, namespace, target, (instance) => synchronous(behavior.name, 'eachInstance', visit(instance))),
         validate: typeCheck(target.runtime, behavior.name),
@@ -76,13 +80,14 @@ export function afterConfigChanges(storage: Storage, transitions: readonly Confi
 function eachInstance(storage: Storage, namespace: string, target: PublishTarget, visit: (instance: StoredInstance) => void): void {
   for (let after = 0; ; ) {
     const rows = storage.all(
-      `SELECT position, id, data FROM engine_instances
+      `SELECT position, id, data, value_refs FROM engine_instances
        WHERE namespace = ? AND schema = ? AND schema_namespace = ? AND position > ?
        ORDER BY position LIMIT ?`,
       [namespace, target.schema, target.holder, after, BATCH]
     );
     for (const row of rows) {
-      visit(Object.freeze({ id: String(row.id), data: deepFreeze(JSON.parse(String(row.data)) as FrozenJSON) }));
+      const data = valuesOf(storage).fill(JSON.parse(String(row.data)) as FrozenJSON, refsOf(row.value_refs));
+      visit(Object.freeze({ id: String(row.id), data: deepFreeze(data) }));
     }
     if (rows.length < BATCH) {
       return;
