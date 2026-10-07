@@ -201,6 +201,7 @@ type Field struct {
 	IsNullableBool     bool   // optional boolean without a default: typegen emits *bool
 	IsUUIDScalar       bool   // non-array UUID-like scalar: values coerce via .ToUUID()
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
+	IsGeoPoint         bool   // single scalar stored as POINT (Geo.Location): values convert through pgtype.Point, x = Lon, y = Lat
 	IsUUIDLike         bool
 	IsStringLike       bool
 	IsIntLike          bool
@@ -587,6 +588,9 @@ func SetReplacePaths(output *ORMOutput, paths naming.LocalPaths, outputDir strin
 type scalarLookup struct {
 	symbol string
 	traits codegen.ScalarTraits
+	// sqlType is the scalar's sql type mapping, the column type sqlgen
+	// stores a single value of it as (POINT for Geo.Location).
+	sqlType string
 }
 
 func buildScalarLookup(schema *ir.Schema) map[string]scalarLookup {
@@ -598,8 +602,9 @@ func buildScalarLookup(schema *ir.Schema) map[string]scalarLookup {
 			symbol = name
 		}
 		lookup[name] = scalarLookup{
-			symbol: symbol,
-			traits: codegen.BuildScalarTraits(scalarDef, tokens, ""),
+			symbol:  symbol,
+			traits:  codegen.BuildScalarTraits(scalarDef, tokens, ""),
+			sqlType: scalarDef.TypeMappings["sql"],
 		}
 	}
 	return lookup
@@ -987,6 +992,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsNullableBool:            isNullableBool,
 		IsUUIDScalar:              isScalar && !isArray && traits.IsUUIDLike,
 		IsDateTimeScalar:          isScalar && !isArray && traits.IsDateTimeLike,
+		IsGeoPoint:                isScalar && !isArray && !isMap && !fieldDef.JsonField && strings.EqualFold(scalar.sqlType, "POINT"),
 		IsUUIDLike:                traits.IsUUIDLike,
 		IsStringLike:              traits.IsStringLike || irType == codegen.PrimitiveString,
 		IsIntLike:                 traits.IsIntegerLike,
@@ -1224,6 +1230,9 @@ func computeImportNeeds(repo *Repository) {
 			repo.NeedsTime = true
 		}
 		if !field.IsJSONField && !field.IsArray && field.IsDateLike && !field.IsPrimaryKey && !field.IsAuditField {
+			repo.NeedsPgtype = true
+		}
+		if field.IsGeoPoint {
 			repo.NeedsPgtype = true
 		}
 		// A JSON column (a map among them) scans through []byte, never

@@ -163,6 +163,23 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		if err := unmarshalJSONListFieldValue(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}, 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
+		{{- else if .IsGeoPoint }}
+		// to_jsonb writes a POINT as its text, "(x,y)": x is the longitude and
+		// y the latitude.
+		var text string
+		if err := json.Unmarshal(rawValue, &text); err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		var point pgtype.Point
+		if err := point.Scan(text); err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		{{- if .IsNullableScalar }}
+		location := {{ .GoType }}{Lat: point.P.Y, Lon: point.P.X}
+		result.{{ toGoName .Name }} = &location
+		{{- else }}
+		result.{{ toGoName .Name }} = {{ .GoType }}{Lat: point.P.Y, Lon: point.P.X}
+		{{- end }}
 		{{- else }}
 		if err := json.Unmarshal(rawValue, &result.{{ toGoName .Name }}); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
@@ -190,6 +207,10 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 }
 {{- end }}
 
+{{- define "geoPoint" -}}
+pgtype.Point{P: pgtype.Vec2{X: {{ . }}.Lon, Y: {{ . }}.Lat}, Valid: true}
+{{- end }}
+
 {{- define "nullableTempVarsMembers" -}}
 {{- range $member := . }}
 {{- if $member.IsRelationship }}
@@ -197,6 +218,8 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 var temp{{ toGoName $member.Field.Name }} []byte
 {{- else if $member.Field.ScansElementPointers }}
 var temp{{ toGoName $member.Field.Name }} []*{{ $member.Field.GoType }}
+{{- else if $member.Field.IsGeoPoint }}
+var temp{{ toGoName $member.Field.Name }} pgtype.Point
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 var temp{{ toGoName $member.Field.Name }} pgtype.Date
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") }}
@@ -231,6 +254,16 @@ if err := {{ $member.Field.GenericJSONNullCheck (printf "result.%s" (toGoName $m
 {{- else if $member.Field.ScansElementPointers }}
 if err := copyListElements({{ printf "%q" $member.Field.Name }}, temp{{ toGoName $member.Field.Name }}, &result.{{ toGoName $member.Field.Name }}); err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
+}
+{{- else if $member.Field.IsGeoPoint }}
+if temp{{ toGoName $member.Field.Name }}.Valid {
+	// A POINT is (x, y): x is the longitude and y the latitude.
+	{{- if $member.Field.IsNullableScalar }}
+	tmp{{ toGoName $member.Field.Name }} := {{ $member.Field.GoType }}{Lat: temp{{ toGoName $member.Field.Name }}.P.Y, Lon: temp{{ toGoName $member.Field.Name }}.P.X}
+	result.{{ toGoName $member.Field.Name }} = &tmp{{ toGoName $member.Field.Name }}
+	{{- else }}
+	result.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}{Lat: temp{{ toGoName $member.Field.Name }}.P.Y, Lon: temp{{ toGoName $member.Field.Name }}.P.X}
+	{{- end }}
 }
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
@@ -288,6 +321,16 @@ if err := {{ $member.Field.GenericJSONNullCheck (printf "entity.%s" (toGoName $m
 if err := copyListElements({{ printf "%q" $member.Field.Name }}, temp{{ toGoName $member.Field.Name }}, &entity.{{ toGoName $member.Field.Name }}); err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
+{{- else if $member.Field.IsGeoPoint }}
+if temp{{ toGoName $member.Field.Name }}.Valid {
+	// A POINT is (x, y): x is the longitude and y the latitude.
+	{{- if $member.Field.IsNullableScalar }}
+	tmp{{ toGoName $member.Field.Name }} := {{ $member.Field.GoType }}{Lat: temp{{ toGoName $member.Field.Name }}.P.Y, Lon: temp{{ toGoName $member.Field.Name }}.P.X}
+	entity.{{ toGoName $member.Field.Name }} = &tmp{{ toGoName $member.Field.Name }}
+	{{- else }}
+	entity.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}{Lat: temp{{ toGoName $member.Field.Name }}.P.Y, Lon: temp{{ toGoName $member.Field.Name }}.P.X}
+	{{- end }}
+}
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	{{- if $member.Field.IsNullableScalar }}
@@ -324,6 +367,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.ScansElementPointers }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.IsGeoPoint }}
+&temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
@@ -341,6 +386,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.ScansElementPointers }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.IsGeoPoint }}
+&temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
@@ -356,6 +403,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 var temp{{ toGoName $field.Name }} []byte
 {{- else if $field.ScansElementPointers }}
 var temp{{ toGoName $field.Name }} []*{{ $field.GoType }}
+{{- else if $field.IsGeoPoint }}
+var temp{{ toGoName $field.Name }} pgtype.Point
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 var temp{{ toGoName $field.Name }} pgtype.Date
 {{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") }}
@@ -369,7 +418,7 @@ var temp{{ toGoName $field.Name }} *{{ $field.GoType }}
 {{- define "nullableSelectedFlagsFields" -}}
 {{- range $field := . }}
 {{- if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (not $field.IsJSONField) }}
-{{- if or (not $field.IsRequired) (and $field.IsRequired $field.IsDateLike) }}
+{{- if or (not $field.IsRequired) (and $field.IsRequired (or $field.IsDateLike $field.IsGeoPoint)) }}
 var selected{{ toGoName $field.Name }} bool
 {{- end }}
 {{- end }}
@@ -383,6 +432,9 @@ case "{{ $field.DBName }}":
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	{{- else if $field.ScansElementPointers }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
+	{{- else if $field.IsGeoPoint }}
+	scanDest[i] = &temp{{ toGoName $field.Name }}
+	selected{{ toGoName $field.Name }} = true
 	{{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	selected{{ toGoName $field.Name }} = true
@@ -418,6 +470,16 @@ if err := {{ $field.GenericJSONNullCheck (printf "result.%s" (toGoName $field.Na
 {{- else if $field.ScansElementPointers }}
 if err := copyListElements({{ printf "%q" $field.Name }}, temp{{ toGoName $field.Name }}, &result.{{ toGoName $field.Name }}); err != nil {
 	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
+}
+{{- else if $field.IsGeoPoint }}
+if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
+	// A POINT is (x, y): x is the longitude and y the latitude.
+	{{- if $field.IsNullableScalar }}
+	tmp{{ toGoName $field.Name }} := {{ $field.GoType }}{Lat: temp{{ toGoName $field.Name }}.P.Y, Lon: temp{{ toGoName $field.Name }}.P.X}
+	result.{{ toGoName $field.Name }} = &tmp{{ toGoName $field.Name }}
+	{{- else }}
+	result.{{ toGoName $field.Name }} = {{ $field.GoType }}{Lat: temp{{ toGoName $field.Name }}.P.Y, Lon: temp{{ toGoName $field.Name }}.P.X}
+	{{- end }}
 }
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
@@ -1989,6 +2051,8 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	values = append(values, input.{{ toGoName .Name }}.ToUUID())
 	{{- else if .IsDateTimeScalar }}
 	values = append(values, time.Time(input.{{ toGoName .Name }}))
+	{{- else if .IsGeoPoint }}
+	values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 	{{- else if .EnumDefault }}
 	// An unset enum takes its schema default; "" is never a member.
 	if input.{{ toGoName .Name }} == "" {
@@ -2024,6 +2088,8 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 			{{- else }}
 			values = append(values, time.Time(input.{{ toGoName .Name }}))
 			{{- end }}
+			{{- else if .IsGeoPoint }}
+			values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 			{{- else if .DerefValue }}
 			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
 			values = append(values, *input.{{ toGoName .Name }})
@@ -2189,6 +2255,8 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 			cell.value = input.{{ toGoName .Name }}.ToUUID()
 			{{- else if .IsDateTimeScalar }}
 			cell.value = time.Time(input.{{ toGoName .Name }})
+			{{- else if .IsGeoPoint }}
+			cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
 			{{- else if .EnumDefault }}
 			// An unset enum takes its schema default; "" is never a member.
 			cell.value = input.{{ toGoName .Name }}
@@ -2223,6 +2291,8 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 				{{- else }}
 				cell.value = time.Time(input.{{ toGoName .Name }})
 				{{- end }}
+				{{- else if .IsGeoPoint }}
+				cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
 				{{- else if .DerefValue }}
 				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
 				cell.value = *input.{{ toGoName .Name }}
@@ -2411,6 +2481,8 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsGeoPoint }}
+		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else }}
 		values = append(values, *update.{{ toGoName .Name }})
 		{{- end }}
@@ -2587,6 +2659,8 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsGeoPoint }}
+		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else }}
 		values = append(values, *update.{{ toGoName .Name }})
 		{{- end }}
