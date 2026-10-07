@@ -39,5 +39,6 @@ if errors.HasErrors() {
 |------|----------|
 | `scalars.go` | Scalar type aliases onto the scalar library |
 | `types.go` | Object/input structs with validators and codecs |
+| `identity.go` | `IdentityDescriptor`, the identity descriptor (D50); `identity/fixture-user-model-db.json` holds the same document |
 
 Generated at 2026-01-02T03:04:05Z.

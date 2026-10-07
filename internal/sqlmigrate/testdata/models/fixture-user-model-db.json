@@ -102,6 +102,15 @@
           "refTable": "user"
         }
       ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_session_user"
+        }
+      ],
       "kind": "entity",
       "name": "session",
       "origin": "Session",

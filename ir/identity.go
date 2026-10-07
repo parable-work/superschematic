@@ -75,9 +75,9 @@ const (
 const (
 	// Session: id; user, the User table; tokenHash, a @unique Crypto.SHA256
 	// of the session's token; createdAt and expiresAt, Temporal.DateTime;
-	// lastSeenAt and revokedAt, nullable Temporal.DateTime. Revocation is
-	// revokedAt, not a soft delete, so the ORM's soft-delete filter never
-	// hides a revoked session (D33).
+	// lastSeenAt and revokedAt, nullable Temporal.DateTime; an index on
+	// user. Revocation is revokedAt, not a soft delete, so the ORM's
+	// soft-delete filter never hides a revoked session (D33).
 	IdentitySessionUserField       = "user"
 	IdentitySessionTokenHashField  = "tokenHash"
 	IdentitySessionCreatedAtField  = "createdAt"

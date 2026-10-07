@@ -9,6 +9,7 @@ This crate contains Rust types generated from the `fixture-user-model-db` schema
 - `src/scalars.rs` - scalar aliases
 
 - `src/types.rs` - object/input structs and imported type aliases
+- `src/identity.rs` - `IDENTITY_DESCRIPTOR`, the identity descriptor (D50)
 
 
 ## Notes

@@ -42,6 +42,18 @@ func grantIndex() ir.IndexDef {
 	}
 }
 
+// sessionUserIndex indexes Session by its user, so revoking every session
+// of a user, and the cascade from a deleted user, find them without a scan.
+// The other tables need none: UserCredential's user is unique, and
+// UserRoleGrant's (user, role) index leads with the user.
+func sessionUserIndex() ir.IndexDef {
+	return ir.IndexDef{
+		Keys:   []string{ir.IdentitySessionUserField},
+		Name:   "user",
+		Origin: ir.OriginIdentity,
+	}
+}
+
 // GeneratedIndex is an index the expansion adds: the type whose table
 // holds it, and the index.
 type GeneratedIndex struct {
@@ -52,10 +64,14 @@ type GeneratedIndex struct {
 // Indexes returns the indexes the expansion of schema adds, so
 // verification can refuse an authored index of the same name.
 func Indexes(schema *ir.Schema) []GeneratedIndex {
-	if schema.UserTable() == nil || schema.UserRoleTable() == nil {
+	if schema.UserTable() == nil {
 		return nil
 	}
-	return []GeneratedIndex{{ir.IdentityRoleGrantTable, grantIndex()}}
+	indexes := []GeneratedIndex{{ir.IdentitySessionTable, sessionUserIndex()}}
+	if schema.UserRoleTable() != nil {
+		indexes = append(indexes, GeneratedIndex{ir.IdentityRoleGrantTable, grantIndex()})
+	}
+	return indexes
 }
 
 // Expand adds the tables of the user model of schema, when it has a User
@@ -111,6 +127,7 @@ func (m *model) addSession() {
 			dateTime(ir.IdentitySessionLastSeenAtField, false, "When the session last authenticated a request, written at most once a minute."),
 			dateTime(ir.IdentitySessionRevokedAtField, false, "When the session was revoked, by logout or by a change to its user."),
 		},
+		Indexes: []ir.IndexDef{sessionUserIndex()},
 	})
 }
 

@@ -90,4 +90,6 @@ ALTER TABLE user_role_grant
 
 -- Create indexes
 
+CREATE INDEX idx_session_user ON "session" USING BTREE (user_id);
+
 CREATE UNIQUE INDEX uq_user_role_grant_user_role ON user_role_grant USING BTREE (user_id, role_id);

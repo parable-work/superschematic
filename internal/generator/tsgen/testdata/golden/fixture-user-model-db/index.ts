@@ -30,3 +30,6 @@ export * from './validators';
 
 // Re-export mask helpers
 export * from './mask';
+
+// Re-export the identity descriptor
+export { identityDescriptor } from './identity';

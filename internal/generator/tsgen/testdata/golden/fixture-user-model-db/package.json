@@ -33,6 +33,10 @@
     "./validators/types/*": {
       "types": "./validators/types/*.ts",
       "import": "./validators/types/*.ts"
+    },
+    "./identity": {
+      "types": "./identity.ts",
+      "import": "./identity.ts"
     }
   },
   "scripts": {

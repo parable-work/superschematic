@@ -4,6 +4,7 @@
 
 -- Drop indexes
 DROP INDEX IF EXISTS uq_user_role_grant_user_role CASCADE;
+DROP INDEX IF EXISTS idx_session_user CASCADE;
 
 -- Drop join tables first
 

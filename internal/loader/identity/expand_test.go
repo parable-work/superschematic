@@ -126,13 +126,17 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 	if !reflect.DeepEqual(grant.Indexes, wantIndex) {
 		t.Errorf("UserRoleGrant indexes = %+v, want %+v", grant.Indexes, wantIndex)
 	}
-	for _, name := range []string{ir.IdentitySessionTable, ir.IdentityCredentialTable} {
-		if len(schema.Types[name].Indexes) != 0 {
-			t.Errorf("%s has indexes %+v, want none", name, schema.Types[name].Indexes)
-		}
+	session := schema.Types[ir.IdentitySessionTable]
+	wantSessionIndex := []ir.IndexDef{{Keys: []string{"user"}, Name: "user", Origin: ir.OriginIdentity}}
+	if !reflect.DeepEqual(session.Indexes, wantSessionIndex) {
+		t.Errorf("Session indexes = %+v, want %+v", session.Indexes, wantSessionIndex)
 	}
-	if got := Indexes(schema); len(got) != 1 || got[0].Type != ir.IdentityRoleGrantTable || !reflect.DeepEqual(got[0].Index, wantIndex[0]) {
-		t.Errorf("Indexes = %+v, want the UserRoleGrant index Expand adds", got)
+	if indexes := schema.Types[ir.IdentityCredentialTable].Indexes; len(indexes) != 0 {
+		t.Errorf("UserCredential has indexes %+v, want none", indexes)
+	}
+	wantGenerated := []GeneratedIndex{{ir.IdentitySessionTable, wantSessionIndex[0]}, {ir.IdentityRoleGrantTable, wantIndex[0]}}
+	if got := Indexes(schema); !reflect.DeepEqual(got, wantGenerated) {
+		t.Errorf("Indexes = %+v, want the indexes Expand adds, %+v", got, wantGenerated)
 	}
 
 	if want := []string{"Identity.UUID", "Temporal.DateTime", "Crypto.SHA256"}; !slices.Equal(scalars, want) {
@@ -159,8 +163,8 @@ func TestExpandWithoutRoles(t *testing.T) {
 	if schema.Types[ir.IdentityRoleGrantTable] != nil {
 		t.Error("Expand added UserRoleGrant to a schema without a UserRole table")
 	}
-	if got := Indexes(schema); len(got) != 0 {
-		t.Errorf("Indexes = %+v for a schema without a UserRole table, want none", got)
+	if got := Indexes(schema); len(got) != 1 || got[0].Type != ir.IdentitySessionTable {
+		t.Errorf("Indexes = %+v for a schema without a UserRole table, want Session's alone", got)
 	}
 }
 
