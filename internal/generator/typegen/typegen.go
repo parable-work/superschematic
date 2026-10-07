@@ -288,6 +288,10 @@ type ModuleOutput struct {
 	ScalarLibReplacePath string
 	SchemaIRReplacePath  string
 
+	// Pins are the runtime modules go.mod takes from the module proxy, at
+	// the release that generates it (SetReleasePins).
+	Pins naming.Pins
+
 	// VersionGraphs are the descriptors of the schema's version graphs
 	// (D17), written as versiongraph/<name>.json beside the types.
 	VersionGraphs []VersionGraphDescriptor
@@ -483,6 +487,14 @@ func SetReplacePaths(output *ModuleOutput, paths naming.LocalPaths, outputDir st
 		return fmt.Errorf("schema-ir replace path: %w", err)
 	}
 	return nil
+}
+
+// SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
+// modules the types module reaches: the scalar library and the schema IR.
+// go.mod requires each pinned module at its pin and replaces every version
+// of it with that pin.
+func SetReleasePins(output *ModuleOutput, pins naming.Pins) {
+	output.Pins = pins.Of(output.Naming.ScalarGoModule, output.Naming.SchemaIRGoModule)
 }
 
 // fieldTypeMapperGo maps IR type references to Go types.

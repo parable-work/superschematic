@@ -212,6 +212,21 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 	return nil
 }
 
+// SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
+// modules the API module reaches: the HTTP runtime, the schema runtime it
+// builds on, the schema IR, the scalar library and, when the API reads a
+// version graph, the version-graph binding. go.mod requires those it
+// requires at their pins and replaces every version of each pinned module
+// with its pin.
+func SetReleasePins(output *APIOutput, pins naming.Pins) {
+	n := output.Naming
+	modules := []string{n.HTTPRuntimeGoModule, n.SchemaRuntimeGoModule, n.SchemaIRGoModule, n.ScalarGoModule}
+	if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
+		modules = append(modules, n.VersionGraphGoModule)
+	}
+	output.Pins = pins.Of(modules...)
+}
+
 // generateFile generates a file from an embedded template, running .go
 // outputs through gofmt.
 func generateFile(generator *codegen.FileGenerator, fs embed.FS, templateName, outputPath string, data any, funcs template.FuncMap) error {

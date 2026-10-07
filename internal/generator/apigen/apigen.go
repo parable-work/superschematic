@@ -344,6 +344,10 @@ type APIOutput struct {
 	SchemaRuntimeReplacePath string
 	PtrReplacePath           string
 	VersionGraphReplacePath  string
+
+	// Pins are the runtime modules go.mod takes from the module proxy, at
+	// the release that generates it (SetReleasePins).
+	Pins naming.Pins
 }
 
 // AddIndirectModules adds modules to IndirectModules: the dispatch layer

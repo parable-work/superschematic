@@ -7,7 +7,7 @@ require {{.TypesModule}} v0.0.0
 require {{.}} v0.0.0 // indirect
 {{- end}}
 {{- if .HasFilterableEndpoints}}
-require {{ .Naming.HTTPRuntimeGoModule }} v0.0.0
+require {{ .Naming.HTTPRuntimeGoModule }} {{ .Pins.Version .Naming.HTTPRuntimeGoModule "v0.0.0" }}
 {{- end}}
 
 {{- if .TypesReplacePath}}
@@ -18,4 +18,15 @@ replace {{ .Naming.HTTPRuntimeGoModule }} => {{ .HTTPRuntimeReplacePath }}
 {{- end}}
 {{- range .TypeModuleReplaces}}
 replace {{.Module}} => {{.RelPath}}
+{{- end}}
+{{- if .Pins}}
+
+// The release of superschematic that generated this module pins the
+// runtime modules it reaches, which the module proxy serves, whatever
+// version the modules it requires ask for.
+replace (
+{{- range .Pins.List}}
+	{{.Module}} => {{.Module}} {{.Version}}
+{{- end}}
+)
 {{- end}}

@@ -12,6 +12,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/gosdkgen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/ormgen"
 	"github.com/parable-work/superschematic/internal/generator/pygen"
 	"github.com/parable-work/superschematic/internal/generator/pysdkgen"
@@ -185,6 +186,15 @@ func (m *runMemo) loadDependency(name string) (*ir.Schema, error) {
 	return depSchema, nil
 }
 
+// releasePins are the runtime modules every generated Go module takes from
+// the module proxy, at the release that generates it: each no [paths] key
+// names a checkout of (D47, amended). A binary built from a checkout pins
+// none, and each go.mod requires them at versions only a checkout's
+// replace resolves.
+func (r run) releasePins() naming.Pins {
+	return r.Options.Naming.ReleasePins(r.Options.Paths, r.Options.ReleaseInfo())
+}
+
 // generateGoTypes emits the Go type-library module.
 func (r run) generateGoTypes() error {
 	var deps map[string]*ir.Schema
@@ -225,6 +235,7 @@ func (r run) generateGoTypes() error {
 
 	dir := TypesDir(r.Options.OutputRoot, "go", r.Config.Name)
 	if err := r.measure("output.types-go.prepare", func() error {
+		typegen.SetReleasePins(output, r.releasePins())
 		return typegen.SetReplacePaths(output, r.Options.Paths, dir)
 	}); err != nil {
 		return fmt.Errorf("generator: go types for %s: %w", r.Config.Name, err)
@@ -488,6 +499,7 @@ func (r run) generateORM() error {
 
 	dir := ORMDir(r.Options.OutputRoot, r.Config.Name)
 	if err := r.measure("output.orm.prepare", func() error {
+		ormgen.SetReleasePins(output, r.releasePins())
 		return ormgen.SetReplacePaths(output, r.Options.Paths, dir)
 	}); err != nil {
 		return fmt.Errorf("generator: orm for %s: %w", r.Config.Name, err)
@@ -678,6 +690,7 @@ func (r run) generateGoAPI() error {
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if err := r.measure("output.api.prepare", func() error {
+		apigen.SetReleasePins(output, r.releasePins())
 		return apigen.SetReplacePaths(output, r.Options.Paths, dir)
 	}); err != nil {
 		return fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)
@@ -995,6 +1008,7 @@ func (r run) generateEnvConfig(lang string) error {
 		if err = envgen.SetReplacePaths(output, r.Options.Paths, dir); err != nil {
 			return fmt.Errorf("generator: env config replace paths for %s: %w", r.Config.Name, err)
 		}
+		envgen.SetReleasePins(output, r.releasePins())
 		err = envgen.WriteConfigModule(output, dir)
 	case LangRust:
 		err = envgen.WriteRustConfig(output, dir)
@@ -1146,6 +1160,7 @@ func (r run) generateGoSDK() error {
 	if err := gosdkgen.SetReplacePaths(sdkOutput, r.Options.Paths, dir); err != nil {
 		return fmt.Errorf("generator: go sdk for %s: %w", r.Config.Name, err)
 	}
+	gosdkgen.SetReleasePins(sdkOutput, r.releasePins())
 	if err := r.measure("output.sdk-go.write", func() error {
 		return gosdkgen.WriteSDKWithToolsProfiled(sdkOutput, apiOutput, dir, typesDir, r.Options.Clock, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.sdk-go")...)
 	}); err != nil {
