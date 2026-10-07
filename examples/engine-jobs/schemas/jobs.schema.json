@@ -39,7 +39,7 @@
         {
           "name": "Retries",
           "config": {
-            "classes": { "transient": { "attempts": 2, "hint": "Try again; the source may be back." }, "invalid": "terminal" },
+            "classes": { "transient": { "attempts": 2, "hint": "Try again; the source may be back." }, "invalid": "terminal", "cancelled": "terminal" },
             "totalAttempts": 3,
             "exhaustedState": "failed",
             "resultField": "result"

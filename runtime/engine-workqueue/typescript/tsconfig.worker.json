@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "comment": "The ./worker subpath imports only @superschematic/engine/client, so it runs wherever the client does: it compiles here with the DOM's globals and no Node.js types, so a use of a Node.js API, the engine or a behavior fails the typecheck.",
+  "include": ["src/worker/**/*.ts", "src/defaults.ts"]
+}
