@@ -49,7 +49,7 @@ kinds it may reference, and which generators run, in order.
 | DB | a table | `@superschematic/db` | General | `sql`, `orm`, `types` |
 | API | a request or response type; with `@source`, a view of a table | `@superschematic/api` | DB, General | `types`, `api`, `sdks` |
 | General | a plain type | neither | General | `types`, `envConfig` |
-| Stack | a declaration of what runs where: the stack, a deployable or an environment | `@superschematic/stack` | none; it names services by their handles | `stack`, `server` |
+| Stack | a declaration of what runs where: the stack, a deployable or an environment | `@superschematic/stack` | none; it names services by their handles | `stack`, `server`, `ci` |
 
 Every kind may import `@superschematic/schema` (wrappers such as
 `Nullable` and `Default`, and decorators that apply everywhere),
@@ -61,7 +61,8 @@ key lists them.
 A Stack service's build resolves each environment it
 declares to `stack/<stack>/<environment>/environment.json`, and writes a
 Go entrypoint and Dockerfile for each server it runs under
-`server/<stack>/`. [Stacks and deploys](/superschematic/guides/stacks/)
+`server/<stack>/`, and, when its config asks for it, the stack's CI
+workflow under `ci/<stack>/`. [Stacks and deploys](/superschematic/guides/stacks/)
 covers it, with `stack dev` and `stack deploy`.
 
 An extension can register more kinds, each with its own rules and
@@ -77,7 +78,8 @@ asks for it:
 outputs: {
   types: { go: { enabled: true }, typescript: { enabled: true } },
   api: { enabled: true, language: "GO" },     // API: GO, TYPESCRIPT or RUST
-  sdk: { typescript: { enabled: true } }       // API: an SDK per language
+  sdk: { typescript: { enabled: true } },      // API: an SDK per language
+  ci: { github: { branch: "main" } }           // Stack: the generated CI
 }
 ```
 
@@ -89,7 +91,9 @@ class carries `@envVars` also gets a loader for those environment
 variables: in Go when `types` lists Go, in Rust when it lists Rust but not
 Go, and in TypeScript, inside the TypeScript types package, whenever
 `types` lists TypeScript. With none of the three, it gets only their
-`values-schema.json`. Every generated
+`values-schema.json`. A Stack schema's `ci` names the renderer that writes
+its [generated CI](/superschematic/guides/stacks/#generated-ci), with its
+options. Every generated
 package is self-contained: it imports the runtimes under `runtime/` and
 superscalar, never the compiler.
 

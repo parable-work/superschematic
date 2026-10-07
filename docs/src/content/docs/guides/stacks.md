@@ -32,10 +32,11 @@ resources that the Pulumi provisioner applies.
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
+| [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
-and D30 and D45 in `docs/DECISIONS.md` record the decisions.
+and D30, D45, D46 and D47 in `docs/DECISIONS.md` record the decisions.
 
 ## The model
 
@@ -578,7 +579,8 @@ build says why.
 ## Deploy to Google Cloud
 
 The gcp target is `extensions/gcp`, linked in the installed binary. Its
-values are `project` and `region`, which are required, and `production`.
+values are `project` and `region`, which are required, `production`, and
+`projectNumber`, which the [generated CI](#generated-ci) signs in with.
 
 | Stack concept | On gcp |
 | --- | --- |
@@ -673,6 +675,89 @@ digest, in the stack's repository. None of this has run against Google
 Cloud yet. The
 [CLI reference](/superschematic/reference/cli/#stack-deploy-environment)
 has every flag, the hazard gate and the manifest.
+
+## Generated CI
+
+A stack opts in to a generated CI workflow in its config, under the name
+of the renderer that writes it. The core's is `github`, GitHub Actions:
+
+```ts
+// schemas/services/shop-stack/schema.config.ts
+export default defineConfig({
+  name: "shop-stack",
+  kind: SchemaKind.Stack,
+  outputs: { ci: { github: { branch: "main" } } }
+});
+```
+
+| Option | Default | What it sets |
+| --- | --- | --- |
+| `branch` | `main` | the branch pull requests target and a push deploys from: a branch name, not a pattern |
+| `install` | `.github/workflows` | the directory under the repository root the build installs the workflow into |
+
+Only a Stack service takes `ci`, and one naming a renderer the binary
+does not register fails to build. The build writes the workflow to
+`ci/shop-stack/github/shop-stack.yml` under the output root, and copies it
+into the install directory when that directory exists. Without the
+directory, or outside a git repository, it logs why and installs nothing,
+so an example in a repository with CI of its own adds no workflow. A stack
+without `outputs.ci` gets none. Commit the installed file, and build again
+after changing the stack.
+
+The workflow:
+
+- **On a pull request to the branch**, `check` installs superschematic
+  and the schemas root's packages (`bun install --frozen-lockfile` for a
+  `bun.lock`, `npm ci` for a `package-lock.json`), runs `build-all`,
+  which resolves every environment and checks its graph, and compiles
+  each Go server's entrypoint module with `go build -mod=mod`. It needs no
+  credentials.
+- After it, `plan-<environment>` runs `stack plan` for each cloud
+  environment without parameters, as the environment's `planner`
+  account, and `preview-<environment>` runs `stack deploy <environment>
+  --param <parameter>=<pull request number>` for each environment with one
+  parameter, as `deployer`. When the pull request closes, the preview job
+  runs `stack destroy` of that member instead.
+- A pull request from a fork runs `check` alone: GitHub gives its jobs
+  no identity token.
+- **On a push to the branch**, `deploy-<environment>` deploys each cloud
+  environment without parameters in the order the stack declares them,
+  each after the one before, in the GitHub environment of its name. Give
+  the `Production` environment required reviewers in the repository's
+  settings, and each production deploy waits for their approval.
+  `workflow_dispatch` runs the same on demand from the branch.
+- One deploy runs at a time per environment, and one preview job per
+  member.
+
+A local environment has no job, since `stack dev` runs it on your
+machine, and neither has an environment with several parameters. The
+workflow's header names each environment it leaves out and why.
+
+Each cloud job signs in through its target. On gcp that is Workload
+Identity Federation, through the pool `stack bootstrap` creates for the
+GitHub repository of the git remote, as `<stack>-planner` or
+`<stack>-deployer`, with `google-github-actions/auth`, whose credentials
+file gives superschematic and Pulumi application default credentials.
+The provider's name holds the project's number, `projectNumber` in the
+environment's `gcp` values, which bootstrap records and you may enter by
+hand. An environment that extends another inherits it. Until it is set,
+the environment has no cloud job, and the header names the bootstrap to
+run:
+
+```ts
+gcp: { project: "acme-staging", projectNumber: "123456789012", region: "us-east1" }
+```
+
+The cloud jobs also install the tools the environment's provisioner runs:
+the `pulumi` CLI at the release of the Pulumi SDK the binary links.
+
+The workflow installs the release of superschematic that generated it,
+from the project's release page, and checks it against the release's
+`SHA256SUMS`, so a repository's CI changes only when you build with
+another release. A binary built from a checkout names no release: its
+workflow's install step fails and says to generate the workflow again
+with a released superschematic. Every action is pinned by commit, and
+nothing in the file depends on when it was generated.
 
 ## DNS
 
@@ -792,8 +877,9 @@ deployed in many stacks.
 
 ## Write your own target
 
-Targets, platforms, connectors, DNS platforms and provisioners are
-registrations, so a new cloud or tool needs no core edit.
+Targets, platforms, connectors, DNS platforms, provisioners and CI
+renderers are registrations, so a new cloud, tool or CI system needs no
+core edit.
 [A deploy target](/superschematic/extending/write-an-extension/#a-deploy-target)
 lists them, and [Stack targets](/superschematic/extending/stack-targets/)
 covers writing and testing one.

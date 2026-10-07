@@ -588,7 +588,7 @@ supplies it at run time.
 
 ## 6. Plug-in interfaces
 
-Five registrations keep platforms and tools independent of each other and
+Six registrations keep platforms and tools independent of each other and
 of the core:
 
 - a deployable is placed on a **platform**;
@@ -596,7 +596,9 @@ of the core:
 - a **target** names a platform for each deployable kind;
 - a **DNS platform** holds an environment's domain records (section 6.9);
 - a **provisioner** turns the resulting resource graph into running
-  resources.
+  resources;
+- a **CI renderer** writes a stack's workflow for one CI system from its
+  resolved environments (section 11.3).
 
 ### 6.1 Platform
 
@@ -920,10 +922,11 @@ last part is not built: the Stack IR has no field for the program yet.
 
 ### 6.7 Registry surface
 
-There are five specs, registered like the others in section 3 of
+There are six specs, registered like the others in section 3 of
 `docs/extension-model.md`. The core registers one target, `local`, with
 its platforms, connectors and provisioner (section 8.3, and D30, amended:
-the core registers the local target); every other is an extension's.
+the core registers the local target), and one CI renderer, `github`
+(D47); every other is an extension's.
 
 - `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a server platform without languages or a
@@ -937,7 +940,9 @@ the core registers the local target); every other is an extension's.
   unknown deployable kind, a values or resource type schema that does not
   compile, a resource type another target or a DNS platform registered
   with a different schema, and a policy rule without a name or a check, or
-  with a repeated name.
+  with a repeated name, and a deploy seam it cannot use (section 11.1):
+  any but `Secrets` without a provisioner, and `Bootstrap`, `Migrations`,
+  `Builder` or `CI` without `State`.
 - `RegisterDNSPlatform(DNSPlatformSpec)` refuses a malformed or repeated
   name, the reserved name `manual`, a values or resource type schema that
   does not compile, a resource type a target or another DNS platform
@@ -947,7 +952,12 @@ the core registers the local target); every other is an extension's.
   name the secrets its provider reads when the provisioner runs (section
   6.9).
 - `RegisterProvisioner(ProvisionerSpec)` refuses a malformed or repeated
-  name and a missing implementation.
+  name, a missing implementation, and a tool without a name or a version,
+  or listed twice. Its `Tools` are the command-line tools it runs, which
+  a generated CI job installs (section 11.3).
+- `RegisterCIRenderer(CIRendererSpec)` refuses a malformed or repeated
+  name, a missing `Render`, and an install directory that is not a
+  relative path inside the repository.
 
 A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
 `Finalize` checks that each connector joins registered platforms of the
@@ -2138,7 +2148,8 @@ parameter's value as `--param pr=123`. `bootstrap`, `secrets set`,
 `stack`; the reference page "CLI" lists their flags. `build` builds the
 images a deploy would build (section 11.2) and deploys nothing: it prints
 each as an `--image` flag and writes no manifest. A target plugs into
-them through five seams on its `TargetSpec` (D45, D46):
+them, and into the generated CI, through six seams on its `TargetSpec`
+(D45, D46, D47):
 
 - `State`, a state store: the provisioner's state backend for an
   environment, and each run's deploy manifest;
@@ -2150,7 +2161,11 @@ them through five seams on its `TargetSpec` (D45, D46):
   servers that connect their privileges (section 8.4);
 - `Builder`, an image builder: a build request is a server, its
   Dockerfile and its build context, which the deploy writes as an
-  archive, and the result is the image by digest. Cloud Build on gcp.
+  archive, and the result is the image by digest. Cloud Build on gcp;
+- `CI`, how a generated CI job signs in to a resolved environment as
+  `planner` or `deployer` (section 11.3): an identity, a kind and its
+  fields, which a CI renderer turns into its own steps, or none yet.
+  Workload Identity Federation on gcp.
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -2272,51 +2287,81 @@ export default defineConfig({
 });
 ```
 
-The build writes the workflow under `<output-root>/ci/<stack>/` and
-installs it into the renderer's directory under the repository root,
-`.github/workflows/<stack>.yml`, when that directory exists, as
-`InstallTargetDir` installs any generator's output. GitHub Actions
-(`github`) is the first renderer. Others are registrations, as
-provisioners are. A stack without `outputs.ci` gets no workflow, so an
-example in a repository with CI of its own installs nothing.
+Each renderer takes `branch`, which pull requests target and pushes
+deploy from, `main` unless set, and `install`, the renderer's directory
+unless set. Only a Stack service takes `outputs.ci`, and a renderer no
+extension registered fails the build. The Stack kind's `ci` generator
+resolves every environment as the `stack` generator does, asks each
+environment's target for its identities (`TargetSpec.CI`) and its
+provisioner for its tools (`ProvisionerSpec.Tools`), and renders. It
+writes the workflow under `<output-root>/ci/<stack>/<renderer>/` and
+installs it into the install directory under the repository root,
+`.github/workflows/<stack>.yml`, when that directory exists, through
+`InstallTargetDir`. Without the directory, or outside a git repository,
+it logs why and installs nothing. GitHub Actions (`github`) is the first
+renderer. Others are registrations, as provisioners are. A stack without
+`outputs.ci` gets no workflow, so an example in a repository with CI of
+its own installs nothing. The paths in the workflow are relative to the
+repository root, where a CI job starts, and its build writes to the
+default output root, `<schemas-root>/dist`, which the `stack` commands
+read.
 
 The GitHub workflow:
 
 - **On a pull request:**
   - A `check` job needs no credentials. It installs superschematic and
-    the schemas root's packages, builds, which resolves every environment
-    and checks its graph (levels 1 and 3), and compiles each server's
-    entrypoint (level 2).
+    the schemas root's packages, by the root's lockfile (`bun install
+    --frozen-lockfile` or `npm ci`), runs `build-all` over the services
+    root, which resolves every environment and checks its graph (levels 1
+    and 3), and compiles each Go server's entrypoint module with `go build
+    -mod=mod` (level 2). It runs on a push too.
   - A `plan` job per cloud environment without parameters runs `stack
-    plan` as `planner`: the infrastructure diff, the migration plans and
-    their hazards (levels 5 and 6).
+    plan` as `planner`, after `check`: the infrastructure diff, the
+    migration plans and their hazards (levels 5 and 6).
   - A `preview` job per environment with one parameter runs `stack deploy
     <environment> --param <parameter>=<pull request number>` as
-    `deployer`, a member per pull request, and `stack destroy` of that
-    member when the pull request closes (level 7). An environment with
-    more parameters has no CI job, and the workflow says so.
+    `deployer` after `check`, a member per pull request, and `stack
+    destroy` of that member when the pull request closes, when `check`
+    does not run (level 7). An environment with more parameters has no CI
+    job, and the workflow says so.
   - A pull request from a fork runs `check` alone: GitHub gives its jobs
     no identity token.
 - **On a push to the branch:** a `deploy` job per cloud environment
   without parameters, in the order the environments are declared. The
-  first deploys at once; each later one waits for the one before, and runs
-  in a GitHub environment of its own name, so that environment's required
-  reviewers approve it. Reviewers are a setting of the repository, not of
-  the stack.
-- One run at a time per environment, and per preview member.
+  first deploys once `check` passes; each later one waits for the one
+  before. Each runs in a GitHub environment of its own name, so that
+  environment's required reviewers approve it. Reviewers are a setting of
+  the repository, not of the stack. `workflow_dispatch` runs `check` and,
+  from the branch, the deploys.
+- One deploy at a time per environment, and one preview job per member,
+  neither cancelled by the next. A plan job has a group per pull request
+  and environment: GitHub keeps one pending job per group and cancels the
+  one it replaces, so a plan sharing the environment's group could cancel
+  a pending deploy. A plan that meets a running deploy's lock fails, and
+  runs again.
 - Local environments have no job. Level 4 runs on an engineer's machine.
+  The workflow's header names each environment that has no job and why.
 
 Each cloud job signs in through the target's CI identity (`TargetSpec.CI`):
 on gcp, Workload Identity Federation through the pool bootstrap creates,
 as `<stack>-planner` or `<stack>-deployer`. The provider's name holds the
 project's number, `projectNumber` (section 7.1), which bootstrap records.
 An environment without it has no cloud jobs, and the workflow names the
-bootstrap to run.
+bootstrap to run. `google-github-actions/auth` signs in, and its
+credentials file gives superschematic and Pulumi application default
+credentials. The cloud jobs install the provisioner's tools: the Pulumi
+provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
+is built with.
 
 The workflow installs the release of superschematic that generated it,
-checked against the release's `SHA256SUMS`. A binary built from a checkout
-is no release, so its workflow's install step fails and says to generate
-again with a released binary. Only servers whose build context changed
+the version of the root module in the binary's build information, from
+its repository's release page, checked against the release's
+`SHA256SUMS`. A binary built from a checkout is no release, so its
+workflow's install step fails and says to generate again with a released
+binary. Every action is pinned by commit, and the file holds no
+timestamp. The build cache keys the workflow on the stack's inputs, which
+hold its config, and on the binary, which names the release, so it needs
+no key of its own. Only servers whose build context changed
 are built and rolled (section 11.2), so the workflow builds and deploys
 whatever the deploy decides is affected, and needs no list of its own.
 
@@ -2439,7 +2484,9 @@ whatever the deploy decides is affected, and needs no list of its own.
 ## 13. Module layout
 
 - **The root module:** the Stack kind, the resolver, the registry specs,
-  the `local` target and the `stack` commands.
+  the `local` target, the `stack` commands, and the `ci` generator with
+  the `github` CI renderer (`internal/generator/cigen`): a workflow is
+  text, with no dependency to keep out of the core (D47).
 - **`extensions/gcp`**, a Go module of its own (D1): the gcp target's
   platforms, connectors and Cloud DNS platform, its policy rules, and its
   pinned provider schemas with the tool that keeps them current (sections

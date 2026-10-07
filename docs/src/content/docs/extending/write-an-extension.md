@@ -891,7 +891,7 @@ through a provisioner (D30 in `docs/DECISIONS.md`; section 6 of
 `docs/stack-model.md` is the design). The official extensions are the
 examples: `extensions/gcp` registers the `gcp` target with its platforms,
 connectors and Cloud DNS platform, `extensions/cloudflare` a DNS platform,
-and `extensions/pulumi` the provisioner. Five registrations make up the
+and `extensions/pulumi` the provisioner. Six registrations make up the
 surface, each spec carrying the extension's `Name()`:
 
 | Registration | Adds |
@@ -900,14 +900,16 @@ surface, each spec carrying the extension's `Name()`:
 | `RegisterConnector(registry.ConnectorSpec)` | one edge kind (`sql` or `http`) between two platforms: a pure `Connect` that returns the edge's resources, such as an IAM grant, and the value of the config field the edge derives |
 | `RegisterTarget(registry.TargetSpec)` | a platform per deployable kind, the JSON Schema of an environment's values, the default DNS platform, the provisioner, the properties schema of each resource type its platforms emit, and policy rules over the resolved resource graph |
 | `RegisterDNSPlatform(registry.DNSPlatformSpec)` | a DNS provider for an environment's domain records, which need not be the target's provider: its values schema, a pure `Lower` from records to resources, the schemas of the resource types it brings, and the credentials its provider reads |
-| `RegisterProvisioner(registry.ProvisionerSpec)` | a tool that applies a resolved environment: `Render` writes the tool's program where a person can read it, and `Plan`, `Apply`, `Destroy` and `Outputs` run it |
+| `RegisterProvisioner(registry.ProvisionerSpec)` | a tool that applies a resolved environment: `Render` writes the tool's program where a person can read it, and `Plan`, `Apply`, `Destroy` and `Outputs` run it; `Tools` lists the command-line tools it runs, which a generated CI job installs |
+| `RegisterCIRenderer(registry.CIRendererSpec)` | a CI system a stack's workflow is written for: the directory it installs into and a pure `Render` from the stack, its resolved environments with their CI identities, its options from `outputs.ci` and the release, to files. The core registers `github` |
 
 Resolution checks every resource against the schema of its type, so a
 target checks in the provider schemas it emits from a pinned provider
 version, as the gcp target does with pulumi-gcp's. A target that deploys
-also fills four seams on its `TargetSpec`, `State`, `Secrets`,
-`Bootstrap` and `Migrations`, and the core registers one target of its
-own, `local`, for `stack dev`.
+also fills six seams on its `TargetSpec`, `State`, `Secrets`,
+`Bootstrap`, `Migrations`, `Builder` and `CI`, the last of which says how
+a generated CI job signs in to an environment, and the core registers one
+target of its own, `local`, for `stack dev`.
 [Stack targets](/superschematic/extending/stack-targets/) walks each
 registration, its seams and its offline tests.
 
