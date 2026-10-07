@@ -4,8 +4,39 @@ import (
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+
 	ir "github.com/parable-work/superschematic/ir"
 )
+
+// TestBuildEnded: waitBuild stops at every status but the four of a build
+// that has yet to end. A status Cloud Build adds fails here until it is
+// placed.
+func TestBuildEnded(t *testing.T) {
+	running := map[cloudbuildpb.Build_Status]bool{
+		cloudbuildpb.Build_STATUS_UNKNOWN: true,
+		cloudbuildpb.Build_PENDING:        true,
+		cloudbuildpb.Build_QUEUED:         true,
+		cloudbuildpb.Build_WORKING:        true,
+	}
+	ended := map[cloudbuildpb.Build_Status]bool{
+		cloudbuildpb.Build_SUCCESS:        true,
+		cloudbuildpb.Build_FAILURE:        true,
+		cloudbuildpb.Build_INTERNAL_ERROR: true,
+		cloudbuildpb.Build_TIMEOUT:        true,
+		cloudbuildpb.Build_CANCELLED:      true,
+		cloudbuildpb.Build_EXPIRED:        true,
+	}
+	for value, name := range cloudbuildpb.Build_Status_name {
+		status := cloudbuildpb.Build_Status(value)
+		if !running[status] && !ended[status] {
+			t.Errorf("status %s is neither running nor ended", name)
+		}
+		if got := buildEnded(status); got != ended[status] {
+			t.Errorf("buildEnded(%s) = %v", name, got)
+		}
+	}
+}
 
 // TestTagResource names an image's tag in Artifact Registry.
 func TestTagResource(t *testing.T) {
