@@ -27,6 +27,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/release"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -81,6 +82,12 @@ type Module struct {
 
 	// Dir is the module's directory, absolute, or "" for no replace.
 	Dir string
+
+	// Pinned replaces every version of the module with Version, which the
+	// module proxy serves: a module of the release that generates the
+	// server, which no [paths] key names a checkout of. The generated
+	// modules require it at a version only a checkout's replace resolves.
+	Pinned bool
 
 	// Direct is true for a module main.go imports a package of.
 	Direct bool
@@ -140,9 +147,14 @@ type Input struct {
 
 	// ScalarGo is the directory of the scalar library's Go binding, the
 	// naming file's [paths] scalar_go. The Dockerfile builds its static
-	// archive from the workspace that holds it; without it no Dockerfile is
-	// written.
+	// archive from the workspace that holds it. Without it the Dockerfile
+	// downloads the static archives Release ships, or, from a binary that
+	// names none, no Dockerfile is written.
 	ScalarGo string
+
+	// Release is the release of superschematic that generates the
+	// entrypoint (D47, amended).
+	Release release.Release
 
 	// VersionGraphGo is the directory of the version graph's Go binding,
 	// when a database the server connects to declares a version graph. The
@@ -205,16 +217,24 @@ type Server struct {
 	NoDocker string
 }
 
+// Pinned reports whether a replace takes a module of the release from the
+// module proxy.
+func (s *Server) Pinned() bool {
+	return slices.ContainsFunc(s.Replaces, func(r Replace) bool { return r.Version != "" })
+}
+
 // Require is a go.mod require line.
 type Require struct {
 	Path    string
 	Version string
 }
 
-// Replace is a go.mod replace line, its directory relative to the module.
+// Replace is a go.mod replace line: the module at its directory, relative
+// to the module, or, with a Version, the module at that version.
 type Replace struct {
-	Path string
-	Dir  string
+	Path    string
+	Dir     string
+	Version string
 }
 
 // API is a served API in main.go.
@@ -296,9 +316,38 @@ type Docker struct {
 	VersionGraphGo    string
 	VersionGraphCrate string
 
+	// Archives, when set, are the static archives of the release the
+	// build stage downloads, in place of the stages that build them from
+	// checkouts.
+	Archives *Archives
+
 	// Include are the paths the build context holds.
 	Include []string
 }
+
+// Archives are a release's static archives for the platforms an image
+// builds for, which the Dockerfile downloads.
+type Archives struct {
+	// Version is the release.
+	Version string
+
+	// Base is where the release's assets download from.
+	Base string
+
+	// Platforms are the image's platforms, by GOARCH.
+	Platforms []ArchivePlatform
+}
+
+// ArchivePlatform is the archives tarball for linux and one GOARCH, and
+// its hex SHA-256.
+type ArchivePlatform struct {
+	GOARCH string
+	Name   string
+	SHA256 string
+}
+
+// archiveArches are the architectures an image builds for, linux's.
+var archiveArches = []string{"amd64", "arm64"}
 
 // reserved are the names main.go and cloudsql.go declare or import beside
 // the served APIs' own: an API, database or client never takes one.
@@ -499,6 +548,10 @@ func (s *Server) planModule(in Input, dir string) error {
 		} else {
 			indirect = append(indirect, Require{m.Path, version})
 		}
+		if m.Pinned {
+			s.Replaces = append(s.Replaces, Replace{Path: m.Path, Version: version})
+			continue
+		}
 		if m.Dir == "" {
 			continue
 		}
@@ -518,14 +571,19 @@ func (s *Server) planModule(in Input, dir string) error {
 
 // planDocker plans the Dockerfile, or says why there is none: every
 // directory the build reads must lie under the repository root, the build
-// context, and the scalar library's Go binding must be a checkout the
-// image can build the static archive from.
+// context. The static archives come from the checkout of the scalar
+// library's Go binding the naming file names, which the image builds
+// them from, or, without one, from the release, which ships them.
 func planDocker(in Input, dir string) (*Docker, string, error) {
 	if in.RepositoryRoot == "" {
 		return nil, "no repository root to take as the build context", nil
 	}
+	var archives *Archives
 	if in.ScalarGo == "" {
-		return nil, "the naming file's [paths] scalar_go is unset, and the image builds superscalar's static archive from that checkout", nil
+		var why string
+		if archives, why = releaseArchives(in.Release); archives == nil {
+			return nil, why, nil
+		}
 	}
 	root, err := filepath.Abs(in.RepositoryRoot)
 	if err != nil {
@@ -548,11 +606,21 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		return nil, fmt.Sprintf("the output root holding %s lies outside the repository root %s, the build context", dir, root), nil
 	}
 	d.Dockerfile = path.Join(d.Context, DockerFile)
+	include := []string{d.Context}
+	if archives != nil {
+		d.Archives = archives
+		if in.VersionGraphGo != "" {
+			if d.VersionGraphGo, ok = rel(in.VersionGraphGo); !ok {
+				return nil, fmt.Sprintf("the version graph's Go binding %s lies outside the repository root %s, the build context", in.VersionGraphGo, root), nil
+			}
+		}
+		return finish(d, in, root, include, rel)
+	}
 	if d.ScalarGo, ok = rel(in.ScalarGo); !ok {
 		return nil, fmt.Sprintf("superscalar's Go binding %s lies outside the repository root %s, the build context", in.ScalarGo, root), nil
 	}
 	d.ScalarWorkspace = path.Dir(d.ScalarGo)
-	include := []string{d.Context, d.ScalarGo, d.ScalarWorkspace + "/Cargo.toml", d.ScalarWorkspace + "/Cargo.lock", d.ScalarWorkspace + "/crates"}
+	include = append(include, d.ScalarGo, d.ScalarWorkspace+"/Cargo.toml", d.ScalarWorkspace+"/Cargo.lock", d.ScalarWorkspace+"/crates")
 	if in.VersionGraphGo != "" {
 		if d.VersionGraphGo, ok = rel(in.VersionGraphGo); !ok {
 			return nil, fmt.Sprintf("the version graph's Go binding %s lies outside the repository root %s, the build context", in.VersionGraphGo, root), nil
@@ -560,6 +628,13 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		d.VersionGraphCrate = path.Join(path.Dir(d.VersionGraphGo), "rust")
 		include = append(include, d.VersionGraphGo, d.VersionGraphCrate+"/Cargo.toml", d.VersionGraphCrate+"/Cargo.lock", d.VersionGraphCrate+"/src")
 	}
+	return finish(d, in, root, include, rel)
+}
+
+// finish adds the directory of every module a replace points at to the
+// paths the context holds, include, and sets d.Include, or says which
+// module lies outside the context, root, and plans no Dockerfile.
+func finish(d *Docker, in Input, root string, include []string, rel func(string) (string, bool)) (*Docker, string, error) {
 	for _, m := range in.Modules {
 		if m.Dir == "" {
 			continue
@@ -573,6 +648,27 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 	slices.Sort(include)
 	d.Include = slices.Compact(include)
 	return d, "", nil
+}
+
+// releaseArchives are the static archives of r for the platforms an image
+// builds for, or nil and why the image cannot take them: a binary built
+// from a checkout is no release, and one its release workflow did not
+// build names no digests.
+func releaseArchives(r release.Release) (*Archives, string) {
+	const unset = "the naming file's [paths] scalar_go is unset, so the image links the static archives superschematic's release ships"
+	if r.Version == "" {
+		return nil, unset + ", and this superschematic is built from a checkout, which is no release; set [paths] scalar_go to a superscalar checkout to build them from"
+	}
+	a := &Archives{Version: r.Version, Base: strings.TrimSuffix(release.DownloadURL(r.Version, ""), "/")}
+	for _, arch := range archiveArches {
+		platform := release.Platform("linux", arch)
+		digest, ok := r.Archive(platform)
+		if !ok {
+			return nil, fmt.Sprintf("%s, and this superschematic %s, which its release workflow did not build, names no digest of them for %s", unset, r.Version, platform)
+		}
+		a.Platforms = append(a.Platforms, ArchivePlatform{GOARCH: arch, Name: release.ArchiveName(r.Version, platform), SHA256: digest})
+	}
+	return a, ""
 }
 
 // routeParam matches a path parameter, which a router matches whatever its
@@ -675,6 +771,10 @@ func WriteImplementationModule(n naming.Naming, service string, impl Implementat
 			m.Requires = append(m.Requires, Require{mod.Path, version})
 		} else {
 			m.Indirect = append(m.Indirect, Require{mod.Path, version})
+		}
+		if mod.Pinned {
+			m.Replaces = append(m.Replaces, Replace{Path: mod.Path, Version: version})
+			continue
 		}
 		if mod.Dir == "" {
 			continue
