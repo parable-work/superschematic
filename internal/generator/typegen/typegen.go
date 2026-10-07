@@ -24,6 +24,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
+	"github.com/parable-work/superschematic/internal/generator/identitydesc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -290,15 +291,28 @@ type ModuleOutput struct {
 
 	// VersionGraphs are the descriptors of the schema's version graphs
 	// (D17), written as versiongraph/<name>.json beside the types.
-	VersionGraphs []VersionGraphDescriptor
+	VersionGraphs []DescriptorFile
+
+	// Identity is the schema's identity descriptor (D50), written as
+	// identity/<schema>.json beside the types and as the constant
+	// IdentityDescriptor in identity.go. Nil when the schema has no User
+	// table.
+	Identity *DescriptorFile
 }
 
-// VersionGraphDescriptor is one version graph's descriptor file.
-type VersionGraphDescriptor struct {
-	// FileName is the graph's snake_case name, the file's stem.
+// DescriptorFile is one descriptor document written beside the types.
+type DescriptorFile struct {
+	// FileName is the file's stem: a version graph's snake_case name, or
+	// the schema's name for the identity descriptor.
 	FileName string
 	// JSON is the descriptor document.
 	JSON []byte
+}
+
+// Text is the descriptor as a Go constant holds it: the document without
+// its trailing newline.
+func (d *DescriptorFile) Text() string {
+	return strings.TrimSuffix(string(d.JSON), "\n")
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -449,7 +463,22 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		if err != nil {
 			return nil, err
 		}
-		output.VersionGraphs = append(output.VersionGraphs, VersionGraphDescriptor{FileName: graph.FileName, JSON: descriptor})
+		output.VersionGraphs = append(output.VersionGraphs, DescriptorFile{FileName: graph.FileName, JSON: descriptor})
+	}
+	identity, ok, err := identitydesc.Describe(schema)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		descriptor, err := identity.JSON()
+		if err != nil {
+			return nil, err
+		}
+		name := opts.SchemaName
+		if name == "" {
+			name = schema.Name
+		}
+		output.Identity = &DescriptorFile{FileName: name, JSON: descriptor}
 	}
 
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)

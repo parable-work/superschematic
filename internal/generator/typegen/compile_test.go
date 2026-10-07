@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/identitydesc/identitytest"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
@@ -44,6 +45,8 @@ func TestGeneratedModulesCompile(t *testing.T) {
 	}{
 		{name: "fixture-db", schema: dbSchema},
 		{name: "fixture-api", schema: apiSchema, deps: map[string]*ir.Schema{"fixture-db": dbSchema}},
+		// A User table adds identity.go, which declares IdentityDescriptor.
+		{name: identitytest.Service, schema: identitytest.Schema(t, identitytest.Options{Roles: true, Name: "displayName"})},
 	}
 
 	for _, tc := range cases {
