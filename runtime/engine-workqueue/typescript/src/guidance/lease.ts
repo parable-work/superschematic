@@ -73,7 +73,10 @@ export function leaseGuidance(config: LeaseConfig, target: DescribeTarget): Beha
         : fenced;
   }
   const moved = config.directOn.map(
-    (rule) => `directive ${rule.name} when the ${rule.link} link's target gains ${rule.pinned ? 'a revision past the pinned one' : 'a revision'} or a release`
+    (rule) =>
+      `directive ${rule.name} when the ${rule.link} link's target gains ${
+        rule.pin === 'revision' ? 'a revision past the pinned one or a release' : rule.pin === 'release' ? 'a revision or a release past the pinned one' : 'a revision or a release'
+      }`
   );
   return {
     summary: sentences(
@@ -106,7 +109,7 @@ export function leaseGuidance(config: LeaseConfig, target: DescribeTarget): Beha
           'Returns the new expiresAt and the directives not yet acknowledged, oldest first.',
           moved.length === 0
             ? undefined
-            : `A directive the runner sends when a link's target moves on (${list(config.directOn.map((rule) => rule.name), 'or')}) carries data.revised: the link, the target, and its revision or the release's commit.`
+            : `A directive the runner sends when a link's target moves on (${list(config.directOn.map((rule) => rule.name), 'or')}) carries data.revised: the link, the target, and its revision, or its release and the release's commit.`
         ),
         errors: errors('not_leased', 'not_holder', 'token_required', 'token_stale', 'lapsed'),
       },

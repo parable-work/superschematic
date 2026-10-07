@@ -15,10 +15,11 @@ the behavior, so react never sees an event from while they were off.
 It handles one event at a time, in log order: the reaction runs in a
 savepoint of a batch's transaction, and the cursor's advance commits
 with it. A reaction that throws rolls its savepoint back; the batch
-commits what came before it and records the failure. The event runs again after a backoff, and after maxAttempts
-failures the subscription halts at it until resume. So a reaction's
-database effects happen once per event, whatever fails or crashes
-before the commit; an effect outside the database happens at least once.
+commits what came before it and records the failure. The event runs
+again after a backoff, and after maxAttempts failures the subscription
+halts at it until resume. So a reaction's database effects happen once
+per event, whatever fails or crashes before the commit; an effect
+outside the database happens at least once.
 
 A schedule is one behavior's named timed work on one schema that
 composes it, in one namespace, with the time of its next run in
@@ -48,6 +49,24 @@ Once started, the runner wakes on the commit notifier, after the commit
 returns to its writer, and on a timer for the next retry or schedule. It
 works through what is due in batches and yields between them. runDue
 runs everything due at once, synchronously.
+
+An archived namespace runs nothing: its subscriptions and schedules wait,
+in the status as archived, until it is unarchived. Nothing writes there
+meanwhile, so a subscription picks up where it stopped, and a schedule
+that came due runs once, as after a stop.
+
+With the engine's retention, the runner also prunes the event log
+(events/retention.ts): at its first pass, then every everyMs, a batch per
+transaction, yielding between batches. It never prunes a namespace's
+events past its hold: the cursor of the least advanced subscription
+there that composes a behavior with reactions, halted, retrying and
+archived ones included, but not one whose watches turns them off, or,
+where the behavior is not registered, that has run. A subscription whose
+cursor is behind its namespace's floor all the same (an implementation
+that gained reactions after retention pruned past the publish its
+subscription starts from) halts with cursor_expired: resume with skip
+moves it to the floor, past what retention pruned. Pruning acts for no
+principal, so prune() runs without the runner's.
 */
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
@@ -58,8 +77,9 @@ import type { BoundBehavior } from '../behaviors/composition.js';
 import { Chain, WorkExecution, type Reach } from '../behaviors/execution.js';
 import { MIN_SCHEDULE_MS, type BehaviorRegistry } from '../behaviors/registry.js';
 import { synchronous } from '../behaviors/storage.js';
-import { BehaviorError, EngineError } from '../errors.js';
-import { EVENT_COLUMNS, toEvent, type EngineEvent, type EventLog } from '../events/log.js';
+import { BehaviorError, CursorExpiredError, EngineError } from '../errors.js';
+import { EVENT_COLUMNS, logFloor, logHead, toEvent, type EngineEvent, type EventLog } from '../events/log.js';
+import { floorsOf, type Retention } from '../events/retention.js';
 import type { Namespaces } from '../namespaces.js';
 import type { SchemaCatalog, SchemaRecord, VersionRuntime } from '../registry/catalog.js';
 import { checkSchemaName } from '../registry/document.js';
@@ -105,13 +125,15 @@ export interface SubscriptionKey {
 /**
  * active: it handles events as they come; retrying: its next event failed
  * and runs again at retryAt; halted: its next event failed maxAttempts
- * times and waits for resume; off: the behavior's watches turns its
- * reactions off for the live version's config, so it handles nothing
- * until a publish turns them on; inactive: the schema's live version no
- * longer composes the behavior, or its implementation is not registered.
- * An off subscription is listed only once it has run.
+ * times, or retention pruned past its cursor, and it waits for resume;
+ * off: the behavior's watches turns its reactions off for the live
+ * version's config, so it handles nothing until a publish turns them on;
+ * archived: its namespace is archived, and it runs nothing until the
+ * namespace is unarchived; inactive: the schema's live version no longer
+ * composes the behavior, or its implementation is not registered. An off
+ * subscription is listed only once it has run.
  */
-export type SubscriptionState = 'active' | 'retrying' | 'halted' | 'off' | 'inactive';
+export type SubscriptionState = 'active' | 'retrying' | 'halted' | 'off' | 'archived' | 'inactive';
 
 export interface SubscriptionStatus extends SubscriptionKey {
   state: SubscriptionState;
@@ -136,10 +158,11 @@ export interface ScheduleStatus {
   /**
    * retrying: its last run failed, or its interval could not be had; off:
    * its everyMs function returns null for the schema's config, so it runs
-   * nothing there until a publish gives it an interval; inactive: no live
-   * version composes it now.
+   * nothing there until a publish gives it an interval; archived: its
+   * namespace is archived, and it runs nothing until it is unarchived;
+   * inactive: no live version composes it now.
    */
-  state: 'active' | 'retrying' | 'off' | 'inactive';
+  state: 'active' | 'retrying' | 'off' | 'archived' | 'inactive';
   /** Its interval on the schema; null for an inactive or off one and one whose everyMs function fails there. */
   everyMs: number | null;
   /** When its last run committed; null before its first, and for an off one. */
@@ -155,12 +178,32 @@ export interface RunnerStatus {
   running: boolean;
   /** The subject of the runner's principal; null when the engine has none. */
   principal: string | null;
-  /** The log's last cursor, 0 for an empty log: a subscription at it has nothing to do. */
+  /** The log's last cursor, 0 for a log that never held one: a subscription at it has nothing to do. */
   head: number;
   subscriptions: SubscriptionStatus[];
   schedules: ScheduleStatus[];
+  /** The event log's retention; absent for an engine opened without it. */
+  retention?: RetentionStatus;
   /** The runner's own last error, outside any reaction or schedule (a busy file, say); null after a pass that worked. */
   error: string | null;
+}
+
+/** What retention keeps and how far it has pruned. */
+export interface RetentionStatus {
+  maxAgeMs: number | null;
+  maxEvents: number | null;
+  everyMs: number;
+  /** When the started runner last finished pruning; null before it first does. */
+  previous: number | null;
+  /** When it prunes next: at its first pass, then everyMs after it last finished. */
+  next: number | null;
+  /**
+   * Each namespace retention has pruned or a subscription holds, by name:
+   * its floor, the events pruned of it so far, and the least advanced
+   * subscription there, past whose cursor nothing of the namespace is
+   * pruned (null when none holds it).
+   */
+  namespaces: Array<{ namespace: string; floor: number; pruned: number; heldAt: number | null; heldBy: SubscriptionKey | null }>;
 }
 
 /** What one runDue did. */
@@ -173,6 +216,14 @@ export interface RunnerPass {
   failed: number;
   /** Schedule runs, committed. */
   scheduled: number;
+  /** Events retention pruned; absent for an engine opened without retention. */
+  pruned?: number;
+}
+
+/** What one prune did. */
+export interface PruneResult {
+  /** Events pruned. */
+  pruned: number;
 }
 
 interface ResolvedOptions {
@@ -191,6 +242,8 @@ interface Unit {
   readonly record: SchemaRecord;
   readonly runtime: VersionRuntime;
   readonly bound: BoundBehavior;
+  /** Its namespace is archived: it runs nothing, and shows so. */
+  readonly archived: boolean;
 }
 
 interface ReactionUnit extends Unit {
@@ -208,10 +261,21 @@ interface ScheduleUnit extends Unit {
   readonly every: { readonly everyMs: number } | { readonly off: true } | { readonly error: unknown };
 }
 
+// A subscription that holds retention, or would once it has run: a
+// behavior with reactions its config does not turn off, or one not
+// registered, on a schema's live version in a namespace, archived ones
+// included, with where it starts.
+interface Holder extends SubscriptionKey {
+  readonly start: number;
+  /** Its behavior is not registered: it holds only once it has run, which a row in engine_subscriptions shows. */
+  readonly unregistered: boolean;
+}
+
 interface Discovery {
   readonly key: string;
   readonly reactions: readonly ReactionUnit[];
   readonly schedules: readonly ScheduleUnit[];
+  readonly holders: readonly Holder[];
 }
 
 interface Totals {
@@ -219,8 +283,14 @@ interface Totals {
   skipped: number;
   failed: number;
   scheduled: number;
-  /** Whether a subscription moved, so more may be due. */
+  pruned: number;
+  /** Whether a subscription moved, or retention has more to prune, so more may be due. */
   moved: boolean;
+}
+
+// A retention pass under way: the namespaces it has yet to prune.
+interface Pruning {
+  readonly queue: string[];
 }
 
 const SUBSCRIPTION_COLUMNS =
@@ -240,6 +310,14 @@ export class Runner {
   // When the next retry or schedule comes due, as the last pass saw it.
   private due: number | undefined;
   private lastError: string | null = null;
+  // Retention: when it prunes next, when it last finished, and the pass
+  // under way.
+  private nextPrune = 0;
+  private lastPrune: number | null = null;
+  private pruning: Pruning | undefined;
+  // Where each subscription starts, by its schema's live version, which
+  // never changes once published.
+  private readonly starts = new Map<string, number>();
 
   constructor(
     private readonly storage: Storage,
@@ -250,7 +328,9 @@ export class Runner {
     private readonly events: EventLog,
     private readonly clock: () => number,
     private readonly permissions: PermissionMatcher,
-    options: RunnerOptions | undefined
+    options: RunnerOptions | undefined,
+    /** The event log's retention, which the runner prunes on; undefined for none. */
+    private readonly retention?: Retention
   ) {
     this.options = resolveOptions(options);
     this.principal = options?.principal;
@@ -310,16 +390,55 @@ export class Runner {
    */
   runDue(): RunnerPass {
     this.ready('runDue');
-    const total: RunnerPass = { handled: 0, skipped: 0, failed: 0, scheduled: 0 };
+    const total: RunnerPass = { handled: 0, skipped: 0, failed: 0, scheduled: 0, ...(this.retention ? { pruned: 0 } : {}) };
     for (;;) {
       const pass = this.pass();
       total.handled += pass.handled;
       total.skipped += pass.skipped;
       total.failed += pass.failed;
       total.scheduled += pass.scheduled;
+      if (total.pruned !== undefined) {
+        total.pruned += pass.pruned;
+      }
       if (!pass.moved) {
         return total;
       }
+    }
+  }
+
+  /**
+   * prune runs retention now, to the end: every namespace's events that
+   * retention lets go and no subscription holds, a batch per transaction.
+   * It acts for no principal, so it runs without the runner's, started or
+   * not; it refuses inside a transaction, and on an engine without
+   * retention (TypeError).
+   */
+  prune(): PruneResult {
+    if (this.closed) {
+      throw new Error('the engine is closed');
+    }
+    if (this.retention === undefined) {
+      throw new TypeError('runner.prune needs retention: open the engine with retention: { maxAgeMs?, maxEvents? }');
+    }
+    if (this.passing) {
+      throw new Error('the runner is already running: prune cannot run inside a reaction or a schedule');
+    }
+    if (this.storage.inTransaction) {
+      throw new Error('the runner prunes outside any transaction');
+    }
+    this.passing = true;
+    try {
+      this.pruning = undefined;
+      let pruned = 0;
+      for (;;) {
+        const step = this.pruneStep();
+        pruned += step.pruned;
+        if (step.done) {
+          return { pruned };
+        }
+      }
+    } finally {
+      this.passing = false;
     }
   }
 
@@ -336,11 +455,12 @@ export class Runner {
       const row = this.subscriptionRow(unit);
       if (unit.off) {
         if (row) {
-          subscriptions.set(id, { ...subscriptionStatus(row), state: 'off', retryAt: null });
+          subscriptions.set(id, { ...subscriptionStatus(row), state: unit.archived ? 'archived' : 'off', retryAt: null });
         }
         continue;
       }
-      subscriptions.set(id, row ? { ...subscriptionStatus(row), cursor: Math.max(Number(row.cursor), unit.start) } : fresh(unit));
+      const status = row ? { ...subscriptionStatus(row), cursor: Math.max(Number(row.cursor), unit.start) } : fresh(unit);
+      subscriptions.set(id, unit.archived ? { ...status, state: 'archived', retryAt: null } : status);
     }
     const schedules = new Map<string, ScheduleStatus>();
     for (const row of this.storage.all(`SELECT ${SCHEDULE_COLUMNS} FROM engine_schedules`)) {
@@ -354,18 +474,45 @@ export class Runner {
         continue;
       }
       const row = this.scheduleRow(unit);
+      const everyMs = 'everyMs' in unit.every ? unit.every.everyMs : null;
       if (row) {
-        schedules.set(id, scheduleStatus(row, 'everyMs' in unit.every ? unit.every.everyMs : null));
+        const status = scheduleStatus(row, everyMs);
+        schedules.set(id, unit.archived ? { ...status, state: 'archived' } : status);
+      } else if (unit.archived) {
+        schedules.set(id, { ...offStatus(unit), state: 'archived', everyMs });
       }
     }
-    const head = this.storage.get('SELECT MAX(cursor) AS head FROM engine_events');
     return {
       running: this.started,
       principal: this.principal?.subject ?? null,
-      head: head?.head === null || head?.head === undefined ? 0 : Number(head.head),
+      head: logHead(this.storage),
       subscriptions: [...subscriptions.values()].sort(byKey),
       schedules: [...schedules.values()].sort((a, b) => compare(scheduleId(a), scheduleId(b))),
+      ...(this.retention ? { retention: this.retentionStatus(discovery) } : {}),
       error: this.lastError,
+    };
+  }
+
+  // retentionStatus is what retention keeps, when it prunes, and each
+  // namespace's floor and hold.
+  private retentionStatus(discovery: Discovery): RetentionStatus {
+    const options = (this.retention as Retention).options;
+    const holds = this.holds(discovery);
+    const byNamespace = new Map<string, RetentionStatus['namespaces'][number]>();
+    for (const floor of floorsOf(this.storage)) {
+      byNamespace.set(floor.namespace, { namespace: floor.namespace, floor: floor.floor, pruned: floor.pruned, heldAt: null, heldBy: null });
+    }
+    for (const [namespace, hold] of holds) {
+      const entry = byNamespace.get(namespace) ?? { namespace, floor: 0, pruned: 0, heldAt: null, heldBy: null };
+      byNamespace.set(namespace, { ...entry, heldAt: hold.cursor, heldBy: hold.subscription });
+    }
+    return {
+      maxAgeMs: options.maxAgeMs ?? null,
+      maxEvents: options.maxEvents ?? null,
+      everyMs: options.everyMs,
+      previous: this.lastPrune,
+      next: this.pruning !== undefined ? this.clock() : this.nextPrune === 0 ? null : this.nextPrune,
+      namespaces: [...byNamespace.values()].sort((a, b) => compare(a.namespace, b.namespace)),
     };
   }
 
@@ -478,20 +625,94 @@ export class Runner {
     }
     this.passing = true;
     try {
-      const totals: Totals = { handled: 0, skipped: 0, failed: 0, scheduled: 0, moved: false };
+      const totals: Totals = { handled: 0, skipped: 0, failed: 0, scheduled: 0, pruned: 0, moved: false };
       this.due = undefined;
       const discovery = this.discover();
       for (const unit of discovery.reactions) {
-        this.react(unit, totals);
+        if (!unit.archived) {
+          this.react(unit, totals);
+        }
       }
       for (const unit of discovery.schedules) {
-        this.schedule(unit, totals);
+        if (!unit.archived) {
+          this.schedule(unit, totals);
+        }
       }
+      this.retain(totals);
       this.lastError = null;
       return totals;
     } finally {
       this.passing = false;
     }
+  }
+
+  // retain prunes one batch of the event log when retention is due or a
+  // pass of it is under way, and has the runner come back while more is
+  // left; when the pass is over, the next one is due everyMs later.
+  private retain(totals: Totals): void {
+    if (this.retention === undefined) {
+      return;
+    }
+    const now = this.clock();
+    if (this.pruning === undefined && now < this.nextPrune) {
+      this.dueAt(this.nextPrune);
+      return;
+    }
+    const step = this.pruneStep();
+    totals.pruned += step.pruned;
+    if (!step.done) {
+      totals.moved = true;
+    } else {
+      this.dueAt(this.nextPrune);
+    }
+  }
+
+  // pruneStep prunes one batch of the retention pass under way, starting
+  // one when none is, and reports whether the pass is over: every
+  // namespace pruned as far as retention lets it go and its hold allows.
+  private pruneStep(): { pruned: number; done: boolean } {
+    const retention = this.retention as Retention;
+    this.pruning ??= { queue: retention.namespacesWithEvents() };
+    const holds = this.holds(this.discover());
+    while (this.pruning.queue.length > 0) {
+      const namespace = this.pruning.queue[0];
+      const pruned = retention.batch(namespace, holds.get(namespace)?.cursor);
+      if (pruned < retention.options.batchSize) {
+        this.pruning.queue.shift();
+      }
+      if (pruned > 0) {
+        return { pruned, done: false };
+      }
+    }
+    this.pruning = undefined;
+    this.lastPrune = this.clock();
+    this.nextPrune = this.lastPrune + retention.options.everyMs;
+    return { pruned: 0, done: true };
+  }
+
+  // holds is, by namespace, the cursor past which retention prunes none
+  // of its events, with the subscription that holds it there: the least
+  // advanced one of the namespace's subscriptions, at its cursor, or at
+  // its start before it has run. One whose behavior is not registered
+  // holds only once it has run.
+  private holds(discovery: Discovery): Map<string, { cursor: number; subscription: SubscriptionKey }> {
+    const cursors = new Map<string, number>();
+    for (const row of this.storage.all('SELECT behavior, namespace, schema, cursor FROM engine_subscriptions')) {
+      cursors.set(subscriptionId({ behavior: String(row.behavior), namespace: String(row.namespace), schema: String(row.schema) }), Number(row.cursor));
+    }
+    const holds = new Map<string, { cursor: number; subscription: SubscriptionKey }>();
+    for (const holder of discovery.holders) {
+      const saved = cursors.get(subscriptionId(holder));
+      if (holder.unregistered && saved === undefined) {
+        continue;
+      }
+      const cursor = saved !== undefined && saved >= holder.start ? saved : holder.start;
+      const held = holds.get(holder.namespace);
+      if (held === undefined || cursor < held.cursor) {
+        holds.set(holder.namespace, { cursor, subscription: { behavior: holder.behavior, namespace: holder.namespace, schema: holder.schema } });
+      }
+    }
+    return holds;
   }
 
   // react runs one batch of a subscription's events, if it is due and its
@@ -513,6 +734,29 @@ export class Runner {
       return;
     }
     const cursor = current ? Number(current.cursor) : unit.start;
+    // Retention pruned past where it is: it halts, rather than skip what
+    // it never handled.
+    const floor = logFloor(this.storage, this.namespaces, unit.namespace, false);
+    if (cursor < floor) {
+      this.storage.transaction(() => {
+        this.ensureSubscription(unit);
+        this.storage.run(
+          `UPDATE engine_subscriptions SET halted = 1, attempts = ?, retry_at = NULL, failed_cursor = ?, failed_at = ?, error = ?
+           WHERE behavior = ? AND namespace = ? AND schema = ?`,
+          [
+            this.options.maxAttempts,
+            floor,
+            now,
+            describe(new CursorExpiredError(unit.namespace, cursor, floor, logHead(this.storage))),
+            unit.behavior,
+            unit.namespace,
+            unit.schema,
+          ]
+        );
+      });
+      totals.failed += 1;
+      return;
+    }
     let watched: string[];
     try {
       watched = this.watched(unit);
@@ -780,17 +1024,20 @@ export class Runner {
   }
 
   // discover finds every behavior with reactions or schedules on every
-  // schema's live version in every namespace. It looks again when a
-  // schema is published or a behavior registered.
+  // schema's live version in every namespace, and every subscription that
+  // holds retention. It looks again when a schema is published, a
+  // behavior registered, or a namespace created, archived or unarchived.
   private discover(): Discovery {
-    const head = this.storage.get("SELECT MAX(cursor) AS head FROM engine_events WHERE kind = 'publish'");
-    const key = `${String(head?.head ?? 0)}\u0000${this.behaviors.names().join(',')}`;
+    const published = this.storage.get('SELECT MAX(published_cursor) AS head FROM engine_schemas');
+    const key = `${String(published?.head ?? 0)}\u0000${this.namespaces.generation}\u0000${this.behaviors.names().join(',')}`;
     if (this.discovery?.key === key) {
       return this.discovery;
     }
     const reactions: ReactionUnit[] = [];
     const schedules: ScheduleUnit[] = [];
+    const holders: Holder[] = [];
     for (const namespace of this.namespaces.names) {
+      const archived = this.namespaces.archived(namespace);
       for (const summary of this.catalog.list(namespace)) {
         if (summary.liveVersion === null) {
           continue;
@@ -798,6 +1045,15 @@ export class Runner {
         const record = this.catalog.find(summary.name, namespace, 'live');
         if (!record) {
           continue;
+        }
+        for (const ref of composed(record)) {
+          const registered = this.behaviors.lookup(ref);
+          const reacts = registered?.implementation.reactions;
+          // Reactions the config turns off hold nothing: turned on, they
+          // start at the publish that does it.
+          if (registered === undefined || (reacts !== undefined && !(reacts.watches !== undefined && this.offIn(record, ref, reacts)))) {
+            holders.push({ behavior: ref, namespace, schema: record.name, start: this.startOf(record, ref, reacts), unregistered: registered === undefined });
+          }
         }
         let runtime: VersionRuntime;
         try {
@@ -812,7 +1068,7 @@ export class Runner {
         }
         for (const bound of runtime.composition.behaviors) {
           const implementation = bound.behavior.implementation;
-          const unit = { behavior: bound.behavior.name, namespace, schema: record.name, record, runtime, bound };
+          const unit = { behavior: bound.behavior.name, namespace, schema: record.name, record, runtime, bound, archived };
           if (implementation.reactions !== undefined) {
             const off = reactionsOff(implementation.reactions, bound.config, record.name);
             const start = off ? 0 : this.startOf(record, bound.behavior.name, implementation.reactions);
@@ -826,7 +1082,7 @@ export class Runner {
     }
     reactions.sort(byKey);
     schedules.sort((a, b) => compare(scheduleId({ ...a, schedule: a.name }), scheduleId({ ...b, schedule: b.name })));
-    this.discovery = { key, reactions, schedules };
+    this.discovery = { key, reactions, schedules, holders };
     return this.discovery;
   }
 
@@ -846,22 +1102,32 @@ export class Runner {
 
   // startOf is the cursor a subscription starts after: the publish of the
   // earliest version of the run of versions, up to the live one, that
-  // compose the behavior with its reactions on.
-  private startOf(live: SchemaRecord, behavior: string, reactions: BehaviorReactions<unknown>): number {
+  // compose the behavior with its reactions on, as the version keeps it
+  // (published_cursor), so retention pruning the event moves nothing. A
+  // version a version-1 file stored with no publish event starts at 0.
+  // reactions is the behavior's, absent for one not registered.
+  private startOf(live: SchemaRecord, behavior: string, reactions?: BehaviorReactions<unknown>): number {
+    const id = `${live.namespace}\u0000${live.name}\u0000${String(live.version)}\u0000${behavior}\u0000${reactions?.watches === undefined ? '' : 'watches'}`;
+    const known = this.starts.get(id);
+    if (known !== undefined) {
+      return known;
+    }
     let first = live.version as number;
     for (let version = first - 1; version >= 1; version -= 1) {
       const older = this.catalog.find(live.name, live.namespace, version);
-      if (!older || !composes(older, behavior) || (reactions.watches !== undefined && this.offIn(older, behavior, reactions))) {
+      if (!older || !composes(older, behavior) || (reactions?.watches !== undefined && this.offIn(older, behavior, reactions))) {
         break;
       }
       first = version;
     }
-    const row = this.storage.get("SELECT cursor FROM engine_events WHERE kind = 'publish' AND namespace = ? AND schema = ? AND version = ?", [
+    const row = this.storage.get('SELECT published_cursor FROM engine_schemas WHERE namespace = ? AND name = ? AND version = ?', [
       live.namespace,
       live.name,
       first,
     ]);
-    return row ? Number(row.cursor) : 0;
+    const start = row?.published_cursor === null || row?.published_cursor === undefined ? 0 : Number(row.published_cursor);
+    this.starts.set(id, start);
+    return start;
   }
 }
 
@@ -914,7 +1180,12 @@ function reactionsOff(reactions: BehaviorReactions<unknown>, config: unknown, sc
 }
 
 function composes(record: SchemaRecord, behavior: string): boolean {
-  return ((record.document.types ?? {})[record.instanceType]?.behaviors ?? []).some((ref) => ref.name === behavior);
+  return composed(record).includes(behavior);
+}
+
+// composed lists the behaviors a version's instance type composes, by name.
+function composed(record: SchemaRecord): string[] {
+  return ((record.document.types ?? {})[record.instanceType]?.behaviors ?? []).map((ref) => ref.name);
 }
 
 function resolveOptions(options: RunnerOptions | undefined): ResolvedOptions {

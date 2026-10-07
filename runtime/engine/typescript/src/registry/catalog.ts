@@ -4,8 +4,8 @@ registry and the instance store ask the policy first). A schema name has
 one draft and a line of published versions in each namespace. define
 stores the draft, replacing the one before it, and appends a define event
 with the draft's hash; publish makes the draft the next live version (1,
-2, 3, ...) and appends a publish event. Instances are read and written
-with the live version, the newest one.
+2, 3, ...) and appends a publish event, whose cursor the version keeps.
+Instances are read and written with the live version, the newest one.
 
 Both refuse a document the engine does not take (document.ts) and a
 version the compatibility rule refuses against the live one (compat.ts),
@@ -23,7 +23,8 @@ A schema's instance type may compose behaviors (behaviors/). define and
 publish check them against the registered implementations, with the
 namespace's other schemas in reach of their configs as the caller may
 read them (ConfigTarget.schemas), and the compatibility rule against
-each behavior's rule for its config. publish creates the storage of
+each behavior's rule for its config, and each type's display against
+the type and its Workflow (display.ts). publish creates the storage of
 every behavior the new version composes, in its own transaction, so a
 publish that fails leaves none behind, then runs the afterConfigChange
 of each behavior whose config the version adds, removes or changes
@@ -55,6 +56,7 @@ import type { Namespaces } from '../namespaces.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { incompatibleChanges } from './compat.js';
+import { displayIssues } from './display.js';
 import { checkSchemaName, modelOf, readSchema, type SchemaModel } from './document.js';
 import { SchemaValidator } from './validator.js';
 
@@ -248,7 +250,7 @@ export class SchemaCatalog {
         namespaces: namespace === this.namespaces.shared ? this.namespaces.names : [namespace],
         runtime: { composition, validator: lazyValidator(model, composition) },
       });
-      appendEvent(this.storage, {
+      const cursor = appendEvent(this.storage, {
         kind: 'publish',
         namespace,
         schema: name,
@@ -259,6 +261,9 @@ export class SchemaCatalog {
         at: now,
         change: model.canonical,
       });
+      // The version keeps its publish's cursor, where a subscription that
+      // the version starts begins, after retention prunes the event.
+      this.storage.run('UPDATE engine_schemas SET published_cursor = ? WHERE namespace = ? AND name = ? AND version = ?', [cursor, namespace, name, version]);
       return { namespace, name, version, published: true };
     });
   }
@@ -363,7 +368,9 @@ export class SchemaCatalog {
     const model = readSchema(this.loader, text, source, (candidate) => {
       const composed = compose(candidate, this.behaviors);
       alone = composed.composition;
-      return [...composed.issues, ...indexIssues(candidate.document, candidate.instanceType)];
+      // A display is held to the behaviors once they compose (display.ts).
+      const issues = composed.composition ? displayIssues(candidate.document, candidate.instanceType, composed.composition) : composed.issues;
+      return [...issues, ...indexIssues(candidate.document, candidate.instanceType)];
     });
     if (alone !== undefined) {
       this.alone.set(model, alone);

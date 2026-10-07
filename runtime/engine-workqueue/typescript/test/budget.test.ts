@@ -809,6 +809,27 @@ for (const driver of drivers) {
       );
       unset.instances.update(alice, 'Step', 's1', { title: 'Renamed' });
     });
+
+    test('limit beside limitField is the limit while the field holds no count, as reserve is beside reserveField; emptying the field is held to it', () => {
+      const { engine } = single({ meters: { cpu: { limit: 70, limitField: 'cap', reserve: 60 } }, limitPermission: 'budget.limit' });
+      assert.deepEqual(meterOf(engine, 'Step', 's1'), meter(0, 0, 70));
+      engine.instances.create(alice, 'Step', { title: 'Capped', cap: 100 }, { id: 's2' });
+      assert.deepEqual(meterOf(engine, 'Step', 's2'), meter(0, 0, 100));
+      // setLimit writes the field, which then holds the limit; emptying it brings the fallback back.
+      assert.deepEqual(invoke(engine, operator, 'Step', 's1', 'setLimit', { meter: 'cpu', limit: 90 }), { meter: 'cpu', limit: 90, previous: 70 });
+      assert.deepEqual([engine.instances.get(alice, 'Step', 's1')?.data.cap, meterOf(engine, 'Step', 's1')], [90, meter(0, 0, 90)]);
+      engine.instances.update(operator, 'Step', 's1', { cap: null });
+      assert.deepEqual(meterOf(engine, 'Step', 's1'), meter(0, 0, 70));
+      // The fallback is a limit a reservation is held to.
+      claim(engine, 's1');
+      assert.deepEqual(meterOf(engine, 'Step', 's1'), meter(0, 60, 70));
+      // Emptying the field is never below what is used and reserved, the fallback being the limit.
+      claim(engine, 's2', lead);
+      invoke(engine, lead, 'Step', 's2', 'recordUsage', { meter: 'cpu', amount: 75 });
+      const below = veto(() => engine.instances.update(lead, 'Step', 's2', { cap: null }));
+      assert.deepEqual([below.reason, below.vetoCode], ['meter cpu has 75 used and reserved, more than the limit 70', 'below_committed']);
+      assert.deepEqual(meterOf(engine, 'Step', 's2'), meter(75, 0, 100));
+    });
   });
 
   describe(`Budget: daily meters (${driver})`, () => {
@@ -860,8 +881,8 @@ for (const driver of drivers) {
       assert.match(refusal(engine, 'Run', [budgetOn({}, { onExceeded: { direct: 'stop' } })]), /onExceeded sends a directive through Lease's direct, which the type does not list/);
       // The core meta-schema holds the shape first.
       assert.ok(
-        thrown(() => engine.schemas.define(alice, budgetDocument('Run', [budgetOn({ limit: 10, limitField: 'cap' })])), SchemaDocumentError).issues.some(
-          (issue) => issue.path === '/types/Run/behaviors/0/config/meters/cpu'
+        thrown(() => engine.schemas.define(alice, budgetDocument('Run', [budgetOn({ limit: 0, limitField: 'cap' })])), SchemaDocumentError).issues.some(
+          (issue) => issue.path === '/types/Run/behaviors/0/config/meters/cpu/limit'
         )
       );
       // A scope on the type's own schema: a run nested in a run.

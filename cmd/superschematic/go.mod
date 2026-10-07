@@ -21,6 +21,7 @@ require (
 	cloud.google.com/go/kms v1.35.0 // indirect
 	cloud.google.com/go/longrunning v1.2.0 // indirect
 	cloud.google.com/go/monitoring v1.30.0 // indirect
+	cloud.google.com/go/resourcemanager v1.17.0 // indirect
 	cloud.google.com/go/run v1.23.0 // indirect
 	cloud.google.com/go/secretmanager v1.22.0 // indirect
 	cloud.google.com/go/serviceusage v1.16.0 // indirect

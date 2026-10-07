@@ -169,7 +169,7 @@ describe('the describe document', () => {
       [
         ['Constants', []],
         ['Variants', []],
-        ['Links', ['no_revision', 'required_link', 'required_target']],
+        ['Links', ['no_revision', 'no_release', 'required_link', 'required_target']],
         ['test.Hold', ['stale', 'required', 'refused']],
       ]
     );
@@ -255,6 +255,10 @@ describe('the tools document', () => {
         ['engine.listBehaviors', 'list_behaviors', 'engine', 'listBehaviors'],
         ['engine.describeBehavior', 'describe_behavior', 'engine', 'describeBehavior'],
         ['engine.getValue', 'get_value', 'engine', 'getValue'],
+        ['engine.listNamespaces', 'list_namespaces', 'engine', 'listNamespaces'],
+        ['engine.createNamespace', 'create_namespace', 'engine', 'createNamespace'],
+        ['engine.archiveNamespace', 'archive_namespace', 'engine', 'archiveNamespace'],
+        ['engine.unarchiveNamespace', 'unarchive_namespace', 'engine', 'unarchiveNamespace'],
         ['item.create', 'item_create', 'item', 'create'],
         ['item.get', 'item_get', 'item', 'get'],
         ['item.list', 'item_list', 'item', 'list'],
@@ -338,7 +342,21 @@ describe('the tools document', () => {
     const tools = engine.tools.manifest(reader).tools;
     assert.deepEqual(
       tools.filter((entry) => !entry.mcp.hidden).map((entry) => entry.name),
-      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue', 'item.get', 'item.list', 'item.history']
+      [
+        'engine.listSchemas',
+        'engine.describeSchema',
+        'engine.defineSchema',
+        'engine.listBehaviors',
+        'engine.describeBehavior',
+        'engine.getValue',
+        'engine.listNamespaces',
+        'engine.createNamespace',
+        'engine.archiveNamespace',
+        'engine.unarchiveNamespace',
+        'item.get',
+        'item.list',
+        'item.history',
+      ]
     );
     assert.equal(
       (tool(engine, 'item.increment', reader).mcp as { hiddenReason: string }).hiddenReason,
@@ -358,7 +376,7 @@ describe('the tools document', () => {
     publish(engine, orderDocument());
     assert.deepEqual(
       engine.tools.manifest(alice).tools.map((entry) => entry.namespace),
-      ['engine', 'engine', 'engine', 'engine', 'engine', 'engine', 'order', 'order', 'order', 'order', 'order']
+      [...Array.from({ length: 10 }, () => 'engine'), 'order', 'order', 'order', 'order', 'order']
     );
   });
 });
@@ -377,6 +395,10 @@ describe('invocation policies', () => {
       'engine.listBehaviors': 'auto',
       'engine.describeBehavior': 'auto',
       'engine.getValue': 'auto',
+      'engine.listNamespaces': 'auto',
+      'engine.createNamespace': 'auto',
+      'engine.archiveNamespace': 'auto',
+      'engine.unarchiveNamespace': 'auto',
       'item.create': 'auto',
       'item.get': 'auto',
       'item.list': 'auto',
@@ -416,6 +438,10 @@ describe('invocation policies', () => {
         ['engine.listBehaviors', 'on-write'],
         ['engine.describeBehavior', 'on-write'],
         ['engine.getValue', 'on-write'],
+        ['engine.listNamespaces', 'on-write'],
+        ['engine.createNamespace', 'on-write'],
+        ['engine.archiveNamespace', 'on-write'],
+        ['engine.unarchiveNamespace', 'on-write'],
         ['item.create', 'on-write'],
         ['item.get', 'never'],
         ['item.list', 'never'],
@@ -473,6 +499,7 @@ describe("the core's behaviors", () => {
         ['documents.comment', 'documents_comment', 'writes'],
         ['documents.listComments', 'documents_list_comments', 'read_only'],
         ['documents.listRevisions', 'documents_list_revisions', 'read_only'],
+        ['documents.getRevision', 'documents_get_revision', 'read_only'],
         ['documents.propose', 'documents_propose', 'writes'],
         ['documents.approve', 'documents_approve', 'writes'],
         ['documents.reject', 'documents_reject', 'writes'],
@@ -501,6 +528,7 @@ describe("the core's behaviors", () => {
         ['Comments', 'comment', true, 'auto'],
         ['Comments', 'listComments', false, 'auto'],
         ['Revisions', 'listRevisions', false, 'auto'],
+        ['Revisions', 'getRevision', false, 'auto'],
         ['Revisions', 'propose', true, 'auto'],
         ['Revisions', 'approve', true, 'auto'],
         ['Revisions', 'reject', true, 'auto'],
@@ -509,8 +537,8 @@ describe("the core's behaviors", () => {
     );
     const properties = described.instance.properties as Record<string, { readOnly?: boolean }>;
     assert.deepEqual(
-      ['status', 'commentCount', 'revision', 'title'].map((field) => properties[field]?.readOnly === true),
-      [true, true, true, false]
+      ['status', 'commentCount', 'revision', 'pendingProposals', 'title'].map((field) => properties[field]?.readOnly === true),
+      [true, true, true, true, false]
     );
   });
 
@@ -530,6 +558,7 @@ describe("the core's behaviors", () => {
         ['documents.comment', 'always'],
         ['documents.listComments', 'always'],
         ['documents.listRevisions', 'always'],
+        ['documents.getRevision', 'always'],
         ['documents.propose', 'always'],
         ['documents.approve', 'always'],
         ['documents.reject', 'always'],

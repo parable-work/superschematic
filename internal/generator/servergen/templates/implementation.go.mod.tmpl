@@ -27,7 +27,7 @@ require (
 
 replace (
 {{- range .Replaces }}
-	{{ .Path }} => {{ .Dir }}
+	{{ .Path }} => {{ if .Version }}{{ .Path }} {{ .Version }}{{ else }}{{ .Dir }}{{ end }}
 {{- end }}
 )
 {{- end }}

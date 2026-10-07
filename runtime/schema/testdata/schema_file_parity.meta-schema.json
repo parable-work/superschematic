@@ -123,7 +123,7 @@
                     "uniqueItems": true
                   },
                   "copyLinks": {
-                    "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records: the links the instance holds when it is stamped, which for inline steps are the ones its create gives.",
+                    "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision or the release this instance's link records where the child's pins the same: the links the instance holds when it is stamped, which for inline steps are the ones its create gives.",
                     "items": {
                       "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                       "type": "string"
@@ -133,7 +133,7 @@
                   },
                   "from": {
                     "additionalProperties": false,
-                    "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set, by the create that gives it or a later link.",
+                    "description": "Where the steps are kept as an instance: a link of this type's Links config pinned to a revision, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set, by the create that gives it or a later link.",
                     "properties": {
                       "field": {
                         "description": "The field of the linked instance's type that holds the steps.",
@@ -141,7 +141,7 @@
                         "type": "string"
                       },
                       "link": {
-                        "description": "A pinned link of this type's Links config.",
+                        "description": "A link of this type's Links config pinned to a revision.",
                         "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                         "type": "string"
                       }
@@ -428,20 +428,14 @@
                   "meters": {
                     "additionalProperties": {
                       "additionalProperties": false,
-                      "not": {
-                        "required": [
-                          "limit",
-                          "limitField"
-                        ]
-                      },
                       "properties": {
                         "limit": {
-                          "description": "The most the instance may have used and reserved together; no limit of its own when neither this nor limitField is given.",
+                          "description": "The most the instance may have used and reserved together; with limitField, the limit while the field holds no value of at least 0. No limit of its own when neither gives one.",
                           "minimum": 1,
                           "type": "integer"
                         },
                         "limitField": {
-                          "description": "An integer field of the type that holds the instance's limit; no limit while it holds no value of at least 0. Only a principal with limitPermission changes it once the instance exists.",
+                          "description": "An integer field of the type that holds the instance's limit; while it holds no value of at least 0, limit is the limit, and without limit there is none. Only a principal with limitPermission changes it once the instance exists.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -800,8 +794,13 @@
                       "additionalProperties": false,
                       "properties": {
                         "pinned": {
-                          "description": "The link records the target's revision, and reports whether the target has moved past it. The schema must compose Revisions.",
-                          "type": "boolean"
+                          "description": "What the link records of the target, reporting the target's latest beside it and whether the target has moved past it: true or revision, its revision, whose schema must compose Revisions; release, its release, whose schema must compose Branches; false or absent, nothing.",
+                          "enum": [
+                            true,
+                            false,
+                            "revision",
+                            "release"
+                          ]
                         },
                         "required": {
                           "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused.",
@@ -979,7 +978,7 @@
                     "type": "object"
                   },
                   "excludeStale": {
-                    "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
+                    "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision or a release its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
                     "items": {
                       "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                       "type": "string"
@@ -1147,7 +1146,7 @@
                             },
                             "revised": {
                               "additionalProperties": false,
-                              "description": "The rule fires on an instance when the instance its link points to gains a new revision of Revisions, or, when its schema composes Branches, a new release (releaseCommit). For a pinned link, only an instance the new revision leaves stale.",
+                              "description": "The rule fires on an instance when the instance its link points to gains a new revision of Revisions, or, when its schema composes Branches, a new release (releaseCommit). For a link pinned to a revision, only an instance a new revision leaves stale, and for one pinned to a release, only an instance a new release leaves stale.",
                               "properties": {
                                 "link": {
                                   "description": "A link of the type's Links config.",
@@ -1383,7 +1382,8 @@
                                   "countBy",
                                   "sum",
                                   "min",
-                                  "max"
+                                  "max",
+                                  "latest"
                                 ]
                               }
                             }
@@ -1431,18 +1431,19 @@
                       ],
                       "properties": {
                         "field": {
-                          "description": "For countBy, a string, enum or boolean field of the linked instances, or status when their schema composes Workflow; for sum, min and max, a numeric field.",
+                          "description": "For countBy, a string, enum or boolean field of the linked instances, or status when their schema composes Workflow; for sum, min and max, a numeric field; for latest, any field of theirs, or status when their schema composes Workflow.",
                           "minLength": 1,
                           "type": "string"
                         },
                         "function": {
-                          "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow, with an outcome outcomes lists when it is given.",
+                          "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. latest: field's value on the instance created last, the greater id on a tie. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow, with an outcome outcomes lists when it is given.",
                           "enum": [
                             "count",
                             "countBy",
                             "sum",
                             "min",
                             "max",
+                            "latest",
                             "all",
                             "any"
                           ]
@@ -1874,6 +1875,35 @@
       ],
       "type": "object"
     },
+    "DisplayState": {
+      "additionalProperties": false,
+      "description": "How a UI shows one Workflow state: its label, the present-progressive form it shows while an instance is in the state, and a tone, what the state means to a reader.",
+      "minProperties": 1,
+      "properties": {
+        "activeForm": {
+          "default": "",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "tone": {
+          "default": "",
+          "enum": [
+            "muted",
+            "active",
+            "success",
+            "warning",
+            "danger"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Document": {
       "additionalProperties": false,
       "properties": {
@@ -2112,6 +2142,10 @@
         "domain": {
           "default": "",
           "type": "string"
+        },
+        "order": {
+          "default": 0,
+          "type": "integer"
         },
         "parameters": {
           "default": [],
@@ -3564,6 +3598,9 @@
           "default": "",
           "type": "string"
         },
+        "display": {
+          "$ref": "#/$defs/TypeDisplay"
+        },
         "envVars": {
           "default": false,
           "type": "boolean"
@@ -3695,6 +3732,81 @@
         "name",
         "role"
       ],
+      "type": "object"
+    },
+    "TypeDisplay": {
+      "additionalProperties": false,
+      "description": "What a UI reads to render the instances of a type (@display): what to call one and many, which field is an instance's title, what a create button says, which fields summarize it in a list, and the labels of its Workflow's states and transitions.",
+      "minProperties": 1,
+      "properties": {
+        "createLabel": {
+          "default": "",
+          "description": "What a button that creates an instance says.",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "noun": {
+          "default": "",
+          "description": "What to call one instance.",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "plural": {
+          "default": "",
+          "description": "What to call several.",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "states": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DisplayState"
+          },
+          "default": {},
+          "description": "Labels of states of the type's Workflow, by state.",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
+          "type": "object"
+        },
+        "summaryFields": {
+          "default": [],
+          "description": "The fields that summarize an instance in a list, in order: the type's own, or fields its behaviors add.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "titleField": {
+          "default": "",
+          "description": "The field whose value is an instance's title: one of the type's own, a single text value.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "transitions": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "minProperties": 1,
+            "propertyNames": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Labels of transitions of the type's Workflow, by the state a transition leaves, then by the state it enters.",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "TypeRef": {

@@ -12,7 +12,9 @@ least once: a crash between the handler and the save runs it again on
 the next start. A handler that throws is retried on the same event with
 a backoff, and never skipped; a stop waits for the handler in progress.
 A ready also saves the stream's cursor, which may be past events the
-filters dropped, so a restart does not scan them again.
+filters dropped, so a restart does not scan them again. A stored cursor
+retention has pruned past ends the reconciler with the 410
+`cursor_expired` problem: it does not skip what it never handled.
 */
 
 import type { EngineClient } from './client.js';

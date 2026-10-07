@@ -34,8 +34,14 @@ export function searchGuidance(config: SearchConfig, target: DescribeTarget): Be
         success: `Returns hits best first, each its id, rank and a snippet of the field that matched. ${PAGE}`,
       },
       similar: {
-        useWhen: 'Use before creating an instance like one you have, to find near-duplicates to reuse or link instead.',
-        success: `Returns the nearest instances, leaving the one named out, and whether its vector ranked (embedded). ${PAGE}`,
+        useWhen: sentences(
+          `Use before creating a ${target.type}, to find near-duplicates to reuse or link instead: with id, the instances nearest to one you have; with text, the ones nearest to a draft's ${
+            config.fields.length === 1 ? config.fields[0] : `${list(config.fields)}, joined by a blank line`
+          }.`,
+          vectors === undefined ? undefined : `With text, a vector of ${vectors.dimensions} numbers from model ${vectors.model} computed from the same text ranks by similarity too.`
+        ),
+        doNotUseWhen: 'Do not use to search by a few words; call search.',
+        success: `Returns the nearest instances, leaving out the one named by id, and whether a vector ranked (embedded). ${PAGE}`,
       },
       staleEmbeddings:
         vectors === undefined
@@ -52,7 +58,7 @@ export function searchGuidance(config: SearchConfig, target: DescribeTarget): Be
               doNotUseWhen: 'Do not settle a vector computed from other text or another model: its hash no longer matches and it is skipped.',
               success: 'Returns how many it settled and each skipped item with its reason, moved or not_found.',
             },
-      create: { doNotUseWhen: 'Do not create a duplicate: call search or similar first, to find one to reuse.' },
+      create: { doNotUseWhen: "Do not create a duplicate: call similar with the draft's text first, to find one to reuse." },
     },
   };
 }

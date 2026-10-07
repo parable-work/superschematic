@@ -370,14 +370,14 @@ takes its lease and moves its status.
 
 | | |
 | --- | --- |
-| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, pinned `Links` links |
+| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, `Links` links pinned to a revision or a release |
 | Operations | `claim({ ttlMs? })`, `refresh()`, the schema-level `claimNext({ match?, assignedOnly?, ttlMs? })`, which returns `{ claimed }`, a claim or null, and the schema-level, read-only `countClaimable({ match?, assignedOnly? })`, which returns `{ count }` |
 | Guard | `Lease.acquire` other than through a claim is `vetoed` (`claim_required`), so a claimable instance's lease is taken only by claiming it |
 
 `claim` expires a lapsed lease first, then checks the status is one of
 `claim.from`, that no `Dependencies` blocker holds the instance up, and
-that no link `excludeStale` names is pinned to a revision its target has
-moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
+that no link `excludeStale` names is pinned to a revision or a release its
+target has moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
 transitions to `claim.to`. A refusal at any step leaves nothing behind.
 
 A claim waits on blockers; a plain `transition` to `claim.to` does not,
@@ -391,7 +391,7 @@ dependent's `satisfiedBy` lists, a success by default
 `claimNext` tries candidates highest priority first (an instance with no
 priority last), then oldest, then by id, skipping work that is blocked,
 assigned to another principal, at `maxExpiries`, exhausted by `Retries`,
-pinned to a superseded revision or over its `Budget`, and claims the first that succeeds; a claim
+pinned to a superseded revision or release or over its `Budget`, and claims the first that succeeds; a claim
 refused to this caller (`vetoed`, `conflict` or `forbidden`) passes to
 the next. Calls are synchronous and the engine writes from one process,
 so two claims never interleave.
@@ -410,7 +410,9 @@ so two claims never interleave.
 - **Outdated work is not tried.** With `excludeStale: ["spec"]` and a
   pinned `spec` link, a job whose spec has a newer revision than the one
   it pins is out of the candidates, and `claim` refuses it, until it is
-  linked to the spec again. A `revised` rule of `Reactions` can send it
+  linked to the spec again. A link pinned to a release (`pinned:
+  "release"`, to a schema that composes `Branches`) keeps its job out
+  the same way once the target is released again. A `revised` rule of `Reactions` can send it
   back to review ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
 - **Your own work.** `assignedOnly: true` takes only work assigned to
   the caller.
@@ -536,12 +538,13 @@ the enclosing scopes its `scope` link points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, by name): each `limit` or `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
+| Config | `meters` (required, by name): each `limit` and `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
 | Field | `budget`: by meter, `{ used, reserved, limit, remaining }` |
 | Operations | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, and the scope side, `reserveFor`, `settleFor` and `recordUsageFor` |
 
 - A claim reserves each meter's amount, the instance's `reserveField`
-  or else `reserve`, and is refused when it does not fit (`over_limit`).
+  or else `reserve`, and is refused when it does not fit (`over_limit`)
+  in the meter's limit, the instance's `limitField` or else `limit`.
   `checkReserve` says whether it would fit, without reserving, and which
   values of each scope its answer turns on; Queue copies it, so
   `claimNext` does not try work over its budget.

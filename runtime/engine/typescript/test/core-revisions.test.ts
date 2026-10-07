@@ -1,7 +1,8 @@
 // Revisions, the core's immutable revisions with an optional review step:
-// a revision per change, listRevisions, propose, approve and reject with
-// the review permission, listProposals through the read path, events,
-// delete, and its rule for a new version.
+// a revision per change, listRevisions and getRevision, propose with its
+// evidence, approve and reject with the review permission,
+// pendingProposals, listProposals through the read path, events, delete,
+// and its rule for a new version.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -129,9 +130,10 @@ for (const driver of drivers) {
       }
     });
 
-    test('propose stores a pending proposal and changes nothing a reader sees', () => {
+    test('propose stores a pending proposal and changes no own field; pendingProposals counts it', () => {
       const engine = published();
       const seq = engine.instances.get(alice, 'Document', 'd1')?.seq;
+      assert.equal(engine.instances.get(alice, 'Document', 'd1')?.data.pendingProposals, 0);
       assert.deepEqual(engine.instances.invoke(writer, 'Document', 'd1', 'propose', { patch: { body: 'Proposed.' }, note: 'Fills it in.' }), {
         id: 1,
         patch: { body: 'Proposed.' },
@@ -142,14 +144,14 @@ for (const driver of drivers) {
         createdAt: (engine.instances.invoke(alice, 'Document', 'd1', 'listProposals') as Page<{ createdAt: number }>).items[0].createdAt,
       });
       const instance = engine.instances.get(alice, 'Document', 'd1');
-      assert.deepEqual(instance?.data, { title: 'Plan', revision: 1 });
+      assert.deepEqual(instance?.data, { title: 'Plan', revision: 1, pendingProposals: 1 });
       assert.equal(instance?.seq, (seq ?? 0) + 1);
       assert.deepEqual(revisionsOf(engine).length, 1);
       assert.deepEqual(engine.events.read(alice, { schema: 'Document', instanceId: 'd1' }).events.at(-1)?.change, {
         behavior: 'Revisions',
         operation: 'propose',
         params: { patch: { body: 'Proposed.' }, note: 'Fills it in.' },
-        patch: {},
+        patch: { pendingProposals: 1 },
       });
     });
 
@@ -178,7 +180,7 @@ for (const driver of drivers) {
 
       const approved = engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 }) as Proposal;
       assert.deepEqual([approved.state, approved.reviewedBy, approved.revision, approved.base], ['approved', 'rae', 2, 1]);
-      assert.deepEqual(engine.instances.get(alice, 'Document', 'd1')?.data, { title: 'Plan', body: 'Proposed.', revision: 2 });
+      assert.deepEqual(engine.instances.get(alice, 'Document', 'd1')?.data, { title: 'Plan', body: 'Proposed.', revision: 2, pendingProposals: 0 });
       assert.deepEqual(revisionsOf(engine).at(-1), {
         revision: 2,
         data: { title: 'Plan', body: 'Proposed.' },
@@ -187,12 +189,12 @@ for (const driver of drivers) {
         proposal: 1,
       });
       assert.equal(revisionsOf(engine).length, 2);
-      // The approval's event carries the own field it changed and the new revision.
+      // The approval's event carries the own field it changed, the new revision and the pending count.
       assert.deepEqual(engine.events.read(alice, { schema: 'Document', instanceId: 'd1' }).events.at(-1)?.change, {
         behavior: 'Revisions',
         operation: 'approve',
         params: { proposal: 1 },
-        patch: { body: 'Proposed.', revision: 2 },
+        patch: { body: 'Proposed.', revision: 2, pendingProposals: 0 },
       });
       const again = thrown(() => engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 }), BehaviorVetoError);
       assert.deepEqual([again.reason, again.vetoCode, again.vetoDetails], ['proposal 1 is approved, not pending', 'not_pending', { proposal: 1, state: 'approved' }]);
@@ -219,7 +221,7 @@ for (const driver of drivers) {
       engine.instances.update(alice, 'Document', 'd1', { title: 'Plan B' });
       const approved = engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 }) as Proposal;
       assert.deepEqual([approved.base, approved.revision], [1, 3]);
-      assert.deepEqual(engine.instances.get(alice, 'Document', 'd1')?.data, { title: 'Plan B', body: 'Proposed.', revision: 3 });
+      assert.deepEqual(engine.instances.get(alice, 'Document', 'd1')?.data, { title: 'Plan B', body: 'Proposed.', revision: 3, pendingProposals: 0 });
       // A proposal whose patch the instance already has approves without a new revision.
       propose(engine, { title: 'Plan C' });
       engine.instances.update(alice, 'Document', 'd1', { title: 'Plan C' });
@@ -233,7 +235,7 @@ for (const driver of drivers) {
       propose(engine, { body: 'Proposed.' });
       const rejected = engine.instances.invoke(reviewer, 'Document', 'd1', 'reject', { proposal: 1, reason: 'Not yet.' }) as Proposal;
       assert.deepEqual([rejected.state, rejected.reviewedBy, rejected.reason, rejected.revision], ['rejected', 'rae', 'Not yet.', undefined]);
-      assert.deepEqual(engine.instances.get(alice, 'Document', 'd1')?.data, { title: 'Plan', revision: 1 });
+      assert.deepEqual(engine.instances.get(alice, 'Document', 'd1')?.data, { title: 'Plan', revision: 1, pendingProposals: 0 });
       const late = thrown(() => engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 }), BehaviorVetoError);
       assert.deepEqual([late.reason, late.vetoCode], ['proposal 1 is rejected, not pending', 'not_pending']);
     });
@@ -279,6 +281,102 @@ for (const driver of drivers) {
         [1, undefined],
         [2, 1],
       ]);
+    });
+
+    test('getRevision reads one revision by its number, through no write; one the instance has not reached is not_found', () => {
+      const asked: AccessRequest[] = [];
+      let now = 10;
+      const engine = published([{ name: 'Revisions' }], {
+        clock: () => now,
+        policy: (request) => {
+          asked.push(request);
+          return true;
+        },
+      });
+      now = 20;
+      engine.instances.update(writer, 'Document', 'd1', { body: 'Draft one.' });
+      const seq = engine.instances.get(alice, 'Document', 'd1')?.seq;
+      asked.length = 0;
+      const get = (revision: number) => engine.instances.invoke(writer, 'Document', 'd1', 'getRevision', { revision });
+      assert.deepEqual(get(1), { revision: 1, data: { title: 'Plan' }, createdBy: 'alice', createdAt: 10 });
+      assert.deepEqual(get(2), { revision: 2, data: { title: 'Plan', body: 'Draft one.' }, createdBy: 'wes', createdAt: 20 });
+      assert.deepEqual(new Set(asked.map((request) => `${request.action} ${request.operation}`)), new Set(['read getRevision']));
+      assert.equal(engine.instances.get(alice, 'Document', 'd1')?.seq, seq);
+      const missing = thrown(() => get(3), EngineError);
+      assert.deepEqual([missing.code, missing.message], ['not_found', 'Document d1 has revisions 1 to 2, not revision 3']);
+      assert.equal(thrown(() => engine.instances.invoke(writer, 'Document', 'd1', 'getRevision', { revision: 0 }), OperationParamsError).code, 'invalid_argument');
+      // A proposal's revision is the approval's.
+      const reviewed = published();
+      propose(reviewed, { body: 'Proposed.' });
+      reviewed.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 });
+      assert.deepEqual((reviewed.instances.invoke(writer, 'Document', 'd1', 'getRevision', { revision: 2 }) as Revision).proposal, 1);
+    });
+
+    test('pendingProposals counts the pending proposals, and is absent without review', () => {
+      const engine = published();
+      const pending = () => engine.instances.get(alice, 'Document', 'd1')?.data.pendingProposals;
+      propose(engine, { body: 'a' });
+      propose(engine, { body: 'b' });
+      propose(engine, { body: 'c' });
+      assert.equal(pending(), 3);
+      engine.instances.invoke(reviewer, 'Document', 'd1', 'reject', { proposal: 1 });
+      engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 2 });
+      assert.equal(pending(), 1);
+      // The reject's event carries the count it moved.
+      const events = engine.events.read(alice, { schema: 'Document', instanceId: 'd1' }).events;
+      assert.deepEqual((events.at(-2)?.change as { patch: unknown }).patch, { pendingProposals: 2 });
+      const plain = published([{ name: 'Revisions' }]);
+      assert.deepEqual(plain.instances.get(alice, 'Document', 'd1')?.data, { title: 'Plan', revision: 1 });
+    });
+
+    test('propose takes evidence: instances the proposer may read, each at a revision it has had; kept as given and returned with the proposal', () => {
+      const engine = published(undefined, {
+        policy: (request) => request.principal.subject !== 'wes' || request.schema !== 'Secret',
+      });
+      const note = schemaDocument('Note', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: { Note: Record<string, unknown> } };
+      engine.schemas.define(alice, note);
+      engine.schemas.publish(alice, 'Note');
+      engine.schemas.define(alice, schemaDocument('Secret', [{ name: 'title', typeRef: { name: 'string' }, required: true }]));
+      engine.schemas.publish(alice, 'Secret');
+      engine.instances.create(alice, 'Note', { title: 'n1' }, { id: 'n1' });
+      engine.instances.create(alice, 'Secret', { title: 'x1' }, { id: 'x1' });
+      engine.instances.create(alice, 'Document', { title: 'Brief' }, { id: 'd2' });
+      engine.instances.update(alice, 'Document', 'd2', { body: 'v2' });
+      const evidence = [
+        { schema: 'Note', id: 'n1' },
+        { schema: 'Document', id: 'd2', revision: 2 },
+      ];
+      const proposed = engine.instances.invoke(writer, 'Document', 'd1', 'propose', { patch: { body: 'Cited.' }, evidence }) as Proposal & { evidence: unknown };
+      assert.deepEqual(proposed.evidence, evidence);
+      const listed = (engine.instances.invoke(reviewer, 'Document', 'd1', 'listProposals') as Page<Proposal & { evidence?: unknown }>).items;
+      assert.deepEqual(listed[0].evidence, evidence);
+      // Evidence is data, not a reference: the cited note goes, the proposal keeps it.
+      assert.equal(engine.instances.delete(alice, 'Note', 'n1'), true);
+      const approved = engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 }) as Proposal & { evidence?: unknown };
+      assert.deepEqual(approved.evidence, evidence);
+      // A proposal without evidence has none.
+      assert.equal((propose(engine, { body: 'Bare.' }) as Proposal & { evidence?: unknown }).evidence, undefined);
+
+      const issues = (cited: unknown[]) =>
+        thrown(() => engine.instances.invoke(writer, 'Document', 'd1', 'propose', { patch: { body: 'Again.' }, evidence: cited }), OperationParamsError).issues;
+      engine.instances.create(alice, 'Note', { title: 'n2' }, { id: 'n2' });
+      assert.deepEqual(issues([{ schema: 'Note', id: 'n9' }]), [{ path: '/evidence/0/id', message: 'Note n9 does not exist' }]);
+      assert.deepEqual(issues([{ schema: 'Nope', id: 'n2' }]), [{ path: '/evidence/0/schema', message: 'Nope is not a schema of namespace default' }]);
+      assert.deepEqual(issues([{ schema: 'Note', id: 'n2', revision: 1 }]), [
+        { path: '/evidence/0/revision', message: 'Note does not compose Revisions, so Note n2 has no revision to cite' },
+      ]);
+      assert.deepEqual(issues([{ schema: 'Note', id: 'n2' }, { schema: 'Document', id: 'd2', revision: 3 }]), [
+        { path: '/evidence/1/revision', message: 'Document d2 has revisions 1 to 2, not 3' },
+      ]);
+      // Its paramsSchema: at most 64, no entry twice, nothing but schema, id and revision.
+      assert.equal(issues([{ schema: 'Note', id: 'n2' }, { schema: 'Note', id: 'n2' }])[0].path, '/evidence');
+      assert.equal(issues([{ schema: 'Note', id: 'n2', note: 'x' }])[0].path, '/evidence/0');
+      assert.equal(issues(Array.from({ length: 65 }, (_, i) => ({ schema: 'Note', id: `n${i}` })))[0].path, '/evidence');
+      // A schema the proposer may not read is forbidden, as any read of it is.
+      const forbidden = thrown(() => engine.instances.invoke(writer, 'Document', 'd1', 'propose', { patch: { body: 'Again.' }, evidence: [{ schema: 'Secret', id: 'x1' }] }), EngineError);
+      assert.equal(forbidden.code, 'forbidden');
+      // A refused proposal stores nothing.
+      assert.equal(engine.instances.get(alice, 'Document', 'd1')?.data.pendingProposals, 1);
     });
 
     test('deleting the instance deletes its revisions and proposals', () => {

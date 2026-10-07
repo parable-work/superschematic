@@ -55,6 +55,23 @@ indexes on engine_instances named engine_unique_<digest> and
 engine_index_<digest>, partial on one schema's rows, which publish
 creates and drops as versions add and remove them (instances/indexes.ts);
 migration 10 creates the ones of the versions published before it.
+
+engine_namespaces holds the namespaces a create made while an engine ran
+(namespaces.ts), each with who made it and when, and who archived it and
+when while it is archived.
+
+Retention prunes the event log (events/retention.ts). engine_log_floors
+holds how far it has pruned each namespace: every event of the namespace
+at or before floor is gone, and publish_floor is the last publish event
+it pruned, which the namespaces that look names up there read. The
+trigger that refuses a delete of an event lets one through at or before
+its namespace's floor, which retention moves first. engine_event_bases
+holds, for each instance whose events it pruned, the instance as the log
+had it after the last of them and that event's sequence, so a reaction's
+before() still folds the instance from the log and a create after a
+delete still takes the next sequence. engine_schemas records the cursor
+of each version's publish event (published_cursor), so a subscription
+finds where it starts without the event.
 */
 
 import { clashMessage, ownIndexes, syncOwnIndexes } from './instances/indexes.js';
@@ -386,6 +403,64 @@ ALTER TABLE engine_events ADD COLUMN value_refs TEXT CHECK (value_refs IS NULL O
             );
           }
         }
+      },
+    },
+    {
+      version: 11,
+      name: 'namespaces a create makes',
+      up(storage) {
+        storage.exec(`
+CREATE TABLE engine_namespaces (
+  name        TEXT    PRIMARY KEY,
+  created_at  INTEGER NOT NULL,
+  created_by  TEXT    NOT NULL,
+  archived_at INTEGER,
+  archived_by TEXT,
+  CHECK ((archived_at IS NULL) = (archived_by IS NULL))
+) STRICT;
+`);
+      },
+    },
+    {
+      version: 12,
+      name: 'event log retention',
+      // Every publish event is still in the log when this runs, so each
+      // version gets its publish's cursor; one a version-1 file stored with
+      // no event keeps null, from which a subscription starts at 0, as it
+      // did. The delete trigger is made again, letting through only an
+      // event at or before its namespace's floor.
+      up(storage) {
+        storage.exec(`
+ALTER TABLE engine_schemas ADD COLUMN published_cursor INTEGER;
+
+UPDATE engine_schemas SET published_cursor = (
+  SELECT MAX(events.cursor) FROM engine_events AS events
+  WHERE events.kind = 'publish' AND events.namespace = engine_schemas.namespace
+    AND events.schema = engine_schemas.name AND events.version = engine_schemas.version
+) WHERE version > 0;
+
+CREATE TABLE engine_log_floors (
+  namespace     TEXT    PRIMARY KEY,
+  floor         INTEGER NOT NULL CHECK (floor >= 0),
+  publish_floor INTEGER NOT NULL DEFAULT 0 CHECK (publish_floor >= 0),
+  pruned        INTEGER NOT NULL DEFAULT 0 CHECK (pruned >= 0)
+) STRICT;
+
+CREATE TABLE engine_event_bases (
+  namespace   TEXT    NOT NULL,
+  schema      TEXT    NOT NULL,
+  instance_id TEXT    NOT NULL,
+  seq         INTEGER NOT NULL CHECK (seq >= 1),
+  data        TEXT    CHECK (data IS NULL OR (json_valid(data) AND json_type(data) = 'object')),
+  value_refs  TEXT    CHECK (value_refs IS NULL OR json_valid(value_refs)),
+  PRIMARY KEY (namespace, schema, instance_id)
+) STRICT;
+
+DROP TRIGGER engine_events_no_delete;
+CREATE TRIGGER engine_events_no_delete BEFORE DELETE ON engine_events
+WHEN OLD.cursor > COALESCE((SELECT floor FROM engine_log_floors WHERE namespace = OLD.namespace), 0)
+BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
+`);
       },
     },
   ],

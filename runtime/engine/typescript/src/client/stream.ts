@@ -13,8 +13,10 @@ the id of the last message it has handed out, an id-only one included.
 When the connection drops, or the stream ends because the engine closed,
 it connects again with `Last-Event-ID` set to that cursor, after a
 backoff, so it neither repeats nor skips an event. A refusal (a 4xx
-problem, a policy change say) ends it with that problem; a 5xx, a 429 or
-a network failure is retried.
+problem, a policy change say) ends it with that problem, a resume from a
+cursor retention has pruned past with the 410 `cursor_expired` one,
+whose floor and head say where a new subscription may start; a 5xx, a
+429 or a network failure is retried.
 */
 
 import { EngineProblem } from './errors.js';
@@ -36,7 +38,11 @@ export interface EventFilters {
 }
 
 export interface SubscribeOptions extends EventFilters, CallOptions {
-  /** Where to start: after a cursor, at `head` for no replay, or at the start of the log (0) by default. */
+  /**
+   * Where to start: after a cursor, at `head` for no replay, or at the
+   * start of the log by default (or 0), which after retention is the
+   * oldest event it kept.
+   */
   readonly after?: number | 'head';
   /** The backoff between reconnects; `false` ends the subscription when the connection drops. */
   readonly reconnect?: false | { readonly initialMs?: number; readonly maxMs?: number };

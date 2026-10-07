@@ -41,9 +41,10 @@ A rule is one when and one then:
   carries revision, or, when its schema composes Branches, a release, a
   releaseCommit operation. The instances it sets off are the ones whose
   link points at the event's instance, found with Links' listLinked on
-  the type's own schema; for a pinned link and a revision, only the ones
-  the target has moved past (stale), so an instance linked to the new
-  revision since is left alone.
+  the type's own schema; for a link pinned to a revision and a revision,
+  or pinned to a release and a release, only the ones the target has
+  moved past (stale), so an instance linked to the new revision or
+  release since is left alone.
 - then { transition, link? }: move the instance, or the one its link
   points to, to the state.
 
@@ -94,6 +95,7 @@ import { mergePatch } from '../../instances/patch.js';
 import { BehaviorConfigError, defineBehavior, type FrozenJSON, type ReactionContext } from '../behavior.js';
 import declaration from './declarations/Reactions.behavior.json' with { type: 'json' };
 import { reactionsGuidance } from './guidance/reactions.js';
+import { linkPin, type LinkPin } from './links.js';
 import { movedOn, targetMove } from './revised.js';
 import { MAX_ROLLUP_READ } from './rollups.js';
 import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
@@ -136,7 +138,8 @@ export interface ReactionsRollup {
 /** A link of the type's Links config a revised rule names, as the config gives it. */
 export interface ReactionsRevisedLink {
   readonly schema: string;
-  readonly pinned: boolean;
+  /** What the link pins, a revision or a release; absent when it pins nothing. */
+  readonly pin?: LinkPin;
 }
 
 /** Reactions' config, parsed: the rules, and what the type's other configs say of the rollups and links they name. */
@@ -491,7 +494,8 @@ function resolve(
       if (link === undefined) {
         throw new BehaviorConfigError(`${at}: when.revised names link ${name}, which is not a link of the type's Links (${Object.keys(links).join(', ')})`);
       }
-      revised[name] = { schema: String(link.schema), pinned: link.pinned === true };
+      const pin = linkPin(link);
+      revised[name] = { schema: String(link.schema), ...(pin === undefined ? {} : { pin }) };
     }
   });
   return { rollups, revised };
@@ -601,7 +605,7 @@ export const reactions = defineBehavior<ReactionsConfig>({
           if (move === undefined) {
             continue;
           }
-          for (const referrer of movedOn(context, name, link.pinned, event.instanceId as string, move)) {
+          for (const referrer of movedOn(context, name, link.pin, event.instanceId as string, move)) {
             apply(context, rule.then, referrer);
           }
           continue;

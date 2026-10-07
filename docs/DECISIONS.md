@@ -1111,18 +1111,24 @@ with create parameters narrowed by them (an amendment below on each). A
 typed client of its HTTP API with the event stream and a reconciler
 (`@superschematic/engine/client`), and a worker over the client
 (`@superschematic/engine-workqueue/worker`), are built (the amendment "a
-typed client over the HTTP API, a worker and a reconciler" below). A
-large field is stored once, by hash, in a value store in the same file
+typed client over the HTTP API, a worker and a reconciler" below), and
+`superschematic engine-client` types the client for given schemas
+(D49). A large field is stored once, by hash, in a value store in the same file
 (the amendment "a large value is stored once" below). The engine enforces
 `@unique`, `@key` and `@index`, finds an instance by its unique fields and
 filters a list by equality (the amendment "an instance is found by a
 unique field" below), on Assignment's assignee, Lease's holder and
 Retries' exhaustion too, and on no value (the amendment "a list filters
-on who holds the work" below). Lease tells a holder that a linked target
-moved (`directOn`), and a behavior's `configChange` sees whether the
-schema has instances (the two amendments after it). Each change that
-lands a piece updates this paragraph. The names and rules are reversible
-until the first release.
+on who holds the work" below). A deployment makes and archives
+namespaces while the engine runs, and the log keeps events by age or
+count, pruned on the runner (the amendments "namespaces made while the
+engine runs, and archived" and "the log keeps what retention and its
+subscriptions need" below). Display metadata is the core `@display`
+decorator (D48), which the describe document carries. Lease tells a
+holder that a linked target moved (`directOn`), and a behavior's
+`configChange` sees whether the schema has instances (the last two
+amendments below). Each change that lands a piece updates this
+paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -1654,10 +1660,108 @@ rather than of the two documents.
 | The typed client (`@superschematic/engine/client`) follows the routes: `instances.lookup(schema, key)`, a missing instance a thrown 404 as for `get`; `list`'s `where`; and an `EngineProblem`'s `fields`, `details.fields` of a conflict. | Leaving the client a step behind the HTTP API it types |
 | A behavior's implementation lists `filters`: its declared fields whose value is one of its columns, with the value's JSON type, which a list filters on as an own field. The engine compares the column in SQL; a migration's index on that column alone serves the filter. `Workflow` filters on `status`, and its migration 2 adds the index. | SQL each behavior writes for its filter, which the engine would check and splice like its other SQL; filtering on a field as its reader computes it, which reads every instance's behaviors to filter; every behavior field, many of which are computed from other instances |
 
+### D16, amended: namespaces made while the engine runs, and archived
+
+Namespaces were fixed in `openEngine`'s options. A deployment that
+serves several projects of its own reopened the engine with new
+options to add one, and had no way to stop the writes to one it was done
+with short of taking it out of the options, which left its data in the
+file and out of reach. Who may add a namespace is a question the access
+policy could not be asked: every question named a schema. A namespace
+is now made, archived and unarchived while the engine runs, as the
+policy allows, and an archived one is read as it was. This changes
+D16's namespaces row: the deployment configures some, and a call makes
+the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Namespaces come from two places: the options configure some, `default` always among them, and `engine.namespaces.create` makes the others, which `engine_namespaces` keeps (engine migration 11), so the next engine on the file has them. A name the options list is configured whatever the table holds for it, and only the options add or take one away. A created namespace looks names up in the shared namespace, always a configured one, under D16's rules. | Every namespace in the table, the options' inserted at open, under which a call archives what the options declare and the options and the file disagree at the next open; options only, as before |
+| A name follows the rule configured names do (`invalid_argument` otherwise). A name that is a namespace already, configured or created, archived or not, is `conflict`. There is no delete, so a name is never reused. | Reusing an archived namespace's name, which hands a new project another's data |
+| Who may create, archive, unarchive or list is the policy's: one action, `manage`, asked about the namespace itself, `{ principal, action: 'manage', namespace, operation }` with the operation `create`, `archive`, `unarchive` or `list`, and no schema. `AccessRequest` becomes a union on `action` (`SchemaAccessRequest`, `NamespaceAccessRequest`), so a policy that reads `schema` must say what it does for `manage`, and one that builds a permission from the schema's name, as the examples' do, refuses it. A create asks before it looks the name up, so a caller the policy refuses learns nothing of what exists; `list` asks of each namespace and returns the ones it allows. | An action per operation (`createNamespace`, ...), four names each policy must know where one with an operation reads as the behavior operations do; `schema: ''`, which a policy written per schema takes for a schema; any caller listing every namespace, as any caller reads the behavior catalog, which shows one project another's name; a permission the engine names, which D16's "no roles" rules out |
+| An archived namespace refuses every write a call makes there, once the policy has allowed it: a define, a publish, a create, an update, a delete and a writing operation, of an instance or a schema, are `namespace_archived` (409). Its schemas, drafts, instances, events and values read as before, and its tools document hides each tool that writes there, with the reason. | 403, which tells the caller it lacks a grant it may hold; 410, which says the namespace is gone while its reads work; 423, WebDAV's lock; refusing before the policy, which tells a caller the policy refuses that the namespace is archived |
+| `unarchive` undoes an archive. Archiving an archived namespace, or unarchiving an active one, returns it as it is; archiving or unarchiving a configured namespace is `conflict`. Nothing deletes a namespace. | No unarchive, which makes a mistaken archive final; refusing the second archive, which a retried call trips on; a delete, which must remove instances, behaviors' rows, values and events across every table, a change of its own |
+| The runner runs no reaction and no schedule in an archived namespace: `status()` shows them `archived`, and once it is unarchived a subscription picks up at its cursor, since nothing was written there meanwhile, and a schedule that came due runs once. A publish in the shared namespace still runs `afterConfigChange` for an archived namespace's instances, which keeps their derived storage in step with the version their reads use. | Running them, whose writes the namespace refuses, so each would fail, retry and halt until the unarchive; dropping their subscriptions, which loses the cursors; skipping `afterConfigChange` there, which leaves a search index that does not match the version a read uses |
+| `engine.namespaces` has `create`, `archive`, `unarchive`, `list` and `get`, each record `{ name, origin, shared, state, createdAt, createdBy, archivedAt, archivedBy }`. HTTP serves `GET` and `POST /namespaces`, `GET /namespaces/{namespace}` and `POST .../archive` and `.../unarchive`; MCP serves `list_namespaces`, `create_namespace`, `archive_namespace` and `unarchive_namespace`, engine tools with guidance in every caller's list, whose policy `tools.invocation` sets. They append no event. | Tools in one admin namespace's endpoint only, which a deployment that serves each project's endpoint alone could not reach; an event kind for them, which has no schema to ask `read` on and which migration 7's CHECKs refuse |
+| The typed client (`@superschematic/engine/client`) follows the routes: `client.namespaces` has `list`, `get`, `create`, `archive` and `unarchive`, each naming the namespace it acts on, and returns the server's record, which `test/client-types.test.ts` holds to it. | Leaving the client a step behind the HTTP API it types |
+
+### D16, amended: the log keeps what retention and its subscriptions need
+
+The log grew for good, and since the value store every large value an
+event held stayed stored for good with it: the value store's amendment
+left freeing them to retention. Four readers relied on every event being
+there: a read or a stream from 0, a subscription's start, which the
+runner read from its publish event, a reaction's `before()`, which
+folds an instance's events from its create, and the next sequence of an
+instance created again after a delete, the highest its events held. The
+log now keeps events by age or count, a namespace at a time, never past
+an event a subscription has yet to handle, and each reader needs only
+what retention keeps. This changes D16's storage row: the log is
+append-only, and retention removes its oldest events.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine option `retention: { maxAgeMs?, maxEvents?, everyMs, batchSize }` keeps events by age (the event's `at` against the engine's clock), by count (an event more than `maxEvents` cursors behind the head goes) or both, an event going when either lets it go. Without it nothing is pruned. | Retention per namespace or per schema, an option keyed by names a deployment makes while the engine runs; a count of a namespace's own events, which counts every namespace's events at each pass |
+| The runner prunes at its first pass and every `everyMs` after, `batchSize` events per transaction, yielding between batches; `runDue()` prunes when it is due, and `engine.runner.prune()` prunes to the end now, with no principal, since pruning acts for none. | Pruning inside writes, which makes a heartbeat pay for the log; a timer of the engine's own beside the runner's, a second loop to start, stop and test |
+| It prunes each namespace apart, oldest first, and stops at the first event it keeps, so what is gone is a run of cursors. A namespace's floor (`engine_log_floors`, engine migration 12) is the last cursor pruned of its events. | One floor for the log, under which one project's stuck subscription holds every project's log |
+| It never prunes past a namespace's hold: the cursor of its least advanced subscription, active, retrying, halted or archived, at its cursor or, before it has run, where it starts; one whose behavior is not registered holds once it has run. A halted subscription holds its namespace's log until it is resumed, and `status().retention` shows the hold and the subscription. | A halted subscription not holding, or holding until a deadline, after which its resume runs on with the events it failed at gone, quietly; holding only running subscriptions, which loses the events of a namespace while it is archived or a deployment's runner while it is stopped |
+| A subscription found behind its floor all the same, one whose implementation gained reactions after retention pruned past where it starts, halts with `cursor_expired`, its failure cursor the floor, and `resume` with `skip` moves it there. | Skipping silently to the floor, which hides events no reaction ran for |
+| A read from a cursor before its namespace's floor, or before the last publish pruned of the shared namespace it reads, is `cursor_expired`, `CursorExpiredError` with the floor and the head: 410 with `details: { after, floor, head }` over HTTP, a stream's resume and a JSON page alike. A stream retention passes ends, and its reconnect gets the problem. The head never moves back, so `after=head` works as before. | Reading on from the oldest event kept without a word, a gap a client cannot see; 404, which says the namespace or route is not there; 409, which a client retries |
+| A read that gives no cursor, no `after` on `events.read` or the JSON route and no `Last-Event-ID` or `after` on a stream, asks for the log from its start and starts at the floor, the oldest event kept: it is never `cursor_expired`, so a client that reads the log from the start goes on working once retention has run. `after: 0` is the same read: no event has cursor 0, and `?after=0` is how the guides and clients spell a replay from the start. A client can hold 0 as a place only as the head of a log that never held an event, and a reconnect from it after retention pruned what it missed reads on from the floor without a word; it is flagged here, as the price of 0 meaning the start. | No cursor expired once anything is pruned, under which every client that replays from the start fails at the first prune; `after: 0` as an explicit cursor, so `?after=0` fails where no `after` reads, two spellings of one request with two answers |
+| Each pruned instance event folds into its instance's base (`engine_event_bases`): the instance as the log had it after the event, or none after a delete, and its sequence. `before()` folds from the base and the events kept, and is `cursor_expired` for an event pruned; a create after a delete takes the sequence after the base's. The base holds the values it keeps. | Keeping each instance's create, which keeps every instance's whole history for as long as it lives; failing `before()` once the create is gone, which halts every `Reactions` rule on an old instance; restarting the sequence, under which an `If-Match` from the old life matches the new one |
+| A version keeps its publish's cursor (`engine_schemas.published_cursor`, migration 12 fills it from the log), from which a subscription starts and which the runner's discovery is keyed on, so pruning a publish event moves nothing. | Never pruning publish events, which keeps every schema document twice, in the log and in `engine_schemas` |
+| A pruned event drops its value holders in the prune's transaction, so a value only events held goes with the last of them. | A sweep of unheld values, which one writer and synchronous transactions leave nothing for |
+| Pruning writes the engine's own storage, appends no event and acts for no principal. D32 lets a schedule write its behavior's tables where nothing an operation returns changes. Pruning changes nothing a read of an instance, a schema or a behavior returns; a read of the log from a cursor returns every event after it or `cursor_expired`, never other events, so what it does change is announced by a code, and one from the start returns what is kept. That is why it is the runner's own work and not a behavior's schedule: no behavior owns the log. | A behavior that prunes, which writes storage that is not its own; an event per prune, which grows the log it prunes |
+| The trigger that refuses a delete of an event lets one through at or before its namespace's floor, which retention moves first in the batch's transaction, so a stray delete above the floor is still refused. | Dropping the trigger, which lets any statement in the process delete events |
+| The typed client reads a `cursor_expired` problem's `floor` and `head` into its `EngineProblem`. A subscription resuming from a cursor retention has pruned past ends with that problem, as any 4xx ends it, and so does a reconciler whose stored cursor it is: neither skips what it never handled. With no cursor, each reads from the floor. | Resuming a subscription from the floor on its own, which skips events its caller never saw, the gap the code exists to announce |
+
+### D16, amended: a link pins a release, and shows the latest
+
+`Links` pinned revisions of `Revisions` only. Work done against a
+recipe, a version graph of `Branches`, could not record the release it
+was done against, so neither `Queue`'s `excludeStale` nor `Reactions`'
+`revised` could tell work pinned to a superseded release from current
+work, which the amendment on a revised link left open. And a pinned
+link's record said only whether it was stale, so a client that shows
+"pinned 3, latest 5" read the target as well. A link now pins a
+revision or a release, and its record shows the target's latest beside
+the pin.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `pinned` takes `true` or `"revision"`, a revision of the target's `Revisions`, or `"release"`, a release of its `Branches`; `false` and absent pin nothing. `true` stays a revision, so every config written before keeps its meaning. `linkPin`, exported, reads it from a config as a schema holds it. | A key of its own beside `pinned` (`pins: "release"`), two keys for one choice that can disagree; a string only, which rewrites every config written so far; a pin of both kinds at once, which no case needs |
+| A release is the version of the target's release pointer, 1 at its first release, as `releaseCommit` numbers it. `Branches` gains a read-only field, `release`, which reads it from the behavior's own table and is absent before the first release. Links reads it as it reads `revision`, through a read of the target as the caller, and a `releaseCommit` event carries it in its patch. | Links invoking `releases`, which pages from the oldest; `released`, which materializes the tree; Links reading Branches' tables, which D16 rules out; the released commit's id, which orders nothing, so no pin could be past it |
+| A row keeps a revision pin and a release pin in columns of their own (Links migration 2 adds `release`), and `link` writes the kind its config pins and clears the other. A config that changes what a link pins finds no pin of the new kind in a row until it is linked again, as a link made before it was pinned has none, so `configChange` allows the change. | One column for either kind, which a config that changes the kind would read as a number of the other |
+| `link` and a create's entry take `release` beside `revision`, each only for a link that pins its kind and at most the target's latest. A target with no release yet is vetoed `no_release`, as one with no revision is `no_revision`; a link pinned to a release whose schema does not compose `Branches` is `invalid_argument`. | `no_revision` for both, which a client branching on the code could not tell apart |
+| The record of a pinned link, in `links` and in `listLinked`, carries `latest`, the target's latest revision or release of the kind it pins, beside the pin and `stale`, wherever `stale` is computed. An unpinned link carries none. | `latest` on every link, which would read every link's target at every read, where only a pinned link reads its target now |
+| `Queue`'s `excludeStale` takes a link pinned to either kind, and hears the target's `/release` cross the pin plus one, as it hears `/revision`. `Reactions`' `revised` moves only the stale instances where the link pins what the event made, a revision or a release; any other link moves every instance that points at the target, as before. | Leaving release pins out of `excludeStale`, which keeps out only half the outdated work |
+| `Blueprint`'s `from` names a link pinned to a revision: a release pins the definition's version graph, not the own fields its map of steps is kept in. A `parentLink` pinned to a release is refused at define, since a parent has no release when its create stamps its children. `copyLinks` copies a release pin where the child's link pins releases too. | Reading the map from a release's tree, which would keep a blueprint's steps in a graph's rows, a format of their own |
+| Branches' field takes the name `release`, beside Revisions' `revision`, so a type that composes `Branches` and has an own field `release` is refused at load, as any collision of a behavior's field is. This is flagged: no schema in the repository has one. | A name less likely to collide (`releaseVersion`), which reads worse beside `revision`; no field, which leaves Links and Queue nothing to read or hear |
+
+### D16, amended: a revision by number, a proposal's evidence, the latest linked value, a limit's fallback, and a draft's near-duplicates
+
+Five small gaps in the core and work-queue behaviors. `Blueprint` read
+one revision of a definition by building a `listRevisions` cursor by
+hand. A list of instances under review could not show how many
+proposals each waited on without listing them, and a proposal could not
+say what it rested on. A parent had no rollup for its newest child's
+value, such as the latest attempt's result. A meter whose limit an
+instance's field holds had no limit at all while the field was empty.
+And an agent could find near-duplicates of an instance that exists, not
+of the draft it was about to create.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Revisions`' `getRevision({ revision })`, read-only, returns one revision as `listRevisions` returns each, through the value store; a number the instance has not reached is `not_found`. `Blueprint` reads a pinned definition through it. | A filter on `listRevisions`, whose page a single read does not need; `invalid_argument`, Revisions' answer for a proposal it does not hold, where a read of what is not there is `not_found`, as `released` before the first release is |
+| `pendingProposals`, a field of `Revisions`, counts the pending proposals through the proposals' index by state: present, 0 included, while the config has review, and absent without it. A create's, `propose`'s, `approve`'s and `reject`'s events carry it, so `propose` no longer appends an empty patch. | A count in `listProposals` only, which a list of instances would call per instance; the field without review, always 0 |
+| `propose` takes `evidence`, at most 64 entries `{ schema, id, revision? }`: instances the proposal cites, each optionally at a revision. `propose` reads each as the proposer, so a schema the proposer may not read is `forbidden`; a schema the namespace does not have, an instance that does not exist, and a revision of a schema that does not compose `Revisions` or past the target's latest are `invalid_argument` at the entry. It is stored as data, in a column Revisions' migration 3 adds, and every proposal record returns it. | References, which would make a cited instance's delete ask the proposal, and leave nothing to show once it went; no check at `propose`, which stores a citation a reviewer cannot follow |
+| `Rollups`' `latest`, `{ function: "latest", field }`, is the field's value on the linked instance created last, by `createdAt`, the greater id on a tie; absent when that instance holds none or there is none. The field is any field of the linked type, or `status` when it composes `Workflow`, which `parseConfig` checks. It is one pass over the records a rollup reads and its JSON type is its field's, so the set stays closed. | Ordering by when the link was made, which Rollups cannot read without Links' tables; the latest instance that holds a value, which is a filter; `first` beside it, which no case needs yet |
+| `Budget`'s `limit` and `limitField` go together: `limit` is the limit while the field holds no value of at least 0, as `reserve` is the amount beside `reserveField`. A change that empties the field is held to `limit`, never below what is used and reserved. The declaration drops the `not` that refused both. | Exclusive keys, which leave an instance without a limit until its field is set; falling back to the limit `setLimit` stored, which a meter with `limitField` never writes |
+| `Search`'s `similar` takes `text` in place of `id`, with an optional `vector` and `model`: the text of an instance not yet created, its indexed fields joined as `staleEmbeddings` joins them, at most 100,000 characters. It ranks as `similar(id)` does, by the text's longest words fused with the vector's ranking, with no instance to leave out, and `embedded` says whether a vector ranked. The parameters take one of `id` and `text`, and a vector only with text. | An operation of its own, a second tool for one question; the text as a `search` query, which every word must then match; a vector with `id`, whose own vector is the one that ranks |
+
 ### D16, amended: a list filters on who holds the work, and on what ran out
 
-The amendment above gave a behavior's column a filter, and Workflow's
-`status` the first one. The questions a client asks of a work queue next
+The amendment on finding an instance by a unique field gave a
+behavior's column a filter, and Workflow's `status` the first one. The questions a client asks of a work queue next
 had none: the work assigned to me, the work no one has, the leases a
 worker holds when it restarts, the free instances, the jobs whose
 retries ran out. `Assignment`'s assignee is a column with no filter, and
@@ -1690,12 +1794,12 @@ off on a schema.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | `Lease` takes `directOn: [{ revised: { link }, name, data? }]`, one entry per link of the type's `Links`. When the link's target moves on, the runner sends directive `name` to the holder of each instance the move reaches. | A Reactions `then: { direct }`, which names a work-queue operation in the core; a rule on the target's schema, which would name every schema that links to it |
-| What moves a target on, and which instances it reaches, is `Reactions`' `revised` rule, which the engine exports and Reactions now calls: `targetMove` reads a revision of `Revisions` (an update or an operation whose change carries `revision`) or a release of `Branches` (`releaseCommit`), and `movedOn` lists the instances that point at the target through `Links`' `listLinked`, for a pinned link and a revision only the stale ones. A target schema with neither is a failure at run. | A copy in the work-queue package, which would drift from the rule it restates |
+| What moves a target on, and which instances it reaches, is `Reactions`' `revised` rule, which the engine exports and Reactions now calls: `targetMove` reads a revision of `Revisions` (an update or an operation whose change carries `revision`) or a release of `Branches` (`releaseCommit`, with the release pointer's version its patch carries), and `movedOn` lists the instances that point at the target through `Links`' `listLinked`, only the stale ones where the link pins what the move made, a revision or a release (the amendment "a link pins a release"). A target schema with neither is a failure at run. | A copy in the work-queue package, which would drift from the rule it restates |
 | It is Lease's reactions, on the runner, as its principal, and each directive is Lease's `direct`, invoked, so its guard asks `directPermission`, or `overridePermission` when that is absent. `parseConfig` refuses `directOn` when the config names neither. A runner principal that lacks it fails the subscription, `forbidden`, where `engine.runner.status()` shows it, as any refusal of the policy does. | A way past the permission for the runner, which the guard cannot tell from any other caller; `call()`, which a reaction has no instance to make from |
-| The directive's data is the entry's, with `revised` set to what moved: `{ link, schema, id, revision }`, or `{ link, schema, id, commit }` for a release. An entry's `data` may not hold `revised`. | The entry's data alone, which leaves the holder to read the target to learn what moved and to what |
-| Its `dedupeKey` is `direct`'s: `revised <link> <revision>`, or `released <link> <version>`, the release pointer's version the release was fenced by. A holder hears each move once per lease, and two moves twice. | One key per link, under which a second move finds the first directive standing, acknowledged or not, and is never sent |
-| An instance whose lease is free hears nothing, and neither does its next holder: the runner reads Lease's holder column and invokes only where one is recorded, and a lapsed lease's `direct` is refused, which the reaction passes over, as Reactions passes over a veto. A directive belongs to a lease's token, and a new token deletes the last lease's directives; the next holder takes the instance after the move and reads its links as they are, and with Queue's `excludeStale` a stale pinned instance is not claimed at all. | Queueing it for the next holder, a directive outside any lease, which would tell a worker to redo work it had not started |
-| A behavior's `watches` may return null, which turns its reactions off on the schema, as a schedule's `everyMs` function returning null turns a schedule off (D32): the runner reads none of the schema's events for it, `status()` shows a subscription that has run as `off`, and one that never ran not at all. A subscription starts at the publish of the earliest version of the run of versions, up to the live one, that compose the behavior with its reactions on, so a version that turns them on starts at its own publish. Lease's are off without `directOn`. | Reactions on every schema that composes Lease, so the runner reads every heartbeat of every leased schema, and a deployment that upgrades replays the log from when each schema composed Lease, telling holders of moves long past; an `enabled(config)` hook beside `watches` |
+| The directive's data is the entry's, with `revised` set to what moved: `{ link, schema, id, revision }`, or `{ link, schema, id, release, commit }` for a release, `release` the pointer's version as a link pins it. An entry's `data` may not hold `revised`. | The entry's data alone, which leaves the holder to read the target to learn what moved and to what |
+| Its `dedupeKey` is `direct`'s: `revised <link> <revision>`, or `released <link> <release>`, the release pointer's version the release made. A holder hears each move once per lease, and two moves twice. | One key per link, under which a second move finds the first directive standing, acknowledged or not, and is never sent |
+| An instance whose lease is free hears nothing, and neither does its next holder: the runner reads Lease's holder column and invokes only where one is recorded, and a lapsed lease's `direct` is refused, which the reaction passes over, as Reactions passes over a veto. A directive belongs to a lease's token, and a new token deletes the last lease's directives; the next holder takes the instance after the move and reads its links as they are, and with Queue's `excludeStale` an instance pinned to a superseded revision or release is not claimed at all. | Queueing it for the next holder, a directive outside any lease, which would tell a worker to redo work it had not started |
+| A behavior's `watches` may return null, which turns its reactions off on the schema, as a schedule's `everyMs` function returning null turns a schedule off (D32): the runner reads none of the schema's events for it, `status()` shows a subscription that has run as `off`, and one that never ran not at all. A subscription starts at the publish of the earliest version of the run of versions, up to the live one, that compose the behavior with its reactions on, so a version that turns them on starts at its own publish. An off subscription holds no retention (the amendment "the log keeps what retention and its subscriptions need"): it handles nothing, and turned on it starts past what was pruned. Lease's are off without `directOn`. | Reactions on every schema that composes Lease, so the runner reads every heartbeat of every leased schema, each holds its namespace's log against retention, and a deployment that upgrades replays the log from when each schema composed Lease, telling holders of moves long past; an `enabled(config)` hook beside `watches` |
 | With `directOn`, the subscription hears its own schema's events too, as every subscription does, and passes over them. | A `watches` that leaves out the schema itself, a change to every behavior's reactions for one case |
 
 ### D16, amended: a config change sees whether the schema has instances
@@ -1712,7 +1816,7 @@ exist before it asked a behavior about being added or removed.
 | `configChange(before, after, change)`: `change.instances` says whether an instance of the schema exists. It is true for an added or removed behavior, which is asked about only then. | A publish-time hook of its own; the count of instances, which no rule needs |
 | Any namespace that reads the version counts: for a schema of the shared namespace, every namespace that looks it up, since one published config serves them all. It is the question an add or a remove already asks. | The defining namespace alone, under which the shared namespace, which holds the schema and no instance of it, would let a link become required while another namespace's instances lack it |
 | It is read when the behavior reads it, at define and again at publish, in the publish's transaction, so a version defined while the schema was empty is refused at publish once an instance exists. | Reading it for every define, a query per namespace that no behavior may ask for |
-| With no instance, `Links` allows any change (a link made required, a new required link, a link gone, another schema); `Workflow` a dropped state; `Variants` a new `field`, `by` or type for a value; `Branches` a removed kind and a kind's type, parent, order, singleton or unit, since deleting an instance deletes its graph; `Budget` a removed meter; `Presence` a new `principalField`. The other behaviors refuse no config change. | Leaving each as it was |
+| With no instance, `Links` allows any change (a link made required, a new required link, a link gone, another schema; a pin's kind changes with instances too, as the amendment on release pins has it); `Workflow` a dropped state; `Variants` a new `field`, `by` or type for a value; `Branches` a removed kind and a kind's type, parent, order, singleton or unit, since deleting an instance deletes its graph; `Budget` a removed meter; `Presence` a new `principalField`. The other behaviors refuse no config change. | Leaving each as it was |
 | The field rule, which refuses a field made required and a new required field, is the engine's and stays as it is, instances or not. | Relaxing it too, beyond this change, which would change D16's compatibility rule for every schema |
 
 ## D17. A version graph over versioned tables, with one merge core
@@ -4099,3 +4203,125 @@ does not record it yet, the readers do not number environments, and no
 renderer, generator or CI seam exists.
 
 The rule is reversible until the first release.
+
+### D47, amended: a release ships the static archives its generated servers link
+
+The workflow's `check` job compiles each Go server, and its deploy jobs
+build images from a context the deploy writes (D46). A generated server
+links superscalar's static archive through cgo (D3), and the version
+graph's when its database declares one, and no Go module the module proxy
+serves carries either: a fresh runner, with no superscalar checkout and no
+`CGO_LDFLAGS`, failed `go build` at the link, and a project whose naming
+file names no checkout (`[paths] scalar_go`) got no Dockerfile at all. A
+checkout's server, on a runner that never made the checkout, got a
+context without it, which Cloud Build would refuse at a `COPY`. Such a
+project's server `go.mod` also required superscalar at `v1.0.0` and the
+runtime modules at the zero pseudo-version, which no proxy serves.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each release ships, per platform, `superschematic-archives_<version>_<platform>.tar.gz`: superscalar's archive, built from the pinned commit, and the version graph's, both with `tools.env`'s Rust under `lib/` (`scripts/release-archives.sh`). The release builds them before the CLIs, links each CLI against its platform's tarball, and links every tarball's SHA-256 into the CLI (`internal/release`), so the code a release generates pins what it downloads. | superscalar's own release assets, which its pipeline builds with its Rust release for musl: the version graph's archive must come from the same Rust release to link beside them, a coupling across two repositories on every bump, and superschematic would still publish the version graph's. Building from source in every workflow and image, a Rust toolchain and a cache in each, which the release does once. A WebAssembly core run by a pure-Go runtime, with no archives at all, the largest change and one in superscalar's binding. A digest read from the release's `SHA256SUMS`, which the same release page serves (D46). |
+| The workflow's `check` job installs the runner's tarball after superschematic, checks it against the digest the binary names, and points `CGO_LDFLAGS` at its `lib/`. A binary the release workflow did not build names no digests, and the step fails and says so. | An archives step in every job, though only `check` compiles; folding it into the install step, which checks the CLI against `SHA256SUMS`. |
+| A server Dockerfile without `[paths] scalar_go` downloads the release's tarball for the image's platform, `linux/amd64` or `linux/arm64`, checked against the digests it pins, from `SUPERSCHEMATIC_RELEASE`, a build argument whose default is the release's page, and builds with no Rust stage and no checkout in its context. With `[paths] scalar_go` it builds both archives from the checkouts, as before. A binary built from a checkout, or not by the release workflow, writes no Dockerfile without it, and says why. | Archives the deploy adds to the context, which the target's builder would upload with every build; a Rust stage that fetches superscalar's source by commit. |
+| A release pins each runtime module no `[paths]` key names in the server's `go.mod` and in the implementation module it scaffolds, by a replace of every version: superschematic's at the release's tag, superscalar's Go binding at the version the release links. The generated modules keep requiring them at versions only a checkout's replace resolves. | Real versions in every generator's `go.mod`, a change to every Go generator that the server, which every build of a stack goes through, does not need first. |
+| The deploy refuses a context that lacks a path its ignore file takes in by name, or holds one under a symbolic link, which a context carries as a link and not its files, before anything is uploaded. | Following links into the context, which BuildKit's rules for a local context do not. |
+
+Status: built. The release's `build-archives` job and the CLI's digests
+are in `.github/workflows/release.yml`, which no release has run yet. The
+`github` renderer's `check` job has the archives step; `servergen` writes
+the release's Dockerfile and pins, whose golden is
+`internal/generator/servergen/testdata/golden/release`, and
+`TestTheReleaseDockerfileBuildsAnImageThatServes` builds one from a stand-in
+release page and runs the image. A clean `golang` container, with a
+project of no `[paths]`, built both servers with the archives step's
+commands, the runtime modules coming from the module proxy at a commit.
+Not built: `stack dev`, and a local `go build` in such a project, still
+need `CGO_LDFLAGS` set by hand, and the other Go generators' modules
+still require the runtime modules at the zero pseudo-version.
+
+### D30, amended: a project names its build context when its runtime modules lie above it
+
+The Dockerfile's context was the repository root, the parent of the
+schemas root, and a server whose `go.mod` replaces a module outside it got
+no Dockerfile. `examples/acme-shop` points its `[paths]` at the runtime
+modules of its checkout, two levels up, so its servers had no image, and
+`stack deploy` could not build one, which the first run against Google
+Cloud found (`docs/stack-model.md`, section 14, milestone 3).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The naming file's `[paths] build_context`, relative to the parent of the schemas root like every `[paths]` key, names the build context of the stack's server images. Unset, it is the repository root. The generated Dockerfile's paths, its ignore file and the archive `stack build` and `stack deploy` send are all relative to it. `examples/acme-shop` sets `../..`. | The git work tree's root, which a source archive without `.git` lacks and which makes the generated files depend on the checkout; moving the example's implementations and its naming file to the checkout's root, which leaves the example no longer a project of its own |
+
+The rule is reversible until the first release.
+
+## D48. A type's display is the core `@display` decorator, checked against the type and its Workflow
+
+D16 says display metadata a UI reads is written with decorators, as
+documentation is (D10), and fields have theirs: `@docs({ title })`,
+`@purpose` and `@icon`, core on D18's ground. A type had none. A UI, or
+an agent, that renders a schema's instances could not learn from the
+schema what to call one or many, which field is an instance's title, what
+a create button says, which fields summarize it in a list, or how to
+label its `Workflow`'s states and transitions. The engine's describe
+document carried each field's description but not its title or icon,
+though the stored schema holds both.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A core type decorator, `@display({ noun, plural, titleField, createLabel, summaryFields, states, transitions })` from `@superschematic/schema`, on a class of any kind. It writes `TypeDef.Display` (`ir.TypeDisplay`), after `behaviors`, omitted when absent, so IR JSON without it is the same bytes. Every member is optional, `{}` is refused, and a type takes one. It adds no field, operation or storage. | A decorator per member (`@noun`, `@titleField`, ...), a spec and an export each for one concept; a behavior, which D16 rules out; an `extensions` slot, which would make a concept every UI reads look like one distribution's data |
+| It is core IR on D18's rule: it means the same in every deployment, the core checks it, and every form writes it. A distribution's own display concepts (a role a UI shows a type to, a home page, link defaults, an icon set) stay its extension's: a type decorator of its own that writes `extensions.<name>`, and a check (D10) for a rule over `@display`'s values. | Open members a distribution fills with its own keys, which no UI could rely on |
+| One JSON Schema. The registered spec's `Args` is the schema of the decorator's argument, and the data forms write the argument verbatim under `display`, so the schema-file JSON Schema takes its `$defs/TypeDisplay` and `$defs/DisplayState` from the spec in place of the reflected ones. The TypeScript frontend, the JSON and YAML readers, `superschematic json-schema` and the engine's strict loader check one schema, and generation fails when the IR struct and the schema name different members. The schema-file types emitter learns the keywords that only narrow a value (`pattern`, lengths, `uniqueItems`, `minProperties`, `propertyNames`). `ir.ValidateTypeDisplay` holds IR built in Go to the same shape. | Reflection with patches, as the docs records have, which cannot say `minProperties` or `propertyNames`; a second copy of the rules in the loader, which would drift |
+| A state's `tone` is one of a closed set: `muted`, `active`, `success`, `warning`, `danger`. A tone says what a state means to a reader; a UI maps each onto its own colors. | An open string or a color, which ties the schema to one UI's palette; more tones (`info`, `neutral`) with no case that needs them yet |
+| `transitions` is keyed by the state a transition leaves, then the state it enters: `{ todo: { doing: "Start" } }`. A UI showing an instance's moves reads `transitions[status]`, and `propertyNames` checks both keys as state names. | `"<from>-><to>"` keys, which parse and which Go's JSON encoder, and so `format --to=json`, writes as `"todo->doing"`; a list of `{ from, to, label }`, which can repeat a pair |
+| `titleField` names one of the type's own fields, by its name or its JSON key, holding a single text value: `string`, or a scalar whose values are strings (its language primitive is string and its `json_schema` mapping is not `any`, `object` or `array`, as `Identity.Name`, not `Generic.JSON`). Not a list, a map, a number, an enum, a `Secret` field or a `@uiHidden` one. An optional field may be the title; a UI falls back to the noun and the id. | Any field, which a UI must then format; an enum, whose value names a group, not an instance; a field a behavior adds, whose declaration gives it no type |
+| `summaryFields` names, in order and each once, the type's own fields or fields its behaviors add by their declarations, neither secret nor hidden. | The type's own fields only, which would leave out `Workflow`'s `status`, the field a list shows most |
+| `states` and `transitions` label the type's `Workflow`: each state and transition must be one its config lists, and a type that does not compose `Workflow` takes neither. The compiler's loader checks it in every form (`verify.checkDisplays`) from the config the type holds, with the field rules above, and the engine checks the same at define and publish with the same wording, against the parsed config, after the behaviors compose. A compiled schema's types compose no behavior while generators refuse them (D16), so outside the engine `states` and `transitions` cannot appear; `build --emit-ir` and `format` still catch a wrong one before a define. | Leaving them unchecked outside the engine; labels for an enum field's values, a compiled type's own status, which needs a key naming the field and can come later |
+| No generator renders it, as none renders a field's `@docs` title, so every golden is unchanged. A test builds the DB, API and General fixtures with every type language, SDK and server, as loaded and with a display on every type, and compares the trees byte for byte; the one difference is the Rust types crate's `schemas/<Type>.json`, which copies the IR of each `@jsonField` payload and so carries its display, as it carries its fields' titles. `format --to=ts` writes it. | A golden per generator for a fixture with displays, which would pin the same bytes again |
+| The engine's describe document carries the instance type's `display`, with `titleField` and `summaryFields` naming fields by their keys in an instance's `data`; `fields`, the type's own fields in declaration order with their `title` and `icon` where declared; and each operation's `title`, its tool's. No operation carries an icon: an engine schema declares no operations, and a behavior's declaration gives its operations none. A new version may change a display freely: the compatibility rule ignores it. | Field titles as JSON Schema `title` inside `instance`, which would make it differ from create's `data` and from the tool parameters the Go generators write; an icon field on behavior declarations, an engine change beyond this one |
+
+The names, the tone set and the key shapes are reversible until the first
+release.
+
+## D49. A generator types the engine's client for given schemas, narrowing the core's behaviors in Go
+
+The engine's typed client (D16, amended: a typed client over the HTTP
+API) knows the HTTP API and no schema: `instances.create('tasks', data)`
+takes any object, an operation any parameters, and a misspelled field,
+link name, create parameter or transition target reaches the server and
+comes back as a refusal. A schema's shape is known before it runs. Its
+document gives the instance type's own fields and the other types; the
+behavior declarations the binary registers give each behavior's fields,
+operations with their parameters and results, create parameters,
+preconditions and veto codes; and each behavior's config narrows them:
+a Workflow's states, a Links config's names, the types a Variants config
+picks. `superschematic engine-client` writes them down as one TypeScript
+module of typed wrappers over the client.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The generator is Go: `internal/generator/engineclientgen`, which the command `superschematic engine-client --out <file.ts> <schema file>...` runs. It reads each document through the loader (`loader.LoadDocument`: a JSON or YAML file on its own, a `.schema.ts` file in its service, as `format` reads it) with the loader's checks, the behaviors' configs against their declarations included, takes the declarations from the binary's registry, and imports the client from the package the naming key `engine_npm_package` names (default `@superschematic/engine`). | A bin in `@superschematic/engine` that loads the schemas into an in-memory engine and types its describe document, which would narrow the create parameters with the engine's own `createParamsSchema` and so once. But the describe document lacks what the types need most: a Workflow's states, the link names `link` takes and a behavior field's type, since a declaration gives a field a name only. Each would need a new hook on every behavior. It also could not read a `.schema.ts` file, would sit outside the naming file and the goldens, and would be the one generator not in Go. |
+| The generator narrows the core's behaviors in Go, keyed by their bare names: `Workflow` (`<T>State` for `status` and `transition`), `Links` (`<T>LinkName`, the create parameters, the `links` field per link with its target's schema), `Dependencies` (the blocker schemas, a blocker's schema required when the type's own is not among them), `Rollups` (each rollup's value by its function), `Revisions` (a proposal's patch, a revision's data), `Variants` (below), and the fields of `Comments`, `Assignment` and the work-queue behaviors. Any other behavior, an extension's among them, keeps its declaration's shapes, and its fields are `unknown`. | A seam on `BehaviorSpec` through which an extension narrows its own behaviors: a later change, when one needs it. A narrowing declared in the declaration, a JSON Schema that reads the config, which changes every declaration and the registry's checks for one reader. The engine narrowing operations' parameters in the describe document, which changes the tools document and every tool's digest. |
+| The create parameters are narrowed twice, in Go here and in TypeScript by `createParamsSchema(config)`. `runtime/engine/testdata/client_codegen_parity.json`, which the Go test writes (`-update`), holds the generator's narrowing for fixture and example schemas; the engine's suite (`test/client-codegen.test.ts`) publishes the same documents and holds its describe document's create parameters to it, shape for shape with descriptions aside, and validates the behavior fields its reads return against the generator's types. A drift on either side fails the engine's suite. | Comparing descriptions too, which each side words for its own reader; no check, so a narrowing that drifts types a create the engine refuses |
+| A command of its own, not a `build` target. D16's row "until a generator renders behaviors, it refuses a type that declares one" is lifted for this generator alone: it runs in no kind's pipeline, and every pipeline generator still refuses such a type (`refuseBehaviors`). | A generator in `General`'s pipeline: an engine schema has no `schema.config` and no service, and one module types schemas that link to each other |
+| One module for the schemas given, a section per schema in name order. Per schema: `<T>Fields` (the own fields, a create's data), `<T>` (a read's data: `<T>Fields` and the behaviors' fields, `readonly`), `<T>Patch`, the narrowings' aliases, `<T>CreateParams` and `<T>Preconditions` by behavior name, `<T><Op>Params` and `<T><Op>Result` per operation, `<T>Operations`, `<T>Vetoes` with `is<T>Veto`, `<T>CreateOptions` and `<T>WriteOptions`, and the wrapper interface `<Schema>Client` with its factory `<schema>Client(client)`: `create`, `get`, `list`, `update`, `delete`, `operate` and a method per behavior operation. `<T>` is the instance type's name, and the document's other enums and types keep theirs. Two exports of one name, across schemas or with a document type, are refused. | A module per schema, which repeats the shared imports and splits schemas that link to each other; a namespace per schema, which a module that Node.js runs by stripping types may hold only as types; names prefixed by the schema, which read worse for the common case of one schema |
+| A behavior field is optional unless the engine returns it on every read: it leaves out a field whose reader returns nothing, as `Revisions`' `revision` before the first revision. `status`, `commentCount`, `blocked` and `rollups` are always there, and `links` when a link is required. | Every behavior field required, which a read of a fresh instance contradicts |
+| A create's entry for a behavior is required when its narrowed schema requires a member, as a required link's: the engine checks a missing entry as `{}`. `<T>CreateOptions` then requires `behaviors`, and `create` requires its options. | Every entry optional, so a create that leaves out a required link compiles |
+| With `Variants`, `<T>Fields` is the other own fields joined with a union by `by`: per listed value, `by` that value and `field` its type; then, unless `field` is required, `by` another value of its enum, any string, or none, and `field` none. `<T>Patch` types `field` as any listed type, since a patch that leaves `by` alone does not show which applies. | `field` as `unknown` everywhere, the Variants check left to the engine |
+| A scalar field is typed by its JSON on the wire: its `json_schema` mapping or primitive, `unknown` for any JSON and `JSONObject` for an object. | Its scalar library's symbol (D25), which is a `Date` for `Temporal.DateTime` where the JSON holds a string, and would import the scalar library into a module that otherwise imports only the client |
+| A patch's nested object value is the whole type, and its required fields are required, as the describe document's `patch` has it. | A deep partial, which a merge patch allows over HTTP but the tool schema refuses |
+| The module imports the client's types and `isVeto` and nothing else, uses only erasable syntax, and ends each method in a call of the client, so it runs where the client runs. Its header names `engineclientgen`, as `sdkgen`'s names `sdkgen`. | Classes and enums, which Node.js does not strip |
+
+The goldens are the modules `examples/engine-notes` uses
+(`src/notes.client.ts`, in its end-to-end test) and the engine's suite
+typechecks and runs (`runtime/engine/typescript/test/generated/`: the
+notes schema, the engine-jobs example's three schemas, and a fixture of
+`Spec`, `Task` and `Project` that covers Variants, required and pinned
+links, cross-schema blockers, rollups, nested types, enums, lists and
+scalars); `go test ./internal/generator/engineclientgen -update`
+rewrites them. The suite's `typos()` holds a misspelled field, state,
+link, parameter, precondition and veto code to a compile error. The
+naming golden test generates the module under a naming file whose
+`engine_npm_package` differs and scans it for the default.
+
+Status: built. The command name, the naming key and every export name
+are reversible until the first release.

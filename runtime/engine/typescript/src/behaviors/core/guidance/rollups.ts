@@ -20,6 +20,8 @@ function computes(spec: RollupSpec): string {
     case 'min':
     case 'max':
       return `the ${spec.function} of ${String(spec.field)} over ${over}`;
+    case 'latest':
+      return `the ${String(spec.field)} of the one of ${over} created last`;
     case 'all':
       return `whether every one of ${over} is in ${terminal}`;
     case 'any':

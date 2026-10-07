@@ -175,6 +175,33 @@ describe('the client', () => {
     await refused(client.events.read({ behaviors: ['not a name'] }), 400, 'invalid_argument');
   });
 
+  test('lists, creates, archives and unarchives namespaces; reads from the start after retention, and a pruned cursor carries the floor and the head', async () => {
+    const served = serve({}, { retention: { maxEvents: 1 } });
+    const client = served.client();
+    const acme = await client.namespaces.create('acme');
+    assert.deepEqual([acme.name, acme.origin, acme.state, acme.createdBy], ['acme', 'created', 'active', 'alice']);
+    assert.deepEqual(served.requests.at(-1)?.url, '/api/namespaces');
+    assert.deepEqual((await client.namespaces.list()).map((namespace) => namespace.name), ['default', 'acme']);
+    assert.deepEqual(await client.namespaces.get('acme'), acme);
+    await refused(client.namespaces.create('acme'), 409, 'conflict');
+    await refused(served.client({ auth: { token: 'reader' } }).namespaces.archive('acme'), 403, 'forbidden');
+    assert.equal((await client.namespaces.archive('acme')).state, 'archived');
+    await refused(client.schemas.define(taskDocument(), { namespace: 'acme' }), 409, 'namespace_archived');
+    assert.equal((await client.namespaces.unarchive('acme')).state, 'active');
+    await refused(client.namespaces.get('nowhere'), 404, 'unknown_namespace');
+
+    await client.instances.create('Task', { title: 'Plan' }, { id: 'plan' });
+    await client.instances.create('Task', { title: 'Build' }, { id: 'build' });
+    served.engine.runner.prune();
+    const floor = served.engine.events.floor();
+    const head = served.engine.events.head();
+    const expired = await refused(client.events.read({ after: 1 }), 410, 'cursor_expired');
+    assert.deepEqual([expired.floor, expired.head], [floor, head]);
+    assert.deepEqual((await client.events.read()).events.map((event) => event.cursor), [head]);
+    assert.deepEqual((await client.events.read({ after: 0 })).events.map((event) => event.cursor), [head]);
+    assert.deepEqual([(await refused(client.instances.get('Task', 'nowhere'), 404, 'not_found')).floor], [undefined]);
+  });
+
   test('calls schema-level operations, searches, and reads the tools document and the behavior catalog', async () => {
     const served = serve();
     const { engine } = served;

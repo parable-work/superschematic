@@ -1,11 +1,12 @@
 /*
 What the engine serves about a namespace's schemas besides their
-instances (D16): a describe document per schema, the tools document in
-the shape the SDK generators write to tools/schema.json (ir.ToolManifest),
-and the calls those tools make. The MCP endpoint (@superschematic/engine/mcp)
-and the HTTP routes read them from here; every read and call goes through
-the schema registry and the instance store, so the access policy answers
-each one.
+instances (D16): a describe document per schema, which carries the
+instance type's display and its fields' titles and icons (D48), the
+tools document in the shape the SDK generators write to
+tools/schema.json (ir.ToolManifest), and the calls those tools make. The
+MCP endpoint (@superschematic/engine/mcp) and the HTTP routes read them
+from here; every read and call goes through the schema registry and the
+instance store, so the access policy answers each one.
 
 A tool is one operation: create, get, list, update and delete of every
 live schema the namespace reaches, and lookup of one whose instance type
@@ -21,9 +22,10 @@ its behaviors add (a schema-level one takes its parameters and no
 instance id), three tools for writing schemas: list, describe and define
 a draft, two that list and describe the behaviors a schema may compose
 (behaviors.ts), get_value, which reads a value of the value store by its
-hash (engine.values), and where a schema the caller may read composes
+hash (engine.values), where a schema the caller may read composes
 Search, search, the search across the namespace's schemas
-(engine.search). The
+(engine.search), and four that list, create, archive and unarchive
+namespaces (engine.namespaces), which the policy's manage answers. The
 update, delete and instance operation tools of a schema one of whose
 behaviors declares a preconditionSchema take `preconditions`, each such
 behavior's entry by its name, as the HTTP API's Preconditions header
@@ -45,15 +47,20 @@ method the operation's name, as `order.create` or `line-item.addNote`. An
 SDK tool's MCP handle is authored with @mcp; the engine derives it from
 the same two parts in snake case (codegen.ToSnakeCase), as `order_create`,
 and the engine's own tools are `list_schemas`, `describe_schema`,
-`define_schema`, `list_behaviors`, `describe_behavior`, `get_value` and
-`search`. A handle @mcp would refuse (not lowercase snake case, or
-longer than 48 characters) or one two tools derive hides both tools, with
-the reason; the engine's schema tools keep theirs. A tool the access
+`define_schema`, `list_behaviors`, `describe_behavior`, `get_value`,
+`search`, `list_namespaces`, `create_namespace`, `archive_namespace` and
+`unarchive_namespace`. A handle @mcp would refuse (not lowercase snake
+case, or longer than 48 characters) or one two tools derive hides both
+tools, with the reason; the engine's schema tools keep theirs. A tool the access
 policy refuses the caller is hidden too, with that reason, and can still
-be called by its handle: the call is refused.
+be called by its handle: the call is refused. So is every tool that
+writes in an archived namespace, the namespace tools aside, since the
+namespace refuses the write.
 */
 
-import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
+import type { TypeDisplay } from '@superschematic/schema-ir/schema-file';
+
+import { checkPrincipal, type Access, type Principal, type SchemaAction } from '../access.js';
 import type { InstanceSchemaForm, TypeSchema } from '../behaviors/behavior.js';
 import { SEARCH_SCHEMAS_PARAMS, searchSchemas } from '../behaviors/core/index.js';
 import { BEHAVIOR_NAME, type BehaviorDeclaration, type BehaviorOperationDeclaration, type OperationScope } from '../behaviors/declaration.js';
@@ -65,10 +72,11 @@ import { isPlainObject } from '../instances/patch.js';
 import { MAX_FILTER_VALUES, type Filterable } from '../instances/filters.js';
 import type { OwnIndex } from '../instances/indexes.js';
 import { INSTANCE_ID, type InstanceStore } from '../instances/store.js';
-import type { Namespaces } from '../namespaces.js';
+import { NAMESPACE_NAME, type Namespaces } from '../namespaces.js';
 import { MAX_PAGE_SIZE } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, SchemaSummary } from '../registry/catalog.js';
-import { SCHEMA_NAME } from '../registry/document.js';
+import { describedDisplay } from '../registry/display.js';
+import { SCHEMA_NAME, jsonKey } from '../registry/document.js';
 import type { ComposedBehavior, SchemaRegistry } from '../registry/registry.js';
 import { VALUE_HASH } from '../values/store.js';
 import type { EngineValues } from '../values/values.js';
@@ -107,11 +115,30 @@ export interface DescribeDocument {
   instanceType: string;
   /** The instance type's description, else the document's; absent without either. */
   description?: string;
+  /**
+   * The instance type's display (@display, D48): what a UI calls an
+   * instance, its title and summary fields by their keys in an instance's
+   * data, and the labels of its Workflow's states and transitions. Absent
+   * when the type declares none.
+   */
+  display?: TypeDisplay;
+  /** The instance type's own fields, in declaration order, each with its title and icon where declared. */
+  fields: DescribedField[];
   /** The JSON Schema of an instance's data: closed, its behaviors' fields read-only. */
   instance: JSONSchemaObject;
   behaviors: DescribedBehavior[];
   /** create, get, list, update, delete, lookup when the type has a unique field, then each behavior's operations in the type's list order. */
   operations: DescribedOperation[];
+}
+
+/** One of the instance type's own fields, as a UI labels it. */
+export interface DescribedField {
+  /** Its key in an instance's data. */
+  name: string;
+  /** Its label, from @docs({ title }). */
+  title?: string;
+  /** The glyph a UI shows for it, from @icon. */
+  icon?: string;
 }
 
 /** A behavior a schema's instance type composes. */
@@ -138,6 +165,8 @@ export interface DescribedOperation {
   behavior?: string;
   /** For a behavior's operation, what it runs on: an instance, or the schema as a whole. */
   scope?: OperationScope;
+  /** Its tool's title, as the tools document writes it. */
+  title: string;
   description: string;
   writes: boolean;
   params: JSONSchemaObject;
@@ -220,7 +249,15 @@ type ToolKind =
   | 'listBehaviors'
   | 'describeBehavior'
   | 'search'
-  | 'getValue';
+  | 'getValue'
+  | 'listNamespaces'
+  | 'createNamespace'
+  | 'archiveNamespace'
+  | 'unarchiveNamespace';
+
+// The engine's tools that act on namespaces themselves, not in the
+// namespace whose tools they are among.
+const NAMESPACE_TOOLS: ReadonlySet<ToolKind> = new Set(['listNamespaces', 'createNamespace', 'archiveNamespace', 'unarchiveNamespace']);
 
 // One tool before it is rendered: its names, what it does, and who may see it.
 interface ToolSpec {
@@ -326,6 +363,7 @@ export class ToolCatalog {
     const policyKey = this.options.invocationPolicy.key;
     const type = (record.document.types ?? {})[record.instanceType];
     const description = type?.description || record.document.description;
+    const display = type === undefined ? undefined : describedDisplay(type);
     const said = this.guidanceOf(record);
     return {
       namespace,
@@ -335,6 +373,12 @@ export class ToolCatalog {
       hash: record.hash,
       instanceType: record.instanceType,
       ...(description ? { description } : {}),
+      ...(display !== undefined ? { display } : {}),
+      fields: (type?.fields ?? []).map((field) => ({
+        name: jsonKey(field),
+        ...(field.title ? { title: field.title } : {}),
+        ...(field.icon ? { icon: field.icon } : {}),
+      })),
       instance: this.instanceSchema(record, behaviors),
       behaviors: behaviors.map((bound) => ({
         name: bound.name,
@@ -354,6 +398,7 @@ export class ToolCatalog {
       operations: tools.map((tool) => ({
         name: tool.methodName,
         ...(tool.behavior ? { behavior: tool.behavior.name, scope: tool.kind === 'schemaOperation' ? 'schema' : 'instance' } : {}),
+        title: tool.title,
         description: tool.description,
         writes: tool.writes,
         [policyKey]: tool.policy,
@@ -510,6 +555,18 @@ export class ToolCatalog {
       case 'getValue':
         only(tool, input, ['hash']);
         return this.values.get(principal, requiredString(tool, input, 'hash'), { namespace });
+      case 'listNamespaces':
+        only(tool, input, []);
+        return this.namespaces.list(principal);
+      case 'createNamespace':
+        only(tool, input, ['name']);
+        return this.namespaces.create(principal, requiredString(tool, input, 'name'));
+      case 'archiveNamespace':
+        only(tool, input, ['name']);
+        return this.namespaces.archive(principal, requiredString(tool, input, 'name'));
+      case 'unarchiveNamespace':
+        only(tool, input, ['name']);
+        return this.namespaces.unarchive(principal, requiredString(tool, input, 'name'));
     }
   }
 
@@ -593,7 +650,7 @@ export class ToolCatalog {
         'describeSchema',
         'describe_schema',
         'Describe a schema',
-        "Returns a schema's describe document: the JSON Schema of an instance, the behaviors its type composes with their config, and every operation with its parameters, its result and its tool.",
+        "Returns a schema's describe document: how a UI shows an instance (its display, and each field's title and icon), the JSON Schema of an instance, the behaviors its type composes with their config, and every operation with its parameters, its result and its tool.",
         false,
         'GET',
         `${base}/{name}/describe`
@@ -633,6 +690,42 @@ export class ToolCatalog {
         false,
         'GET',
         `/namespaces/${encodeURIComponent(namespace)}/values/{hash}`
+      ),
+      tool(
+        'listNamespaces',
+        'list_namespaces',
+        'List namespaces',
+        "Lists the namespaces the caller may see: each one's name, whether the engine's options configure it or a create made it, whether it is the shared namespace, and whether it is archived.",
+        false,
+        'GET',
+        '/namespaces'
+      ),
+      tool(
+        'createNamespace',
+        'create_namespace',
+        'Create a namespace',
+        'Creates a namespace, which holds schemas and instances of its own and looks schema names up in the shared namespace after itself. Its name is lowercase letters, digits and hyphens, starting with a letter.',
+        true,
+        'POST',
+        '/namespaces'
+      ),
+      tool(
+        'archiveNamespace',
+        'archive_namespace',
+        'Archive a namespace',
+        'Archives a namespace a create made: its schemas, instances and events stay readable, and it refuses every write, and runs no reaction or schedule, until it is unarchived.',
+        true,
+        'POST',
+        '/namespaces/{name}/archive'
+      ),
+      tool(
+        'unarchiveNamespace',
+        'unarchive_namespace',
+        'Unarchive a namespace',
+        'Lets an archived namespace be written again; its reactions and schedules pick up where they stopped.',
+        true,
+        'POST',
+        '/namespaces/{name}/unarchive'
       ),
       tool(
         'search',
@@ -803,13 +896,18 @@ export class ToolCatalog {
   }
 
   // refusal is why the policy hides a tool from the principal: a schema
-  // tool asks the action its call asks. The schema tools name no schema
-  // until they are called, so the policy answers each call.
+  // tool asks the action its call asks. The schema tools and the
+  // namespace tools name no schema until they are called, so the policy
+  // answers each call. In an archived namespace a tool that writes there
+  // is hidden: the namespace refuses the write.
   private refusal(principal: Principal, namespace: string, tool: ToolSpec): string | undefined {
+    if (tool.writes && !NAMESPACE_TOOLS.has(tool.kind) && this.namespaces.archived(namespace)) {
+      return `namespace ${namespace} is archived: it refuses every write until it is unarchived`;
+    }
     if (!tool.schema) {
       return undefined;
     }
-    const action: Action = tool.writes ? 'write' : 'read';
+    const action: SchemaAction = tool.writes ? 'write' : 'read';
     const operation = tool.kind === 'operation' || tool.kind === 'schemaOperation' ? tool.methodName : undefined;
     return this.access.allows(principal, action, namespace, tool.schema.name, operation)
       ? undefined
@@ -855,6 +953,12 @@ export class ToolCatalog {
           [['hash', { type: 'string', description: "The value's hash: the SHA-256 of its canonical JSON, as a ref's $value holds it", pattern: VALUE_HASH.source }]],
           ['hash']
         );
+      case 'listNamespaces':
+        return schema([], []);
+      case 'createNamespace':
+      case 'archiveNamespace':
+      case 'unarchiveNamespace':
+        return schema([['name', { type: 'string', description: 'The namespace name', pattern: NAMESPACE_NAME.source }]], ['name']);
       case 'create': {
         const properties: Array<[string, Property]> = [
           ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
@@ -1157,6 +1261,12 @@ export class ToolCatalog {
         return { type: 'object', description: 'A page of hits across the schemas, best first' };
       case 'getValue':
         return { type: 'object', description: 'The value, with its hash and its canonical JSON\'s length in bytes' };
+      case 'listNamespaces':
+        return { type: 'array', description: 'Array of namespaces', items: { type: 'object', description: 'A namespace' } };
+      case 'createNamespace':
+      case 'archiveNamespace':
+      case 'unarchiveNamespace':
+        return { type: 'object', description: 'The namespace' };
       case 'operation':
       case 'schemaOperation': {
         const result = (tool.operation as BehaviorOperationDeclaration).resultSchema;

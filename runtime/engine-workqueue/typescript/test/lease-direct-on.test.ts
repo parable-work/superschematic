@@ -36,7 +36,7 @@ function plans(): Record<string, unknown> {
   };
 }
 
-/** Recipe is a version graph's root, with at most one cover, which a release points at. */
+/** Recipe is a version graph's root, with covers, which a release points at. */
 function recipes(): Record<string, unknown> {
   return {
     kind: 'General',
@@ -45,7 +45,7 @@ function recipes(): Record<string, unknown> {
       Recipe: {
         name: 'Recipe',
         role: 'EmbeddedStruct',
-        behaviors: [{ name: 'Branches', config: { kinds: { cover: { type: 'Cover', singleton: true } } } }],
+        behaviors: [{ name: 'Branches', config: { kinds: { cover: { type: 'Cover' } } } }],
         fields: [{ name: 'title', typeRef: { name: 'string' }, required: true }],
       },
       Cover: { name: 'Cover', role: 'EmbeddedStruct', fields: [{ name: 'photoUrl', typeRef: { name: 'string' }, required: true }] },
@@ -60,19 +60,24 @@ const links: BehaviorRef = {
 
 const rebase = { revised: { link: 'plan' }, name: 'rebase', data: { why: 'the plan moved' } };
 
-function jobs(lease: Record<string, unknown>): Record<string, unknown> {
-  return jobsDocument([{ name: 'Workflow', config: jobFlow }, links, { name: 'Lease', config: lease }]);
+function jobs(lease: Record<string, unknown>, more: Record<string, unknown> = {}): Record<string, unknown> {
+  const config = links.config as { links: Record<string, unknown> };
+  return jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Links', config: { links: { ...config.links, ...more } } }, { name: 'Lease', config: lease }]);
 }
 
 for (const driver of drivers) {
   // world opens an engine with plan p1 at revision 1 and jobs j1 to j3
   // pinned to it, j1 held by wren and j3 by otto, j2 free.
-  function world(lease: Record<string, unknown> = { directPermission: 'jobs.direct', directOn: [rebase] }, options: Partial<EngineOptions> = {}) {
+  function world(
+    lease: Record<string, unknown> = { directPermission: 'jobs.direct', directOn: [rebase] },
+    options: Partial<EngineOptions> = {},
+    more: Record<string, unknown> = {}
+  ) {
     const clock = new Clock();
     const engine = openTestEngine({ driver, clock: clock.now, runner: { principal: runner, maxAttempts: 1 }, ...options });
     publish(engine, plans());
     publish(engine, recipes());
-    publish(engine, jobs(lease));
+    publish(engine, jobs(lease, more));
     engine.instances.create(alice, 'Plan', { title: 'v1' }, { id: 'p1' });
     engine.instances.create(alice, 'Plan', { title: 'notes' }, { id: 'p2' });
     for (const id of ['j1', 'j2', 'j3']) {
@@ -84,6 +89,21 @@ for (const driver of drivers) {
     };
     return { engine, clock, tokens };
   }
+
+  // tagged writes a cover on a draft of soup's primary line, commits it
+  // and merges it in, tagged, and returns the merge's commit.
+  function tagged(engine: Engine, name: string): string {
+    const call = <T>(operation: string, params: Record<string, unknown>): T => engine.instances.invoke(alice, 'Recipe', 'soup', operation, params) as T;
+    type Ref = { id: string; name: string; version: number };
+    const main = call<{ items: Ref[] }>('refs', {}).items.find((ref) => ref.name === 'main') as Ref;
+    const draft = call<Ref>('branch', { fromRef: main.id, name });
+    const saved = call<{ ref: Ref }>('save', { ref: draft.id, version: draft.version, edits: { cover: { upsert: [{ photoUrl: `${name}.jpg` }] } } });
+    const committed = call<{ ref: Ref }>('commit', { ref: saved.ref.id, version: saved.ref.version });
+    return call<{ commit: { id: string } }>('merge', { source: committed.ref.id, target: main.id, targetVersion: main.version, tag: true }).commit.id;
+  }
+
+  const release = (engine: Engine, commit: string, version: number) =>
+    engine.instances.invoke(alice, 'Recipe', 'soup', 'releaseCommit', { commit, version });
 
   const directives = (engine: Engine, who: Principal, id: string, token: number): Directive[] =>
     (engine.instances.invoke(who, 'Job', id, 'heartbeat', {}, fenced(token)) as { directives: Directive[] }).directives;
@@ -156,21 +176,36 @@ for (const driver of drivers) {
       const { engine, tokens } = world({ directPermission: 'jobs.direct', directOn: [{ revised: { link: 'recipe' }, name: 'reload' }] });
       engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
       engine.instances.invoke(wren, 'Job', 'j1', 'link', { name: 'recipe', id: 'soup' }, fenced(tokens.j1));
-      const call = <T>(operation: string, params: Record<string, unknown>): T => engine.instances.invoke(alice, 'Recipe', 'soup', operation, params) as T;
-      type Ref = { id: string; name: string; version: number };
-      const main = call<{ items: Ref[] }>('refs', {}).items.find((ref) => ref.name === 'main') as Ref;
-      const draft = call<Ref>('branch', { fromRef: main.id, name: 'cover' });
-      const saved = call<{ ref: Ref }>('save', { ref: draft.id, version: draft.version, edits: { cover: { upsert: [{ photoUrl: 'soup.jpg' }] } } });
-      const committed = call<{ ref: Ref }>('commit', { ref: saved.ref.id, version: saved.ref.version });
-      const merged = call<{ commit: { id: string } }>('merge', { source: committed.ref.id, target: main.id, targetVersion: main.version, tag: true }).commit;
+      const merged = tagged(engine, 'cover');
       engine.runner.runDue();
       assert.deepEqual(directives(engine, wren, 'j1', tokens.j1), []);
-      call('releaseCommit', { commit: merged.id, version: 0 });
+      release(engine, merged, 0);
       engine.runner.runDue();
       assert.deepEqual(
         directives(engine, wren, 'j1', tokens.j1).map((directive) => [directive.name, directive.data, directive.dedupeKey]),
-        [['reload', { revised: { link: 'recipe', schema: 'Recipe', id: 'soup', commit: merged.id } }, 'released recipe 0']]
+        [['reload', { revised: { link: 'recipe', schema: 'Recipe', id: 'soup', release: 1, commit: merged } }, 'released recipe 1']]
       );
+    });
+
+    test('a link pinned to a release tells only the jobs pinned to an earlier release', () => {
+      const { engine, tokens } = world(
+        { directPermission: 'jobs.direct', directOn: [{ revised: { link: 'recipe' }, name: 'reload' }] },
+        {},
+        { recipe: { schema: 'Recipe', pinned: 'release' } }
+      );
+      engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
+      release(engine, tagged(engine, 'first'), 0);
+      engine.instances.invoke(wren, 'Job', 'j1', 'link', { name: 'recipe', id: 'soup' }, fenced(tokens.j1));
+      engine.instances.invoke(otto, 'Job', 'j3', 'link', { name: 'recipe', id: 'soup' }, fenced(tokens.j3));
+      // Release 1 was made before either pinned it: no one is behind.
+      engine.runner.runDue();
+      assert.deepEqual(directives(engine, wren, 'j1', tokens.j1), []);
+      release(engine, tagged(engine, 'second'), 1);
+      // Before the runner hears it, j3 is pinned to release 2.
+      engine.instances.invoke(otto, 'Job', 'j3', 'link', { name: 'recipe', id: 'soup' }, fenced(tokens.j3));
+      engine.runner.runDue();
+      assert.deepEqual(directives(engine, wren, 'j1', tokens.j1).map((directive) => directive.dedupeKey), ['released recipe 2']);
+      assert.deepEqual(directives(engine, otto, 'j3', tokens.j3), []);
     });
 
     test('without directOn the reactions are off; a version that adds it hears only what comes after its publish', () => {
@@ -231,7 +266,7 @@ for (const driver of drivers) {
         /The runner sends the holder of an active lease directive rebase when the plan link's target gains a revision past the pinned one or a release and directive reread when the notes link's target gains a revision or a release; an instance with no lease held hears nothing, and its next holder nothing either\./
       );
       const heartbeat = described.operations.find((operation) => operation.name === 'heartbeat')?.guidance.success ?? '';
-      assert.match(heartbeat, /\(rebase or reread\) carries data\.revised: the link, the target, and its revision or the release's commit\./);
+      assert.match(heartbeat, /\(rebase or reread\) carries data\.revised: the link, the target, and its revision, or its release and the release's commit\./);
     });
   });
 }

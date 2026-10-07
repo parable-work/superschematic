@@ -56,7 +56,18 @@ export interface VersionGuidance {
 }
 
 /** The engine's own tools, by the kind the tool catalog names them with. */
-export type EngineTool = 'listSchemas' | 'describeSchema' | 'defineSchema' | 'listBehaviors' | 'describeBehavior' | 'getValue' | 'search';
+export type EngineTool =
+  | 'listSchemas'
+  | 'describeSchema'
+  | 'defineSchema'
+  | 'listBehaviors'
+  | 'describeBehavior'
+  | 'getValue'
+  | 'search'
+  | 'listNamespaces'
+  | 'createNamespace'
+  | 'archiveNamespace'
+  | 'unarchiveNamespace';
 
 const ENGINE_GUIDANCE: Readonly<Record<EngineTool, OperationGuidance>> = {
   listSchemas: {
@@ -94,6 +105,28 @@ const ENGINE_GUIDANCE: Readonly<Record<EngineTool, OperationGuidance>> = {
     useWhen: 'Use to find instances across every schema this namespace reaches that composes Search, by words, by a vector, or both.',
     doNotUseWhen: "Do not use to page through one schema's instances; call its list.",
     success: 'Returns hits best first, each naming its schema and how it matched, and next for the page after.',
+  },
+  listNamespaces: {
+    useWhen: 'Use to learn which namespaces you may see, and whether each is archived.',
+    doNotUseWhen: "Do not use to list a namespace's schemas; call list_schemas.",
+    success: "Returns each namespace's name, origin (configured by the engine's options, or created), whether it is the shared namespace, and its state (active or archived).",
+  },
+  createNamespace: {
+    useWhen:
+      "Use to make a namespace for a new project: it starts with no schemas of its own and looks schema names up in the shared namespace after itself.",
+    doNotUseWhen: 'Do not use to make a schema; call define_schema in the namespace. Do not use for a name that is a namespace already, archived or not: the create is refused (conflict).',
+    success: 'Returns the namespace, active, with who made it and when.',
+  },
+  archiveNamespace: {
+    useWhen:
+      'Use when a project made with create_namespace is finished: its schemas, instances and events stay readable, every write is refused (namespace_archived), and its reactions and schedules stop.',
+    doNotUseWhen: "Do not use on a namespace the engine's options configure, which is refused (conflict), or to remove data: nothing is removed.",
+    success: 'Returns the namespace, archived, with who archived it and when; archiving an archived namespace changes nothing.',
+  },
+  unarchiveNamespace: {
+    useWhen: 'Use to write again to an archived namespace.',
+    doNotUseWhen: 'Do not use on an active namespace, which stays as it is.',
+    success: 'Returns the namespace, active; its reactions and schedules pick up where they stopped.',
   },
 };
 

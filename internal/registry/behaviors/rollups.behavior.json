@@ -1,6 +1,6 @@
 {
   "name": "Rollups",
-  "description": "Values derived from the instances that point at this one through a link of their schema's Links config: how many there are, how many hold each value of a field, the sum, least or greatest of a numeric field, and whether every one or some one is in a terminal state of its schema's Workflow, optionally one with a listed outcome. A value is computed when the instance is read, as the caller, from at most 500 linked instances; a rollup over more has none. A rollup of every or some one may gate states of the type's Workflow: a transition into one waits until the rollup holds.",
+  "description": "Values derived from the instances that point at this one through a link of their schema's Links config: how many there are, how many hold each value of a field, the sum, least or greatest of a numeric field, a field's value on the one created last, and whether every one or some one is in a terminal state of its schema's Workflow, optionally one with a listed outcome. A value is computed when the instance is read, as the caller, from at most 500 linked instances; a rollup over more has none. A rollup of every or some one may gate states of the type's Workflow: a transition into one waits until the rollup holds.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -19,11 +19,11 @@
             "schema": { "description": "The schema whose instances point at this one; it composes Links.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
             "link": { "description": "The link of that schema's Links config that points at this schema.", "type": "string", "pattern": "^[a-z][A-Za-z0-9]{0,63}$" },
             "function": {
-              "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow, with an outcome outcomes lists when it is given.",
-              "enum": ["count", "countBy", "sum", "min", "max", "all", "any"]
+              "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. latest: field's value on the instance created last, the greater id on a tie. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow, with an outcome outcomes lists when it is given.",
+              "enum": ["count", "countBy", "sum", "min", "max", "latest", "all", "any"]
             },
             "field": {
-              "description": "For countBy, a string, enum or boolean field of the linked instances, or status when their schema composes Workflow; for sum, min and max, a numeric field.",
+              "description": "For countBy, a string, enum or boolean field of the linked instances, or status when their schema composes Workflow; for sum, min and max, a numeric field; for latest, any field of theirs, or status when their schema composes Workflow.",
               "type": "string",
               "minLength": 1
             },
@@ -44,7 +44,7 @@
           },
           "allOf": [
             {
-              "if": { "properties": { "function": { "enum": ["countBy", "sum", "min", "max"] } } },
+              "if": { "properties": { "function": { "enum": ["countBy", "sum", "min", "max", "latest"] } } },
               "then": { "required": ["field"] },
               "else": { "not": { "required": ["field"] } }
             },
@@ -62,7 +62,7 @@
     }
   },
   "fields": [
-    { "name": "rollups", "description": "Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, or a boolean. A rollup whose link holds more than 500 instances is {\"over\": true} instead; a min or max with no value to compare is absent." }
+    { "name": "rollups", "description": "Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {\"over\": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent." }
   ],
   "vetoes": [
     { "code": "not_held", "description": "A Workflow transition into a state an all or any rollup gates while the rollup does not hold, or has no value past 500 linked instances; details names the rollup and counts the linked instances." }

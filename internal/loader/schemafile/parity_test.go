@@ -320,11 +320,24 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"an unknown key on a behavior entry", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited", "extra": 1}]}`},
 	{"a behavior entry without its name", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"config": {"aisles": 1}}]}`},
 	{"a behavior name that is not a string", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": 3}]}`},
+	// A type's display (D48): the registered @display schema's shape.
+	{"a display", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {"doing": "Start"}},
+		"states": {"doing": {"tone": "active", "activeForm": "Doing"}, "todo": {"label": "To do"}}, "summaryFields": ["status", "title"], "titleField": "title", "noun": "Ticket"}}`},
+	{"a display that declares nothing", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {}}`},
+	{"a blank display noun", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"noun": " "}}`},
+	{"a display summary field twice", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"summaryFields": ["title", "title"]}}`},
+	{"a display state with an unknown tone", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"states": {"todo": {"tone": "blue"}}}}`},
+	{"a display state that declares nothing", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"states": {"todo": {}}}}`},
+	{"a display state that is no state name", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"states": {"to do": {"label": "To do"}}}}`},
+	{"a display transition to no state name", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {"in progress": "Start"}}}}`},
+	{"a display transition from a state that labels none", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {}}}}`},
+	{"a display key the schema lacks", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "ticket"}}`},
 }
 
 // parityFiles are data-form files the JSON writer wrote for the loader's
 // fixture services (testdata/parity): operation docs, MCP records, SQL
-// projections, arrays of arrays and a single-definition enum file.
+// projections, arrays of arrays, a type's display and a single-definition
+// enum file.
 func parityFiles(t *testing.T) []struct{ name, registry, input string } {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join("testdata", "parity", "*.schema.json"))

@@ -77,11 +77,11 @@ directOn sends one when the target of a link of the type's Links moves
 on, as Reactions' revised hears it (the engine's targetMove): a new
 revision of Revisions, or a release of Branches. Lease's reactions hear
 the link's schema on the runner, as its principal, and invoke direct on
-each instance the move reaches (movedOn: for a pinned link and a
-revision, the ones the target moved past) whose lease has a holder,
-with the entry's data and revised (the link, the target, its revision or
-the release's commit) and a dedupeKey per move, so a holder hears each
-move once. direct refuses a lapsed lease, which the reaction passes
+each instance the move reaches (movedOn: where the link pins what the
+move made, a revision or a release, the ones the target moved past)
+whose lease has a holder, with the entry's data and revised (the link,
+the target, its revision, or its release and the release's commit) and a
+dedupeKey per move, so a holder hears each move once. direct refuses a lapsed lease, which the reaction passes
 over; a free instance hears nothing, and nothing waits for its next
 holder. The runner's principal needs directPermission, or
 overridePermission, which parseConfig requires a directOn config to
@@ -112,6 +112,7 @@ import {
   OperationParamsError,
   defineBehavior,
   isTerminalState,
+  linkPin,
   movedOn,
   targetMove,
   type BehaviorScope,
@@ -120,6 +121,7 @@ import {
   type GuardAnswer,
   type GuardRequest,
   type InstanceView,
+  type LinkPin,
   type OperationContext,
   type ReactionContext,
   type Row,
@@ -165,8 +167,8 @@ export interface LeaseDirectOn {
   readonly link: string;
   /** The link's schema, as the type's Links config gives it. */
   readonly schema: string;
-  /** Whether the link is pinned: a revision then sends it only to the instances the target moved past. */
-  readonly pinned: boolean;
+  /** What the link pins, a revision or a release: a move of that kind sends it only to the instances the target moved past. */
+  readonly pin?: LinkPin;
   /** The directive's name. */
   readonly name: string;
   /** Its data, beside the revised member the runner adds. */
@@ -664,10 +666,11 @@ function checkDirectOn(raw: { directOn?: readonly RawDirectOn[]; directPermissio
     if (link === undefined) {
       throw new BehaviorConfigError(`${at}.revised names link ${name}, which is not a link of the type's Links (${Object.keys(links).join(', ')})`);
     }
+    const pin = linkPin(link);
     checked.push({
       link: name,
       schema: String(link.schema),
-      pinned: link.pinned === true,
+      ...(pin === undefined ? {} : { pin }),
       name: entry.name,
       ...(entry.data === undefined ? {} : { data: { ...entry.data } }),
     });
@@ -677,9 +680,9 @@ function checkDirectOn(raw: { directOn?: readonly RawDirectOn[]; directPermissio
 
 // directKey is the dedupe key of a directOn directive: one per lease for
 // each move of the link's target, a revision by its number and a release
-// by the release pointer's version it was fenced by.
+// by the release pointer's version it made.
 function directKey(rule: LeaseDirectOn, move: TargetMove): string {
-  return move.kind === 'revision' ? `revised ${rule.link} ${move.revision}` : `released ${rule.link} ${move.version}`;
+  return move.kind === 'revision' ? `revised ${rule.link} ${move.revision}` : `released ${rule.link} ${move.release}`;
 }
 
 // heldAmong lists the ids, of the given ones, whose lease has a holder in
@@ -1147,9 +1150,9 @@ export const lease = defineBehavior<LeaseConfig>({
         const revised =
           move.kind === 'revision'
             ? { link: rule.link, schema: rule.schema, id: target, revision: move.revision }
-            : { link: rule.link, schema: rule.schema, id: target, commit: move.commit };
+            : { link: rule.link, schema: rule.schema, id: target, release: move.release, commit: move.commit };
         const params = { name: rule.name, data: { ...rule.data, revised }, dedupeKey: directKey(rule, move) };
-        for (const id of heldAmong(context, movedOn(context, rule.link, rule.pinned, target, move))) {
+        for (const id of heldAmong(context, movedOn(context, rule.link, rule.pin, target, move))) {
           try {
             context.instances.invoke(context.schema, id, 'direct', params as unknown as FrozenJSON);
           } catch (error) {
