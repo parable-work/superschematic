@@ -154,6 +154,9 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 			errs = append(errs, validateArrayOfArrays(fmt.Sprintf("%s.%s argument %q", td.Name, f.Name, arg.Name), arg.TypeRef)...)
 		}
 	}
+	if err := ValidateTypeDisplay(td.Display); err != nil {
+		errs = append(errs, fmt.Errorf("type %s: %w", td.Name, err))
+	}
 	return errs
 }
 

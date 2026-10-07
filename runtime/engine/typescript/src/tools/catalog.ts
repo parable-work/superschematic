@@ -1,11 +1,12 @@
 /*
 What the engine serves about a namespace's schemas besides their
-instances (D16): a describe document per schema, the tools document in
-the shape the SDK generators write to tools/schema.json (ir.ToolManifest),
-and the calls those tools make. The MCP endpoint (@superschematic/engine/mcp)
-and the HTTP routes read them from here; every read and call goes through
-the schema registry and the instance store, so the access policy answers
-each one.
+instances (D16): a describe document per schema, which carries the
+instance type's display and its fields' titles and icons (D48), the
+tools document in the shape the SDK generators write to
+tools/schema.json (ir.ToolManifest), and the calls those tools make. The
+MCP endpoint (@superschematic/engine/mcp) and the HTTP routes read them
+from here; every read and call goes through the schema registry and the
+instance store, so the access policy answers each one.
 
 A tool is one operation: create, get, list, update and delete of every
 live schema the namespace reaches, and lookup of one whose instance type
@@ -57,6 +58,8 @@ writes in an archived namespace, the namespace tools aside, since the
 namespace refuses the write.
 */
 
+import type { TypeDisplay } from '@superschematic/schema-ir/schema-file';
+
 import { checkPrincipal, type Access, type Principal, type SchemaAction } from '../access.js';
 import type { InstanceSchemaForm, TypeSchema } from '../behaviors/behavior.js';
 import { SEARCH_SCHEMAS_PARAMS, searchSchemas } from '../behaviors/core/index.js';
@@ -72,7 +75,8 @@ import { INSTANCE_ID, type InstanceStore } from '../instances/store.js';
 import { NAMESPACE_NAME, type Namespaces } from '../namespaces.js';
 import { MAX_PAGE_SIZE } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, SchemaSummary } from '../registry/catalog.js';
-import { SCHEMA_NAME } from '../registry/document.js';
+import { describedDisplay } from '../registry/display.js';
+import { SCHEMA_NAME, jsonKey } from '../registry/document.js';
 import type { ComposedBehavior, SchemaRegistry } from '../registry/registry.js';
 import { VALUE_HASH } from '../values/store.js';
 import type { EngineValues } from '../values/values.js';
@@ -111,11 +115,30 @@ export interface DescribeDocument {
   instanceType: string;
   /** The instance type's description, else the document's; absent without either. */
   description?: string;
+  /**
+   * The instance type's display (@display, D48): what a UI calls an
+   * instance, its title and summary fields by their keys in an instance's
+   * data, and the labels of its Workflow's states and transitions. Absent
+   * when the type declares none.
+   */
+  display?: TypeDisplay;
+  /** The instance type's own fields, in declaration order, each with its title and icon where declared. */
+  fields: DescribedField[];
   /** The JSON Schema of an instance's data: closed, its behaviors' fields read-only. */
   instance: JSONSchemaObject;
   behaviors: DescribedBehavior[];
   /** create, get, list, update, delete, lookup when the type has a unique field, then each behavior's operations in the type's list order. */
   operations: DescribedOperation[];
+}
+
+/** One of the instance type's own fields, as a UI labels it. */
+export interface DescribedField {
+  /** Its key in an instance's data. */
+  name: string;
+  /** Its label, from @docs({ title }). */
+  title?: string;
+  /** The glyph a UI shows for it, from @icon. */
+  icon?: string;
 }
 
 /** A behavior a schema's instance type composes. */
@@ -142,6 +165,8 @@ export interface DescribedOperation {
   behavior?: string;
   /** For a behavior's operation, what it runs on: an instance, or the schema as a whole. */
   scope?: OperationScope;
+  /** Its tool's title, as the tools document writes it. */
+  title: string;
   description: string;
   writes: boolean;
   params: JSONSchemaObject;
@@ -338,6 +363,7 @@ export class ToolCatalog {
     const policyKey = this.options.invocationPolicy.key;
     const type = (record.document.types ?? {})[record.instanceType];
     const description = type?.description || record.document.description;
+    const display = type === undefined ? undefined : describedDisplay(type);
     const said = this.guidanceOf(record);
     return {
       namespace,
@@ -347,6 +373,12 @@ export class ToolCatalog {
       hash: record.hash,
       instanceType: record.instanceType,
       ...(description ? { description } : {}),
+      ...(display !== undefined ? { display } : {}),
+      fields: (type?.fields ?? []).map((field) => ({
+        name: jsonKey(field),
+        ...(field.title ? { title: field.title } : {}),
+        ...(field.icon ? { icon: field.icon } : {}),
+      })),
       instance: this.instanceSchema(record, behaviors),
       behaviors: behaviors.map((bound) => ({
         name: bound.name,
@@ -366,6 +398,7 @@ export class ToolCatalog {
       operations: tools.map((tool) => ({
         name: tool.methodName,
         ...(tool.behavior ? { behavior: tool.behavior.name, scope: tool.kind === 'schemaOperation' ? 'schema' : 'instance' } : {}),
+        title: tool.title,
         description: tool.description,
         writes: tool.writes,
         [policyKey]: tool.policy,
@@ -617,7 +650,7 @@ export class ToolCatalog {
         'describeSchema',
         'describe_schema',
         'Describe a schema',
-        "Returns a schema's describe document: the JSON Schema of an instance, the behaviors its type composes with their config, and every operation with its parameters, its result and its tool.",
+        "Returns a schema's describe document: how a UI shows an instance (its display, and each field's title and icon), the JSON Schema of an instance, the behaviors its type composes with their config, and every operation with its parameters, its result and its tool.",
         false,
         'GET',
         `${base}/{name}/describe`

@@ -351,6 +351,20 @@ deployment's binary, the core's by default. The engine then requires:
   instance type's own fields whose value is a string, a number or a
   boolean, an enum's included, and an index only over fields the type
   has ("Unique fields and indexes" under "Instances").
+- each type's display (`@display`, D48 in `docs/DECISIONS.md`) held to
+  the type, as the compiler's loader holds it, with its wording, at
+  `/types/<Type>/display`: `titleField` names one of the type's own
+  fields, by its name or its JSON key, that holds a single text value (a
+  string, or a scalar whose values are strings, not a list or a map) and
+  is neither `secret` nor `uiHidden`; each `summaryFields` entry names
+  one of the type's own fields, or a field one of its behaviors adds,
+  shown to a reader the same way; and `states` and `transitions` name
+  states and transitions of the type's `Workflow` config, so a type that
+  does not compose `Workflow`, a nested type among them, takes neither.
+  The meta-schema holds the display's shape: at least one member, state
+  names, no blank text, and the tones `muted`, `active`, `success`,
+  `warning` and `danger`. A new version may change a display freely: the
+  compatibility rule ignores it.
 
 A refused document throws `SchemaDocumentError` with an issue per problem,
 each at a JSON pointer.
@@ -3426,6 +3440,8 @@ a schema's live version:
 {
   "namespace": "default", "name": "Item", "schemaNamespace": "default",
   "version": 1, "hash": "9f2c...", "instanceType": "Item",
+  "display": {"noun": "Item", "plural": "Items", "titleField": "title", "summaryFields": ["count"]},
+  "fields": [{"name": "title", "title": "Title", "icon": "text"}],
   "instance": {
     "type": "object", "additionalProperties": false,
     "properties": {
@@ -3439,16 +3455,28 @@ a schema's live version:
                  "fields": [{"name": "count", "description": "The count."}], "operations": ["increment"],
                  "vetoes": [{"code": "at_limit", "description": "The count is at its config's limit."}]}],
   "operations": [
-    {"name": "create", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
+    {"name": "create", "title": "Create Item", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
      "params": {"type": "object", "additionalProperties": false, "properties": {"data": {...}, "id": {...}}, "required": ["data"]},
      "result": {...}, "tool": "item.create",
      "guidance": {"useWhen": "Use to create a new Item: ...", "doNotUseWhen": "...", "success": "...", "errors": []}},
-    {"name": "increment", "behavior": "test.Counter", "scope": "instance", "description": "Adds to the count.", "writes": true,
+    {"name": "increment", "behavior": "test.Counter", "scope": "instance", "title": "Item: increment", "description": "Adds to the count.", "writes": true,
      "invocationPolicy": "auto", "params": {...}, "result": {...}, "tool": "item.increment", "guidance": {...}}
   ]
 }
 ```
 
+- `display` is the instance type's `@display` (D48 in
+  `docs/DECISIONS.md`), as the document holds it, with `titleField` and
+  `summaryFields` naming each field by its key in an instance's `data`:
+  what a UI calls one instance and several, its title and summary fields,
+  what a create button says, and the labels of its `Workflow`'s states
+  (`label`, `activeForm`, `tone`) and transitions (by the state a
+  transition leaves, then the one it enters). It is absent when the type
+  declares none.
+- `fields` lists the instance type's own fields in declaration order, each
+  by its key in an instance's `data`, with its `title` (`@docs({ title
+  })`) and its `icon` (`@icon`) where it declares them. A behavior's
+  fields are under `behaviors`.
 - `instance` is the JSON Schema of an instance's `data`: closed, its own
   fields, then its behaviors' fields, `readOnly` and without a type, since
   a declaration gives a field only a name and a description. Under
@@ -3481,7 +3509,9 @@ a schema's live version:
   what it returns (an instance, a page, `null` for a delete, a behavior
   operation's `resultSchema`), and the invocation policy sits under the
   policy's key. A behavior's operation carries `behavior` and `scope`,
-  `instance` or `schema`. Each carries `guidance`, its tool's.
+  `instance` or `schema`. Each carries `title` and `guidance`, its
+  tool's. No operation carries an icon: a schema declares no operations,
+  and a behavior's declaration gives its operations none.
 
 A field's JSON Schema is what the SDK generators write for the same field
 as a tool argument (`internal/generator/toolsutil`), keyed by the field's

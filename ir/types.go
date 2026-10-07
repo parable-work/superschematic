@@ -83,6 +83,12 @@ type TypeDef struct {
 	// runs the schema. See [BehaviorRef].
 	Behaviors []BehaviorRef `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
 
+	// Display is what a UI reads to render the type's instances, declared
+	// with @display: what to call one and many, the title field, the
+	// summary fields and the labels of its Workflow's states and
+	// transitions. Nil when the type declares none. See [TypeDisplay].
+	Display *TypeDisplay `json:"display,omitempty" yaml:"display,omitempty"`
+
 	// RawHeritage records the heritage clauses as written, before flattening.
 	// Every reader records this unconditionally: recording is cheap at walk
 	// time and unrecoverable later. Flattened Fields remain the canonical
