@@ -25,8 +25,10 @@ its own under the schema; it sends no ETag, since it names no instance.
 Besides the instances and the event log, the routes serve a schema's
 describe document, the namespace's tools document (tools/catalog.ts) and
 the behaviors the engine runs, which are the same in every namespace, so
-their routes carry none (tools/behaviors.ts), and a search across the
-namespace's schemas (engine.search); the MCP endpoint is the ./mcp entry
+their routes carry none (tools/behaviors.ts), a search across the
+namespace's schemas (engine.search), and a value of the value store by
+its hash (engine.values), which an event, and an instance read with
+`valueRefs=true`, carries as a ref; the MCP endpoint is the ./mcp entry
 point's.
 
 With the runtime's `authenticateService`, a calling service is verified
@@ -96,6 +98,7 @@ const EVENTS = '/namespaces/{namespace}/events';
 const TOOLS = '/namespaces/{namespace}/tools';
 const BEHAVIORS = '/behaviors';
 const SEARCH = '/namespaces/{namespace}/search';
+const VALUE = '/namespaces/{namespace}/values/{hash}';
 
 const PATH_PARAMS: Record<string, ParamSpec> = {
   namespace: { name: 'namespace', kind: 'string', required: true },
@@ -103,7 +106,10 @@ const PATH_PARAMS: Record<string, ParamSpec> = {
   version: { name: 'version', kind: 'integer', required: true },
   id: { name: 'id', kind: 'string', required: true },
   operation: { name: 'operation', kind: 'string', required: true },
+  hash: { name: 'hash', kind: 'string', required: true },
 };
+
+const VALUE_REFS: ParamSpec = { name: 'valueRefs', kind: 'boolean', required: false };
 
 const EVENT_QUERY: readonly ParamSpec[] = [
   { name: 'after', kind: 'string', required: false },
@@ -195,15 +201,12 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
 
   route(
     spec('listInstances', 'GET', INSTANCES, {
-      queryParams: [
-        { name: 'limit', kind: 'integer', required: false },
-        { name: 'cursor', kind: 'string', required: false },
-      ],
+      queryParams: [{ name: 'limit', kind: 'integer', required: false }, { name: 'cursor', kind: 'string', required: false }, VALUE_REFS],
     }),
     (ctx, { path, query }) => {
       const { namespace, name } = path as { namespace: string; name: string };
-      const { limit, cursor } = query as { limit?: number; cursor?: string };
-      return engine.instances.list(principalOf(ctx), name, { namespace, limit, cursor });
+      const { limit, cursor, valueRefs } = query as { limit?: number; cursor?: string; valueRefs?: boolean };
+      return engine.instances.list(principalOf(ctx), name, { namespace, limit, cursor, valueRefs });
     }
   );
 
@@ -219,9 +222,10 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     });
   });
 
-  route(spec('getInstance', 'GET', INSTANCE), (ctx, { path }) => {
+  route(spec('getInstance', 'GET', INSTANCE, { queryParams: [VALUE_REFS] }), (ctx, { path, query }) => {
     const { namespace, name, id } = path as { namespace: string; name: string; id: string };
-    const record = engine.instances.get(principalOf(ctx), name, id, { namespace });
+    const { valueRefs } = query as { valueRefs?: boolean };
+    const record = engine.instances.get(principalOf(ctx), name, id, { namespace, valueRefs });
     if (!record) throw notFound(`${name} ${id} does not exist in namespace ${namespace}`);
     return new OperationResult(record, 200, { etag: etagOf(record) });
   });
@@ -285,6 +289,13 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     const refused = mediaTypeRefusal(ctx, JSON_MEDIA_TYPE);
     if (refused) return refused;
     return engine.search(principalOf(ctx), input, { namespace: path.namespace as string });
+  });
+
+  // A value of the value store, by its hash: not_found unless a schema of
+  // the namespace the caller may read references it.
+  route(spec('getValue', 'GET', VALUE), (ctx, { path }) => {
+    const { namespace, hash } = path as { namespace: string; hash: string };
+    return engine.values.get(principalOf(ctx), hash, { namespace });
   });
 
   // The event log: a JSON page, or with Accept: text/event-stream the
