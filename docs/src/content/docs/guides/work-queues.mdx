@@ -147,6 +147,13 @@ not yet acknowledged, and `heartbeat({ acknowledge: ids })` acknowledges
 the ones handled in the same write. A failed attempt's result carries its
 class's `hint`, which can steer the next attempt.
 
+A large result, a field whose JSON is longer than 64 KiB that
+`recordAttempt` keeps or the worker writes, is stored once in the
+engine's value store, and the job's row and events keep a ref to it, so
+heartbeats and the other writes under the lease never rewrite it. A
+dashboard that lists jobs passes `valueRefs` to receive the refs rather
+than the results ([The engine](/superschematic/guides/engine/#instances)).
+
 A refusal carries a code to branch on. A worker whose lease is gone gets
 409 `vetoed` with `details.behavior` `Lease` and `details.code`
 `token_stale` (another lease replaced it) or `lapsed` (it ran out), and

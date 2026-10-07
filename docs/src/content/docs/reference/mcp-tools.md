@@ -330,8 +330,11 @@ name, and where one takes create parameters, as `Links` and
 Three more list, describe and define
 schemas, and none publishes; two list the behaviors the engine runs and
 describe one by name (`list_behaviors`, `describe_behavior`), which every
-caller may call; and where a schema composes `Search`, one more,
-`search`, searches every such schema the caller may read. Where an SDK
+caller may call; `get_value` reads a value of the engine's value store by
+its hash, for a caller who may read a schema that references it, and a
+schema's `get` and `list` take `valueRefs` to return such values as
+refs; and where a schema composes `Search`, one more, `search`, searches
+every such schema the caller may read. Where an SDK
 tool's guidance is its operation's `@docs`, the engine writes its own:
 fixed for its tools, a base for the operations every schema has, and
 what each behavior the type composes says under its config: the states

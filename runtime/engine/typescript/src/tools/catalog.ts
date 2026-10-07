@@ -12,12 +12,15 @@ live schema the namespace reaches (create takes the parameters its
 behaviors declare a createParamsSchema for, under behaviors, and create's
 data, update's patch and the describe document's instance carry what the
 behaviors' validate holds the fields to, as allOf entries their
-instanceSchema writes), each operation its behaviors add (a
-schema-level one takes its parameters and no instance id), three tools
-for writing schemas: list, describe and define a draft, two that list
-and describe the behaviors a schema may compose (behaviors.ts), and where
-a schema the caller may read composes Search, search, the search across
-the namespace's schemas (engine.search). The
+instanceSchema writes; get and list take valueRefs, for the refs of the
+fields the value store holds in place of their values), each operation
+its behaviors add (a schema-level one takes its parameters and no
+instance id), three tools for writing schemas: list, describe and define
+a draft, two that list and describe the behaviors a schema may compose
+(behaviors.ts), get_value, which reads a value of the value store by its
+hash (engine.values), and where a schema the caller may read composes
+Search, search, the search across the namespace's schemas
+(engine.search). The
 update, delete and instance operation tools of a schema one of whose
 behaviors declares a preconditionSchema take `preconditions`, each such
 behavior's entry by its name, as the HTTP API's Preconditions header
@@ -39,7 +42,8 @@ method the operation's name, as `order.create` or `line-item.addNote`. An
 SDK tool's MCP handle is authored with @mcp; the engine derives it from
 the same two parts in snake case (codegen.ToSnakeCase), as `order_create`,
 and the engine's own tools are `list_schemas`, `describe_schema`,
-`define_schema`, `list_behaviors` and `describe_behavior`. A handle @mcp would refuse (not lowercase snake case, or
+`define_schema`, `list_behaviors`, `describe_behavior`, `get_value` and
+`search`. A handle @mcp would refuse (not lowercase snake case, or
 longer than 48 characters) or one two tools derive hides both tools, with
 the reason; the engine's schema tools keep theirs. A tool the access
 policy refuses the caller is hidden too, with that reason, and can still
@@ -61,6 +65,8 @@ import { MAX_PAGE_SIZE } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, SchemaSummary } from '../registry/catalog.js';
 import { SCHEMA_NAME } from '../registry/document.js';
 import type { ComposedBehavior, SchemaRegistry } from '../registry/registry.js';
+import { VALUE_HASH } from '../values/store.js';
+import type { EngineValues } from '../values/values.js';
 import { behaviorDocument, behaviorSummary, type BehaviorDocument, type BehaviorSummary } from './behaviors.js';
 import { engineGuidance, versionGuidance, type EngineTool, type ToolGuidance, type VersionGuidance } from './guidance.js';
 import type { BuiltinTool, ResolvedToolOptions } from './options.js';
@@ -207,7 +213,8 @@ type ToolKind =
   | 'defineSchema'
   | 'listBehaviors'
   | 'describeBehavior'
-  | 'search';
+  | 'search'
+  | 'getValue';
 
 // One tool before it is rendered: its names, what it does, and who may see it.
 interface ToolSpec {
@@ -260,7 +267,9 @@ export class ToolCatalog {
     /** The versions' runtimes, for what their behaviors hold an instance's fields to; the registry has asked the policy. */
     private readonly catalog: SchemaCatalog,
     /** The behaviors this engine runs, which listBehaviors and describeBehavior serve. */
-    private readonly behaviors: BehaviorRegistry
+    private readonly behaviors: BehaviorRegistry,
+    /** The value store's reads by hash, which get_value serves. */
+    private readonly values: EngineValues
   ) {}
 
   /**
@@ -418,22 +427,27 @@ export class ToolCatalog {
         });
       }
       case 'get': {
-        only(tool, input, ['id']);
+        only(tool, input, ['id', 'valueRefs']);
         const id = requiredString(tool, input, 'id');
-        const record = this.instances.get(principal, schema, id, { namespace });
+        const record = this.instances.get(principal, schema, id, { namespace, ...valueRefsOf(tool, input) });
         if (!record) {
           throw new EngineError('not_found', `${schema} ${id} does not exist in namespace ${namespace}`);
         }
         return record;
       }
       case 'list': {
-        only(tool, input, ['limit', 'cursor']);
+        only(tool, input, ['limit', 'cursor', 'valueRefs']);
         const limit = input.limit ?? undefined;
         if (limit !== undefined && typeof limit !== 'number') {
           throw new EngineError('invalid_argument', `${tool.handle}: limit is an integer`);
         }
         const cursor = optionalString(tool, input, 'cursor');
-        return this.instances.list(principal, schema, { namespace, ...(limit !== undefined ? { limit } : {}), ...(cursor !== undefined ? { cursor } : {}) });
+        return this.instances.list(principal, schema, {
+          namespace,
+          ...(limit !== undefined ? { limit } : {}),
+          ...(cursor !== undefined ? { cursor } : {}),
+          ...valueRefsOf(tool, input),
+        });
       }
       case 'update': {
         only(tool, input, ['id', 'patch', 'expectedSeq', ...preconditionsArgument(tool)]);
@@ -467,6 +481,9 @@ export class ToolCatalog {
       }
       case 'search':
         return searchSchemas(this.schemas, this.instances, principal, input, namespace);
+      case 'getValue':
+        only(tool, input, ['hash']);
+        return this.values.get(principal, requiredString(tool, input, 'hash'), { namespace });
     }
   }
 
@@ -581,6 +598,15 @@ export class ToolCatalog {
         false,
         'GET',
         '/behaviors/{name}'
+      ),
+      tool(
+        'getValue',
+        'get_value',
+        'Get a stored value',
+        "Returns a value the engine stores by its hash, { hash, bytes, value }: a field whose JSON is longer than the engine's threshold, which an event (and an instance read with valueRefs) carries as a ref, { \"$value\": <hash>, \"bytes\": <n> }. The caller must be able to read a schema of this namespace whose instances, events or behaviors hold the value.",
+        false,
+        'GET',
+        `/namespaces/${encodeURIComponent(namespace)}/values/{hash}`
       ),
       tool(
         'search',
@@ -752,6 +778,10 @@ export class ToolCatalog {
       description: "The sequence the caller last read (an instance's seq): the call is refused unless the instance is still at it",
       minimum: 0,
     };
+    const valueRefs: Property = {
+      type: 'boolean',
+      description: 'Return each field the value store holds as its ref, { "$value": <hash>, "bytes": <n> }, listed in valueRefs, rather than its value, which get_value reads',
+    };
     const schema = (properties: Array<[string, Property]>, required: string[]): ArgumentSchema => ({
       vendor,
       properties: new Map(properties),
@@ -773,6 +803,11 @@ export class ToolCatalog {
           Object.entries(SEARCH_SCHEMAS_PARAMS.properties as Record<string, JSONSchemaValue>).map(([name, raw]): [string, Property] => [name, { raw }]),
           []
         );
+      case 'getValue':
+        return schema(
+          [['hash', { type: 'string', description: "The value's hash: the SHA-256 of its canonical JSON, as a ref's $value holds it", pattern: VALUE_HASH.source }]],
+          ['hash']
+        );
       case 'create': {
         const properties: Array<[string, Property]> = [
           ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
@@ -785,12 +820,19 @@ export class ToolCatalog {
         return schema(properties, ['data']);
       }
       case 'get':
-        return schema([['id', id]], ['id']);
+        return schema(
+          [
+            ['id', id],
+            ['valueRefs', valueRefs],
+          ],
+          ['id']
+        );
       case 'list':
         return schema(
           [
             ['limit', { type: 'integer', description: 'How many instances a page holds, 50 when absent', minimum: 1, maximum: MAX_PAGE_SIZE }],
             ['cursor', { type: 'string', description: "The previous page's next" }],
+            ['valueRefs', valueRefs],
           ],
           []
         );
@@ -993,6 +1035,8 @@ export class ToolCatalog {
         return { type: 'object', description: "The behavior's declaration" };
       case 'search':
         return { type: 'object', description: 'A page of hits across the schemas, best first' };
+      case 'getValue':
+        return { type: 'object', description: 'The value, with its hash and its canonical JSON\'s length in bytes' };
       case 'operation':
       case 'schemaOperation': {
         const result = (tool.operation as BehaviorOperationDeclaration).resultSchema;
@@ -1069,6 +1113,11 @@ function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
       createdBy: { type: 'string' },
       updatedAt: { type: 'integer', description: 'Epoch milliseconds' },
       updatedBy: { type: 'string' },
+      valueRefs: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'For a read with valueRefs: the JSON pointers into data of the fields that hold a ref, { "$value": <hash>, "bytes": <n> }, in place of a value the value store holds',
+      },
     },
     required: ['namespace', 'schema', 'id', 'schemaNamespace', 'version', 'seq', 'data', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
   };
@@ -1190,6 +1239,17 @@ function preconditionsOf(tool: ToolSpec, args: Record<string, unknown>): { preco
     throw new EngineError('invalid_argument', `${tool.handle}: preconditions is a JSON object of each behavior's entry by its name`);
   }
   return { preconditions: value };
+}
+
+function valueRefsOf(tool: ToolSpec, args: Record<string, unknown>): { valueRefs?: boolean } {
+  const value = args.valueRefs;
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (typeof value !== 'boolean') {
+    throw new EngineError('invalid_argument', `${tool.handle}: valueRefs is a boolean`);
+  }
+  return { valueRefs: value };
 }
 
 function expectedSeqOf(tool: ToolSpec, args: Record<string, unknown>): { expectedSeq?: number } {
