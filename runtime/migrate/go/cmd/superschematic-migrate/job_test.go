@@ -209,9 +209,12 @@ func (d *localDialer) Close() error { return nil }
 // document and its plan in a bucket, read through Cloud Storage's API,
 // and the database reached through the Cloud SQL connector, here a dialer
 // of the local server, as an IAM database user that owns what it creates.
+// The database is set up as Cloud SQL sets up one its API creates: owned
+// by cloudsqlsuperuser, which holds CREATE on the public schema from
+// pg_database_owner, and the migrator is a member of cloudsqlsuperuser.
 func TestJobOnCloudSQL(t *testing.T) {
-	r := roles(t, "shop-migrator", "shop-api")
-	migrator, api := r[0], r[1]
+	r := roles(t, "shop-migrator", "shop-api", "cloudsqlsuperuser")
+	migrator, api, superuser := r[0], r[1], r[2]
 	// The connector signs the IAM user in with a token, so the job's URL
 	// for it has no password; the local server stands in with the role's,
 	// which pgx reads from PGPASSWORD when a URL has none, as libpq does.
@@ -223,8 +226,9 @@ func TestJobOnCloudSQL(t *testing.T) {
 	}
 	database := strings.TrimPrefix(u.Path, "/")
 	testdb.Exec(t, dbURL,
-		"GRANT CREATE ON SCHEMA public TO "+pgx.Identifier{migrator}.Sanitize(),
-		"GRANT CONNECT, TEMPORARY ON DATABASE "+pgx.Identifier{database}.Sanitize()+" TO "+pgx.Identifier{migrator}.Sanitize())
+		"GRANT "+pgx.Identifier{superuser}.Sanitize()+" TO "+pgx.Identifier{migrator}.Sanitize(),
+		"ALTER DATABASE "+pgx.Identifier{database}.Sanitize()+" OWNER TO "+pgx.Identifier{superuser}.Sanitize(),
+		"GRANT CREATE ON SCHEMA public TO "+pgx.Identifier{superuser}.Sanitize())
 
 	plan, err := os.ReadFile(fixturePath(migrate.Postgres, "01-create"))
 	if err != nil {
@@ -284,6 +288,15 @@ func TestJobOnCloudSQL(t *testing.T) {
 	}
 	if !can(t, dbURL, api, `public."order"`, "INSERT") {
 		t.Error("the server's role cannot write order")
+	}
+	// The job takes nothing back from a role the migrator is a member of:
+	// Cloud SQL's own grant to cloudsqlsuperuser stays, and the job does
+	// not report it.
+	if strings.Contains(stdout.String(), "took the privileges") {
+		t.Errorf("the job took privileges back on a fresh database:\n%s", stdout.String())
+	}
+	if got := testdb.Strings(t, dbURL, "SELECT has_schema_privilege($1, 'public', 'CREATE')::text", superuser); len(got) != 1 || got[0] != "true" {
+		t.Errorf("%s lost CREATE on public: %v", superuser, got)
 	}
 
 	// A missing object is named.
