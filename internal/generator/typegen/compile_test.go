@@ -37,6 +37,10 @@ func TestGeneratedModulesCompile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture-api: %v", err)
 	}
+	userModelSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-user-model-db"))
+	if err != nil {
+		t.Fatalf("load fixture-user-model-db: %v", err)
+	}
 
 	cases := []struct {
 		name   string
@@ -47,6 +51,7 @@ func TestGeneratedModulesCompile(t *testing.T) {
 		{name: "fixture-api", schema: apiSchema, deps: map[string]*ir.Schema{"fixture-db": dbSchema}},
 		// A User table adds identity.go, which declares IdentityDescriptor.
 		{name: identitytest.Service, schema: identitytest.Schema(t, identitytest.Options{Roles: true, Name: "displayName"})},
+		{name: "fixture-user-model-db", schema: userModelSchema},
 	}
 
 	for _, tc := range cases {

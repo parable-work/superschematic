@@ -1,0 +1,296 @@
+{
+  "dialect": "sqlite",
+  "service": "fixture-user-model-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Role.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Role.name",
+          "type": "TEXT"
+        },
+        {
+          "default": "'[]'",
+          "element": "TEXT",
+          "holds": "list",
+          "name": "permissions",
+          "origin": "Role.permissions",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "role",
+      "origin": "Role",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "role_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "name"
+          ],
+          "name": "role_name_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Session.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "Session.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "Session.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Session.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "Session.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_seen_at",
+          "nullable": true,
+          "origin": "Session.lastSeenAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "Session.revokedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_session_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        }
+      ],
+      "kind": "entity",
+      "name": "session",
+      "origin": "Session",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "session_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "session_token_hash_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "User.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "email",
+          "origin": "User.email",
+          "type": "TEXT COLLATE NOCASE"
+        },
+        {
+          "name": "display_name",
+          "origin": "User.displayName",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "User.createdAt",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "user",
+      "origin": "User",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "email"
+          ],
+          "name": "user_email_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserCredential.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserCredential.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "password_hash",
+          "origin": "UserCredential.passwordHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "password_changed_at",
+          "origin": "UserCredential.passwordChangedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "disabled_at",
+          "nullable": true,
+          "origin": "UserCredential.disabledAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_credential_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        }
+      ],
+      "kind": "entity",
+      "name": "user_credential",
+      "origin": "UserCredential",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_credential_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "user_credential_user_id_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserRoleGrant.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserRoleGrant.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "role_id",
+          "origin": "UserRoleGrant.role",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "granted_at",
+          "origin": "UserRoleGrant.grantedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "role_id"
+          ],
+          "name": "fk_user_role_grant_role_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "role"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_role_grant_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id",
+            "role_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_user_role_grant_user_role",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "user_role_grant",
+      "origin": "UserRoleGrant",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_role_grant_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

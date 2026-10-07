@@ -134,6 +134,7 @@ var modelFixtures = []string{
 	filepath.Join(sqlgenFixtures, "fixture-optimistic-db"),
 	filepath.Join(sqlgenFixtures, "fixture-projection"),
 	filepath.Join(sqlgenFixtures, "fixture-version-graph-db"),
+	filepath.Join(sqlgenFixtures, "fixture-user-model-db"),
 	shopDir,
 }
 
