@@ -6,7 +6,9 @@ import (
 
 // withoutExpansion returns a view of schema without what the loader added
 // when it expanded declarations: the types and enums a version graph
-// generates, and the fields, indexes and prune pins it adds to member types.
+// generates, and the fields, indexes and prune pins it adds to member types
+// (ir.OriginVersionGraph), and the tables, fields and indexes the user
+// model's traits add (ir.OriginIdentity). Any Origin marks loader output.
 // The declarations stay, so a written schema file expands to the same IR
 // when it is read back. schema itself is not modified.
 func withoutExpansion(schema *ir.Schema) *ir.Schema {

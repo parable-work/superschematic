@@ -4,8 +4,8 @@
 // The writer emits exactly the authoring surface the tsreader walks: import
 // statements grouped by source package, decorator syntax with arguments,
 // generic wrapper forms (Nullable, Default, Validate, AutoGenerate, ...),
-// heritage clauses reconstructed from RawHeritage, and IR Comment metadata
-// as '//' comments above each node.
+// heritage clauses reconstructed from RawHeritage and the user model's
+// traits, and IR Comment metadata as '//' comments above each node.
 //
 // TypeScript is the only format that cannot carry the full IR: schema-level
 // comments, extension data and documents, descriptions on the schema and on
@@ -128,6 +128,7 @@ var symbolPackages = map[string]string{
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
 	"ManyToMany": "@superschematic/db", "Relation": "@superschematic/db",
+	"User": "@superschematic/db", "UserRole": "@superschematic/db",
 	// @superschematic/api
 	"Authenticated": "@superschematic/api", "Encrypted": "@superschematic/api",
 	"bodyLimit": "@superschematic/api", "manualRouteRegistration": "@superschematic/api",
