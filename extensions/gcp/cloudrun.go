@@ -44,7 +44,9 @@ func serviceAddress(ctx registry.PlatformContext) any {
 //     only and keeps Cloud Run's invoker check, which admits the callers
 //     its edges grant. An exposed one turns the check off, since browsers
 //     call it, and with a domain takes traffic from the load balancer
-//     only; without one, the run.app URL is its public address.
+//     only; without one, the run.app URL is its public address. Every
+//     service lists its full resource name as a custom audience, the
+//     audience of its callers' ID tokens (serviceAudience).
 //   - for a server that calls another, Direct VPC egress through the
 //     environment's network (networkNodes): a call to the callee's run.app
 //     URL from the VPC counts as internal, which an internal server's
@@ -110,12 +112,29 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 
 	container := map[string]any{
-		"image": join(v.region, "-docker.pkg.dev/", v.project, "/", kebab(env.Stack), "/", kebab(d.Name)),
+		"image": imageRepository(v, env.Stack, d.Name),
 		"ports": map[string]any{"containerPort": containerPort},
 		"resources": map[string]any{"limits": map[string]any{
 			"cpu":    settingString(d.Settings, "cpu", defaultCPU),
 			"memory": settingString(d.Settings, "memory", defaultMemory),
 		}},
+		// The entrypoint's health checks (section 8.1): an instance takes
+		// traffic once /readyz answers, so a revision whose databases do
+		// not answer never serves, and one whose process stops answering
+		// /healthz is restarted. /healthz answers while the instance
+		// drains, so a drain is never cut short.
+		"startupProbe": map[string]any{
+			"httpGet":          map[string]any{"path": readinessPath, "port": containerPort},
+			"periodSeconds":    startupPeriod,
+			"timeoutSeconds":   startupTimeout,
+			"failureThreshold": startupFailures,
+		},
+		"livenessProbe": map[string]any{
+			"httpGet":          map[string]any{"path": livenessPath, "port": containerPort},
+			"periodSeconds":    livenessPeriod,
+			"timeoutSeconds":   livenessTimeout,
+			"failureThreshold": livenessFailures,
+		},
 	}
 	if len(envs) > 0 {
 		container["envs"] = envs
@@ -166,6 +185,7 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"name":               d.ResourceName,
 		"ingress":            ingress,
 		"invokerIamDisabled": d.Exposed,
+		"customAudiences":    []any{serviceAudience(v, d.ResourceName)},
 		"deletionProtection": false,
 		"template":           template,
 	}})

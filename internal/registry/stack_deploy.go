@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"regexp"
 	"strings"
 
@@ -165,10 +166,24 @@ type MigrationPlan struct {
 
 	// Plan is the plan document.
 	Plan json.RawMessage
+
+	// Steps is the number of the plan's steps in the request's phase. It
+	// is zero for a plan the deploy hands the runner only for what the
+	// runner owns besides the steps: the privileges of the servers that
+	// connect (Servers), which changed since the runner last ran.
+	Steps int
+
+	// Servers are the server deployables that connect to the DB service,
+	// as the environment's sql edges name them, sorted. A runner that owns
+	// the database's privileges (D46) gives each what its APIs read and
+	// write, after the phase's steps, and takes them back from any server
+	// it gave them to that is no longer here.
+	Servers []string
 }
 
 // MigrationRequest runs one phase of the migration plans of one database:
-// the plan of each DB service it hosts that has steps in the phase.
+// the plan of each DB service it hosts that has steps in the phase, and
+// in the expand phase also each plan whose connecting servers changed.
 type MigrationRequest struct {
 	Run Run
 
@@ -194,6 +209,65 @@ type MigrationRunner interface {
 	Migrate(ctx context.Context, req MigrationRequest) error
 }
 
+// BuildRequest is one image build (docs/stack-model.md, section 11.2): a
+// server, its Dockerfile and its context. The deploy writes the context:
+// the build context directory as the Dockerfile's ignore file cuts it
+// down, in a gzipped tarball whose entries carry no time, owner or mode
+// of the machine that wrote it, so the same files give the same archive.
+type BuildRequest struct {
+	Run Run
+
+	// Server is the server deployable the image is for.
+	Server string
+
+	// Context is the path of the gzipped tarball of the build context.
+	// ContextDigest names it: `sha256:` and the hex SHA-256 of its tar
+	// stream before compression.
+	Context       string
+	ContextDigest string
+
+	// Dockerfile is the Dockerfile's path inside the context,
+	// slash-separated (`schemas/dist/server/Shop/shop-api/Dockerfile`).
+	Dockerfile string
+
+	// Log receives progress.
+	Log io.Writer
+}
+
+// contextDigestPattern is the shape of a BuildRequest's ContextDigest.
+var contextDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// Check refuses a request with no valid run, no server of the run's
+// environment, no context archive or digest, or a Dockerfile path that is
+// not a relative, slash-separated path inside the context.
+func (r BuildRequest) Check() error {
+	if err := r.Run.Check(); err != nil {
+		return err
+	}
+	d := r.Run.Environment.Deployable(r.Server)
+	switch {
+	case d == nil || d.Kind != ir.DeployableServer:
+		return fmt.Errorf("build: environment %s has no server %q", r.Run.Environment.Environment, r.Server)
+	case r.Context == "":
+		return fmt.Errorf("build %s: no context archive", r.Server)
+	case !contextDigestPattern.MatchString(r.ContextDigest):
+		return fmt.Errorf("build %s: context digest %q is not sha256:<64 hex digits>", r.Server, r.ContextDigest)
+	case r.Dockerfile == "" || strings.HasPrefix(r.Dockerfile, "/") || strings.Contains(r.Dockerfile, `\`) ||
+		path.Clean(r.Dockerfile) != r.Dockerfile || r.Dockerfile == ".." || strings.HasPrefix(r.Dockerfile, "../"):
+		return fmt.Errorf("build %s: Dockerfile %q is not a slash-separated path inside the context", r.Server, r.Dockerfile)
+	}
+	return nil
+}
+
+// ImageBuilder builds a server's image from a context the deploy wrote,
+// and pushes it where the server's platform reads it: the repository path
+// the platform writes into the graph (section 7.2). It returns the image
+// by digest, `<repository>@sha256:<digest>`, which the deploy pins in the
+// server's nodes; one whose repository no node holds is refused there.
+type ImageBuilder interface {
+	Build(ctx context.Context, req BuildRequest) (image string, err error)
+}
+
 // Credential is a secret a platform needs to write its resources, such
 // as the API token of the Cloudflare DNS platform (section 6.9): not an
 // application secret a server reads, but one the provisioner hands its
@@ -213,9 +287,9 @@ type Credential struct {
 }
 
 // checkDeploySeams refuses a target that carries a deploy seam it cannot
-// use: State, Bootstrap or Migrations without a provisioner, and
-// Bootstrap or Migrations without State, which a bootstrap creates and a
-// deploy records each migration in.
+// use: State, Bootstrap, Migrations or Builder without a provisioner, and
+// Bootstrap, Migrations or Builder without State, which a bootstrap
+// creates and a deploy records each migration and each build in.
 func checkDeploySeams(spec TargetSpec) error {
 	var named []string
 	if spec.State != nil {
@@ -227,11 +301,14 @@ func checkDeploySeams(spec TargetSpec) error {
 	if spec.Migrations != nil {
 		named = append(named, "Migrations")
 	}
+	if spec.Builder != nil {
+		named = append(named, "Builder")
+	}
 	if len(named) > 0 && spec.Provisioner == "" {
 		return fmt.Errorf("registry: target %q has %s but names no provisioner to deploy with", spec.Name, strings.Join(named, ", "))
 	}
-	if (spec.Bootstrap != nil || spec.Migrations != nil) && spec.State == nil {
-		return fmt.Errorf("registry: target %q has Bootstrap or Migrations but no State: a bootstrap creates the deploy state, and a deploy records each migration in it", spec.Name)
+	if (spec.Bootstrap != nil || spec.Migrations != nil || spec.Builder != nil) && spec.State == nil {
+		return fmt.Errorf("registry: target %q has Bootstrap, Migrations or Builder but no State: a bootstrap creates the deploy state, and a deploy records each migration and each build in it", spec.Name)
 	}
 	return nil
 }

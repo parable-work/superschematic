@@ -30,8 +30,9 @@ needs cargo and the `wasm32-unknown-unknown` target) and the engine, links
 them into `node_modules`, type-checks the example, and runs
 `test/notes.test.ts` with `node --test` and with `bun test`, each serving
 the example on a free port. The `typescript` job in
-`.github/workflows/ci.yml` runs it after the engine's own tests, and so
-does `make ts`.
+`.github/workflows/ci.yml` runs it after the engine's own tests in the
+full tier (D40), which the release candidate runs on `main` twice a day,
+and so does `make ts`.
 
 To run the server after that:
 

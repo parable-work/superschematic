@@ -206,11 +206,27 @@ function checkCreateParams(schema: unknown, problems: string[]): void {
   if (schema === undefined) {
     return;
   }
-  if (!isPlainObject(schema) || schema.type !== 'object') {
-    problems.push('createParamsSchema must be an object schema ("type": "object")');
-  } else if (schema.additionalProperties !== false && !isPlainObject(schema.additionalProperties)) {
-    problems.push('createParamsSchema must set "additionalProperties": false or a schema, so no create parameter goes unchecked');
+  const problem = createParamsSchemaProblem(schema);
+  if (problem !== undefined) {
+    problems.push(problem);
   }
+}
+
+/**
+ * createParamsSchemaProblem says why a schema cannot be a behavior's
+ * create parameters: it is not an object schema whose additionalProperties
+ * is false or a schema. undefined when it can. A declaration's
+ * createParamsSchema, and what an implementation's createParamsSchema
+ * returns for a config, are held to it.
+ */
+export function createParamsSchemaProblem(schema: unknown): string | undefined {
+  if (!isPlainObject(schema) || schema.type !== 'object') {
+    return 'createParamsSchema must be an object schema ("type": "object")';
+  }
+  if (schema.additionalProperties !== false && !isPlainObject(schema.additionalProperties)) {
+    return 'createParamsSchema must set "additionalProperties": false or a schema, so no create parameter goes unchecked';
+  }
+  return undefined;
 }
 
 function checkFields(fields: unknown, problems: string[]): void {

@@ -33,10 +33,10 @@ schema that composes one until a deployment registers that package.
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision | | [Links](#links) |
-| `Rollups` | values computed from the instances that link here | `Workflow` | [Rollups](#rollups) |
-| `Search` | full-text search over the type's text fields, and vector search over embeddings an outside embedder computes | | [Search](#search) |
+| `Rollups` | values computed from the instances that link here, optionally gating the type's Workflow transitions | | [Rollups](#rollups) |
+| `Search` | full-text search over the type's text fields, vector search over embeddings an outside embedder computes, and a search across a namespace's schemas | | [Search](#search) |
 | `Reactions` | rules that move statuses after a change commits | `Workflow` | [Reactions](#reactions) |
-| `Constants` | fields the create sets and nothing changes after | | [Constants and Variants](#constants-and-variants) |
+| `Constants` | fields that keep the value their create gives them, unless a caller holds the config's permission | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
 | `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases | | [Branches](#branches) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
@@ -50,6 +50,15 @@ and invocation policy, and its veto codes. An MCP client calls
 `list_behaviors` and `describe_behavior` for the same, before it writes
 a draft with `define_schema`. Every caller may read them
 ([the behavior catalog](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#the-behavior-catalog)).
+
+Once a type composes behaviors, each says what its config means where
+a client picks a tool. The describe document gives each behavior's
+summary beside its config, and every tool of the type carries guidance
+in the members an SDK tool's `@docs` fills (`useWhen`, `doNotUseWhen`,
+`success`, `errors`), in its MCP `_meta` too: `transition`'s names the
+moves from each state, the permission each needs and the vetoes it can
+meet, `blocked` from `Dependencies` among them
+([guidance](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#guidance)).
 
 ## Compose a behavior
 
@@ -139,7 +148,9 @@ create tool (`tasks_create`) takes them as its `behaviors` argument:
 ```
 
 - Each behavior declares what it takes (`createParamsSchema`), and the
-  describe document and the create tool show it.
+  describe document and the create tool show it as the type's config
+  narrows it: `Links`' parameters name the type's links, with the
+  required ones required.
 - A parameter is held to the same checks as the operation it stands in
   for (`link`, `addBlocker`). A refusal is `invalid_argument` (400), with
   each issue at a JSON pointer such as `/behaviors/Links/project`, or
@@ -408,7 +419,7 @@ count of tasks, its tasks by status, whether they have all finished.
 | --- | --- |
 | Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`; `countBy`, `sum`, `min` and `max` take a `field`; only `all` and `any` take `gatedStates` and `outcomes` |
 | Field | `rollups`: `{ <name>: value }`, computed at each read |
-| Guard | a transition into a state an `all` or `any` rollup gates is `vetoed` unless the rollup holds |
+| Guard | a transition into a state an `all` or `any` rollup gates is `vetoed` (`not_held`) unless the rollup holds, with the rollup and its counts in `details.details` |
 
 On a `projects` schema, with the `tasks` schema linking to it through
 `project`:
@@ -762,6 +773,9 @@ release, and a rollback is a release of an earlier one. The instance's
 own fields stay outside the graph. The graph lives
 in the behavior's own tables, through the version graph's SQLite
 adapter, in the transaction of the operation that writes it.
+[Version graphs](/superschematic/reference/version-graphs/) covers the
+model under it: refs, commits, merges by conflict unit, releases,
+snapshots and the sweep.
 
 Each kind's content is another type of the schema, so a recipe's steps,
 its ingredients under a step and its one cover are three types:
@@ -875,7 +889,9 @@ call("released");                                                 // { release, 
 - **Deleting.** Deleting an instance deletes its graph.
 - **Lease.** The operation that points the release pointer is
   `releaseCommit`, not `release`, because `Lease` has `release`, so a
-  type composes both.
+  type composes both. Lease's guard then holds `Branches`' writes to the
+  lease's holder, as it holds any writing operation
+  ([Work queues](/superschematic/guides/work-queues/#lease)).
 
 ## Where to go next
 

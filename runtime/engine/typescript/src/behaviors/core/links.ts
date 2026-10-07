@@ -53,6 +53,7 @@ import type { Row } from '../../storage/driver.js';
 import { defineBehavior, type BehaviorScope, type FrozenJSON, type InstanceContext, type InstanceView } from '../behavior.js';
 import { page, pageRequest } from '../paging.js';
 import declaration from './declarations/Links.behavior.json' with { type: 'json' };
+import { linksCreateParams, linksGuidance } from './guidance/links.js';
 
 /** One link of a Links config. */
 export interface LinkSpec {
@@ -208,6 +209,10 @@ function linkOf(row: Row, current: number | undefined, pinned: boolean): LinkRec
 
 export const links = defineBehavior<LinksConfig>({
   declaration,
+
+  guidance: linksGuidance,
+
+  createParamsSchema: linksCreateParams,
 
   parseConfig(json) {
     const raw = json as { links: Record<string, { schema: string; required?: boolean; pinned?: boolean }> };

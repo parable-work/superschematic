@@ -19,9 +19,11 @@ resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
 The core has seven commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors` and the `stack` group. The installed
-`superschematic` links the official extensions (the gcp target, the
-Cloudflare DNS platform and the Pulumi provisioner), which add none.
+`json-schema`, `format`, `behaviors` and the `stack` group, beside
+cobra's own `help` and `completion`. The installed `superschematic` links
+the official extensions (the gcp target, the Cloudflare DNS platform and
+the Pulumi provisioner), which add none. The migration runner,
+`superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)).
 
 ## `build <service-dir>`
 
@@ -202,7 +204,15 @@ service. With `--cache`, a service whose input hash matches a stamp and
 whose outputs still exist is skipped; a miss restores from the cache or
 rebuilds.
 
-The input hash covers a hash of the running binary, so rebuilding the
+A service's input hash covers its directory, the hashes of its
+`dependencies` and its `authDb`, and each API it `calls` without that
+API's own calls, so two APIs that call each other hash without a cycle.
+It also covers the naming file's resolved values except `[deps]`, the
+files `[cache] inputs` lists, the schemas root's `package.json` and
+`bun.lock`, and the `go`, `bun`, `rustc` and `cargo` versions on the
+`PATH`.
+
+The input hash covers a hash of the running binary too, so rebuilding the
 binary with different code invalidates every stamp and cache entry. Build
 it with `-trimpath -buildvcs=false`, as `make build` does, so a commit
 that changes no Go source keeps the same binary. A binary that links
@@ -350,7 +360,9 @@ belong to the file convert; service-level definitions that TypeScript
 cannot attribute to a file (enums, scalars) ride along with the
 service's first schema file.
 
-The converted file is written next to the input as
+The input's format comes from its extension: `.schema.ts`,
+`.schema.json`, or `.schema.yaml` or `.schema.yml`. Converting a file to
+its own format fails. The converted file is written next to the input as
 `<name>.schema.<format>`. An existing file is not overwritten without
 `--force`. `--stdout` prints the conversion instead.
 
@@ -490,18 +502,18 @@ same from run to run:
 export abstract class Dev {}
 ```
 
-## `stack bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and `outputs`
+## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy` and `outputs`
 
-The cloud half of the `stack` group bootstraps, plans, deploys and
+The cloud half of the `stack` group bootstraps, plans, builds, deploys and
 destroys the environments a Stack service declares
 (`docs/stack-model.md`, sections 7.3, 11.1 and 11.2). Each command loads
 the stack, resolves one environment as the `stack` generator does, and
 drives the environment's target and provisioner. A binary deploys to a
 target only when it links the target's extension and the provisioner's
 (`gcp.Extension{}`, `pulumi.Extension{...}`). An environment on the
-`local` target runs with `stack dev`; `plan`, `deploy`, `bootstrap`,
-`destroy` and `outputs` refuse it, and `secrets set` writes its
-`secrets.env`.
+`local` target runs with `stack dev`; `plan`, `build`, `deploy`,
+`bootstrap`, `destroy` and `outputs` refuse it, and `secrets set` writes
+its `secrets.env`.
 
 Each of these commands takes these flags:
 
@@ -510,16 +522,17 @@ Each of these commands takes these flags:
 | `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
 | `--naming` | `<stack>/../../superschematic.toml` | naming config file |
 | `--program-dir` | `<schemas-root>/dist/program/<stack>/<environment>` | where to render the provisioner's program |
-| `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `deploy`, `destroy` and `outputs` take it |
+| `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `build`, `deploy`, `destroy` and `outputs` take it |
 
 ### `stack bootstrap <environment>`
 
 Prepare the cloud project the environment deploys to, with an owner's
 credentials, once; it is safe to run again. On gcp it enables the APIs,
 creates the state bucket and its KMS key, applies the Artifact Registry
-repository, the `deployer` and `planner` accounts and Workload Identity
-Federation for the GitHub repository, and creates the secret of each
-platform credential the environment needs. Then it asks for each
+repository, the `deployer` and `planner` accounts, the `builder` account
+image builds run as, the `migrator` account the migration job runs as,
+and Workload Identity Federation for the GitHub repository, and creates
+the secret of each platform credential the environment needs. Then it asks for each
 credential with no value, with the terminal's echo off.
 
 | Flag | Default | Meaning |
@@ -546,7 +559,8 @@ superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
 Show what `stack deploy` would do, changing nothing: the provisioner's plan
 of every resource, with each server's image pinned, and each database's
 migration plan from the schema the deploy manifest records. It also lists
-the secrets with no value, the servers with no image yet, the migration
+the secrets with no value, the servers with no image yet (which a deploy
+builds), the migration
 phases a failed deploy left part-way, and the records to create by hand
 for a domain no DNS platform holds. It exits 1 after printing when a plan
 has a hazard of a `--fail-on` class that no `--allow` names.
@@ -559,17 +573,53 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 | `--out` | none | write the plan as JSON, for `stack deploy --expect` |
 | `--format` | `text` | print the plan as `text` or `json` |
 
+### `stack build <environment>`
+
+Build the image of each server whose build context changed since the image
+the deploy manifest records, as `stack deploy` would, and deploy nothing.
+A Go server builds from the Dockerfile `superschematic build-all` writes at
+`<output-root>/server/<stack>/<server>/`, with the repository root as its
+context, cut down by the `Dockerfile.dockerignore` beside it; on gcp the
+build runs on Cloud Build and pushes to the stack's Artifact Registry
+repository. It prints each image as a `stack deploy` flag:
+
+```
+$ superschematic stack build Staging
+--image Orders=us-east1-docker.pkg.dev/acme-staging/shop/orders@sha256:...
+--image shop-api=us-east1-docker.pkg.dev/acme-staging/shop/shop-api@sha256:...
+```
+
+A build writes no deploy manifest.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--server` | every server with a Dockerfile | build this server only; repeatable |
+| `--force` | false | build a server whose context did not change |
+| `--out` | none | write the result as JSON |
+| `--format` | `text` | print `--image` flags (`text`) or the result as `json` |
+
 ### `stack deploy <environment>`
 
 Deploy the environment in deploy order: infrastructure, each database's
 `expand` phase, the servers wave by wave, callees first, the `contract`
-phases, exposure. The deploy manifest records each step. Every secret
-needs a value before the first step after infrastructure; at a terminal
-the deploy asks for each one missing. A rollout that fails runs no
+phases, exposure. Before any step, it builds the image of each server
+`--image` names none for whose build context changed since the image the
+manifest records, as `stack build` does; a server with no Dockerfile keeps
+the manifest's image. The deploy manifest records each step, and the
+context each image it built came from. Every secret needs a value before
+the first step after infrastructure; at a terminal the deploy asks for
+each one missing. On gcp each migration phase runs as an execution of the
+stack's Cloud Run job, `<stack>-migrate`, which also gives each server
+that connects to a database its privileges. A rollout that fails runs no
 `contract` step, and the next deploy plans from the schema between the
 phases.
 
+A binary built from a checkout names no release of the migration runner
+to build the job's image from: set `SUPERSCHEMATIC_MIGRATE_IMAGE` to an
+image of `superschematic-migrate`, by digest, in the stack's repository.
+
 ```
+superschematic stack deploy Staging
 superschematic stack deploy Staging --image shop-api=us-east1-docker.pkg.dev/acme-staging/shop/shop-api@sha256:...
 superschematic stack plan Preview --param pr=123 --out plan.json
 superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'destructive:table/order/column/total'
@@ -577,7 +627,8 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--image` | the manifest's | a server's image, `<server>=<repository>@sha256:<digest>`; repeatable. A server with neither is refused |
+| `--image` | a build, else the manifest's | a server's image, `<server>=<repository>@sha256:<digest>`; repeatable. A server with none of them is refused |
+| `--no-build` | false | build no image: take each from `--image` or the manifest |
 | `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--expect` | none | a plan `stack plan --out` wrote: refuse migration plans other than its |
@@ -589,9 +640,26 @@ run's name at a terminal unless `--yes`, and refuses without either.
 
 ### `stack outputs <environment>`
 
-Print the outputs of the run's applied resources as JSON, by node ID and
-output name, leaving out secret ones. `--out` writes them to a file, the
-`outputs.json` the bindings generator reads.
+Print the run's outputs file, the `outputs.json` the bindings generator
+reads: a JSON object with the format's `version`, the `stack`, the
+`environment`, the run's `parameters` for a member of a parameterized
+environment, and under `resources` the outputs of the run's applied
+resources by node ID and output name, leaving out secret ones.
+
+```json
+{
+  "version": 1,
+  "stack": "shop-stack",
+  "environment": "Staging",
+  "resources": {
+    "shop-api.service": { "url": "https://shop-api-3kq7x2-ue.a.run.app" }
+  }
+}
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--out` | stdout | write the outputs file to this path; put it beside the environment's `environment.json` for the bindings generator |
 
 ## Extension commands
 

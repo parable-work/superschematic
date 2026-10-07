@@ -1,0 +1,11 @@
+{
+  "name": "engine-jobs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A job runner on @superschematic/engine and @superschematic/engine-workqueue: jobs claimed under leases, retried per failure class and held to a budget, workers whose presence releases their leases, and batches that stamp their steps and settle when they finish, over one SQLite file and the engine's HTTP API. scripts/link.sh puts the engine, the work-queue package and the packages they need into node_modules from this checkout; see README.md.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "Apache-2.0"
+}

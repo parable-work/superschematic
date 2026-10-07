@@ -255,19 +255,35 @@ func TestStackCommands(t *testing.T) {
 	_, err = run("secrets", "set", "Staging")
 	require.ErrorContains(t, err, "stdin is not one")
 
-	// outputs writes what the provisioner read.
-	outputs := filepath.Join(t.TempDir(), "outputs.json")
+	// outputs prints the outputs file of what the provisioner read, and
+	// --out writes the same file.
+	printed, err := run("outputs", "Staging")
+	require.NoError(t, err)
+	outputs := filepath.Join(t.TempDir(), stackdeploy.OutputsFile)
 	_, err = run("outputs", "Staging", "--out", outputs)
 	require.NoError(t, err)
 	data, err = os.ReadFile(outputs)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `"demo-api.service"`)
+	assert.Equal(t, printed, string(data))
+	file, err := stackdeploy.UnmarshalOutputs(data)
+	require.NoError(t, err)
+	assert.Equal(t, "demo-stack", file.Stack)
+	assert.Equal(t, "Staging", file.Environment)
+	assert.Nil(t, file.Parameters)
+	assert.Equal(t, map[string]any{"id": "demo-api.service"}, file.Resources["demo-api.service"])
 
-	// A member of Preview needs its parameter.
+	// A member of Preview needs its parameter, and its outputs file
+	// carries it.
 	_, err = run("plan", "Preview")
 	require.ErrorContains(t, err, "takes parameter pr")
 	_, err = run("deploy", "Preview", "--param", "pr=7", "--image", demoImage(2))
 	require.NoError(t, err)
+	printed, err = run("outputs", "Preview", "--param", "pr=7")
+	require.NoError(t, err)
+	file, err = stackdeploy.UnmarshalOutputs([]byte(printed))
+	require.NoError(t, err)
+	assert.Equal(t, "Preview", file.Environment)
+	assert.Equal(t, map[string]string{"pr": "7"}, file.Parameters)
 
 	// bootstrap runs the target's, with the repository named.
 	_, err = run("bootstrap", "Staging", "--repository", "acme/shop")
@@ -301,6 +317,66 @@ func TestStackCommands(t *testing.T) {
 	require.ErrorContains(t, err, "stack demo-stack has no environment Nowhere (its environments: Dev, Preview, Staging)")
 	_, err = run("deploy", "Staging", "--image", "demo-api")
 	require.ErrorContains(t, err, "want <server>=<repository>@sha256:<digest>")
+}
+
+// TestStackBuild runs stack build and a deploy that builds over the demo
+// tree, with a Dockerfile where build-all writes one, on the fake target.
+func TestStackBuild(t *testing.T) {
+	stackDir := demoTree(t)
+	schemasRoot := filepath.Dir(filepath.Dir(stackDir))
+	serverDir := filepath.Join(schemasRoot, "dist", "server", "demo-stack", "demo-api")
+	require.NoError(t, os.MkdirAll(serverDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(serverDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(serverDir, "Dockerfile.dockerignore"), []byte("*\n!schemas/dist/server\n"), 0o644))
+	ext := &stacktest.Extension{}
+	run := func(args ...string) (string, error) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		root := New(Config{}, ext)
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		root.SetIn(strings.NewReader(""))
+		root.SetArgs(append([]string{"stack"}, append(args, "--stack", stackDir)...))
+		err := root.Execute()
+		return stdout.String(), err
+	}
+	useTerminal(t, &fakeTerminal{answers: []string{"key-1"}})
+
+	out, err := run("build", "Staging")
+	require.NoError(t, err)
+	assert.Regexp(t, `^--image demo-api=demo-api@sha256:[0-9a-f]{64}\n$`, out)
+	assert.Equal(t, []string{"build demo-api: schemas/dist/server/demo-stack/demo-api/Dockerfile"}, ext.Provisioner.Calls())
+	assert.Equal(t, []string{"schemas/dist/server/", "schemas/dist/server/demo-stack/", "schemas/dist/server/demo-stack/demo-api/",
+		"schemas/dist/server/demo-stack/demo-api/Dockerfile", "schemas/dist/server/demo-stack/demo-api/Dockerfile.dockerignore"},
+		ext.Builder.Context("demo-api"))
+	image := strings.TrimSpace(strings.TrimPrefix(out, "--image demo-api="))
+
+	out, err = run("build", "Staging", "--format", "json", "--server", "demo-api")
+	require.NoError(t, err)
+	var result stackdeploy.BuildResult
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	assert.Equal(t, map[string]string{"demo-api": image}, result.Images)
+	_, err = run("build", "Staging", "--server", "demo-db")
+	require.ErrorContains(t, err, "has no server demo-db")
+
+	// --no-build with no image anywhere is refused; a deploy builds.
+	_, err = run("deploy", "Staging", "--no-build")
+	require.ErrorContains(t, err, "no image for server demo-api: the manifest records none, so pass --image")
+	n := len(ext.Provisioner.Calls())
+	_, err = run("deploy", "Staging")
+	require.NoError(t, err)
+	calls := ext.Provisioner.Calls()[n:]
+	assert.Equal(t, "build demo-api: schemas/dist/server/demo-stack/demo-api/Dockerfile", calls[0])
+	service := ext.Provisioner.Rendered().Resources.Resource("demo-api.service")
+	assert.Equal(t, image, service.Properties["image"])
+
+	// Nothing changed since the deploy: the build has nothing to build.
+	out, err = run("build", "Staging", "--format", "json")
+	require.NoError(t, err)
+	result = stackdeploy.BuildResult{}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	assert.Empty(t, result.Built)
+	assert.Equal(t, []string{"demo-api"}, result.Unchanged)
 }
 
 func TestParseGitHubRemote(t *testing.T) {

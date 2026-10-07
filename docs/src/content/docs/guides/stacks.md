@@ -1,0 +1,799 @@
+---
+title: Stacks and deploys
+description: Declare what runs where in a Stack service, run it on your machine with stack dev, and deploy it to Google Cloud through the Pulumi provisioner.
+sidebar:
+  order: 5.5
+---
+
+A Stack service declares which of your services run, how they group into
+servers and databases, and the environments they run in. Its build wires
+each server to its database and to the APIs it calls, checks the result
+offline, and writes three things: each environment as `environment.json`,
+an entrypoint module and Dockerfile for each Go server, and a scaffold of
+each API implementation that is missing. Wiring the schemas already say,
+such as an API's database or the address of an API another one calls, is
+derived and never written by hand.
+
+`superschematic stack dev` runs an environment on your machine, with
+Postgres in Docker and each server as a process. The `stack` commands
+bootstrap, plan and deploy the cloud environments, and the gcp target
+lowers them to Cloud Run, Cloud SQL, Secret Manager, load balancer and DNS
+resources that the Pulumi provisioner applies.
+
+## What is built
+
+| Built | Not built yet |
+| --- | --- |
+| the Stack kind and `@superschematic/stack`; every build resolves each environment to `environment.json` | |
+| `calls` in an API's config, and a build ordered by output | |
+| Go: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which dials Cloud SQL through the Cloud SQL connector where an environment places its database there | the same for TypeScript and Rust servers; OpenTelemetry export |
+| the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
+| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's; a lifecycle rule for old build contexts and job documents in the state bucket |
+| the Pulumi provisioner and the typed bindings generator | |
+| the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
+| `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
+
+The design is
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
+and D30 and D45 in `docs/DECISIONS.md` record the decisions.
+
+## The model
+
+A stack has three tiers:
+
+- **Schemas** are your DB and API services, as they are today.
+- **Deployables** are what runs. A database hosts DB schemas, and a server
+  serves API schemas. With nothing declared, each API service is one
+  server and each DB service one database.
+- **Environments** place the deployables on a target and set the values
+  only a person decides: a project, a region, a domain, instance sizes and
+  settings.
+
+An edge is a need one deployable has of another. The schemas already say
+most of them:
+
+| Edge | From | To | Comes from |
+| --- | --- | --- | --- |
+| sql | a server | a database | each served API's `authDb`, or its one DB-kind dependency |
+| http | a server | a server | `calls` in the config of each API the calling server serves |
+
+A server's edges are the union of its APIs' edges, so grouping two APIs on
+one server restates nothing.
+
+## Wire the services
+
+`calls` is the one wiring fact you write, because no schema says that one
+API's implementation calls another. It sits in the API's config beside
+`authDb`, as handles:
+
+```ts
+// schemas/services/shop-orders/schema.config.ts
+import { ShopApi } from "@acme/shop-api";
+import { ShopDb } from "@acme/shop-db";
+import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
+
+export default defineConfig({
+  name: "shop-orders",
+  kind: SchemaKind.API,
+  authDb: ShopDb,
+  dependencies: [ShopDb],
+  calls: [ShopApi],
+  outputs: {
+    types: { [TargetLanguage.Go]: { enabled: true } },
+    api: { enabled: true }
+  }
+});
+```
+
+`calls` takes only API handles, so tsc refuses a DB handle there and
+discovery refuses one in any form. The callee must generate a Go SDK, and
+the database Go types, or the caller's build refuses them. A call is a
+build-order edge for the caller's API server only: each callee's SDK
+builds before the servers that call it, so two APIs may call each other.
+The [CLI reference](/superschematic/reference/cli/#build-all-services-root)
+has the ordering rules.
+
+A server's settings come from the API's `@envVars` class, which may sit in
+the API's own schema:
+
+```ts
+// schemas/services/shop-orders/src/config.schema.ts
+import { Default, Secret } from "@superschematic/schema";
+import { envVars } from "@superschematic/schema-config";
+
+export abstract class PaymentsSecrets {
+  STRIPE_KEY: Secret<string>;
+}
+
+@envVars
+export abstract class OrdersConfig extends PaymentsSecrets {
+  FULFILLMENT_REGION: string;
+  MAX_LINE_ITEMS: Default<number, 50>;
+}
+```
+
+A secret is identified by the type that declares the field and the
+field's name. When `shop-api`'s config extends the same `PaymentsSecrets`,
+both servers read one `PaymentsSecrets.STRIPE_KEY` in each environment.
+
+Each API's build writes its handle to `src/service.generated.ts`. An API's
+handle carries its kind and its `@envVars` class as type parameters
+(`service<"API", OrdersConfig>(...)`), which is how a stack types the
+`env` it sets for that API.
+
+## What an API gets from its edges
+
+Each edge adds a typed field to the Go API's config. The API package's
+`EnvConfig` embeds the `@envVars` type and adds a field per edge, and
+`LoadEnvConfig` reads them all, reporting every missing or invalid one:
+
+```go
+type EnvConfig struct {
+	OrdersConfig
+
+	// ShopDbDatabase is the connection to shop-db, the API's database.
+	ShopDbDatabase stackconfig.Database
+
+	// ShopApiService is the endpoint of shop-api, which the API calls.
+	ShopApiService stackconfig.Service
+}
+```
+
+`stackconfig` is a package of the Go HTTP runtime. A `Database` is a
+connection string or a Cloud SQL connector configuration (instance
+connection name, database and IAM user). A `Service` is the callee's base
+URL and, optionally, the source of the service credential to send and the
+headers that carry it.
+
+A platform sets each derived field as one environment variable per member
+of its value: the field's name, an underscore and the member's path in
+upper snake case.
+
+| Field | Variables |
+| --- | --- |
+| `SHOP_DB_DATABASE` | `SHOP_DB_DATABASE_URL`, or `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `_CLOUD_SQL_DATABASE` and `_CLOUD_SQL_USER` |
+| `SHOP_API_SERVICE` | `SHOP_API_SERVICE_URL`; with a credential, `SHOP_API_SERVICE_CREDENTIAL_SOURCE` and the members that source reads (`_AUDIENCE`, `_TOKEN_FILE`, `_ISSUER`, `_KEY`), and `_HEADERS`, joined by commas |
+
+The names come from the naming file's
+[`[derived_fields]`](/superschematic/reference/naming/#derived_fields)
+templates, `{SERVICE}_DATABASE` and `{SERVICE}_SERVICE` by default. The
+loader refuses an `@envVars` field named after a derived field, or after
+one plus an underscore. `values-schema.json` lists each derived field
+under `x-superschematic.envVars` with `derived`, `service` and
+`variables`. The TypeScript and Rust config loaders do not read derived
+fields yet.
+
+The API package also gets `deps.go`, with what the implementation is built
+from and the signature of its constructor:
+
+```go
+type Deps struct {
+	Config  EnvConfig              // the @envVars settings and the derived fields
+	DB      orm.DatabaseInterface  // the ORM of the API's database
+	ShopApi *shopapisdk.ShopApiSDK // a Go SDK client per calls entry
+	Logger  *zap.Logger
+}
+
+type Constructor func(deps Deps) (Implementations, error)
+```
+
+A field is left out when the API has nothing for it. The generated server
+entrypoint fills `Deps` and calls your `New`.
+
+## Declare a stack
+
+A stack is a service of kind `Stack`. Its config names it and lists no
+`dependencies`: the handles in its schema reference the services.
+
+```ts
+// schemas/services/shop-stack/schema.config.ts
+import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+
+export default defineConfig({
+  name: "shop-stack",
+  kind: SchemaKind.Stack,
+  outputs: {}
+});
+```
+
+Its schema declares the stack, any deployable that differs from the
+defaults, and the environments, one class each. Every class carries one of
+the four decorators of `@superschematic/stack` and no fields.
+
+```ts
+// schemas/services/shop-stack/src/stack.schema.ts
+import { ShopApi } from "@acme/shop-api";
+import { ShopDb } from "@acme/shop-db";
+import { ShopOrders } from "@acme/shop-orders";
+import { environment, server, stack } from "@superschematic/stack";
+
+@stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
+export abstract class Shop {}
+
+@server({ serves: [ShopOrders] })
+export abstract class Orders {}
+
+@environment({
+  target: "local",
+  settings: [{ of: Orders, env: { FULFILLMENT_REGION: "us" } }]
+})
+export abstract class Dev {}
+
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-staging", region: "us-east1" },
+  domain: "staging.acme.dev",
+  dns: { "gcp.clouddns": { zone: "acme-dev" } },
+  settings: [{ of: Orders, env: { FULFILLMENT_REGION: "us" } }]
+})
+export abstract class Staging {}
+
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-prod", region: "us-east1", production: true },
+  domain: "acme.dev",
+  settings: [
+    { of: ShopDb, tier: "db-custom-2-7680", highAvailability: true },
+    { of: ShopApi, minInstances: 1, env: { LOG_LEVEL: "warn" } },
+    { of: Orders, memory: "1Gi", env: { FULFILLMENT_REGION: "us" } }
+  ]
+})
+export abstract class Production {}
+
+@environment({
+  parameters: ["pr"],
+  settings: [{ of: ShopApi, env: { PREVIEW_ID: { parameter: "pr" } } }]
+})
+export abstract class Preview extends Staging {}
+```
+
+- **`@stack({ deploy, expose })`** declares the stack, once per schema.
+  `deploy` names the entry points, API and DB handles; every service they
+  reach through `authDb`, DB dependencies and `calls` joins the stack, so
+  `shop-db` needs no mention. `expose` names what is reachable from
+  outside the environment, an API's handle or an `@server` class.
+  Everything else is internal.
+- **`@server({ serves })`** declares one server for the listed APIs in
+  place of their default servers. Here `Orders` serves `shop-orders`, and
+  takes its edges from it: `shop-db` through `authDb`, `shop-api` through
+  `calls`. **`@database({ hosts })`** puts several DB schemas on one
+  database in the same way.
+- **`@environment({...})`** declares an environment.
+  [Environments](#environments) covers its keys.
+
+The stack takes its service's name, `shop-stack`. A server takes its name
+in the stack: a declared server's class name (`Orders`), or the API a
+default server serves (`shop-api`). The schema files import their
+siblings' handles from the siblings' packages, as a config does, and
+`build` writes any missing sibling handle first. A stack may not import
+`@superschematic/api` or `@superschematic/db`.
+
+### Type a target's values
+
+tsc checks a stack in the editor, and the loader reports tsc's errors, so
+a value tsc refuses fails the build at its line. `target` takes a key of
+the `Targets` interface of `@superschematic/stack`, which lists the core's
+`local`. No package augments it for gcp yet, so declare the gcp target's
+types yourself, in a file of the stack's `src/` that its `tsconfig.json`
+includes:
+
+```ts
+// schemas/services/shop-stack/src/gcp-target.ts
+export {};
+
+declare module "@superschematic/stack" {
+  interface Targets {
+    gcp: {
+      values: { project: string; region: string; production?: boolean };
+      server: {
+        minInstances?: number;
+        maxInstances?: number;
+        concurrency?: number;
+        cpu?: string;
+        memory?: string;
+      };
+      database: {
+        tier?: string;
+        highAvailability?: boolean;
+        version?: "POSTGRES_15" | "POSTGRES_16" | "POSTGRES_17";
+        deletionProtection?: boolean;
+        diskSize?: number;
+      };
+    };
+  }
+}
+```
+
+The loader checks the same values again against the JSON Schemas the gcp
+target registers, so these types are the early warning, not the rule.
+`internal/generator/stackgen/testdata/services/shop-stack` does the same
+for a test target.
+
+### The data forms
+
+A stack has the JSON and YAML forms every schema has. A class is a type
+and its decorator a key of the type. A handle is `{ name, kind }`; an
+`expose` entry or a settings `of` is `{ service: { name, kind } }` or
+`{ deployable: Orders }`; the target's values sit under `values`, platform
+settings under each element's `values`, and an `env` value is `{ value }`
+or `{ parameter }`:
+
+```yaml
+# schemas/services/shop-stack/src/stack.schema.yaml (excerpt)
+kind: Stack
+types:
+  Production:
+    name: Production
+    role: EmbeddedStruct
+    environment:
+      target: gcp
+      values: { project: acme-prod, region: us-east1, production: true }
+      domain: acme.dev
+      settings:
+        - of: { service: { name: shop-db, kind: DB } }
+          values: { tier: db-custom-2-7680, highAvailability: true }
+        - of: { deployable: Orders }
+          values: { memory: 1Gi }
+          env: { FULFILLMENT_REGION: { value: us } }
+```
+
+`internal/generator/stackgen/testdata/yaml/shop-stack` is a whole stack in
+YAML, `extends` included, and builds to the same `environment.json` as its
+TypeScript twin.
+
+## Environments
+
+| Key | What it sets |
+| --- | --- |
+| `target` | the target that places every deployable no setting places elsewhere: `local`, or `gcp` in the installed binary |
+| `<target>` | the target's values, under the target's name: `gcp: { project, region, production }`, or `local: { postgresImage, postgresPort }` |
+| `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
+| `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
+| `settings` | per deployable: `of` a handle or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's |
+| `parameters` | makes the environment a family, one member per value |
+
+`env` binds the server's `@envVars` fields, each to a literal or to
+`{ parameter }`. tsc types the keys from the handle's config: a
+`Secret<T>` field takes no literal, and a `Default<T, V>` field takes a
+`T`. An `@server` or `@database` class takes either kind's settings and
+any `env` key, since tsc cannot see what it serves; the loader checks
+them.
+
+An `@environment` class may extend another. It inherits the parent's
+target, values and settings, which merge key by key, and adds its own
+parameters to the parent's. `Preview` above inherits Staging's project and
+domain, and each of its members is named with the value of `pr` at deploy
+time. A parameter's value is never written into a generated file.
+
+## Build a stack
+
+Build the stack like any service. A single build loads the services it
+reaches from its siblings:
+
+```sh
+superschematic build schemas/services/shop-stack
+superschematic build-all schemas/services
+```
+
+Under the output root, `schemas/dist` by default, the build writes:
+
+- `stack/shop-stack/<environment>/environment.json` for each environment;
+- `server/shop-stack/<server>/`, a Go module for each Go server, holding
+  `main.go`, `go.mod`, a `Dockerfile` and `Dockerfile.dockerignore`.
+
+A TypeScript or Rust server gets no entrypoint yet, and the build log
+says so. The build also scaffolds each implementation a Go server serves
+that is missing: `implementation.go` at the naming file's
+[`[implementation_paths]`](/superschematic/reference/naming/#implementation_paths)
+`go` template (`go/{service}` from the parent of the schemas root), whose
+`New` has the `Constructor` signature and whose every method answers 501
+until you implement it. Where the API's generated `Config` takes them, it
+also writes `AuthMiddleware(deps)`, which refuses every request with 401
+until it verifies your end users, and `PayloadDecryptor(deps)`, which
+refuses every encrypted payload. When no `go.mod` holds the package, it
+writes one beside it. It never writes into a directory that holds a Go
+file, so the package is yours from then on. Outside a stack,
+`build --scaffold` writes the same scaffold for each Go API built. This
+is a different stub from `outputs.api.scaffoldsOutputDir`
+([API routes](/superschematic/guides/api-routes/#operation-sets)), which
+writes one per route.
+
+No `environment.json` is written unless every environment resolves. A
+failure names the stack, the environment and each problem with its code:
+
+```
+stack shop-stack environment Production does not resolve:
+  unbound-field: server Orders: required config field FULFILLMENT_REGION of OrdersConfig has no binding and no default
+```
+
+The installed `superschematic` links the gcp target, so a stack with gcp
+environments builds with it. The core alone registers only `local`, and a
+stack on a target the binary does not link fails with `unknown-target`.
+
+### What is checked offline
+
+Resolution needs no credentials and no network. It stops at the end of the
+first stage that fails, so every model problem reports before anything is
+lowered:
+
+| Code | Refuses |
+| --- | --- |
+| `unbound-field` | a required config field with no binding and no default |
+| `unknown-env-key` | an `env` key that is not a field of the server's `@envVars`, or an `env` on a database |
+| `secret-literal` | a literal or a parameter for a `Secret<T>` field |
+| `kind-mismatch` | a handle whose kind is not the kind of the service it names, or a handle in a place that does not take its kind |
+| `unrealizable` | a deployable its platform cannot run, such as a TypeScript server on `local`, or a server whose APIs are in two languages |
+| `no-connector` | an edge no connector realizes between the two platforms |
+| `expose-not-server` | an exposed deployable that is not a server |
+| `unreachable-edge` | a `calls` edge to an API none of whose operations admits the calling server |
+| `ambiguous-database` | an API with several DB dependencies and no `authDb` |
+| `call-cycle` | servers that call each other, which no callee-first rollout serves |
+| `field-collision` | a config field two types declare for one server, or one a derived field takes |
+| `invalid-values`, `invalid-settings` | target, DNS or platform values that fail their JSON Schema |
+| `lowering` | an error a platform, connector or DNS platform returned, such as a Rust server's sql edge on gcp |
+| `graph` | a dangling or cyclic dependency, an undeclared parameter, properties that fail the schema of their resource type, or an inherited node the parent lacks |
+| `policy` | a target's policy rule |
+
+`invalid-stack`, `unknown-service`, `unknown-deployable`,
+`unknown-target`, `unknown-platform` and `unknown-parameter` cover
+malformed declarations and names nothing registers.
+
+## Run it locally
+
+`stack dev` runs an environment on the core's `local` target and stays in
+the foreground until Ctrl-C. Give each secret a value first; `stack dev`
+refuses a secret that has none and names the file it reads:
+
+```sh
+superschematic stack secrets set Dev --stack schemas/services/shop-stack
+superschematic stack dev schemas/services/shop-stack
+```
+
+It needs Docker, Go, and the migration runner, `superschematic-migrate`,
+on `PATH` or named by `SUPERSCHEMATIC_MIGRATE`
+([Schema migrations](/superschematic/reference/migrations/#the-runner)
+says how to install it). It then:
+
+1. builds the stack and every service it reaches, each with its
+   dependencies;
+2. starts one Postgres container for the environment, published on
+   127.0.0.1 only, and creates a database per DB schema;
+3. migrates each database from the model it recorded to its schema's,
+   expand and contract back to back;
+4. builds each server's entrypoint module with `go build`, starts it with
+   its resolved config and `PORT`, callees first, and waits until it
+   answers `/readyz`. Each line a server prints carries its name.
+
+Ctrl-C stops the servers, callers first, and the container, which keeps
+its data for the next run; `--remove-database` removes it instead.
+
+| Stack concept | On `local` |
+| --- | --- |
+| server | a Go process, built from its entrypoint module. TypeScript and Rust servers do not run locally yet |
+| database | a database on the environment's one Postgres container, `postgres:16-alpine` unless `postgresImage` names another |
+| sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable` |
+| http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential signed by an Ed25519 key pair per calling and called server |
+| secret | a line in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`: `PaymentsSecrets.STRIPE_KEY=sk_test_...` |
+| port | a server's `port` setting and the `postgresPort` value; otherwise a hash of the stack, the environment and the server, the same on every run |
+
+`stack secrets set` writes the secrets file, or you edit it by hand. The
+`.superschematic` directory ignores itself in git, and holds the key
+pairs too; no secret or private key reaches the output root or
+`environment.json`. A local environment refuses a domain, parameters and
+two listeners on one port. The
+[CLI reference](/superschematic/reference/cli/#stack-dev-stack-service-dir)
+lists the flags.
+
+## What environment.json holds
+
+The resolved environment is what a provisioner reads, and it is stable:
+fields in a fixed order and map keys sorted, so a wiring change reads as a
+diff in review. Its top-level keys are `stack`, `environment`, `extends`,
+`target`, `provisioner`, `values`, `parameters`, `domain`, `dns`,
+`deployables`, `edges`, `secrets`, `resources` (the resource graph) and
+`deployOrder`.
+
+Each deployable carries its platform, its name and address in the
+environment, and a binding for every config field, from one of four
+sources: `literal`, `secret`, `derived` or `parameter`. A value may
+reference a node's output (`$output`), a parameter (`$parameter`), or
+both joined (`$concat`). These are the `Orders` server's bindings in
+Staging on gcp:
+
+```json
+"bindings": [
+  { "field": "FULFILLMENT_REGION", "source": "literal", "value": "us" },
+  { "field": "MAX_LINE_ITEMS", "source": "literal", "value": "50", "default": true },
+  {
+    "field": "SHOP_API_SERVICE",
+    "source": "derived",
+    "value": {
+      "credential": {
+        "audience": { "$output": { "resource": "shop-api.service", "name": "uri" } },
+        "source": "google-id-token"
+      },
+      "url": { "$output": { "resource": "shop-api.service", "name": "uri" } }
+    },
+    "edge": "http:Orders->shop-api"
+  },
+  {
+    "field": "SHOP_DB_DATABASE",
+    "source": "derived",
+    "value": {
+      "cloudSql": {
+        "database": { "$output": { "resource": "shop-db.database.shop-db", "name": "name" } },
+        "instance": { "$output": { "resource": "shop-db.instance", "name": "connectionName" } },
+        "user": "orders@acme-staging.iam"
+      }
+    },
+    "edge": "sql:Orders->shop-db"
+  },
+  { "field": "STRIPE_KEY", "source": "secret", "secret": "PaymentsSecrets.STRIPE_KEY" }
+]
+```
+
+Each node of the resource graph has an ID, a type token, its properties,
+`dependsOn`, its phase (`infrastructure`, `rollout` or `exposure`), its
+owners, and `inherited` when a parameterized member reads it from the
+parent environment. `deployOrder` lists the steps: infrastructure; the
+migrations' `expand` phase; the rollout in waves, callees before their
+callers; the migrations' `contract` phase; then exposure.
+
+## The generated server
+
+Each Go server's `main.go` reads its whole configuration from the
+environment. It loads each served API's `EnvConfig`, opens one pgx pool
+per database, shared by the APIs on it and connecting on first use, and
+builds one Go SDK client per API called, which sends the service
+credential its endpoint names and forwards the request's end user. It
+calls each implementation's `New` with its `Deps`, routes each request to
+the API that registers its method and path, answers `GET /healthz` and
+`GET /readyz`, listens on `$PORT` (8080 when unset), logs JSON, and drains
+on SIGTERM. The build refuses two served APIs that register one method
+and path.
+
+A server whose database some environment of the stack places on Cloud
+SQL links the Cloud SQL Go connector and logs in with IAM database
+authentication; every other server links no Google module. One limit
+applies today: a server whose API has a `@requireService` or
+`@allowService` clause refuses to start, since no connector derives the
+callee's service-auth field yet.
+
+No `go.sum` is generated: build with `go build -mod=mod`, which fills it.
+`go mod tidy` can fail, because it also resolves the imports of the
+implementation module's tests, which the server's `go.mod` does not
+replace. The Dockerfile builds from the repository root, the parent of
+the schemas root, after the stack's services are built:
+
+```sh
+docker build -f schemas/dist/server/shop-stack/Orders/Dockerfile .
+```
+
+It builds superscalar's static archive in a Rust stage, links the server
+against it in a Go stage, and runs the binary on distroless `cc` as a
+non-root user. A server whose modules lie outside the repository root, or
+a naming file without `[paths] scalar_go`, gets no Dockerfile, and the
+build says why.
+
+## Deploy to Google Cloud
+
+The gcp target is `extensions/gcp`, linked in the installed binary. Its
+values are `project` and `region`, which are required, and `production`.
+
+| Stack concept | On gcp |
+| --- | --- |
+| server | a Cloud Run service with its own service account; its config in environment variables, a derived field as one variable per member |
+| database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password. A Rust server's sql edge is refused |
+| http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback |
+| internal server | internal ingress only, with Cloud Run's invoker check on |
+| calling server | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
+| exposed server | with a domain, a global external Application Load Balancer and a Certificate Manager certificate for its host, authorized by a DNS record, with the service taking traffic from the load balancer only; without one, its public `run.app` URL |
+| secret | a Secret Manager secret named `<stack>-<Type>-<FIELD>`, an accessor grant to each reading server, and an environment variable that reads its latest version |
+| image | `<region>-docker.pkg.dev/<project>/<stack>/<server>`, names in kebab case, pinned to the digest a deploy is given |
+| parameter | names suffixed with the parameter and its value (`shop-api-pr123`), and a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits |
+
+Settings and their defaults:
+
+| Platform | Setting | Default |
+| --- | --- | --- |
+| `gcp.cloudrun` | `cpu`, `memory` | `1`, `512Mi` |
+| `gcp.cloudrun` | `minInstances`, `maxInstances`, `concurrency` | Cloud Run's |
+| `gcp.cloudsql` | `tier` | `db-custom-1-3840` |
+| `gcp.cloudsql` | `highAvailability` | false: a zonal instance |
+| `gcp.cloudsql` | `version` | `POSTGRES_16` |
+| `gcp.cloudsql` | `deletionProtection` | on in production |
+| `gcp.cloudsql` | `diskSize` | Cloud SQL's |
+
+Backups are on, with point-in-time recovery in production. Two policy
+rules run over every gcp environment: `production-databases-highly-available`
+refuses a zonal instance when `production` is set, and
+`nothing-public-unless-exposed` refuses an internal server that takes
+outside traffic or turns its invoker check off, a load balancer for
+anything but an exposed server, a grant to `allUsers` or
+`allAuthenticatedUsers`, and an instance open to `0.0.0.0/0`. Every
+resource type is pinned at pulumi-gcp 9.37.1 in `extensions/gcp/schemas`,
+and resolution checks each node's properties against it.
+
+### The commands
+
+Each command resolves the environment as the build does, without writing
+a build. They reach Google Cloud with application default credentials,
+and all but `secrets set` run the `pulumi` CLI, which must be on `PATH`:
+
+```sh
+superschematic stack bootstrap Staging
+superschematic stack secrets set Staging
+superschematic stack plan Staging
+superschematic stack deploy Staging
+superschematic stack outputs Staging --out outputs.json
+```
+
+- **`bootstrap`** runs once per project with an owner's credentials, and
+  is safe to run again. It enables the APIs, creates the state bucket
+  `<project>-superschematic-state` and its KMS key, and applies the
+  Artifact Registry repository named after the stack, the
+  `<stack>-deployer` and read-only `<stack>-planner` accounts, the
+  `builder` account Cloud Build runs as, the `migrator` account the
+  migration job runs as, and Workload Identity Federation for the GitHub
+  repository of the git remote.
+- **`secrets set`** asks for each secret that has no value and stores it
+  in Secret Manager. On a fresh environment, deploy first: its
+  infrastructure step creates each secret's storage, and the deploy then
+  asks for the missing values at a terminal.
+- **`plan`** changes nothing: the provisioner's plan of every resource,
+  each database's migration plan, the secrets with no value and the
+  servers with no image.
+- **`build`** builds the image of each server whose build context
+  changed, on Cloud Build, and prints each as a `--image` flag. It
+  deploys nothing.
+- **`deploy`** first builds, as `build` does, each server whose context
+  changed and that `--image` names no image for. It then runs the deploy
+  order: infrastructure, each database's `expand` phase, the servers wave
+  by wave, callees first, the `contract` phase, then exposure. Each
+  migration phase runs as an execution of the stack's Cloud Run job,
+  `<stack>-migrate`, which also gives each server that connects to a
+  database its privileges. The deploy records a manifest in the state
+  bucket after every step, and refuses a migration hazard no `--allow`
+  acknowledges.
+- **`destroy`** removes a run's resources and its manifest, and
+  **`outputs`** prints the applied outputs.
+
+A build's context is the repository root, cut down by the
+`Dockerfile.dockerignore` beside each server's Dockerfile. `--image
+<server>=...` takes a server's image by digest instead of building it,
+and `--no-build` builds nothing. A deploy keeps the image the manifest
+records for a server whose context did not change. A parameterized
+member takes its values with `--param pr=123`.
+
+The migration job's image is built once per release of the runner. A
+binary built from a checkout names no release, so set
+`SUPERSCHEMATIC_MIGRATE_IMAGE` to an image of `superschematic-migrate`, by
+digest, in the stack's repository. None of this has run against Google
+Cloud yet. The
+[CLI reference](/superschematic/reference/cli/#stack-deploy-environment)
+has every flag, the hazard gate and the manifest.
+
+## DNS
+
+An environment with a `domain` writes two records per exposed server on
+gcp: the host's A record and the certificate's `_acme-challenge` CNAME.
+Its DNS platform turns them into resources, in the same provisioner run.
+
+- **Cloud DNS**, `gcp.clouddns`, is the gcp target's default. It writes
+  into a managed zone that already holds the domain: `zone` names it,
+  defaulting to the domain with its dots as hyphens, and `project` names
+  the zone's project when it is not the environment's.
+- **Cloudflare DNS**, `cloudflare`, writes into a Cloudflare zone. Its
+  values are `zone` (the zone's name), `zoneId` (its 32-character id from
+  the zone's Overview page, which is not a secret) and `proxied`, false by
+  default.
+
+```ts
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-staging", region: "us-east1" },
+  domain: "staging.acme.dev",
+  dns: { cloudflare: { zone: "acme.dev", zoneId: "023e105f4ecef8ad9ca31a8372d0c353" } }
+})
+export abstract class Staging {}
+```
+
+Cloudflare records are `cloudflare:index/dnsRecord:DnsRecord` nodes of
+pulumi-cloudflare 6.22.0, pinned and checked offline like gcp's. They are
+DNS-only with a TTL of 300 seconds, unless `proxied` proxies each host's
+A, AAAA and CNAME records. A TXT record, or a name whose first label
+begins with an underscore, is never proxied. A domain or record outside
+the zone is refused. Resolution writes the API token the provider reads,
+`CLOUDFLARE_API_TOKEN`, into `environment.json` under `dns.credentials`
+as a secret name (`<stack>-cloudflare-dns-<zone>`, dots as underscores),
+never a value.
+
+The installed binary links the Cloudflare extension, with its provider
+pin. `stack bootstrap` asks for the token and stores it in the target's
+secret store, and `plan`, `deploy`, `destroy` and `outputs` set
+`CLOUDFLARE_API_TOKEN` from it for each run. A distribution of your own
+links it the same way:
+
+```go
+cli.New(cli.Config{Name: "superschematic"},
+	gcp.Extension{},
+	cloudflare.Extension{},
+	pulumi.Extension{ProviderVersions: map[string]string{
+		"gcp":              gcp.ProviderVersion,
+		cloudflare.Package: cloudflare.ProviderVersion,
+	}},
+)
+```
+
+## The Pulumi provisioner
+
+`extensions/pulumi` is the provisioner the gcp target names, and the cloud
+commands drive it. It renders an environment's graph as `Pulumi.yaml` in
+`<schemas-root>/dist/program/<stack>/<environment>`: one resource per
+node, keyed and named by the node's ID, with `dependsOn`,
+`${node.output}` references and the provider version pinned for each
+package. The same environment renders the same bytes, so you can review
+the program. The Pulumi project is the stack's name in kebab case, and
+each run is a Pulumi stack of it: `staging`, or `preview.pr-123` for a
+member of a parameterized environment, which reads the nodes it inherits
+from its parent's stack through a stack reference.
+
+Each step of the deploy order is one targeted `up` of that program, and
+the last step that holds nodes updates the whole program, which deletes
+what the graph dropped. Migrations run between steps, outside the graph.
+The release pins the `pulumi` CLI at the Go SDK's version,
+`PULUMI_VERSION` in `tools.env`.
+
+## Typed bindings
+
+`extensions/pulumi/bindings` writes a Go package over a stack's outputs,
+for scripts and for hand-written Pulumi programs that need a resource the
+vocabulary lacks. It has no command: call it from Go with each
+environment's `environment.json` and the outputs file `stack outputs --out`
+wrote, which `bindings.UnmarshalOutputs` reads and checks the version of.
+
+```go
+env, err := stack.Unmarshal(environmentJSON)
+if err != nil {
+	return err
+}
+outputs, err := bindings.UnmarshalOutputs(outputsJSON)
+if err != nil {
+	return err
+}
+err = bindings.Write("internal/shopstack", "shopstack",
+	[]bindings.Environment{{Resolved: env, Outputs: outputs}})
+```
+
+It writes two packages:
+
+- `shopstack`, with an `Environment` type that has a field per deployable
+  and a value per applied environment: `shopstack.Staging.ShopAPI.Address`,
+  or a node's outputs under the node it comes from. DNS records sit in a
+  field of their own.
+- `shopstack/pulumi`, package `shopstackpulumi`, with the same types over
+  Pulumi outputs and a function per environment that reads one through a
+  stack reference: `shopstackpulumi.Staging(ctx)`, or
+  `shopstackpulumi.Preview(ctx, "123")` for a member.
+
+Generate the binding again after each deploy.
+
+## Service callers
+
+An API decides which servers may call each operation with
+`@requireService` and `@allowService`
+([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
+A stack's `calls` edges must agree: every edge from a server to an API
+must reach at least one operation that admits that server, or resolution
+fails with `unreachable-edge`. A handle in `from` that names a service the
+stack does not deploy is not an error, since one API is written once and
+deployed in many stacks.
+
+## Write your own target
+
+Targets, platforms, connectors, DNS platforms and provisioners are
+registrations, so a new cloud or tool needs no core edit.
+[A deploy target](/superschematic/extending/write-an-extension/#a-deploy-target)
+lists them, and [Stack targets](/superschematic/extending/stack-targets/)
+covers writing and testing one.

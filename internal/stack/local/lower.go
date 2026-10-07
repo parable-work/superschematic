@@ -44,6 +44,11 @@ const (
 	KeyAlgorithm   = "Ed25519"
 	TokenAlgorithm = "EdDSA"
 
+	// SignedTokenLifetime is how long, in seconds, a token signed with an
+	// edge's key lives, exp minus iat, and the most the callee accepts
+	// (D37).
+	SignedTokenLifetime = 300
+
 	// ReadinessPath is the path the generated entrypoint answers once it
 	// is ready; HealthPath once it runs.
 	ReadinessPath = "/readyz"
@@ -337,10 +342,10 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 // reference to its private key, which the provisioner resolves when it
 // starts the caller and which no file under the output root holds.
 //
-// The callee does not get the public key yet. Which config field carries a
-// callee's verification keys is for the connectors and the generated
-// entrypoint to define together; the node's publicJwk output is what this
-// connector will give it.
+// The callee gets the edge's public key, a reference to the node's
+// publicJwk output: the caller is an issuer of its own, named by its
+// deployable, whose tokens carry the callee's deployable as their audience
+// and live at most SignedTokenLifetime seconds.
 //
 // A server that calls an API it serves itself reaches it on its own
 // loopback URL, with no key and no credential, as on every target.
@@ -350,6 +355,10 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 		return registry.Connected{Value: ir.ServiceEndpoint{URL: to.Address}}, nil
 	}
 	key := keyPairID(from.Name, to.Name)
+	serves := make([]string, len(from.Services))
+	for i, ref := range from.Services {
+		serves[i] = ref.Name
+	}
 	return registry.Connected{
 		Resources: []*ir.Resource{{
 			ID:   key,
@@ -369,6 +378,14 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 				Issuer:   from.Name,
 				Key:      ir.Output{Resource: key, Name: "privateJwk"},
 			},
+		},
+		Callee: ir.ServiceAuthIssuer{
+			Issuer:             from.Name,
+			Audience:           to.Name,
+			Algorithms:         []string{ir.AlgorithmEdDSA},
+			Keys:               []ir.ServiceAuthKey{{JWK: ir.Output{Resource: key, Name: "publicJwk"}}},
+			MaxLifetimeSeconds: SignedTokenLifetime,
+			Callers:            []ir.ServiceAuthCaller{{Subject: from.Name, Deployable: from.Name, Serves: serves}},
 		},
 	}, nil
 }

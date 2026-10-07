@@ -71,10 +71,21 @@ type Extension struct {
 	Cloud Cloud
 
 	// Migrations runs the migration plans of the target's databases
-	// between a deploy's steps. Nil runs none, so a deploy with a
-	// migration to run is refused: the migration job (section 8.4) is not
-	// built yet.
+	// between a deploy's steps. Nil runs each phase as an execution of the
+	// stack's Cloud Run job, which runs superschematic-migrate on Cloud SQL
+	// (section 8.4); tests pass a fake.
 	Migrations registry.MigrationRunner
+
+	// MigrateImage, when set, is the image of superschematic-migrate, by
+	// digest, that the migration job runs; else SUPERSCHEMATIC_MIGRATE_IMAGE
+	// names one, else the job runs the image built from the release
+	// MigrateVersion names.
+	MigrateImage string
+
+	// MigrateVersion is the release of superschematic-migrate whose image
+	// the migration job runs. Empty is the release the binary is part of,
+	// none for a binary built from a checkout.
+	MigrateVersion string
 }
 
 // Name is the extension's name.
@@ -82,8 +93,8 @@ func (Extension) Name() string { return Name }
 
 // Register adds the gcp target, its platforms, connectors and DNS
 // platform, the pinned schema of every resource type they and bootstrap
-// emit, and the target's deploy seams: the state bucket, Secret Manager
-// and bootstrap.
+// emit, and the target's deploy seams: the state bucket, Secret Manager,
+// bootstrap, image builds with Cloud Build and the migration job.
 func (e Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		{
@@ -146,8 +157,18 @@ func (e Extension) Register(r *registry.Registry) error {
 		State:      stateStore{ext: e},
 		Secrets:    secretStore{ext: e},
 		Bootstrap:  bootstrapper{ext: e},
-		Migrations: e.Migrations,
+		Migrations: e.migrations(),
+		Builder:    imageBuilder{ext: e},
 	})
+}
+
+// migrations is the extension's migration runner: the one it was given, or
+// the Cloud Run job.
+func (e Extension) migrations() registry.MigrationRunner {
+	if e.Migrations != nil {
+		return e.Migrations
+	}
+	return migrationRunner{ext: e}
 }
 
 // resourceTypeSchemas returns the JSON Schema of every pinned type, keyed

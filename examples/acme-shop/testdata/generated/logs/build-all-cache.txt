@@ -2,4 +2,5 @@
   OK: shop-api (up to date)
   OK: shop-common (up to date)
   OK: shop-orders (up to date)
+  OK: shop-stack (up to date)
   OK: shop-storefront (up to date)

@@ -72,7 +72,7 @@ import type { ValidationIssue, Veto } from '../errors.js';
 import type { EngineEvent } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
-import type { BehaviorDeclaration } from './declaration.js';
+import type { BehaviorDeclaration, JSONSchema, OperationScope } from './declaration.js';
 
 /** A JSON object a behavior reads: deep-frozen. */
 export type FrozenJSON = Readonly<Record<string, unknown>>;
@@ -884,6 +884,76 @@ export interface ConfigSchema {
   readonly configs: Readonly<Record<string, unknown>>;
 }
 
+/** One operation of a schema's instance type, as a behavior's guidance reads it (DescribeTarget.operations). */
+export interface DescribedTypeOperation {
+  readonly name: string;
+  /** The behavior that adds it; absent for create, get, list, update and delete. */
+  readonly behavior?: string;
+  readonly writes: boolean;
+  readonly scope: OperationScope;
+}
+
+/**
+ * The type a config is described on, for guidance and createParamsSchema:
+ * the schema, its instance type, every behavior the type lists with its
+ * config as the schema holds it, and every operation the type has.
+ */
+export interface DescribeTarget {
+  readonly schema: string;
+  readonly type: string;
+  /** Every behavior the type lists, in order. */
+  readonly behaviors: readonly string[];
+  /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
+  readonly configs: Readonly<Record<string, unknown>>;
+  /** create, get, list, update and delete, then each behavior's operations in the type's list order. */
+  readonly operations: readonly DescribedTypeOperation[];
+}
+
+/**
+ * One refusal an operation can meet, as an operation's @docs guidance
+ * lists an error (ir.ToolOperationGuidanceError): a veto code the
+ * behavior's declaration lists, which a refused call carries in the
+ * problem's details.code.
+ */
+export interface GuidanceError {
+  readonly code: string;
+  /** What it means for the operation under the config; the declaration's description of the code when absent. */
+  readonly description?: string;
+  /** What a caller usually does before it tries again. */
+  readonly commonCorrection: string;
+}
+
+/**
+ * What a behavior says about one operation under its config, in the
+ * members an operation's @docs guidance has (ir.ToolOperationGuidance):
+ * plain sentences, each member optional.
+ */
+export interface OperationGuidance {
+  /** When a caller, a person or a model, chooses the operation. */
+  readonly useWhen?: string;
+  /** When it chooses another, and which. */
+  readonly doNotUseWhen?: string;
+  /** What a call that succeeds returns or leaves. */
+  readonly success?: string;
+  /** The behavior's vetoes the operation can meet. */
+  readonly errors?: readonly GuidanceError[];
+}
+
+/**
+ * What a behavior tells a caller about a type under its config
+ * (BehaviorImplementation.guidance).
+ */
+export interface BehaviorGuidance {
+  /** What it does on the type under the config: a sentence or a few, which the describe document shows beside the config. */
+  readonly summary: string;
+  /**
+   * By operation name, what it says about each operation of the type: its
+   * own, the ones every schema has (create, get, list, update, delete) and
+   * other behaviors' it guards, as DescribeTarget.operations names them.
+   */
+  readonly operations?: Readonly<Record<string, OperationGuidance>>;
+}
+
 /** An instance operation's handler. Its result is checked against resultSchema. */
 export type OperationHandler<Config> = (context: OperationContext<Config>, params: FrozenJSON) => unknown;
 
@@ -998,6 +1068,32 @@ export interface BehaviorImplementation<Config = unknown> {
    * names in the form.
    */
   instanceSchema?(config: Config, form: InstanceSchemaForm, typeSchema: TypeSchema): readonly unknown[];
+
+  /**
+   * What the behavior tells a caller about the type under its config: a
+   * summary, which the describe document carries beside the config, and,
+   * by operation name, the guidance it gives each operation of the type
+   * (its own, the built-in ones and other behaviors' it guards), which the
+   * engine merges into each operation's tool guidance, the owner's first,
+   * then the others' in list order. Each error names a veto code its
+   * declaration lists. It is computed once per published version, so it
+   * returns the same value for the same config and target: short, plain
+   * sentences, deterministic.
+   */
+  guidance?(config: Config, target: DescribeTarget): BehaviorGuidance;
+
+  /**
+   * The create parameters it takes under the config, narrower than its
+   * declaration's createParamsSchema: the names a config gives, the ones
+   * it requires. The describe document and the create tool show it in
+   * place of the declared one. It describes what initialize enforces, as
+   * instanceSchema describes what validate enforces: the engine still
+   * checks a create against the declared schema, and initialize refuses
+   * what the config refuses. An object schema whose additionalProperties
+   * is false or a schema; only a behavior whose declaration has a
+   * createParamsSchema has it.
+   */
+  createParamsSchema?(config: Config, target: DescribeTarget): JSONSchema;
 
   /**
    * A handler per declared operation of scope instance (the default). A

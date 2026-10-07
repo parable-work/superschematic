@@ -5,9 +5,13 @@
 //	superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
 //	superschematic-migrate status --service NAME [--model] [--database-url URL]
 //	superschematic-migrate adopt --model model.json [--database-url URL]
+//	superschematic-migrate job --job job.json|gs://bucket/job.json
 //	superschematic-migrate version
 //
-// A d1:// database URL reads the API token from CLOUDFLARE_API_TOKEN.
+// A d1:// database URL reads the API token from CLOUDFLARE_API_TOKEN. A job
+// document runs a phase of several plans and gives the servers that
+// connect their privileges, on Cloud SQL through the Cloud SQL Go
+// connector.
 // Exit codes: 0 done, 1 refused or failed, 2 usage.
 package main
 
@@ -41,6 +45,7 @@ const usage = `usage:
   superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
   superschematic-migrate status --service NAME [--model] [--database-url URL]
   superschematic-migrate adopt --model model.json [--database-url URL]
+  superschematic-migrate job --job job.json|gs://bucket/job.json
   superschematic-migrate version
 
 --database-url defaults to $DATABASE_URL. A postgres:// or postgresql://
@@ -48,6 +53,13 @@ URL selects Postgres; a sqlite: URL, a file: URI or a path selects SQLite;
 a d1://<account id>/<database id> URL selects a Cloudflare D1 database,
 reached with the API token in $CLOUDFLARE_API_TOKEN. SQLite and D1 run
 sqlite plans.
+
+job runs a job document: one phase of the plans it names, each on its
+database, then the read and write privileges of the roles it lists. Its
+databases are on one Cloud SQL instance, reached through the Cloud SQL Go
+connector with IAM database authentication, or each at its URL. A gs://
+document is read with application default credentials, or from
+$STORAGE_EMULATOR_HOST when it is set.
 `
 
 func main() {
@@ -67,6 +79,9 @@ type options struct {
 	// d1 are the D1 driver's options but the token, which comes from
 	// CLOUDFLARE_API_TOKEN. Tests point them at a fake server.
 	d1 d1.Options
+	// cloudSQL dials a job's Cloud SQL instance; nil is the Cloud SQL Go
+	// connector's. Tests dial a local server.
+	cloudSQL func(ctx context.Context, instance string) (sqlDialer, error)
 }
 
 // run runs one command and returns its exit code.
@@ -87,6 +102,8 @@ func runWith(ctx context.Context, args []string, o options) int {
 		err = status(ctx, args[1:], o)
 	case "adopt":
 		err = adopt(ctx, args[1:], o)
+	case "job":
+		err = job(ctx, args[1:], o)
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(o.stdout, usage)
 		return exitOK

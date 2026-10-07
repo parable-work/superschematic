@@ -369,9 +369,19 @@ func TestRefusals(t *testing.T) {
 		t.Run("the wrong baseline", func(t *testing.T) {
 			url := testdb.New(t, db)
 			r := newRunner(t, url)
-			refused(t, r, evolve, migrate.All, "the plan starts from model "+evolve.From, "service shop has no applied model", "status --model")
+			// With no applied model, status --model has nothing to print:
+			// the refusal says to adopt the model the database holds.
+			noModel := refused(t, r, evolve, migrate.All, "the plan starts from model "+evolve.From, "service shop has no applied model",
+				"record the model it matches with superschematic-migrate adopt", "plan --print-model", "if it is empty, plan from an empty database")
+			if strings.Contains(noModel, "status --model") {
+				t.Fatalf("%q points at status --model, which fails with no applied model", noModel)
+			}
 			apply(t, r, create, migrate.All)
-			refused(t, r, audit, migrate.All, "the plan starts from model "+audit.From, "service shop is at model "+create.To)
+			otherModel := refused(t, r, audit, migrate.All, "the plan starts from model "+audit.From, "service shop is at model "+create.To,
+				"plan again from the applied model (superschematic-migrate status --model)")
+			if strings.Contains(otherModel, "adopt") {
+				t.Fatalf("%q points at adopt, though the database recorded a model", otherModel)
+			}
 			if st := status(t, r, "shop"); st.PlanHash != "" || st.ModelHash != create.To {
 				t.Fatalf("a refusal changed the state: %+v", st)
 			}

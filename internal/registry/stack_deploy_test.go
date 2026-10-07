@@ -19,6 +19,9 @@ func (nopState) WriteManifest(context.Context, Run, []byte) error  { return nil 
 func (nopState) DeleteManifest(context.Context, Run) error         { return nil }
 func (nopState) Bootstrap(context.Context, BootstrapRequest) error { return nil }
 func (nopState) Migrate(context.Context, MigrationRequest) error   { return nil }
+func (nopState) Build(context.Context, BuildRequest) (string, error) {
+	return "", nil
+}
 
 // TestRegisterTargetDeploySeams covers the refusals of a deploy seam a
 // target cannot use.
@@ -30,8 +33,10 @@ func TestRegisterTargetDeploySeams(t *testing.T) {
 	}{
 		{"state without provisioner", TargetSpec{Name: "fake", State: nopState{}}, `target "fake" has State but names no provisioner`},
 		{"bootstrap without provisioner", TargetSpec{Name: "fake", State: nopState{}, Bootstrap: nopState{}}, "has State, Bootstrap but names no provisioner"},
-		{"bootstrap without state", TargetSpec{Name: "fake", Provisioner: "fake", Bootstrap: nopState{}}, "has Bootstrap or Migrations but no State"},
-		{"migrations without state", TargetSpec{Name: "fake", Provisioner: "fake", Migrations: nopState{}}, "has Bootstrap or Migrations but no State"},
+		{"bootstrap without state", TargetSpec{Name: "fake", Provisioner: "fake", Bootstrap: nopState{}}, "has Bootstrap, Migrations or Builder but no State"},
+		{"migrations without state", TargetSpec{Name: "fake", Provisioner: "fake", Migrations: nopState{}}, "has Bootstrap, Migrations or Builder but no State"},
+		{"builder without provisioner", TargetSpec{Name: "fake", State: nopState{}, Builder: nopState{}}, "has State, Builder but names no provisioner"},
+		{"builder without state", TargetSpec{Name: "fake", Provisioner: "fake", Builder: nopState{}}, "has Bootstrap, Migrations or Builder but no State"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,7 +46,7 @@ func TestRegisterTargetDeploySeams(t *testing.T) {
 			}
 		})
 	}
-	sound := TargetSpec{Name: "fake", Provisioner: "fake", State: nopState{}, Bootstrap: nopState{}, Migrations: nopState{}}
+	sound := TargetSpec{Name: "fake", Provisioner: "fake", State: nopState{}, Bootstrap: nopState{}, Migrations: nopState{}, Builder: nopState{}}
 	if err := New(naming.Default()).RegisterTarget(sound); err != nil {
 		t.Errorf("a target with every seam: %v", err)
 	}
@@ -76,5 +81,41 @@ func TestRunCheckAndName(t *testing.T) {
 	}
 	if got := (Run{Environment: plain}).Name(); got != "Staging" {
 		t.Errorf("Name = %s", got)
+	}
+}
+
+// TestBuildRequestCheck covers the refusals of a malformed build request.
+func TestBuildRequestCheck(t *testing.T) {
+	env := &ir.ResolvedEnvironment{Environment: "Staging", Deployables: []*ir.ResolvedDeployable{
+		{Name: "shop-api", Kind: ir.DeployableServer},
+		{Name: "shop-db", Kind: ir.DeployableDatabase},
+	}}
+	sound := BuildRequest{
+		Run: Run{Environment: env}, Server: "shop-api", Context: "/tmp/ctx.tar.gz",
+		ContextDigest: "sha256:" + strings.Repeat("ab", 32), Dockerfile: "schemas/dist/server/Shop/shop-api/Dockerfile",
+	}
+	if err := sound.Check(); err != nil {
+		t.Fatalf("a sound request: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*BuildRequest)
+		want   string
+	}{
+		{"no run", func(r *BuildRequest) { r.Run = Run{} }, "no environment"},
+		{"a database", func(r *BuildRequest) { r.Server = "shop-db" }, `has no server "shop-db"`},
+		{"no context", func(r *BuildRequest) { r.Context = "" }, "no context archive"},
+		{"a bad digest", func(r *BuildRequest) { r.ContextDigest = "sha256:abc" }, "is not sha256:<64 hex digits>"},
+		{"an absolute Dockerfile", func(r *BuildRequest) { r.Dockerfile = "/Dockerfile" }, "not a slash-separated path inside the context"},
+		{"a Dockerfile outside", func(r *BuildRequest) { r.Dockerfile = "../Dockerfile" }, "not a slash-separated path inside the context"},
+		{"an unclean Dockerfile", func(r *BuildRequest) { r.Dockerfile = "a/./Dockerfile" }, "not a slash-separated path inside the context"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := sound
+			tc.change(&r)
+			if err := r.Check(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Check = %v, want an error containing %q", err, tc.want)
+			}
+		})
 	}
 }

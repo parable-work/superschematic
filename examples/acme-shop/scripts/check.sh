@@ -12,8 +12,10 @@
 #
 # Asserts, in order:
 #   1. build-all builds every service with the binary that links no
-#      extension, dependencies first;
-#   2. every generated Go module builds and vets;
+#      extension, dependencies first, and the stack, shop-stack, last of
+#      the services it deploys, which writes each server's entrypoint;
+#   2. every generated Go module builds and vets, the entrypoints of
+#      shop-stack's servers included;
 #   3. the generated TypeScript router and SDKs, and the app in typescript/,
 #      type-check; the generated Python packages import and python/'s type
 #      tests pass; the Rust client in rust/ builds against the generated Rust
@@ -24,7 +26,10 @@
 #      compare what they print; then run all four clients against
 #      shop-orders served by the generated Rust server (rust-server/,
 #      built with --api-language RUST into schemas/dist-rust) and check
-#      they print the same;
+#      they print the same; and, when Docker runs, `superschematic stack
+#      dev` runs shop-stack's Dev environment, Postgres and both Go servers
+#      on their generated entrypoints, and the test calls each API through
+#      its SDK (milestone 1 of docs/stack-model.md);
 #   4a. the Topcoat app in topcoat/ passes its tests: its pages call
 #      shop-orders in-process through the crate the Topcoat extension
 #      writes into schemas/dist-rust, with the binary that links it;
@@ -82,7 +87,7 @@ echo "==> build-all"
 rm -rf "$DIST"
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 5 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 6 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -93,6 +98,8 @@ built_before() {
 built_before shop-common shop-storefront
 built_before shop-db shop-api
 built_before shop-db shop-orders
+built_before shop-api shop-stack
+built_before shop-orders shop-stack
 # The pages show the summary lines of build-all, not each service's build.
 grep -E '^(Discovered|  Shared|  OK:|  Wrote|All |$)' "$OUT/logs/build-all.full.txt" >"$OUT/logs/build-all.txt"
 
@@ -110,6 +117,13 @@ for module in \
   orm/shop-db api/shop-api api/shop-orders sdk/go/shop-api sdk/go/shop-orders; do
   echo "    $module"
   go_module_compiles "$DIST/$module"
+done
+# superschematic writes no go.sum for an entrypoint, and go mod tidy would
+# resolve the imports of go/'s tests too; -mod=mod fills it as the build
+# reads each module, as stack dev's build does.
+for server in shop-api shop-orders; do
+  echo "    server/shop-stack/$server"
+  (cd "$DIST/server/shop-stack/$server" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
 done
 
 echo "==> TypeScript: the generated router and SDKs type-check"
@@ -182,11 +196,15 @@ echo "==> Topcoat: the app's pages call shop-orders in-process"
 test -f "$SCHEMAS/dist-rust/topcoat/shop-orders/src/operations.rs"
 (cd "$EXAMPLE_DIR/topcoat" && cargo test --locked -q)
 
-echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server"
+echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server; stack dev runs the shop"
+# stack dev applies shop-db's migrations with the migration runner.
+(cd "$REPO_ROOT/runtime/migrate/go" &&
+  CGO_ENABLED=0 GOWORK=off go build -o "$OUT/superschematic-migrate" ./cmd/superschematic-migrate)
 (cd "$EXAMPLE_DIR/go" && GOFLAGS=-mod=mod go mod tidy >/dev/null && go build ./... && go vet ./...)
 (cd "$EXAMPLE_DIR/go" &&
   ACME_SHOP_CLIENTS=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
     ACME_SHOP_RUST_CLIENT="$RUST_CLIENT" ACME_SHOP_RUST_SERVER="$RUST_SERVER" \
+    ACME_SHOP_SUPERSCHEMATIC="$OUT/superschematic" SUPERSCHEMATIC_MIGRATE="$OUT/superschematic-migrate" \
     go test -count=1 -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
 grep -E '^(--- |ok)' "$OUT/go-test.log"
 for server in Go Rust; do
@@ -194,6 +212,10 @@ for server in Go Rust; do
     grep -q "^    --- PASS: TestEverySDKCallsThe${server}Server/$language " "$OUT/go-test.log"
   done
 done
+# The stack runs wherever Docker does; the test skips only without it.
+if docker info >/dev/null 2>&1; then
+  grep -q '^--- PASS: TestStackDevRunsTheShop ' "$OUT/go-test.log"
+fi
 
 echo "==> the TypeScript app's tests"
 (cd "$APP" && bun test)
@@ -209,11 +231,13 @@ QUOTED=(
   types/go/shop-db/types.go
   api/shop-api/interfaces.go
   api/shop-api/routes.go
+  api/shop-api/deps.go
   api/shop-orders/interfaces.go
   api/shop-orders/routes.go
   api/shop-storefront/interfaces.ts
   types/python/shop-common/acme_types_shop_common/types.py
   types/rust/shop-common/src/types.rs
+  stack/shop-stack/Dev/environment.json
 )
 mkdir -p "$OUT/quoted"
 for path in "${QUOTED[@]}"; do
@@ -231,8 +255,12 @@ capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" 
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 5
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 6
+# The stack's references to the APIs it deploys are recorded under dist
+# (D41), so once dist is gone it builds again, and is cached under its new
+# key; every other service is restored.
 test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 5
+grep -q '^  OK: shop-stack (built, cached)$' "$OUT/logs/build-all-restore.txt"
 rm -f "$OUT"/logs/*.full.txt
 cp -R "$OUT/logs" "$OUT/quoted/logs"
 

@@ -33,6 +33,7 @@ import { BehaviorError, EngineError, OperationParamsError } from '../../errors.j
 import { setMember } from '../../instances/patch.js';
 import { BehaviorConfigError, defineBehavior } from '../behavior.js';
 import declaration from './declarations/Workflow.behavior.json' with { type: 'json' };
+import { workflowGuidance } from './guidance/workflow.js';
 
 /** One transition of a Workflow config. */
 export interface WorkflowTransition {
@@ -151,6 +152,8 @@ export const workflow = defineBehavior<WorkflowConfig>({
     const gone = before.states.filter((state) => !after.states.includes(state));
     return gone.length > 0 ? `an instance may be in ${gone.map((state) => `"${state}"`).join(', ')}, which the new config drops` : undefined;
   },
+
+  guidance: workflowGuidance,
 
   migrations: [{ version: 1, name: 'status', columns: { status: { type: 'text' } } }],
 

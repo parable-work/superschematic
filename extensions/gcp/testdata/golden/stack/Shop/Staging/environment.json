@@ -82,12 +82,7 @@
           "source": "derived",
           "value": {
             "credential": {
-              "audience": {
-                "$output": {
-                  "resource": "shop-api.service",
-                  "name": "uri"
-                }
-              },
+              "audience": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api",
               "source": "google-id-token"
             },
             "url": {
@@ -321,6 +316,7 @@
         "id": "Orders.database-user.shop-db",
         "type": "gcp:sql/user:User",
         "properties": {
+          "deletionPolicy": "ABANDON",
           "instance": {
             "$output": {
               "resource": "shop-db.instance",
@@ -401,6 +397,9 @@
         "id": "Orders.service",
         "type": "gcp:cloudrunv2/service:Service",
         "properties": {
+          "customAudiences": [
+            "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/orders"
+          ],
           "deletionProtection": false,
           "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
           "invokerIamDisabled": false,
@@ -421,12 +420,7 @@
                   },
                   {
                     "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
-                    "value": {
-                      "$output": {
-                        "resource": "shop-api.service",
-                        "name": "uri"
-                      }
-                    }
+                    "value": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api"
                   },
                   {
                     "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
@@ -479,6 +473,15 @@
                   }
                 ],
                 "image": "us-east1-docker.pkg.dev/acme-staging/shop/orders",
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 15,
+                  "timeoutSeconds": 5
+                },
                 "ports": {
                   "containerPort": 8080
                 },
@@ -487,6 +490,15 @@
                     "cpu": "1",
                     "memory": "512Mi"
                   }
+                },
+                "startupProbe": {
+                  "failureThreshold": 24,
+                  "httpGet": {
+                    "path": "/readyz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 4
                 },
                 "volumeMounts": [
                   {
@@ -904,6 +916,7 @@
         "id": "shop-api.database-user.shop-db",
         "type": "gcp:sql/user:User",
         "properties": {
+          "deletionPolicy": "ABANDON",
           "instance": {
             "$output": {
               "resource": "shop-db.instance",
@@ -1058,6 +1071,9 @@
         "id": "shop-api.service",
         "type": "gcp:cloudrunv2/service:Service",
         "properties": {
+          "customAudiences": [
+            "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api"
+          ],
           "deletionProtection": false,
           "ingress": "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER",
           "invokerIamDisabled": true,
@@ -1110,6 +1126,15 @@
                   }
                 ],
                 "image": "us-east1-docker.pkg.dev/acme-staging/shop/shop-api",
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 15,
+                  "timeoutSeconds": 5
+                },
                 "ports": {
                   "containerPort": 8080
                 },
@@ -1118,6 +1143,15 @@
                     "cpu": "1",
                     "memory": "512Mi"
                   }
+                },
+                "startupProbe": {
+                  "failureThreshold": 24,
+                  "httpGet": {
+                    "path": "/readyz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 4
                 },
                 "volumeMounts": [
                   {
@@ -1261,6 +1295,32 @@
         "owners": [
           "shop-db"
         ]
+      },
+      {
+        "id": "shop-db.migrator",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "databaseRoles": [
+            "cloudsqlsuperuser"
+          ],
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "shop-migrator@acme-staging.iam",
+          "project": "acme-staging",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "shop-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
       }
     ]
   },
@@ -1286,7 +1346,8 @@
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.trace-agent",
         "shop-db.database.shop-db",
-        "shop-db.instance"
+        "shop-db.instance",
+        "shop-db.migrator"
       ]
     },
     {

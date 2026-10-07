@@ -225,7 +225,7 @@ func TestRefusalsAndFailures(t *testing.T) {
 			invoke(t, nil, "apply", "--plan", fixturePath(other, "01-create"), "--database-url", url).
 				expect(t, exitFailed, "the plan is for "+string(other)+" and the database URL selects "+string(dialect))
 			invoke(t, nil, "apply", "--plan", fixturePath(dialect, evolveName), "--database-url", url).
-				expect(t, exitFailed, "superschematic-migrate status --model")
+				expect(t, exitFailed, "service shop has no applied model", "superschematic-migrate adopt")
 			invoke(t, nil, "apply", "--plan", fixturePath(dialect, evolveName), "--phase", "contract", "--database-url", url).
 				expect(t, exitFailed, "service shop has no applied model")
 

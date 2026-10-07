@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -307,11 +309,16 @@ type DerivedVariable struct {
 // variables, one per member (section 3.4). A member's variable is the
 // field's name, an underscore, and the member's name in upper snake case;
 // a nested member adds its own name the same way, and a list of strings
-// is one variable that joins them with commas:
+// is one variable that joins them with commas. A list of objects, or an
+// empty list, is a variable that holds the list's length, and each
+// object's members add the object's index to the list's name. A whole
+// number is its decimal:
 //
 //	SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE  cloudSql.instance
 //	SHOP_API_SERVICE_URL                 url
 //	SHOP_API_SERVICE_CREDENTIAL_HEADERS  credential.headers
+//	SHOP_API_CALLERS_ISSUERS             the length of issuers
+//	SHOP_API_CALLERS_ISSUERS_0_AUDIENCE  issuers[0].audience
 //
 // A platform sets each variable on the server, and may set one from its
 // secret store; the generated loaders read them back. The variables are
@@ -335,15 +342,32 @@ func DerivedVariables(field string, value any) ([]DerivedVariable, error) {
 				}
 			}
 		case []any:
+			if len(v) == 0 || isObject(v[0]) {
+				out = append(out, DerivedVariable{Name: name, Value: strconv.Itoa(len(v))})
+				for i, item := range v {
+					if !isObject(item) {
+						return fmt.Errorf("%s: a list member is %s; a list holds objects or strings, not both", name, describeMember(item))
+					}
+					if err := walk(name+"_"+strconv.Itoa(i), item); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
 			parts := make([]string, len(v))
 			for i, item := range v {
 				s, ok := item.(string)
 				if !ok || strings.Contains(s, ",") {
-					return fmt.Errorf("%s: a list member is %s; a list holds strings without commas", name, describeMember(item))
+					return fmt.Errorf("%s: a list member is %s; a list holds strings without commas, or objects", name, describeMember(item))
 				}
 				parts[i] = s
 			}
 			out = append(out, DerivedVariable{Name: name, Value: strings.Join(parts, ",")})
+		case float64:
+			if v != math.Trunc(v) || math.Abs(v) > 1<<53 {
+				return fmt.Errorf("%s: %s is not a whole number", name, describeMember(v))
+			}
+			out = append(out, DerivedVariable{Name: name, Value: strconv.FormatInt(int64(v), 10)})
 		case string, Output, Parameter, Concat:
 			out = append(out, DerivedVariable{Name: name, Value: v})
 		default:
@@ -356,6 +380,12 @@ func DerivedVariables(field string, value any) ([]DerivedVariable, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// isObject reports whether a JSON form is an object.
+func isObject(v any) bool {
+	_, ok := v.(map[string]any)
+	return ok
 }
 
 // DerivedVariableSegment turns a member's name into its part of a

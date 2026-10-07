@@ -1,0 +1,291 @@
+package shop_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	orm "example.com/acme/orm/shop-db"
+	apisdk "example.com/acme/sdk/go/shop-api"
+	"example.com/acme/sdk/go/shop-api/namespaces"
+	orderssdk "example.com/acme/sdk/go/shop-orders"
+	apitypes "example.com/acme/types/go/shop-api"
+	db "example.com/acme/types/go/shop-db"
+	orderstypes "example.com/acme/types/go/shop-orders"
+	scalars "github.com/parable-work/superscalar/go"
+)
+
+// TestStackDevRunsTheShop is milestone 1 of docs/stack-model.md (section
+// 14) on this example. `superschematic stack dev` runs shop-stack's Dev
+// environment from examples/acme-shop, as the tutorial does: Postgres in a
+// container with shop-db migrated, and shop-api and shop-orders each on its
+// generated entrypoint, built with the implementations in go/shop-api and
+// go/shop-orders. Every connection string, URL and port the test uses comes
+// from the environment the build resolved. The test waits for each server's
+// /readyz, signs a user in through the generated ORM, calls each API
+// through its generated Go SDK, then stops the stack as Ctrl-C does, which
+// with --remove-database removes the container.
+//
+// scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
+// SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary, or
+// without Docker, the test skips.
+func TestStackDevRunsTheShop(t *testing.T) {
+	binary := os.Getenv("ACME_SHOP_SUPERSCHEMATIC")
+	if binary == "" {
+		t.Skip("set ACME_SHOP_SUPERSCHEMATIC to the superschematic binary, as scripts/check.sh does, to run the stack")
+	}
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skipf("Docker is not available: %v", err)
+	}
+
+	// The build goes to an output root of the test's own, so schemas/dist,
+	// which scripts/check.sh compares with testdata/generated/, is left as
+	// build-all wrote it.
+	outputRoot := t.TempDir()
+	output := &lockedBuffer{}
+	stack := exec.Command(binary, "stack", "dev", "--remove-database", "--out", outputRoot)
+	stack.Dir = ".."
+	stack.Stdout, stack.Stderr = output, output
+	if err := stack.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- stack.Wait() }()
+	// On a failure, stop stack dev as Ctrl-C does, then remove the
+	// container whatever it left.
+	stopped, container := false, ""
+	t.Cleanup(func() {
+		if !stopped {
+			_ = stack.Process.Signal(os.Interrupt)
+			select {
+			case <-exited:
+			case <-time.After(time.Minute):
+				_ = stack.Process.Kill()
+			}
+		}
+		if container != "" {
+			_ = exec.Command("docker", "rm", "--force", "--volumes", container).Run()
+		}
+		if t.Failed() {
+			t.Logf("stack dev printed:\n%s", output)
+		}
+	})
+
+	// stack dev prints the summary once every server answers /readyz.
+	deadline := time.Now().Add(5 * time.Minute)
+	for !strings.Contains(output.String(), "is running:") {
+		select {
+		case err := <-exited:
+			stopped = true
+			t.Fatalf("stack dev exited before the stack ran: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the stack did not come up in 5 minutes")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	env := readEnvironment(t, filepath.Join(outputRoot, "stack", "shop-stack", "Dev", "environment.json"))
+	container = env.container
+	for _, server := range []string{"shop-api", "shop-orders"} {
+		if env.servers[server] == "" {
+			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
+		}
+	}
+	for server, url := range env.servers {
+		if status := get(t, url+"/readyz"); status != http.StatusOK {
+			t.Fatalf("%s answered /readyz %d", server, status)
+		}
+	}
+
+	ctx := context.Background()
+	token := signIn(ctx, t, env.database)
+	n := time.Now().UnixNano()
+
+	// shop-api: staff add a product, and it is listed.
+	products, err := apisdk.New(apisdk.SDKConfig{BaseURL: env.servers["shop-api"], Auth: &apisdk.AuthConfig{Token: token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	product, err := products.ProductNamespace.CreateProduct(ctx, apitypes.CreateProductInput{
+		Sku:        apitypes.IdentitySlug(fmt.Sprintf("green-tea-%d", n)),
+		Name:       "Green tea",
+		PriceCents: 450,
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+	listed, err := products.ProductNamespace.ListProducts(ctx, &namespaces.ProductListProductsQueryParams{InStock: true})
+	if err != nil {
+		t.Fatalf("ListProducts: %v", err)
+	}
+	if !containsProduct(listed, product.Id) {
+		t.Fatalf("ListProducts returned %+v, without %s", listed, product.Id)
+	}
+
+	// shop-orders: a shopper orders two of it, in one transaction over
+	// the order and its lines.
+	orders, err := orderssdk.New(orderssdk.SDKConfig{BaseURL: env.servers["shop-orders"], Auth: &orderssdk.AuthConfig{Token: token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, err := orders.OrderNamespace.PlaceOrder(ctx, orderstypes.PlaceOrderInput{
+		Lines:           []orderstypes.PlaceOrderLine{{ProductId: product.Id, Quantity: 2}},
+		ShippingAddress: address,
+	})
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if order.Status != orderstypes.OrderStatus_Placed || order.TotalCents != 900 || len(order.Lines) != 1 {
+		t.Fatalf("PlaceOrder returned %+v", order)
+	}
+
+	// Ctrl-C stops the servers, then removes the container and its data.
+	stopped = true
+	if err := stack.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("stack dev exited with %v", err)
+		}
+	case <-time.After(2 * time.Minute):
+		_ = stack.Process.Kill()
+		t.Fatal("stack dev did not stop in 2 minutes")
+	}
+	if !strings.Contains(output.String(), "removed container "+env.container) {
+		t.Fatalf("stack dev did not remove container %s", env.container)
+	}
+	if exec.Command("docker", "container", "inspect", env.container).Run() == nil {
+		t.Fatalf("container %s outlived --remove-database", env.container)
+	}
+}
+
+// environment is what the test reads from the environment the build
+// resolved: each server's URL, shop-db's connection string and the
+// Postgres container's name.
+type environment struct {
+	servers   map[string]string
+	database  string
+	container string
+}
+
+func readEnvironment(t *testing.T, path string) environment {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resolved struct {
+		Deployables []struct {
+			Name    string `json:"name"`
+			Kind    string `json:"kind"`
+			Address string `json:"address"`
+		} `json:"deployables"`
+		Resources struct {
+			Resources []struct {
+				Type       string         `json:"type"`
+				Properties map[string]any `json:"properties"`
+			} `json:"resources"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(data, &resolved); err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	env := environment{servers: map[string]string{}}
+	for _, d := range resolved.Deployables {
+		if d.Kind == "server" {
+			env.servers[d.Name] = d.Address
+		}
+	}
+	for _, r := range resolved.Resources.Resources {
+		switch {
+		case r.Type == "local:docker/container:Container":
+			env.container, _ = r.Properties["name"].(string)
+		case r.Type == "local:postgres/database:Database" && r.Properties["service"] == "shop-db":
+			env.database, _ = r.Properties["url"].(string)
+		}
+	}
+	if env.database == "" || env.container == "" {
+		t.Fatalf("%s names no shop-db database or no container", path)
+	}
+	return env
+}
+
+// signIn creates a user and a session of an hour in shop-db, through the
+// generated ORM, as the shop's sign-in would, and returns the session's
+// bearer token: its jti (shop.SessionToken).
+func signIn(ctx context.Context, t *testing.T, databaseURL string) string {
+	t.Helper()
+	database, err := orm.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	user, err := database.GetUserRepository().CreateOne(ctx, &db.User{
+		Email: db.ContactEmail(fmt.Sprintf("ada.%d@example.com", time.Now().UnixNano())),
+		Name:  "Ada Lovelace",
+	})
+	if err != nil {
+		t.Fatalf("create the user: %v", err)
+	}
+	jti := scalars.NewUUID()
+	_, err = database.GetSessionRepository().CreateOne(ctx, &db.Session{
+		Jti:       jti,
+		User:      db.User{Id: user.Id},
+		ExpiresAt: db.TemporalDateTime(time.Now().Add(time.Hour)),
+	})
+	if err != nil {
+		t.Fatalf("create the session: %v", err)
+	}
+	return jti.String()
+}
+
+func containsProduct(products []apitypes.ProductView, id apitypes.IdentityUUID) bool {
+	for _, p := range products {
+		if p.Id == id {
+			return true
+		}
+	}
+	return false
+}
+
+func get(t *testing.T, url string) int {
+	t.Helper()
+	response, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	return response.StatusCode
+}
+
+// lockedBuffer is stack dev's output, which its process writes while the
+// test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}

@@ -1,14 +1,16 @@
 ---
 // Quotes a file of an example, read when the site builds, so the code on a
 // page is the code that example builds and tests: examples/acme-shop
-// (scripts/check.sh there), the default, or examples/engine-notes
-// (scripts/check.sh there). See src/lib/snippet.ts for how a page picks the
-// part it quotes.
+// (scripts/check.sh there), the default, examples/engine-notes,
+// examples/engine-jobs or examples/migrations (scripts/check.sh in each).
+// See src/lib/snippet.ts for how a page picks the part it quotes.
 //
 // Files under acme-shop's testdata/generated/ are committed copies of the
 // build's output; the title shows them where a reader's own build writes
-// them, under schemas/dist/. Files under testdata/generated/logs/ are the
-// output of the commands the pages show, and carry no title.
+// them, under schemas/dist/. Files under testdata/generated/logs/, and
+// every file under migrations' testdata/generated/ (the plans migrate plan
+// prints), are the output of the commands the pages show, and carry no
+// title.
 import { Code } from '@astrojs/starlight/components';
 import { extract } from '../lib/snippet';
 
@@ -16,6 +18,8 @@ const files = import.meta.glob(
   [
     '../../../examples/acme-shop/**/*.{ts,go,sql,toml,json,mod,sh,txt,py,rs}',
     '../../../examples/engine-notes/**/*.{ts,json,sh}',
+    '../../../examples/engine-jobs/**/*.{ts,json,sh}',
+    '../../../examples/migrations/**/*.{ts,json,sh,sql,md,txt}',
     '!../../../examples/*/**/node_modules/**',
     '!../../../examples/acme-shop/schemas/dist/**',
     '!../../../examples/acme-shop/schemas/dist-rust/**',
@@ -35,11 +39,12 @@ const languages: Record<string, string> = {
   txt: 'text',
   py: 'python',
   rs: 'rust',
+  md: 'markdown',
 };
 
 interface Props {
   /** The example under examples/ the file belongs to. */
-  example?: 'acme-shop' | 'engine-notes';
+  example?: 'acme-shop' | 'engine-notes' | 'engine-jobs' | 'migrations';
   /** Path under the example. */
   file: string;
   symbol?: string | string[];
@@ -61,9 +66,10 @@ const code = extract(source, { file: `${example}/${file}`, symbol, from, to });
 const extension = file.split('.').pop() ?? '';
 const logs = 'testdata/generated/logs/';
 const generated = 'testdata/generated/';
+const output = file.startsWith(logs) || (example === 'migrations' && file.startsWith(generated));
 const shown =
   title ??
-  (file.startsWith(logs) ? undefined : file.startsWith(generated) ? `schemas/dist/${file.slice(generated.length)}` : file);
+  (output ? undefined : file.startsWith(generated) ? `schemas/dist/${file.slice(generated.length)}` : file);
 ---
 
 <Code code={code} lang={lang ?? languages[extension] ?? 'text'} title={shown} mark={mark} />

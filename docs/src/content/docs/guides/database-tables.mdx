@@ -1,6 +1,6 @@
 ---
 title: Database tables
-description: Keys, columns, relations, one-to-many, indexes, text search, JSON columns and soft delete in a DB schema, and what the SQL and the Go ORM make of them.
+description: Keys, columns, relations, one-to-many, indexes, text search, JSON columns and soft delete in a DB schema, what the SQL and the Go ORM make of them, and how a database that holds data changes.
 sidebar:
   order: 2
 ---
@@ -57,6 +57,9 @@ defaults to the empty array `'{}'`, whatever its element type, and a
 required `JSONB` column has no default. `Validate` constraints
 and enum membership are checked by the generated code, not by the
 database, and `Default<T, V>` fills in decoded payloads, not columns.
+The SQLite DDL stores each column as the type its values need, such as a
+list as JSON text; [SQLite](/superschematic/reference/migrations/#types-and-defaults)
+has the table.
 
 ## Relations
 
@@ -84,7 +87,7 @@ points at the order.
 The ORM loads the lines when the read asks for them, through the nested
 field selection of the order's options:
 
-<Snippet file="go/orders.go" symbol="withLines" />
+<Snippet file="go/shop-orders/orders.go" symbol="withLines" />
 
 ## Indexes
 
@@ -144,7 +147,7 @@ context, set with `orm.WithUserID`; without one it returns
 does not tell the ORM who they are, so the orders service adds that step
 to its auth middleware:
 
-<Snippet file="go/orders.go" symbol="actingUser" />
+<Snippet file="go/shop-orders/orders.go" symbol="actingUser" />
 
 ## Transactions
 
@@ -152,7 +155,7 @@ to its auth middleware:
 and rolls it back when the function returns an error. Placing an order
 writes the order and its lines together:
 
-<Snippet file="go/orders.go" symbol="Orders.PlaceOrder" />
+<Snippet file="go/shop-orders/orders.go" symbol="Orders.PlaceOrder" />
 
 The transaction also takes raw SQL for what the repositories do not
 express: `Exec` for a write, and `Query` for a read such as a keyset-paged
@@ -162,6 +165,28 @@ no-op transaction returns none.
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.
+
+## Change tables that hold data
+
+`create.sql` builds the database from nothing. `drop.sql` drops the
+tables, views, triggers and functions it creates, and leaves the Postgres
+extensions, which it names in a comment. A database that already holds
+rows changes through a migration plan instead: `superschematic migrate
+plan` compares the DB service with a previous version of it, with no
+database at hand, and prints ordered steps, each with its SQL and its
+hazards.
+
+```sh
+superschematic migrate plan schemas/services/shop-db --from-ref origin/main --format markdown --fail-on destructive
+```
+
+The `expand` steps run before the new servers roll out and keep the
+previous version's servers working; the `contract` steps, such as drops,
+run after. A rename reads as a drop and an add until `--rename` names it.
+`superschematic-migrate`, a binary of its own, applies the plan to
+Postgres, to a SQLite file or to Cloudflare D1, and records the model the
+database is at. [Schema migrations](/superschematic/reference/migrations/)
+covers the plan, its hazards and the runner.
 
 ## Beyond plain tables
 

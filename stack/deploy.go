@@ -2,7 +2,9 @@ package stack
 
 import (
 	"context"
+	"io"
 
+	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -16,8 +18,16 @@ type (
 	Options          = stackdeploy.Options
 	DeployOptions    = stackdeploy.DeployOptions
 	PlanOptions      = stackdeploy.PlanOptions
+	BuildOptions     = stackdeploy.BuildOptions
 	BootstrapOptions = stackdeploy.BootstrapOptions
 	SecretsOptions   = stackdeploy.SecretsOptions
+
+	// Sources says where a stack's build wrote each server's Dockerfile;
+	// BuildResult is what a build made; Context is a build context a
+	// deploy wrote for a server's image (WriteContext).
+	Sources     = stackdeploy.Sources
+	BuildResult = stackdeploy.BuildResult
+	Context     = stackdeploy.Context
 
 	// PlanResult is what a deploy would do; PendingNote names a migration
 	// phase a failed deploy left part-way.
@@ -43,13 +53,29 @@ type (
 
 	// Prompter asks a person for a secret value.
 	Prompter = stackdeploy.Prompter
+
+	// RunOutputs is an outputs file: what one run exported, which the
+	// bindings generator reads.
+	RunOutputs = stackdeploy.RunOutputs
 )
+
+// GoVersion is the Go release the images superschematic generates a
+// Dockerfile for build with: tools.env's GO_VERSION, the go directive of
+// every module it writes.
+const GoVersion = servergen.GoVersion
 
 // The statuses a manifest records.
 const (
 	StatusDeploying = stackdeploy.StatusDeploying
 	StatusDeployed  = stackdeploy.StatusDeployed
 	StatusFailed    = stackdeploy.StatusFailed
+)
+
+// OutputsVersion is the version of the outputs file format, and
+// OutputsFile its name beside environment.json; see internal/stackdeploy.
+const (
+	OutputsVersion = stackdeploy.OutputsVersion
+	OutputsFile    = stackdeploy.OutputsFile
 )
 
 // Deploy deploys a run; see internal/stackdeploy.Deploy.
@@ -61,14 +87,30 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 // internal/stackdeploy.Plan.
 func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) { return stackdeploy.Plan(ctx, o) }
 
+// Build builds the images of a run's servers without deploying them; see
+// internal/stackdeploy.Build.
+func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
+	return stackdeploy.Build(ctx, o)
+}
+
+// WriteContext writes the build context of a Dockerfile as a gzipped
+// tarball, cut down by its ignore file; see internal/stackdeploy.WriteContext.
+func WriteContext(w io.Writer, root, dockerfile string) (*Context, error) {
+	return stackdeploy.WriteContext(w, root, dockerfile)
+}
+
+// SplitImage splits an image reference by digest into its repository and
+// its digest; see internal/stackdeploy.SplitImage.
+func SplitImage(image string) (repository, digest string, err error) {
+	return stackdeploy.SplitImage(image)
+}
+
 // Destroy removes a run's resources and manifest; see
 // internal/stackdeploy.Destroy.
 func Destroy(ctx context.Context, o Options) error { return stackdeploy.Destroy(ctx, o) }
 
-// Outputs returns a run's outputs; see internal/stackdeploy.Outputs.
-func Outputs(ctx context.Context, o Options) (map[string]map[string]any, error) {
-	return stackdeploy.Outputs(ctx, o)
-}
+// Outputs returns a run's outputs file; see internal/stackdeploy.Outputs.
+func Outputs(ctx context.Context, o Options) (*RunOutputs, error) { return stackdeploy.Outputs(ctx, o) }
 
 // Bootstrap prepares the cloud project an environment deploys to; see
 // internal/stackdeploy.Bootstrap.
@@ -93,3 +135,13 @@ func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.Resol
 // UnmarshalManifest decodes a deploy manifest; see
 // internal/stackdeploy.UnmarshalManifest.
 func UnmarshalManifest(data []byte) (*Manifest, error) { return stackdeploy.UnmarshalManifest(data) }
+
+// NewOutputs returns the outputs file of one run of env; see
+// internal/stackdeploy.NewOutputs.
+func NewOutputs(env *ir.ResolvedEnvironment, parameters map[string]string, resources map[string]map[string]any) *RunOutputs {
+	return stackdeploy.NewOutputs(env, parameters, resources)
+}
+
+// UnmarshalOutputs decodes an outputs file; see
+// internal/stackdeploy.UnmarshalOutputs.
+func UnmarshalOutputs(data []byte) (*RunOutputs, error) { return stackdeploy.UnmarshalOutputs(data) }

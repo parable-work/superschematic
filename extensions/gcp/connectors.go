@@ -16,7 +16,9 @@ const serverlessAuthorizationHeader = "X-Serverless-Authorization"
 // database (sections 7.2 and 7.4). The server's account gets the Cloud
 // SQL client role, to reach the instance through the connector, and the
 // instance user role, to log in with IAM, both held to the edge's
-// instance by an IAM condition; and an IAM database user on the instance.
+// instance by an IAM condition; and an IAM database user on the instance,
+// which the migration job gives read and write privileges on the edge's
+// DB service's tables.
 // The derived value is the Cloud SQL connection the server's connector
 // dials, so there is no password.
 //
@@ -62,6 +64,11 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 					"instance": ir.Output{Resource: to.Name + ".instance", Name: "name"},
 					"name":     user,
 					"type":     "CLOUD_IAM_SERVICE_ACCOUNT",
+					// The migration job gives the user privileges (section
+					// 8.4), and Postgres drops no role that holds any, so the
+					// node abandons it when it goes: after the job took them
+					// back from a server that left, or with its database.
+					"deletionPolicy": "ABANDON",
 				},
 			},
 		},
@@ -73,15 +80,46 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 	}, nil
 }
 
+// The issuer of the Google ID tokens a Cloud Run caller sends (section
+// 9.2): its iss, the alias older tokens carry, the keys it signs with,
+// and the claim that names the caller's service account.
+const (
+	googleIssuer       = "https://accounts.google.com"
+	googleIssuerAlias  = "accounts.google.com"
+	googleJWKSURL      = "https://www.googleapis.com/oauth2/v3/certs"
+	googleSubjectClaim = "email"
+)
+
+// serviceAudience is the audience of the ID tokens a Cloud Run service
+// accepts from its callers: the service's full resource name, which its
+// own lowering lists as a custom audience (lowerService). The service's
+// run.app URL is an output of the service, which the service's own
+// callers field could not reference without the service depending on
+// itself; a name the resolver composes can be in both.
+func serviceAudience(v values, name any) any {
+	return join("//run.googleapis.com/projects/", v.project, "/locations/", v.region, "/services/", name)
+}
+
+// serviceAccountEmail is the email of a server's service account, whose
+// id is the server's name (lowerService).
+func serviceAccountEmail(v values, name any) any {
+	return join(name, "@", v.project, ".iam.gserviceaccount.com")
+}
+
 // connectHTTP realizes an http edge from a Cloud Run server to one it
 // calls (sections 7.2 and 9.2). The caller's account gets the invoker role
 // on the callee, which Cloud Run's invoker check admits an internal callee
 // by. The derived value is the callee's run.app URL, which the caller
-// reaches through the VPC (lowerService), and a Google ID token for it from
-// the metadata server as the service credential. The token travels in
-// Service-Authorization, which the callee verifies, and to an internal
-// callee also in X-Serverless-Authorization, which the invoker check reads
-// so the end user's Authorization reaches the application.
+// reaches through the VPC (lowerService), and a Google ID token from the
+// metadata server as the service credential, for the callee's custom
+// audience (serviceAudience). The token travels in Service-Authorization,
+// which the callee verifies, and to an internal callee also in
+// X-Serverless-Authorization, which the invoker check reads so the end
+// user's Authorization reaches the application.
+//
+// The callee verifies the token against Google's keys, with its custom
+// audience, and knows the caller by its service account's email in the
+// token's email claim.
 //
 // A server that calls an API it serves itself reaches it over loopback,
 // needs no grant and sends no credential.
@@ -91,9 +129,14 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 		return registry.Connected{Value: ir.ServiceEndpoint{URL: fmt.Sprintf("http://127.0.0.1:%d", containerPort)}}, nil
 	}
 	v := valuesOf(ctx.Environment)
-	credential := &ir.ServiceCredential{Source: ir.CredentialGoogleIDToken, Audience: to.Address}
+	audience := serviceAudience(v, to.ResourceName)
+	credential := &ir.ServiceCredential{Source: ir.CredentialGoogleIDToken, Audience: audience}
 	if !to.Exposed {
 		credential.Headers = []string{ir.ServiceAuthorizationHeader, serverlessAuthorizationHeader}
+	}
+	serves := make([]string, len(from.Services))
+	for i, ref := range from.Services {
+		serves[i] = ref.Name
 	}
 	return registry.Connected{
 		Resources: []*ir.Resource{{
@@ -108,5 +151,18 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 			},
 		}},
 		Value: ir.ServiceEndpoint{URL: to.Address, Credential: credential},
+		Callee: ir.ServiceAuthIssuer{
+			Issuer:        googleIssuer,
+			IssuerAliases: []string{googleIssuerAlias},
+			Audience:      audience,
+			Algorithms:    []string{ir.AlgorithmRS256},
+			JWKSURL:       googleJWKSURL,
+			SubjectClaim:  googleSubjectClaim,
+			Callers: []ir.ServiceAuthCaller{{
+				Subject:    serviceAccountEmail(v, from.ResourceName),
+				Deployable: from.Name,
+				Serves:     serves,
+			}},
+		},
 	}, nil
 }

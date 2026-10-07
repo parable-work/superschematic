@@ -3,19 +3,22 @@ package servergen_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,8 +32,11 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
+	publicregistry "github.com/parable-work/superschematic/registry"
+	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden entrypoints")
@@ -39,8 +45,12 @@ const (
 	// servicesRoot holds the fixture: shop-stack, whose declared server
 	// Storefront serves shop-orders and shop-reviews and calls shop-api,
 	// which runs on a default server of its own, and shop-db, the one
-	// database of the three APIs.
+	// database of the three APIs. Its one environment is local.
 	servicesRoot = "testdata/services"
+
+	// cloudStack is a second stack of the fixture, with shop-stack's
+	// servers, whose Staging environment places shop-db on Cloud SQL.
+	cloudStack = "shop-cloud-stack"
 
 	// goldenRoot holds the entrypoints as the output root lays them out,
 	// under server, and the scaffolds as the repository root does, under
@@ -48,21 +58,33 @@ const (
 	goldenRoot = "testdata/golden"
 )
 
-// order is the order a build-all builds the fixture in: shop-orders calls
-// shop-api, so its server builds after shop-api's SDK.
+// order is the order a build-all builds the fixture in, cloudStack left
+// out: shop-orders calls shop-api, so its server builds after shop-api's
+// SDK.
 var order = []string{"shop-db", "shop-api", "shop-orders", "shop-reviews", "shop-stack"}
+
+// apis are the services of order the stacks serve, in order.
+var apis = order[:len(order)-1]
 
 // fixture is the loaded fixture services.
 type fixture struct {
+	reg     *registry.Registry
 	schemas map[string]*ir.Schema
 	configs map[string]*schemaconfig.SchemaConfig
 }
 
+// loadFixture loads every fixture service, cloudStack included, with the
+// core registry and stacktest's fake target, whose sql connector derives a
+// Cloud SQL connector configuration as the gcp target's does.
 func loadFixture(t *testing.T, root string) fixture {
 	t.Helper()
-	f := fixture{schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range order {
-		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(root, name))
+	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
+	for _, name := range append(slices.Clone(order), cloudStack) {
+		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(root, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
 		}
@@ -80,6 +102,7 @@ func (f fixture) options(repoRoot string, paths naming.LocalPaths) generator.Opt
 		Naming:         naming.Default(),
 		Clock:          codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 		RepositoryRoot: repoRoot,
+		Registry:       f.reg,
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			if schema, ok := f.schemas[name]; ok {
 				return schema, nil
@@ -129,15 +152,18 @@ func fakePaths(repoRoot string) naming.LocalPaths {
 	}
 }
 
-// generated lists the files the stack's build writes, by their path under
-// goldenRoot: an entrypoint's from the output root, a scaffold's from the
-// repository root.
-func generated(repoRoot string) map[string]string {
+// generated lists the files the build of each of stacks writes, by their
+// path under goldenRoot: an entrypoint's from the output root, a
+// scaffold's from the repository root. It lists every server's
+// cloudsql.go, which only a server on Cloud SQL has.
+func generated(repoRoot string, stacks ...string) map[string]string {
 	files := map[string]string{}
 	out := filepath.Join(repoRoot, "schemas", "dist")
-	for _, server := range []string{"Storefront", "shop-api"} {
-		for _, file := range []string{servergen.MainFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
-			files[filepath.Join("server", "shop-stack", server, file)] = filepath.Join(servergen.ServerDir(out, "shop-stack", server), file)
+	for _, stack := range stacks {
+		for _, server := range []string{"Storefront", "shop-api"} {
+			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
+				files[filepath.Join("server", stack, server, file)] = filepath.Join(servergen.ServerDir(out, stack, server), file)
+			}
 		}
 	}
 	for _, service := range []string{"shop-api", "shop-orders", "shop-reviews"} {
@@ -149,33 +175,40 @@ func generated(repoRoot string) map[string]string {
 	return files
 }
 
-// TestEntrypointGolden: the stack's build writes an entrypoint module per
+// TestEntrypointGolden: each stack's build writes an entrypoint module per
 // server, Storefront serving two APIs on one database and calling
 // shop-api, and shop-api's default server, and scaffolds each API's
-// implementation with a module of its own. Regenerate with:
+// implementation with a module of its own. shop-stack's servers never run
+// on Cloud SQL and link no Cloud SQL connector; cloudStack's, whose
+// Staging places shop-db on Cloud SQL, do. Regenerate with:
 //
 //	go test ./internal/generator/servergen -run TestEntrypointGolden -update
 func TestEntrypointGolden(t *testing.T) {
 	repoRoot := t.TempDir()
 	f := loadFixture(t, servicesRoot)
-	result := f.build(t, repoRoot, fakePaths(repoRoot))
-	if got, want := result.Outputs["server"], servergen.StackDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack"); got != want {
-		t.Errorf("server output = %q, want %q", got, want)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	for _, stack := range []string{"shop-stack", cloudStack} {
+		result := f.build(t, repoRoot, fakePaths(repoRoot), append(slices.Clone(apis), stack)...)
+		if got, want := result.Outputs["server"], servergen.StackDir(out, stack); got != want {
+			t.Errorf("server output = %q, want %q", got, want)
+		}
 	}
 
-	files := generated(repoRoot)
-	rels := make([]string, 0, len(files))
-	for rel := range files {
-		rels = append(rels, rel)
-	}
-	sort.Strings(rels)
-	for _, rel := range rels {
+	files := generated(repoRoot, "shop-stack", cloudStack)
+	for _, rel := range slices.Sorted(maps.Keys(files)) {
+		golden := filepath.Join(goldenRoot, rel)
 		got, err := os.ReadFile(files[rel])
-		if err != nil {
+		written := err == nil
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
 		}
-		golden := filepath.Join(goldenRoot, rel)
 		if *update {
+			if !written {
+				if err := os.Remove(golden); err != nil && !errors.Is(err, os.ErrNotExist) {
+					t.Fatal(err)
+				}
+				continue
+			}
 			if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -185,23 +218,72 @@ func TestEntrypointGolden(t *testing.T) {
 			continue
 		}
 		want, err := os.ReadFile(golden)
-		if err != nil {
-			t.Fatalf("%v (run with -update to write it)", err)
-		}
-		if string(got) != string(want) {
+		switch {
+		case errors.Is(err, os.ErrNotExist) && !written:
+		case errors.Is(err, os.ErrNotExist):
+			t.Errorf("the build wrote %s, which has no golden (run with -update to write it)", rel)
+		case err != nil:
+			t.Fatal(err)
+		case !written:
+			t.Errorf("the build did not write %s, which has a golden", rel)
+		case string(got) != string(want):
 			t.Errorf("%s differs from %s; run with -update and review the diff", rel, golden)
 		}
 	}
-	entries, err := os.ReadDir(servergen.StackDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack"))
-	if err != nil {
-		t.Fatal(err)
+	for _, stack := range []string{"shop-stack", cloudStack} {
+		entries, err := os.ReadDir(servergen.StackDir(out, stack))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var servers []string
+		for _, e := range entries {
+			servers = append(servers, e.Name())
+		}
+		if got := strings.Join(servers, " "); got != "Storefront shop-api" {
+			t.Errorf("%s: servers = %s, want Storefront and shop-api", stack, got)
+		}
 	}
-	var servers []string
-	for _, e := range entries {
-		servers = append(servers, e.Name())
+}
+
+// TestOnlyAServerOnCloudSQLLinksTheConnector: a server whose database some
+// environment places on Cloud SQL gets cloudsql.go, which main.go's connect
+// calls for a Cloud SQL configuration, and requires the Cloud SQL
+// connector. A server no environment places there gets neither, and its
+// connect refuses a Cloud SQL configuration and says why.
+func TestOnlyAServerOnCloudSQLLinksTheConnector(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot))
+	f.build(t, repoRoot, fakePaths(repoRoot), cloudStack)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	read := func(stack, server, file string) (string, bool) {
+		data, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, stack, server), file))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		return string(data), err == nil
 	}
-	if got := strings.Join(servers, " "); got != "Storefront shop-api" {
-		t.Errorf("servers = %s, want Storefront and shop-api", got)
+	for _, server := range []string{"Storefront", "shop-api"} {
+		if _, ok := read("shop-stack", server, servergen.CloudSQLFile); ok {
+			t.Errorf("shop-stack's %s, never on Cloud SQL, has cloudsql.go", server)
+		}
+		if mod, _ := read("shop-stack", server, servergen.ModFile); strings.Contains(mod, "cloud.google.com") {
+			t.Errorf("shop-stack's %s, never on Cloud SQL, requires a Google module:\n%s", server, mod)
+		}
+		main, _ := read("shop-stack", server, servergen.MainFile)
+		if want := "which server " + server + " does not link: no environment of stack shop-stack placed its databases on Cloud SQL"; !strings.Contains(main, want) || strings.Contains(main, "connectCloudSQL") {
+			t.Errorf("shop-stack's %s connects a Cloud SQL configuration or does not say why it refuses one:\n%s", server, main)
+		}
+
+		if _, ok := read(cloudStack, server, servergen.CloudSQLFile); !ok {
+			t.Errorf("%s's %s, on Cloud SQL in Staging, has no cloudsql.go", cloudStack, server)
+		}
+		if mod, _ := read(cloudStack, server, servergen.ModFile); !strings.Contains(mod, "\tcloud.google.com/go/cloudsqlconn v1.25.3\n") {
+			t.Errorf("%s's %s does not require the Cloud SQL connector:\n%s", cloudStack, server, mod)
+		}
+		if main, _ := read(cloudStack, server, servergen.MainFile); !strings.Contains(main, "return connectCloudSQL(ctx, field, *db.CloudSQL)") {
+			t.Errorf("%s's %s does not connect a Cloud SQL configuration:\n%s", cloudStack, server, main)
+		}
 	}
 }
 
@@ -287,8 +369,15 @@ func TestTwoAPIsOnOneRouteFail(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("build = %v, want %q", err, want)
 	}
-	if entries, _ := os.ReadDir(repoRoot); len(entries) != 0 {
-		t.Errorf("a refused build wrote %v", entries)
+	// The stack generator wrote the Local environment before the server
+	// generator refused; no entrypoint or implementation is written.
+	for _, dir := range []string{
+		servergen.StackDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack"),
+		filepath.Dir(naming.Default().GoImplementationDir(repoRoot, "shop-orders")),
+	} {
+		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("a refused build wrote %s: %v", dir, err)
+		}
 	}
 }
 
@@ -424,6 +513,8 @@ func (s *started) stop(t *testing.T) {
 // routes each API's requests to it, the scaffold answering 501 and its
 // payload decryptor refusing an encrypted body; shop-api's scaffolded auth
 // middleware refuses its protected route. Each stops cleanly on SIGTERM.
+// Storefront, which no environment places on Cloud SQL, refuses to start
+// on a Cloud SQL configuration.
 func TestEntrypointCompilesAndServes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -466,6 +557,130 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	shopAPI.expect(t, http.MethodGet, "/api/products/p-1", http.StatusNotImplemented, "Product.GetProduct")
 	shopAPI.expect(t, http.MethodPut, "/api/products/p-1/name?name=x", http.StatusUnauthorized)
 	shopAPI.stop(t)
+
+	cmd := exec.Command(binaries["Storefront"])
+	cmd.Env = append(os.Environ(), append(append(cloudSQLVariables(t, "SHOP_DB_DATABASE"), edgeVariables(t, "SHOP_API_SERVICE")...), "PORT="+freePort(t))...)
+	refused, err := cmd.CombinedOutput()
+	if want := "SHOP_DB_DATABASE is a Cloud SQL connector configuration, which server Storefront does not link"; err == nil || !strings.Contains(string(refused), want) {
+		t.Errorf("Storefront on a Cloud SQL configuration = %v, want it to stop saying %q:\n%s", err, want, refused)
+	}
+}
+
+// cloudSQLVariables are the variables of the database field named field
+// holding a Cloud SQL connection, as ir.DerivedVariables encodes a
+// resolved environment's value for a platform.
+func cloudSQLVariables(t *testing.T, field string) []string {
+	t.Helper()
+	vars, err := ir.DerivedVariables(field, ir.DatabaseConnection{CloudSQL: &ir.CloudSQLConnection{
+		Instance: "acme-staging:us-east1:shop-db", Database: "shop_db", User: "storefront@acme-staging.iam",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := make([]string, len(vars))
+	for i, v := range vars {
+		env[i] = fmt.Sprintf("%s=%v", v.Name, v.Value)
+	}
+	return env
+}
+
+// offlineCredentials are the variables of application default credentials
+// that reach nothing: a service account key, freshly generated, whose
+// token endpoint is a loopback port nothing answers, and a proxy on that
+// port for every other request, so a token fetch fails and no request
+// leaves the machine.
+func offlineCredentials(t *testing.T) []string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nowhere := "127.0.0.1:" + freePort(t)
+	account, err := json.Marshal(map[string]string{
+		"type":           "service_account",
+		"project_id":     "acme-staging",
+		"private_key_id": "test",
+		"private_key":    string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"client_email":   "storefront@acme-staging.iam.gserviceaccount.com",
+		"client_id":      "1",
+		"token_uri":      "http://" + nowhere + "/token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.WriteFile(file, account, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return []string{"GOOGLE_APPLICATION_CREDENTIALS=" + file, "HTTPS_PROXY=http://" + nowhere, "HTTP_PROXY=http://" + nowhere}
+}
+
+// TestCloudSQLEntrypointConnectsBothWays: a server some environment places
+// on Cloud SQL builds and vets with the Cloud SQL connector, and its one
+// binary connects either way. cloudsql.go's cloudSQLConfig turns the
+// derived variables of a Cloud SQL connection into a pool that logs in as
+// the IAM user over the dialer's connection, which a fake Postgres answers
+// (testdata/cloudsql_test.go, run in the module). The binary serves on a
+// connection string, as the local target derives it; on a Cloud SQL
+// configuration it starts without dialing, and /readyz reports the
+// database while the connector cannot fetch a token. The modules come
+// from the network, so the test skips when go mod tidy cannot fetch them.
+func TestCloudSQLEntrypointConnectsBothWays(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	paths := testpaths.Local(t)
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, paths, append(slices.Clone(apis), cloudStack)...)
+	dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), cloudStack, "Storefront")
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Skipf("go mod tidy failed (likely offline): %v\n%s", err, out)
+	}
+	goCommand(t, dir, "vet", ".")
+	binary := filepath.Join(t.TempDir(), "Storefront")
+	goCommand(t, dir, "build", "-o", binary, ".")
+
+	unit, err := os.ReadFile(filepath.Join("testdata", "cloudsql_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cloudsql_test.go"), unit, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cloudSQL := cloudSQLVariables(t, "SHOP_DB_DATABASE")
+	test := exec.Command("go", "test", "-v", "-count=1", "-run", "^TestCloudSQLConfig$", ".")
+	test.Dir = dir
+	// PWD keeps go in dir as the build saw it, through a symlinked
+	// temporary directory, which the replaces' relative paths count from;
+	// exec sets it only when Env is nil.
+	test.Env = append(os.Environ(), append(cloudSQL, "PWD="+dir)...)
+	if out, err := test.CombinedOutput(); err != nil || !strings.Contains(string(out), "--- PASS: TestCloudSQLConfig") {
+		t.Fatalf("go test in %s: %v\n%s", dir, err, out)
+	}
+
+	shopAPI := edgeVariables(t, "SHOP_API_SERVICE")
+	local := start(t, binary, append([]string{"SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1&sslmode=disable"}, shopAPI...)...)
+	local.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
+	local.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
+	local.stop(t)
+
+	cloud := start(t, binary, append(append(cloudSQL, offlineCredentials(t)...), shopAPI...)...)
+	cloud.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
+	cloud.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
+	cloud.stop(t)
+	// The ping dialed the instance through the connector, as the IAM user.
+	for _, want := range []string{"user=storefront@acme-staging.iam database=shop_db", "(acme-staging:us-east1:shop-db): dial error"} {
+		if !strings.Contains(cloud.out.String(), want) {
+			t.Errorf("the server's readiness check did not log %q:\n%s", want, cloud.out.String())
+		}
+	}
 }
 
 // edgeVariables are the variables of the service field named field, an
@@ -507,64 +722,6 @@ func withServiceClause(f fixture) {
 				op.ServiceCallers = &ir.ServiceCallers{Mode: ir.ServiceCallersAllow, From: []string{"shop-orders"}}
 			}
 		}
-	}
-}
-
-// TestAServiceClauseTakesTheServiceAuthenticator: an API whose operations
-// have a service clause gets its Config's service authenticator from the
-// entrypoint's serviceAuthenticator, and an API without one gets none.
-func TestAServiceClauseTakesTheServiceAuthenticator(t *testing.T) {
-	repoRoot := t.TempDir()
-	f := loadFixture(t, servicesRoot)
-	withServiceClause(f)
-	f.build(t, repoRoot, fakePaths(repoRoot), "shop-stack")
-	out := filepath.Join(repoRoot, "schemas", "dist")
-	main, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, "shop-stack", "shop-api"), servergen.MainFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`shopApiServiceAuthenticator, err := serviceAuthenticator("shop-api")`,
-		"ServiceAuthenticator: shopApiServiceAuthenticator,",
-		"func serviceAuthenticator(api string) (serviceauth.Authenticator, error) {",
-	} {
-		if !strings.Contains(string(main), want) {
-			t.Errorf("shop-api's main.go lacks %q:\n%s", want, main)
-		}
-	}
-	storefront, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, "shop-stack", "Storefront"), servergen.MainFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(storefront), "serviceAuthenticator") {
-		t.Errorf("Storefront, whose APIs have no service clause, has a service authenticator:\n%s", storefront)
-	}
-}
-
-// TestAServiceClauseRefusesToStartWithoutTheServiceAuthField: until a
-// connector derives the service-auth field, the server of an API with a
-// service clause does not start, and says why.
-func TestAServiceClauseRefusesToStartWithoutTheServiceAuthField(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping compile check in -short mode")
-	}
-	paths := testpaths.Local(t)
-	repoRoot := t.TempDir()
-	f := loadFixture(t, servicesRoot)
-	withServiceClause(f)
-	f.build(t, repoRoot, paths)
-	dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack", "shop-api")
-	goCommand(t, dir, "mod", "tidy")
-	binary := filepath.Join(t.TempDir(), "shop-api")
-	goCommand(t, dir, "build", "-o", binary, ".")
-	cmd := exec.Command(binary)
-	cmd.Env = append(os.Environ(), "PORT="+freePort(t), "SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("shop-api started:\n%s", out)
-	}
-	if want := "shop-api has operations with a service clause, and no environment derives the service-auth field"; !strings.Contains(string(out), want) {
-		t.Errorf("shop-api stopped without saying %q:\n%s", want, out)
 	}
 }
 
@@ -631,12 +788,13 @@ func docker(t *testing.T, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestTheDockerfileBuildsAnImageThatServes: Storefront's Dockerfile
-// builds from a repository root holding the generated modules, the
-// scaffolds, the runtime modules and a superscalar checkout, and the image
-// serves: /healthz, an API's route, and a clean stop on docker stop. It
-// needs Docker, and builds superscalar's archive in a Rust stage, so it
-// runs only outside -short.
+// TestTheDockerfileBuildsAnImageThatServes: Storefront's Dockerfile, in
+// cloudStack, where it links the Cloud SQL connector, builds from a
+// repository root holding the generated modules, the scaffolds, the
+// runtime modules and a superscalar checkout, and the image serves:
+// /healthz, an API's route, and a clean stop on docker stop. It needs
+// Docker, and builds superscalar's archive in a Rust stage, so it runs
+// only outside -short.
 func TestTheDockerfileBuildsAnImageThatServes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping docker build in -short mode")
@@ -664,10 +822,10 @@ func TestTheDockerfileBuildsAnImageThatServes(t *testing.T) {
 		}
 	}
 	f := loadFixture(t, servicesRoot)
-	f.build(t, repoRoot, fakePaths(repoRoot))
+	f.build(t, repoRoot, fakePaths(repoRoot), append(slices.Clone(apis), cloudStack)...)
 
 	image := fmt.Sprintf("superschematic-servergen-test:%d", time.Now().UnixNano())
-	cmd := exec.Command("docker", "build", "-q", "-f", "schemas/dist/server/shop-stack/Storefront/Dockerfile", "-t", image, ".")
+	cmd := exec.Command("docker", "build", "-q", "-f", "schemas/dist/server/"+cloudStack+"/Storefront/Dockerfile", "-t", image, ".")
 	cmd.Dir = repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("docker build: %v\n%s", err, out)

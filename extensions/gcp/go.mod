@@ -3,14 +3,18 @@ module github.com/parable-work/superschematic/extensions/gcp
 go 1.26.4
 
 require (
+	cloud.google.com/go/artifactregistry v1.27.0
+	cloud.google.com/go/cloudbuild v1.34.0
 	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
+	cloud.google.com/go/run v1.23.0
 	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/serviceusage v1.16.0
 	cloud.google.com/go/storage v1.69.0
 	github.com/parable-work/superschematic v0.0.0
 	github.com/parable-work/superschematic/ir v0.0.0
 	google.golang.org/grpc v1.84.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -61,7 +65,6 @@ require (
 	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260715232425-e75dac1f907d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260715232425-e75dac1f907d // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

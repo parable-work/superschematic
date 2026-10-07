@@ -10,7 +10,7 @@ config:
 resources:
   # The stack of environment Staging, which owns the nodes this environment
   # inherits: network, network.nat, network.router, network.subnet,
-  # secret.PaymentsSecrets.STRIPE_KEY, shop-db.instance.
+  # secret.PaymentsSecrets.STRIPE_KEY, shop-db.instance, shop-db.migrator.
   parent-stack:
     type: pulumi:pulumi:StackReference
     properties:
@@ -60,6 +60,7 @@ resources:
     name: Orders.database-user.shop-db
     type: gcp:sql/user:User
     properties:
+      deletionPolicy: ABANDON
       instance: ${parent-stack.outputs["shop-db.instance.name"]}
       name: orders-pr${pr}@acme-staging.iam
       project: acme-staging
@@ -103,6 +104,8 @@ resources:
     name: Orders.service
     type: gcp:cloudrunv2/service:Service
     properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-staging/locations/us-east1/services/orders-pr${pr}
       deletionProtection: false
       ingress: INGRESS_TRAFFIC_INTERNAL_ONLY
       invokerIamDisabled: false
@@ -117,7 +120,7 @@ resources:
               - name: MAX_LINE_ITEMS
                 value: "50"
               - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
-                value: ${shop-api-service.uri}
+                value: //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api-pr${pr}
               - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
                 value: google-id-token
               - name: SHOP_API_SERVICE_URL
@@ -134,12 +137,26 @@ resources:
                     secret: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.secretId"]}
                     version: latest
             image: us-east1-docker.pkg.dev/acme-staging/shop/orders
+            livenessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /healthz
+                port: 8080
+              periodSeconds: 15
+              timeoutSeconds: 5
             ports:
               containerPort: 8080
             resources:
               limits:
                 cpu: "1"
                 memory: 512Mi
+            startupProbe:
+              failureThreshold: 24
+              httpGet:
+                path: /readyz
+                port: 8080
+              periodSeconds: 5
+              timeoutSeconds: 4
             volumeMounts:
               - mountPath: /cloudsql
                 name: cloudsql
@@ -317,6 +334,7 @@ resources:
     name: shop-api.database-user.shop-db
     type: gcp:sql/user:User
     properties:
+      deletionPolicy: ABANDON
       instance: ${parent-stack.outputs["shop-db.instance.name"]}
       name: shop-api-pr${pr}@acme-staging.iam
       project: acme-staging
@@ -402,6 +420,8 @@ resources:
     name: shop-api.service
     type: gcp:cloudrunv2/service:Service
     properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api-pr${pr}
       deletionProtection: false
       ingress: INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
       invokerIamDisabled: true
@@ -427,12 +447,26 @@ resources:
                     secret: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.secretId"]}
                     version: latest
             image: us-east1-docker.pkg.dev/acme-staging/shop/shop-api
+            livenessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /healthz
+                port: 8080
+              periodSeconds: 15
+              timeoutSeconds: 5
             ports:
               containerPort: 8080
             resources:
               limits:
                 cpu: "1"
                 memory: 512Mi
+            startupProbe:
+              failureThreshold: 24
+              httpGet:
+                path: /readyz
+                port: 8080
+              periodSeconds: 5
+              timeoutSeconds: 4
             volumeMounts:
               - mountPath: /cloudsql
                 name: cloudsql
@@ -537,3 +571,4 @@ outputs:
   shop-db.instance.connectionName: ${parent-stack.outputs["shop-db.instance.connectionName"]}
   shop-db.instance.id: ${parent-stack.outputs["shop-db.instance.id"]}
   shop-db.instance.name: ${parent-stack.outputs["shop-db.instance.name"]}
+  shop-db.migrator.id: ${parent-stack.outputs["shop-db.migrator.id"]}

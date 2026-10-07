@@ -4,9 +4,11 @@
 // Dockerfile. main.go loads each served API's config, connects one pool per
 // database, builds one SDK client per API called, builds each API's
 // implementation from its Deps and mounts every API's routes on one
-// handler beside /healthz and /readyz. The generator package plans what
-// each server serves from the stack and the APIs' Go server outputs;
-// this package turns that plan into files.
+// handler beside /healthz and /readyz. cloudsql.go beside it connects a
+// database through the Cloud SQL connector, on a server that some
+// environment places on Cloud SQL. The generator package plans what each
+// server serves from the stack and the APIs' Go server outputs; this
+// package turns that plan into files.
 package servergen
 
 import (
@@ -45,18 +47,24 @@ const RustVersion = "1.99.0"
 // The files of an entrypoint module.
 const (
 	MainFile         = "main.go"
+	CloudSQLFile     = "cloudsql.go"
 	ModFile          = "go.mod"
 	DockerFile       = "Dockerfile"
 	DockerIgnoreFile = "Dockerfile.dockerignore"
 )
 
 // The versions of the third-party modules main.go imports, those the
-// generated API and ORM modules require.
+// generated API and ORM modules require, and of the Cloud SQL Go connector
+// cloudsql.go imports, whose own pgx requirement is pgxVersion.
 const (
-	chiVersion = "v5.3.2"
-	pgxVersion = "v5.11.0"
-	zapVersion = "v1.28.0"
+	chiVersion          = "v5.3.2"
+	pgxVersion          = "v5.11.0"
+	zapVersion          = "v1.28.0"
+	cloudSQLConnVersion = "v1.25.3"
 )
+
+// cloudSQLConnModule is the Cloud SQL Go connector's module.
+const cloudSQLConnModule = "cloud.google.com/go/cloudsqlconn"
 
 // ZeroVersion is the version a go.mod requires a module at that a replace
 // points at a directory, as the generated modules require one another.
@@ -140,6 +148,12 @@ type Input struct {
 	// when a database the server connects to declares a version graph. The
 	// Dockerfile builds its static archive from the crate beside it.
 	VersionGraphGo string
+
+	// CloudSQL are the DB services some environment of the stack connects
+	// the server to with a Cloud SQL connector configuration. The server
+	// links the Cloud SQL connector when one of them is a database it
+	// connects to.
+	CloudSQL []string
 }
 
 // ServerDir is where the entrypoint of server in stack is written.
@@ -171,6 +185,12 @@ type Server struct {
 	APIs      []*API
 	Databases []*Database
 	Clients   []*Client
+
+	// CloudSQL are the databases, by service and sorted, that some
+	// environment places on Cloud SQL. When there is one, cloudsql.go
+	// connects them through the Cloud SQL connector, which go.mod
+	// requires; with none the server does not link it.
+	CloudSQL []string
 
 	// Requires are the go.mod's direct requires and Indirect its
 	// indirect ones, sorted by path; Replaces point each module that has
@@ -280,13 +300,14 @@ type Docker struct {
 	Include []string
 }
 
-// reserved are the names main.go declares or imports beside the served
-// APIs' own: an API, database or client never takes one.
+// reserved are the names main.go and cloudsql.go declare or import beside
+// the served APIs' own: an API, database or client never takes one.
 var reserved = []string{
 	"chi", "chimiddleware", "context", "dependency", "dispatch", "draining", "err", "errors", "fmt", "handler", "http", "json",
 	"logger", "main", "net", "newHandler", "os", "pgxpool", "run", "runtimemiddleware", "serve", "served", "serviceCredential",
 	"signal", "stackconfig", "stop", "atomic", "syscall", "time", "writeJSON", "zap", "connect", "ctx", "api", "apis",
 	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers",
+	"connectCloudSQL", "cloudSQLDialer", "cloudSQLDial", "cloudSQLConfig",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -405,6 +426,9 @@ func Plan(in Input) (*Server, error) {
 				}
 				databases[db] = d
 				s.Databases = append(s.Databases, d)
+				if slices.Contains(in.CloudSQL, db) {
+					s.CloudSQL = append(s.CloudSQL, db)
+				}
 			}
 			api.Database = d
 		}
@@ -431,6 +455,7 @@ func Plan(in Input) (*Server, error) {
 		}
 	}
 	s.APIs = apis
+	slices.Sort(s.CloudSQL)
 	dir, err := filepath.Abs(in.Dir)
 	if err != nil {
 		return nil, err
@@ -445,12 +470,15 @@ func Plan(in Input) (*Server, error) {
 	return s, nil
 }
 
-// planModule plans go.mod: the third-party modules main.go imports, then
-// in.Modules, each replaced by its directory.
+// planModule plans go.mod: the third-party modules main.go and
+// cloudsql.go import, then in.Modules, each replaced by its directory.
 func (s *Server) planModule(in Input, dir string) error {
 	direct := []Require{{"github.com/go-chi/chi/v5", chiVersion}, {"go.uber.org/zap", zapVersion}}
 	if len(s.Databases) > 0 {
 		direct = append(direct, Require{"github.com/jackc/pgx/v5", pgxVersion})
+	}
+	if len(s.CloudSQL) > 0 {
+		direct = append(direct, Require{cloudSQLConnModule, cloudSQLConnVersion})
 	}
 	seen := map[string]bool{}
 	for _, r := range direct {
@@ -584,8 +612,10 @@ func checkRoutes(in Input) error {
 	return nil
 }
 
-// Write writes the entrypoint module into dir: main.go, go.mod, and the
-// Dockerfile with its ignore file when s.Docker is planned.
+// Write writes the entrypoint module into dir: main.go, go.mod,
+// cloudsql.go when some environment places a database of the server on
+// Cloud SQL, and the Dockerfile with its ignore file when s.Docker is
+// planned.
 func Write(s *Server, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
@@ -595,6 +625,9 @@ func Write(s *Server, dir string) error {
 		{"main.go.tmpl", MainFile},
 		{"go.mod.tmpl", ModFile},
 	}
+	if len(s.CloudSQL) > 0 {
+		files = append(files, struct{ template, name string }{"cloudsql.go.tmpl", CloudSQLFile})
+	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.tmpl", DockerIgnoreFile})
 	}
@@ -603,7 +636,7 @@ func Write(s *Server, dir string) error {
 			return fmt.Errorf("servergen: server %s: %w", s.Name, err)
 		}
 	}
-	return nil
+	return writeServiceAuth(s, dir)
 }
 
 // ImplementationModule is the module the scaffold of an implementation

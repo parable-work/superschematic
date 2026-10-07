@@ -47,7 +47,7 @@ resources:
         - name: MAX_LINE_ITEMS
           value: "50"
         - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
-          value: ${shop-api-service.url}
+          value: shop-api
         - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
           value: google-id-token
         - name: SHOP_API_SERVICE_URL

@@ -119,10 +119,12 @@ The Makefile mirrors `.github/workflows/ci.yml`, which runs in two tiers
   tests with `-short` (which skips every test that compiles and runs a
   generated module), the runtimes' and the version graph's own test suites,
   and the docs build.
-- The full tier adds the Go tests without `-short`, `make cli-smoke`, the
-  acme example (`examples/acme-schematic/scripts/smoke.sh`,
-  `check_second_decorator.sh` and `examples/acme-shop/scripts/check.sh`),
-  `examples/engine-notes/scripts/check.sh` and the version-graph scenarios
+- The full tier adds the Go tests without `-short`, `make cli-smoke`,
+  `examples/migrations/scripts/check.sh`, the acme example
+  (`examples/acme-schematic/scripts/smoke.sh`, `check_second_decorator.sh`
+  and `examples/acme-shop/scripts/check.sh`),
+  `examples/engine-notes/scripts/check.sh`,
+  `examples/engine-jobs/scripts/check.sh` and the version-graph scenarios
   (`make versiongraph-scenarios`, `-ts`, `-rust` and `-python`). It runs
   twice a day on `main` as the release candidate (`release-candidate.yml`),
   and before every release. A red candidate opens an issue, "Release
@@ -130,7 +132,9 @@ The Makefile mirrors `.github/workflows/ci.yml`, which runs in two tiers
 
 A full-tier failure first shows on `main`, so before pushing, run the
 full-tier checks your change touches: `make go-test` for a generator change,
-an example's script for a change to that example.
+an example's script for a change to that example, and
+`examples/migrations/scripts/check.sh` for a change to the migration
+planner or runner.
 
 CI runs only on a pull request that targets `main` and is not a draft.
 Marking a draft ready for review starts its run. A stacked pull request runs
@@ -151,7 +155,8 @@ agent or a bot with write access counts.
 | `make behaviors-check` | The copies of the core's behavior declarations in the packages that implement them (`runtime/engine/typescript/src/behaviors/core/declarations`, `runtime/engine-workqueue/typescript/src/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target, the Cloudflare DNS platform and the Pulumi provisioner linked) |
 | `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |
-| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript` and `runtime/engine-workqueue/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's and the work-queue package's tests run under Node.js and Bun, and so does `examples/engine-notes`'s end-to-end test (`scripts/check.sh` there) |
+| `make example-migrations` | `examples/migrations/scripts/check.sh`: `migrate plan` between the example's two versions for Postgres and SQLite, its hazard gate, and `superschematic-migrate` applying it to SQLite, and to Postgres when `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` is set; the outputs the docs quote match `testdata/generated/` there |
+| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript` and `runtime/engine-workqueue/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's and the work-queue package's tests run under Node.js and Bun, and so do the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) |
 | `make python`         | `runtime/schema/python` pytest; `runtime/versiongraph/python` fmt, clippy `-D warnings`, the PyO3 extension built by uv with maturin, and every core vector and the engine's tests that need no database through the package under the default Python and 3.9 |
 | `make rust`           | `runtime/http/rust`, `runtime/schema/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test; the schema runtime's and the version-graph crates' tests again with the serde_json features superscalar turns on |
 | `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
@@ -240,7 +245,7 @@ PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
 (`superschematic-http-runtime`, and `superschematic-versiongraph`,
 `superschematic-versiongraph-engine` and
-`superschematic-versiongraph-python`, which are not published) and the ten
+`superschematic-versiongraph-python`, which are not published) and the eleven
 Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing
 that writes it. `bump_version.py check` fails when any site disagrees; CI

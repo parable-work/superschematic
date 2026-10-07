@@ -37,10 +37,13 @@ func TestD1Lease(t *testing.T) {
 	ctx := context.Background()
 	url := testdb.NewD1(t)
 	dead := openD1(t, url, func(o *d1.Options) { o.Holder, o.Lease = "dead-runner", 400*time.Millisecond })
+	// The lease starts while Lock runs, so the wait is measured from before
+	// it: a lease can then end no sooner than 400ms after began, however
+	// long Lock takes to return.
+	began := time.Now()
 	if _, err := dead.Lock(ctx, "shop"); err != nil {
 		t.Fatal(err)
 	}
-	began := time.Now()
 
 	impatient := &migrate.Runner{Driver: openD1(t, url, func(o *d1.Options) { o.LockWait = 50 * time.Millisecond }), Log: &testLog{t: t}}
 	_, err := impatient.Apply(ctx, plan(t, migrate.SQLite, "01-create"), migrate.All)

@@ -32,6 +32,7 @@ const (
 
 	// The types of the bootstrap graph (BootstrapEnvironment).
 	TypeRepository               = "gcp:artifactregistry/repository:Repository"
+	TypeRepositoryIAMMember      = "gcp:artifactregistry/repositoryIamMember:RepositoryIamMember"
 	TypeServiceAccountIAMMember  = "gcp:serviceaccount/iAMMember:IAMMember"
 	TypeBucketIAMMember          = "gcp:storage/bucketIAMMember:BucketIAMMember"
 	TypeCryptoKeyIAMMember       = "gcp:kms/cryptoKeyIAMMember:CryptoKeyIAMMember"
@@ -110,6 +111,27 @@ const (
 	// containerPort is the port every server listens on: Cloud Run's
 	// default, which it also passes in PORT.
 	containerPort = 8080
+
+	// The paths of the entrypoint's health checks (section 8.1):
+	// readinessPath answers 200 while every database the server connects
+	// to answers, and 503 while it drains; livenessPath answers 200 while
+	// the process runs.
+	readinessPath = "/readyz"
+	livenessPath  = "/healthz"
+
+	// The startup probe asks readinessPath every startupPeriod seconds, each
+	// time for at most startupTimeout, and fails the instance after
+	// startupFailures misses: two minutes for its databases to answer.
+	startupPeriod   = 5
+	startupTimeout  = 4
+	startupFailures = 24
+
+	// The liveness probe asks livenessPath every livenessPeriod seconds, each
+	// time for at most livenessTimeout, and restarts the instance after
+	// livenessFailures misses in a row.
+	livenessPeriod   = 15
+	livenessTimeout  = 5
+	livenessFailures = 3
 
 	defaultCPU      = "1"
 	defaultMemory   = "512Mi"
