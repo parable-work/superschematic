@@ -169,7 +169,7 @@ describe('the describe document', () => {
       [
         ['Constants', []],
         ['Variants', []],
-        ['Links', ['no_revision', 'required_link', 'required_target']],
+        ['Links', ['no_revision', 'no_release', 'required_link', 'required_target']],
         ['test.Hold', ['stale', 'required', 'refused']],
       ]
     );
@@ -499,6 +499,7 @@ describe("the core's behaviors", () => {
         ['documents.comment', 'documents_comment', 'writes'],
         ['documents.listComments', 'documents_list_comments', 'read_only'],
         ['documents.listRevisions', 'documents_list_revisions', 'read_only'],
+        ['documents.getRevision', 'documents_get_revision', 'read_only'],
         ['documents.propose', 'documents_propose', 'writes'],
         ['documents.approve', 'documents_approve', 'writes'],
         ['documents.reject', 'documents_reject', 'writes'],
@@ -527,6 +528,7 @@ describe("the core's behaviors", () => {
         ['Comments', 'comment', true, 'auto'],
         ['Comments', 'listComments', false, 'auto'],
         ['Revisions', 'listRevisions', false, 'auto'],
+        ['Revisions', 'getRevision', false, 'auto'],
         ['Revisions', 'propose', true, 'auto'],
         ['Revisions', 'approve', true, 'auto'],
         ['Revisions', 'reject', true, 'auto'],
@@ -535,8 +537,8 @@ describe("the core's behaviors", () => {
     );
     const properties = described.instance.properties as Record<string, { readOnly?: boolean }>;
     assert.deepEqual(
-      ['status', 'commentCount', 'revision', 'title'].map((field) => properties[field]?.readOnly === true),
-      [true, true, true, false]
+      ['status', 'commentCount', 'revision', 'pendingProposals', 'title'].map((field) => properties[field]?.readOnly === true),
+      [true, true, true, true, false]
     );
   });
 
@@ -556,6 +558,7 @@ describe("the core's behaviors", () => {
         ['documents.comment', 'always'],
         ['documents.listComments', 'always'],
         ['documents.listRevisions', 'always'],
+        ['documents.getRevision', 'always'],
         ['documents.propose', 'always'],
         ['documents.approve', 'always'],
         ['documents.reject', 'always'],

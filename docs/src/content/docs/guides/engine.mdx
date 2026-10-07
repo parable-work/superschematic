@@ -262,7 +262,8 @@ curl -s $API/schemas/notes/instances \
       ],
       "status": "draft",
       "commentCount": 0,
-      "revision": 1
+      "revision": 1,
+      "pendingProposals": 0
     },
     "createdAt": 1790790700324,
     "createdBy": "alice",
@@ -277,8 +278,8 @@ curl -s $API/schemas/notes/instances \
 
 The response is 201. The note's `data` holds its own fields and, after
 them, the fields its behaviors add: Workflow's `status`, Comments'
-`commentCount` and Revisions' `revision`. Those are read-only; a create or
-an update that sets one is 422. `seq` is the sequence of the note's last
+`commentCount` and Revisions' `revision` and `pendingProposals`. Those
+are read-only; a create or an update that sets one is 422. `seq` is the sequence of the note's last
 event, and the response sends it as the `ETag`, `"1"`. Without an `id`, the
 engine makes a random UUID. A body may also carry `behaviors`, the
 parameters a create gives the note's behaviors by name, such as the links
@@ -323,7 +324,8 @@ curl -s -X PATCH $API/schemas/notes/instances/launch \
   "body": "Ships in the fall.",
   "status": "draft",
   "commentCount": 0,
-  "revision": 2
+  "revision": 2,
+  "pendingProposals": 0
 }
 ```
 
@@ -492,7 +494,8 @@ through them.
 ### Revisions
 
 carol cannot change the note, but she can propose a change. The proposal
-is checked as the update would be, and changes nothing yet:
+is checked as the update would be, and changes none of the note's fields
+yet; `pendingProposals` counts it:
 
 ```sh
 curl -s $API/schemas/notes/instances/launch/operations/propose \
@@ -551,13 +554,17 @@ curl -s $API/schemas/notes/instances/launch -H 'authorization: Bearer carol-toke
   "body": "Ships on October 1.",
   "status": "published",
   "commentCount": 1,
-  "revision": 3
+  "revision": 3,
+  "pendingProposals": 0
 }
 ```
 
 `reject` settles a proposal without applying it, `listProposals` and
-`listRevisions` page through them, and a revision's `data` is the note's
-own fields as that change left them.
+`listRevisions` page through them, `getRevision` reads one revision by
+its number, and a revision's `data` is the note's own fields as that
+change left them. A proposal may cite `evidence`, instances the proposer
+may read, each optionally at a revision, which the reviewer reads with
+the proposal.
 
 ### Your own behaviors
 
@@ -675,10 +682,10 @@ id: 7
 data: {"cursor":7,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":5,"version":1,"actor":"carol","at":1790790700450,"change":{"behavior":"Comments","operation":"comment","params":{"body":"Which fall?"},"patch":{"commentCount":1}}}
 
 id: 8
-data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{}}}
+data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{"pendingProposals":1}}}
 
 id: 9
-data: {"cursor":9,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":7,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"body":"Ships on October 1.","revision":3}}}
+data: {"cursor":9,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":7,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"body":"Ships on October 1.","revision":3,"pendingProposals":0}}}
 
 event: ready
 id: 9
@@ -803,6 +810,7 @@ notes_list
 notes_comment
 notes_list_comments
 notes_list_revisions
+notes_get_revision
 notes_propose
 notes_list_proposals
 ```

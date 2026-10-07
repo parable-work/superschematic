@@ -1706,6 +1706,50 @@ append-only, and retention removes its oldest events.
 | The trigger that refuses a delete of an event lets one through at or before its namespace's floor, which retention moves first in the batch's transaction, so a stray delete above the floor is still refused. | Dropping the trigger, which lets any statement in the process delete events |
 | The typed client reads a `cursor_expired` problem's `floor` and `head` into its `EngineProblem`. A subscription resuming from a cursor retention has pruned past ends with that problem, as any 4xx ends it, and so does a reconciler whose stored cursor it is: neither skips what it never handled. With no cursor, each reads from the floor. | Resuming a subscription from the floor on its own, which skips events its caller never saw, the gap the code exists to announce |
 
+### D16, amended: a link pins a release, and shows the latest
+
+`Links` pinned revisions of `Revisions` only. Work done against a
+recipe, a version graph of `Branches`, could not record the release it
+was done against, so neither `Queue`'s `excludeStale` nor `Reactions`'
+`revised` could tell work pinned to a superseded release from current
+work, which the amendment on a revised link left open. And a pinned
+link's record said only whether it was stale, so a client that shows
+"pinned 3, latest 5" read the target as well. A link now pins a
+revision or a release, and its record shows the target's latest beside
+the pin.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `pinned` takes `true` or `"revision"`, a revision of the target's `Revisions`, or `"release"`, a release of its `Branches`; `false` and absent pin nothing. `true` stays a revision, so every config written before keeps its meaning. `linkPin`, exported, reads it from a config as a schema holds it. | A key of its own beside `pinned` (`pins: "release"`), two keys for one choice that can disagree; a string only, which rewrites every config written so far; a pin of both kinds at once, which no case needs |
+| A release is the version of the target's release pointer, 1 at its first release, as `releaseCommit` numbers it. `Branches` gains a read-only field, `release`, which reads it from the behavior's own table and is absent before the first release. Links reads it as it reads `revision`, through a read of the target as the caller, and a `releaseCommit` event carries it in its patch. | Links invoking `releases`, which pages from the oldest; `released`, which materializes the tree; Links reading Branches' tables, which D16 rules out; the released commit's id, which orders nothing, so no pin could be past it |
+| A row keeps a revision pin and a release pin in columns of their own (Links migration 2 adds `release`), and `link` writes the kind its config pins and clears the other. A config that changes what a link pins finds no pin of the new kind in a row until it is linked again, as a link made before it was pinned has none, so `configChange` allows the change. | One column for either kind, which a config that changes the kind would read as a number of the other |
+| `link` and a create's entry take `release` beside `revision`, each only for a link that pins its kind and at most the target's latest. A target with no release yet is vetoed `no_release`, as one with no revision is `no_revision`; a link pinned to a release whose schema does not compose `Branches` is `invalid_argument`. | `no_revision` for both, which a client branching on the code could not tell apart |
+| The record of a pinned link, in `links` and in `listLinked`, carries `latest`, the target's latest revision or release of the kind it pins, beside the pin and `stale`, wherever `stale` is computed. An unpinned link carries none. | `latest` on every link, which would read every link's target at every read, where only a pinned link reads its target now |
+| `Queue`'s `excludeStale` takes a link pinned to either kind, and hears the target's `/release` cross the pin plus one, as it hears `/revision`. `Reactions`' `revised` moves only the stale instances where the link pins what the event made, a revision or a release; any other link moves every instance that points at the target, as before. | Leaving release pins out of `excludeStale`, which keeps out only half the outdated work |
+| `Blueprint`'s `from` names a link pinned to a revision: a release pins the definition's version graph, not the own fields its map of steps is kept in. A `parentLink` pinned to a release is refused at define, since a parent has no release when its create stamps its children. `copyLinks` copies a release pin where the child's link pins releases too. | Reading the map from a release's tree, which would keep a blueprint's steps in a graph's rows, a format of their own |
+| Branches' field takes the name `release`, beside Revisions' `revision`, so a type that composes `Branches` and has an own field `release` is refused at load, as any collision of a behavior's field is. This is flagged: no schema in the repository has one. | A name less likely to collide (`releaseVersion`), which reads worse beside `revision`; no field, which leaves Links and Queue nothing to read or hear |
+
+### D16, amended: a revision by number, a proposal's evidence, the latest linked value, a limit's fallback, and a draft's near-duplicates
+
+Five small gaps in the core and work-queue behaviors. `Blueprint` read
+one revision of a definition by building a `listRevisions` cursor by
+hand. A list of instances under review could not show how many
+proposals each waited on without listing them, and a proposal could not
+say what it rested on. A parent had no rollup for its newest child's
+value, such as the latest attempt's result. A meter whose limit an
+instance's field holds had no limit at all while the field was empty.
+And an agent could find near-duplicates of an instance that exists, not
+of the draft it was about to create.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Revisions`' `getRevision({ revision })`, read-only, returns one revision as `listRevisions` returns each, through the value store; a number the instance has not reached is `not_found`. `Blueprint` reads a pinned definition through it. | A filter on `listRevisions`, whose page a single read does not need; `invalid_argument`, Revisions' answer for a proposal it does not hold, where a read of what is not there is `not_found`, as `released` before the first release is |
+| `pendingProposals`, a field of `Revisions`, counts the pending proposals through the proposals' index by state: present, 0 included, while the config has review, and absent without it. A create's, `propose`'s, `approve`'s and `reject`'s events carry it, so `propose` no longer appends an empty patch. | A count in `listProposals` only, which a list of instances would call per instance; the field without review, always 0 |
+| `propose` takes `evidence`, at most 64 entries `{ schema, id, revision? }`: instances the proposal cites, each optionally at a revision. `propose` reads each as the proposer, so a schema the proposer may not read is `forbidden`; a schema the namespace does not have, an instance that does not exist, and a revision of a schema that does not compose `Revisions` or past the target's latest are `invalid_argument` at the entry. It is stored as data, in a column Revisions' migration 3 adds, and every proposal record returns it. | References, which would make a cited instance's delete ask the proposal, and leave nothing to show once it went; no check at `propose`, which stores a citation a reviewer cannot follow |
+| `Rollups`' `latest`, `{ function: "latest", field }`, is the field's value on the linked instance created last, by `createdAt`, the greater id on a tie; absent when that instance holds none or there is none. The field is any field of the linked type, or `status` when it composes `Workflow`, which `parseConfig` checks. It is one pass over the records a rollup reads and its JSON type is its field's, so the set stays closed. | Ordering by when the link was made, which Rollups cannot read without Links' tables; the latest instance that holds a value, which is a filter; `first` beside it, which no case needs yet |
+| `Budget`'s `limit` and `limitField` go together: `limit` is the limit while the field holds no value of at least 0, as `reserve` is the amount beside `reserveField`. A change that empties the field is held to `limit`, never below what is used and reserved. The declaration drops the `not` that refused both. | Exclusive keys, which leave an instance without a limit until its field is set; falling back to the limit `setLimit` stored, which a meter with `limitField` never writes |
+| `Search`'s `similar` takes `text` in place of `id`, with an optional `vector` and `model`: the text of an instance not yet created, its indexed fields joined as `staleEmbeddings` joins them, at most 100,000 characters. It ranks as `similar(id)` does, by the text's longest words fused with the vector's ranking, with no instance to leave out, and `embedded` says whether a vector ranked. The parameters take one of `id` and `text`, and a vector only with text. | An operation of its own, a second tool for one question; the text as a `search` query, which every word must then match; a vector with `id`, whose own vector is the one that ranks |
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.

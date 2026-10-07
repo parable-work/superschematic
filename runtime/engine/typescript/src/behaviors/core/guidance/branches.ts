@@ -37,7 +37,7 @@ export function branchesGuidance(config: BranchesConfig, target: DescribeTarget)
   return {
     summary: sentences(
       `Each ${target.type} holds a version graph of rows of the kinds ${list(kinds)}, on its primary line, ${primary}, and drafts of it.`,
-      'Work happens on a draft at its version and merges into the primary line; a tagged commit can be released.',
+      'Work happens on a draft at its version and merges into the primary line; a tagged commit can be released, and release holds the number of the latest release.',
       config.sweep === undefined
         ? undefined
         : `Every ${duration(config.sweep.intervalMs)} the sweep${config.sweep.abandonAfter === undefined ? '' : ` discards drafts idle for ${duration(config.sweep.abandonAfter)} and`} prunes history.`
@@ -80,7 +80,7 @@ export function branchesGuidance(config: BranchesConfig, target: DescribeTarget)
         errors: errors('version_conflict', 'ref_sealed', 'primary_merge_only', 'invalid_tree'),
       },
       releaseCommit: {
-        useWhen: "Use to release a tagged commit: it points the release pointer at it, at the pointer's version, 0 for the first.",
+        useWhen: "Use to release a tagged commit: it points the release pointer at it, at the pointer's version, the release field (0 before the first).",
         success: 'Returns the commit and the release pointer at its new version.',
         errors: errors('version_conflict', 'not_tagged'),
       },

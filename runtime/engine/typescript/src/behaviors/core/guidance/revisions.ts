@@ -1,8 +1,9 @@
 /*
 Revisions' guidance: every change of the own fields records a revision,
-and with a review step a change may be proposed and settled by a caller
-with the review permission. Without one, the review operations are
-refused, which their guidance says.
+which getRevision reads by number, and with a review step a change may be
+proposed, with evidence, and settled by a caller with the review
+permission, while pendingProposals counts the ones waiting. Without one,
+the review operations are refused, which their guidance says.
 */
 
 import type { BehaviorGuidance, DescribeTarget, OperationGuidance } from '../../behavior.js';
@@ -28,19 +29,24 @@ export function revisionsGuidance(config: RevisionsConfig, target: DescribeTarge
     summary:
       review === undefined
         ? `Every change of the own fields of a ${target.type} records a numbered revision of them; revision holds the latest. There is no review step.`
-        : `Every change of the own fields of a ${target.type} records a numbered revision of them; revision holds the latest. A change may also be proposed, and a caller with permission ${review.permission} approves or rejects it.`,
+        : `Every change of the own fields of a ${target.type} records a numbered revision of them; revision holds the latest. A change may also be proposed, and a caller with permission ${review.permission} approves or rejects it; pendingProposals counts the proposals waiting.`,
     operations: {
       listRevisions: {
         useWhen: "Use to read the instance's revisions, oldest first: each its number and the own fields as that change left them.",
+        doNotUseWhen: 'Do not page through them for one revision; call getRevision with its number.',
         success: page,
+      },
+      getRevision: {
+        useWhen: 'Use to read one revision by its number, the one a pinned link or a proposal names say: the own fields as that change left them.',
+        success: 'Returns the revision; a number the instance has not reached is not_found.',
       },
       propose:
         review === undefined
           ? refused('a proposal')
           : {
-              useWhen: `Use to propose a change of the own fields, as a JSON merge patch, for a caller with permission ${review.permission} to approve.`,
+              useWhen: `Use to propose a change of the own fields, as a JSON merge patch, for a caller with permission ${review.permission} to approve. evidence cites instances the proposer may read, each optionally at a revision it has had.`,
               doNotUseWhen: 'Do not use to change the instance at once; call update.',
-              success: 'Returns the pending proposal with its id; the instance does not change until it is approved.',
+              success: 'Returns the pending proposal with its id and its evidence; the instance does not change until it is approved.',
             },
       approve:
         review === undefined
@@ -62,7 +68,7 @@ export function revisionsGuidance(config: RevisionsConfig, target: DescribeTarge
         review === undefined
           ? refused('listing proposals')
           : {
-              useWhen: "Use to read the instance's proposals, oldest first; with state, only the pending, approved or rejected ones.",
+              useWhen: "Use to read the instance's proposals, oldest first, each with the evidence it cites; with state, only the pending, approved or rejected ones.",
               success: page,
             },
       update: { success: 'A change of the own fields records the next revision.' },

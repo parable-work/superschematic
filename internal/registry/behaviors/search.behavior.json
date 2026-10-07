@@ -1,6 +1,6 @@
 {
   "name": "Search",
-  "description": "Full-text search over the instance's own text fields, which the config names, and with vectors in the config, vector search over embeddings an outside embedder computes from the same text. The index is kept in the transaction of each create, update and delete; an embedder pulls the instances whose text changed since their vector was computed (staleEmbeddings) and settles their vectors back (settleEmbeddings). The schema-level search returns the matching ids in rank order, by the text, by a vector the caller gives, or by both fused, from the instances of the caller's namespace only, and similar returns the instances nearest to one.",
+  "description": "Full-text search over the instance's own text fields, which the config names, and with vectors in the config, vector search over embeddings an outside embedder computes from the same text. The index is kept in the transaction of each create, update and delete; an embedder pulls the instances whose text changed since their vector was computed (staleEmbeddings) and settles their vectors back (settleEmbeddings). The schema-level search returns the matching ids in rank order, by the text, by a vector the caller gives, or by both fused, from the instances of the caller's namespace only, and similar returns the instances nearest to one, or to a draft's text.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -110,14 +110,29 @@
     },
     {
       "name": "similar",
-      "description": "Lists the instances nearest to an existing one, leaving it out: by its own indexed text and, once its vector is settled, by its vector, the two rankings fused, each hit saying how it matched. Call it before creating an instance like this one, to find near-duplicates to reuse or link instead.",
+      "description": "Lists the instances nearest to an existing one, leaving it out: by its own indexed text and, once its vector is settled, by its vector, the two rankings fused, each hit saying how it matched. Given text in place of an id, the text of an instance not yet created, it ranks the same way by that text and the vector given with it, if any. Call it before creating an instance, to find near-duplicates to reuse or link instead.",
       "scope": "schema",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id"],
+        "oneOf": [{ "required": ["id"] }, { "required": ["text"] }],
+        "dependentRequired": { "vector": ["text"], "model": ["vector"] },
         "properties": {
           "id": { "description": "The instance whose neighbours to list.", "type": "string", "minLength": 1 },
+          "text": {
+            "description": "In place of id, the text of an instance not yet created: its indexed fields that hold more than whitespace, in the config's order, joined by a blank line, as an embedder is given an instance's.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000
+          },
+          "vector": {
+            "description": "With text, the text's vector: as many numbers as the config's dimensions, computed with its model.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4096,
+            "items": { "type": "number" }
+          },
+          "model": { "description": "The model the vector was computed with; refused when it is not the config's.", "type": "string", "minLength": 1, "maxLength": 200 },
           "limit": { "description": "At most this many instances; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
           "cursor": { "description": "The next of the previous page.", "type": "string" }
         }
@@ -163,7 +178,7 @@
             }
           },
           "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] },
-          "embedded": { "description": "Whether the instance's vector is settled, so the ranking used it.", "type": "boolean" }
+          "embedded": { "description": "Whether a vector ranked: the instance's, once it is settled, or the one given with text.", "type": "boolean" }
         }
       }
     },

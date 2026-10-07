@@ -977,21 +977,21 @@ engine; without them the engine refuses a schema that composes one.
 | --- | --- | --- | --- |
 | `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status` | `transition` |
 | `Comments` | none | `commentCount` | `comment`, `listComments` |
-| `Revisions` | `review` (`permission`), optional | `revision` | `listRevisions`, `propose`, `approve`, `reject`, `listProposals` |
+| `Revisions` | `review` (`permission`), optional | `revision`, `pendingProposals` | `listRevisions`, `getRevision`, `propose`, `approve`, `reject`, `listProposals` |
 | `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
-| `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
+| `Links` | `links` (by name: `schema`, `required`, `pinned`: a revision or a release); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`, `vectors` (`dimensions`, `model`, `permission`); required | none | `search`, `similar`, `staleEmbeddings` and `settleEmbeddings`, of scope `schema` |
 | `Reactions` | `rules` (each a `when`, `enters`, `allTerminal`, `anyTerminal`, `holds` or `revised`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 | `Constants` | `fields`, `permission`; required | none | none |
 | `Variants` | `field`, `by`, `types` (by a value of `by`, a type of the document); required | none | none |
-| `Branches` | `kinds` (by name: `type`, a type of the document, `parent` (`key`, `of`), `order`, `singleton`, `units`, `retentionDays`), `primary`, `snapshotEvery`, `sweep` (`intervalMs`, `discardGrace`, `pruneBatch`, `abandonAfter`); required | none | `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`, and the read-only `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history` |
+| `Branches` | `kinds` (by name: `type`, a type of the document, `parent` (`key`, `of`), `order`, `singleton`, `units`, `retentionDays`), `primary`, `snapshotEvery`, `sweep` (`intervalMs`, `discardGrace`, `pruneBatch`, `abandonAfter`); required | `release` | `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`, and the read-only `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history` |
 | `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`; optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`, `excludeStale`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
 | `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required; `@superschematic/engine-workqueue` | `presence` | `beat`, `miss` |
 | `Blueprint` | `schema`, `parentLink`, `keyField`, one of `steps` (by key: `after`, `when`, `data`) and `from` (`link`, `field`), `copyFields`, `copyLinks`; required; `@superschematic/engine-workqueue` | `blueprint` | none |
-| `Budget` | `meters` (by name: `limit` or `limitField`, `reserve` and `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`), `escalate` (`transition`, `from`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
+| `Budget` | `meters` (by name: `limit` and `limitField`, `reserve` and `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`), `escalate` (`transition`, `from`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
 | `Retries` | `classes` (by name: `attempts` and `hint`, or `terminal`), `totalAttempts`, `limitsField`, `limitsPermission`, `keepBest` (`minDelta`, `neverRegress`), `stuckAfter`, `resultField`, `exhaustedState`, `from`, `permission`; required; requires `Workflow`; `@superschematic/engine-workqueue` | `retries` | `recordAttempt` |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,

@@ -41,7 +41,7 @@
         "maximum": 1000
       },
       "excludeStale": {
-        "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
+        "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision or a release its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
         "type": "array",
         "minItems": 1,
         "maxItems": 16,
@@ -159,7 +159,7 @@
   "vetoes": [
     { "code": "not_claimable", "description": "The instance's status is not one of the states it is claimed from." },
     { "code": "blocked", "description": "A blocker of Dependencies holds the instance up." },
-    { "code": "stale_link", "description": "A link excludeStale names is pinned to a revision its target has moved past; details.links names them." },
+    { "code": "stale_link", "description": "A link excludeStale names is pinned to a revision or a release its target has moved past; details.links names them." },
     { "code": "claim_required", "description": "The lease of a claimable instance is taken by claiming it, not by Lease's acquire." }
   ]
 }

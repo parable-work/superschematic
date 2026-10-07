@@ -366,7 +366,7 @@ describe("the core's behaviors over HTTP", () => {
     );
     assert.equal((await problem(call(app, 'POST', build('addBlocker'), { body: { id: 'build' } }), 400)).code, 'invalid_argument');
     assert.deepEqual(await data(call(app, 'POST', `${TASKS}/operations/listLinked`, { token: 'reader', body: { name: 'spec', id: 'doc-1' } })), {
-      data: { items: [{ id: 'build', revision: 1, stale: false }], next: null },
+      data: { items: [{ id: 'build', revision: 1, latest: 1, stale: false }], next: null },
       etag: null,
     });
     const required = await problem(call(app, 'DELETE', '/namespaces/default/schemas/projects/instances/launch'), 409);
