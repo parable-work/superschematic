@@ -3,17 +3,18 @@
 // directives; the terminal step through a transition, Retries and an
 // abandon that counts toward escalation; a lost lease aborting the handler
 // and blocking its fenced writes, by a veto or by silence; bounded
-// concurrency; waking on the event stream; and a stop that drains or
-// releases what the worker holds.
+// concurrency; waking on the event stream; a stop that drains or releases
+// what the worker holds; and the Presence instance it beats, which holds
+// back its claims while the engine refuses its beats or none succeeds.
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineClient } from '@superschematic/engine/client';
+import { EngineClient, isProblem, isVeto } from '@superschematic/engine/client';
 import { engineApp, type EngineHttpOptions } from '@superschematic/engine/http';
 import type { Engine, Principal } from '@superschematic/engine';
 
-import { LeaseLostError, QueueWorker, WorkFailure, WorkerStoppedError, type Job, type QueueWorkerOptions } from '../dist/worker/index.js';
+import { LeaseLostError, PresenceLostError, QueueWorker, WorkFailure, WorkerStoppedError, type Job, type QueueWorkerOptions } from '../dist/worker/index.js';
 import { alice, cleanup, jobFlow, jobsDocument, openTestEngine, publish } from './helpers.ts';
 
 const workers: QueueWorker[] = [];
@@ -40,6 +41,8 @@ interface Served {
   skew(ms: number): void;
   /** Makes the client's heartbeats fail as a network does, or work again. */
   failHeartbeats(fail: boolean): void;
+  /** Makes the client's presence beats fail as a network does, or work again. */
+  failBeats(fail: boolean): void;
 }
 
 const LEASE = {
@@ -56,6 +59,7 @@ const LEASE = {
 function serve(behaviors: ReadonlyArray<{ name: string; config?: unknown }> = [LEASE, { name: 'Queue', config: { claim: { from: ['queued'], to: 'running' }, priorityField: 'priority', match: ['topic'] } }]): Served {
   let skew = 0;
   let failing = false;
+  let failingBeats = false;
   const engine = openTestEngine({ clock: () => Date.now() + skew });
   publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, ...behaviors]));
   const app = engineApp(engine, { authenticate });
@@ -67,7 +71,7 @@ function serve(behaviors: ReadonlyArray<{ name: string; config?: unknown }> = [L
       const request = new Request(input, init);
       const path = new URL(request.url).pathname;
       requests.push(`${request.method} ${path}`);
-      if (failing && path.endsWith('/operations/heartbeat')) {
+      if ((failing && path.endsWith('/operations/heartbeat')) || (failingBeats && path.endsWith('/operations/beat'))) {
         throw new TypeError('network down');
       }
       return app.fetch(request);
@@ -83,7 +87,43 @@ function serve(behaviors: ReadonlyArray<{ name: string; config?: unknown }> = [L
     failHeartbeats: (fail) => {
       failing = fail;
     },
+    failBeats: (fail) => {
+      failingBeats = fail;
+    },
   };
+}
+
+/** A worker's presence lasts a second; its miss would release its leases on Job. */
+const PRESENCE = { ttlMs: 1000, principalField: 'subject', releaseLeases: ['Job'] };
+
+/**
+ * servePresence serves Job, and Worker, whose instances stand for workers
+ * with Presence, with w1 standing for the client's principal.
+ */
+function servePresence(): Served {
+  const served = serve();
+  publish(served.engine, {
+    kind: 'General',
+    name: 'Worker',
+    types: {
+      Worker: {
+        name: 'Worker',
+        role: 'EmbeddedStruct',
+        behaviors: [{ name: 'Presence', config: PRESENCE }],
+        fields: [{ name: 'subject', typeRef: { name: 'string' }, required: true }],
+      },
+    },
+  });
+  served.engine.instances.create(alice, 'Worker', { subject: 'worker' }, { id: 'w1' });
+  return served;
+}
+
+/** The beats of w1, as its events record them: who beat it. */
+function beats(engine: Engine): string[] {
+  return engine.events
+    .read(alice, { schema: 'Worker', instanceId: 'w1', limit: 500 })
+    .events.filter((event) => event.kind === 'operation' && (event.change as { operation: string }).operation === 'beat')
+    .map((event) => event.actor);
 }
 
 function start<T = Record<string, unknown>>(client: EngineClient, options: Partial<QueueWorkerOptions<T>> & Pick<QueueWorkerOptions<T>, 'handle'>): Promise<QueueWorker<T>> {
@@ -434,6 +474,121 @@ describe('the worker', () => {
         assert.match(match[1], /^(?:\.\/[a-z-]+\.js|\.\.\/defaults\.js|@superschematic\/engine\/client)$/u, `${file} imports ${match[1]}`);
       }
     }
+  });
+});
+
+describe('the worker\'s presence', () => {
+  test('beats as its principal before it claims, and on its own timer while a handler is busy, until the stop', async () => {
+    const { engine, client, requests } = servePresence();
+    engine.instances.create(alice, 'Job', { title: 'long' }, { id: 'long' });
+    let open = false;
+    const worker = await start(client, {
+      presence: { schema: 'Worker', id: 'w1', beatMs: 20 },
+      handle: async () => {
+        await until(() => open, 'the gate');
+        return { transition: 'done' };
+      },
+    });
+    assert.equal(worker.present, true);
+    await until(() => worker.active === 1, 'the claim');
+    const beat = requests.indexOf('POST /namespaces/default/schemas/Worker/instances/w1/operations/beat');
+    const claim = requests.indexOf('POST /namespaces/default/schemas/Job/operations/claimNext');
+    assert.ok(beat >= 0 && beat < claim, 'the first beat comes before the first claim');
+    const before = beats(engine).length;
+    await until(() => beats(engine).length >= before + 3, 'three beats while the handler works');
+    open = true;
+    await until(() => job(engine, 'long').status === 'done', 'the job done');
+    assert.ok(beats(engine).every((actor) => actor === 'worker'));
+    const presence = engine.instances.get(alice, 'Worker', 'w1')?.data.presence as { lastBeatAt: number | null; missed: boolean };
+    assert.deepEqual([typeof presence.lastBeatAt, presence.missed], ['number', false]);
+    await worker.stop();
+    const stopped = beats(engine).length;
+    await sleep(80);
+    assert.equal(beats(engine).length, stopped);
+  });
+
+  test('a refused first beat fails the start, and so does a schema without Presence', async () => {
+    const { engine, client } = servePresence();
+    engine.instances.create(alice, 'Worker', { subject: 'someone else' }, { id: 'w2' });
+    engine.instances.create(alice, 'Job', { title: 'waiting' }, { id: 'waiting' });
+    const handle = () => ({ transition: 'done' });
+    await assert.rejects(new QueueWorker(client, { schema: 'Job', presence: { schema: 'Worker', id: 'w2' }, handle }).start(), (error: unknown) =>
+      isVeto(error, 'Presence', 'not_principal')
+    );
+    await assert.rejects(new QueueWorker(client, { schema: 'Job', presence: { schema: 'Worker', id: 'w3' }, handle }).start(), (error: unknown) => isProblem(error, 'not_found'));
+    await assert.rejects(new QueueWorker(client, { schema: 'Job', presence: { schema: 'Job', id: 'waiting' }, handle }).start(), /Job does not compose Presence/u);
+    assert.throws(() => new QueueWorker(client, { schema: 'Job', presence: { schema: 'Worker', id: '' }, handle }), /presence\.id/u);
+    assert.throws(() => new QueueWorker(client, { schema: 'Job', presence: { schema: 'Worker', id: 'w1', beatMs: 0 }, handle }), /presence\.beatMs/u);
+    assert.equal(job(engine, 'waiting').status, 'queued');
+  });
+
+  test('while the engine refuses its beats it claims nothing, and it claims again once a beat succeeds', async () => {
+    const { engine, client, requests } = servePresence();
+    const errors: unknown[] = [];
+    const done: string[] = [];
+    const worker = await start(client, {
+      presence: { schema: 'Worker', id: 'w1', beatMs: 20 },
+      onError: (error) => errors.push(error),
+      handle: async (job) => {
+        done.push(job.id);
+        return { transition: 'done' };
+      },
+    });
+    // The worker's instance is removed: its next beat is refused.
+    engine.instances.delete(alice, 'Worker', 'w1');
+    await until(() => !worker.present, 'the presence lost');
+    const lost = errors.find((error) => error instanceof PresenceLostError) as PresenceLostError;
+    assert.deepEqual([lost.reason, lost.schema, lost.id], ['refused', 'Worker', 'w1']);
+    assert.ok(isProblem(lost.cause, 'not_found'));
+    assert.ok(isProblem(errors[0], 'not_found'), 'the refused beat is reported first');
+    const sent = requests.length;
+    engine.instances.create(alice, 'Job', { title: 'waiting' }, { id: 'waiting' });
+    await sleep(100);
+    assert.equal(job(engine, 'waiting').status, 'queued');
+    assert.ok(requests.slice(sent).every((request) => !/claimNext|countClaimable/u.test(request)));
+    assert.ok(requests.slice(sent).some((request) => request.endsWith('/w1/operations/beat')), 'it beats on');
+    // Registered again, it beats, and claims what waited.
+    engine.instances.create(alice, 'Worker', { subject: 'worker' }, { id: 'w1' });
+    await until(() => done.includes('waiting'), 'the claim once present');
+    assert.equal(worker.present, true);
+    assert.equal(errors.filter((error) => error instanceof PresenceLostError).length, 1);
+  });
+
+  test('a presence no beat renews for its ttlMs lapses: the worker stops claiming, and the job it holds goes on', async () => {
+    const served = servePresence();
+    const { engine, client } = served;
+    engine.instances.create(alice, 'Job', { title: 'held' }, { id: 'held' });
+    const errors: unknown[] = [];
+    let held: Job | undefined;
+    let open = false;
+    const worker = await start(client, {
+      concurrency: 2,
+      presence: { schema: 'Worker', id: 'w1' },
+      onError: (error) => errors.push(error),
+      handle: async (job) => {
+        if (job.id === 'held') {
+          held = job;
+          await until(() => open, 'the gate', 10_000);
+        }
+        return { transition: 'done' };
+      },
+    });
+    await until(() => held !== undefined, 'the claim');
+    served.failBeats(true);
+    await until(() => !worker.present, 'the lapse', 5_000);
+    const lost = errors.find((error) => error instanceof PresenceLostError) as PresenceLostError;
+    assert.equal(lost.reason, 'lapsed');
+    assert.ok(errors.some((error) => /network down/u.test(String(error))));
+    // The job it holds renews its own lease, and goes on.
+    assert.equal(held?.signal.aborted, false);
+    engine.instances.create(alice, 'Job', { title: 'next' }, { id: 'next' });
+    await sleep(100);
+    assert.equal(job(engine, 'next').status, 'queued');
+    served.failBeats(false);
+    await until(() => job(engine, 'next').status === 'done', 'the claim once a beat succeeds', 3_000);
+    assert.equal(worker.present, true);
+    open = true;
+    await until(() => job(engine, 'held').status === 'done', 'the held job done');
   });
 });
 
