@@ -20,6 +20,7 @@ import {
   BehaviorError,
   EngineError,
   InstanceValidationError,
+  ValueTooLargeError,
   allowAll,
   canonicalJSON,
   defineBehavior,
@@ -681,19 +682,61 @@ for (const driver of drivers) {
       assert.deepEqual(payloads(engine), [x, y, z].map(hashOf).sort());
     });
 
-    test('a driver outside the transaction gets a value removed only after the commit that dropped its last holder', () => {
+    test('a driver outside the transaction gets a value removed only after the commit that dropped its last holder, and none a rollback left', () => {
       const values = new MapDriver();
       const engine = open(driver, { values: { driver: values } });
       publish(engine, steps([{ name: 'test.Shelf' }]));
       const [x, y] = [verify(60, 'x'), verify(60, 'y')];
       engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: x });
-      // The failed keep stowed y and dropped x, then rolled back: x stays.
+      // The failed keep stowed y and dropped x, then rolled back: x stays,
+      // and y, which the driver wrote and nothing holds, goes at the end of
+      // the transaction.
       assert.throws(() => engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: y, fail: true }));
-      assert.ok(values.values.has(hashOf(x)));
+      assert.deepEqual([...values.values.keys()], [hashOf(x)]);
+      assert.equal(values.removes, 1);
       assert.deepEqual(engine.instances.invokeSchema(alice, 'Step', 'take', { key: 'a' }), x);
       engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: y });
       assert.deepEqual([...values.values.keys()], [hashOf(y)]);
-      assert.equal(values.removes, 1);
+      assert.equal(values.removes, 2);
+    });
+
+    test('values.sweep removes what a crash left in a driver that lists its hashes, and refuses a driver that does not', () => {
+      const values = new MapDriver();
+      const listing = Object.assign(values, {
+        list: (after: string, limit: number) => [...values.values.keys()].filter((hash) => hash > after).sort().slice(0, limit),
+      });
+      const engine = open(driver, { values: { driver: listing } });
+      publish(engine, steps([{ name: 'test.Shelf' }]));
+      const x = verify(60, 'x');
+      engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: x });
+      // A value a crash left between the driver's write and the end of its
+      // transaction: stored, held by nothing.
+      values.values.set('0'.repeat(64), '"left behind"');
+      assert.deepEqual(engine.values.sweep(), { removed: 1 });
+      assert.deepEqual([...values.values.keys()], [hashOf(x)]);
+      assert.deepEqual(engine.values.sweep(), { removed: 0 });
+      // The default driver lists its hashes too, and leaves none behind.
+      const plain = open(driver);
+      assert.deepEqual(plain.values.sweep(), { removed: 0 });
+      const unlisted = open(driver, { values: { driver: new MapDriver() } });
+      assert.throws(() => unlisted.values.sweep(), /needs a driver that lists its hashes/);
+    });
+
+    test('a value longer than values.maxBytes is refused with value_too_large, where it would be stored', () => {
+      assert.throws(() => open(driver, { values: { thresholdBytes: 2048, maxBytes: 1024 } }), /values.maxBytes is an integer of at least values.thresholdBytes \(2048\)/);
+      const engine = open(driver, { values: { thresholdBytes: 1024, maxBytes: 4096 } });
+      assert.equal(engine.values.maxBytes, 4096);
+      publish(engine, steps([{ name: 'test.Shelf' }]));
+      const refused = thrown(() => engine.instances.create(alice, 'Step', { title: 'big', kind: 'verify', result: verify(500, 'x') }), ValueTooLargeError);
+      assert.deepEqual([refused.code, refused.path, refused.maxBytes], ['value_too_large', '/result', 4096]);
+      assert.ok(refused.bytes > 4096);
+      assert.equal(engine.instances.list(alice, 'Step').items.length, 0);
+      // One under the most is stored, by hash.
+      engine.instances.create(alice, 'Step', { title: 'fits', kind: 'verify', result: verify(60, 'x') }, { id: 'fits' });
+      // So is an object a behavior stows, at its pointer in the object.
+      const kept = thrown(() => engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: verify(500, 'y') }), ValueTooLargeError);
+      assert.equal(kept.path, '/doc');
+      assert.equal(engine.instances.get(alice, 'Step', 'fits')?.data.title, 'fits');
     });
   });
 }

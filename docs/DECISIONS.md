@@ -1118,8 +1118,12 @@ large field is stored once, by hash, in a value store in the same file
 filters a list by equality (the amendment "an instance is found by a
 unique field" below). A deployment makes and archives namespaces while
 the engine runs, and the log keeps events by age or count, pruned on the
-runner (the last two amendments below). Each change that lands a piece
-updates this paragraph. The names and rules are reversible until the
+runner (the amendments "namespaces made while the engine runs" and "the
+log keeps what retention and its subscriptions need" below). A write
+that changes nothing writes nothing, a write stores what the schema's
+parse makes of it, each caller's tools are the ones it may use, and
+retention and the value store have bounds (the last four amendments
+below). Each change that lands a piece updates this paragraph. The names and rules are reversible until the
 first release.
 
 ### D16, amended: behaviors that reach other instances
@@ -1772,6 +1776,29 @@ caller's list.
 | The engine tools that only read stay in every caller's list: `list_schemas`, `describe_schema` and `get_value` answer with what the policy lets the caller read, and the behavior tools ask nothing (that amendment's rule). | Hiding them from a caller who may read no schema now, which a publish changes without the list knowing |
 | `engineMcp` and `engineApp` take `tools`, a `ToolFilter`: `(principal, tool, namespace) => boolean`, asked of each tool with `{ handle, name, schema?, operation, behavior?, writes }`. A tool it leaves out is hidden from that caller with a reason in the tools document, absent from `tools/list`, and a `tools/call` of it is `UnknownToolError`, the invalid-params error of a tool the namespace does not have. So a session limited to one schema's operations, or to its reads, reaches nothing else through the endpoint. It narrows only: a tool the policy hides stays hidden, and a kept tool's call is still the policy's to allow. | A filter on the engine, which every mount would share where each endpoint serves a different audience; a list of handles in the options, which cannot follow a schema's tools as versions add operations; hiding without refusing the call, which leaves the narrower set a suggestion |
 | On the HTTP mount the filter narrows the tools document only: the routes answer as the policy says. | Refusing routes by tool, which would make the filter a second access policy for HTTP |
+
+### D16, amended: retention and the value store have bounds
+
+Retention and the value store each left an unbounded case. A halted
+subscription, or one in an archived namespace, held its namespace's log
+until someone resumed it, and with the log every large value its events
+held; the status named the hold but not how far back it reached.
+`maxEvents` counted cursors behind the global head, so one busy
+namespace pushed a quiet one's events out. A stored value had no size
+of its own, and a write through a driver outside the file's
+transactions that rolled back left a value nothing held. This changes
+the amendments "the log keeps what retention and its subscriptions
+need" (its hold and count rows) and "a large value is stored once" (its
+size and driver rows).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `retention.maxHoldMs` bounds a subscription that does not advance: halted, in an archived namespace, or whose behavior the engine no longer runs. It holds no event older than `maxHoldMs` that age or count lets go. A subscription that advances, active or retrying, holds whatever its age. Past the bound retention prunes on, and the subscription, behind its floor, halts with `cursor_expired` when it next runs (after its resume, or its namespace's unarchive), the rule that amendment gave a subscription found behind its floor; `resume` with `skip` moves it there. Without the option such a hold lasts until the subscription advances, as before. | A time since the halt or the archive, which needs a timestamp per state and none exists for an unregistered behavior, and which lets a slow subscription's old events outlive the bound; dropping a halted subscription's hold at once, which loses the events it failed at before anyone looks |
+| `status().retention` shows the bound (`maxHoldMs`) and, per namespace, beside the holding subscription, its state (`heldState`), when the oldest event it keeps was appended (`heldSince`), and for a hold the bound applies to, the time it lasts to (`heldUntil`). An operator sees how far back a halt reaches and when its events start to go. | The cursor alone, as before, from which an operator cannot tell a day's hold from a year's |
+| `maxEvents` counts a namespace's own events: each keeps its newest `maxEvents`. The runner counts a namespace's events once, at its first pass, and after that adds what was appended since its last count (one indexed range read past it) and takes away what it pruned, in memory, since one process writes the file. | Distance from the global head, as before, under which one namespace's traffic prunes another's; a count column kept at every append, a second write in every write transaction for an engine without retention too; counting every event at every pass, the cost that amendment declined |
+| Creating, archiving and unarchiving a namespace append no event, in its own log or another's. A namespace's log is read per schema, `read` asked of each event's schema, and a namespace's change names none, so its readers would need a rule of their own and its CHECKs a rebuild of `engine_events`. A writer learns of an archive from its next write's `namespace_archived`, and a reader reads on, since an archive stops no read. The shared namespace's log would show a project another's name, which `list` hides from it. | An event kind in the namespace's own log, read with `manage`, which a stream filtered by schema never sees and which needs the log rebuilt; one in the shared namespace's log |
+| `values.maxBytes` caps a stored value: 16 MiB of canonical JSON by default, at least the threshold. A write that would store a longer top-level member, of an instance's own fields, an event's change or an object a behavior stows, inline under an index or by hash, is refused as a whole: `ValueTooLargeError`, `value_too_large`, 413 over HTTP with `details: { path, bytes, maxBytes }`, the path the member's pointer in what would be stored. | No cap, as before, where only the HTTP body limit bounded a value and nothing bounded one a behavior computes; a cap per schema, an option keyed by names a deployment makes while the engine runs; the HTTP runtime's `payload_too_large`, which names the request body |
+| A driver outside the file's transactions has its writes settled around them: once the outermost transaction ends, committed or rolled back, the store removes each value the driver wrote in it that no holder references (`Storage.afterTransaction`, which a savepoint's rollback does not drop). So a rolled-back write leaves nothing. A crash between a driver's write and the end of its transaction can still leave one: `engine.values.sweep()` pages through the driver's optional `list(after, limit)` and removes each value no holder references, acting for no principal, as retention's prune does. A deployment runs it after a crash; the default driver lists too and leaves nothing to sweep. | A sweep on a runner schedule, which runs per behavior and schema and needs a principal; keeping the rolled-back values, as before, which a driver over object storage pays for in storage until someone looks; a list on every driver, which a write-only store cannot give |
 
 ## D17. A version graph over versioned tables, with one merge core
 

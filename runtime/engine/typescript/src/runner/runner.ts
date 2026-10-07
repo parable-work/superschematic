@@ -56,7 +56,9 @@ transaction, yielding between batches. It never prunes a namespace's
 events past its hold: the cursor of the least advanced subscription
 there that composes a behavior with reactions, halted, retrying and
 archived ones included, or, where the behavior is not registered, that
-has run. A subscription whose cursor is behind its namespace's floor all
+has run. With retention's maxHoldMs, a subscription that does not
+advance (halted, archived or unregistered) holds no event older than
+that. A subscription whose cursor is behind its namespace's floor all
 the same (an implementation that gained reactions after retention pruned
 past the publish its subscription starts from) halts with
 cursor_expired: resume with skip moves it to the floor, past what
@@ -74,7 +76,7 @@ import { MIN_SCHEDULE_MS, type BehaviorRegistry } from '../behaviors/registry.js
 import { synchronous } from '../behaviors/storage.js';
 import { BehaviorError, CursorExpiredError, EngineError } from '../errors.js';
 import { EVENT_COLUMNS, logFloor, logHead, toEvent, type EngineEvent, type EventLog } from '../events/log.js';
-import { floorsOf, type Retention } from '../events/retention.js';
+import { floorsOf, type NamespaceHold, type Retention } from '../events/retention.js';
 import type { Namespaces } from '../namespaces.js';
 import type { SchemaCatalog, SchemaRecord, VersionRuntime } from '../registry/catalog.js';
 import { checkSchemaName } from '../registry/document.js';
@@ -184,6 +186,8 @@ export interface RunnerStatus {
 export interface RetentionStatus {
   maxAgeMs: number | null;
   maxEvents: number | null;
+  /** The longest a subscription that does not advance holds the log; null for no bound. */
+  maxHoldMs: number | null;
   everyMs: number;
   /** When the started runner last finished pruning; null before it first does. */
   previous: number | null;
@@ -193,9 +197,36 @@ export interface RetentionStatus {
    * Each namespace retention has pruned or a subscription holds, by name:
    * its floor, the events pruned of it so far, and the least advanced
    * subscription there, past whose cursor nothing of the namespace is
-   * pruned (null when none holds it).
+   * pruned (null when none holds it), with how far that holds the log.
    */
-  namespaces: Array<{ namespace: string; floor: number; pruned: number; heldAt: number | null; heldBy: SubscriptionKey | null }>;
+  namespaces: RetentionNamespaceStatus[];
+}
+
+/** How far retention has pruned one namespace, and what holds it. */
+export interface RetentionNamespaceStatus {
+  namespace: string;
+  /** The last cursor pruned of its events. */
+  floor: number;
+  /** Events pruned of it so far. */
+  pruned: number;
+  /** The cursor of the least advanced subscription, past which nothing is pruned; null when none holds it. */
+  heldAt: number | null;
+  heldBy: SubscriptionKey | null;
+  /**
+   * That subscription's state: active or retrying, which advance, or
+   * halted, archived or inactive (its behavior not registered), which do
+   * not; null when none holds it.
+   */
+  heldState: SubscriptionState | null;
+  /** When the oldest event the hold keeps was appended: how far back the hold reaches; null when it keeps none. */
+  heldSince: number | null;
+  /**
+   * For a subscription that does not advance, under maxHoldMs: the time
+   * its hold of that event lasts to (heldSince + maxHoldMs), after which
+   * retention prunes past it and it halts with cursor_expired when it next
+   * runs; null otherwise.
+   */
+  heldUntil: number | null;
 }
 
 /** What one runDue did. */
@@ -249,6 +280,15 @@ interface ScheduleUnit extends Unit {
   readonly spec: BehaviorSchedule<unknown>;
   /** Its interval on the schema, that its everyMs function turns it off there, or why it gives none. */
   readonly every: { readonly everyMs: number } | { readonly off: true } | { readonly error: unknown };
+}
+
+// What holds a namespace's events: the least advanced subscription, with
+// its state, and the least advanced cursors of the ones that advance and
+// the ones that do not, which retention holds to (Retention.batch).
+interface Hold extends NamespaceHold {
+  readonly cursor: number;
+  readonly subscription: SubscriptionKey;
+  readonly state: SubscriptionState;
 }
 
 // A subscription that holds retention, or would once it has run: a
@@ -481,17 +521,29 @@ export class Runner {
   private retentionStatus(discovery: Discovery): RetentionStatus {
     const options = (this.retention as Retention).options;
     const holds = this.holds(discovery);
-    const byNamespace = new Map<string, RetentionStatus['namespaces'][number]>();
+    const byNamespace = new Map<string, RetentionNamespaceStatus>();
+    const unheld = { heldAt: null, heldBy: null, heldState: null, heldSince: null, heldUntil: null };
     for (const floor of floorsOf(this.storage)) {
-      byNamespace.set(floor.namespace, { namespace: floor.namespace, floor: floor.floor, pruned: floor.pruned, heldAt: null, heldBy: null });
+      byNamespace.set(floor.namespace, { namespace: floor.namespace, floor: floor.floor, pruned: floor.pruned, ...unheld });
     }
     for (const [namespace, hold] of holds) {
-      const entry = byNamespace.get(namespace) ?? { namespace, floor: 0, pruned: 0, heldAt: null, heldBy: null };
-      byNamespace.set(namespace, { ...entry, heldAt: hold.cursor, heldBy: hold.subscription });
+      const entry = byNamespace.get(namespace) ?? { namespace, floor: 0, pruned: 0, ...unheld };
+      const oldest = this.storage.get('SELECT at FROM engine_events WHERE namespace = ? AND cursor > ? ORDER BY cursor LIMIT 1', [namespace, hold.cursor]);
+      const heldSince = oldest === undefined ? null : Number(oldest.at);
+      const stuck = hold.state === 'halted' || hold.state === 'archived' || hold.state === 'inactive';
+      byNamespace.set(namespace, {
+        ...entry,
+        heldAt: hold.cursor,
+        heldBy: hold.subscription,
+        heldState: hold.state,
+        heldSince,
+        heldUntil: stuck && heldSince !== null && options.maxHoldMs !== undefined ? heldSince + options.maxHoldMs : null,
+      });
     }
     return {
       maxAgeMs: options.maxAgeMs ?? null,
       maxEvents: options.maxEvents ?? null,
+      maxHoldMs: options.maxHoldMs ?? null,
       everyMs: options.everyMs,
       previous: this.lastPrune,
       next: this.pruning !== undefined ? this.clock() : this.nextPrune === 0 ? null : this.nextPrune,
@@ -659,7 +711,7 @@ export class Runner {
     const holds = this.holds(this.discover());
     while (this.pruning.queue.length > 0) {
       const namespace = this.pruning.queue[0];
-      const pruned = retention.batch(namespace, holds.get(namespace)?.cursor);
+      const pruned = retention.batch(namespace, holds.get(namespace));
       if (pruned < retention.options.batchSize) {
         this.pruning.queue.shift();
       }
@@ -673,27 +725,45 @@ export class Runner {
     return { pruned: 0, done: true };
   }
 
-  // holds is, by namespace, the cursor past which retention prunes none
-  // of its events, with the subscription that holds it there: the least
-  // advanced one of the namespace's subscriptions, at its cursor, or at
-  // its start before it has run. One whose behavior is not registered
-  // holds only once it has run.
-  private holds(discovery: Discovery): Map<string, { cursor: number; subscription: SubscriptionKey }> {
-    const cursors = new Map<string, number>();
-    for (const row of this.storage.all('SELECT behavior, namespace, schema, cursor FROM engine_subscriptions')) {
-      cursors.set(subscriptionId({ behavior: String(row.behavior), namespace: String(row.namespace), schema: String(row.schema) }), Number(row.cursor));
+  // holds is, by namespace, what holds its events: the least advanced of
+  // its subscriptions, at its cursor, or at its start before it has run,
+  // with its state, and the least advanced cursors of the ones that
+  // advance and of the ones that do not: halted, in an archived namespace,
+  // or whose behavior is not registered, which holds only once it has
+  // run. A row from before the schema last came to compose the behavior
+  // starts over at the start, whatever it held.
+  private holds(discovery: Discovery): Map<string, Hold> {
+    const saved = new Map<string, Row>();
+    for (const row of this.storage.all('SELECT behavior, namespace, schema, cursor, halted, attempts FROM engine_subscriptions')) {
+      saved.set(subscriptionId({ behavior: String(row.behavior), namespace: String(row.namespace), schema: String(row.schema) }), row);
     }
-    const holds = new Map<string, { cursor: number; subscription: SubscriptionKey }>();
+    const holds = new Map<string, Hold>();
     for (const holder of discovery.holders) {
-      const saved = cursors.get(subscriptionId(holder));
-      if (holder.unregistered && saved === undefined) {
+      const row = saved.get(subscriptionId(holder));
+      if (holder.unregistered && row === undefined) {
         continue;
       }
-      const cursor = saved !== undefined && saved >= holder.start ? saved : holder.start;
+      const current = row !== undefined && Number(row.cursor) >= holder.start ? row : undefined;
+      const cursor = current === undefined ? holder.start : Number(current.cursor);
+      const state: SubscriptionState = holder.unregistered
+        ? 'inactive'
+        : this.namespaces.archived(holder.namespace)
+          ? 'archived'
+          : current !== undefined && Number(current.halted) === 1
+            ? 'halted'
+            : current !== undefined && Number(current.attempts) > 0
+              ? 'retrying'
+              : 'active';
+      const advances = state === 'active' || state === 'retrying';
       const held = holds.get(holder.namespace);
-      if (held === undefined || cursor < held.cursor) {
-        holds.set(holder.namespace, { cursor, subscription: { behavior: holder.behavior, namespace: holder.namespace, schema: holder.schema } });
-      }
+      const least = held === undefined || cursor < held.cursor;
+      holds.set(holder.namespace, {
+        cursor: least ? cursor : (held as Hold).cursor,
+        subscription: least ? { behavior: holder.behavior, namespace: holder.namespace, schema: holder.schema } : (held as Hold).subscription,
+        state: least ? state : (held as Hold).state,
+        ...lower('advancing', held?.advancing, advances ? cursor : undefined),
+        ...lower('stuck', held?.stuck, advances ? undefined : cursor),
+      });
     }
     return holds;
   }
@@ -1087,6 +1157,12 @@ export class Runner {
     this.starts.set(id, start);
     return start;
   }
+}
+
+// lower is { [key]: the lesser of two cursors }, or nothing when both are absent.
+function lower(key: 'advancing' | 'stuck', a: number | undefined, b: number | undefined): Partial<NamespaceHold> {
+  const least = a === undefined ? b : b === undefined ? a : Math.min(a, b);
+  return least === undefined ? {} : { [key]: least };
 }
 
 // intervalOf is a schedule's interval on one schema: its everyMs, or what

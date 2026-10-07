@@ -799,14 +799,41 @@ written by a schema-level operation or a schedule, which append no
 event, goes with its last row.
 
 Where the values live is a driver (`values.driver`, a `ValueDriver`):
-`read(hash)`, `write(hash, json)` and `remove(hash)`, synchronous, as
-everything in a write is (D16). The default, `SqliteValueDriver`, writes
-`engine_payloads` in the write's transaction (`transactional: true`). A
-driver over other storage is not transactional: the engine removes a
-value only after the commit that dropped its last holder, so a
-rolled-back write never loses one, and a write that rolls back can leave
-a value nothing holds. The holders stay in the engine's file whatever the
-driver. No driver over object storage ships yet.
+`read(hash)`, `write(hash, json)`, `remove(hash)` and, optionally,
+`list(after, limit)`, synchronous, as everything in a write is (D16). The
+default, `SqliteValueDriver`, writes `engine_payloads` in the write's
+transaction (`transactional: true`), and a rollback undoes its writes. A
+driver over other storage is not transactional, and the engine settles
+what it did around the file's transactions:
+
+- it removes a value only after the commit that dropped its last holder,
+  so a rolled-back write never loses one;
+- once the outermost transaction ends, committed or rolled back, it
+  removes each value the driver wrote in it that no holder references
+  then, so a write that rolled back leaves no value behind;
+- what a crash leaves between a driver's write and the end of its
+  transaction, `engine.values.sweep()` removes: it pages through the
+  driver's `list` and removes each value no holder references, and
+  returns `{ removed }`. It acts for no principal, needs no open
+  transaction and a driver with `list`; a deployment runs it at start,
+  after a crash. The default driver has `list` and leaves nothing to
+  sweep.
+
+Such a driver must keep what `write` was given under its hash, return it
+from `read` unchanged, take a `write` of a hash it has as a no-op and a
+`remove` of one it lacks the same, and list its hashes in order if it is
+to be swept. The holders stay in the engine's file whatever the driver.
+No driver over object storage ships yet.
+
+No value is longer than `values.maxBytes`, 16 MiB of canonical JSON by
+default and at least the threshold. A write that would store a longer
+top-level member, an instance's own field, a member of an event's change
+or of an object a behavior stows, is refused as a whole with
+`ValueTooLargeError` (`value_too_large`, 413 over HTTP), whose `path` is
+the member's pointer in what would be stored (`/body`, `/params/doc`),
+with its `bytes` and the `maxBytes`. The HTTP runtime's body limit bounds
+what a request carries first; the engine's bounds what any write stores,
+a behavior's included.
 
 ## Retention
 
@@ -825,12 +852,17 @@ engine.events.floor('default'); // the earliest cursor a read of default may sta
 | Option | Default | What it is |
 | --- | --- | --- |
 | `maxAgeMs` | none | an event older than this, by its `at` and the engine's clock, goes |
-| `maxEvents` | none | an event more than this many cursors behind the head goes, so the log keeps about this many |
+| `maxEvents` | none | a namespace's events past its newest this many go, so each namespace keeps about this many |
+| `maxHoldMs` | none | the longest a subscription that does not advance (halted, in an archived namespace, or whose behavior the engine no longer runs) holds the log: it keeps no event older than this that age or count lets go |
 | `everyMs` | 60000 | how often the started runner prunes, at least 1000 |
 | `batchSize` | 1000 | events pruned in one transaction, after which the runner yields, at most 10000 |
 
 One of `maxAgeMs` and `maxEvents` is required; with both, an event goes
 when either lets it go. `openEngine` refuses anything else (`TypeError`).
+A namespace's count is its own: one busy namespace never pushes a quiet
+one's events out. The runner counts a namespace's events once, at its
+first pass, and after that only what was appended since, so a pass reads
+what is new, not the whole log.
 
 - **A namespace at a time, oldest first.** Retention prunes each
   namespace's events apart, from its oldest, and stops at the first
@@ -847,8 +879,18 @@ when either lets it go. `openEngine` refuses anything else (`TypeError`).
   archived namespace; and one whose behavior is not registered, once it
   has run. Retention prunes none of the namespace's events after it, and
   holds no other namespace's. So a halted subscription holds its
-  namespace's log, and `status()` shows by whom
-  ("Status" under "The runner"), until it is resumed.
+  namespace's log, and `status()` shows by whom, in what state, and since
+  when ("Status" under "The runner"), until it is resumed.
+- **A hold that does not move is bounded by `maxHoldMs`.** A subscription
+  that does not advance, halted, in an archived namespace, or whose
+  behavior the engine no longer runs, holds no event older than
+  `maxHoldMs` once age or count lets it go; one that advances, active or
+  retrying, holds whatever its age, since it is working through it. Past
+  the bound retention prunes on, and the subscription, behind its floor,
+  halts with `cursor_expired` when it next runs, after its `resume` or
+  its namespace's unarchive; `resume(key, { skip: true })` moves it to the
+  floor. `status()` shows when that happens (`heldUntil`). Without
+  `maxHoldMs` such a hold lasts until the subscription advances.
 - **A read from a cursor before the floor is `cursor_expired`.**
   `events.read` from a cursor before the floor of its namespace, or
   before the last publish pruned of the shared namespace it reads,
@@ -1041,7 +1083,7 @@ later, with no `previous`.
 | `running`, `principal`, `head` | whether it is started, the principal's subject, and the log's last cursor, which retention never moves back |
 | `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` (after `maxAttempts` failures, or behind its namespace's floor), `archived` (its namespace is) or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
 | `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying`, `off` (its function returns `null` for the schema's config), `archived` (its namespace is) or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema; an `off` schedule has no `previous` and its `next` is null |
-| `retention` | on an engine with retention: `{ maxAgeMs, maxEvents, everyMs, previous, next, namespaces }`, when the runner last finished pruning and prunes next (null before its first pass), and per namespace pruned or held `{ namespace, floor, pruned, heldAt, heldBy }`, its floor, the events pruned of it, and the cursor and subscription that hold it, or null |
+| `retention` | on an engine with retention: `{ maxAgeMs, maxEvents, maxHoldMs, everyMs, previous, next, namespaces }`, when the runner last finished pruning and prunes next (null before its first pass), and per namespace pruned or held `{ namespace, floor, pruned, heldAt, heldBy, heldState, heldSince, heldUntil }`: its floor, the events pruned of it, the cursor and subscription that hold it, that subscription's state (`active` or `retrying`, which advance; `halted`, `archived` or `inactive`, which do not), when the oldest event it keeps was appended, and, for one that does not advance under `maxHoldMs`, the time its hold lasts to, after which retention prunes past it; each null when none holds it |
 | `error` | the runner's own last error outside any reaction (a busy file, say), cleared by the next pass that works |
 
 The status is not served over HTTP or MCP: it spans every namespace and
@@ -1129,7 +1171,9 @@ version's or a behavior's `validate`'s),
 `name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`,
 `namespace_archived` (a write in an archived namespace), `cursor_expired`
 (`CursorExpiredError`: a read of the log from a cursor retention has
-pruned past, with its `floor` and the `head`),
+pruned past, with its `floor` and the `head`), `value_too_large`
+(`ValueTooLargeError`: a value longer than `values.maxBytes`, with its
+`path`, `bytes` and the `maxBytes`),
 `invalid_argument` (`OperationParamsError` for an operation's parameters,
 `CreateParamsError` for a create's and `PreconditionsError` for a call's
 preconditions, with their issues), `seq_mismatch`, `vetoed`
@@ -3172,8 +3216,15 @@ engine.namespaces.get(admin, 'acme');
   unarchiving an active one, changes nothing and returns it as it is.
   Nothing is deleted: there is no delete of a namespace.
 
-A create, an archive and an unarchive append no event: the log's events
-belong to a schema, and the record carries who did it and when.
+A create, an archive and an unarchive append no event, in the
+namespace's own log or any other. The record carries who did it and
+when. The log's events are read per schema, `read` asked of each event's
+schema, and a namespace's change names none, so a reader of the log
+would need a rule of its own; a writer learns of an archive from its
+next write's `namespace_archived`, and a reader reads on as before, since
+an archive stops no read. Putting it in another namespace's log, the
+shared one's, would show one project another's name, which `list` hides
+from it (D16, amended: retention and the value store have bounds).
 
 ## HTTP
 
@@ -3304,6 +3355,7 @@ the same in every namespace.
 | 410 | `cursor_expired` | an event read or a stream's resume from a cursor before the namespace's floor; `details` is `{after, floor, head}` |
 | 412 | `seq_mismatch` | `If-Match` names a sequence the instance is no longer at; a failed precondition is the behavior's veto, 409 |
 | 413 | `payload_too_large` | the body exceeds `bodyLimitBytes` |
+| 413 | `value_too_large` | a value the write would store is longer than `values.maxBytes`; `details` is `{path, bytes, maxBytes}` |
 | 415 | `unsupported_media_type` | the body is not of the route's media type |
 | 422 | `invalid_schema` | the document is refused; `details.issues` |
 | 422 | `invalid_instance` | the instance, or an update's result, is refused by the live version or a behavior's `validate`; `details.issues` |

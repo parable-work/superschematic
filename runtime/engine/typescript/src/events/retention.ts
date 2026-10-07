@@ -4,16 +4,23 @@ subscriptions need). Without it the log grows for good, and with it every
 large value an event holds in the value store. An engine opened with
 `retention` prunes the log on the runner, as one more piece of timed
 work: by age (maxAgeMs, the event's `at` against the engine's clock),
-by count (maxEvents, the events more than that many cursors behind the
-head), or both, an event going when either lets it go.
+by count (maxEvents, a namespace's events past its newest maxEvents), or
+both, an event going when either lets it go. A namespace's count is kept
+in memory, from one count of its events at the first pass and the events
+appended since at each after, so a pass reads what was appended, not the
+whole log (D16, amended: retention and the value store have bounds).
 
 Retention prunes each namespace's events on their own, oldest first, in
 batches of batchSize, each in its own transaction, and never past a
 namespace's hold: the cursor of the least advanced subscription there
-that has not handled the events after it, halted and archived ones
-included, which the runner computes (runner.ts). So pruning never takes
-an event a subscription still has to handle, and one namespace's stuck
-subscription holds only that namespace's events.
+that has not handled the events after it, which the runner computes
+(runner.ts). So pruning never takes an event a subscription still has to
+handle, and one namespace's stuck subscription holds only that
+namespace's events. A subscription that does not advance, halted, in an
+archived namespace or whose behavior the engine no longer runs, holds
+like the others, unless maxHoldMs bounds it: then it holds no event older
+than maxHoldMs, and once retention prunes past it, it halts with
+cursor_expired when it next runs.
 
 A namespace's floor (engine_log_floors) is the last cursor retention
 pruned of its events: every event of the namespace at or before it is
@@ -43,14 +50,21 @@ import { mergePatch } from '../instances/patch.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { refsOf, refsText, valuesOf, type ValueHolder } from '../values/store.js';
-import { EVENT_COLUMNS, logHead, toEvent, type EngineEvent, type OperationChange } from './log.js';
+import { EVENT_COLUMNS, toEvent, type EngineEvent, type OperationChange } from './log.js';
 
 /** EngineOptions.retention: how long the log keeps events, and how the runner prunes it. */
 export interface RetentionOptions {
   /** Events older than this many milliseconds, by their `at`, are pruned. */
   maxAgeMs?: number;
-  /** Events more than this many cursors behind the head are pruned, so the log keeps about this many. */
+  /** A namespace's events past its newest maxEvents are pruned, so each namespace keeps about this many. */
   maxEvents?: number;
+  /**
+   * The longest a subscription that does not advance holds retention: one
+   * halted, in an archived namespace, or whose behavior the engine no
+   * longer runs keeps no event older than this many milliseconds that age
+   * or count lets go. Absent, it holds until it advances.
+   */
+  maxHoldMs?: number;
   /** How often the started runner prunes, in milliseconds; 60000 by default, at least 1000. */
   everyMs?: number;
   /** Events pruned in one transaction, after which the started runner yields; 1000 by default, at most 10000. */
@@ -66,6 +80,7 @@ const MIN_RETENTION_EVERY_MS = 1_000;
 export interface ResolvedRetention {
   readonly maxAgeMs: number | undefined;
   readonly maxEvents: number | undefined;
+  readonly maxHoldMs: number | undefined;
   readonly everyMs: number;
   readonly batchSize: number;
 }
@@ -80,7 +95,7 @@ export function checkRetentionOptions(options: RetentionOptions | undefined): Re
     return undefined;
   }
   if (typeof options !== 'object' || options === null) {
-    throw new TypeError('retention is { maxAgeMs?, maxEvents?, everyMs?, batchSize? }');
+    throw new TypeError('retention is { maxAgeMs?, maxEvents?, maxHoldMs?, everyMs?, batchSize? }');
   }
   const maxAgeMs = integer('maxAgeMs', options.maxAgeMs, undefined, 1, Number.MAX_SAFE_INTEGER);
   const maxEvents = integer('maxEvents', options.maxEvents, undefined, 1, Number.MAX_SAFE_INTEGER);
@@ -90,6 +105,7 @@ export function checkRetentionOptions(options: RetentionOptions | undefined): Re
   return {
     maxAgeMs,
     maxEvents,
+    maxHoldMs: integer('maxHoldMs', options.maxHoldMs, undefined, 1, Number.MAX_SAFE_INTEGER),
     everyMs: integer('everyMs', options.everyMs, DEFAULT_RETENTION_EVERY_MS, MIN_RETENTION_EVERY_MS, Number.MAX_SAFE_INTEGER) as number,
     batchSize: integer('batchSize', options.batchSize, DEFAULT_RETENTION_BATCH_SIZE, 1, MAX_RETENTION_BATCH_SIZE) as number,
   };
@@ -126,7 +142,22 @@ export function floorsOf(storage: Storage): LogFloor[] {
   }));
 }
 
+/**
+ * What holds a namespace's events, as the runner finds it: the least
+ * advanced cursor of its subscriptions that advance (active, retrying, not
+ * yet run), and of the ones that do not (halted, archived, unregistered).
+ * Retention prunes none after the first, and none after the second younger
+ * than maxHoldMs, or none at all without maxHoldMs.
+ */
+export interface NamespaceHold {
+  readonly advancing?: number;
+  readonly stuck?: number;
+}
+
 export class Retention {
+  // Each namespace's count of kept events, through the last cursor counted.
+  private readonly counts = new Map<string, { kept: number; through: number }>();
+
   constructor(
     private readonly storage: Storage,
     private readonly clock: () => number,
@@ -153,47 +184,73 @@ export class Retention {
 
   /**
    * batch prunes the oldest events of one namespace that retention lets
-   * go, at most batchSize of them, none after hold, in one transaction,
-   * and returns how many it pruned: fewer than batchSize when it pruned
-   * all it may for now. Call it outside a transaction.
+   * go, at most batchSize of them, none its hold keeps, in one
+   * transaction, and returns how many it pruned: fewer than batchSize when
+   * it pruned all it may for now. Call it outside a transaction.
    */
-  batch(namespace: string, hold: number | undefined): number {
-    const { maxAgeMs, maxEvents, batchSize } = this.options;
+  batch(namespace: string, hold: NamespaceHold = {}): number {
+    const { maxAgeMs, maxEvents, maxHoldMs, batchSize } = this.options;
     const floor = this.floorOf(namespace);
-    let limit = hold ?? Number.MAX_SAFE_INTEGER;
-    if (maxEvents !== undefined && maxAgeMs === undefined) {
-      limit = Math.min(limit, logHead(this.storage) - maxEvents);
-    }
+    // Without maxHoldMs a subscription that does not advance holds as one
+    // that does.
+    const firm = maxHoldMs === undefined ? lowest(hold.advancing, hold.stuck) : hold.advancing;
+    const limit = firm ?? Number.MAX_SAFE_INTEGER;
     if (limit <= floor) {
+      return 0;
+    }
+    // How many of its oldest events the count lets go.
+    const over = maxEvents === undefined ? 0 : this.kept(namespace, floor) - maxEvents;
+    if (maxAgeMs === undefined && over <= 0) {
       return 0;
     }
     const rows = this.storage.all(
       `SELECT ${EVENT_COLUMNS} FROM engine_events WHERE namespace = ? AND cursor > ? AND cursor <= ? ORDER BY cursor LIMIT ?`,
-      [namespace, floor, limit, batchSize]
+      [namespace, floor, limit, maxAgeMs === undefined ? Math.min(batchSize, over) : batchSize]
     );
-    const pruned = maxAgeMs === undefined ? rows : this.goneByAge(rows, maxAgeMs, maxEvents);
+    const pruned = this.gone(rows, over, maxHoldMs === undefined ? undefined : hold.stuck);
     if (pruned.length === 0) {
       return 0;
     }
     this.storage.transaction(() => this.prune(namespace, floor, pruned));
+    const count = this.counts.get(namespace);
+    if (count !== undefined) {
+      count.kept -= pruned.length;
+    }
     return pruned.length;
   }
 
-  // goneByAge keeps the run of rows, oldest first, that retention lets go:
-  // each older than maxAgeMs, or more than maxEvents cursors behind the
-  // head. It stops at the first that stays, so the floor never passes an
-  // event kept.
-  private goneByAge(rows: readonly Row[], maxAgeMs: number, maxEvents: number | undefined): Row[] {
-    const cutoff = this.clock() - maxAgeMs;
-    const countLimit = maxEvents === undefined ? -1 : logHead(this.storage) - maxEvents;
+  // gone keeps the run of rows, oldest first, that retention lets go: each
+  // older than maxAgeMs or among the namespace's over oldest, and, past a
+  // stuck subscription's cursor, no younger than maxHoldMs. It stops at the
+  // first that stays, so the floor never passes an event kept.
+  private gone(rows: readonly Row[], over: number, stuck: number | undefined): Row[] {
+    const { maxAgeMs, maxHoldMs } = this.options;
+    const now = this.clock();
     const gone: Row[] = [];
-    for (const row of rows) {
-      if (Number(row.at) >= cutoff && Number(row.cursor) > countLimit) {
+    for (const [index, row] of rows.entries()) {
+      const at = Number(row.at);
+      const letGo = (maxAgeMs !== undefined && at < now - maxAgeMs) || index < over;
+      const held = stuck !== undefined && maxHoldMs !== undefined && Number(row.cursor) > stuck && at >= now - maxHoldMs;
+      if (!letGo || held) {
         break;
       }
       gone.push(row);
     }
     return gone;
+  }
+
+  // kept is how many events of a namespace the log holds after its floor:
+  // the count it kept, plus the events appended since it last counted.
+  // The first count reads every event the namespace keeps; each after,
+  // only the new ones.
+  private kept(namespace: string, floor: number): number {
+    const known = this.counts.get(namespace);
+    const since = known?.through ?? floor;
+    const row = this.storage.get('SELECT COUNT(*) AS count, MAX(cursor) AS last FROM engine_events WHERE namespace = ? AND cursor > ?', [namespace, since]);
+    const appended = Number(row?.count ?? 0);
+    const count = { kept: (known?.kept ?? 0) + appended, through: appended > 0 ? Number(row?.last) : since };
+    this.counts.set(namespace, count);
+    return count.kept;
   }
 
   // prune removes a namespace's oldest rows, in cursor order, inside a
@@ -265,6 +322,11 @@ export class Retention {
     const row = this.storage.get('SELECT floor FROM engine_log_floors WHERE namespace = ?', [namespace]);
     return row === undefined ? 0 : Number(row.floor);
   }
+}
+
+// lowest is the lesser of two cursors either of which may be absent.
+function lowest(a: number | undefined, b: number | undefined): number | undefined {
+  return a === undefined ? b : b === undefined ? a : Math.min(a, b);
 }
 
 /**
