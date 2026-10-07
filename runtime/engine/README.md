@@ -5,11 +5,12 @@ code (D16 in `docs/DECISIONS.md`). It takes a schema as data, one JSON
 schema-file document, versions it per namespace, and keeps it, its
 instances and an event log in one SQLite file.
 
-Built: the storage layer and its migrations, the schema registry with its
-compatibility rule, instances, the event log with its filters, the value
-store, which keeps a large field once by hash and serves it by hash, the
-access policy with service callers (D37), the HTTP API with the event
-stream (`@superschematic/engine/http`), the behavior plug-in interface,
+Built: the storage layer and its migrations, namespaces, configured or
+made while the engine runs and archived when done, the schema registry
+with its compatibility rule, instances, the event log with its filters
+and its retention, the value store, which keeps a large field once by
+hash and serves it by hash, the access policy with service callers
+(D37), the HTTP API with the event stream (`@superschematic/engine/http`), the behavior plug-in interface,
 the runner of reactions and schedules, the describe and tools documents,
 the behavior catalog, the MCP endpoint (`@superschematic/engine/mcp`),
 and the core's behaviors: `Workflow`,
@@ -85,10 +86,10 @@ queued it rolls back; the event log announces its events this way.
 
 One process writes the file. SQLite queues writers from several
 processes on the busy timeout, but the engine keeps per-process state
-(the cache of each version's validator and behaviors) that nothing
-coordinates across processes.
+(the cache of each version's validator and behaviors, the namespaces)
+that nothing coordinates across processes.
 
-The engine's tables, as its nine migrations leave them:
+The engine's tables, as its eleven migrations leave them:
 
 ```sql
 -- Every schema document by namespace, name and version. Version 0 is the
@@ -103,6 +104,10 @@ CREATE TABLE engine_schemas (
   published_at INTEGER,                                        -- null for the draft
   defined_by   TEXT,                                           -- principal subjects; null
   published_by TEXT,                                           -- before migration 2
+  -- The cursor of the version's publish event (migration 11), where a
+  -- subscription starts, after retention prunes the event; null for the
+  -- draft, and for a version a version-1 file stored with no event.
+  published_cursor INTEGER,
   PRIMARY KEY (namespace, name, version),
   CHECK ((version = 0) = (published_at IS NULL))
 ) STRICT;
@@ -130,7 +135,8 @@ CREATE TABLE engine_instances (
 ) STRICT;
 CREATE INDEX engine_instances_list ON engine_instances (namespace, schema, position);
 
--- The append-only event log. Triggers refuse an UPDATE or DELETE.
+-- The append-only event log. A trigger refuses an UPDATE, and another a
+-- DELETE of an event after its namespace's floor (engine_log_floors).
 CREATE TABLE engine_events (
   cursor      INTEGER PRIMARY KEY AUTOINCREMENT,  -- the global cursor
   kind        TEXT    NOT NULL CHECK (kind IN ('create', 'update', 'delete', 'operation', 'publish', 'define')),
@@ -233,18 +239,53 @@ CREATE TABLE engine_payloads (
   bytes INTEGER NOT NULL                          -- the canonical JSON's UTF-8 length
 ) STRICT;
 
--- Who holds each value: an instance's row, an event, or a row of a
--- behavior's tables. A value goes when its last holder does.
+-- Who holds each value: an instance's row, an event, what retention kept
+-- of an instance (base), or a row of a behavior's tables. A value goes
+-- when its last holder does.
 CREATE TABLE engine_payload_holders (
   hash      TEXT NOT NULL,
   namespace TEXT NOT NULL,
   schema    TEXT NOT NULL,
-  holder    TEXT NOT NULL,                        -- instance, event, or the behavior's name
+  holder    TEXT NOT NULL,                        -- instance, event, base, or the behavior's name
   id        TEXT NOT NULL,                        -- the instance id; '' for none
   key       TEXT NOT NULL,                        -- '', the event's cursor, or the behavior's key
   PRIMARY KEY (hash, namespace, schema, holder, id, key)
 ) STRICT;
 CREATE INDEX engine_payload_holders_holder ON engine_payload_holders (namespace, schema, holder, id, key);
+
+-- The namespaces a create made while an engine ran ("Namespaces"),
+-- with who archived each and when while it is archived (migration 10).
+CREATE TABLE engine_namespaces (
+  name        TEXT    PRIMARY KEY,
+  created_at  INTEGER NOT NULL,
+  created_by  TEXT    NOT NULL,
+  archived_at INTEGER,
+  archived_by TEXT,
+  CHECK ((archived_at IS NULL) = (archived_by IS NULL))
+) STRICT;
+
+-- How far retention has pruned each namespace's events ("Retention",
+-- migration 11): every event of the namespace at or before floor is
+-- gone; publish_floor is the last of its publish events pruned.
+CREATE TABLE engine_log_floors (
+  namespace     TEXT    PRIMARY KEY,
+  floor         INTEGER NOT NULL,
+  publish_floor INTEGER NOT NULL DEFAULT 0,
+  pruned        INTEGER NOT NULL DEFAULT 0       -- events pruned so far
+) STRICT;
+
+-- What retention kept of each instance's pruned events: the instance as
+-- the log had it after the last of them, null after a delete, and that
+-- event's sequence (migration 11).
+CREATE TABLE engine_event_bases (
+  namespace   TEXT    NOT NULL,
+  schema      TEXT    NOT NULL,
+  instance_id TEXT    NOT NULL,
+  seq         INTEGER NOT NULL,
+  data        TEXT,
+  value_refs  TEXT,
+  PRIMARY KEY (namespace, schema, instance_id)
+) STRICT;
 
 -- The migration ledger, one row per applied migration of each owner.
 CREATE TABLE engine_migrations (
@@ -419,7 +460,9 @@ that changes something and a writing behavior operation.
 Every operation on a schema with no live version is `not_found`. A row
 records the schema version it was last written with; the compatibility
 rule keeps it valid under every later version, so reads return it as
-stored.
+stored. In an archived namespace a create, an update, a delete and a
+writing operation are `namespace_archived` once the policy has allowed
+them, and reads go on ("Namespaces").
 
 ## The event log
 
@@ -444,7 +487,7 @@ a draft waits to be published. Applying each change in order to the
 create's instance gives the instance as a read returns it. The cursor
 orders the whole log; an instance's sequence runs 1, 2, 3, ... across
 its life, a re-create after a delete included. A delete never removes
-earlier events.
+earlier events; only retention does ("Retention").
 
 `engine.events.read(principal, { namespace, schema, instanceId, after,
 limit, kinds, behaviors, exclude })` returns `{ events, next, more }`:
@@ -453,7 +496,10 @@ schema and one instance, 50 by default and at most 500 scanned per page.
 Read on from `next`. Without a schema filter, events of schemas the
 principal may not read are skipped, so a page can hold fewer events than
 its limit while `more` is true. `engine.events.head()` is the cursor of
-the last event, 0 for an empty log.
+the last event, 0 for a log that never held one; retention never moves
+it back. A read from a cursor before the namespace's floor, where
+retention has pruned events after it, is `cursor_expired`
+("Retention"); so is a read with no `after` once it has.
 
 - `after: 'head'` starts at the head: the page is empty, `next` is the
   head and `more` is false, so a client that wants only new events reads
@@ -514,8 +560,9 @@ which is complete because one process writes the file: every event passes
 through it. A watcher reads the log as its own principal from its own
 cursor; the notice tells it only that the log grew.
 
-There is no retention yet: the log grows until a later change adds a
-policy for it, and so does what it holds in the value store.
+Without `retention` the log grows for good, and so does what its events
+hold in the value store; with it, the runner prunes the oldest events
+("Retention").
 
 ## The value store
 
@@ -581,11 +628,12 @@ it. A hash that is not 64 lowercase hex digits is `invalid_argument`.
 A value goes when its last holder does, in the transaction that drops
 it: an instance's row holds the values it holds now, an instance's
 delete drops its row's, a behavior's `stow` holds and its `release`
-drops, and an event holds its values for good, since the log has no
-retention yet. So a field an instance once held stays while an event
-records it; a value only a behavior's rows held, written by a
-schema-level operation or a schedule, which append no event, goes with
-its last row.
+drops, and an event holds its values until retention prunes it
+("Retention"), when what retention keeps of the instance holds what the
+instance held after the event instead. So a field an instance once held
+stays while an event records it; a value only a behavior's rows held,
+written by a schema-level operation or a schedule, which append no
+event, goes with its last row.
 
 Where the values live is a driver (`values.driver`, a `ValueDriver`):
 `read(hash)`, `write(hash, json)` and `remove(hash)`, synchronous, as
@@ -597,6 +645,83 @@ rolled-back write never loses one, and a write that rolls back can leave
 a value nothing holds. The holders stay in the engine's file whatever the
 driver. No driver over object storage ships yet.
 
+## Retention
+
+Without retention the log keeps every event, and the value store every
+large value an event holds. The engine option `retention` keeps events
+by age, by count or both (D16, amended: the log keeps what retention and
+its subscriptions need), and the runner prunes the rest:
+
+```ts
+const engine = openEngine({ path: 'shop.db', policy, runner: { principal }, retention: { maxAgeMs: 30 * 86_400_000 } });
+engine.runner.start();          // prunes at its first pass, then every everyMs
+engine.runner.prune();          // { pruned }: everything retention lets go, now
+engine.events.floor('default'); // the earliest cursor a read of default may start from
+```
+
+| Option | Default | What it is |
+| --- | --- | --- |
+| `maxAgeMs` | none | an event older than this, by its `at` and the engine's clock, goes |
+| `maxEvents` | none | an event more than this many cursors behind the head goes, so the log keeps about this many |
+| `everyMs` | 60000 | how often the started runner prunes, at least 1000 |
+| `batchSize` | 1000 | events pruned in one transaction, after which the runner yields, at most 10000 |
+
+One of `maxAgeMs` and `maxEvents` is required; with both, an event goes
+when either lets it go. `openEngine` refuses anything else (`TypeError`).
+
+- **A namespace at a time, oldest first.** Retention prunes each
+  namespace's events apart, from its oldest, and stops at the first
+  event it keeps, so what is gone is always a run of cursors. A
+  namespace's floor (`engine_log_floors`) is the last cursor pruned of
+  its events: every event of the namespace at or before it is gone. A
+  namespace no longer configured keeps its events until they are pruned
+  too.
+- **Never past an event a subscription has yet to handle.** A
+  namespace's hold is the cursor of its least advanced subscription
+  ("Subscriptions" under "The runner"): one whose schema's live version
+  composes a behavior with reactions, at its cursor, or where it starts
+  before it has run, whether it is active, retrying, halted or in an
+  archived namespace; and one whose behavior is not registered, once it
+  has run. Retention prunes none of the namespace's events after it, and
+  holds no other namespace's. So a halted subscription holds its
+  namespace's log, and `status()` shows by whom
+  ("Status" under "The runner"), until it is resumed.
+- **A read from before the floor is `cursor_expired`.** `events.read`
+  from a cursor before the floor of its namespace, or before the last
+  publish pruned of the shared namespace it reads, throws
+  `CursorExpiredError` with `floor` and `head`; over HTTP it is 410 with
+  `details: { after, floor, head }`, a stream's resume included ("The
+  event stream" under "HTTP"). A client that can take the gap reads on
+  from `floor`; one that cannot starts again from `head`. The head stays
+  the last cursor the log gave, and `after=head` works as before.
+- **A reaction reads on as before.** Each pruned instance event folds
+  into its instance's base (`engine_event_bases`): the instance as the
+  log had it after the event, behaviors' fields included, or none after
+  a delete, and the event's sequence. `before()` folds from the base and
+  the events still there, so it answers for every event a subscription
+  has yet to handle; for an event retention has pruned it is
+  `cursor_expired`. A create after a delete takes the sequence after the
+  base's, so an instance's sequences never repeat and an old `If-Match`
+  never matches a new life.
+- **Values go with their events.** A pruned event drops its value
+  holders, and a base holds what it keeps, so a value only pruned events
+  held goes in the prune's transaction ("The value store").
+- **A subscription behind its floor halts.** Where a subscription's
+  cursor is before its namespace's floor all the same, an implementation
+  registered with reactions only after retention pruned past where it
+  starts, the runner halts it with `cursor_expired`, failure cursor the
+  floor; `resume(key, { skip: true })` moves it there, past what was
+  pruned.
+
+Pruning appends no event, acts for no principal and changes nothing a
+read of an instance, a schema or a behavior returns, as a schedule's
+writes to its own tables may not (D32). It runs on the started runner,
+or when the deployment calls `engine.runner.prune()`, which needs no
+runner principal. `runDue()` prunes when retention is due and adds
+`pruned` to what it returns; `status()` adds `retention` ("Status"). A
+reader of the log learns it was pruned from `cursor_expired`, never from
+a page with a gap.
+
 ## The runner
 
 `engine.runner` runs the work behaviors do after a change commits (D16,
@@ -604,12 +729,13 @@ amended): reactions to the events of the log, and schedules on an
 interval ("Reactions and schedules" under "Behaviors"). One runs per
 engine, in its process, as one principal the deployment names; a
 reaction never refuses the change that set it off, and is not limited by
-the permissions of whoever made it.
+the permissions of whoever made it. With `retention` it also prunes the
+event log ("Retention").
 
 ```ts
 const engine = openEngine({ path: 'shop.db', policy, runner: { principal: { subject: 'runner', permissions: ['projects.close'] } } });
 engine.runner.start();                                    // runs what is due, then wakes on each commit
-engine.runner.status();                                   // { running, principal, head, subscriptions, schedules, error }
+engine.runner.status();                                   // { running, principal, head, subscriptions, schedules, retention?, error }
 engine.runner.resume({ behavior: 'Reactions', namespace: 'default', schema: 'Project' });
 engine.runner.stop();                                     // engine.close() stops it too
 ```
@@ -636,9 +762,13 @@ Workflow transition names included.
   saved cursors, and so does a new engine on the same file.
   `close()` stops it for good.
 - `runDue()` runs everything due now, the reactions to what that writes
-  included, and returns `{ handled, skipped, failed, scheduled }`. It runs
-  started or not, so a test or a deployment that drives the runner itself
-  calls it; it refuses inside a transaction and inside a reaction.
+  included, and returns `{ handled, skipped, failed, scheduled }`, with
+  `pruned` beside them on an engine with retention. It runs started or
+  not, so a test or a deployment that drives the runner itself calls it;
+  it refuses inside a transaction and inside a reaction.
+- `prune()` runs retention to the end now and returns `{ pruned }`. It
+  acts for no principal, so it needs none; it refuses on an engine
+  without retention (`TypeError`).
 - `running` says whether it is started.
 
 ### Subscriptions
@@ -686,6 +816,11 @@ An event at the depth limit (`maxDepth`) is passed over, not handled: a
 loop of reactions, each writing an event the next reacts to, stops there,
 and the subscription counts the event as skipped (`reason: 'depth'`).
 
+In an archived namespace ("Namespaces") a subscription runs nothing, and
+shows as `archived`, until the namespace is unarchived. Nothing writes
+there meanwhile, so it picks up at its cursor. A subscription holds its
+namespace's retention at its cursor in every state ("Retention").
+
 ### Schedules
 
 A schedule is one behavior's named timed work on one schema that
@@ -731,9 +866,10 @@ later, with no `previous`.
 
 | | |
 | --- | --- |
-| `running`, `principal`, `head` | whether it is started, the principal's subject, and the log's last cursor |
-| `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
-| `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying`, `off` (its function returns `null` for the schema's config) or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema; an `off` schedule has no `previous` and its `next` is null |
+| `running`, `principal`, `head` | whether it is started, the principal's subject, and the log's last cursor, which retention never moves back |
+| `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` (after `maxAttempts` failures, or behind its namespace's floor), `archived` (its namespace is) or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
+| `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying`, `off` (its function returns `null` for the schema's config), `archived` (its namespace is) or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema; an `off` schedule has no `previous` and its `next` is null |
+| `retention` | on an engine with retention: `{ maxAgeMs, maxEvents, everyMs, previous, next, namespaces }`, when the runner last finished pruning and prunes next (null before its first pass), and per namespace pruned or held `{ namespace, floor, pruned, heldAt, heldBy }`, its floor, the events pruned of it, and the cursor and subscription that hold it, or null |
 | `error` | the runner's own last error outside any reaction (a busy file, say), cleared by the next pass that works |
 
 The status is not served over HTTP or MCP: it spans every namespace and
@@ -749,7 +885,13 @@ where the action is `read` (a schema, its instances or its events),
 `write` (create, update, delete), `define` or `publish`; a behavior
 operation asks `write` when its declaration says it writes and `read`
 otherwise, and names itself in `operation`, absent for every other call.
-Only `true` allows, and anything else is `forbidden`. It runs synchronously. There is no default
+A question about a namespace itself names no schema:
+`{ principal, action: 'manage', namespace, operation }`, the operation
+`create`, `archive`, `unarchive` or `list` ("Namespaces"). The type is a
+union on `action` (`SchemaAccessRequest`, `NamespaceAccessRequest`), so
+a policy that reads `schema` says what it does for `manage`; one that
+builds a permission from the schema's name, as the examples' do, refuses
+it. Only `true` allows, and anything else is `forbidden`. It runs synchronously. There is no default
 policy: `allowAll` is explicit, for tests and local use. The engine has
 no roles; a policy can hold the principal's `permissions` to whatever
 rule the deployment has, through the HTTP runtime's `PermissionMatcher`
@@ -801,6 +943,9 @@ status: `invalid_schema` (`SchemaDocumentError`, with its issues),
 `invalid_instance` (`InstanceValidationError`, with its issues, the live
 version's or a behavior's `validate`'s),
 `name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`,
+`namespace_archived` (a write in an archived namespace), `cursor_expired`
+(`CursorExpiredError`: a read of the log from a cursor retention has
+pruned past, with its `floor` and the `head`),
 `invalid_argument` (`OperationParamsError` for an operation's parameters,
 `CreateParamsError` for a create's and `PreconditionsError` for a call's
 preconditions, with their issues), `seq_mismatch`, `vetoed`
@@ -2770,6 +2915,54 @@ cannot define a name the shared namespace holds, and the shared namespace
 cannot define a name another namespace holds, so what a namespace reaches
 never changes under it.
 
+A deployment that serves several projects of its own also makes a
+namespace while the engine runs, and archives one it is done with (D16,
+amended: namespaces made while the engine runs, and archived):
+
+```ts
+engine.namespaces.create(admin, 'acme');     // { name, origin: 'created', shared, state: 'active', createdAt, createdBy, ... }
+engine.namespaces.archive(admin, 'acme');    // state 'archived', archivedAt, archivedBy
+engine.namespaces.unarchive(admin, 'acme');  // state 'active'
+engine.namespaces.list(admin);               // the ones the policy lets admin list
+engine.namespaces.get(admin, 'acme');
+```
+
+- **Two sources.** The options configure some, `default` always among
+  them, and only the options add or take one away (`origin:
+  'configured'`). A create makes another (`origin: 'created'`), which
+  `engine_namespaces` keeps, so the next engine on the file has it.
+  `names` lists them all, archived ones included, the configured first.
+  A name the options list is configured whatever the file holds for it.
+- **The same rules.** A created namespace has its own drafts, versions,
+  instances and events, and looks names up in the shared namespace,
+  which is always a configured one, as any other does. Its name follows
+  the rule above (`invalid_argument` otherwise), and a name that is a
+  namespace already, archived or not, is `conflict`.
+- **The policy decides.** Each call asks `manage` about the namespace,
+  with the operation: `create` with the new name, `archive`,
+  `unarchive`, and `list` for each namespace `list` returns and the one
+  `get` returns. The policy is asked before the engine says whether the
+  name exists.
+- **An archive freezes it.** An archived namespace is read as it was:
+  schemas, drafts, instances, events, values, describe and tools
+  documents, search. Every write is `namespace_archived` (409) once the
+  policy has allowed it: a define, a publish, a create, an update, a
+  delete, a writing operation, of an instance or a schema. Its tools
+  document hides each tool that writes there, with the reason. The
+  runner runs none of its reactions and schedules, which show as
+  `archived` and pick up where they stopped once it is unarchived.
+  Retention prunes it as any namespace, held by its subscriptions. A
+  publish in the shared namespace still runs `afterConfigChange` for its
+  instances, since that keeps their derived storage in step with the
+  version they read.
+- **Only a created namespace is archived.** Archiving or unarchiving a
+  configured one is `conflict`; archiving an archived one, or
+  unarchiving an active one, changes nothing and returns it as it is.
+  Nothing is deleted: there is no delete of a namespace.
+
+A create, an archive and an unarchive append no event: the log's events
+belong to a schema, and the record carries who did it and when.
+
 ## HTTP
 
 `@superschematic/engine/http` serves an engine over HTTP (D16).
@@ -2807,6 +3000,11 @@ sees what the engine does not raise.
 
 | Method | Path | Engine call | Success |
 | --- | --- | --- | --- |
+| GET | `/namespaces` | `namespaces.list` | 200, the namespaces the caller may list ("Namespaces") |
+| POST | `/namespaces` | `namespaces.create`, body `{"name"}` | 201, the namespace, `Location` |
+| GET | `/namespaces/{namespace}` | `namespaces.get` | 200, the namespace |
+| POST | `/namespaces/{namespace}/archive` | `namespaces.archive` | 200, the namespace, archived |
+| POST | `/namespaces/{namespace}/unarchive` | `namespaces.unarchive` | 200, the namespace, active |
 | GET | `/namespaces/{namespace}/schemas` | `schemas.list` | 200, the names the namespace reaches |
 | POST | `/namespaces/{namespace}/schemas` | `schemas.define`, body: the document | 200, the draft |
 | GET | `/namespaces/{namespace}/schemas/{name}` | `schemas.live` | 200, the live version |
@@ -2851,7 +3049,12 @@ The event route's `after` is a cursor or `head`; `kind`, `behavior` and
 `exclude` are lists, as repeated parameters or comma-separated
 (`kind=create,update`), with `events.read`'s meaning ("The event log").
 An `after` that is neither is 400 `bad_request`; a filter value the
-engine refuses is 400 `invalid_argument`.
+engine refuses is 400 `invalid_argument`; a cursor before the
+namespace's floor, given or by default, is 410 `cursor_expired`
+("Retention").
+
+A namespace's create takes `{"name": "<namespace>"}` and nothing else
+(400 `bad_request` otherwise); its archive and unarchive take no body.
 
 The behavior routes carry no namespace: the behaviors an engine runs are
 the same in every namespace.
@@ -2861,17 +3064,19 @@ the same in every namespace.
 | Status | `code` | When |
 | --- | --- | --- |
 | 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), a create's parameters the engine or a behavior refuses (`CreateParamsError`), or preconditions the engine refuses (`PreconditionsError`), `details.issues` |
-| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data, behaviors?}`, a `Preconditions` header that is not a JSON object, a path that is not valid percent-encoding, an event `after` that is not a cursor or `head` |
+| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data, behaviors?}`, a namespace create body that is not `{name}`, a `Preconditions` header that is not a JSON object, a path that is not valid percent-encoding, an event `after` that is not a cursor or `head` |
 | 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject, and no verified service stands in for one |
 | 401 | `service_unauthorized` | a `Service-Authorization` credential that does not verify (the runtime's service step, D37) |
 | 403 | `forbidden` | the access policy refused, or a behavior refused a caller without the permission its config names |
 | 403 | `service_forbidden` | a verified service identity the service authenticator does not list as a caller |
 | 404 | `not_found` | no such version, draft or instance in the namespace, or no such route |
-| 404 | `unknown_namespace` | the namespace is not configured |
-| 409 | `conflict` | an instance with the id exists |
+| 404 | `unknown_namespace` | no such namespace, configured or created |
+| 409 | `conflict` | an instance with the id exists; a namespace with the name exists; an archive or unarchive of a configured namespace |
+| 409 | `namespace_archived` | a write in an archived namespace |
 | 409 | `name_taken` | the name is defined on the other side of the shared lookup |
 | 409 | `incompatible_change` | the version breaks the compatibility rule; `details.changes` |
 | 409 | `vetoed` | a behavior refused the create, the update, the delete or the operation; `details` is `{behavior, action, reason, code?, details?}`, the veto's code and details when it gives them |
+| 410 | `cursor_expired` | an event read or a stream's resume from a cursor before the namespace's floor; `details` is `{after, floor, head}` |
 | 412 | `seq_mismatch` | `If-Match` names a sequence the instance is no longer at; a failed precondition is the behavior's veto, 409 |
 | 413 | `payload_too_large` | the body exceeds `bodyLimitBytes` |
 | 415 | `unsupported_media_type` | the body is not of the route's media type |
@@ -2887,8 +3092,10 @@ the same in every namespace.
 is `about:blank`, as the HTTP runtime writes it for every problem; `code`
 names the problem. A detail names only what the request named, so an
 instance id that exists only in another namespace answers as one that
-exists nowhere. The namespaces a deployment configures are not secret: an
-unknown namespace is 404, and a configured one the policy refuses is 403.
+exists nowhere. A namespace's name is not secret: an unknown namespace is
+404, and one the policy refuses is 403. Which namespaces exist is the
+policy's to show: `GET /namespaces` lists the ones it lets the caller
+list.
 
 ### Authentication and access
 
@@ -2970,7 +3177,10 @@ data: {"cursor":41}
   `EventSource` sends, else after `after` (a cursor, or `head` for no
   replay), else at the start of the log. `schema`, `instanceId`, `kind`,
   `behavior` and `exclude` filter as on the JSON route; `limit` applies
-  to the JSON route only.
+  to the JSON route only. A start before the namespace's floor is the
+  410 `cursor_expired` problem ("Retention"), so a client knows to start
+  again from the head; a stream whose cursor retention passes while it
+  is open ends, and its reconnect gets that problem.
 - It replays in pages of `stream.pageSize` (100) and reads the next page
   only when the server has sent the previous one, so a slow client holds
   one page and replay never loads the backlog. The first page that is the
@@ -3097,7 +3307,8 @@ included; `typeArguments(document, type, keys)` returns it for any type.
 reference): a tool per operation of every live schema the namespace
 reaches that the principal may read, by name, after the engine's tools:
 three schema tools, two behavior tools, the read of a value by its hash,
-and the search across schemas where one of those schemas composes Search.
+four namespace tools, and the search across schemas where one of those
+schemas composes Search.
 
 | Tool | Name | MCP handle | Arguments |
 | --- | --- | --- | --- |
@@ -3114,6 +3325,10 @@ and the search across schemas where one of those schemas composes Search.
 | list behaviors | `engine.listBehaviors` | `list_behaviors` | none |
 | describe a behavior | `engine.describeBehavior` | `describe_behavior` | `name` |
 | get a stored value | `engine.getValue` | `get_value` | `hash`: `values.get` ("The value store") |
+| list namespaces | `engine.listNamespaces` | `list_namespaces` | none: `namespaces.list` ("Namespaces") |
+| create a namespace | `engine.createNamespace` | `create_namespace` | `name` |
+| archive a namespace | `engine.archiveNamespace` | `archive_namespace` | `name` |
+| unarchive a namespace | `engine.unarchiveNamespace` | `unarchive_namespace` | `name` |
 | search every schema | `engine.search` | `search` | `query`, `syntax`, `vector`, `model`, `limit`, `cursor` (`engine.search`'s); listed where a schema the principal may read composes Search |
 
 A name follows the SDK generators, `<namespace>.<method>`, with the schema
@@ -3123,7 +3338,9 @@ same parts in snake case (`line_item_add_note`). A handle `@mcp` would
 refuse (not lowercase snake case, longer than 48 characters), one two
 tools derive, or an engine tool's hides the tool with its reason in
 `hiddenReason`; the engine's tools keep theirs. A tool the access policy
-refuses the principal is hidden too, with that reason. `requiresAuth` is
+refuses the principal is hidden too, with that reason, and so is, in an
+archived namespace, every tool that writes there, the namespace tools
+aside: the namespace refuses the write. `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
 `replay` is `read_only`, `inputSchemaDigest` hashes the arguments as
 the Go encoder writes them, and `guidance` is the tool's guidance
@@ -3154,7 +3371,9 @@ schema the engine runs has no `@docs`, so the engine writes the same
 members from what it knows:
 
 - its own tools (`list_schemas`, `describe_schema`, `define_schema`,
-  `list_behaviors`, `describe_behavior`, `search`) carry fixed guidance;
+  `list_behaviors`, `describe_behavior`, `get_value`, `search`,
+  `list_namespaces`, `create_namespace`, `archive_namespace`,
+  `unarchive_namespace`) carry fixed guidance;
 - `create`, `get`, `list`, `update` and `delete` carry the engine's base,
   which names the schema's instance type and, for `create`, the
   behaviors that take create parameters;
@@ -3283,7 +3502,9 @@ openEngine({
 
 - `invocationPolicy` is D11's key, values and default. A built-in
   operation or engine tool (the schema tools, the behavior tools,
-  `getValue` and `search`) takes `invocation`'s value for it, else the default; a
+  `getValue`, `search` and the namespace tools, `listNamespaces`,
+  `createNamespace`, `archiveNamespace` and `unarchiveNamespace`) takes
+  `invocation`'s value for it, else the default; a
   behavior operation takes its declaration's `invocationPolicy`,
   else the default. Registration refuses a declaration whose value is not
   one of the values, as the compiler's `Finalize` does. The core's
@@ -3335,12 +3556,16 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   as the name, the title, the description, the arguments as `inputSchema`,
   `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
   invocation policy under the policy's key. The list is the caller's: a
-  tool the policy refuses is not in it. The schema tools
-  (`list_schemas`, `describe_schema`, `define_schema`), the behavior
-  tools (`list_behaviors`, `describe_behavior`) and `get_value` are in
-  every caller's list, since they name no schema until they are called:
-  the access policy answers the call, not the listing, and asks nothing
-  of the behavior tools. `search` is in the list of a caller who may read a
+  tool the policy refuses is not in it, nor, in an archived namespace, a
+  tool that writes there. The schema tools (`list_schemas`,
+  `describe_schema`, `define_schema`), the behavior tools
+  (`list_behaviors`, `describe_behavior`), `get_value` and the namespace
+  tools (`list_namespaces`, `create_namespace`, `archive_namespace`,
+  `unarchive_namespace`) are in every caller's list, since they name no
+  schema until they are called: the access policy answers the call, not
+  the listing, and asks nothing of the behavior tools. The namespace
+  tools act on the namespace they name, whichever namespace's endpoint
+  serves them. `search` is in the list of a caller who may read a
   schema that composes Search, and searches the ones it may read.
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:

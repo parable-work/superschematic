@@ -40,8 +40,9 @@ export interface ToolKeys {
 
 /**
  * The operations every schema has, the engine's tools for writing schemas
- * and reading its behaviors, its search across them, and the read of a
- * value by its hash.
+ * and reading its behaviors, its search across them, the read of a value
+ * by its hash, and its tools for listing, creating, archiving and
+ * unarchiving namespaces.
  */
 export type BuiltinTool =
   | 'create'
@@ -55,7 +56,11 @@ export type BuiltinTool =
   | 'listBehaviors'
   | 'describeBehavior'
   | 'search'
-  | 'getValue';
+  | 'getValue'
+  | 'listNamespaces'
+  | 'createNamespace'
+  | 'archiveNamespace'
+  | 'unarchiveNamespace';
 
 export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   'create',
@@ -70,6 +75,10 @@ export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   'describeBehavior',
   'search',
   'getValue',
+  'listNamespaces',
+  'createNamespace',
+  'archiveNamespace',
+  'unarchiveNamespace',
 ];
 
 /** EngineOptions.tools. */

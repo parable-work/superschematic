@@ -9,12 +9,23 @@ export { Engine, openEngine } from './engine.js';
 export type { EngineOptions } from './engine.js';
 
 export { SERVICE_SUBJECT_PREFIX, allowAll, servicePrincipal, standsIn } from './access.js';
-export type { AccessPolicy, AccessRequest, Action, Principal, PrincipalService } from './access.js';
+export type {
+  AccessPolicy,
+  AccessRequest,
+  Action,
+  NamespaceAccessRequest,
+  NamespaceOperation,
+  Principal,
+  PrincipalService,
+  SchemaAccessRequest,
+  SchemaAction,
+} from './access.js';
 
 export {
   BehaviorError,
   BehaviorVetoError,
   CreateParamsError,
+  CursorExpiredError,
   EngineError,
   IncompatibleChangeError,
   InstanceValidationError,
@@ -25,7 +36,7 @@ export {
 export type { EngineErrorCode, SchemaChange, SchemaIssue, ValidationIssue, Veto } from './errors.js';
 
 export { DEFAULT_NAMESPACE, NAMESPACE_NAME, Namespaces } from './namespaces.js';
-export type { NamespaceOptions } from './namespaces.js';
+export type { NamespaceOptions, NamespaceRecord } from './namespaces.js';
 
 export { SchemaRegistry } from './registry/registry.js';
 export type { ComposedBehavior, DefineOptions, SchemaTarget, ValidateOptions } from './registry/registry.js';
@@ -40,6 +51,9 @@ export type { InvokeOptions, InvokeSchemaOptions, OperationOutcome } from './ins
 export { EVENT_KINDS, EventLog } from './events/log.js';
 export type { DefineChange, EngineEvent, EventCause, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
 export type { EventWatcher } from './events/notifier.js';
+// Event log retention (runtime/engine/README.md, "Retention").
+export { DEFAULT_RETENTION_BATCH_SIZE, DEFAULT_RETENTION_EVERY_MS, MAX_RETENTION_BATCH_SIZE } from './events/retention.js';
+export type { RetentionOptions } from './events/retention.js';
 
 // The value store (runtime/engine/README.md, "The value store").
 export {
@@ -65,6 +79,8 @@ export {
   Runner,
 } from './runner/runner.js';
 export type {
+  PruneResult,
+  RetentionStatus,
   RunnerOptions,
   RunnerPass,
   RunnerStatus,

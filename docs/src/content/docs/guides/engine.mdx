@@ -160,6 +160,10 @@ a draft defined over HTTP; see
   namespace, the schema and, for a behavior operation, the operation's
   name. Only `true` allows; anything else is 403 `forbidden`. The policy
   runs synchronously. There is no default: `allowAll` is there for tests.
+- Making, archiving and listing namespaces asks the action `manage`,
+  with the namespace, no schema, and the operation (`create`, `archive`,
+  `unarchive` or `list`). This example makes no namespace while it runs,
+  so its policy refuses `manage`.
 - A behavior operation asks `write` when it writes and `read` when it only
   reads. This policy lets a reader call `comment` and `propose`, and
   nothing else that writes.
@@ -194,7 +198,10 @@ a draft defined over HTTP; see
 - `engineMcp` serves the MCP endpoint at `/namespaces/{namespace}/mcp`,
   with the same options.
 - There is one namespace, `default`, unless you configure more with the
-  `namespaces` option.
+  `namespaces` option or make one while the server runs
+  (`POST /api/namespaces`, `create_namespace`), as the policy allows. An
+  archived namespace is read as it was and refuses every write (409
+  `namespace_archived`).
 
 Start the server from the example's directory:
 
@@ -648,14 +655,25 @@ it waits it sends a `: keepalive` comment every five seconds. Stop it
 with Ctrl-C. The end-to-end test reads the stream from a cursor, then
 adds a comment and receives its event.
 
+This server keeps every event. One that passes `retention` to
+`openEngine`, `{ maxAgeMs }`, `{ maxEvents }` or both, has its runner
+prune the oldest, each namespace's apart, and never one a subscription
+has yet to handle. A read or a stream's resume from a cursor retention
+has pruned past is 410 `cursor_expired`, whose `details` carry the
+`floor` to read on from, taking the gap, and the `head` to start again
+from. The README's
+[retention](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#retention)
+section has the rules.
+
 ## MCP tools
 
 The MCP endpoint serves one tool per operation of every live schema the
-caller may read, and six engine tools: `list_schemas`, `describe_schema`
+caller may read, and ten engine tools: `list_schemas`, `describe_schema`
 and `define_schema`, `list_behaviors` and `describe_behavior`, which
 list the behaviors the engine runs and return one's declaration, its
-config's JSON Schema included, and `get_value`, which reads a value of
-the value store by its hash. A tool's name is the schema's and the operation's,
+config's JSON Schema included, `get_value`, which reads a value of
+the value store by its hash, and `list_namespaces`, `create_namespace`,
+`archive_namespace` and `unarchive_namespace`. A tool's name is the schema's and the operation's,
 in snake case: `notes_create`, `notes_transition`, `notes_list_comments`.
 A tool the policy refuses the caller is left out of the caller's list, so
 carol, a reader, sees these:
@@ -674,6 +692,10 @@ define_schema
 list_behaviors
 describe_behavior
 get_value
+list_namespaces
+create_namespace
+archive_namespace
+unarchive_namespace
 notes_get
 notes_list
 notes_comment
@@ -685,7 +707,8 @@ notes_list_proposals
 
 The engine's tools name no schema until they are called, so everyone
 lists them and the policy answers the call; the behavior tools ask it
-nothing, since the behaviors are the server's code. Where a schema
+nothing, since the behaviors are the server's code, and this policy
+refuses every caller the namespace tools' `manage`. Where a schema
 composes `Search`, one more tool, `search`, searches every such schema the
 caller may read ([Engine behaviors](/superschematic/guides/engine-behaviors/#searching-every-schema)).
 No tool publishes: a draft that `define_schema` stores goes live only

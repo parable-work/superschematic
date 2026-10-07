@@ -204,6 +204,10 @@ describe('tools/list', () => {
         'list_behaviors',
         'describe_behavior',
         'get_value',
+        'list_namespaces',
+        'create_namespace',
+        'archive_namespace',
+        'unarchive_namespace',
         'item_create',
         'item_get',
         'item_list',
@@ -262,6 +266,10 @@ describe('tools/list', () => {
         ['list_behaviors', { confirm: 'never' }],
         ['describe_behavior', { confirm: 'never' }],
         ['get_value', { confirm: 'never' }],
+        ['list_namespaces', { confirm: 'never' }],
+        ['create_namespace', { confirm: 'never' }],
+        ['archive_namespace', { confirm: 'never' }],
+        ['unarchive_namespace', { confirm: 'never' }],
         ['order_create', { confirm: 'never' }],
         ['order_get', { confirm: 'never' }],
         ['order_list', { confirm: 'never' }],
@@ -272,11 +280,11 @@ describe('tools/list', () => {
     for (const tool of tools) {
       assert.equal((tool.inputSchema as Record<string, unknown>)['x-acme-arguments'], 1, tool.name);
     }
-    const data = (tools[6].inputSchema.properties as Record<string, any>).data;
+    const data = (tools[10].inputSchema.properties as Record<string, any>).data;
     assert.equal(data.properties.quantity['x-acme-scalar'], 'Generic.Int64');
     // The other namespace has no schema.
     const { client: other } = await connect(endpoint(url));
-    assert.equal((await other.listTools()).tools.length, 6);
+    assert.equal((await other.listTools()).tools.length, 10);
   });
 
   test('lists only what the access policy lets the caller call', async () => {
@@ -284,7 +292,7 @@ describe('tools/list', () => {
     const { client } = await connect(endpoint(url), 'reader');
     assert.deepEqual(
       (await client.listTools()).tools.map((tool) => tool.name),
-      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'item_get', 'item_list', 'item_history']
+      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'list_namespaces', 'create_namespace', 'archive_namespace', 'unarchive_namespace', 'item_get', 'item_list', 'item_history']
     );
   });
 });
@@ -425,7 +433,7 @@ describe('tools/call', () => {
     const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
     assert.deepEqual(
       [...byName.keys()],
-      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value'],
+      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'list_namespaces', 'create_namespace', 'archive_namespace', 'unarchive_namespace'],
       'reader may read no schema, and still lists the engine tools'
     );
     assert.deepEqual(byName.get('list_behaviors')?.annotations, { readOnlyHint: true });
@@ -443,7 +451,7 @@ describe('tools/call', () => {
   });
 
   test('an unknown tool, or one the caller may not read, is a JSON-RPC invalid-params error', async () => {
-    const { url } = await served({ policy: ({ principal, action, schema }) => policy({ principal, action, namespace: 'default', schema }) && !(principal.subject === 'reader' && schema === 'Item') });
+    const { url } = await served({ policy: (request) => policy({ ...request, namespace: 'default' }) && !(request.principal.subject === 'reader' && request.schema === 'Item') });
     const { client } = await connect(endpoint(url), 'reader');
     for (const name of ['publish_schema', 'item_get']) {
       await assert.rejects(client.callTool({ name, arguments: { id: 'i1' } }), (error: unknown) => {
@@ -735,5 +743,43 @@ describe("the core's behaviors", () => {
     const again = await call(reader, 'projects_get', { id: 'launch' });
     assert.deepEqual((again.structuredContent as { data: Record<string, unknown> }).data.rollups, { tasks: 1, tasksByStatus: { dropped: 1 }, tasksFinished: true });
     assert.deepEqual((await call(client, 'projects_transition', { id: 'launch', params: { to: 'done' } })).structuredContent, { from: 'active', to: 'done' });
+  });
+});
+
+describe('namespace tools', () => {
+  const call = async (client: Client, name: string, args: Record<string, unknown>) =>
+    (await client.callTool({ name, arguments: args })) as CallToolResult & { structuredContent?: Record<string, any> };
+
+  test('create, list, archive and unarchive a namespace from any namespace, as the policy allows; an archived one lists no tool that writes there', async () => {
+    const { url } = await served();
+    const { client } = await connect(endpoint(url, 'east'));
+    const created = await call(client, 'create_namespace', { name: 'acme' });
+    assert.deepEqual(
+      [created.structuredContent?.name, created.structuredContent?.origin, created.structuredContent?.state],
+      ['acme', 'created', 'active']
+    );
+    const listed = await call(client, 'list_namespaces', {});
+    assert.deepEqual(
+      (JSON.parse((listed.content[0] as { text: string }).text) as Array<{ name: string }>).map((namespace) => namespace.name),
+      ['default', 'east', 'acme']
+    );
+    assert.equal(problemOf(await call(client, 'create_namespace', { name: 'acme' })).code, 'conflict');
+    assert.equal(problemOf(await call(client, 'create_namespace', { name: 'Acme' })).code, 'invalid_argument');
+    assert.equal(problemOf(await call(client, 'archive_namespace', { name: 'east' })).code, 'conflict');
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    assert.equal(problemOf(await call(reader, 'archive_namespace', { name: 'acme' })).code, 'forbidden');
+
+    // In acme, a schema, then the archive: its tools that write are hidden
+    // and refused, and reading and unarchiving go on.
+    const { client: inAcme } = await connect(endpoint(url, 'acme'));
+    assert.equal((await call(inAcme, 'define_schema', { document: orderDocument() })).isError, undefined);
+    assert.equal((await call(client, 'archive_namespace', { name: 'acme' })).structuredContent?.state, 'archived');
+    const names = (await inAcme.listTools()).tools.map((tool) => tool.name);
+    assert.ok(!names.includes('define_schema') && names.includes('list_schemas') && names.includes('unarchive_namespace'), names.join(', '));
+    const refused = problemOf(await call(inAcme, 'define_schema', { document: orderDocument() }));
+    assert.deepEqual([refused.status, refused.code], [409, 'namespace_archived']);
+    assert.equal((await call(inAcme, 'list_schemas', {})).isError, undefined);
+    assert.equal((await call(inAcme, 'unarchive_namespace', { name: 'acme' })).structuredContent?.state, 'active');
+    assert.ok((await inAcme.listTools()).tools.some((tool) => tool.name === 'define_schema'));
   });
 });

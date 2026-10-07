@@ -29,7 +29,11 @@ their routes carry none (tools/behaviors.ts), a search across the
 namespace's schemas (engine.search), and a value of the value store by
 its hash (engine.values), which an event, and an instance read with
 `valueRefs=true`, carries as a ref; the MCP endpoint is the ./mcp entry
-point's.
+point's. The namespaces themselves are listed, created, archived and
+unarchived under /namespaces, as the access policy's manage allows
+(engine.namespaces). A read of the event log from a cursor retention has
+pruned past answers 410 cursor_expired, the JSON page and a stream's
+resume alike.
 
 With the runtime's `authenticateService`, a calling service is verified
 on every route and reaches the engine beside the end user, or standing in
@@ -88,6 +92,8 @@ export const MERGE_PATCH_MEDIA_TYPE = 'application/merge-patch+json';
 /** The request header that carries a write's preconditions, a JSON object by behavior name. */
 export const PRECONDITIONS_HEADER = 'Preconditions';
 
+const NAMESPACES = '/namespaces';
+const NAMESPACE = '/namespaces/{namespace}';
 const SCHEMAS = '/namespaces/{namespace}/schemas';
 const SCHEMA = `${SCHEMAS}/{name}`;
 const INSTANCES = `${SCHEMA}/instances`;
@@ -156,6 +162,26 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
   const body = { input: { parse: (value: unknown) => value, required: true } };
   const route = (operation: OperationSpec, handler: (ctx: RequestContext, request: DecodedRequest) => unknown) =>
     mountOperation(app, operation, async (ctx, request) => handler(ctx, request), runtime);
+
+  // The namespaces themselves, as the policy's manage allows.
+  route(spec('listNamespaces', 'GET', NAMESPACES), (ctx) => engine.namespaces.list(principalOf(ctx)));
+
+  route(spec('createNamespace', 'POST', NAMESPACES, body), (ctx, { input }) => {
+    const refused = mediaTypeRefusal(ctx, JSON_MEDIA_TYPE);
+    if (refused) return refused;
+    const record = engine.namespaces.create(principalOf(ctx), namespaceName(input));
+    return new OperationResult(record, 201, { location: `${ctx.path.replace(/\/+$/u, '')}/${encodeURIComponent(record.name)}` });
+  });
+
+  route(spec('getNamespace', 'GET', NAMESPACE), (ctx, { path }) => engine.namespaces.get(principalOf(ctx), path.namespace as string));
+
+  route(spec('archiveNamespace', 'POST', `${NAMESPACE}/archive`), (ctx, { path }) =>
+    engine.namespaces.archive(principalOf(ctx), path.namespace as string)
+  );
+
+  route(spec('unarchiveNamespace', 'POST', `${NAMESPACE}/unarchive`), (ctx, { path }) =>
+    engine.namespaces.unarchive(principalOf(ctx), path.namespace as string)
+  );
 
   route(spec('listSchemas', 'GET', SCHEMAS), (ctx, { path }) =>
     engine.schemas.list(principalOf(ctx), { namespace: path.namespace as string })
@@ -338,6 +364,14 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
 function schemaView(record: SchemaRecord): Omit<SchemaRecord, 'canonical'> {
   const { canonical: _canonical, ...view } = record;
   return view;
+}
+
+/** The body of a namespace's create: `{ "name": "<namespace>" }`, whose name the engine checks. */
+function namespaceName(input: unknown): string {
+  if (!isPlainObject(input) || typeof input.name !== 'string' || Object.keys(input).some((key) => key !== 'name')) {
+    throw badRequest('A namespace create body is a JSON object with the namespace\'s name as "name", a string, and nothing else');
+  }
+  return input.name;
 }
 
 /**

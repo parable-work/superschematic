@@ -1109,8 +1109,10 @@ HTTP and MCP mounts take service callers (D37), it serves the behaviors
 it runs, and each tool carries guidance its behaviors' configs give,
 with create parameters narrowed by them (an amendment below on each). A
 large field is stored once, by hash, in a value store in the same file
-(the amendment "a large value is stored once" below). Each change that
-lands a piece updates this paragraph. The names and rules are reversible until the first release.
+(the amendment "a large value is stored once" below). A deployment makes
+and archives namespaces while the engine runs, and the log keeps events
+by age or count, pruned on the runner (the last two amendments below).
+Each change that lands a piece updates this paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -1549,6 +1551,57 @@ one process still writes it.
 | A behavior keeps an object with large members in its own tables through `values` in its context: `stow(key, object)` returns the JSON text and the pointers its row keeps and holds the values for the row named by the behavior, the call's namespace and schema, the context's instance and key; `load(json, refs)` puts them back; `release(key?)` drops them. A read loads only. `Revisions` stows each revision's fields and each proposal's patch (its migration 2 adds `value_refs`) and releases them when the instance goes. | The engine writing behaviors' tables for them, which D16 rules out; `Revisions` copying the fields as before, a large field in every revision |
 | A row or an event written before migration 9 keeps its values inline. An instance's row moves a large field to the store at its next write; an event is never rewritten. | Moving every large value in migration 9, which hashes each one inside one migration's transaction and still cannot touch the append-only log |
 | The store sets no limit of its own on a value's size: the HTTP runtime's body limit bounds what a caller sends, and dedupe and refs bound the copies. | A maximum per value, which no case has asked for and which a client that hits it can only split by hand |
+
+### D16, amended: namespaces made while the engine runs, and archived
+
+Namespaces were fixed in `openEngine`'s options. A deployment that
+serves several projects of its own reopened the engine with new
+options to add one, and had no way to stop the writes to one it was done
+with short of taking it out of the options, which left its data in the
+file and out of reach. Who may add a namespace is a question the access
+policy could not be asked: every question named a schema. A namespace
+is now made, archived and unarchived while the engine runs, as the
+policy allows, and an archived one is read as it was. This changes
+D16's namespaces row: the deployment configures some, and a call makes
+the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Namespaces come from two places: the options configure some, `default` always among them, and `engine.namespaces.create` makes the others, which `engine_namespaces` keeps (engine migration 10), so the next engine on the file has them. A name the options list is configured whatever the table holds for it, and only the options add or take one away. A created namespace looks names up in the shared namespace, always a configured one, under D16's rules. | Every namespace in the table, the options' inserted at open, under which a call archives what the options declare and the options and the file disagree at the next open; options only, as before |
+| A name follows the rule configured names do (`invalid_argument` otherwise). A name that is a namespace already, configured or created, archived or not, is `conflict`. There is no delete, so a name is never reused. | Reusing an archived namespace's name, which hands a new project another's data |
+| Who may create, archive, unarchive or list is the policy's: one action, `manage`, asked about the namespace itself, `{ principal, action: 'manage', namespace, operation }` with the operation `create`, `archive`, `unarchive` or `list`, and no schema. `AccessRequest` becomes a union on `action` (`SchemaAccessRequest`, `NamespaceAccessRequest`), so a policy that reads `schema` must say what it does for `manage`, and one that builds a permission from the schema's name, as the examples' do, refuses it. A create asks before it looks the name up, so a caller the policy refuses learns nothing of what exists; `list` asks of each namespace and returns the ones it allows. | An action per operation (`createNamespace`, ...), four names each policy must know where one with an operation reads as the behavior operations do; `schema: ''`, which a policy written per schema takes for a schema; any caller listing every namespace, as any caller reads the behavior catalog, which shows one project another's name; a permission the engine names, which D16's "no roles" rules out |
+| An archived namespace refuses every write a call makes there, once the policy has allowed it: a define, a publish, a create, an update, a delete and a writing operation, of an instance or a schema, are `namespace_archived` (409). Its schemas, drafts, instances, events and values read as before, and its tools document hides each tool that writes there, with the reason. | 403, which tells the caller it lacks a grant it may hold; 410, which says the namespace is gone while its reads work; 423, WebDAV's lock; refusing before the policy, which tells a caller the policy refuses that the namespace is archived |
+| `unarchive` undoes an archive. Archiving an archived namespace, or unarchiving an active one, returns it as it is; archiving or unarchiving a configured namespace is `conflict`. Nothing deletes a namespace. | No unarchive, which makes a mistaken archive final; refusing the second archive, which a retried call trips on; a delete, which must remove instances, behaviors' rows, values and events across every table, a change of its own |
+| The runner runs no reaction and no schedule in an archived namespace: `status()` shows them `archived`, and once it is unarchived a subscription picks up at its cursor, since nothing was written there meanwhile, and a schedule that came due runs once. A publish in the shared namespace still runs `afterConfigChange` for an archived namespace's instances, which keeps their derived storage in step with the version their reads use. | Running them, whose writes the namespace refuses, so each would fail, retry and halt until the unarchive; dropping their subscriptions, which loses the cursors; skipping `afterConfigChange` there, which leaves a search index that does not match the version a read uses |
+| `engine.namespaces` has `create`, `archive`, `unarchive`, `list` and `get`, each record `{ name, origin, shared, state, createdAt, createdBy, archivedAt, archivedBy }`. HTTP serves `GET` and `POST /namespaces`, `GET /namespaces/{namespace}` and `POST .../archive` and `.../unarchive`; MCP serves `list_namespaces`, `create_namespace`, `archive_namespace` and `unarchive_namespace`, engine tools with guidance in every caller's list, whose policy `tools.invocation` sets. They append no event. | Tools in one admin namespace's endpoint only, which a deployment that serves each project's endpoint alone could not reach; an event kind for them, which has no schema to ask `read` on and which migration 7's CHECKs refuse |
+
+### D16, amended: the log keeps what retention and its subscriptions need
+
+The log grew for good, and since the value store every large value an
+event held stayed stored for good with it: the value store's amendment
+left freeing them to retention. Four readers relied on every event being
+there: a read or a stream from 0, a subscription's start, which the
+runner read from its publish event, a reaction's `before()`, which
+folds an instance's events from its create, and the next sequence of an
+instance created again after a delete, the highest its events held. The
+log now keeps events by age or count, a namespace at a time, never past
+an event a subscription has yet to handle, and each reader needs only
+what retention keeps. This changes D16's storage row: the log is
+append-only, and retention removes its oldest events.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine option `retention: { maxAgeMs?, maxEvents?, everyMs, batchSize }` keeps events by age (the event's `at` against the engine's clock), by count (an event more than `maxEvents` cursors behind the head goes) or both, an event going when either lets it go. Without it nothing is pruned. | Retention per namespace or per schema, an option keyed by names a deployment makes while the engine runs; a count of a namespace's own events, which counts every namespace's events at each pass |
+| The runner prunes at its first pass and every `everyMs` after, `batchSize` events per transaction, yielding between batches; `runDue()` prunes when it is due, and `engine.runner.prune()` prunes to the end now, with no principal, since pruning acts for none. | Pruning inside writes, which makes a heartbeat pay for the log; a timer of the engine's own beside the runner's, a second loop to start, stop and test |
+| It prunes each namespace apart, oldest first, and stops at the first event it keeps, so what is gone is a run of cursors. A namespace's floor (`engine_log_floors`, engine migration 11) is the last cursor pruned of its events. | One floor for the log, under which one project's stuck subscription holds every project's log |
+| It never prunes past a namespace's hold: the cursor of its least advanced subscription, active, retrying, halted or archived, at its cursor or, before it has run, where it starts; one whose behavior is not registered holds once it has run. A halted subscription holds its namespace's log until it is resumed, and `status().retention` shows the hold and the subscription. | A halted subscription not holding, or holding until a deadline, after which its resume runs on with the events it failed at gone, quietly; holding only running subscriptions, which loses the events of a namespace while it is archived or a deployment's runner while it is stopped |
+| A subscription found behind its floor all the same, one whose implementation gained reactions after retention pruned past where it starts, halts with `cursor_expired`, its failure cursor the floor, and `resume` with `skip` moves it there. | Skipping silently to the floor, which hides events no reaction ran for |
+| A read from a cursor before its namespace's floor, or before the last publish pruned of the shared namespace it reads, is `cursor_expired`, `CursorExpiredError` with the floor and the head: 410 with `details: { after, floor, head }` over HTTP, a stream's resume and a JSON page alike. A read with no `after` starts at 0, so it is expired once anything is pruned. A stream retention passes ends, and its reconnect gets the problem. The head never moves back, so `after=head` works as before. | Reading on from the oldest event kept without a word, a gap a client cannot see; absent `after` meaning the oldest kept event, under which a client that rebuilds state from a replay gets part of it; 404, which says the namespace or route is not there; 409, which a client retries |
+| Each pruned instance event folds into its instance's base (`engine_event_bases`): the instance as the log had it after the event, or none after a delete, and its sequence. `before()` folds from the base and the events kept, and is `cursor_expired` for an event pruned; a create after a delete takes the sequence after the base's. The base holds the values it keeps. | Keeping each instance's create, which keeps every instance's whole history for as long as it lives; failing `before()` once the create is gone, which halts every `Reactions` rule on an old instance; restarting the sequence, under which an `If-Match` from the old life matches the new one |
+| A version keeps its publish's cursor (`engine_schemas.published_cursor`, migration 11 fills it from the log), from which a subscription starts and which the runner's discovery is keyed on, so pruning a publish event moves nothing. | Never pruning publish events, which keeps every schema document twice, in the log and in `engine_schemas` |
+| A pruned event drops its value holders in the prune's transaction, so a value only events held goes with the last of them. | A sweep of unheld values, which one writer and synchronous transactions leave nothing for |
+| Pruning writes the engine's own storage, appends no event and acts for no principal. D32 lets a schedule write its behavior's tables where nothing an operation returns changes. Pruning changes nothing a read of an instance, a schema or a behavior returns; a read of the log returns every event after its cursor or `cursor_expired`, never other events, so what it does change is announced by a code. That is why it is the runner's own work and not a behavior's schedule: no behavior owns the log. | A behavior that prunes, which writes storage that is not its own; an event per prune, which grows the log it prunes |
+| The trigger that refuses a delete of an event lets one through at or before its namespace's floor, which retention moves first in the batch's transaction, so a stray delete above the floor is still refused. | Dropping the trigger, which lets any statement in the process delete events |
 
 ## D17. A version graph over versioned tables, with one merge core
 
