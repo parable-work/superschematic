@@ -5,8 +5,8 @@
 // container, with a database per hosted DB schema, a sql edge derives a
 // connection string to that container, and an http edge the callee's
 // loopback URL with a service credential the caller signs with the edge's
-// Ed25519 key (D37). Giving the callee the public key waits for the
-// service-auth field connectors and the entrypoint will share.
+// Ed25519 key (D37), and gives the callee the edge's public key for its
+// callers field.
 //
 // The target registers like any other (Register), but the core registers
 // it, so a binary with no extension linked runs `stack dev`. Its resource
@@ -70,8 +70,8 @@ const (
 	// TypeKeyPair is an http edge's Ed25519 key pair. The provisioner
 	// generates it into the environment's state directory, never the
 	// output root, and the caller signs its service credential with the
-	// private key. Its public key is an output, for the callee's
-	// service-auth field once there is one.
+	// private key. Its public key is an output the callee's callers field
+	// references.
 	TypeKeyPair = "local:serviceauth/keyPair:KeyPair"
 
 	// TypeProcess is a server process built from its entrypoint module.

@@ -59,6 +59,7 @@ import type { Row } from '../../storage/driver.js';
 import { BehaviorConfigError, defineBehavior, type InstanceContext, type InstanceView } from '../behavior.js';
 import { page, pageRequest } from '../paging.js';
 import declaration from './declarations/Dependencies.behavior.json' with { type: 'json' };
+import { dependenciesCreateParams, dependenciesGuidance } from './guidance/dependencies.js';
 import { isTerminalState, stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
 /** Dependencies' config, parsed: the defaults filled in. */
@@ -287,6 +288,10 @@ function describe(blocker: { schema: string; id: string; status?: string }): str
 
 export const dependencies = defineBehavior<DependenciesConfig>({
   declaration,
+
+  guidance: dependenciesGuidance,
+
+  createParamsSchema: dependenciesCreateParams,
 
   // The configSchema holds the shape; this holds gatedStates to the
   // states of the type's Workflow, whose config it is given, and fills

@@ -10,7 +10,7 @@ config:
 resources:
   # The stack of environment Staging, which owns the nodes this environment
   # inherits: network, network.nat, network.router, network.subnet,
-  # secret.PaymentsSecrets.STRIPE_KEY, shop-db.instance.
+  # secret.PaymentsSecrets.STRIPE_KEY, shop-db.instance, shop-db.migrator.
   parent-stack:
     type: pulumi:pulumi:StackReference
     properties:
@@ -60,6 +60,7 @@ resources:
     name: Orders.database-user.shop-db
     type: gcp:sql/user:User
     properties:
+      deletionPolicy: ABANDON
       instance: ${parent-stack.outputs["shop-db.instance.name"]}
       name: orders-pr${pr}@acme-staging.iam
       project: acme-staging
@@ -103,6 +104,8 @@ resources:
     name: Orders.service
     type: gcp:cloudrunv2/service:Service
     properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-staging/locations/us-east1/services/orders-pr${pr}
       deletionProtection: false
       ingress: INGRESS_TRAFFIC_INTERNAL_ONLY
       invokerIamDisabled: false
@@ -117,7 +120,7 @@ resources:
               - name: MAX_LINE_ITEMS
                 value: "50"
               - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
-                value: ${shop-api-service.uri}
+                value: //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api-pr${pr}
               - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
                 value: google-id-token
               - name: SHOP_API_SERVICE_URL
@@ -331,6 +334,7 @@ resources:
     name: shop-api.database-user.shop-db
     type: gcp:sql/user:User
     properties:
+      deletionPolicy: ABANDON
       instance: ${parent-stack.outputs["shop-db.instance.name"]}
       name: shop-api-pr${pr}@acme-staging.iam
       project: acme-staging
@@ -416,6 +420,8 @@ resources:
     name: shop-api.service
     type: gcp:cloudrunv2/service:Service
     properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api-pr${pr}
       deletionProtection: false
       ingress: INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
       invokerIamDisabled: true
@@ -565,3 +571,4 @@ outputs:
   shop-db.instance.connectionName: ${parent-stack.outputs["shop-db.instance.connectionName"]}
   shop-db.instance.id: ${parent-stack.outputs["shop-db.instance.id"]}
   shop-db.instance.name: ${parent-stack.outputs["shop-db.instance.name"]}
+  shop-db.migrator.id: ${parent-stack.outputs["shop-db.migrator.id"]}

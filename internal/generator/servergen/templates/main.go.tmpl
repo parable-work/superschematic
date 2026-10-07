@@ -40,7 +40,7 @@ import (
 {{- if anyPrivate .APIs }}
 	runtimemiddleware "{{ .Naming.HTTPRuntimeGoModule }}/middleware"
 {{- end }}
-{{- if or .Clients (anyServiceAuth .APIs) }}
+{{- if .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/serviceauth"
 {{- end }}
 {{- if or .Databases .Clients }}
@@ -390,18 +390,6 @@ func serviceCredential(endpoint stackconfig.Service) (serviceauth.TokenSource, [
 		return token, c.HeaderNames(), nil
 	}
 	return nil, nil, fmt.Errorf("service credential source %q is not one the runtime ships", c.Source)
-}
-{{- end }}
-{{- if anyServiceAuth .APIs }}
-
-// serviceAuthenticator is the service authenticator of an API whose
-// operations have a service clause: a serviceauth.Verifier over the
-// service-auth field, the config each inbound edge's connector derives
-// for the callee (docs/stack-model.md, sections 3.4 and 9.2). No connector
-// derives that field yet, so the server refuses to start rather than
-// answer every service caller 401.
-func serviceAuthenticator(api string) (serviceauth.Authenticator, error) {
-	return nil, fmt.Errorf("%s has operations with a service clause, and no environment derives the service-auth field its callers are verified against yet (docs/stack-model.md, section 3.4)", api)
 }
 {{- end }}
 

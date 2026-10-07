@@ -177,6 +177,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
 		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
 		{links, []string{"no_revision", "required_link", "required_target"}},
+		{rollups, []string{"not_held"}},
 		{revisions, []string{"no_review", "not_pending"}},
 		{retries, []string{"exhausted", "limits_fixed", "not_configured"}},
 		{lease, []string{"held_by_another", "held_by_caller", "not_leased", "not_holder", "lapsed", "token_stale", "token_required", "max_expiries", "hold_limit_fixed", "not_configured"}},

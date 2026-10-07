@@ -18,6 +18,7 @@
       "@superschematic/db": ["../../../packages/db/src/index.ts"],
       "@superschematic/schema": ["../../../packages/schema/src/index.ts"],
       "@superschematic/schema-config": ["../../../packages/schema-config/src/index.ts"],
+      "@superschematic/stack": ["../../../packages/stack/src/index.ts"],
       "superscalar": ["../../../third_party/superscalar/bindings/typescript/src/index.ts"],
       "@acme/*": ["./services/*/src/index.ts"]
     }

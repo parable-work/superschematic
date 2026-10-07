@@ -17,7 +17,7 @@ from the same schema as its server.
 | Part | Service | What you get |
 | --- | --- | --- |
 | [Model the database](/superschematic/first-project/database/) | `shop-db` | Postgres DDL, a Go ORM, Go and TypeScript types |
-| [Serve and call it from Go](/superschematic/first-project/go-api/) | `shop-api` | a Go server, OpenAPI, a Go SDK and a TypeScript SDK |
+| [Serve and call it from Go](/superschematic/first-project/go-api/) | `shop-api`, `shop-stack` | a Go server, OpenAPI, a Go SDK and a TypeScript SDK, run locally with `stack dev` |
 | [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/) | `shop-storefront` | a TypeScript server and a TypeScript SDK |
 | [Build the whole tree](/superschematic/first-project/build-the-tree/) | every service | one build in dependency order, and a cache |
 
@@ -48,7 +48,10 @@ calls from its pages.
       - shop-api/ API: products, served in Go
       - shop-orders/ API: orders and reviews, for the guides
       - shop-storefront/ API: carts, served in TypeScript
-  - go/ the Go services: implementations, auth, wiring, tests
+      - shop-stack/ Stack: what runs, and the Dev environment stack dev runs
+  - go/ the Go module: auth.go, which both APIs share, and tests
+    - shop-api/ the implementation of shop-api
+    - shop-orders/ the implementation of shop-orders
   - typescript/ the TypeScript service, a client and tests
   - python/ a client and tests
   - rust/ a client and tests

@@ -50,6 +50,7 @@ resources:
     name: Orders.database-user.shop-db
     type: gcp:sql/user:User
     properties:
+      deletionPolicy: ABANDON
       instance: ${shop-db-instance.name}
       name: orders@acme-prod.iam
       project: acme-prod
@@ -93,6 +94,8 @@ resources:
     name: Orders.service
     type: gcp:cloudrunv2/service:Service
     properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-prod/locations/us-east1/services/orders
       deletionProtection: false
       ingress: INGRESS_TRAFFIC_INTERNAL_ONLY
       invokerIamDisabled: false
@@ -107,7 +110,7 @@ resources:
               - name: MAX_LINE_ITEMS
                 value: "50"
               - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
-                value: ${shop-api-service.uri}
+                value: //run.googleapis.com/projects/acme-prod/locations/us-east1/services/shop-api
               - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
                 value: google-id-token
               - name: SHOP_API_SERVICE_URL
@@ -388,6 +391,7 @@ resources:
     name: shop-api.database-user.shop-db
     type: gcp:sql/user:User
     properties:
+      deletionPolicy: ABANDON
       instance: ${shop-db-instance.name}
       name: shop-api@acme-prod.iam
       project: acme-prod
@@ -473,6 +477,8 @@ resources:
     name: shop-api.service
     type: gcp:cloudrunv2/service:Service
     properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-prod/locations/us-east1/services/shop-api
       deletionProtection: false
       ingress: INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
       invokerIamDisabled: true
@@ -596,6 +602,22 @@ resources:
         tier: db-custom-2-7680
     options:
       version: 9.37.1
+  # phase infrastructure; owners shop-db
+  shop-db-migrator:
+    name: shop-db.migrator
+    type: gcp:sql/user:User
+    properties:
+      databaseRoles:
+        - cloudsqlsuperuser
+      deletionPolicy: ABANDON
+      instance: ${shop-db-instance.name}
+      name: shop-migrator@acme-prod.iam
+      project: acme-prod
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${shop-db-instance}
+      version: 9.37.1
 outputs:
   Orders.account.email: ${Orders-account.email}
   Orders.account.id: ${Orders-account.id}
@@ -648,3 +670,4 @@ outputs:
   shop-db.instance.connectionName: ${shop-db-instance.connectionName}
   shop-db.instance.id: ${shop-db-instance.id}
   shop-db.instance.name: ${shop-db-instance.name}
+  shop-db.migrator.id: ${shop-db-migrator.id}

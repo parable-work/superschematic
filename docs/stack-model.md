@@ -163,10 +163,12 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a service field per http edge. It holds the callee's base URL, the
   source of the service credential and the headers that carry it (section
   9.2);
-- a service-auth field on a server that an http edge reaches. It holds
-  what the server's `ServiceAuthenticator` checks: each inbound edge's
-  issuer, keys and audience, and the deployable each caller identity is
-  (section 9.2).
+- a callers field per served API with a service clause, `<API>_CALLERS`
+  (`SHOP_API_CALLERS`), named by the core's rule alone over the API's own
+  name. It holds what the server's `ServiceAuthenticator` checks: the
+  issuers it accepts, with their keys and audience, and the deployable
+  each caller identity is, which the connectors of the http edges to the
+  API write together (section 9.2).
 
 An API's database field comes from its `authDb`, or its one DB-kind
 dependency, as its sql edge does (section 3.3).
@@ -178,30 +180,38 @@ reads. `values-schema.json` lists each derived field in
 `x-superschematic.envVars` with `derived` (the edge kind), `service` and
 `variables`, and each of its variables as an optional string property
 that the platform sets, not a deployment's values. The TypeScript and Rust
-loaders read no derived field yet (section 12), and the service-auth field
-waits for the connectors that write it.
+loaders read no derived field yet (section 12). The callers field is in
+neither `EnvConfig` nor `values-schema.json`, since its variables follow
+the environment's edges: the generated entrypoint reads it with
+`stackconfig.LoadCallers` (section 8.1).
 
 What a connector derives for each edge kind has a contract, in
-`ir/derived_value.go`. Resolution checks every connector's value against
-it and refuses one that breaks it with a `lowering` failure that names the
-member at fault:
+`ir/derived_value.go` and `ir/service_auth.go`. Resolution checks every
+connector's value against it and refuses one that breaks it with a
+`lowering` failure that names the member at fault:
 
 | Edge | Value | Members |
 | --- | --- | --- |
 | sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
 | http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization` |
+| http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 
 A member holds a string or a reference to an output or a parameter. A
-credential's `source` and `headers` are literals, and a member the
-contract lacks, or that the credential's source does not read, is
-refused.
+credential's `source` and `headers` are literals, as are an issuer's
+aliases, algorithms, subject claim and maximum lifetime, a whole number,
+and a caller's deployable and the APIs it serves. A member the contract
+lacks, or that the credential's source does not read, is refused.
 
 In environment variables, a derived field is one variable per member:
 the field's name, an underscore and the member's path in upper snake case,
-with a list joined by commas (`SHOP_DB_DATABASE_URL`,
+with a list of strings joined by commas (`SHOP_DB_DATABASE_URL`,
 `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `SHOP_API_SERVICE_URL`,
-`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). `ir.DerivedVariables` encodes a
-value that way for platforms, and the generated loaders read it back.
+`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). A list of objects, or an empty
+list, is a variable that holds the list's length, and each object's
+members follow the list's name and the object's index
+(`SHOP_API_CALLERS_ISSUERS=1`, `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`). A
+whole number is its decimal. `ir.DerivedVariables` encodes a value that
+way for platforms, and the generated loaders read it back.
 Each variable is a plain string a platform can set from an output
 reference, or from its secret store for a member such as a signing key.
 
@@ -224,8 +234,9 @@ second form covers each of its variables, and any member a later contract
 adds. The resolver applies the same rule (`field-collision`).
 
 The generated entrypoint (section 8.1) reads these fields, so application
-code never names an environment variable. `examples/acme-shop/go/example_test.go`
-connecting with `os.Getenv("DATABASE_URL")` is the code this replaces.
+code never names an environment variable. It replaces a hand-written
+`main` that connects with `os.Getenv("DATABASE_URL")`, as
+`examples/acme-shop` did before its stack.
 
 ## 4. Authoring
 
@@ -1090,11 +1101,12 @@ change reads as a diff.
 
 ## 7. The gcp target
 
-`extensions/gcp` builds this section, apart from image builds and the
-migration job: the target, its Cloud Run and Cloud SQL platforms, their
-connectors, the Cloud DNS platform, the policy rules, the pinned provider
-schemas (section 6.4), at pulumi-gcp 9.37.1, and bootstrap with the
-target's Secret Manager store and state bucket (section 7.3). Its golden
+`extensions/gcp` builds this section: the target, its Cloud Run and Cloud
+SQL platforms, their connectors, the Cloud DNS platform, the policy
+rules, the pinned provider schemas (section 6.4), at pulumi-gcp 9.37.1,
+bootstrap with the target's Secret Manager store and state bucket
+(section 7.3), image builds on Cloud Build, and the migration job
+(section 8.4, D46). Its golden
 environments resolve the acme-shop stack of section 4.1 in a staging, a
 production and a parameterized preview environment.
 
@@ -1120,7 +1132,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service mounts |
-| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for that URL as the service credential (section 9.2) |
+| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
@@ -1151,10 +1163,11 @@ owner credentials (application default credentials), and is safe to run
 again: each step creates what is missing and leaves the rest.
 
 1. It enables the APIs the deploy and the environment's graph use: those
-   of the state, the images, the accounts and Workload Identity
+   of the state, the images and their builds (Artifact Registry, Cloud
+   Build and Cloud Logging), the accounts and Workload Identity
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager and Cloud DNS as the graph's resource types need
-   them.
+   them, Cloud Run with any database for its migration job.
 2. It creates the state bucket and the KMS key directly, since Pulumi needs
    them before it can run: the bucket `<project>-superschematic-state`,
    with uniform access, public access prevention and object versioning,
@@ -1171,7 +1184,18 @@ again: each step creates what is missing and leaves the rest.
      and its use of the state bucket and the key. `planner` reads every
      resource and IAM policy a preview refreshes and sees whether a secret
      has a value, without reading one; it writes objects in the bucket,
-     since a preview takes the stack's lock;
+     since a preview takes the stack's lock. `deployer` also runs Cloud
+     Build builds and the migration job, as the next two accounts;
+   - a `builder` account, `<stack>-builder`, that image builds run as
+     (section 11.2): it pushes to the stack's repository, writes its
+     logs, and reads the build contexts in the state bucket, under
+     `superschematic/builds/`, and nothing else of it;
+   - a `migrator` account, `<stack>-migrator`, that the migration job runs
+     as (section 8.4): it holds the Cloud SQL client and instance user
+     roles, and reads the job documents and plans in the state bucket,
+     under `superschematic/migrations/`, and nothing else of it. Its IAM
+     database user is a node of the environment's graph, on each Cloud
+     SQL instance, since an instance is not there at bootstrap;
    - Workload Identity Federation for the GitHub repository the git remote
      names: a pool, a provider for GitHub Actions' tokens that admits only
      that repository, and the right of both accounts to be used from it.
@@ -1212,8 +1236,7 @@ needs it rather than in the background, since Cloud Run throttles an
 instance's CPU between requests (section 8.1). A TypeScript server gets no
 entrypoint yet. A Rust server's sql edge fails to lower until the derived
 value has a password form. An IAM database user starts with no privileges
-in its database; granting them belongs to the migration job (section 8.4),
-which is not built.
+in its database; the migration job grants them (section 8.4, D46).
 
 ### 7.5 Defaults
 
@@ -1285,12 +1308,13 @@ last build wrote, and a TypeScript or Rust server gets no entrypoint yet.
   seconds to finish.
 
 An API whose operations have a service clause also takes a service
-authenticator, a `serviceauth.Verifier` over the service-auth field of
-section 3.4. No connector derives that field yet, so until one does the
-entrypoint's `serviceAuthenticator` refuses to start such a server, rather
-than answer every service caller 401. OpenTelemetry export is not set up:
-the runtime records spans through the global tracer, and an exporter
-would add the OTLP client's dependencies to every server.
+authenticator, a `serviceauth.Verifier` over the API's callers field
+(section 9.2), which `serviceAuthenticator` in `serviceauth.go`, beside
+`main.go`, builds with `stackconfig.LoadCallers`. The server refuses to
+start without the field, and where no other server calls the API it starts
+with no issuers and refuses every service credential. OpenTelemetry export
+is not set up: the runtime records spans through the global tracer, and an
+exporter would add the OTLP client's dependencies to every server.
 
 The engineer writes the implementation of each served API, and nothing else
 (section 8.5). The entrypoint calls each implementation's constructor with
@@ -1299,9 +1323,10 @@ to compile at level 2 of section 10.
 
 `go.mod` requires each generated module, runtime module and
 implementation module the server builds from, and a replace points each
-at its directory. superschematic writes no `go.sum`: `go mod tidy` fills
-it before the first `go build .`, or the build runs with
-`GOFLAGS=-mod=mod`.
+at its directory. superschematic writes no `go.sum`: the build runs with
+`-mod=mod`, which fills it. `go mod tidy` would also resolve the imports
+of the tests of the implementation's module, such as an SDK a test calls
+its API through, which the server's `go.mod` does not replace.
 
 Only a server that some environment places on Cloud SQL links the Cloud
 SQL connector, whose Google modules (auth, the Admin API client, gRPC)
@@ -1346,7 +1371,7 @@ stages:
   version graph's archive when a database the server connects to declares
   a version graph;
 - a Go stage, on the Go release `tools.env` pins, puts each archive where
-  its binding's cgo flags look, then tidies and builds the server;
+  its binding's cgo flags look, then builds the server with `-mod=mod`;
 - the binary runs on distroless `cc`, which holds the glibc and libgcc
   the archives need and nothing else, as a non-root user.
 
@@ -1406,11 +1431,6 @@ until the TypeScript and Rust entrypoints exist.
 
 Not built:
 
-- The callee's half of service auth. Which config field gives a callee
-  its verification keys is for the connectors and the generated entrypoint
-  to define together, in one change; the key pair node's `publicJwk`
-  output is what the local connector will put there. Until then the
-  entrypoint does not start a server whose API has a service clause.
 - Key rotation: a local key pair lasts until its file is removed.
 - Restarting a server that exits: `stack dev` stops the environment.
 
@@ -1433,6 +1453,51 @@ them: `superschematic migrate plan` and the `superschematic-migrate` runner
   locally;
 - a check that a plan does not drop or retype a column that an `@source`
   view of a deployed API reads.
+
+The apply step on GCP is built (D46). Each phase a deploy runs on a
+database is one execution of the stack's Cloud Run job, `<stack>-migrate`,
+through the target's `Migrations` seam:
+
+1. The runner writes each plan with steps in the phase, and a job document
+   that names them, into the state bucket, under
+   `superschematic/migrations/<stack>/<run>/`. The document names the
+   Cloud SQL instance, the database of each DB service on it, the plan and
+   the IAM database users of the servers that connect.
+2. It creates or updates the job to run the runner's image as the
+   `migrator` account (section 7.3), with one task, no retry and an hour to
+   finish, and runs it once with the document's `gs://` URL as its
+   argument, `superschematic-migrate job --job <url>`. It waits for the
+   execution, and a failed one fails the step with the execution's name
+   and logs.
+3. The job reads the document and the plans through Cloud Storage's API,
+   and reaches each database through the Cloud SQL Go connector, with IAM
+   database authentication as the migrator's IAM database user, so there
+   is no password. The Cloud SQL platform gives each instance that user,
+   with the `cloudsqlsuperuser` role, which owns the databases the
+   platform creates, so the migrator creates the tables and owns them.
+
+The job owns the database's privileges. After each phase's steps, it gives
+every server that connects to the DB service, by its IAM database user,
+USAGE on the schemas that hold the migrator's objects, SELECT, INSERT,
+UPDATE and DELETE on its tables, SELECT on its views and USAGE and SELECT
+on its sequences, leaving out the runner's state tables, and takes every
+such privilege back from a user it gave them to that no longer connects,
+all in one transaction. The grant is table-level DML, not what each API
+reads. The deploy manifest records the servers each DB service's job saw
+connect, and a deploy runs the expand phase of a DB service whose servers
+changed even when its plan has no steps, before the new server rolls out
+and before a removed server's user goes. Since Postgres drops no role that
+holds privileges, an IAM database user's node abandons the user when it
+goes.
+
+The runner's image is built once per release, with Cloud Build, from a
+generated Dockerfile that installs the runner with `go install` from its
+module at the release's tag, which the Go checksum database verifies,
+onto distroless static. `runtime/migrate/go` carries no `replace`
+directive, so `go install` takes it. The release is the one the binary is
+part of; a binary built from a checkout names none, and
+`SUPERSCHEMATIC_MIGRATE_IMAGE` names an image of the runner by digest in
+its place. The local target runs the runner on the host (section 8.3).
 
 ### 8.5 Where the implementation lives
 
@@ -1489,8 +1554,7 @@ found with no declaration:
 
 Outside a stack the scaffold stays opt-in. Nothing imports the package
 but a server's generated `main` (section 8.1), and a build of a tree whose
-Go code lives elsewhere, such as `examples/acme-shop`, would gain a stub
-package beside it.
+Go code lives elsewhere would gain a stub package beside it.
 
 A server that serves several APIs calls each one's constructor with that
 API's `Deps`, built from the server's shared connections and clients.
@@ -1534,19 +1598,72 @@ Service auth answers which deployable is calling, at two layers:
 The service credential is a short-lived JWT on every v1 platform, so one
 verifier in each runtime reads all of them. It knows JWTs and keys, not
 clouds; what is specific to a platform is data the connector writes into
-the callee's config (section 3.4).
+the callee's callers field (below).
 
 | Platform | The caller sends | Lifetime | The callee checks |
 | --- | --- | --- | --- |
-| Cloud Run | a Google ID token whose audience is the callee's URL, from the metadata server | 1 hour; fetched again 5 minutes before it expires | RS256 against Google's keys; `iss` `https://accounts.google.com` or `accounts.google.com`; `aud`; `exp`; the caller's service account by its unique id in `sub` |
+| Cloud Run | a Google ID token, from the metadata server, whose audience is the callee's custom audience: its full resource name, `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, which the callee's service lists | 1 hour; fetched again 5 minutes before it expires | RS256 against Google's keys; `iss` `https://accounts.google.com` or `accounts.google.com`; `aud`; `exp`; the caller's service account by its email in `email` |
 | Kubernetes | a projected service account token whose audience is the callee, read from the file the kubelet keeps current | 10 minutes, the shortest Kubernetes allows; the kubelet replaces it at 80% of that, and the caller reads the file again each minute | the signature against the issuer's keys; `iss`; `aud`; `exp`; the caller's service account in `sub` |
 | local, and the generic connector (section 6.2) | a token the caller signs with the edge's Ed25519 key | 5 minutes | the signature against the edge's public keys; `iss`; `aud`; `exp` |
 
-The callee's config holds, for each inbound edge, the issuer, the keys or
-where to fetch them, the audience, the claim that names the caller, and the
-deployable each caller identity is, with the APIs it serves. An identity
-the config does not list is no caller, whatever signed its token. The
-Kubernetes platform reads the issuer's keys from the API server's
+**The callers field.** The callee's config holds, for each API it serves
+with a service clause, a callers field: `<API>_CALLERS` (`SHOP_API_CALLERS`),
+the API's name in upper snake case and `_CALLERS`, which begins with no
+other derived field's name, so a server that serves an API and calls it
+holds both. Its value, `ir.ServiceAuth` in `ir/service_auth.go`, lists the
+issuers the API's server accepts, each with:
+
+- `issuer` and `issuerAliases`, the `iss` values it writes;
+- `audience`, which the token's `aud` must hold, and `algorithms`;
+- `jwksUrl`, where its keys are, or `keys`, each a public JWK's JSON or a
+  reference to an output that holds one;
+- `subjectClaim`, the claim that names the caller, `sub` when unset, and
+  `maxLifetimeSeconds`, the longest a token may live;
+- `callers`: each a `subject`, the claim's value, the `deployable` it is,
+  and the APIs that deployable `serves`, which a route's `from` is checked
+  against.
+
+An identity the field does not list is no caller, whatever signed its
+token. The value is the runtimes' `serviceauth` config, with two changes:
+the callers are a list, since a subject may be a reference, rather than a
+map keyed by subject; and a key is its JWK's JSON, since it may be an
+output.
+
+The connector of each http edge between two servers gives the callee an
+issuer that lists the edge's caller alone (`Connected.Callee`). Resolution
+checks it against the contract (`ir.CheckServiceAuthIssuer`), with the
+edge's caller as its deployable and that caller's APIs as what it serves,
+and refuses an edge to an API with a service clause whose connector gives
+none (`lowering`). It merges the entries of the edges to an API by issuer:
+two entries that name one issuer must agree on all but their callers. The
+binding names the API (`callersOf`) and the edges it comes from. An API no
+other server calls gets the field with no issuers, so its server starts
+and refuses every service credential.
+
+| Connector | Issuer | Keys | Audience | Caller |
+| --- | --- | --- | --- | --- |
+| local | the caller's deployable | the edge's key pair's `publicJwk` output | the callee's deployable | the caller's deployable in `sub`; a token lives at most 300 seconds |
+| gcp | `https://accounts.google.com`, alias `accounts.google.com` | `https://www.googleapis.com/oauth2/v3/certs` | the callee's custom audience | the caller's service account, `<service>@<project>.iam.gserviceaccount.com`, in `email` |
+
+In environment variables the field follows section 3.4's encoding, with
+two rules it adds: a list of objects is a variable that holds the list's
+length, and each object's members follow the list's name and the
+object's index; and a whole number is its decimal
+(`SHOP_API_CALLERS_ISSUERS=1`, `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`,
+`SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK`). No issuers is
+`SHOP_API_CALLERS_ISSUERS=0`. The Go runtime reads it with
+`stackconfig.LoadCallers`, which refuses a variable under the field's name
+that is no member, and the generated entrypoint builds the API's
+`serviceauth.Verifier` from it (section 8.1).
+
+Every Cloud Run service lists its full resource name as a custom
+audience, and a caller asks the metadata server for a token for it. The
+service's `run.app` URL is an output of the service, which its own
+callers field cannot reference without the service depending on itself;
+the resource name is composed from names, so the caller's credential and
+the callee's field both hold it.
+
+The Kubernetes platform reads the issuer's keys from the API server's
 `/openid/v1/jwks`, which default RBAC lets any service account read, with
 the server's own token.
 
@@ -1597,8 +1714,9 @@ generates, not a secret a person enters (section 4.2): the private key goes
 into the caller's secret store, the public key into the callee's config.
 
 The `local` target uses the same tokens. `stack dev` generates a key pair
-per edge into the gitignored local file, so a local stack runs the code
-path a deployed one does.
+per edge into the gitignored local file, and the callee's callers field
+references its public key, so a local stack runs the code path a deployed
+one does.
 
 Not taken:
 
@@ -1627,6 +1745,18 @@ Not taken:
   `jsonwebtoken`, and WebCrypto in Node.js 22.13, Bun and Workers.
 - No service auth locally, or a header that names the caller unsigned. It
   leaves a code path only production runs, and a mode that could ship.
+- One callers field per server, the union over its inbound edges. Without
+  `from`, a route lists every server with a `calls` edge to its API, and a
+  server whose edge reaches one API of the callee would pass a route of
+  another.
+- The callee's `run.app` URL as the audience on Cloud Run, an output of
+  the callee's own service.
+- The caller's unique id in `sub` on Cloud Run, which D37 first chose. It
+  is an output of the caller's account node, which every callee's config
+  would reference; the email is a name resolution composes, and the
+  account it names is the environment's own.
+- The field as one JSON document in one variable, which section 3.4
+  refuses for every derived field.
 
 ### 9.3 Schema surface
 
@@ -1783,9 +1913,10 @@ credential. It refuses a credential it cannot verify with 401, code
 `service_unauthorized`, and a verified identity that is no caller of this
 server with 403, code `service_forbidden`. A failure that is not the
 caller's, such as keys it cannot fetch, answers 503. Each runtime ships one
-implementation over the config of section 9.2, which the generated
-entrypoint builds; a deployment with a credential that config cannot
-express passes its own.
+implementation over the config of section 9.2, which the generated Go
+entrypoint builds from the API's callers field (section 8.1), and the
+TypeScript and Rust entrypoints will when they exist; a deployment with a
+credential that config cannot express passes its own.
 
 A route runs its steps in this order:
 
@@ -1898,6 +2029,24 @@ the decorators unchanged byte for byte. The SDK tests check the retry: one
 fresh service token on `service_unauthorized`, and the end-user refresh
 left alone.
 
+The callers field has its own tests:
+
+- `ir` checks the contract and its variables, and the resolver's tests
+  check the merge by issuer, an API no server calls, a call within one
+  server, the collisions, and each way a connector's entry can break the
+  contract;
+- the local and gcp targets' goldens resolve the shop with an
+  `@requireService` and an `@allowService` operation on shop-api, which
+  Orders calls (`stacktest.RequireServiceShop` and `AllowServiceShop`);
+- `stackconfig.LoadCallers` reads the variables into a verifier config
+  that admits a token signed with the edge's key, and servergen's golden
+  and compiled tests cover `serviceauth.go`;
+- `cli`'s `TestStackDevVerifiesServiceCallers` runs three Go servers with
+  `stack dev`: the caller's call is admitted with its end user forwarded,
+  a request with no credential, from a server with no edge, or for
+  another audience is 401 `service_unauthorized`, and a caller the
+  route's `from` leaves out is 403 `service_forbidden`.
+
 ### 9.9 Open
 
 - A deployable that serves no API, such as a job (section 3.1), has no
@@ -1918,6 +2067,15 @@ left alone.
   HTTP clients do not trust. Until the Kubernetes platform lands, a
   deployment passes a key fetcher or HTTP client that trusts it; the
   platform may add a CA to the callee config instead.
+- A call between two APIs one server serves stays on loopback and carries
+  no service credential, so a `@requireService` operation the other API
+  calls refuses it with 401, though resolution's check (section 9.3)
+  counts the call as admitted. The call could carry a token the server
+  signs for itself, or the check could leave such calls out.
+- The callers field of a server outside a stack. `values-schema.json`
+  does not list it, since its variables depend on the environment's
+  edges, so a deployment that sets its own config writes the variables by
+  hand.
 
 ## 10. Validation and simulation
 
@@ -1942,7 +2100,7 @@ request adds an edge and grants `run.invoker`".
 ### 11.1 Commands
 
 The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
-`dev`, `plan`, `deploy`, `destroy` and `outputs`. Targets and provisioners
+`dev`, `plan`, `build`, `deploy`, `destroy` and `outputs`. Targets and provisioners
 plug into it; they add no commands of their own. `stack dev` runs a local
 environment (section 8.3).
 
@@ -1953,15 +2111,17 @@ and reads the `environment.json` the build writes, it resolves the
 environment as the `stack` generator does, without a build, so `plan`
 never reads a stale one. The provisioner's program goes to
 `<schemas-root>/dist/program/<stack>/<environment>`, or `--program-dir`.
-`plan`, `deploy`, `bootstrap`, `destroy` and `outputs` refuse a local
-environment, which `stack dev` runs, and `secrets set` writes its
+`plan`, `build`, `deploy`, `bootstrap`, `destroy` and `outputs` refuse a
+local environment, which `stack dev` runs, and `secrets set` writes its
 `secrets.env`. A command
 that works on one run of a parameterized environment takes each
 parameter's value as `--param pr=123`. `bootstrap`, `secrets set`,
-`plan`, `deploy`, `destroy` and `outputs` are built, in
+`plan`, `build`, `deploy`, `destroy` and `outputs` are built, in
 `cli/stack_deploy.go` over `internal/stackdeploy`, whose public face is in
-`stack`; the reference page "CLI" lists their flags. A target plugs into
-them through four seams on its `TargetSpec` (D45):
+`stack`; the reference page "CLI" lists their flags. `build` builds the
+images a deploy would build (section 11.2) and deploys nothing: it prints
+each as an `--image` flag and writes no manifest. A target plugs into
+them through five seams on its `TargetSpec` (D45, D46):
 
 - `State`, a state store: the provisioner's state backend for an
   environment, and each run's deploy manifest;
@@ -1969,7 +2129,11 @@ them through four seams on its `TargetSpec` (D45):
   identity (section 4.2) or a credential's secret name;
 - `Bootstrap`, the bootstrap of section 7.3;
 - `Migrations`, a migration runner, which runs one phase of a database's
-  plans where `superschematic-migrate` reaches the database.
+  plans where `superschematic-migrate` reaches the database, and gives the
+  servers that connect their privileges (section 8.4);
+- `Builder`, an image builder: a build request is a server, its
+  Dockerfile and its build context, which the deploy writes as an
+  archive, and the result is the image by digest. Cloud Build on gcp.
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -1985,37 +2149,59 @@ file.
 
 `stack deploy <environment>`:
 
-1. takes the images of the servers it rolls out, by digest
-   (`--image shop-api=<repository>@sha256:<digest>`), and keeps the image
-   the manifest records for every other server. A server with neither is
-   refused. A platform writes a server's image into the graph as its
-   repository path, and the deploy pins it: every string property of the
-   server's own nodes equal to the repository becomes
-   `<repository>@<digest>`, so the program the provisioner renders names
-   each image by digest. The deploy does not build the images yet: each
-   server's generated Dockerfile (section 8.2) builds one, and the deploy
-   takes its digest;
+1. decides each server's image: the one `--image` names, by digest
+   (`--image shop-api=<repository>@sha256:<digest>`); else a build, when
+   the target builds images and the server has the Dockerfile the stack's
+   build writes (section 8.2), unless its build context is the one the
+   image the manifest records was built from; else the image the manifest
+   records. A server with none of them is refused, and `--no-build`
+   builds nothing;
 2. plans each database's migration from the model the manifest records
    (D27), with the readers of the schemas root as the readers after the
    rollout, refuses a hazard of a `--fail-on` class (every class by
    default) that no `--allow` acknowledges, and with `--expect` refuses
    plans other than the ones `stack plan --out` wrote;
-3. applies infrastructure;
-4. needs a value for every secret (section 4.2);
-5. runs each database's `expand` steps (`superschematic-migrate apply
+3. builds the images it decided to build, through the target's
+   `Builder`, before anything changes, and pins every image. A platform
+   writes a server's image into the graph as its repository path, and the
+   deploy pins it: every string property of the server's own nodes equal
+   to the repository becomes `<repository>@<digest>`, so the program the
+   provisioner renders names each image by digest;
+4. applies infrastructure;
+5. needs a value for every secret (section 4.2);
+6. runs each database's `expand` steps (`superschematic-migrate apply
    --phase expand`), which keep the servers of the previous version
-   working;
-6. rolls servers callee first, a wave at a time, each wave returning once
+   working, and the runner then gives the servers that connect their
+   privileges; a DB service whose connecting servers changed runs its
+   expand phase even with no steps (section 8.4);
+7. rolls servers callee first, a wave at a time, each wave returning once
    the platform reports its servers ready: Cloud Run's provider waits for
    the revision's `Ready` condition, which the startup probe on `/readyz`
    holds back until the server's databases answer (section 7.2);
-7. runs the plan's `contract` steps (`--phase contract`), the drops and
+8. runs the plan's `contract` steps (`--phase contract`), the drops and
    tightenings that the previous version's servers could not survive, once
    none of them runs;
-8. applies exposure;
-9. writes a deploy manifest to the state bucket after every step and at
-   the end: the resolved environment, the IR digest of each service, the
-   image of each server and each database's applied model.
+9. applies exposure;
+10. writes a deploy manifest to the state bucket after every step and at
+    the end: the resolved environment, the IR digest of each service, the
+    image of each server with the digest of the build context the deploy
+    built it from, and each database's applied model with the servers
+    its runner last saw connect.
+
+A build context is the repository root as the server's
+`Dockerfile.dockerignore` cuts it down, read by BuildKit's rules, written
+as a gzipped tarball whose entries carry no time, owner or mode but the
+executable bit, so the same files give the same archive on any machine.
+The digest of its tar stream decides whether the server changed: it
+covers the server's entrypoint module, the generated and runtime modules,
+the implementations and the superscalar checkout the image builds from,
+and nothing the ignore file leaves out. On gcp the builder uploads the
+archive to the state bucket, under `superschematic/builds/`, and runs a
+Cloud Build build of the Dockerfile with BuildKit, as the `builder`
+account (section 7.3), which pushes to the stack's repository with the tag
+`context-<digest>`. A tag that exists is not built again, so a `stack
+build` before a deploy, or a deploy that failed after its builds, saves
+the next deploy the build.
 
 Each step of the deploy order is one targeted update of the provisioner's
 program (section 6.5), and each migration phase runs between two updates
@@ -2031,7 +2217,10 @@ drop still wanted is in its own `contract` (D27, amended). A migration
 phase that fails is recorded in the manifest as pending, on the model the
 database held before it, and the next deploy finishes that phase first, as
 the runner requires, then plans from where it ends. A server whose wave
-did not finish keeps the image the previous deploy recorded.
+did not finish keeps the image the previous deploy recorded, and the
+context it was built from, so the next deploy builds it again, or finds
+the image the failed deploy built. A build that fails stops the deploy
+before it changes anything.
 
 The manifest is the migration baseline, the record of what is running, and
 the starting point for a rollback. The manifest records where the last
@@ -2047,9 +2236,9 @@ destroy` removes a run's resources and its manifest, and `stack outputs`
 prints the run's outputs file, or writes it with `--out`, which the
 bindings generator reads (section 6.6).
 
-Not built: the gcp target's migration runner, a Cloud Run job that runs
-`superschematic-migrate` (section 8.4). Until it lands, a gcp deploy with a
-migration to run is refused before it applies anything.
+`stack plan` builds nothing: it plans each server at the image `--image`
+names or the manifest records, and lists a server with neither among the
+servers with no image yet.
 
 ### 11.3 Generated CI
 
@@ -2121,11 +2310,12 @@ registrations.
    every connector's value against it. The Go loader's `EnvConfig`, with
    a field per database and per `calls` entry named by `[derived_fields]`
    and read through the Go HTTP runtime's `stackconfig`;
-   `values-schema.json` marking those fields derived; and the loader's
-   refusal of an `@envVars` field that collides with one. Next: the
-   TypeScript and Rust loaders read the derived fields, in the PR that
-   gives them `Deps`, and the service-auth field arrives with the
-   connectors that write it.
+   `values-schema.json` marking those fields derived; the loader's
+   refusal of an `@envVars` field that collides with one; and the callers
+   field of an API with a service clause, `ir.ServiceAuth` in
+   `ir/service_auth.go`, which the local and gcp connectors write and
+   `stackconfig.LoadCallers` reads (section 9.2). Next: the TypeScript and
+   Rust loaders read the derived fields, in the PR that gives them `Deps`.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
    (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`;
@@ -2135,14 +2325,14 @@ registrations.
    (`internal/generator/servergen`), which writes each Go server's
    entrypoint module and Dockerfile at `server/<stack>/<server>` (sections
    8.1 and 8.2). Its clients send the D37 service credential each edge's
-   endpoint names, and a server some environment places on Cloud SQL links
-   the Cloud SQL connector. Next: the service authenticator, once a
-   connector derives the service-auth field; OpenTelemetry
-   export; then `Deps`, the constructor signature, the scaffold and the
+   endpoint names, `serviceauth.go` builds the service authenticator of
+   each API with a service clause from its callers field, and a server
+   some environment places on Cloud SQL links the Cloud SQL connector.
+   Next: OpenTelemetry export; then `Deps`, the constructor signature, the scaffold and the
    entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
-   hand wiring until a later change moves it onto the entrypoint, which
-   moves the code its docs pages quote (`go/products.go`, `go/orders.go`,
-   `NewHandler`).
+   implementations at the scaffold layout, `go/shop-api` and
+   `go/shop-orders`, which the entrypoints of its `shop-stack` import
+   (section 14, milestone 1).
 5. **Config and build plan.** `calls` is in the schema config, beside
    `authDb`, in the TypeScript type and the data-form schema, valid on an
    API config and naming API services. It is a build-order edge for the
@@ -2168,13 +2358,18 @@ registrations.
    from the service's IR and its config's outputs, and
    `registry.Options.LoadDependencyConfig`, which every build sets, gives
    it each config. Landed too: the deploy seams on `TargetSpec` (`State`,
-   `Secrets`, `Bootstrap` and `Migrations`), `ProvisionRequest.Env` for a
-   run's credentials, and the deploy that drives them in deploy order
-   (`internal/stackdeploy`, section 11.2), which `stack/stacktest`'s fake
-   target carries too; the gcp target's bootstrap, Secret Manager store and
-   state bucket (section 7.3), and `stackdeploy.CredentialsOf` reading
-   the credentials a DNS platform resolves into `dns.credentials`. Next:
-   the gcp migration runner.
+   `Secrets`, `Bootstrap`, `Migrations` and `Builder`),
+   `ProvisionRequest.Env` for a run's credentials, and the deploy that
+   drives them in deploy order (`internal/stackdeploy`, section 11.2),
+   with the build contexts it writes and the builds it skips, which
+   `stack/stacktest`'s fake target carries too; the gcp target's
+   bootstrap, Secret Manager store and state bucket (section 7.3), its
+   image builds on Cloud Build, its migration runner, a Cloud Run job
+   that runs `superschematic-migrate job` on Cloud SQL and owns the
+   servers' privileges (section 8.4, D46), and `stackdeploy.CredentialsOf`
+   reading the credentials a DNS platform resolves into
+   `dns.credentials`. Next: a deploy lock beyond the provisioner's and
+   the runner's, and the generated CI of section 11.3.
 8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
    and `bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and
    `outputs` (section 11).
@@ -2188,7 +2383,7 @@ registrations.
   pinned provider schemas with the tool that keeps them current (sections
   6.4 and 7), and its bootstrap, secret store and state store over Google
   Cloud's client libraries (section 7.3), which stay out of the root
-  module. Its migration runner is to come.
+  module, and its image builder and migration runner (D46).
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
   binding generator (sections 6.5 and 6.6). Built: it registers provisioner
   `pulumi`, its `bindings` package is the generator, and it joins
@@ -2242,7 +2437,21 @@ model, or retired, when it lands.
 1. **Wiring with no cloud.** Derived config fields, the Go entrypoint, the
    `local` target and `stack dev`. Done when acme-shop runs end to end and
    nothing in `examples/acme-shop` writes a connection string, a URL or a
-   port by hand.
+   port by hand. Done: `examples/acme-shop`'s `shop-stack` deploys
+   `shop-api` and `shop-orders`, each on a default Go server, and its `Dev`
+   environment is on the `local` target. Their implementations sit at
+   `go/shop-api` and `go/shop-orders` behind `Deps`, with no `main` and no
+   connection code. `TestStackDevRunsTheShop` (`examples/acme-shop/go`)
+   runs `superschematic stack dev`, which starts Postgres with `shop-db`
+   migrated and both servers on their generated entrypoints; it waits for
+   each `/readyz`, signs a user in through the ORM, calls `CreateProduct`
+   and `ListProducts` and then `PlaceOrder` through the generated Go SDKs,
+   and stops the stack with `--remove-database`. Every URL, port and
+   connection string it uses comes from the resolved `environment.json`.
+   `scripts/check.sh` runs it in the full tier. What stays hand-written
+   runs outside the stack: the Topcoat app's listen address, the Rust
+   server's (port 0, which it prints), and the in-process base URL of the
+   TypeScript storefront's tests.
 2. **Model, resolver and seams.** The Stack kind, environments,
    `environment.json`, the registry specs, and levels 1 to 3 in CI.
    Done when a test extension adds a platform and a provisioner with no

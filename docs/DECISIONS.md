@@ -1105,8 +1105,9 @@ So are search's vectors (the amendment "search's vectors" below), which
 an outside embedder computes and the engine keeps and ranks with no
 SQLite extension, and the engine's search across a namespace's schemas.
 The engine's event log starts at its head, filters and logs defines, its
-HTTP and MCP mounts take service callers (D37), and it serves the
-behaviors it runs (an amendment below on each). Each change that
+HTTP and MCP mounts take service callers (D37), it serves the behaviors
+it runs, and each tool carries guidance its behaviors' configs give,
+with create parameters narrowed by them (an amendment below on each). Each change that
 lands a piece updates this paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
@@ -1447,8 +1448,9 @@ declaration of its own.
 | A behavior's document is its declaration with what a reader would otherwise have to know filled in: `requires`, `conflicts`, `fields`, `operations` and `vetoes` as lists, and each operation's `scope`, `writes` and invocation policy, the declaration's or the default, under the policy's key after `writes`, as the describe document writes it (D11). An absent `configSchema`, `createParamsSchema` or `preconditionSchema` stays absent: the behavior takes none. | The declaration as its file holds it, which leaves a client to know that an absent scope is `instance` and an absent policy the deployment's default, which it cannot know; the describe document's `params` and `result`, which there name a tool's arguments, not the operation's parameters |
 | Any caller the gate admits may read the catalog, and the policy is not asked. It is the deployment's registered code, the same in every namespace, and carries no schema's or instance's data; the describe document already shows a schema's behaviors to whoever may read it. | Asking `define`, which needs a schema name the catalog does not have, so a policy would be asked about a schema that does not exist |
 
-Generated guidance per behavior's tool and create parameters narrowed by
-a config are a later change.
+Guidance per behavior's tool and create parameters narrowed by a config
+came after (the amendment "a behavior's config gives its tools their
+guidance" below).
 
 ### D16, amended: a reference hears what can move its holder
 
@@ -1490,6 +1492,30 @@ work pinned to a superseded revision out.
 | `when: { revised: { link } }` names a link of the type's `Links`. It fires on an update or an operation of the target whose change carries `revision`, of a schema that composes `Revisions`, and on a `releaseCommit` operation of one that composes `Branches`; a link to a schema with neither is a failure at run. It moves the instances `Links`' `listLinked` finds on the type's own schema, for a pinned link and a revision only the stale ones. No transition makes a revision or a release, so it never sets itself off. | Firing on every event of the target, which sends work back on a comment; every instance of a pinned link, which sends back work already pinned to the new revision; checking the target's schema at define, which need not be published yet, as the `Reactions` rows have it |
 | `Queue`'s `excludeStale` names pinned links of the type's `Links`, which `parseConfig` checks. While one is `stale` in the instance's `links` field, the instance is excluded until a change (`excluded_until`, as for Retries' exhaustion) and `claim` refuses it (`stale_link`, details `{ links }`). While none is, Queue hears each target's `/revision` crossing the pinned revision plus one, which the target's next revision does; once stale it hears nothing, since only its own new `link` lets it back in. A new `excludeStale` applies to an instance from its next change, as a new `priorityField` does. | A column of its own beside `blocked`, which the candidate query's index would read past; leaving the claim to `Links`, which has none to refuse |
 | `Links` pins revisions of `Revisions` only, so `excludeStale` cannot keep out work pinned to a `Branches` release; pinning one is a change to `Links` of its own. | |
+
+### D16, amended: a behavior's config gives its tools their guidance
+
+The engine's MCP tools carried empty guidance, and a behavior operation's
+tool only its declaration's text, the same on every type. An agent
+calling `transition` could not tell which states it may move to from
+where the instance is, or which move needs a permission; one calling
+`heartbeat`, how often; a `claimNext` caller, what keeps work out. The
+create tool showed each behavior's create parameters as declared, which
+name no link of the type and require none, so a required link showed up
+as a refusal. And the gate of `Rollups` was the one veto with no code.
+Each behavior now says what its config means, and the engine puts it
+where an SDK tool carries its `@docs` guidance.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An implementation's `guidance(config, target)` returns `{ summary, operations }`: what the behavior does on the type under the parsed config, and by operation name `{ useWhen?, doNotUseWhen?, success?, errors? }`, the members of `ir.ToolOperationGuidance`. `target` has the schema, the instance type, every behavior the type lists with its config as the schema holds it, and every operation of the type with its behavior, `writes` and `scope`. | Guidance in the declaration, which is static and cannot name a config's states or lengths; a hook per operation, which cannot speak to another behavior's operation; prose for the whole behavior alone, which an agent reads only in the describe document, not on the tool it is about to call |
+| A behavior speaks to any operation of the type: its own, `create`, `get`, `list`, `update`, `delete`, and another behavior's it guards, so Lease's fence reaches every write its guard holds and Dependencies' gate reaches `transition`. A tool's guidance is the engine's base for a built-in operation, then the owner's, then each other behavior's in list order, each member's sentences joined by a space. | Guidance only on a behavior's own operations, which leaves out the refusals an agent meets most, on another behavior's operation; the engine reading refusals out of guards, which are code |
+| `errors` are vetoes, the refusals a client branches on by `details.code`: each a code the contributing behavior's declaration lists, its description the declaration's when the behavior gives none, led by the behavior's name, and listed once per behavior. The engine refuses any other code, an operation the type does not have, a padded text and a missing summary as a `BehaviorError`. | Engine codes such as `forbidden` beside the vetoes, which mix the problem's code with `details.code` in one list; a `behavior` member on each error, which `ir.ToolOperationGuidanceError` does not have; codes qualified by the behavior, which an earlier amendment declined |
+| The engine writes guidance of its own: fixed for its tools, and a base naming the instance type for the operations every schema has. Each core and work-queue behavior gives guidance, plain ASCII computed from the config, its text in a module of its own; a behavior without the hook adds nothing. | Empty guidance where no behavior speaks, which leaves every create, read and engine tool without the members an SDK tool fills; text shared across behaviors in one module, which every behavior's change would touch |
+| It is computed once per published version, which never changes, so the same config gives the same text. The tools document carries it in each tool's `guidance` and, under the guidance key (D11), in a visible tool's MCP `_meta`; the describe document carries it on each operation and each behavior's summary beside its config. | Computing it at each listing; a route of its own, which a client would have to know to call |
+| An implementation's `createParamsSchema(config, target)` narrows its declaration's: `Links` a property per link, the required ones required and a revision only for a pinned link; `Dependencies` a blocker's schema from the config's, required when the type's own is not among them. The describe document and the create tool show it in place of the declared one. Only a behavior whose declaration takes create parameters has the hook, and what it returns has the declaration's shape. | One schema for every config, which names no link and requires none; the engine narrowing per behavior, which D16 rules out, since the engine names no behavior |
+| The narrowed schema is display only, as `instanceSchema` is: the engine checks a create against the declared schema, and `initialize` refuses what the config refuses, with its own messages. | Checking the narrowed schema too, which moves a config's refusals, a required link not given, a link the config lacks, ahead of every guard, and replaces each behavior's message with the validator's: a change to refusals this does not make. A test holds each core narrowing to what its `initialize` refuses |
+| `Rollups`' gate vetoes with `not_held`, details `{ rollup, to, over, linked, counted }`, `linked` and `counted` absent past the read bound. | `gated`, Dependencies' code for another refusal, which a client reads beside `blocked` on the same transition; no details, which leaves a client parsing the reason for the rollup |
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -3616,7 +3642,7 @@ and its amendment on `Deps` left both to the build. Building them for Go
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| The Stack kind's `server` generator writes them, beside `stack`, for each Go server of the stack, which `stack.Servers` lists without an environment. Each server is a Go module at `<output-root>/server/<stack>/<server>/` holding `main.go`, `go.mod` and a Dockerfile, whose `go.mod` requires and replaces every generated, runtime and implementation module it builds from. superschematic writes no `go.sum`; `go mod tidy` fills it. | A generator on each API service, which cannot see that one server serves several APIs. The entrypoint under `stack/<stack>`, which `stack` empties on each build of the environments. A generated `go.sum`, whose hashes depend on modules no offline build can read. |
+| The Stack kind's `server` generator writes them, beside `stack`, for each Go server of the stack, which `stack.Servers` lists without an environment. Each server is a Go module at `<output-root>/server/<stack>/<server>/` holding `main.go`, `go.mod` and a Dockerfile, whose `go.mod` requires and replaces every generated, runtime and implementation module it builds from. superschematic writes no `go.sum`; a build with `-mod=mod` fills it. | A generator on each API service, which cannot see that one server serves several APIs. The entrypoint under `stack/<stack>`, which `stack` empties on each build of the environments. A generated `go.sum`, whose hashes depend on modules no offline build can read. |
 | One `main` serves every API of its server: one pgx pool per database and one SDK client per callee, shared across the APIs, and each API's routes on a router of its own, a request going to the API whose router registers its method and path. The build refuses two served APIs that register one method and path. The server answers `/healthz` while it runs and `/readyz` while each database answers, listens on `$PORT`, and drains on SIGTERM. A pool connects when first used, so a server starts before its database. | Every API's `RegisterRoutes` on one router, which chi refuses: each registers middleware and mounts `/api`. A connection at startup, which stops a server whose database comes up after it. |
 | The implementation package supplies what only it can: `New(deps)`, and `AuthMiddleware(deps)` and `PayloadDecryptor(deps)` where the API's `Config` takes them. The scaffold's refuse every request and every payload. | An auth middleware the entrypoint builds from the auth provider's stores, which still needs the deployment's token verification and role store, and which an extension's provider has no hook for. |
 | A stack's build scaffolds each API its servers serve, with no flag, and writes a `go.mod` beside a scaffold that no module holds. The entrypoint imports each implementation from the module of the nearest `go.mod`, read on each build. `--scaffold` stays for builds outside a stack, and build-all rebuilds a cached stack whose served implementation is missing. | Requiring the engineer to make a module first, which leaves a fresh stack unbuildable. A path per server, which D30 already refused. |
@@ -3625,7 +3651,9 @@ and its amendment on `Deps` left both to the build. Building them for Go
 
 OpenTelemetry export, the Cloud SQL connector and the entrypoints of
 TypeScript and Rust servers are not built. `examples/acme-shop` keeps its
-hand wiring until a later change moves it onto the entrypoint.
+implementations at `go/{service}`, which the entrypoints of its
+`shop-stack` import, and `stack dev` runs it (`docs/stack-model.md`,
+section 14, milestone 1).
 
 The rule is reversible until the first release.
 
@@ -3772,5 +3800,82 @@ servers require no Google module. `TestCloudSQLEntrypointConnectsBothWays`
 builds the first's server, runs a test of its `cloudSQLConfig` against a
 fake Postgres in its module, and starts the binary on a connection string
 and on a Cloud SQL configuration whose credentials reach nothing.
+
+The rule is reversible until the first release.
+
+## D46. A deploy builds each changed server's image through a fifth target seam, and gcp runs each migration phase as a Cloud Run job that owns the servers' privileges
+
+D45 left two pieces of a gcp deploy unbuilt: image builds, so every deploy
+took its images with `--image`, and the gcp migration runner, so a gcp
+deploy with a migration to run was refused. Section 7.4 of
+`docs/stack-model.md` also left the IAM database users of the servers with
+no privileges. Building both settled the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Image builds are a fifth seam on `TargetSpec`, `Builder` (`registry.ImageBuilder`). A `BuildRequest` is a run, a server, its Dockerfile's path in the context and the context itself, which the deploy writes; the result is the image by digest, which the deploy pins as it pins `--image`. `RegisterTarget` refuses a `Builder` without a provisioner or without `State`, which records each build. `stack build <environment>` runs the same builds without deploying, prints `--image` flags and writes no manifest. | Builds inside the provisioner's program, as a Docker image resource, which would put the context's digest, not a function of the schemas, into the graph; a build command per target, which section 11.1 rules out |
+| The core writes the context: the repository root as the Dockerfile's ignore file (`Dockerfile.dockerignore`, else the root's `.dockerignore`) cuts it down, by BuildKit's matching rules, as a gzipped tarball in path order whose entries are at the epoch, owned by root, with mode 0644, or 0755 for a directory or an executable file. The Dockerfile and its ignore file are always in it, as Docker's client sends them. | Each target walking the context with its own ignore rules, two matchers that would drift; the context as a directory the target archives, so the digest the deploy compares would not be the archive the target uploads |
+| A server is built again only when its context changed: the digest of the context's tar stream, before compression, is recorded in the manifest beside the image a deploy built (`Contexts`), and a deploy whose context has the same digest keeps that image. `--image` overrides, and drops the context; `--no-build` builds nothing; a server with no Dockerfile, such as a TypeScript or Rust server for now, keeps the manifest's image. Builds run before any step, after the plans and the gate, so a failed build changes nothing. | A digest over the server's module and its implementation sources only, which misses the generated and runtime modules and the superscalar checkout the image also builds from; always building, which rebuilds the Rust archive on every deploy; the IR digests, which do not cover the implementations |
+| gcp builds with Cloud Build: the builder uploads the archive to the state bucket under `superschematic/builds/` and runs the Dockerfile with BuildKit (`gcr.io/cloud-builders/docker`, `DOCKER_BUILDKIT=1`) on an `E2_HIGHCPU_8` machine, as a `builder` account bootstrap creates, which pushes to the stack's repository with the tag `context-<digest>` and reads only its prefix of the bucket. A tag that exists is not built again, so a `stack build`, or a deploy that failed after its builds, saves the next one the build. | Building as `deployer`, whose credentials a build's own steps could reach through the metadata server; a `gcloud builds submit` the deploy shells out to, a tool it cannot fake |
+| gcp's migration runner, the default of `gcp.Extension{Migrations}`, runs each phase on a database as one execution of the stack's Cloud Run job, `<stack>-migrate`, with one task and no retry, as a `migrator` account bootstrap creates. It writes each plan with steps and a job document into the state bucket under `superschematic/migrations/<stack>/<run>/`, creates or updates the job, and runs it with the document's `gs://` URL; a failed execution fails the step with its name and logs, and the deploy records the phase as pending (D45). The job is not a node of the graph: it changes with the runner's release, not the schemas, and one serves every run of the stack in the project. | The job as a graph node, whose image the graph would then depend on; a job per run or per phase, which a member's destroy would leave behind; executions passing plans in arguments or variables, which Cloud Run limits in size, while a plan carries its models |
+| The runner gains `superschematic-migrate job --job <path or gs:// URL>`, which runs a job document (runtime/migrate/README.md, "Jobs"): the phase of each DB service's plan on its database, then its privileges. Its databases sit on one Cloud SQL instance, reached through the Cloud SQL Go connector (`cloud.google.com/go/cloudsqlconn`, in `runtime/migrate/go`, beside the drivers, D27) with IAM database authentication, or each at a URL. `gs://` documents are read through Cloud Storage's JSON API with application default credentials. gcp writes the document without importing the runner, and the runner's tests read gcp's golden document. | One `apply` invocation per plan, which a distroless image has no shell to chain and which leaves the privileges to another tool; the Cloud SQL mount Cloud Run provides, which carries no IAM authentication; a Cloud Storage FUSE volume, whose directory lookups need options a test cannot check offline |
+| The migration job owns the database's privileges. The Cloud SQL platform gives each instance the migrator's IAM database user with `cloudsqlsuperuser`, the role that owns the databases the platform creates, so the migrator creates the tables and owns them. After each phase's steps, the job gives each server that connects to the DB service, by its IAM database user, USAGE on the schemas that hold the migrator's objects, SELECT, INSERT, UPDATE and DELETE on its tables, SELECT on its views and USAGE and SELECT on its sequences, leaving out the runner's state tables and extensions' objects, and takes every such privilege back from a role it gave them to that is not listed, in one transaction. Each migration plan carries its connecting servers (`MigrationPlan.Servers`), the manifest records the servers each runner saw (`AppliedSchema.Servers`), and a deploy runs a DB service's expand phase even with no steps when they changed (`MigrationPlan.Steps` zero), before a new server rolls out and before a removed one's user goes. | Grants per API, from the columns each reads, which the table-level DML grant leaves for later; `ALTER DEFAULT PRIVILEGES` alone, which reaches only the objects created after it and still needs the same pass when a server leaves; `pg_read_all_data` and `pg_write_all_data` through `databaseRoles`, which reach every database on the instance, the members' too; granting in the graph through a Postgres provider, which needs a connection from the machine that deploys |
+| An IAM database user's node, a server's and the migrator's, abandons the user when it goes (`deletionPolicy: ABANDON`): Postgres drops no role that holds privileges or owns objects. A server that leaves has its privileges taken back first, and the role stays, empty; a destroyed instance takes every role with it. | Revoking at destroy, which has no hook between the provisioner's deletes; leaving the deletes to fail |
+| The runner's image is built once per release, through the same builder machinery, from a Dockerfile gcp generates: `go install` of `runtime/migrate/go/cmd/superschematic-migrate` at the release's tag on the Go release `tools.env` pins, with cgo off, onto distroless static. `runtime/migrate/go` carries no `replace` directive (`scripts/bump_version.py`), so `go install` takes it, and the Go checksum database verifies the module and everything it requires. The image is tagged with the release in the stack's repository. The release is the version of `extensions/gcp` in the binary's build information; a binary built from a checkout has none, and `SUPERSCHEMATIC_MIGRATE_IMAGE` or `gcp.Extension{MigrateImage}` names an image by digest in its place. | Downloading the release's binary and checking it against `SHA256SUMS`, which only a digest pinned in the compiler would make a real check, and the release builds the compiler beside the runner, not after it; a published image, which the release does not push and Cloud Run could only pull through a remote repository |
+| Bootstrap adds the `builder` account (Cloud Logging's writer, the repository's writer through `gcp:artifactregistry/repositoryIamMember`, now pinned, and object viewer on `superschematic/builds/` by an IAM condition) and the `migrator` account (Cloud SQL client and instance user, and object viewer on `superschematic/migrations/`); `deployer` gains Cloud Build's editor role; the APIs gain Cloud Build and Cloud Logging, and Cloud Run with any database. | The migrator in the environment's graph, an account per run; the accounts' reads of the whole bucket, which holds Pulumi's state and the manifests |
+
+Status: built. `internal/stackdeploy` writes contexts (`WriteContext`),
+plans and runs builds and records `Contexts` and `Servers`;
+`stack/stacktest`'s fake target carries a `FakeBuilder`; `stack build` and
+`stack deploy --no-build` are in `cli/stack_deploy.go`. `extensions/gcp`
+builds with Cloud Build and runs migrations as the Cloud Run job over new
+`Cloud` methods (`ImageDigest`, `RunBuild`, `EnsureJob`, `RunJob`), which
+its tests fake; its golden job document is
+`extensions/gcp/testdata/golden/migrations/Staging-expand.json`. The
+runner's `job` command, its Cloud SQL dialer and its grants run in its
+tests against Postgres, the dialer replaced by one of a local server and
+Cloud Storage by a fake of its API. None of it has run against Google
+Cloud. Not built: a deploy lock beyond the provisioner's and the
+runner's, and a lifecycle rule that prunes old contexts and job documents
+from the bucket.
+
+### D37, amended: the callee's callers field, which the connectors write and the entrypoint verifies against
+
+D37 said each inbound edge's connector writes what the callee checks into
+the callee's config, and its first amendment left that config, the
+connectors writing it and the generated entrypoint reading it unbuilt,
+for one change to define together. Building them for the local and gcp
+connectors and the Go entrypoint settled the contract, and changed two of
+D37's choices on Cloud Run.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A served API with a service clause has a callers field, `<API>_CALLERS` by the core's rule: the API's name in upper snake case and `_CALLERS`, which begins with no other derived field's name, so a server that serves an API and calls it holds both. The loader's verify pass and the resolver refuse a setting or an env key that takes it or one of its variables. | One field per server, the union over its inbound edges: without `from`, a route lists every server with a `calls` edge to its API, and the union would pass a server whose edge reaches another API of the callee. `{SERVICE}_SERVICE_AUTH`, which the caller's `{SERVICE}_SERVICE` claims on a server that serves and calls one API. A `[derived_fields]` template, which the naming file can add later; the resolver's own templates come from no naming file yet. |
+| Its value, `ir.ServiceAuth`, is the runtimes' `serviceauth` config: issuers, each with its issuer and aliases, audience, algorithms, JWKS URL or keys, subject claim, maximum lifetime and callers, each a subject, the deployable it is and the APIs it serves. The callers are a list, not a map keyed by subject, since a subject may be a reference, and a key is its JWK's JSON, since it may be an output. `ir.CheckServiceAuth` and `ir.CheckServiceAuthIssuer` hold the contract. | A value of the local and gcp shapes only, which every later platform would have to widen. |
+| Each http edge between two servers gives the callee an issuer listing the edge's caller alone, `registry.Connected.Callee`. Resolution checks it, with the edge's caller and that caller's APIs, merges the entries of the edges to an API by issuer, which must agree on all but their callers, and binds the field with `callersOf` and the edges it comes from. An edge to an API with a service clause whose connector gives no entry fails as `lowering`. An API no other server calls gets the field with no issuers, so its server starts and refuses every service credential. | Refusing to resolve a server with a clause and no inbound edge: the API is deployed in many stacks, and section 9.3's check already refuses an edge it cannot use. Leaving the field unset there, which the entrypoint could not tell from a platform that forgot it. |
+| `ir.DerivedVariables` encodes a list of objects as a variable holding its length and each object's members under the list's name and the object's index, and a whole number as its decimal. `stackconfig.LoadCallers` reads the field into a `serviceauth.Config` and refuses a variable under the field's name that is no member. | The field as one JSON document, which section 3.4 refuses for every derived field. Variables keyed by the caller's name, which an upper snake case name can make two of one. |
+| The local connector gives the caller as an issuer of its own: its deployable as issuer and subject, the edge's key pair's `publicJwk` output as its key, the callee's deployable as audience, EdDSA and 300 seconds at most. | |
+| On Cloud Run the audience is the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, which every service lists and every caller asks the metadata server for. This replaces D37's audience, the callee's URL: that is an output of the callee's own service, which its callers field cannot reference without the service depending on itself. | The deterministic `run.app` URL, which needs the project's number, which no environment value holds. Reading the service's URL at run time, which puts Google's metadata into the provider-neutral runtime (D6). |
+| On Cloud Run the callee knows the caller by its service account's email in the token's `email` claim, `<service>@<project>.iam.gserviceaccount.com`, a name resolution composes. This replaces D37's unique id in `sub`. | The unique id, an output of the caller's account node, which every callee's config would reference; the environment owns the account its email names. |
+| The Go entrypoint's `serviceAuthenticator(api)`, which main.go calls once per API with a clause, lives in `serviceauth.go` beside `main.go`, and returns a `serviceauth.Verifier` over the API's callers field. A server without the field refuses to start and says which variable is missing. | Keeping it in `main.go`, which every other feature of the entrypoint edits. |
+
+`internal/stack`'s tests cover the merge, an API no server calls, a call
+within one server, the collisions and each broken entry; the local and gcp
+goldens resolve the shop with `@requireService` and `@allowService` on
+shop-api (`stacktest.RequireServiceShop` and `AllowServiceShop`);
+servergen's golden and compiled tests cover `serviceauth.go`; and `cli`'s
+`TestStackDevVerifiesServiceCallers` runs three Go servers with `stack
+dev`. There the caller is admitted with its end user forwarded, a request
+with no credential, from a server with no edge, or for another audience is
+401 `service_unauthorized`, and a caller the route's `from` leaves out is
+403 `service_forbidden`. The stack has no database, so the run needs no
+Docker. The parity vectors are unchanged.
+
+Not built: the TypeScript and Rust entrypoints, which will read the same
+field; the generic connector; key rotation; and the field outside a
+stack, where `values-schema.json` does not list it. A call between two
+APIs one server serves carries no credential, so a `@requireService`
+operation refuses it though section 9.3's check counts it, which section
+9.9 of `docs/stack-model.md` leaves open.
 
 The rule is reversible until the first release.

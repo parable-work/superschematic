@@ -1,4 +1,4 @@
-package shop
+package shoporders
 
 import (
 	"context"
@@ -7,15 +7,12 @@ import (
 	"net/http"
 	"time"
 
-	shoporders "example.com/acme/api/shop-orders"
+	api "example.com/acme/api/shop-orders"
 	orm "example.com/acme/orm/shop-db"
 	db "example.com/acme/types/go/shop-db"
-	api "example.com/acme/types/go/shop-orders"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	types "example.com/acme/types/go/shop-orders"
 	"github.com/jackc/pgx/v5/pgconn"
 	scalars "github.com/parable-work/superscalar/go"
-	"go.uber.org/zap"
 )
 
 // Orders implements the order namespace of shop-orders, which the
@@ -24,7 +21,7 @@ type Orders struct {
 	DB orm.DatabaseInterface
 }
 
-var _ shoporders.OrderImplementation = (*Orders)(nil)
+var _ api.OrderImplementation = (*Orders)(nil)
 
 // withLines reads an order and its lines in one call.
 func withLines() *orm.OrderGetOptions {
@@ -34,7 +31,7 @@ func withLines() *orm.OrderGetOptions {
 	return &orm.OrderGetOptions{Fields: fields}
 }
 
-func (o *Orders) PlaceOrder(ctx context.Context, input *api.PlaceOrderInput) (*api.OrderView, error) {
+func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (*types.OrderView, error) {
 	customer, err := caller(ctx)
 	if err != nil {
 		return nil, err
@@ -52,7 +49,7 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *api.PlaceOrderInput) (*a
 		for _, item := range input.Lines {
 			product, err := tx.GetProductRepository().GetOne(ctx, item.ProductId, nil)
 			if errors.Is(err, orm.ErrNotFound) {
-				return shoporders.BadRequestError(fmt.Sprintf("no product has id %s", item.ProductId), err)
+				return api.BadRequestError(fmt.Sprintf("no product has id %s", item.ProductId), err)
 			}
 			if err != nil {
 				return err
@@ -78,10 +75,10 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *api.PlaceOrderInput) (*a
 	return &view, nil
 }
 
-func (o *Orders) GetOrder(ctx context.Context, id api.IdentityUUID) (*api.OrderView, error) {
+func (o *Orders) GetOrder(ctx context.Context, id types.IdentityUUID) (*types.OrderView, error) {
 	order, err := o.DB.GetOrderRepository().GetOne(ctx, id, withLines())
 	if errors.Is(err, orm.ErrNotFound) {
-		return nil, shoporders.NotFoundError("order", err)
+		return nil, api.NotFoundError("order", err)
 	}
 	if err != nil {
 		return nil, err
@@ -90,7 +87,7 @@ func (o *Orders) GetOrder(ctx context.Context, id api.IdentityUUID) (*api.OrderV
 	return &view, nil
 }
 
-func (o *Orders) ListOrders(ctx context.Context, statuses []api.OrderStatus, limit *float64) ([]api.OrderView, error) {
+func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, limit *float64) ([]types.OrderView, error) {
 	filter := &orm.OrderFilter{}
 	if len(statuses) > 0 {
 		in := make([]string, 0, len(statuses))
@@ -107,23 +104,23 @@ func (o *Orders) ListOrders(ctx context.Context, statuses []api.OrderStatus, lim
 	if err != nil {
 		return nil, err
 	}
-	views := make([]api.OrderView, 0, len(orders))
+	views := make([]types.OrderView, 0, len(orders))
 	for _, order := range orders {
 		views = append(views, orderView(order))
 	}
 	return views, nil
 }
 
-func (o *Orders) CancelOrder(ctx context.Context, id api.IdentityUUID, reason string) (*api.OrderView, error) {
+func (o *Orders) CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error) {
 	order, err := o.DB.GetOrderRepository().GetOne(ctx, id, nil)
 	if errors.Is(err, orm.ErrNotFound) {
-		return nil, shoporders.NotFoundError("order", err)
+		return nil, api.NotFoundError("order", err)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if order.Status != db.OrderStatus_Placed {
-		return nil, shoporders.ConflictError(fmt.Sprintf("order %s is %s", id, order.Status), nil)
+		return nil, api.ConflictError(fmt.Sprintf("order %s is %s", id, order.Status), nil)
 	}
 	cancelled := db.OrderStatus_Cancelled
 	update := &orm.OrderUpdate{Status: &cancelled}
@@ -138,19 +135,19 @@ func (o *Orders) CancelOrder(ctx context.Context, id api.IdentityUUID, reason st
 
 // orderView copies an order and its lines into the view a caller sees, and
 // computes the fields the view declares @virtual.
-func orderView(order *db.Order) api.OrderView {
-	view := api.OrderView{
+func orderView(order *db.Order) types.OrderView {
+	view := types.OrderView{
 		Status:          order.Status,
 		PlacedAt:        order.PlacedAt,
 		ShippingAddress: order.ShippingAddress,
 		CancelReason:    order.CancelReason,
-		Lines:           make([]api.OrderLineView, 0, len(order.Lines)),
+		Lines:           make([]types.OrderLineView, 0, len(order.Lines)),
 	}
 	if order.Id != nil {
 		view.Id = *order.Id
 	}
 	for _, line := range order.Lines {
-		lineView := api.OrderLineView{Quantity: line.Quantity, UnitPriceCents: line.UnitPriceCents}
+		lineView := types.OrderLineView{Quantity: line.Quantity, UnitPriceCents: line.UnitPriceCents}
 		if line.Id != nil {
 			lineView.Id = *line.Id
 		}
@@ -168,9 +165,9 @@ type Reviews struct {
 	DB orm.DatabaseInterface
 }
 
-var _ shoporders.ProductReviewsImplementation = (*Reviews)(nil)
+var _ api.ProductReviewsImplementation = (*Reviews)(nil)
 
-func (r *Reviews) ListReviews(ctx context.Context, productID api.IdentityUUID, minRating *float64) ([]api.ReviewView, error) {
+func (r *Reviews) ListReviews(ctx context.Context, productID types.IdentityUUID, minRating *float64) ([]types.ReviewView, error) {
 	filter := &orm.ReviewFilter{ProductID: &orm.UUIDFilter{Eq: &productID}}
 	if minRating != nil {
 		filter.Rating = &orm.FloatFilter{Gte: minRating}
@@ -182,14 +179,14 @@ func (r *Reviews) ListReviews(ctx context.Context, productID api.IdentityUUID, m
 	if err != nil {
 		return nil, err
 	}
-	views := make([]api.ReviewView, 0, len(reviews))
+	views := make([]types.ReviewView, 0, len(reviews))
 	for _, review := range reviews {
 		views = append(views, reviewView(review))
 	}
 	return views, nil
 }
 
-func (r *Reviews) WriteReview(ctx context.Context, productID api.IdentityUUID, input *api.WriteReviewInput) (*api.ReviewView, error) {
+func (r *Reviews) WriteReview(ctx context.Context, productID types.IdentityUUID, input *types.WriteReviewInput) (*types.ReviewView, error) {
 	author, err := caller(ctx)
 	if err != nil {
 		return nil, err
@@ -204,7 +201,7 @@ func (r *Reviews) WriteReview(ctx context.Context, productID api.IdentityUUID, i
 	// The one_per_author unique index refuses a second review of a product.
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return nil, shoporders.ConflictError("you have already reviewed this product", err)
+		return nil, api.ConflictError("you have already reviewed this product", err)
 	}
 	if err != nil {
 		return nil, err
@@ -213,8 +210,8 @@ func (r *Reviews) WriteReview(ctx context.Context, productID api.IdentityUUID, i
 	return &view, nil
 }
 
-func reviewView(review *db.Review) api.ReviewView {
-	view := api.ReviewView{
+func reviewView(review *db.Review) types.ReviewView {
+	view := types.ReviewView{
 		Rating:    review.Rating,
 		Title:     review.Title,
 		Body:      review.Body,
@@ -228,9 +225,9 @@ func reviewView(review *db.Review) api.ReviewView {
 
 // caller is the signed-in user the auth middleware put on the context.
 func caller(ctx context.Context) (db.IdentityUUID, error) {
-	id, err := scalars.ParseUUID(shoporders.GetPrincipalID(ctx))
+	id, err := scalars.ParseUUID(api.GetPrincipalID(ctx))
 	if err != nil {
-		return db.IdentityUUID{}, shoporders.UnauthorizedError(err)
+		return db.IdentityUUID{}, api.UnauthorizedError(err)
 	}
 	return id, nil
 }
@@ -241,33 +238,9 @@ func caller(ctx context.Context) (db.IdentityUUID, error) {
 func actingUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		if id, err := scalars.ParseUUID(shoporders.GetPrincipalID(ctx)); err == nil {
+		if id, err := scalars.ParseUUID(api.GetPrincipalID(ctx)); err == nil {
 			ctx = orm.WithUserID(ctx, id)
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-// NewOrdersHandler mounts the generated shop-orders routes on a chi router.
-func NewOrdersHandler(database orm.DatabaseInterface, logger *zap.Logger, auth Auth) (http.Handler, error) {
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
-
-	err := shoporders.RegisterRoutes(r, shoporders.Config{
-		DB:     database,
-		Logger: logger,
-		AuthMiddleware: func(next http.Handler) http.Handler {
-			return auth.Middleware(actingUser(next))
-		},
-		Implementations: shoporders.Implementations{
-			Order:          &Orders{DB: database},
-			ProductReviews: &Reviews{DB: database},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return r, nil
 }

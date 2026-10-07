@@ -15,6 +15,7 @@
   ],
   "types": [
     "gcp:artifactregistry/repository:Repository",
+    "gcp:artifactregistry/repositoryIamMember:RepositoryIamMember",
     "gcp:certificatemanager/certificate:Certificate",
     "gcp:certificatemanager/certificateMap:CertificateMap",
     "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry",
