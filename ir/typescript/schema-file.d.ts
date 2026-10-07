@@ -136,6 +136,7 @@ export interface EnvValue {
 export interface EnvironmentDecl {
   dns?: DNSPlacement;
   domain?: string;
+  order?: number;
   parameters?: string[];
   settings?: DeployableSettings[];
   target?: string;
