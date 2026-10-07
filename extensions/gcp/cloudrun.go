@@ -44,7 +44,9 @@ func serviceAddress(ctx registry.PlatformContext) any {
 //     only and keeps Cloud Run's invoker check, which admits the callers
 //     its edges grant. An exposed one turns the check off, since browsers
 //     call it, and with a domain takes traffic from the load balancer
-//     only; without one, the run.app URL is its public address.
+//     only; without one, the run.app URL is its public address. Every
+//     service lists its full resource name as a custom audience, the
+//     audience of its callers' ID tokens (serviceAudience).
 //   - for a server that calls another, Direct VPC egress through the
 //     environment's network (networkNodes): a call to the callee's run.app
 //     URL from the VPC counts as internal, which an internal server's
@@ -183,6 +185,7 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"name":               d.ResourceName,
 		"ingress":            ingress,
 		"invokerIamDisabled": d.Exposed,
+		"customAudiences":    []any{serviceAudience(v, d.ResourceName)},
 		"deletionProtection": false,
 		"template":           template,
 	}})
