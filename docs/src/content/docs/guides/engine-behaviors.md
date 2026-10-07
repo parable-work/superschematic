@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
 sidebar:
   order: 7
 ---
@@ -119,6 +119,44 @@ the JSON form to hand to the engine. A behavior an extension adds joins
 `BehaviorConfigs` by module augmentation;
 [Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
 shows how.
+
+## Display
+
+A UI, or an agent, that renders a schema's instances reads how to show
+them from the schema: `@display` on the type, from
+`@superschematic/schema`. It names one instance and several, the title
+and summary fields, what a create button says, and labels for the
+`Workflow`'s states and transitions:
+
+```ts
+@display({
+  noun: "Task",
+  plural: "Tasks",
+  titleField: "title",
+  createLabel: "New task",
+  summaryFields: ["status"],
+  states: {
+    todo: { label: "To do", tone: "muted" },
+    doing: { label: "Do", activeForm: "Doing", tone: "active" },
+    done: { label: "Done", tone: "success" },
+    dropped: { label: "Dropped", tone: "danger" },
+  },
+  transitions: {
+    todo: { doing: "Start", dropped: "Drop" },
+    doing: { done: "Finish", dropped: "Drop" },
+  },
+})
+```
+
+The JSON form writes the same object under the type's `display` key. A
+UI showing an instance's moves reads `transitions[status]`. `define`
+refuses a title that is not one of the type's own text fields, a summary
+field that is neither the type's nor its behaviors', and a state or a
+transition the `Workflow` config does not list, with the compiler's
+wording. The describe document carries the instance type's display, its
+fields with their `@docs` titles and `@icon`s, and each operation's
+title. [Documentation decorators](/superschematic/reference/documentation/#display-on-a-type)
+has every rule.
 
 ## Create parameters
 

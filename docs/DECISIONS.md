@@ -1107,8 +1107,10 @@ SQLite extension, and the engine's search across a namespace's schemas.
 The engine's event log starts at its head, filters and logs defines, its
 HTTP and MCP mounts take service callers (D37), it serves the behaviors
 it runs, and each tool carries guidance its behaviors' configs give,
-with create parameters narrowed by them (an amendment below on each). Each change that
-lands a piece updates this paragraph. The names and rules are reversible until the first release.
+with create parameters narrowed by them (an amendment below on each).
+Display metadata is the core `@display` decorator (D48), which the
+describe document carries. Each change that lands a piece updates this
+paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -3840,3 +3842,31 @@ runner's, and a lifecycle rule that prunes old contexts and job documents
 from the bucket.
 
 The rule is reversible until the first release.
+
+## D48. A type's display is the core `@display` decorator, checked against the type and its Workflow
+
+D16 says display metadata a UI reads is written with decorators, as
+documentation is (D10), and fields have theirs: `@docs({ title })`,
+`@purpose` and `@icon`, core on D18's ground. A type had none. A UI, or
+an agent, that renders a schema's instances could not learn from the
+schema what to call one or many, which field is an instance's title, what
+a create button says, which fields summarize it in a list, or how to
+label its `Workflow`'s states and transitions. The engine's describe
+document carried each field's description but not its title or icon,
+though the stored schema holds both.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A core type decorator, `@display({ noun, plural, titleField, createLabel, summaryFields, states, transitions })` from `@superschematic/schema`, on a class of any kind. It writes `TypeDef.Display` (`ir.TypeDisplay`), after `behaviors`, omitted when absent, so IR JSON without it is the same bytes. Every member is optional, `{}` is refused, and a type takes one. It adds no field, operation or storage. | A decorator per member (`@noun`, `@titleField`, ...), a spec and an export each for one concept; a behavior, which D16 rules out; an `extensions` slot, which would make a concept every UI reads look like one distribution's data |
+| It is core IR on D18's rule: it means the same in every deployment, the core checks it, and every form writes it. A distribution's own display concepts (a role a UI shows a type to, a home page, link defaults, an icon set) stay its extension's: a type decorator of its own that writes `extensions.<name>`, and a check (D10) for a rule over `@display`'s values. | Open members a distribution fills with its own keys, which no UI could rely on |
+| One JSON Schema. The registered spec's `Args` is the schema of the decorator's argument, and the data forms write the argument verbatim under `display`, so the schema-file JSON Schema takes its `$defs/TypeDisplay` and `$defs/DisplayState` from the spec in place of the reflected ones. The TypeScript frontend, the JSON and YAML readers, `superschematic json-schema` and the engine's strict loader check one schema, and generation fails when the IR struct and the schema name different members. The schema-file types emitter learns the keywords that only narrow a value (`pattern`, lengths, `uniqueItems`, `minProperties`, `propertyNames`). `ir.ValidateTypeDisplay` holds IR built in Go to the same shape. | Reflection with patches, as the docs records have, which cannot say `minProperties` or `propertyNames`; a second copy of the rules in the loader, which would drift |
+| A state's `tone` is one of a closed set: `muted`, `active`, `success`, `warning`, `danger`. A tone says what a state means to a reader; a UI maps each onto its own colors. | An open string or a color, which ties the schema to one UI's palette; more tones (`info`, `neutral`) with no case that needs them yet |
+| `transitions` is keyed by the state a transition leaves, then the state it enters: `{ todo: { doing: "Start" } }`. A UI showing an instance's moves reads `transitions[status]`, and `propertyNames` checks both keys as state names. | `"<from>-><to>"` keys, which parse and which Go's JSON encoder, and so `format --to=json`, writes as `"todo->doing"`; a list of `{ from, to, label }`, which can repeat a pair |
+| `titleField` names one of the type's own fields, by its name or its JSON key, holding a single text value: `string`, or a scalar whose values are strings (its language primitive is string and its `json_schema` mapping is not `any`, `object` or `array`, as `Identity.Name`, not `Generic.JSON`). Not a list, a map, a number, an enum, a `Secret` field or a `@uiHidden` one. An optional field may be the title; a UI falls back to the noun and the id. | Any field, which a UI must then format; an enum, whose value names a group, not an instance; a field a behavior adds, whose declaration gives it no type |
+| `summaryFields` names, in order and each once, the type's own fields or fields its behaviors add by their declarations, neither secret nor hidden. | The type's own fields only, which would leave out `Workflow`'s `status`, the field a list shows most |
+| `states` and `transitions` label the type's `Workflow`: each state and transition must be one its config lists, and a type that does not compose `Workflow` takes neither. The compiler's loader checks it in every form (`verify.checkDisplays`) from the config the type holds, with the field rules above, and the engine checks the same at define and publish with the same wording, against the parsed config, after the behaviors compose. A compiled schema's types compose no behavior while generators refuse them (D16), so outside the engine `states` and `transitions` cannot appear; `build --emit-ir` and `format` still catch a wrong one before a define. | Leaving them unchecked outside the engine; labels for an enum field's values, a compiled type's own status, which needs a key naming the field and can come later |
+| No generator renders it, as none renders a field's `@docs` title, so every golden is unchanged. A test builds the DB, API and General fixtures with every type language, SDK and server, as loaded and with a display on every type, and compares the trees byte for byte; the one difference is the Rust types crate's `schemas/<Type>.json`, which copies the IR of each `@jsonField` payload and so carries its display, as it carries its fields' titles. `format --to=ts` writes it. | A golden per generator for a fixture with displays, which would pin the same bytes again |
+| The engine's describe document carries the instance type's `display`, with `titleField` and `summaryFields` naming fields by their keys in an instance's `data`; `fields`, the type's own fields in declaration order with their `title` and `icon` where declared; and each operation's `title`, its tool's. No operation carries an icon: an engine schema declares no operations, and a behavior's declaration gives its operations none. A new version may change a display freely: the compatibility rule ignores it. | Field titles as JSON Schema `title` inside `instance`, which would make it differ from create's `data` and from the tool parameters the Go generators write; an icon field on behavior declarations, an engine change beyond this one |
+
+The names, the tone set and the key shapes are reversible until the first
+release.

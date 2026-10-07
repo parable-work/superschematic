@@ -281,6 +281,7 @@ func isEmptyTSForwardDeclaration(def *ir.TypeDef) bool {
 		def.Extends == "" &&
 		len(def.Implements) == 0 &&
 		len(def.Behaviors) == 0 &&
+		def.Display == nil &&
 		def.RawHeritage == nil &&
 		!def.IsTrait &&
 		def.TraitConfig == nil &&

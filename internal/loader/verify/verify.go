@@ -9,8 +9,9 @@
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
 // cannot be encrypted, the service clauses an operation cannot take,
 // @index placement and keys, each type's
-// behaviors against their declarations, the kind's own KindSpec.Verify and
-// every registered CheckSpec.
+// behaviors against their declarations, each type's @display against the
+// type and its Workflow, the kind's own KindSpec.Verify and every
+// registered CheckSpec.
 //
 // The readers stay responsible for syntax-level invariants (wildcard
 // imports, decorator argument shapes); this pass is what makes those rules
@@ -207,6 +208,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkIndexKeys(schema, r)
 	reg := in.registry()
 	checkBehaviors(schema, reg, r)
+	checkDisplays(schema, reg, r)
 	if kind, ok := reg.Kind(string(schema.Kind)); ok && kind.Verify != nil {
 		kind.Verify(schema, r)
 	}

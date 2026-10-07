@@ -67,6 +67,10 @@ var corpus = []roundtripFixture{
 		name: "fixture-service-auth-api", dir: tsFixtures + "/fixture-service-auth-api", native: FormatTS,
 		skipTSReason: "@publicRoute has no TypeScript authoring form in the writer",
 	},
+	// @display on a type, beside its behaviors and its fields' titles and
+	// icons (D48), from TypeScript and from JSON.
+	{name: "fixture-display", dir: tsFixtures + "/fixture-display", native: FormatTS},
+	{name: "fixture-display-json", dir: dataFixtures + "/fixture-display-json", native: FormatJSON},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},
