@@ -166,6 +166,23 @@ type (
 	BuildRequest     = registry.BuildRequest
 	Credential       = registry.Credential
 
+	// The generated CI (docs/stack-model.md, section 11.3, D47): a CI
+	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack) and
+	// its CIEnvironments with the renderer's CIOptions, to CIFiles. A
+	// target's CI seam (CIIdentities) gives each environment a CIIdentity
+	// per CIRole, and a provisioner's spec lists the CLITools a CI job
+	// installs.
+	CIRendererSpec = registry.CIRendererSpec
+	CIRequest      = registry.CIRequest
+	CIStack        = registry.CIStack
+	CIEnvironment  = registry.CIEnvironment
+	CIOptions      = registry.CIOptions
+	CIFile         = registry.CIFile
+	CIIdentities   = registry.CIIdentities
+	CIIdentity     = registry.CIIdentity
+	CIRole         = registry.CIRole
+	CLITool        = registry.CLITool
+
 	Naming             = registry.Naming
 	Options            = registry.Options
 	Result             = registry.Result
@@ -194,6 +211,15 @@ const (
 	// database platform declares.
 	SQLDialectPostgres = registry.SQLDialectPostgres
 	SQLDialectSQLite   = registry.SQLDialectSQLite
+
+	// CIPlanner and CIDeployer are the roles a CI job signs in as;
+	// PackageManagerBun and PackageManagerNPM the package managers a
+	// CIStack names; DefaultCIBranch the branch CIOptions default to.
+	CIPlanner         = registry.CIPlanner
+	CIDeployer        = registry.CIDeployer
+	PackageManagerBun = registry.PackageManagerBun
+	PackageManagerNPM = registry.PackageManagerNPM
+	DefaultCIBranch   = registry.DefaultCIBranch
 
 	// OpenAPIDocsKey is the vendor-extension key an operation's @docs record
 	// is written under in the OpenAPI document; an OpenAPIHook renames it.

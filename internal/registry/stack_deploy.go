@@ -314,9 +314,10 @@ type Credential struct {
 }
 
 // checkDeploySeams refuses a target that carries a deploy seam it cannot
-// use: State, Bootstrap, Migrations or Builder without a provisioner, and
-// Bootstrap, Migrations or Builder without State, which a bootstrap
-// creates and a deploy records each migration and each build in.
+// use: State, Bootstrap, Migrations, Builder or CI without a provisioner,
+// and Bootstrap, Migrations, Builder or CI without State, which a
+// bootstrap creates, a deploy records each migration and each build in,
+// and a CI job plans and deploys from.
 func checkDeploySeams(spec TargetSpec) error {
 	var named []string
 	if spec.State != nil {
@@ -331,11 +332,14 @@ func checkDeploySeams(spec TargetSpec) error {
 	if spec.Builder != nil {
 		named = append(named, "Builder")
 	}
+	if spec.CI != nil {
+		named = append(named, "CI")
+	}
 	if len(named) > 0 && spec.Provisioner == "" {
 		return fmt.Errorf("registry: target %q has %s but names no provisioner to deploy with", spec.Name, strings.Join(named, ", "))
 	}
-	if (spec.Bootstrap != nil || spec.Migrations != nil || spec.Builder != nil) && spec.State == nil {
-		return fmt.Errorf("registry: target %q has Bootstrap, Migrations or Builder but no State: a bootstrap creates the deploy state, and a deploy records each migration and each build in it", spec.Name)
+	if (spec.Bootstrap != nil || spec.Migrations != nil || spec.Builder != nil || spec.CI != nil) && spec.State == nil {
+		return fmt.Errorf("registry: target %q has Bootstrap, Migrations, Builder or CI but no State: a bootstrap creates the deploy state, a deploy records each migration and each build in it, and a CI job plans and deploys from it", spec.Name)
 	}
 	return nil
 }

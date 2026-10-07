@@ -157,6 +157,10 @@ type Outputs struct {
 	// SQL configures the DB kind's sql output.
 	SQL *SQLOutputConfig `json:"sql,omitempty"`
 
+	// CI holds the options of each CI renderer a Stack service's workflow
+	// is written by, keyed by the renderer's name (D47).
+	CI map[string]CIOptions `json:"ci,omitempty"`
+
 	// Raw holds every key of the block verbatim so extension generators can
 	// decode their own section with DecodeOutput.
 	Raw map[string]json.RawMessage `json:"-"`
@@ -164,9 +168,9 @@ type Outputs struct {
 
 // ParseOutputs decodes the raw outputs block from schema.config into its
 // typed form, rejecting keys no registered generator claims, sections that
-// fail their generator's OutputSchema, unknown target languages, and an API
+// fail their generator's OutputSchema, unknown target languages, an API
 // server or SDK whose language has no types output (each imports that
-// package). The Go ORM's need for the Go types depends on the kind, so
+// package), and a CI renderer outputs.ci names that is not registered. The Go ORM's need for the Go types depends on the kind, so
 // generator.Run and generator.ExpectedOutputDirs check it.
 func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	if raw == nil {
@@ -194,6 +198,11 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	}
 	if err := json.Unmarshal(data, outputs); err != nil {
 		return nil, fmt.Errorf("decoding outputs block: %w", err)
+	}
+	if section, ok := outputs.Raw["ci"]; ok {
+		if outputs.CI, err = parseCIOutputs(section, reg); err != nil {
+			return nil, err
+		}
 	}
 
 	for lang := range outputs.Types {
@@ -335,6 +344,15 @@ func (o *Outputs) SQLDialects() []string {
 // SQLDialect reports whether outputs.sql.dialects lists dialect.
 func (o *Outputs) SQLDialect(dialect string) bool {
 	return containsString(o.SQLDialects(), dialect)
+}
+
+// CIRenderers returns the names of the CI renderers outputs.ci names,
+// sorted.
+func (o *Outputs) CIRenderers() []string {
+	if o == nil {
+		return nil
+	}
+	return keysOf(o.CI)
 }
 
 // APIEnabled reports whether the REST API server output is enabled.

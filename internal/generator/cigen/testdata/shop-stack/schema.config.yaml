@@ -1,0 +1,5 @@
+name: shop-stack
+kind: Stack
+outputs:
+  ci:
+    github: {}

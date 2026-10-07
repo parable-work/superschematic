@@ -65,7 +65,9 @@ const (
 
 // Extension is the fake extension. Its Provisioner records the calls a
 // test makes, and the target's deploy seams record theirs in the same
-// log; Register creates each one that is nil.
+// log; Register creates each one that is nil. Tools are the command-line
+// tools the fake provisioner declares, which a generated CI job installs;
+// nil declares none.
 type Extension struct {
 	Provisioner *FakeProvisioner
 	State       *FakeState
@@ -73,6 +75,8 @@ type Extension struct {
 	Migrations  *FakeMigrations
 	Bootstrap   *FakeBootstrap
 	Builder     *FakeBuilder
+	CI          *FakeCI
+	Tools       []registry.CLITool
 }
 
 // Name is the extension's name.
@@ -97,6 +101,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 	}
 	if e.Builder == nil {
 		e.Builder = &FakeBuilder{}
+	}
+	if e.CI == nil {
+		e.CI = &FakeCI{}
 	}
 	e.Migrations.log = e.Provisioner
 	e.Bootstrap.log = e.Provisioner
@@ -159,7 +166,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		return err
 	}
 	if err := r.RegisterProvisioner(registry.ProvisionerSpec{
-		Name: Provisioner, Extension: Name, Provisioner: e.Provisioner,
+		Name: Provisioner, Extension: Name, Provisioner: e.Provisioner, Tools: e.Tools,
 	}); err != nil {
 		return err
 	}
@@ -187,6 +194,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Bootstrap:  e.Bootstrap,
 		Migrations: e.Migrations,
 		Builder:    e.Builder,
+		CI:         e.CI,
 	})
 }
 
@@ -195,7 +203,7 @@ const targetValues = `{
   "required": ["project", "region"],
   "properties": {
     "project": {"type": "string", "minLength": 1},
-    "projectNumber": {"type": "string", "minLength": 1},
+    "projectNumber": {"type": "string", "pattern": "^[0-9]+$"},
     "region": {"type": "string", "minLength": 1},
     "production": {"type": "boolean"}
   },
