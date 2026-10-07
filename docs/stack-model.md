@@ -1382,7 +1382,9 @@ build the stack again.
 
 A generated Dockerfile per server builds the entrypoint and the
 implementations together. Its build context is the repository root, the
-parent of the schemas root, after the stack's services are built:
+parent of the schemas root, after the stack's services are built, unless
+the naming file's `[paths] build_context` names a directory above it, as
+`examples/acme-shop` does to reach the runtime modules of its checkout:
 
 ```sh
 docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
@@ -1392,8 +1394,8 @@ docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
 directories the build reads: the server's module, the generated modules,
 the runtime modules and the implementations' modules that the server's
 `go.mod` replaces with a directory, and the superscalar checkout when the
-image builds from one. A server whose modules lie outside the repository
-root gets no Dockerfile, and the build says why.
+image builds from one. A server whose modules lie outside the build
+context gets no Dockerfile, and the build says why.
 
 The generated Go code links superscalar's static archive through cgo (D3),
 so the binary cannot be a `CGO_ENABLED=0` build, and a server whose

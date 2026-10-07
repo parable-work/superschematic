@@ -141,8 +141,9 @@ type Input struct {
 	// main.go imports.
 	Naming naming.Naming
 
-	// RepositoryRoot is the Dockerfile's build context. Every directory
-	// a replace points at must lie under it, or no Dockerfile is written.
+	// RepositoryRoot is the Dockerfile's build context: the repository
+	// root, or the naming file's [paths] build_context. Every directory a
+	// replace points at must lie under it, or no Dockerfile is written.
 	RepositoryRoot string
 
 	// ScalarGo is the directory of the scalar library's Go binding, the

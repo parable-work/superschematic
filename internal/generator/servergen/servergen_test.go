@@ -493,6 +493,42 @@ func TestNoRepositoryRootWritesNoEntrypoint(t *testing.T) {
 	}
 }
 
+// TestTheBuildContextHoldsTheRuntimes: a project whose runtime modules lie
+// above the repository root, as an example inside a checkout does, gets no
+// Dockerfile, until the naming file's [paths] build_context names the
+// directory that holds both; the Dockerfile's paths are then relative to
+// it.
+func TestTheBuildContextHoldsTheRuntimes(t *testing.T) {
+	checkout := t.TempDir()
+	repoRoot := filepath.Join(checkout, "examples", "shop")
+	f := loadFixture(t, servicesRoot)
+	dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack", "shop-api")
+	dockerfile := filepath.Join(dir, servergen.DockerFile)
+	f.build(t, repoRoot, fakePaths(checkout))
+	if _, err := os.Stat(dockerfile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("with the runtimes outside the repository root, %s: %v; want no Dockerfile", dockerfile, err)
+	}
+
+	n := naming.Default()
+	n.Paths.BuildContext = "../.."
+	for _, name := range order {
+		opts := f.options(repoRoot, fakePaths(checkout))
+		opts.Naming = n
+		if _, err := generator.Run(f.schemas[name], f.configs[name], opts); err != nil {
+			t.Fatalf("build %s: %v", name, err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, servergen.DockerIgnoreFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"!examples/shop/schemas/dist/server/shop-stack/shop-api\n", "!third_party/superscalar/go\n", "!examples/shop/go/shop-api\n"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("%s lacks %q:\n%s", servergen.DockerIgnoreFile, want, data)
+		}
+	}
+}
+
 // goCommand runs go in dir.
 func goCommand(t *testing.T, dir string, args ...string) {
 	t.Helper()

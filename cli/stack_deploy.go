@@ -288,9 +288,10 @@ func (c *deployContext) options(cmd *cobra.Command, params map[string]string) st
 
 // sources says where the stack's build wrote each server's Dockerfile, and
 // every image's build context: the repository root, the parent of the
-// schemas root (docs/stack-model.md, section 8.2).
+// schemas root, or the naming file's [paths] build_context
+// (docs/stack-model.md, section 8.2).
 func (c *deployContext) sources() *stackdeploy.Sources {
-	return &stackdeploy.Sources{OutputRoot: c.project.outputRoot, RepositoryRoot: filepath.Dir(c.project.schemasRoot)}
+	return &stackdeploy.Sources{OutputRoot: c.project.outputRoot, RepositoryRoot: c.project.names.BuildContext(filepath.Dir(c.project.schemasRoot))}
 }
 
 // digests returns the IR digest of each service the stack reaches:
