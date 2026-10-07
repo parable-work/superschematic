@@ -55,11 +55,14 @@ type (
 	Prompter = stackdeploy.Prompter
 
 	// SchemaSource is the stack's schema and its directory, where
-	// bootstrap records the values its target returns; RecordedValue is
-	// what it did with one, a RecordOutcome.
-	SchemaSource  = stackdeploy.SchemaSource
-	RecordedValue = stackdeploy.RecordedValue
-	RecordOutcome = stackdeploy.RecordOutcome
+	// bootstrap records the values its target returns, with a
+	// TypeScriptEdit of an EnvironmentValue for a TypeScript schema;
+	// RecordedValue is what it did with one, a RecordOutcome.
+	SchemaSource     = stackdeploy.SchemaSource
+	TypeScriptEdit   = stackdeploy.TypeScriptEdit
+	EnvironmentValue = stackdeploy.EnvironmentValue
+	RecordedValue    = stackdeploy.RecordedValue
+	RecordOutcome    = stackdeploy.RecordOutcome
 
 	// RunOutputs is an outputs file: what one run exported, which the
 	// bindings generator reads.

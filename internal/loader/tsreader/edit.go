@@ -18,6 +18,10 @@ import (
 //
 //	@environment({ target: "gcp", gcp: { project: "acme-staging", projectNumber: "123456789012" } })
 //	export abstract class Staging {}
+//
+// stackdeploy.EnvironmentValue has the same fields in the same order, so
+// the CLI converts one to the other when it hands bootstrap this edit:
+// stackdeploy does not import this package, which would link the compiler.
 type EnvironmentValue struct {
 	// Class is the environment's class.
 	Class string

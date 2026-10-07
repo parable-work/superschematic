@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -17,8 +16,8 @@ import (
 // project's number, and the core records each in the schema source, in the
 // target values of the environment whose declaration sets the value it
 // belongs beside. A TypeScript schema changes in that property's text
-// alone (tsreader.SetEnvironmentValue); for a JSON or YAML schema bootstrap
-// says what to add.
+// alone, through the edit the caller hands in; for a JSON or YAML schema
+// bootstrap says what to add.
 
 // SchemaSource is the stack's schema as the loader read it, and where its
 // files are: each class's TypeDef names the file that declares it (Owner),
@@ -26,6 +25,34 @@ import (
 type SchemaSource struct {
 	Schema *ir.Schema
 	Dir    string
+
+	// EditTypeScript writes a value into a TypeScript schema file. The CLI
+	// hands in the TypeScript reader's (tsreader.SetEnvironmentValue), as
+	// it hands a deploy the Planner, so this package and the stack package
+	// extensions import never link the compiler. Without it, a TypeScript
+	// schema is changed by hand, as a JSON or YAML one is.
+	EditTypeScript TypeScriptEdit
+}
+
+// TypeScriptEdit sets v's key to v.Value in the target values of an
+// @environment class of the TypeScript schema file fileName, whose text is
+// src. It returns the file's new text and the value the key held, with
+// found false when the file set none, and src itself when the value
+// matches. It refuses, with what to change by hand, a file it cannot edit
+// in place.
+type TypeScriptEdit func(fileName string, src []byte, v EnvironmentValue) (out []byte, previous string, found bool, err error)
+
+// EnvironmentValue names one target value of an @environment class: the
+// class, the key its decorator's object holds the target's values under
+// (`gcp`), the value's key and value, and the key whose property a new one
+// is written after. Its fields are tsreader.EnvironmentValue's, in order,
+// so one converts to the other.
+type EnvironmentValue struct {
+	Class  string
+	Target string
+	Key    string
+	Value  string
+	Beside string
 }
 
 // RecordOutcome is what bootstrap did with a value in the schema.
@@ -166,7 +193,7 @@ func (s *session) recordValue(src *SchemaSource, v registry.BootstrapValue) (Rec
 		return r, nil
 	}
 	switch {
-	case strings.HasSuffix(r.File, ".schema.ts"):
+	case strings.HasSuffix(r.File, ".schema.ts") && src.EditTypeScript != nil:
 		return s.recordTypeScript(src, r, target)
 	case matches:
 		r.Outcome = ValueMatches
@@ -181,19 +208,25 @@ func (s *session) recordValue(src *SchemaSource, v registry.BootstrapValue) (Rec
 			return byHand("bootstrap edits no YAML schema; in %s, change %s in the environment values of %s from %v to %s", r.File, v.Key, decl.Name, current, jsonString(v.Value))
 		}
 		return byHand("bootstrap edits no YAML schema; in %s, add %s: %s beside %s in the environment values of %s", r.File, v.Key, jsonString(v.Value), v.Beside, decl.Name)
+	case strings.HasSuffix(r.File, ".schema.ts"):
+		if has {
+			return byHand("bootstrap was handed no TypeScript edit; in %s, change %s in the %s values of %s from %v to %s", r.File, v.Key, target, decl.Name, current, jsonString(v.Value))
+		}
+		return byHand("bootstrap was handed no TypeScript edit; in %s, add %s: %s beside %s in the %s values of %s", r.File, v.Key, jsonString(v.Value), v.Beside, target, decl.Name)
 	}
 	return byHand("the schema does not say which file declares %s; add %s: %s beside %s in its %s values", decl.Name, v.Key, jsonString(v.Value), v.Beside, target)
 }
 
 // recordTypeScript writes r's value into the TypeScript schema file that
-// declares r.Environment, changing that property's text alone.
+// declares r.Environment with the caller's edit, which changes that
+// property's text alone.
 func (s *session) recordTypeScript(src *SchemaSource, r RecordedValue, target string) (RecordedValue, error) {
 	path := filepath.Join(src.Dir, filepath.FromSlash(r.File))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return r, fmt.Errorf("record %s: %w", r.Key, err)
 	}
-	out, previous, found, err := tsreader.SetEnvironmentValue(r.File, data, tsreader.EnvironmentValue{
+	out, previous, found, err := src.EditTypeScript(r.File, data, EnvironmentValue{
 		Class: r.Environment, Target: target, Key: r.Key, Value: r.Value, Beside: r.Beside,
 	})
 	switch {

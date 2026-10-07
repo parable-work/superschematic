@@ -22,6 +22,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	"github.com/parable-work/superschematic/internal/stack"
@@ -389,7 +390,7 @@ Last, it asks for each credential that has no value, without echoing it.`,
 				Options:    c.options(cmd, nil),
 				Repository: repository,
 				Prompter:   terminalPrompter(cmd),
-				Source:     &stackdeploy.SchemaSource{Schema: c.schema, Dir: c.project.dir},
+				Source:     &stackdeploy.SchemaSource{Schema: c.schema, Dir: c.project.dir, EditTypeScript: editTypeScript},
 			})
 			// A value recorded before a credential's prompt failed is
 			// in the schema all the same, so its line is printed.
@@ -402,6 +403,14 @@ Last, it asks for each credential that has no value, without echoing it.`,
 	flags.register(cmd, false)
 	cmd.Flags().StringVar(&repository, "repository", "", "the GitHub repository the CI runs in, owner/name (default: read from the git remote origin)")
 	return cmd
+}
+
+// editTypeScript is the TypeScript reader's edit of an environment's
+// value, which bootstrap records the values its target returns with
+// (D47). The CLI hands it in so that internal/stackdeploy, and the stack
+// package extensions import, never link the compiler.
+func editTypeScript(fileName string, src []byte, v stackdeploy.EnvironmentValue) ([]byte, string, bool, error) {
+	return tsreader.SetEnvironmentValue(fileName, src, tsreader.EnvironmentValue(v))
 }
 
 // gitHubRepositoryPattern reads owner/name from a GitHub remote URL, over
