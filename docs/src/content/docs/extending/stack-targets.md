@@ -155,7 +155,7 @@ six seams on its `TargetSpec`, each an interface in `registry`:
 | --- | --- | --- |
 | `State` | `StateStore` | gives the provisioner's state backend for an environment, and reads, writes and deletes each run's deploy manifest |
 | `Secrets` | `SecretStore` | sets, gets, lists and checks secret values, keyed by a secret's identity (`PaymentsSecrets.STRIPE_KEY`) or a platform credential's secret name |
-| `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs |
+| `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs, and returns the values only the cloud knows, each a `BootstrapValue` the core records in the schema beside the value it belongs with (gcp's `projectNumber`, beside `project`) |
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
 | `Builder` | `ImageBuilder` | builds a server's image from the Dockerfile a stack's build writes, and returns it by digest |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |

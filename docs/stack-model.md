@@ -342,7 +342,10 @@ declared, which the generated CI deploys them in (section 11.3). The
 TypeScript reader numbers each `@environment` class
 (`EnvironmentDecl.Order`): schema files in path order, and the classes of
 a file in source order. A data form writes `order` itself, and an
-environment without one comes after those with one, by name (D47).
+environment without one comes after those with one, by name (D47); the
+kind's verification refuses two environments with one order. The
+TypeScript writer writes the environment classes last, in their order,
+and leaves the property out.
 
 Every declaration has the JSON and YAML data forms every schema has. A
 class is a type, and its declaration the key the decorator writes. A
@@ -357,6 +360,7 @@ types:
     name: Production
     role: EmbeddedStruct
     environment:
+      order: 3
       target: gcp
       values: { project: acme-prod, region: us-east1 }
       domain: acme.dev
@@ -1186,7 +1190,10 @@ again: each step creates what is missing and leaves the rest.
    Build and Cloud Logging), the accounts and Workload Identity
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager and Cloud DNS as the graph's resource types need
-   them, Cloud Run with any database for its migration job.
+   them, Cloud Run with any database for its migration job. An API
+   enabled moments ago can refuse calls as one the project has not
+   enabled, so each later step retries such a refusal for up to five
+   minutes.
 2. It creates the state bucket and the KMS key directly, since Pulumi needs
    them before it can run: the bucket `<project>-superschematic-state`,
    with uniform access, public access prevention and object versioning,
@@ -1534,7 +1541,9 @@ USAGE on the schemas that hold the migrator's objects, SELECT, INSERT,
 UPDATE and DELETE on its tables, SELECT on its views and USAGE and SELECT
 on its sequences, leaving out the runner's state tables, and takes every
 such privilege back from a user it gave them to that no longer connects,
-all in one transaction. The grant is table-level DML, not what each API
+all in one transaction. It takes nothing from a role the migrator is
+granted: Cloud SQL gives `cloudsqlsuperuser` CREATE on the public schema
+itself, and the first live deploy's job reported taking that back. The grant is table-level DML, not what each API
 reads. The deploy manifest records the servers each DB service's job saw
 connect, and a deploy runs the expand phase of a DB service whose servers
 changed even when its plan has no steps, before the new server rolls out

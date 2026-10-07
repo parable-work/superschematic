@@ -285,10 +285,15 @@ func TestStackCommands(t *testing.T) {
 	assert.Equal(t, "Preview", file.Environment)
 	assert.Equal(t, map[string]string{"pr": "7"}, file.Parameters)
 
-	// bootstrap runs the target's, with the repository named.
-	_, err = run("bootstrap", "Staging", "--repository", "acme/shop")
+	// bootstrap runs the target's, with the repository named, and prints
+	// what it did with the value the target returned: the demo's schema
+	// is YAML, which bootstrap does not edit, so the property to add.
+	ext.Bootstrap.Values = []registry.BootstrapValue{{Key: "projectNumber", Value: "123456789012", Beside: "project"}}
+	out, err = run("bootstrap", "Staging", "--repository", "acme/shop")
 	require.NoError(t, err)
 	assert.Contains(t, ext.Provisioner.Calls(), "bootstrap Staging: repository acme/shop, credentials ")
+	assert.Equal(t, `projectNumber 123456789012: not recorded: bootstrap edits no YAML schema; in src/stack.schema.yaml, add projectNumber: "123456789012" beside project in the environment values of Staging`+"\n", out)
+	ext.Bootstrap.Values = nil
 
 	// destroy asks at a terminal, and runs with --yes.
 	_, err = run("destroy", "Staging")
@@ -377,6 +382,43 @@ func TestStackBuild(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	assert.Empty(t, result.Built)
 	assert.Equal(t, []string{"demo-api"}, result.Unchanged)
+}
+
+// TestStackBootstrapRecordsProjectNumber bootstraps Preview of the
+// TypeScript shop stack, which extends Staging: the number the target
+// returns is written beside Staging's project in the stack's schema file,
+// and a second bootstrap, which reads it back, leaves the file alone.
+func TestStackBootstrapRecordsProjectNumber(t *testing.T) {
+	stackDir := filepath.Join(prepareStackServicesRoot(t), "shop-stack")
+	schemaFile := filepath.Join(stackDir, "src", "stack.schema.ts")
+	before, err := os.ReadFile(schemaFile)
+	require.NoError(t, err)
+	run := func() string {
+		t.Helper()
+		ext := &stacktest.Extension{Bootstrap: &stacktest.FakeBootstrap{
+			Values: []registry.BootstrapValue{{Key: "projectNumber", Value: "123456789012", Beside: "project"}},
+		}}
+		var stdout, stderr bytes.Buffer
+		root := New(Config{}, ext)
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		root.SetArgs([]string{"stack", "bootstrap", "Preview", "--repository", "acme/shop", "--stack", stackDir, "--program-dir", t.TempDir()})
+		require.NoError(t, root.Execute(), stderr.String())
+		return stdout.String()
+	}
+	useTerminal(t, nil)
+
+	assert.Equal(t, "projectNumber 123456789012: recorded on Staging in src/stack.schema.ts\n", run())
+	after, err := os.ReadFile(schemaFile)
+	require.NoError(t, err)
+	staging := `fake: { project: "acme-staging", region: "us-east1" },`
+	require.Contains(t, string(before), staging)
+	assert.Equal(t, strings.Replace(string(before), staging, `fake: { project: "acme-staging", projectNumber: "123456789012", region: "us-east1" },`, 1), string(after))
+
+	assert.Equal(t, "projectNumber 123456789012: matches Staging in src/stack.schema.ts\n", run())
+	again, err := os.ReadFile(schemaFile)
+	require.NoError(t, err)
+	assert.Equal(t, string(after), string(again))
 }
 
 func TestParseGitHubRemote(t *testing.T) {

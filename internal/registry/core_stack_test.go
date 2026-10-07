@@ -162,7 +162,9 @@ func TestVerifyStack(t *testing.T) {
 		s := ir.NewSchema("shop-stack", ir.SchemaKindStack)
 		s.Types["Shop"] = &ir.TypeDef{Name: "Shop", Stack: &ir.StackDecl{Deploy: []ir.ServiceRef{api}, Expose: []ir.DeployableRef{{Deployable: "Backend"}}}}
 		s.Types["Backend"] = &ir.TypeDef{Name: "Backend", Server: &ir.ServerDecl{Serves: []ir.ServiceRef{api}}}
-		s.Types["Staging"] = &ir.TypeDef{Name: "Staging", Environment: &ir.EnvironmentDecl{Target: "fake", Settings: []*ir.DeployableSettings{{Of: ir.DeployableRef{Deployable: "Backend"}}}}}
+		// An environment with an order and one without, as a data form
+		// may write them.
+		s.Types["Staging"] = &ir.TypeDef{Name: "Staging", Environment: &ir.EnvironmentDecl{Target: "fake", Settings: []*ir.DeployableSettings{{Of: ir.DeployableRef{Deployable: "Backend"}}}, Order: 1}}
 		s.Types["Preview"] = &ir.TypeDef{Name: "Preview", Extends: "Staging", Environment: &ir.EnvironmentDecl{}}
 		return s
 	}
@@ -200,6 +202,8 @@ func TestVerifyStack(t *testing.T) {
 		{"settings of both", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0].Of = ir.DeployableRef{Service: &api, Deployable: "Backend"}
 		}, "names both service shop-api and deployable Backend"},
+		{"two environments with one order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = 1 }, "@environment classes Preview and Staging both have order 1"},
+		{"a negative order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = -1 }, "@environment class Preview has order -1; an order counts from 1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := valid()

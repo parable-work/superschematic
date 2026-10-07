@@ -34,9 +34,19 @@ WHERE c.relkind IN ('r', 'p', 'v', 'm', 'S')
 ORDER BY n.nspname, c.relname`
 
 // grantees lists the roles the connection's user, or a role it inherits,
-// gave privileges on the objects grantable lists or on a schema it owns,
-// other than the owners themselves and PUBLIC.
+// gave privileges on the objects grantable lists, or USAGE on a schema it
+// owns, other than the owners themselves, PUBLIC and the roles the user
+// is granted, directly or through other roles (mine, read from
+// pg_auth_members, since pg_has_role makes a superuser a member of every
+// role). On Cloud SQL the database's owner, cloudsqlsuperuser, a role the
+// migrator is granted, holds CREATE on the public schema from
+// pg_database_owner: that grant is the platform's, not one a job gave.
 const grantees = `
+WITH RECURSIVE mine(oid) AS (
+  SELECT oid FROM pg_roles WHERE rolname = current_user
+  UNION
+  SELECT m.roleid FROM pg_auth_members m JOIN mine ON m.member = mine.oid
+)
 SELECT r.rolname
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -47,6 +57,7 @@ WHERE c.relkind IN ('r', 'p', 'v', 'm', 'S')
   AND pg_has_role(c.relowner, 'USAGE')
   AND pg_has_role(a.grantor, 'USAGE')
   AND a.grantee <> c.relowner
+  AND a.grantee NOT IN (SELECT oid FROM mine)
 UNION
 SELECT r.rolname
 FROM pg_namespace n
@@ -56,6 +67,8 @@ WHERE n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'
   AND pg_has_role(n.nspowner, 'USAGE')
   AND pg_has_role(a.grantor, 'USAGE')
   AND a.grantee <> n.nspowner
+  AND a.privilege_type = 'USAGE'
+  AND a.grantee NOT IN (SELECT oid FROM mine)
 ORDER BY 1`
 
 // GrantReadWrite gives each role USAGE on the schemas that hold the
