@@ -537,7 +537,7 @@ credential with no value, with the terminal's echo off.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--repository` | read from the git remote `origin` | the GitHub repository the CI runs in, `owner/name` |
+| `--repository` | read from the git remote `origin` | the GitHub repository the CI runs in, `owner/name`; `""` leaves Workload Identity Federation out |
 
 ### `stack secrets set <environment> [Type.FIELD]`
 

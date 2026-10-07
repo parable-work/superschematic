@@ -661,7 +661,9 @@ superschematic stack outputs Staging --out outputs.json
   `<stack>-deployer` and read-only `<stack>-planner` accounts, the
   `builder` account Cloud Build runs as, the `migrator` account the
   migration job runs as, and Workload Identity Federation for the GitHub
-  repository of the git remote.
+  repository of the git remote. `--repository owner/name` names another
+  repository, and `--repository ""` leaves the federation out, for a
+  project no CI deploys to.
 - **`secrets set`** asks for each secret that has no value and stores it
   in Secret Manager. On a fresh environment, deploy first: its
   infrastructure step creates each secret's storage, and the deploy then
@@ -681,8 +683,11 @@ superschematic stack outputs Staging --out outputs.json
   database its privileges. The deploy records a manifest in the state
   bucket after every step, and refuses a migration hazard no `--allow`
   acknowledges.
-- **`destroy`** removes a run's resources and its manifest, and
-  **`outputs`** prints the applied outputs.
+- **`destroy`** removes a run's resources and its manifest, after you
+  type the run's name, or with `--yes`. What the stack's runs in the
+  project share stays: bootstrap's resources, the stack's images, its
+  migration job `<stack>-migrate`, and the build contexts and job
+  documents in the state bucket. **`outputs`** prints the applied outputs.
 
 A build's context is the repository root, cut down by the
 `Dockerfile.dockerignore` beside each server's Dockerfile. `--image
@@ -694,8 +699,17 @@ member takes its values with `--param pr=123`.
 The migration job's image is built once per release of the runner. A
 binary built from a checkout names no release, so set
 `SUPERSCHEMATIC_MIGRATE_IMAGE` to an image of `superschematic-migrate`, by
-digest, in the stack's repository. None of this has run against Google
-Cloud yet. The
+digest, in the stack's repository. After `bootstrap`, the checkout's
+`scripts/migrate-dev-image.sh` builds one from its `runtime/migrate/go` on
+Cloud Build, as the stack's `builder` account, and prints it:
+
+```sh
+export SUPERSCHEMATIC_MIGRATE_IMAGE="$(scripts/migrate-dev-image.sh acme-staging us-east1 shop-stack)"
+```
+
+acme-shop has run this way on a fresh project (milestone 3 of the stack
+model). A failed migration fails its step with the job execution's name
+and the URL of its logs, where the runner's error is. The
 [CLI reference](/superschematic/reference/cli/#stack-deploy-environment)
 has every flag, the hazard gate and the manifest.
 
