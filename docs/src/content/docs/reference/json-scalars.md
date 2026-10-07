@@ -24,9 +24,9 @@ A scalar whose language primitive is `object` says what JSON it holds
 through its `json_schema` type mapping: `object`, `array` or `any`. The
 validators take the mapping as the only sign that a scalar holds JSON, and
 a pattern or a length, which are rules on a string, cancels `object` or
-`array`. Without one of them, the schema
-runtimes and the engine would check the scalar's values as strings, while
-the generated Go, TypeScript, Python and Rust types hold an object
+`array`. Without one of them, the schema runtimes and the engine would
+check the scalar's values as strings, while the generated Go, TypeScript,
+Python and Rust types hold an object
 ([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-a-scalar-that-holds-json-says-which-json)).
 
 ```yaml
@@ -117,10 +117,10 @@ The typed decoders take only the object or array: the generated Go types,
 the Go API routes and the TypeScript API server answer the JSON text with
 `type`, or fail to decode it. The generated Rust validators pass the JSON
 text, and `parse_<type>` then fails to decode it, since serde reads the
-field as a map, a struct or a vector. The generated Python types read the JSON text
-into the value, and so does the Python SDK, which types a body argument of
-either scalar as the types package's alias and sends the object or array
-the text holds.
+field as a map, a struct or a vector. The generated Python types read the
+JSON text into the value, and so does the Python SDK, which types a body
+argument of such a scalar as the types package's alias and sends the
+object or array the text holds.
 
 `Generic.JSON` takes any JSON value but null: an object, an array, a
 string, a number or a boolean, with no type check. A null or missing
@@ -165,19 +165,26 @@ lists or map that is null is absent, as any other list or map is. A
 `Geo.Location` is a point: a JSON object of two numbers in decimal
 degrees, `{"lat": 37.7749, "lon": -122.4194}`, with `lat` from -90 to 90
 and `lon` from -180 to 180, each bound included, and no other key.
-superscalar checks it, so the `"lat,lon"` string, an unknown, missing or
-duplicate key, a member that is not a number and a degree out of range are
-refused. Its canonical text writes each number as `JSON.stringify` does:
+superscalar refuses the `"lat,lon"` string, an unknown, missing or
+duplicate key, a member that is not a number and a degree out of range,
+and every validator hands it the value (the exception is below). Its
+canonical text writes each number as `JSON.stringify` does:
 `{"lat": 90.0, "lon": -180}` reads back as `{"lat":90,"lon":-180}`
 ([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-geolocation-is-a-lat-lon-object)).
 
 `{"lat": 0, "lon": 0}` is a location, not a missing one. The generated Go
 types tell it apart from an absent or null value: a type's `UnmarshalJSON`
-notes a required `Geo.Location` the JSON left out, which `Validate`
-reports as `required`, and checks each value's own JSON with superscalar,
-so an unknown or missing key, which `encoding/json` would drop or zero-fill,
-is refused at its path as `custom`. A value set after decoding is checked
-as set.
+notes a required `Geo.Location`, or a value of a required map of them,
+that the JSON left absent or null, which `Validate` reports as `required`.
+It also checks each value's own JSON with superscalar, so an unknown or
+missing key, which `encoding/json` would drop or zero-fill, is refused at
+its path as `custom`; a `@strictJSON` type's decoder refuses an unknown
+key outright. A value set after decoding is checked as set.
+
+The exception is a body argument of a Go API route, which the route
+decodes on its own: its `Geo.Location` is checked as its Go value, so an
+out-of-range degree is refused, but an unknown key is dropped and a
+missing one reads as 0.
 
 In Postgres a `Geo.Location` column is a `POINT`, which is `(x, y)`: x is
 the longitude and y the latitude, so `{"lat": 37.7749, "lon": -122.4194}`

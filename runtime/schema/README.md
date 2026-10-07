@@ -149,7 +149,7 @@ although the row says `String`:
   or array; validation refuses any other JSON type as `type` and hands the
   scalar core the value's JSON text, which names what it refuses its own
   way (`pattern` in the Go runtime, the core's name in the TypeScript
-  runtime, `custom` in the Python runtime, whose registry reads a scalar's
+  runtime, `custom` in the Python runtime, whose registries read a scalar's
   flat name as its canonical one). An empty string is no value. A scalar
   that also has a pattern or a length keeps the `String` checks.
 

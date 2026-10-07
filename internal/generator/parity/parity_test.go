@@ -586,17 +586,13 @@ type parityVector struct {
 	core []string
 }
 
-// coreFailureName is the name a validator gives a failure only the scalar
-// core finds, when it does not use the core's own (D14): the generated
-// Python validator says "invalid", and the Go and Python schema runtimes say
-// "pattern" and "custom", which their suites apply from the corpus's core
-// list. The generated Go, TypeScript and Rust validators and the TypeScript
-// runtime use the core's name.
-var coreFailureName = map[string]string{
-	"python":         "invalid",
-	"go-runtime":     "pattern",
-	"python-runtime": "custom",
-}
+// coreFailureName is the name a generated validator gives a failure only
+// the scalar core finds, when it does not use the core's own (D14): the
+// generated Python validator says "invalid". The generated Go, TypeScript
+// and Rust validators use the core's name. Of the schema runtimes, which
+// read the corpus's core list in their own suites, the TypeScript one uses
+// the core's name, the Go one says "pattern" and the Python one "custom".
+var coreFailureName = map[string]string{"python": "invalid"}
 
 // coreFailureAtField lists the validators that check a list field's values
 // together and so name a core-only failure in it once, at the field: the
