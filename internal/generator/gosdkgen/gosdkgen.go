@@ -36,6 +36,21 @@ func SetReplacePaths(output *SDKOutput, paths naming.LocalPaths, outputDir strin
 	return nil
 }
 
+// SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
+// modules the SDK reaches: the scalar library and the schema IR through its
+// types module and, when an endpoint takes filters, the HTTP runtime and
+// the schema runtime it builds on. go.mod requires those it requires at
+// their pins and replaces every version of each pinned module with its
+// pin.
+func SetReleasePins(output *SDKOutput, pins naming.Pins) {
+	n := output.Naming
+	modules := []string{n.ScalarGoModule, n.SchemaIRGoModule}
+	if output.HasFilterableEndpoints {
+		modules = append(modules, n.HTTPRuntimeGoModule, n.SchemaRuntimeGoModule)
+	}
+	output.Pins = pins.Of(modules...)
+}
+
 // SDKOutput contains all generated Go SDK metadata.
 type SDKOutput struct {
 	SchemaName             string
@@ -44,7 +59,8 @@ type SDKOutput struct {
 	TypesModule            string
 	TypesReplacePath       string
 	TypeModuleReplaces     []ModuleReplace
-	HTTPRuntimeReplacePath string // set by SetReplacePaths; empty omits the directive
+	HTTPRuntimeReplacePath string      // set by SetReplacePaths; empty omits the directive
+	Pins                   naming.Pins // set by SetReleasePins; empty pins nothing
 	SDKStructName          string
 	Namespaces             []NamespaceInfo
 	HasAuth                bool

@@ -1423,11 +1423,13 @@ one of two places (D47, amended):
   `CGO_LDFLAGS` at it. The server's `go.mod` replaces each runtime module
   no `[paths]` key names, every version of it, with the module at the
   release: superschematic's at the release's tag and superscalar's Go
-  binding at the version the release links, since the generated modules
-  require them at versions only a checkout's replace resolves. A binary
-  built from a checkout is no release, and one the release workflow did
-  not build names no digests: neither writes a Dockerfile without `[paths]
-  scalar_go`, and the build says why.
+  binding at the version the release links, since the runtime modules
+  require one another at versions only a checkout's replace resolves.
+  Every generated Go module's `go.mod` pins the ones it reaches the same
+  way, so each also builds on its own. A binary built from a checkout is
+  no release, and one the release workflow did not build names no
+  digests: neither writes a Dockerfile without `[paths] scalar_go`, and
+  the build says why.
 
 Either way the Go stage, on the Go release `tools.env` pins, builds the
 server with `-mod=mod`, and the binary runs on distroless `cc`, which

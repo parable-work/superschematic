@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -284,23 +283,21 @@ func (r run) implementation(service string) (impl servergen.Implementation, newM
 // ORM of its database, the SDK of each API it calls, and the runtime
 // modules. The API module and the packages its Deps imports are direct.
 // A runtime module no [paths] key names a checkout of is pinned to the
-// release that generates the server, which the module proxy serves:
-// superschematic's at the release's tag, superscalar's at the version the
-// release links and builds its static archives from (D47, amended). A
-// binary built from a checkout names no release, and pins none.
+// release that generates the server, which the module proxy serves
+// (releasePins).
 func (r run) goServerModules(o *apigen.APIOutput) []servergen.Module {
 	out, paths, n := r.Options.OutputRoot, r.Options.Paths, r.Options.Naming
-	rel, defaults := r.Options.ReleaseInfo(), naming.Default()
+	pins := r.releasePins()
 	runtimeModule := func(module, dir string, direct bool) servergen.Module {
 		m := servergen.Module{Path: module, Dir: dir, Direct: direct}
-		if dir == "" && rel.Version != "" && slices.Contains([]string{defaults.HTTPRuntimeGoModule, defaults.SchemaRuntimeGoModule, defaults.SchemaIRGoModule, defaults.VersionGraphGoModule}, module) {
-			m.Version, m.Pinned = rel.ModuleVersion(), true
+		if version, ok := pins[module]; ok {
+			m.Version, m.Pinned = version, true
 		}
 		return m
 	}
-	scalar := servergen.Module{Path: n.ScalarGoModule, Dir: paths.ScalarGo, Version: "v1.0.0"}
-	if paths.ScalarGo == "" && rel.Version != "" && rel.ScalarGo != "" && n.ScalarGoModule == defaults.ScalarGoModule {
-		scalar.Version, scalar.Pinned = rel.ScalarGo, true
+	scalar := runtimeModule(n.ScalarGoModule, paths.ScalarGo, false)
+	if !scalar.Pinned {
+		scalar.Version = "v1.0.0"
 	}
 	modules := []servergen.Module{
 		{Path: o.ModulePath, Dir: APIDir(out, o.SchemaName), Direct: true},

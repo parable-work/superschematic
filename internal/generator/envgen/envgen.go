@@ -47,6 +47,10 @@ type ConfigOutput struct {
 	// targets computed by SetReplacePaths. Empty values omit the directive.
 	ScalarLibReplacePath string
 	SchemaIRReplacePath  string
+	// Pins are the runtime modules the standalone module's go.mod takes
+	// from the module proxy, at the release that generates it
+	// (SetReleasePins).
+	Pins naming.Pins
 	// Fields are the environment variable fields to generate.
 	Fields []ConfigField
 	// Enums are enum types used by the config fields.
@@ -623,6 +627,14 @@ func SetReplacePaths(output *ConfigOutput, paths naming.LocalPaths, outputDir st
 		return fmt.Errorf("schema-ir replace path: %w", err)
 	}
 	return nil
+}
+
+// SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
+// modules the standalone module reaches through its types module: the
+// scalar library and the schema IR. go.mod replaces every version of each
+// pinned module with its pin.
+func SetReleasePins(output *ConfigOutput, pins naming.Pins) {
+	output.Pins = pins.Of(output.Naming.ScalarGoModule, output.Naming.SchemaIRGoModule)
 }
 
 // WriteConfigModule writes a standalone generated environment config module.
