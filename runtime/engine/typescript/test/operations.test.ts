@@ -261,6 +261,7 @@ describe('the describe and tools routes', () => {
       'engine.defineSchema',
       'engine.listBehaviors',
       'engine.describeBehavior',
+      'engine.getValue',
       'item.get',
       'item.list',
       'item.history',

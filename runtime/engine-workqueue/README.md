@@ -17,7 +17,9 @@ expiry on the engine's runner and directives to its holder;
 heartbeat on an instance that stands for a worker; `Blueprint`, children
 created with their parent; `Budget`, reserve-then-settle budgets across
 enclosing scopes; and `Retries`, failure classes with caps, kept results
-and stuck detection. That is every work-queue behavior D16 lists.
+and stuck detection. That is every work-queue behavior D16 lists. A
+worker that runs a handler over the instances a process claims, through
+the engine's HTTP API, is the `./worker` subpath ("The worker").
 
 ```ts
 import { openEngine } from '@superschematic/engine';
@@ -449,7 +451,8 @@ to pin, so its staleness is not one Queue can read.
 
 A heartbeat on an instance that stands for a worker. The instance's
 `principalField` holds the subject of the principal it stands for, and
-only that principal may beat it.
+only that principal may beat it. The worker's `presence` option beats
+one for a worker process ("The worker").
 
 | | |
 | --- | --- |
@@ -896,6 +899,126 @@ no candidate of Queue's `claimNext`, which copies the exhaustion
 a lease is active, `Lease`'s guard keeps it to the holder, as any writing
 operation, and to the current token when the caller presents one.
 
+## The worker
+
+`@superschematic/engine-workqueue/worker` runs a handler over the
+instances a process claims from a schema that composes `Queue` and
+`Lease`, through the engine's HTTP API (D16, amended). It is the loop
+every worker process would otherwise write by hand: claim, heartbeat,
+acknowledge directives, stop writing once the lease is gone, record the
+attempt, release or abandon, hand back what it holds at shutdown, and beat
+the `Presence` instance the worker stands for. It
+imports only `@superschematic/engine/client`, so a worker process loads
+no SQLite and no behavior, and runs wherever the client does
+(`tsconfig.worker.json` compiles it with the DOM's globals and no Node.js
+types).
+
+```ts
+import { EngineClient } from '@superschematic/engine/client';
+import { QueueWorker, WorkFailure } from '@superschematic/engine-workqueue/worker';
+
+const client = new EngineClient({ baseUrl: 'https://jobs.internal/api', serviceCredential });
+const worker = new QueueWorker(client, {
+  schema: 'jobs',
+  match: { topic: ['search', 'mail'] },
+  concurrency: 4,
+  presence: { schema: 'workers', id: 'indexer-1' },             // beaten while it runs
+  handle: async (job) => {
+    job.onDirective((directive) => { if (directive.name === 'cancel') cancel.abort(); });
+    const { data } = await job.instance.get();
+    const pages = await crawl(data, { signal: job.signal });    // stops when the lease is lost
+    if (pages === undefined) throw new WorkFailure('timed out', { failure: 'timeout', attempt: { detail: { after: '30s' } } });
+    await job.instance.update({ pages });                       // presents the lease's token
+    return { transition: 'done', attempt: { score: 1 } };
+  },
+  onError: (error, job) => log.warn({ error, job: job?.id }),
+});
+await worker.start();
+process.on('SIGTERM', () => worker.stop());
+```
+
+| Option | Default | What it is |
+| --- | --- | --- |
+| `schema`, `namespace` | the client's namespace | the schema to claim from |
+| `match`, `assignedOnly`, `ttlMs` | none, the config's lease | what `claimNext` takes; `ttlMs` is also the lease's length the worker counts |
+| `concurrency` | 1 | jobs it works at once |
+| `heartbeatMs` | the claim's | milliseconds between heartbeats, at most the claim's |
+| `idle` | `{ initialMs: 250, maxMs: 10000 }` | the wait between looks at an empty queue, doubling |
+| `wakeOnEvents` | true | whether the schema's event stream wakes an idle worker |
+| `presence` | none | `{ schema, id, beatMs? }`: the `Presence` instance the worker stands for, in its namespace; `beatMs` is a third of the Presence `ttlMs` by default, at most half of it |
+| `handle(job)` | | runs once per claimed instance |
+| `onError(error, job?)` | none | hears a failed claim, heartbeat, beat, terminal step or listener, a `PresenceLostError`, and an error a handler threw that is not a `WorkFailure` |
+
+- **Start.** `start()` reads the schema's describe document. A schema
+  that does not compose `Queue` and `Lease` is refused; `Retries` decides
+  whether attempts are recorded; the worker's `ttlMs`, else Lease's
+  `ttlMs` (60000 when absent), is the lease's length. With `presence`,
+  it reads that schema's document too, which must compose `Presence`, and
+  beats the instance before it claims: a refused or failed beat rejects
+  the start.
+- **Claims.** It calls `claimNext` until it holds `concurrency` jobs or
+  the queue is empty. An empty queue is watched, not polled: the schema's
+  event stream, heartbeats excluded, wakes it, and between events it
+  looks again after the `idle` backoff with `countClaimable`, a read that
+  takes no write lock, and claims only when that counts work. A daily
+  meter's new day makes work claimable with no event; the backoff finds
+  it.
+- **Heartbeats.** Each job heartbeats at its interval with the token as
+  Lease's precondition. The directives a heartbeat returns go to the
+  job's `onDirective` listeners, once each and in order; one sent before
+  a listener is added waits for it. The next heartbeat acknowledges those
+  the listeners heard (`acknowledge`), in its own write.
+- **The job.** `job.id`, `job.token`, `job.signal`; `job.instance`, the
+  claimed instance, which reads freely and adds `{ Lease: { token } }` to
+  each write (`update`, `delete`, `invoke`, `operate`, and a call that
+  gives a `Lease` entry of its own is a `TypeError`); `job.client`, the
+  client, for anything else, with no token.
+- **Losing the lease.** The lease is lost when Lease vetoes a heartbeat or
+  a fenced write `lapsed`, `token_stale`, `not_holder` or `not_leased`,
+  when a heartbeat answers `not_found` (the instance was deleted), and
+  when no heartbeat has succeeded for the lease's length since the last
+  renewing request was sent, by the worker's own clock (`unrenewed`).
+  `job.signal` aborts with a `LeaseLostError` (`reason`), a fenced write
+  throws it without being sent, so a worker a partition cut off does not
+  write when it heals, and the worker writes nothing more for the job.
+  The job holds its place in `concurrency` until the handler returns.
+- **Presence.** With `presence`, the worker beats the instance as the
+  client's principal, every `beatMs` from when the last beat was sent, on
+  a timer of its own, so a busy handler does not hold it back (one that
+  blocks the event loop does). It claims only while its presence holds
+  (`worker.present`). A beat the engine refuses, a 4xx but 408 and 429
+  (`not_principal`, `no_principal`, `not_found`, `forbidden`), loses it at
+  once (`refused`); no successful beat for the Presence `ttlMs` since the last one was
+  sent, by the worker's clock, loses it too (`lapsed`). `onError` hears
+  each failed beat and, once per loss, a `PresenceLostError` (`reason`).
+  The worker then claims nothing, and beats on; the next beat that
+  succeeds brings it back, and it looks for work at once. The jobs it
+  holds go on under their own heartbeats: a miss spares a lease renewed
+  after the worker's last beat and expires the rest, which their next
+  heartbeat finds (`token_stale`). Keep the lease's heartbeats at most
+  the presence `ttlMs` apart ("Deadline and miss").
+- **Stopping.** `stop({ drain, timeoutMs })` claims nothing more and
+  closes the stream. It waits for the jobs it holds, up to `timeoutMs`
+  (30000; `drain: false` waits for none), then aborts the rest with a
+  `WorkerStoppedError`, releases their leases, which counts nothing and
+  moves them by `onExpiry`, and refuses their handlers' later writes
+  (`LeaseLostError`, `released`). It beats until then, and stops beating
+  once nothing is held, so its instance is missed a `ttlMs` later with no
+  lease left to release. It resolves once nothing is held.
+
+The handler's outcome is the job's terminal step:
+
+| The handler | Then |
+| --- | --- |
+| returns `{ transition, attempt? }` | `recordAttempt(attempt)`, a success, when the type composes Retries; Workflow's `transition` to the state; `release` |
+| returns `{ release: true }`, or nothing | `release`: the job goes back as it is, and `onExpiry` moves its status |
+| throws `WorkFailure(message, { failure, attempt? })` | `recordAttempt({ failure, ...attempt })` when the type composes Retries; `release`, or `release({ abandon: true })` with `abandon: true` |
+| throws any other error | `onError`; `release({ abandon: true })`, an expiry toward `maxExpiries`, so a job no worker can finish escalates rather than coming back forever |
+| anything, once the lease is lost | nothing |
+
+A step refused other than by losing the lease is reported, and the job
+still ends with its release.
+
 ## Development
 
 ```
@@ -913,4 +1036,7 @@ The tests import the built package from `dist/` and the engine from
 `node_modules`, open real SQLite files in temporary directories with a
 clock they move, and on Bun run against both adapters.
 `test/package.test.ts` runs the documents the core binary builds in
-`make cli-smoke` (`fixture-workqueue-json`).
+`make cli-smoke` (`fixture-workqueue-json`). `test/worker.test.ts` runs
+the worker against an engine served in process, the app's fetch standing
+in for the network, on a clock it moves ahead of the worker's to lapse a
+lease.

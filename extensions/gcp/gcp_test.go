@@ -260,6 +260,26 @@ func TestPreviewInherits(t *testing.T) {
 	}
 }
 
+// TestProjectNumber: projectNumber, which bootstrap records (D47), is an
+// optional value of the project's digits, and an environment that extends
+// one inherits it.
+func TestProjectNumber(t *testing.T) {
+	reg := assemble(t)
+	s := shop()
+	s.Environments[0].Values["projectNumber"] = "123456789012"
+	if got := resolve(t, reg, s, stacktest.AcmeShop(), "Preview").Values["projectNumber"]; got != "123456789012" {
+		t.Errorf("Preview's projectNumber = %v, want Staging's", got)
+	}
+	for _, bad := range []any{"acme-staging", "0123456789", "1234", float64(123456789012)} {
+		s := shop()
+		s.Environments[0].Values["projectNumber"] = bad
+		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+		if err == nil || !strings.Contains(err.Error(), "projectNumber") {
+			t.Errorf("projectNumber %v: err = %v, want a refusal naming projectNumber", bad, err)
+		}
+	}
+}
+
 // TestPublicImportsOnly holds the extension to the D10 promise: it imports
 // the public packages and the IR, never an internal package of the core.
 func TestPublicImportsOnly(t *testing.T) {
