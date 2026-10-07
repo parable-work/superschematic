@@ -824,6 +824,10 @@ func refineRustScalarType(scalar *codegen.ScalarInfo, scalarDef *ir.ScalarDef) {
 //   - UUID-like scalars -> <scalarCrate>::Uuid (canonical base62 serde)
 //   - Temporal.DateTime -> <scalarCrate>::DateTime (chrono<Utc> newtype
 //     with canonical Go-RFC3339Nano serde; the analog of Go's `time.Time`)
+//   - a catalog type in the superscalar crate itself
+//     (Geo.Location's superscalar::metadata::geo_location::Location) ->
+//     the same path under <scalarCrate>, so a renamed scalar crate still
+//     names it
 func remapScalarLibType(targetType string, scalar codegen.ScalarInfo, scalarCrate string) string {
 	if scalar.Traits.IsUUIDLike || strings.TrimSpace(targetType) == "uuid::Uuid" {
 		return scalarCrate + "::Uuid"
@@ -831,8 +835,15 @@ func remapScalarLibType(targetType string, scalar codegen.ScalarInfo, scalarCrat
 	if scalar.Name == "Temporal.DateTime" {
 		return scalarCrate + "::DateTime"
 	}
+	if path, ok := strings.CutPrefix(strings.TrimSpace(targetType), superscalarRustCrate+"::"); ok {
+		return scalarCrate + "::" + path
+	}
 	return targetType
 }
+
+// superscalarRustCrate is the crate superscalar's catalog names its own
+// Rust types under, whatever the generated crates call the scalar crate.
+const superscalarRustCrate = "superscalar"
 
 // fieldTypeMapperRust maps IR type references to Rust types.
 func fieldTypeMapperRust(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
