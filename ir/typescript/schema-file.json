@@ -3468,6 +3468,12 @@
         "traitConfig": {
           "$ref": "#/$defs/TraitConfigSchema"
         },
+        "user": {
+          "$ref": "#/$defs/UserTrait"
+        },
+        "userRole": {
+          "$ref": "#/$defs/UserRoleTrait"
+        },
         "versionGraph": {
           "$ref": "#/$defs/VersionGraphConfig"
         },
@@ -3568,6 +3574,27 @@
         "name",
         "types",
         "kind"
+      ],
+      "type": "object"
+    },
+    "UserRoleTrait": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "UserTrait": {
+      "additionalProperties": false,
+      "properties": {
+        "login": {
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "login"
       ],
       "type": "object"
     },

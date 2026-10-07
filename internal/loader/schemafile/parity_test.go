@@ -133,6 +133,16 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a service clause on a set and an operation", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "require", "from": ["orders-api"]}, "operations": [
 		{"name": "release", "typeRef": {"name": "Order"}, "auth": true, "serviceCallers": {"mode": "allow", "from": []}}]}`},
 	{"a service clause mode outside the enum", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "sometimes"}, "operations": []}`},
+	// The user model's traits (D50): User's config and UserRole's empty
+	// object, which a pointer keeps.
+	{"the user model's traits", "core", `{"kind": "DB", "name": "accounts", "types": {
+		"Account": {"name": "Account", "role": "DBTable", "user": {"login": "email", "name": "displayName"}},
+		"Admin": {"name": "Admin", "role": "DBTable", "user": {"login": "handle", "name": ""}},
+		"Role": {"name": "Role", "role": "DBTable", "userRole": {}}}}`},
+	{"a user trait without its login", "core", `{"name": "Account", "role": "DBTable", "user": {"name": "displayName"}}`},
+	{"an unknown key on a user trait", "core", `{"name": "Account", "role": "DBTable", "user": {"login": "email", "password": "secret"}}`},
+	{"a key on a userRole trait", "core", `{"name": "Role", "role": "DBTable", "userRole": {"permissions": "permissions"}}`},
+	{"null for a userRole trait", "core", `{"name": "Role", "role": "DBTable", "userRole": null}`},
 
 	// The invocation policy.
 	{"visible tool without a policy gets the default", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [

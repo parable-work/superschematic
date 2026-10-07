@@ -50,3 +50,34 @@ func TestReadFileMissing(t *testing.T) {
 		t.Fatal("ReadFile succeeded on a missing file")
 	}
 }
+
+// TestReadUserTraits: a type carries the user model's traits (D50) as
+// user: { login, name? } and userRole: {}, and the JSON Schema closes both.
+func TestReadUserTraits(t *testing.T) {
+	doc, err := Read([]byte(`{
+		"kind": "DB",
+		"types": {
+			"Account": {"name": "Account", "role": "DBTable", "user": {"login": "email", "name": "displayName"}},
+			"Role": {"name": "Role", "role": "DBTable", "userRole": {}}
+		}
+	}`), "accounts.schema.json")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if user := doc.Types["Account"].User; user == nil || user.Login != "email" || user.Name != "displayName" {
+		t.Errorf("Account.User = %+v", user)
+	}
+	if doc.Types["Role"].UserRole == nil {
+		t.Error("Role.UserRole is nil")
+	}
+
+	for _, tc := range []struct{ payload, want string }{
+		{`{"name": "Account", "role": "DBTable", "user": {"name": "displayName"}}`, "missing property 'login'"},
+		{`{"name": "Account", "role": "DBTable", "user": {"login": "email", "field": "x"}}`, "'field' not allowed"},
+		{`{"name": "Role", "role": "DBTable", "userRole": {"name": "x"}}`, "'name' not allowed"},
+	} {
+		if _, err := Read([]byte(tc.payload), "accounts.schema.json"); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Read(%s) error = %v, want one naming %s", tc.payload, err, tc.want)
+		}
+	}
+}

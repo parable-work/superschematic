@@ -127,3 +127,33 @@ sparkles: true
 		t.Errorf("error %q does not mention the unknown key", err.Error())
 	}
 }
+
+// TestReadUserTraits: the YAML form carries the user model's traits (D50)
+// as the JSON form does, userRole as an empty mapping.
+func TestReadUserTraits(t *testing.T) {
+	src := `kind: DB
+types:
+  Account:
+    name: Account
+    role: DBTable
+    user: { login: handle }
+  Role:
+    name: Role
+    role: DBTable
+    userRole: {}
+`
+	doc, err := Read([]byte(src), "accounts.schema.yaml")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if user := doc.Types["Account"].User; user == nil || user.Login != "handle" || user.Name != "" || user.NameField() != "handle" {
+		t.Errorf("Account.User = %+v", user)
+	}
+	if doc.Types["Role"].UserRole == nil {
+		t.Error("Role.UserRole is nil")
+	}
+
+	if _, err := Read([]byte("name: Role\nrole: DBTable\nuserRole: true\n"), "role.schema.yaml"); err == nil {
+		t.Error("Read accepted a userRole that is not a mapping")
+	}
+}
