@@ -3919,3 +3919,25 @@ operation refuses it though section 9.3's check counts it, which section
 9.9 of `docs/stack-model.md` leaves open.
 
 The rule is reversible until the first release.
+
+## D47. A CI renderer writes each stack's workflow from its environments, and the project's number is a gcp value bootstrap records in the schema
+
+Milestone 6 of `docs/stack-model.md` generates a stack's CI. Section 11.3
+sketched it: a workflow per stack, checks and previews on a pull request,
+deploys on merge and approval, and Workload Identity Federation as
+bootstrap's `planner` and `deployer`. Designing it settled the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A CI renderer is a registration, `registry.CIRendererSpec`: a name, its install directory, and a `Render` from the stack, its resolved environments and the release that renders to files. The core registers `github`, GitHub Actions. A stack opts in with `outputs.ci.<renderer>` in its config; the Stack kind's `ci` generator writes the files under `<output-root>/ci/<stack>/` and installs them under the repository root (`InstallTargetDir`) when the directory exists. | Every stack writing into `.github/workflows`, which an example in a repository with CI of its own would fill with workflows nobody asked for. A `stack ci` command, a second way to write an output the build owns. The renderer in an extension module: a workflow is text, with no dependency to keep out of the core. |
+| A target says how a CI job signs in to an environment through a seam on `TargetSpec`, `CI`: for a resolved environment and a role, `planner` or `deployer`, an identity a renderer turns into its own steps. gcp's is Workload Identity Federation: the provider `projects/<projectNumber>/locations/global/workloadIdentityPools/<stack>-github/providers/github` and the role's account, `<stack>-<role>@<project>.iam.gserviceaccount.com`, both bootstrap's (section 7.3). An environment the seam gives nothing for has no cloud jobs. | Each renderer knowing each target's sign-in, so every target edits every renderer. Account names entered in the stack, which bootstrap already decides. |
+| The project's number is a gcp value, `projectNumber`, a string of digits beside `project`: the provider's name holds it, and nothing else the environment declares gives it. Bootstrap returns it, and the core records it in the schema source: on the environment whose declaration sets `project`, written when absent, written again and reported when it differs, and left alone when it matches. A TypeScript schema changes in that property's text alone, through the compiler's syntax tree; for a JSON or YAML schema the core prints the property to add. A person may correct it by hand like any value. | GitHub repository variables that bootstrap sets, which need an admin token and keep the value outside the repository. A file bootstrap writes and the build reads, which a person correcting it would edit as generated output. The engineer entering it, with nothing to record or check it. |
+| Environments keep their declaration order. The TypeScript reader numbers each `@environment` class (`EnvironmentDecl.Order`): schema files in path order, and a file's classes in source order. `ir.StackOf` orders the stack's environments by it, then by name; a data form writes `order` itself. The workflow deploys the cloud environments without parameters in that order: the first on a push to the branch, each later one after the one before, in a GitHub environment of its name, whose required reviewers approve it. | Name order, which puts Production before Staging. A trigger on each environment, or a promotion list on `@stack`, which restate what the order already says. |
+| A pull request runs a `check` job with no credentials (levels 1 to 3), `stack plan` as `planner` per cloud environment without parameters (levels 5 and 6), and a member of each environment with one parameter, deployed as `deployer` with the pull request's number and destroyed when it closes. A fork's pull request runs `check` alone. | Level 4, `stack dev` with Docker, on every pull request, which an engineer runs on their machine. A workflow per environment, whose order across files GitHub cannot express. A reusable workflow or published action, a second artifact to version beside the binary. |
+| The workflow installs the release that generated it, from the release page of the binary's module, checked against the release's `SHA256SUMS`. The version comes from the binary's build information, as gcp's migration image does (D46); a binary built from a checkout has none, and its workflow's install step fails and says to generate again with a release. | `go install`, which refuses a module with `replace` directives (section 13 of `docs/stack-model.md`). The latest release, which changes a repository's CI with no change in it. |
+
+Status: not built. `projectNumber` is in gcp's values schema; bootstrap
+does not record it yet, the readers do not number environments, and no
+renderer, generator or CI seam exists.
+
+The rule is reversible until the first release.
