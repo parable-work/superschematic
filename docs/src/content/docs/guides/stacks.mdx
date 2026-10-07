@@ -323,7 +323,9 @@ and its decorator a key of the type. A handle is `{ name, kind }`; an
 `expose` entry or a settings `of` is `{ service: { name, kind } }` or
 `{ deployable: Orders }`; the target's values sit under `values`, platform
 settings under each element's `values`, and an `env` value is `{ value }`
-or `{ parameter }`:
+or `{ parameter }`. An environment's `order` is its place among the
+stack's environments, from 1, which TypeScript takes from where the class
+is declared:
 
 ```yaml
 # schemas/services/shop-stack/src/stack.schema.yaml (excerpt)
@@ -333,6 +335,7 @@ types:
     name: Production
     role: EmbeddedStruct
     environment:
+      order: 3
       target: gcp
       values: { project: acme-prod, region: us-east1, production: true }
       domain: acme.dev
@@ -371,6 +374,12 @@ target, values and settings, which merge key by key, and adds its own
 parameters to the parent's. `Preview` above inherits Staging's project and
 domain, and each of its members is named with the value of `pr` at deploy
 time. A parameter's value is never written into a generated file.
+
+The environments keep the order the schema declares them in: its schema
+files in path order, and the classes of a file in source order. Above,
+that is Dev, Staging, Production and Preview. In a data form each
+environment's `order` gives it, and one without comes after those with
+one, by name; two environments with one order fail the build.
 
 ## Build a stack
 

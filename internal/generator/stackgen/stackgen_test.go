@@ -164,24 +164,20 @@ func TestUnresolvedStackFailsTheBuild(t *testing.T) {
 	}
 }
 
-// byName orders a stack's environments by name, as StackOf gives them.
-func byName(s *ir.Stack) *ir.Stack {
-	sort.Slice(s.Environments, func(i, j int) bool { return s.Environments[i].Name < s.Environments[j].Name })
-	return s
-}
-
 // TestTheTypeScriptStackIsStacktestsShop: the decorators build the stack
-// stacktest writes by hand.
+// stacktest writes by hand, its environments in the order the schema
+// declares them, Staging, Production and Preview, which is not their names'.
 func TestTheTypeScriptStackIsStacktestsShop(t *testing.T) {
 	reg := assemble(t)
 	schema, _ := load(t, reg, filepath.Join(servicesRoot, "shop-stack"))
 	got := ir.StackOf(schema)
-	if want := byName(stacktest.Shop()); !reflect.DeepEqual(got, want) {
+	if want := stacktest.Shop(); !reflect.DeepEqual(got, want) {
 		t.Errorf("StackOf =\n%s\nwant\n%s", dump(t, got), dump(t, want))
 	}
 }
 
-// TestTheYAMLStackLoadsToTheSameIR: the data form declares the same stack.
+// TestTheYAMLStackLoadsToTheSameIR: the data form declares the same stack,
+// each environment's order written as the TypeScript reader numbers it.
 func TestTheYAMLStackLoadsToTheSameIR(t *testing.T) {
 	reg := assemble(t)
 	ts, _ := load(t, reg, filepath.Join(servicesRoot, "shop-stack"))
@@ -197,6 +193,9 @@ func TestTheYAMLStackLoadsToTheSameIR(t *testing.T) {
 		}
 		if td.Role != other.Role || td.Extends != other.Extends {
 			t.Errorf("type %s: role %s extends %q in YAML, %s extends %q in TypeScript", name, other.Role, other.Extends, td.Role, td.Extends)
+		}
+		if td.Environment != nil && other.Environment != nil && td.Environment.Order != other.Environment.Order {
+			t.Errorf("environment %s: order %d in YAML, %d in TypeScript", name, other.Environment.Order, td.Environment.Order)
 		}
 	}
 	if len(yaml.Types) != len(ts.Types) {
