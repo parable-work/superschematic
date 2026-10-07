@@ -545,13 +545,17 @@ func (c *googleCloud) RunBuild(ctx context.Context, project, region string, spec
 	if err != nil {
 		return nil, fmt.Errorf("gcp: start the build of %s: %w", spec.Image, err)
 	}
-	logs := ""
-	if meta, merr := op.Metadata(); merr == nil && meta.GetBuild() != nil {
-		logs = meta.GetBuild().GetLogUrl()
+	// The operation of a build in a region is one the operations service
+	// does not find, so op.Wait fails with NotFound at once: the build
+	// itself is polled, by the name its operation's metadata gives it.
+	meta, err := op.Metadata()
+	if err != nil || meta.GetBuild().GetId() == "" {
+		return nil, fmt.Errorf("gcp: the build of %s started, but its operation %s names no build: %v", spec.Image, op.Name(), err)
 	}
-	done, err := op.Wait(ctx)
+	name := fmt.Sprintf("projects/%s/locations/%s/builds/%s", project, region, meta.GetBuild().GetId())
+	done, err := c.waitBuild(ctx, name)
 	if err != nil {
-		return nil, fmt.Errorf("gcp: the build of %s failed (logs: %s): %w", spec.Image, logs, err)
+		return nil, fmt.Errorf("gcp: the build of %s (logs: %s): %w", spec.Image, meta.GetBuild().GetLogUrl(), err)
 	}
 	if done.GetStatus() != cloudbuildpb.Build_SUCCESS {
 		return nil, fmt.Errorf("gcp: the build of %s ended %s: %s (logs: %s)", spec.Image, done.GetStatus(), done.GetStatusDetail(), done.GetLogUrl())
@@ -562,6 +566,38 @@ func (c *googleCloud) RunBuild(ctx context.Context, project, region string, spec
 		}
 	}
 	return nil, fmt.Errorf("gcp: the build of %s pushed no image of that name (logs: %s)", spec.Image, done.GetLogUrl())
+}
+
+// buildPoll is how often waitBuild reads a running build.
+const buildPoll = 5 * time.Second
+
+// waitBuild reads the build name names until it ends, or ctx is done.
+func (c *googleCloud) waitBuild(ctx context.Context, name string) (*cloudbuildpb.Build, error) {
+	for {
+		build, err := c.builds.GetBuild(ctx, &cloudbuildpb.GetBuildRequest{Name: name})
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		if buildEnded(build.GetStatus()) {
+			return build, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(buildPoll):
+		}
+	}
+}
+
+// buildEnded reports whether a build in status has ended, whether or not
+// it succeeded.
+func buildEnded(status cloudbuildpb.Build_Status) bool {
+	switch status {
+	case cloudbuildpb.Build_SUCCESS, cloudbuildpb.Build_FAILURE, cloudbuildpb.Build_INTERNAL_ERROR,
+		cloudbuildpb.Build_TIMEOUT, cloudbuildpb.Build_CANCELLED, cloudbuildpb.Build_EXPIRED:
+		return true
+	}
+	return false
 }
 
 // jobResource is a job's resource name.
