@@ -50,3 +50,43 @@ func TestStackOfAssemblesTheDeclarations(t *testing.T) {
 		t.Errorf("StackOf = %+v, want %+v", got, want)
 	}
 }
+
+// TestStackOfOrdersTheEnvironments: the environments come by their order,
+// then those without one by name, whatever their names.
+func TestStackOfOrdersTheEnvironments(t *testing.T) {
+	schema := NewSchema("shop-stack", SchemaKindStack)
+	schema.Types["Shop"] = &TypeDef{Name: "Shop", Stack: &StackDecl{}}
+	environment := func(name string, order int) {
+		schema.Types[name] = &TypeDef{Name: name, Environment: &EnvironmentDecl{Order: order}}
+	}
+	names := func() []string {
+		var out []string
+		for _, env := range StackOf(schema).Environments {
+			out = append(out, env.Name)
+		}
+		return out
+	}
+
+	environment("Staging", 1)
+	environment("Production", 2)
+	environment("Preview", 3)
+	if got, want := names(), []string{"Staging", "Production", "Preview"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("environments = %v, want %v", got, want)
+	}
+
+	// A gap changes nothing; an environment without an order comes after
+	// those with one, by name.
+	environment("Production", 7)
+	environment("Dev", 0)
+	environment("Canary", 0)
+	if got, want := names(), []string{"Staging", "Preview", "Production", "Canary", "Dev"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("environments = %v, want %v", got, want)
+	}
+
+	// Equal orders, which verification refuses, fall back to name order,
+	// so the stack stays deterministic.
+	environment("Staging", 3)
+	if got, want := names(), []string{"Preview", "Staging", "Production", "Canary", "Dev"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("environments = %v, want %v", got, want)
+	}
+}

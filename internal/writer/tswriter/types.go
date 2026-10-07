@@ -184,6 +184,7 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	for _, ref := range def.Behaviors {
 		e.emitBehavior(def.Name, ref)
 	}
+	e.emitStackDeclarations(def)
 
 	fmt.Fprintf(&e.body, "export abstract class %s%s {\n", e.ident(def.Name, "type"), e.heritageClause(def))
 
