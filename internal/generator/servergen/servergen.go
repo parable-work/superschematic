@@ -636,7 +636,7 @@ func Write(s *Server, dir string) error {
 			return fmt.Errorf("servergen: server %s: %w", s.Name, err)
 		}
 	}
-	return nil
+	return writeServiceAuth(s, dir)
 }
 
 // ImplementationModule is the module the scaffold of an implementation

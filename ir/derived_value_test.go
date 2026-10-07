@@ -137,8 +137,12 @@ func TestDerivedVariables(t *testing.T) {
 		t.Errorf("service variables:\n got %#v\nwant %#v", got, want)
 	}
 
-	if _, err := DerivedVariables("X", map[string]any{"port": 5432}); err == nil {
-		t.Error("a number became a variable")
+	got, err = DerivedVariables("X", map[string]any{"port": 5432})
+	if want := []DerivedVariable{{Name: "X_PORT", Value: "5432"}}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("a whole number: got %#v, %v; want its decimal", got, err)
+	}
+	if _, err := DerivedVariables("X", map[string]any{"tls": true}); err == nil {
+		t.Error("a boolean became a variable")
 	}
 }
 

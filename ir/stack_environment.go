@@ -178,7 +178,9 @@ const (
 	// BindingSecret is a secret the platform stores and a person enters.
 	BindingSecret BindingSource = "secret"
 
-	// BindingDerived is the value an edge's connector derives.
+	// BindingDerived is the value an edge's connector derives, or for an
+	// API's callers field the value the connectors of the http edges to
+	// the API derive together.
 	BindingDerived BindingSource = "derived"
 
 	// BindingParameter is one of the environment's parameters, which the
@@ -206,6 +208,16 @@ type Binding struct {
 
 	// Edge is a derived binding's edge ID.
 	Edge string `json:"edge,omitempty"`
+
+	// CallersOf is the API service a callers field belongs to: a derived
+	// binding, an ir.ServiceAuth, that the server of an API with a service
+	// clause verifies its callers against (CallersField).
+	CallersOf string `json:"callersOf,omitempty"`
+
+	// Edges are the edges a callers field's value comes from: the http
+	// edges to CallersOf from other servers, sorted. None means no server
+	// calls the API, and the field's value has no issuers.
+	Edges []string `json:"edges,omitempty"`
 
 	// Parameter is a parameter binding's parameter.
 	Parameter string `json:"parameter,omitempty"`
