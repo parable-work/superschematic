@@ -74,7 +74,7 @@ for (const driver of drivers) {
       );
 
       const created = engine.instances.create(writer, 'documents', { title: 'Launch plan' }, { id: 'doc-1' });
-      assert.deepEqual(created.data, { title: 'Launch plan', status: 'draft', commentCount: 0, revision: 1 });
+      assert.deepEqual(created.data, { title: 'Launch plan', status: 'draft', commentCount: 0, revision: 1, pendingProposals: 0 });
 
       engine.instances.invoke(writer, 'documents', 'doc-1', 'comment', { body: 'First pass is up.' });
       engine.instances.invoke(writer, 'documents', 'doc-1', 'transition', { to: 'review' });
@@ -86,18 +86,18 @@ for (const driver of drivers) {
       engine.instances.invoke(publisher, 'documents', 'doc-1', 'transition', { to: 'published' });
 
       const read = engine.instances.get(alice, 'documents', 'doc-1');
-      assert.deepEqual(read?.data, { title: 'Launch plan', body: 'The plan, in full.', status: 'published', commentCount: 2, revision: 2 });
+      assert.deepEqual(read?.data, { title: 'Launch plan', body: 'The plan, in full.', status: 'published', commentCount: 2, revision: 2, pendingProposals: 0 });
       assert.equal(read?.seq, 7);
 
       const events = engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events;
       assert.deepEqual(
         events.map((event) => [event.kind, event.actor, event.kind === 'operation' ? (event.change as { patch: unknown }).patch : event.change]),
         [
-          ['create', 'wes', { title: 'Launch plan', status: 'draft', commentCount: 0, revision: 1 }],
+          ['create', 'wes', { title: 'Launch plan', status: 'draft', commentCount: 0, revision: 1, pendingProposals: 0 }],
           ['operation', 'wes', { commentCount: 1 }],
           ['operation', 'wes', { status: 'review' }],
-          ['operation', 'wes', {}],
-          ['operation', 'rae', { body: 'The plan, in full.', revision: 2 }],
+          ['operation', 'wes', { pendingProposals: 1 }],
+          ['operation', 'rae', { body: 'The plan, in full.', revision: 2, pendingProposals: 0 }],
           ['operation', 'rae', { commentCount: 2 }],
           ['operation', 'pat', { status: 'published' }],
         ]
@@ -143,6 +143,7 @@ for (const driver of drivers) {
         status: 'retracted',
         commentCount: 2,
         revision: 3,
+        pendingProposals: 0,
       });
     });
 
@@ -204,7 +205,7 @@ for (const driver of drivers) {
         links: {
           parent: { schema: 'tasks', id: 'plan' },
           project: { schema: 'projects', id: 'launch' },
-          spec: { schema: 'documents', id: 'doc-1', revision: 1, stale: false },
+          spec: { schema: 'documents', id: 'doc-1', revision: 1, latest: 1, stale: false },
         },
       });
       // A create gives the same edges and links in one event: test waits on plan.
@@ -224,9 +225,9 @@ for (const driver of drivers) {
       engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'doing' });
       engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'done' });
       const build = engine.instances.get(alice, 'tasks', 'build');
-      assert.deepEqual([build?.data.blocked, (build?.data.links as { spec: unknown }).spec], [false, { schema: 'documents', id: 'doc-1', revision: 1, stale: true }]);
+      assert.deepEqual([build?.data.blocked, (build?.data.links as { spec: unknown }).spec], [false, { schema: 'documents', id: 'doc-1', revision: 1, latest: 2, stale: true }]);
       assert.deepEqual(engine.instances.invokeSchema(alice, 'tasks', 'listLinked', { name: 'spec', id: 'doc-1', stale: true }), {
-        items: [{ id: 'build', revision: 1, stale: true }],
+        items: [{ id: 'build', revision: 1, latest: 2, stale: true }],
         next: null,
       });
       assert.deepEqual(engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'done' }), { from: 'doing', to: 'done' });

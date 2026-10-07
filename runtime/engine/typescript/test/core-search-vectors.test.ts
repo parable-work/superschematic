@@ -3,7 +3,8 @@
 // which skips an instance whose text moved since and refuses a vector the
 // config's dimensions or a 32-bit float cannot hold, with no event; a
 // search by vector ranks by cosine and one by a query and a vector fuses
-// the two rankings by reciprocal rank; similar leaves the instance out; a
+// the two rankings by reciprocal rank; similar leaves the instance out,
+// and ranks a draft's text and vector the same way; a
 // search across schemas skips one the caller may not read; a version that
 // changes the model, the dimensions or the fields makes every vector
 // stale; and the HTTP route and the MCP tool of the search across schemas.
@@ -342,6 +343,56 @@ for (const driver of drivers) {
       assert.deepEqual(similar('n4'), { items: [], next: null, embedded: false });
       const missing = thrown(() => similar('n9'), EngineError);
       assert.deepEqual([missing.code, missing.message], ['not_found', 'Note n9 does not exist in namespace default']);
+    });
+
+    test("similar takes a draft's text in place of an id, with an optional vector, and ranks as similar of an instance does, with nothing left out", () => {
+      const engine = open();
+      publish(engine, notes());
+      engine.instances.create(alice, 'Note', { title: 'Walnut desk', body: 'Solid walnut with brass legs.' }, { id: 'n1' });
+      engine.instances.create(alice, 'Note', { title: 'Walnut chair', body: 'Pairs with the desk.' }, { id: 'n2' });
+      engine.instances.create(alice, 'Note', { title: 'Oak shelf', body: 'Brass brackets.' }, { id: 'n3' });
+      engine.instances.create(alice, 'Note', { title: 'Pine', body: 'Nothing alike.' }, { id: 'n4' });
+      const similar = (params: Record<string, unknown>) => call(engine, 'similar', params) as Page & { embedded: boolean };
+      // The text n1 holds ranks every instance but n1 as similar of n1 does, and n1 itself first.
+      const draft = 'Walnut desk\n\nSolid walnut with brass legs.';
+      const byText = similar({ text: draft });
+      assert.deepEqual([ids(byText), byText.embedded], [['n1', 'n2', 'n3'], false]);
+      assert.deepEqual(byText.items.slice(1), (similar({ id: 'n1' }).items as SearchHit[]).map((hit, index) => ({ ...hit, rank: index + 2 })));
+      // With a vector, the two rankings fuse, as they do for a settled instance.
+      settleAll(engine, { n1: [1, 0, 0], n2: [0.9, 0.1, 0], n3: [0, 1, 0], n4: [0.95, 0, 0.05] });
+      const fused = similar({ text: draft, vector: [1, 0, 0], model: 'test-3d' });
+      assert.equal(fused.embedded, true);
+      assert.deepEqual(
+        fused.items.map((hit) => [hit.id, hit.score, hit.text?.rank, hit.vector?.rank]),
+        [
+          ['n1', rrf(1, 1), 1, 1],
+          ['n2', rrf(2, 3), 2, 3],
+          ['n3', rrf(3, 4), 3, 4],
+          ['n4', rrf(2), undefined, 2],
+        ]
+      );
+      // A vector alone ranks when the text holds no word to search for.
+      assert.deepEqual(ids(similar({ text: 'a b', vector: [0, 1, 0] })), ['n3', 'n2', 'n1', 'n4']);
+      assert.deepEqual(similar({ text: 'a b' }), { items: [], next: null, embedded: false });
+      // A page at a time.
+      const first = similar({ text: draft, limit: 2 });
+      assert.deepEqual([ids(first), ids(similar({ text: draft, limit: 2, cursor: first.next as string }))], [['n1', 'n2'], ['n3']]);
+      // Its parameters: one of id and text, a vector only with text, the config's model and dimensions.
+      const issues = (params: Record<string, unknown>) => thrown(() => similar(params), OperationParamsError).issues;
+      assert.equal(issues({ id: 'n1', text: draft })[0].path, '');
+      assert.equal(issues({})[0].path, '');
+      assert.ok(issues({ id: 'n1', vector: [1, 0, 0] }).length > 0);
+      assert.deepEqual(issues({ text: draft, vector: [1, 0] }), [{ path: '/vector', message: "holds 2 numbers, and the config's vectors hold 3" }]);
+      assert.deepEqual(issues({ text: draft, vector: [1, 0, 0], model: 'other' }), [{ path: '/model', message: 'is "other", and Note\'s vectors come from "test-3d"' }]);
+      const plain = open();
+      publish(plain, notes([{ name: 'Search', config: { fields: ['title'] } }]));
+      assert.deepEqual(thrown(() => plain.instances.invokeSchema(alice, 'Note', 'similar', { text: 'walnut', vector: [1, 0, 0] }), OperationParamsError).issues, [
+        { path: '/vector', message: "Note's Search keeps no vectors: its config has none" },
+      ]);
+      // A caller who may not read the schema is refused, as for every search.
+      const closed = open({ policy: ((request) => request.principal.subject === 'alice' || request.action !== 'read' || request.operation !== undefined) as AccessPolicy });
+      publish(closed, notes());
+      assert.equal(thrown(() => closed.instances.invokeSchema(bob, 'Note', 'similar', { text: draft }), EngineError).code, 'forbidden');
     });
 
     test('a version that changes the model, the dimensions or the fields makes every vector stale; removing vectors forgets them', () => {

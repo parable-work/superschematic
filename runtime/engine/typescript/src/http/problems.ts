@@ -3,9 +3,13 @@ How an engine refusal crosses HTTP. Each EngineError code has one status,
 and the problem document carries the code as its `code` member; a refused
 schema document, instance, operation's parameters, create's parameters
 or preconditions carries its issues as `details.issues`, a refused
-version its changes as `details.changes`, and a behavior's veto the
-behavior, what it refused and why as `details`, with the veto's own code
-and details, when it gives them, as `details.code` and `details.details`:
+version its changes as `details.changes`, a write that repeats a unique
+field's value the fields as `details.fields`, a read from a cursor
+retention has pruned past the cursor, the floor and the head as
+`details.after`, `details.floor` and `details.head`, and a behavior's
+veto the behavior, what it refused and why as `details`, with the veto's
+own code and details, when it gives them, as `details.code` and
+`details.details`:
 a client branches on `code: "vetoed"` and then on the behavior and its
 code. The detail is the engine's message, which names only what the
 request named.
@@ -19,12 +23,14 @@ import { HttpProblem } from '@superschematic/http-runtime';
 import {
   BehaviorVetoError,
   CreateParamsError,
+  CursorExpiredError,
   EngineError,
   IncompatibleChangeError,
   InstanceValidationError,
   OperationParamsError,
   PreconditionsError,
   SchemaDocumentError,
+  UniqueConflictError,
   type EngineErrorCode,
 } from '../errors.js';
 
@@ -34,6 +40,8 @@ export const ENGINE_ERROR_STATUS: Readonly<Record<EngineErrorCode, number>> = {
   forbidden: 403,
   not_found: 404,
   unknown_namespace: 404,
+  namespace_archived: 409,
+  cursor_expired: 410,
   conflict: 409,
   name_taken: 409,
   incompatible_change: 409,
@@ -82,6 +90,12 @@ function detailsOf(error: EngineError): { details?: unknown } {
   }
   if (error instanceof IncompatibleChangeError) {
     return { details: { changes: error.changes } };
+  }
+  if (error instanceof UniqueConflictError) {
+    return { details: { fields: error.fields } };
+  }
+  if (error instanceof CursorExpiredError) {
+    return { details: { after: error.after, floor: error.floor, head: error.head } };
   }
   return {};
 }

@@ -386,7 +386,13 @@ the key until that module is published.
 Default: unset. This repository's own file sets
 `third_party/superscalar/go`.
 
-Directory of the scalar library's Go module (`go.mod`).
+Directory of the scalar library's Go module (`go.mod`). A stack's server
+Dockerfiles build superscalar's static archive, and the version graph's,
+from the checkout that holds it. Unset, a release of superschematic pins
+the server's runtime modules to itself and its Dockerfiles download the
+archives the release ships
+([Stacks](/superschematic/guides/stacks/)); a binary built from a
+checkout writes no Dockerfile.
 
 ### `paths.scalar_typescript`
 
@@ -479,6 +485,19 @@ Default: unset.
 
 Directory of the `ptr` Go module when it is a module of its own rather
 than a package of the schema runtime.
+
+### `paths.build_context`
+
+Default: unset, the repository root. `examples/acme-shop` sets `../..`.
+
+The build context of a stack's server images: the directory the generated
+`Dockerfile` copies from, and the root `stack build` and `stack deploy`
+archive for each build
+([The commands](/superschematic/guides/stacks/#the-commands)). Every
+module a server's `go.mod` replaces must lie under it, or the server gets
+no `Dockerfile`. Set it when the runtime modules the other keys name lie
+above the repository root, as in an example inside a checkout of
+superschematic.
 
 ## `[deps]`
 

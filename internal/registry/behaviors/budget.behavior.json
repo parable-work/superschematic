@@ -15,9 +15,9 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "limit": { "description": "The most the instance may have used and reserved together; no limit of its own when neither this nor limitField is given.", "type": "integer", "minimum": 1 },
+            "limit": { "description": "The most the instance may have used and reserved together; with limitField, the limit while the field holds no value of at least 0. No limit of its own when neither gives one.", "type": "integer", "minimum": 1 },
             "limitField": {
-              "description": "An integer field of the type that holds the instance's limit; no limit while it holds no value of at least 0. Only a principal with limitPermission changes it once the instance exists.",
+              "description": "An integer field of the type that holds the instance's limit; while it holds no value of at least 0, limit is the limit, and without limit there is none. Only a principal with limitPermission changes it once the instance exists.",
               "type": "string",
               "minLength": 1
             },
@@ -37,8 +37,7 @@
               "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
             },
             "reset": { "description": "daily: the used amount starts again at 0 at each UTC day; reservations are kept.", "enum": ["daily"] }
-          },
-          "not": { "required": ["limit", "limitField"] }
+          }
         }
       },
       "limitPermission": {

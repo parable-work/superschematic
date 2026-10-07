@@ -7,7 +7,9 @@
 {{- range .Docker.Include }}
 !{{ . }}
 {{- end }}
+{{- if .Docker.ScalarGo }}
 {{ .Docker.ScalarGo }}/lib
+{{- end }}
 {{- if .Docker.VersionGraphGo }}
 {{ .Docker.VersionGraphGo }}/lib
 {{- end }}

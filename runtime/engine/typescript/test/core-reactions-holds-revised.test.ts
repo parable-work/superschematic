@@ -4,8 +4,9 @@
 // they are when the rule runs, and up a tree of the type's own schema to
 // the runner's depth limit. revised fires when the instance a link points
 // to gains a revision, or a release when its schema composes Branches,
-// on each instance whose link points there, of a pinned link only the
-// ones the target has moved past. parseConfig holds both to the type's
+// on each instance whose link points there, of a link pinned to what the
+// target gained only the ones the target has moved past. parseConfig
+// holds both to the type's
 // Rollups and Links, and a link to a schema with neither Revisions nor
 // Branches halts the subscription.
 import assert from 'node:assert/strict';
@@ -348,6 +349,39 @@ for (const driver of drivers) {
       engine.runner.runDue();
       assert.equal(status(engine, 'Work', 'w1'), 'todo');
       soup.invoke('releaseCommit', { commit: first.id, version: 0 });
+      engine.runner.runDue();
+      assert.equal(status(engine, 'Work', 'w1'), 'review');
+    });
+
+    test('of a link pinned to a release, a release moves only the work pinned to an earlier one; a revision of the target moves every one', () => {
+      const engine = open();
+      const recipe = recipeDocument();
+      recipe.types.Recipe.behaviors?.push({ name: 'Revisions' });
+      publish(engine, recipe as unknown as Record<string, unknown>);
+      publish(
+        engine,
+        schema('Work', [
+          workFlow,
+          { name: 'Links', config: { links: { recipe: { schema: 'Recipe', pinned: 'release' } } } },
+          { name: 'Reactions', config: { rules: [{ when: { revised: { link: 'recipe' } }, then: { transition: 'review' } }] } },
+        ])
+      );
+      engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
+      const soup = new Calls(engine, 'soup');
+      const first: Commit = soup.change('first', { cover: { upsert: [{ photoUrl: 'soup.jpg' }] } });
+      soup.invoke('releaseCommit', { commit: first.id, version: 0 });
+      for (const id of ['w1', 'w2']) {
+        engine.instances.create(alice, 'Work', { title: id }, { id, behaviors: { Links: { recipe: 'soup' } } });
+      }
+      engine.runner.runDue();
+      const second: Commit = soup.change('second', { step: { upsert: [{ instruction: 'Boil', position: 1 }] } });
+      soup.invoke('releaseCommit', { commit: second.id, version: 1 });
+      // Before the runner hears it, w1 is pinned to release 2.
+      engine.instances.invoke(alice, 'Work', 'w1', 'link', { name: 'recipe', id: 'soup' });
+      engine.runner.runDue();
+      assert.deepEqual(['w1', 'w2'].map((id) => status(engine, 'Work', id)), ['todo', 'review']);
+      // A revision is not what the link pins: it moves every instance that points there.
+      engine.instances.update(alice, 'Recipe', 'soup', { title: 'Tomato soup' });
       engine.runner.runDue();
       assert.equal(status(engine, 'Work', 'w1'), 'review');
     });

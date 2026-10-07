@@ -152,9 +152,36 @@ type BootstrapRequest struct {
 
 // Bootstrapper prepares the cloud project an environment deploys to, once,
 // with an owner's credentials (section 7.3). It is idempotent: a second
-// run changes nothing that the first one made.
+// run changes nothing that the first one made. It returns what it read
+// that the schema should hold, or nil for nothing.
 type Bootstrapper interface {
-	Bootstrap(ctx context.Context, req BootstrapRequest) error
+	Bootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapResult, error)
+}
+
+// BootstrapResult is what a bootstrap read from the cloud that the
+// environment's declaration should hold.
+type BootstrapResult struct {
+	// Values are target values for the core to record in the schema
+	// source (D47), each key once.
+	Values []BootstrapValue
+}
+
+// BootstrapValue is a target value that only the cloud knows, such as the
+// GCP project's number, which bootstrap reads. The core records it in the
+// target values of the environment whose declaration sets Beside, the
+// value it comes from, so an environment that inherits that value inherits
+// this one too; it writes it when the schema has none, writes it again and
+// says so when it differs, and leaves the schema alone when it matches. A
+// person may correct it by hand like any value.
+type BootstrapValue struct {
+	// Key is the value's key in the target's values (`projectNumber`),
+	// and Value the value, a string.
+	Key   string
+	Value string
+
+	// Beside is the key of the value it belongs with (`project`); a new
+	// property is written after that one's.
+	Beside string
 }
 
 // MigrationPlan is one DB service's migration plan, as the plan document
@@ -287,9 +314,10 @@ type Credential struct {
 }
 
 // checkDeploySeams refuses a target that carries a deploy seam it cannot
-// use: State, Bootstrap, Migrations or Builder without a provisioner, and
-// Bootstrap, Migrations or Builder without State, which a bootstrap
-// creates and a deploy records each migration and each build in.
+// use: State, Bootstrap, Migrations, Builder or CI without a provisioner,
+// and Bootstrap, Migrations, Builder or CI without State, which a
+// bootstrap creates, a deploy records each migration and each build in,
+// and a CI job plans and deploys from.
 func checkDeploySeams(spec TargetSpec) error {
 	var named []string
 	if spec.State != nil {
@@ -304,11 +332,14 @@ func checkDeploySeams(spec TargetSpec) error {
 	if spec.Builder != nil {
 		named = append(named, "Builder")
 	}
+	if spec.CI != nil {
+		named = append(named, "CI")
+	}
 	if len(named) > 0 && spec.Provisioner == "" {
 		return fmt.Errorf("registry: target %q has %s but names no provisioner to deploy with", spec.Name, strings.Join(named, ", "))
 	}
-	if (spec.Bootstrap != nil || spec.Migrations != nil || spec.Builder != nil) && spec.State == nil {
-		return fmt.Errorf("registry: target %q has Bootstrap, Migrations or Builder but no State: a bootstrap creates the deploy state, and a deploy records each migration and each build in it", spec.Name)
+	if (spec.Bootstrap != nil || spec.Migrations != nil || spec.Builder != nil || spec.CI != nil) && spec.State == nil {
+		return fmt.Errorf("registry: target %q has Bootstrap, Migrations, Builder or CI but no State: a bootstrap creates the deploy state, a deploy records each migration and each build in it, and a CI job plans and deploys from it", spec.Name)
 	}
 	return nil
 }

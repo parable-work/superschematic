@@ -332,6 +332,13 @@ type PathsConfig struct {
 	// Ptr holds the ptr Go module when it is a module of its own rather
 	// than a package of the schema runtime.
 	Ptr string `toml:"ptr"`
+	// BuildContext is the build context of the server images a stack's
+	// build writes Dockerfiles for (docs/stack-model.md, section 8.2):
+	// every module a server's go.mod points at must lie under it. Unset,
+	// it is the repository root itself. A project whose runtime modules
+	// lie above the parent of the schemas root, as in a checkout of the
+	// compiler, names the directory that holds both.
+	BuildContext string `toml:"build_context"`
 }
 
 // LocalPaths is PathsConfig resolved against a repository root: every set
@@ -350,6 +357,7 @@ type LocalPaths struct {
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
 	Ptr                    string
+	BuildContext           string
 }
 
 // LocalPaths resolves the [paths] table against repoRoot.
@@ -374,7 +382,17 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
 		Ptr:                    resolve(n.Paths.Ptr),
+		BuildContext:           resolve(n.Paths.BuildContext),
 	}
+}
+
+// BuildContext returns the build context of the stack's server images:
+// [paths] build_context resolved against repoRoot, else repoRoot.
+func (n Naming) BuildContext(repoRoot string) string {
+	if n.Paths.BuildContext == "" {
+		return repoRoot
+	}
+	return filepath.Join(repoRoot, filepath.FromSlash(n.Paths.BuildContext))
 }
 
 // checkRelative returns an error naming the first key whose value is an
@@ -395,6 +413,7 @@ func (p PathsConfig) checkRelative() error {
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
 		{"ptr", p.Ptr},
+		{"build_context", p.BuildContext},
 	} {
 		if strings.HasPrefix(entry.value, "/") || filepath.IsAbs(entry.value) {
 			return fmt.Errorf("paths.%s %q is an absolute path: [paths] values are relative to the parent of the schemas root", entry.key, entry.value)

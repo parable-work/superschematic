@@ -21,8 +21,10 @@ meta-schema. On top of the loader, the engine requires:
   a scalar once the catalog has filled it in. The engine knows only the
   builtin catalog, so it reads such a scalar as the document writes it;
 - behaviors the engine has implementations for, composed as the compiler's
-  loader requires (behaviors/composition.ts), which the caller checks
-  through readSchema's compose argument.
+  loader requires (behaviors/composition.ts), and @unique, @key and @index
+  only on the instance type's own fields that hold a string, a number or
+  a boolean (instances/indexes.ts), which the caller checks through
+  readSchema's compose argument.
 */
 
 import {

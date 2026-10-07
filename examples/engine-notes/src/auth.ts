@@ -33,6 +33,11 @@ export const authenticate: Authenticator = async (ctx) => {
 
 /** What each caller may do: the engine asks before every read and write. */
 export const policy: AccessPolicy = ({ principal, action, schema, operation }) => {
+  // Making, archiving and listing namespaces: this example makes none
+  // while it runs.
+  if (action === 'manage') {
+    return false;
+  }
   if (action === 'define' || action === 'publish') {
     return hasAnyPermission(principal.permissions, [`schemas.${action}`]);
   }

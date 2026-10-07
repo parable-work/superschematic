@@ -7,8 +7,17 @@ document, so a reviewer watching the log learns a draft waits.
 An event has a global cursor, which orders the whole log, and an
 instance's events also a per-instance sequence, 1, 2, 3, ... across its
 life, a re-create after a delete included. A delete appends an event and
-removes nothing before it. There is no retention: the log grows until a
-later change adds a policy for it.
+removes nothing before it.
+
+The log grows until retention prunes it (retention.ts), a namespace's
+oldest events first: a namespace's floor is the last cursor retention
+pruned of its events, and a read of the namespace from a cursor before
+it, or before the last publish it pruned of the shared namespace the
+namespace reads, is cursor_expired (CursorExpiredError), since the events
+after the cursor are no longer all there. A read from the start, with no
+cursor or 0, starts at the floor instead: it asked for what the log
+holds, not for a place in it. The head stays the last cursor the log
+gave, whatever retention pruned.
 
 Reading is paged from a cursor, within one namespace and optionally one
 schema and instance. A namespace that looks schema names up in a shared
@@ -50,7 +59,7 @@ the values back.
 
 import { checkPrincipal, type Access, type Principal } from '../access.js';
 import { BEHAVIOR_NAME } from '../behaviors/declaration.js';
-import { EngineError } from '../errors.js';
+import { CursorExpiredError, EngineError } from '../errors.js';
 import type { Namespaces } from '../namespaces.js';
 import { pageSize } from '../paging.js';
 import { checkSchemaName } from '../registry/document.js';
@@ -142,9 +151,11 @@ export interface ReadEventsOptions {
   /** Only this instance's events; needs schema. */
   instanceId?: string;
   /**
-   * Events after this cursor; 0, the start of the log, when absent;
-   * `head`, the log's last event, for an empty page whose next is that
-   * cursor.
+   * Events after this cursor; the start of the log when absent or 0,
+   * which no event has: after retention, the oldest event it kept, never
+   * cursor_expired. `head`, the log's last event, for an empty page whose
+   * next is that cursor. Any other cursor before the namespace's floor,
+   * where retention has pruned events after it, is cursor_expired.
    */
   after?: number | 'head';
   /** How many events to scan, 50 by default and at most 500. */
@@ -240,13 +251,40 @@ export function actorOf(principal: Principal): { actor: string; service?: string
   return principal.service === undefined ? { actor: principal.subject } : { actor: principal.subject, service: principal.service.deployable };
 }
 
-/** nextSeq returns the sequence an instance's next event takes. */
+/**
+ * nextSeq returns the sequence an instance's next event takes: one past
+ * its last event's, which retention may have pruned and kept in the
+ * instance's base (retention.ts).
+ */
 export function nextSeq(storage: Storage, namespace: string, schema: string, instanceId: string): number {
-  const row = storage.get(
-    'SELECT MAX(seq) AS seq FROM engine_events WHERE namespace = ? AND schema = ? AND instance_id = ?',
-    [namespace, schema, instanceId]
-  );
-  return row?.seq === null || row?.seq === undefined ? 1 : Number(row.seq) + 1;
+  const params = [namespace, schema, instanceId];
+  const row = storage.get('SELECT MAX(seq) AS seq FROM engine_events WHERE namespace = ? AND schema = ? AND instance_id = ?', params);
+  const base = storage.get('SELECT seq FROM engine_event_bases WHERE namespace = ? AND schema = ? AND instance_id = ?', params);
+  return Math.max(numberOr0(row?.seq), numberOr0(base?.seq)) + 1;
+}
+
+/** The cursor a log's head is: its last event's, or the last one retention pruned, 0 for a log that never held one. */
+export function logHead(storage: Storage): number {
+  const last = storage.get('SELECT MAX(cursor) AS head FROM engine_events');
+  const pruned = storage.get('SELECT MAX(floor) AS head FROM engine_log_floors');
+  return Math.max(numberOr0(last?.head), numberOr0(pruned?.head));
+}
+
+/**
+ * logFloor returns the earliest cursor a read of a namespace may start
+ * from: the last cursor retention pruned of its events and, for a read
+ * that takes them, of the shared namespace's publishes, which it reads.
+ * 0 when retention has pruned none.
+ */
+export function logFloor(storage: Storage, namespaces: Namespaces, namespace: string, withShared = true): number {
+  const own = storage.get('SELECT floor FROM engine_log_floors WHERE namespace = ?', [namespace]);
+  const shared = withShared ? namespaces.lookup(namespace)[1] : undefined;
+  const published = shared === undefined ? undefined : storage.get('SELECT publish_floor FROM engine_log_floors WHERE namespace = ?', [shared]);
+  return Math.max(numberOr0(own?.floor), numberOr0(published?.publish_floor));
+}
+
+function numberOr0(value: unknown): number {
+  return value === null || value === undefined ? 0 : Number(value);
 }
 
 /** The engine_events columns toEvent reads. */
@@ -267,7 +305,9 @@ export class EventLog {
   /**
    * read returns the page of events after a cursor that the principal may
    * read and the filters keep. From `head` it returns no events, and the
-   * log's last cursor as next.
+   * log's last cursor as next. With no cursor, or 0, it starts at the
+   * namespace's floor, the oldest event retention kept; from a cursor
+   * before the floor it throws CursorExpiredError (cursor_expired).
    */
   read(principal: Principal, options: ReadEventsOptions = {}): EventPage {
     checkPrincipal(principal);
@@ -289,6 +329,15 @@ export class EventLog {
     if (fromHead) {
       return { events: [], next: this.head(), more: false };
     }
+    // A read from the start, with no cursor or 0, which no event has,
+    // starts at the floor. One from a cursor before it would miss what
+    // retention pruned. One instance's events leave the shared namespace's
+    // publishes out.
+    const floor = logFloor(this.storage, this.namespaces, namespace, options.instanceId === undefined);
+    if (after > 0 && after < floor) {
+      throw new CursorExpiredError(namespace, after, floor, this.head());
+    }
+    const from = Math.max(after, floor);
     let rows: Row[];
     if (options.instanceId !== undefined) {
       // One instance's events come from its own index, in sequence order,
@@ -296,10 +345,10 @@ export class EventLog {
       rows = this.storage.all(
         `SELECT ${EVENT_COLUMNS} FROM engine_events INDEXED BY engine_events_instance
          WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor > ? ORDER BY seq LIMIT ?`,
-        [namespace, options.schema as string, options.instanceId, after, limit + 1]
+        [namespace, options.schema as string, options.instanceId, from, limit + 1]
       );
     } else {
-      rows = this.namespaceRows(namespace, options.schema, after, limit + 1);
+      rows = this.namespaceRows(namespace, options.schema, from, limit + 1);
     }
     const scanned = rows.slice(0, limit);
     const readable = new Map<string, boolean>();
@@ -321,13 +370,26 @@ export class EventLog {
     }
     // Next is past every event scanned, kept or not.
     const last = scanned[scanned.length - 1];
-    return { events, next: last ? Number(last.cursor) : after, more: rows.length > limit };
+    return { events, next: last ? Number(last.cursor) : from, more: rows.length > limit };
   }
 
-  /** head returns the cursor of the log's last event, 0 for an empty log. */
+  /**
+   * head returns the cursor of the log's last event, 0 for a log that
+   * never held one. Retention never moves it back: when it has pruned
+   * every event, the head is the last cursor it pruned.
+   */
   head(): number {
-    const row = this.storage.get('SELECT MAX(cursor) AS head FROM engine_events');
-    return row?.head === null || row?.head === undefined ? 0 : Number(row.head);
+    return logHead(this.storage);
+  }
+
+  /**
+   * floor returns the earliest cursor a read of a namespace may start
+   * from: 0 until retention prunes the namespace's events or the shared
+   * namespace's publishes it reads, then the last cursor it pruned of
+   * them. A read from before it is cursor_expired.
+   */
+  floor(namespace?: string): number {
+    return logFloor(this.storage, this.namespaces, this.namespaces.resolve(namespace));
   }
 
   /**

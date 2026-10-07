@@ -31,7 +31,7 @@
         "type": "object"
       },
       "excludeStale": {
-        "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
+        "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision or a release its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
         "items": {
           "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
           "type": "string"
@@ -282,7 +282,7 @@
     },
     {
       "code": "stale_link",
-      "description": "A link excludeStale names is pinned to a revision its target has moved past; details.links names them."
+      "description": "A link excludeStale names is pinned to a revision or a release its target has moved past; details.links names them."
     },
     {
       "code": "claim_required",

@@ -215,37 +215,52 @@ type BootstrapOptions struct {
 	// Prompter asks for each credential of the environment that has no
 	// value.
 	Prompter Prompter
+
+	// Source is the stack's schema source, where bootstrap records the
+	// values the target's bootstrap returns (D47). Without one, it says
+	// what to add by hand.
+	Source *SchemaSource
 }
 
 // Bootstrap prepares the cloud project an environment deploys to
 // (docs/stack-model.md, section 7.3): the target's bootstrap, which also
-// creates the storage of each platform credential, then a value for each
-// credential the secret store lacks. Both halves are idempotent, so it is
-// safe to run again; a credential that has a value is not asked for, and
-// one that environments share is asked for once.
-func Bootstrap(ctx context.Context, o BootstrapOptions) error {
+// creates the storage of each platform credential; then it records each
+// value the target's bootstrap returns in the schema source (D47), and
+// asks for a value for each credential the secret store lacks. Each step
+// is idempotent, so it is safe to run again: a value the schema holds
+// leaves its file alone, a credential that has a value is not asked for,
+// and one that environments share is asked for once. It returns what it
+// did with each value, also when asking for a credential fails after it.
+func Bootstrap(ctx context.Context, o BootstrapOptions) ([]RecordedValue, error) {
 	s, err := openEnvironment(o.Options)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	creds := s.credentials()
 	if len(creds) > 0 && s.target.Secrets == nil {
-		return fmt.Errorf("environment %s needs credentials, and target %s stores no secrets", s.env.Environment, s.target.Name)
+		return nil, fmt.Errorf("environment %s needs credentials, and target %s stores no secrets", s.env.Environment, s.target.Name)
 	}
+	var recorded []RecordedValue
 	if s.target.Bootstrap != nil {
 		if err := s.requireDeploy(); err != nil {
-			return err
+			return nil, err
 		}
 		s.logf("bootstrap target %s for environment %s", s.target.Name, s.env.Environment)
-		if err := s.target.Bootstrap.Bootstrap(ctx, registry.BootstrapRequest{
+		result, err := s.target.Bootstrap.Bootstrap(ctx, registry.BootstrapRequest{
 			Environment: s.env,
 			Repository:  o.Repository,
 			Credentials: creds,
 			Provisioner: s.prov,
 			Dir:         s.dir,
 			Log:         s.log,
-		}); err != nil {
-			return fmt.Errorf("bootstrap %s: %w", s.env.Environment, err)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap %s: %w", s.env.Environment, err)
+		}
+		if result != nil {
+			if recorded, err = s.record(o.Source, result.Values); err != nil {
+				return recorded, err
+			}
 		}
 	} else {
 		s.logf("target %s needs no bootstrap", s.target.Name)
@@ -253,20 +268,20 @@ func Bootstrap(ctx context.Context, o BootstrapOptions) error {
 	for _, c := range creds {
 		ok, err := s.target.Secrets.Exists(ctx, s.env, c.Secret)
 		if err != nil {
-			return fmt.Errorf("credential %s: %w", c.Secret, err)
+			return recorded, fmt.Errorf("credential %s: %w", c.Secret, err)
 		}
 		if ok {
 			s.logf("credential %s has a value", c.Secret)
 			continue
 		}
 		if o.Prompter == nil {
-			return fmt.Errorf("credential %s has no value, and no terminal to ask for it on: run bootstrap at a terminal", c.Secret)
+			return recorded, fmt.Errorf("credential %s has no value, and no terminal to ask for it on: run bootstrap at a terminal", c.Secret)
 		}
 		if err := promptSecret(ctx, s, o.Prompter, c.Secret, credentialPrompt(c)); err != nil {
-			return err
+			return recorded, err
 		}
 	}
-	return nil
+	return recorded, nil
 }
 
 // SecretsOptions is one `stack secrets set`.

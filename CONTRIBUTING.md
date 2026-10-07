@@ -272,6 +272,16 @@ binary is not `go install`able: users download it from the release or run
 `make build` in a checkout. `superschematic-migrate`, whose module has
 none, installs that way.
 
+A generated Go server links superscalar's static archive, and the version
+graph's, through cgo, and no module the module proxy serves carries them.
+Each release ships them as `superschematic-archives_<version>_<platform>.tar.gz`
+beside the CLI, built by `scripts/release-archives.sh` with `RUST_VERSION`
+in the release's `build-archives` job, before the CLIs: each CLI links its
+platform's tarball and every tarball's SHA-256 (`internal/release`), which
+the Dockerfiles and workflows it generates pin
+([`docs/stack-model.md`](docs/stack-model.md), section 8.2; D47, amended).
+A CLI built any other way names no digests.
+
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
 (Settings -> Actions -> General) must permit; it is off by default on a new
