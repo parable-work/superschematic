@@ -38,7 +38,11 @@ export interface ToolKeys {
   readonly parameters: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
 }
 
-/** The operations every schema has, the engine's tools for writing schemas and reading its behaviors, and its search across them. */
+/**
+ * The operations every schema has, the engine's tools for writing schemas
+ * and reading its behaviors, its search across them, and the read of a
+ * value by its hash.
+ */
 export type BuiltinTool =
   | 'create'
   | 'get'
@@ -50,7 +54,8 @@ export type BuiltinTool =
   | 'defineSchema'
   | 'listBehaviors'
   | 'describeBehavior'
-  | 'search';
+  | 'search'
+  | 'getValue';
 
 export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   'create',
@@ -64,6 +69,7 @@ export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   'listBehaviors',
   'describeBehavior',
   'search',
+  'getValue',
 ];
 
 /** EngineOptions.tools. */
