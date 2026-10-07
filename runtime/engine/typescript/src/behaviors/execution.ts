@@ -59,6 +59,15 @@ which checks a value against a type the version's checks cover with the
 version's validator, as validateUpdate checks the instance's own fields.
 validate's own context keeps checkType, held to the types its
 checkedTypes names.
+
+An execution over a stored instance reads its own fields, the values the
+value store holds put back, only when a behavior first reads them (data,
+current()), so a call that never does, an operation that writes only its
+behavior's columns such as a lease's heartbeat, loads no large value.
+update() stores them through the instance store, which keeps the ref of
+each large member the patch leaves alone. Every context with SQL also
+gets values, the value store for objects the behavior keeps in its own
+tables (values/behavior.ts).
 */
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
@@ -110,6 +119,7 @@ import type {
   TypeCheck,
   ValidationContext,
   ValidationRequest,
+  ValueWriter,
   WorkContext,
   WritableColumns,
 } from './behavior.js';
@@ -117,6 +127,7 @@ import type { BoundBehavior, Composition } from './composition.js';
 import { deepFreeze, jsonCopy } from './json.js';
 import { BehaviorRegistry, type OperationSpec, type RegisteredBehavior } from './registry.js';
 import { BehaviorSql, DeletedColumns, InstanceColumns, synchronous, type InstanceRelation } from './storage.js';
+import { behaviorValues, readOnlyValues, type ValueRefusal } from '../values/behavior.js';
 
 /** How deep call(), invokes and reads of other instances may nest together; deeper is a cycle. */
 export const MAX_CALL_DEPTH = 16;
@@ -257,6 +268,12 @@ export interface Reach {
   listReferences(chain: Chain, source: ReferenceSource): Reference[];
   /** Asks the guardReference of every behavior that refers to an instance; the first veto throws. */
   guardReferences(chain: Chain, schema: string, id: string, request: GuardRequest): void;
+  /**
+   * Stores an instance's own fields after an operation's update(), each
+   * large member in the value store; a member whose key is not in changed
+   * keeps the ref the row holds, neither hashed nor written again.
+   */
+  writeOwn(chain: Chain, schema: string, id: string, data: Readonly<Record<string, unknown>>, changed: ReadonlySet<string>): void;
 }
 
 /** The instance an execution runs for. */
@@ -270,7 +287,10 @@ export interface ExecutionTarget {
 type ColumnsMode = 'reading' | 'writing' | 'a read-only operation';
 
 export class Execution {
-  private data: FrozenJSON;
+  private loaded: FrozenJSON | undefined;
+  private readonly load: (() => FrozenJSON) | undefined;
+  // The own fields before the call's first update(), once one has run.
+  private initial: FrozenJSON | undefined;
   private deleted: Map<string, Record<string, SqlValue>> | undefined;
 
   constructor(
@@ -279,25 +299,50 @@ export class Execution {
     private readonly chain: Chain,
     private readonly reach: Reach,
     private readonly target: ExecutionTarget,
-    data: Record<string, unknown>,
+    /**
+     * The instance's own fields, copied; or what reads them from its row,
+     * deep-frozen in place, which runs when a behavior first reads them, so
+     * a call whose behaviors never do loads no value from the value store.
+     */
+    data: Record<string, unknown> | (() => FrozenJSON),
     /** False for a read and a read-only operation: nothing may write. */
     private readonly writable: boolean
   ) {
-    this.data = freezeCopy(data);
+    if (typeof data === 'function') {
+      this.load = data;
+    } else {
+      this.loaded = freezeCopy(data);
+    }
   }
 
   private get composition(): Composition {
     return this.runtime.composition;
   }
 
+  private get data(): FrozenJSON {
+    if (this.loaded === undefined) {
+      this.loaded = deepFreeze((this.load as () => FrozenJSON)());
+    }
+    return this.loaded;
+  }
+
   /** setData replaces the instance's own fields the contexts see, after an update. */
   setData(data: Record<string, unknown>): void {
-    this.data = freezeCopy(data);
+    this.loaded = freezeCopy(data);
   }
 
   /** current is the instance's own fields as the call has left them, deep-frozen. */
   current(): FrozenJSON {
     return this.data;
+  }
+
+  /**
+   * ownBefore is the instance's own fields before the call when an
+   * update() in it changed them, deep-frozen; undefined when none did, the
+   * fields then perhaps never read.
+   */
+  ownBefore(): FrozenJSON | undefined {
+    return this.initial !== undefined && !jsonEqual(this.initial, this.data) ? this.initial : undefined;
   }
 
   /**
@@ -449,11 +494,12 @@ export class Execution {
     }
     // The savepoint rolls back an update() the called operation made along
     // with the rest of it, so the fields the contexts see go back too.
-    const data = this.data;
+    const { loaded, initial } = this;
     try {
       return this.storage.transaction(() => this.invoke(operation, checked, from.behavior.name));
     } catch (error) {
-      this.data = data;
+      this.loaded = loaded;
+      this.initial = initial;
       throw error;
     }
   }
@@ -479,12 +525,8 @@ export class Execution {
       return this.data;
     }
     this.guard({ kind: 'update', patch: deepFreeze(copy), after: freezeCopy(merged), caller: from.behavior.name });
-    this.storage.run('UPDATE engine_instances SET data = ? WHERE namespace = ? AND schema = ? AND id = ?', [
-      JSON.stringify(merged),
-      this.chain.namespace,
-      this.target.schema,
-      this.target.id,
-    ]);
+    this.reach.writeOwn(this.chain, this.target.schema, this.target.id, merged, new Set(Object.keys(copy)));
+    this.initial ??= this.data;
     this.setData(merged);
     return this.data;
   }
@@ -533,7 +575,18 @@ export class Execution {
       columns: this.columns(bound, 'reading'),
       sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.target.schema, 'read'),
       references: Object.freeze({ list: () => this.reach.listReferences(this.chain, source) }),
+      values: this.values(bound, readOnlyValues('a read')),
     };
+  }
+
+  // values is a context's handle on the value store for the behavior's
+  // rows of the instance. After a delete it releases and stows nothing.
+  private values(bound: BoundBehavior, refusal: ValueRefusal): ValueWriter {
+    return behaviorValues(
+      this.storage,
+      { behavior: bound.behavior.name, namespace: this.chain.namespace, schema: this.target.schema, id: this.target.id },
+      (what) => (what === 'stow' && this.deleted ? 'the instance is deleted; values.stow stores nothing for it' : refusal(what))
+    );
   }
 
   // context is a writable context when writes is true and the execution
@@ -560,6 +613,7 @@ export class Execution {
       columns: this.columns(bound, writable ? 'writing' : 'a read-only operation'),
       sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.target.schema, writable ? 'write' : 'read'),
       references: this.references(bound, writable),
+      values: this.values(bound, writable ? () => undefined : readOnlyValues('a read-only operation')),
       call: (behavior: string, operation: string, params?: FrozenJSON) => this.call(bound, writable, behavior, operation, params),
     };
   }
@@ -654,12 +708,17 @@ export class WorkExecution {
     });
   }
 
-  // members is a work context: its SQL reads in a reaction and writes the
-  // behavior's tables in a schedule run.
-  private members(bound: BoundBehavior, mode: 'read' | 'write'): WorkContext<unknown> & { readonly sql: BehaviorSql } {
+  // members is a work context: its SQL and values read in a reaction and
+  // write the behavior's tables in a schedule run.
+  private members(bound: BoundBehavior, mode: 'read' | 'write'): WorkContext<unknown> & { readonly sql: BehaviorSql; readonly values: ValueWriter } {
     return {
       ...scopeMembers(this.chain, this.reach, this.runtime, bound, this.schema, this.version, true),
       sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, mode),
+      values: behaviorValues(
+        this.storage,
+        { behavior: bound.behavior.name, namespace: this.chain.namespace, schema: this.schema, id: '' },
+        mode === 'write' ? undefined : readOnlyValues('a reaction')
+      ),
     };
   }
 }
@@ -688,6 +747,11 @@ export class SchemaExecution {
       const context: SchemaContext<unknown> = Object.freeze({
         ...scopeMembers(this.chain, this.reach, this.runtime, bound, this.schema, this.version, operation.writes),
         sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, operation.writes ? 'write' : 'read'),
+        values: behaviorValues(
+          this.storage,
+          { behavior: bound.behavior.name, namespace: this.chain.namespace, schema: this.schema, id: '' },
+          operation.writes ? undefined : readOnlyValues('a read-only operation')
+        ),
       });
       const result: unknown = declaredVetoes(this.runtime.composition, () =>
         (operation.handler as SchemaOperationHandler<unknown>).call(bound.behavior.implementation.schemaOperations, context, params)
