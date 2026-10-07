@@ -6,7 +6,8 @@ schema-file document, versions it per namespace, and keeps it, its
 instances and an event log in one SQLite file.
 
 Built: the storage layer and its migrations, the schema registry with its
-compatibility rule, instances, the event log with its filters, the
+compatibility rule, instances, the event log with its filters, the value
+store, which keeps a large field once by hash and serves it by hash, the
 access policy with service callers (D37), the HTTP API with the event
 stream (`@superschematic/engine/http`), the behavior plug-in interface,
 the runner of reactions and schedules, the describe and tools documents,
@@ -91,7 +92,7 @@ processes on the busy timeout, but the engine keeps per-process state
 (the cache of each version's validator and behaviors) that nothing
 coordinates across processes.
 
-The engine's tables, as its eight migrations leave them:
+The engine's tables, as its nine migrations leave them:
 
 ```sql
 -- Every schema document by namespace, name and version. Version 0 is the
@@ -126,6 +127,9 @@ CREATE TABLE engine_instances (
   created_by       TEXT    NOT NULL,
   updated_at       INTEGER NOT NULL,
   updated_by       TEXT    NOT NULL,
+  -- The JSON pointers of the fields data holds a ref to the value store
+  -- for, in place of their values (migration 9); null for none.
+  value_refs       TEXT,
   UNIQUE (namespace, schema, id)
 ) STRICT;
 CREATE INDEX engine_instances_list ON engine_instances (namespace, schema, position);
@@ -133,12 +137,12 @@ CREATE INDEX engine_instances_list ON engine_instances (namespace, schema, posit
 -- The append-only event log. Triggers refuse an UPDATE or DELETE.
 CREATE TABLE engine_events (
   cursor      INTEGER PRIMARY KEY AUTOINCREMENT,  -- the global cursor
-  kind        TEXT    NOT NULL CHECK (kind IN ('create', 'update', 'delete', 'operation', 'publish')),
+  kind        TEXT    NOT NULL CHECK (kind IN ('create', 'update', 'delete', 'operation', 'publish', 'define')),
   namespace   TEXT    NOT NULL,
   schema      TEXT    NOT NULL,
-  instance_id TEXT,                               -- null for a publish
-  seq         INTEGER,                            -- per instance; null for a publish
-  version     INTEGER NOT NULL,
+  instance_id TEXT,                               -- null for a publish and a define
+  seq         INTEGER,                            -- per instance; null for a publish and a define
+  version     INTEGER,                            -- null for a define alone
   actor       TEXT    NOT NULL,
   at          INTEGER NOT NULL,
   change      TEXT,                               -- JSON: see "The event log"
@@ -148,8 +152,13 @@ CREATE TABLE engine_events (
   cause_event    INTEGER,
   cause_schedule TEXT,
   depth          INTEGER NOT NULL DEFAULT 0,      -- 0 for a caller's change
-  CHECK ((kind = 'publish') = (instance_id IS NULL)),
-  CHECK ((instance_id IS NULL) = (seq IS NULL))
+  service        TEXT,                            -- the calling deployable (migration 7)
+  -- The JSON pointers of the members of change that hold a ref to the
+  -- value store (migration 9); null for none.
+  value_refs     TEXT,
+  CHECK ((kind IN ('publish', 'define')) = (instance_id IS NULL)),
+  CHECK ((instance_id IS NULL) = (seq IS NULL)),
+  CHECK ((kind = 'define') = (version IS NULL))
 ) STRICT;
 CREATE UNIQUE INDEX engine_events_instance ON engine_events (namespace, schema, instance_id, seq)
   WHERE instance_id IS NOT NULL;
@@ -219,6 +228,27 @@ CREATE TABLE engine_schedules (
   error       TEXT,
   PRIMARY KEY (behavior, schedule, namespace, schema)
 ) STRICT;
+
+-- The value store ("The value store"): each large value once, as its
+-- canonical JSON, under its SHA-256 (migration 9).
+CREATE TABLE engine_payloads (
+  hash  TEXT    PRIMARY KEY,                      -- hex
+  value TEXT    NOT NULL CHECK (json_valid(value)),
+  bytes INTEGER NOT NULL                          -- the canonical JSON's UTF-8 length
+) STRICT;
+
+-- Who holds each value: an instance's row, an event, or a row of a
+-- behavior's tables. A value goes when its last holder does.
+CREATE TABLE engine_payload_holders (
+  hash      TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  schema    TEXT NOT NULL,
+  holder    TEXT NOT NULL,                        -- instance, event, or the behavior's name
+  id        TEXT NOT NULL,                        -- the instance id; '' for none
+  key       TEXT NOT NULL,                        -- '', the event's cursor, or the behavior's key
+  PRIMARY KEY (hash, namespace, schema, holder, id, key)
+) STRICT;
+CREATE INDEX engine_payload_holders_holder ON engine_payload_holders (namespace, schema, holder, id, key);
 
 -- The migration ledger, one row per applied migration of each owner.
 CREATE TABLE engine_migrations (
@@ -355,6 +385,10 @@ holds instances in the namespace that creates them.
   by default and at most 500 (`limit`). Each page is one indexed range
   read, so a list never loads the whole table, and an instance created or
   deleted while a client pages moves no other instance between pages.
+- `get` and `list` take `valueRefs: true`: each own field the value store
+  holds is then its ref, and the record lists the pointers to them in
+  `valueRefs` ("The value store"), so a client that pages through
+  instances for their small fields does not receive their large ones.
 - `update` takes a JSON merge patch (RFC 7386), the engine's update rule: a
   member replaces the instance's member, a nested object merges, `null`
   removes the member, and a list or any other value replaces what was
@@ -379,7 +413,10 @@ holds instances in the namespace that creates them.
 
 An instance's `data` holds its own fields as stored, then each field its
 behaviors add that has a value. The row stores only its own fields; the
-behaviors' are read from their storage. Its `seq` is the sequence of its
+behaviors' are read from their storage. A field whose JSON is longer than
+the value store's threshold, 64 KiB by default, is stored once by hash,
+and the row keeps a ref in its place; every read puts the value back
+("The value store"). Its `seq` is the sequence of its
 last event, so every write that appends one moves it: a create, an update
 that changes something and a writing behavior operation.
 
@@ -455,6 +492,17 @@ cursor. It does not read the shared namespace's defines: a draft changes
 nothing a namespace reaches until it is published, and only the
 namespace that holds a draft can publish it.
 
+An instance event keeps a large member of its change in the value store
+("The value store"): a member of a create's instance, of an update's
+patch, or of an operation's `params` or `patch` whose JSON is longer than
+the threshold holds a ref, `{ "$value": <hash>, "bytes": <n> }`, and the
+event lists the JSON pointers to them in `valueRefs` (`["/result"]`,
+`["/params/result", "/patch/result"]`). A read returns the event as the
+log keeps it, refs and all, and so does the stream; a client reads a
+value by its hash. A reaction gets the event the same way, and its
+`before()` puts the values back. An event written before migration 9
+keeps its values inline and has no `valueRefs`.
+
 An event the runner's work wrote ("The runner") also carries `cause`:
 `{ behavior, event, depth }` for a reaction, `event` being the cursor of
 the event it handled, and `{ behavior, schedule, depth }` for a
@@ -471,7 +519,87 @@ through it. A watcher reads the log as its own principal from its own
 cursor; the notice tells it only that the log grew.
 
 There is no retention yet: the log grows until a later change adds a
-policy for it.
+policy for it, and so does what it holds in the value store.
+
+## The value store
+
+A top-level member of what the engine writes whose JSON is longer than a
+threshold is stored once (D16, amended: a large value is stored once): an
+instance's own field in its row, a member of an event's change, or a
+member of an object a behavior keeps in its own tables ("The value store
+in a behavior's tables" under "Behaviors"). Its canonical JSON, RFC 8785
+(JCS: compact, members sorted, strings and numbers as `JSON.stringify`
+writes them), is stored under its SHA-256 in `engine_payloads`, in the
+engine's file and the write's transaction, and the row keeps a ref in its
+place:
+
+```json
+{ "title": "Check", "kind": "verify", "result": { "$value": "9f2c...", "bytes": 187334 } }
+```
+
+Beside it the row keeps the JSON pointers of the members that hold a ref
+(`value_refs`, `["/result"]`), so a value that looks like a ref is never
+taken for one. One value written twice, by two instances, by an instance
+and its events and revisions, or in two namespaces, is stored once.
+
+- The threshold is the engine option `values.thresholdBytes`, 65536 by
+  default and at least 1024, measured in UTF-8 bytes; it is the
+  engine's, not a schema's.
+- Reads put the values back: `get`, `list`, a behavior's view and context
+  (`data`), its reads of other instances, the field readers, the live
+  version's validation and the behaviors' `validate` (`Variants`),
+  `Search`'s index, `afterConfigChange`'s `eachInstance`, `before()` and
+  `Revisions`' revisions and proposals. A value reads back in canonical
+  form, its objects' members sorted. The API's shapes and the fields'
+  types do not change.
+- A ref is exposed where it is stored and a read asks for it: in an event,
+  and in an instance read with `valueRefs: true`, each with `valueRefs`,
+  the pointers to the refs. `$value` is the value's hash, `bytes` the
+  length of its canonical JSON.
+- The relation `sql.instances()` reads the rows as stored: a field the
+  store holds is its ref in `data`. Its statements filter and order on
+  small fields and the behavior's columns.
+- A write reuses the ref of each member it leaves alone, so it neither
+  hashes nor writes that value again, and an operation reads the own
+  fields only when a behavior does: a lease's heartbeat, which writes
+  Lease's columns, rewrites a row of refs and loads no large value. The
+  engine keeps the values it read last in memory, deep-frozen and shared
+  by its own reads (`values.cacheBytes`, 32 MiB by default, 0 for none);
+  what goes to a caller is a copy.
+- A row or an event written before migration 9 keeps its values inline.
+  An instance's row moves a large field to the store at its next write;
+  an event is never rewritten.
+
+`engine.values.get(principal, hash, { namespace })`, the route `GET
+/namespaces/{namespace}/values/{hash}` and the MCP tool `get_value`
+return `{ hash, bytes, value }`. A caller reads a value only through a
+schema of the namespace that references it: `engine_payload_holders`
+records who holds each value (an instance's row, an event, a row of a
+behavior's tables) by namespace and schema, and the access policy must
+allow the caller `read` on one of those schemas. Knowing a hash grants
+nothing: a value that no schema of the namespace references, one only
+schemas the caller may not read reference, and one no namespace holds are
+all `not_found`, so the answer does not say whether the namespace holds
+it. A hash that is not 64 lowercase hex digits is `invalid_argument`.
+
+A value goes when its last holder does, in the transaction that drops
+it: an instance's row holds the values it holds now, an instance's
+delete drops its row's, a behavior's `stow` holds and its `release`
+drops, and an event holds its values for good, since the log has no
+retention yet. So a field an instance once held stays while an event
+records it; a value only a behavior's rows held, written by a
+schema-level operation or a schedule, which append no event, goes with
+its last row.
+
+Where the values live is a driver (`values.driver`, a `ValueDriver`):
+`read(hash)`, `write(hash, json)` and `remove(hash)`, synchronous, as
+everything in a write is (D16). The default, `SqliteValueDriver`, writes
+`engine_payloads` in the write's transaction (`transactional: true`). A
+driver over other storage is not transactional: the engine removes a
+value only after the commit that dropped its last holder, so a
+rolled-back write never loses one, and a write that rolls back can leave
+a value nothing holds. The holders stay in the engine's file whatever the
+driver. No driver over object storage ships yet.
 
 ## The runner
 
@@ -1078,16 +1206,19 @@ a field reader's) has:
 - `validate(type, value)`: a value checked against another type of the
   schema with the version's validator ("Other types");
 - `references.list()`: the references the behavior recorded from the
-  instance ("References").
+  instance ("References");
+- `values.load(json, refs)`: an object the behavior keeps in its own
+  tables through the value store, with its values back ("The value store
+  in a behavior's tables").
 
 A context (initialize, afterChange, an operation) adds `columns.set()`,
-`sql.run()`, `references.add()` and `remove()`, `call(behavior,
-operation, params)`, `instances.invoke` and `instances.invokeSchema` of
-writing operations, and `instances.create`. In a read-only operation
-`set`, `run`, `add` and `remove` refuse, `call` and `invoke` reach only
-read-only operations, and `create` refuses; after a delete,
-`columns.get()` returns what the instance had and `set`, `add`, `remove`
-and `call` refuse. There is no handle on the instances table beyond the
+`sql.run()`, `references.add()` and `remove()`, `values.stow()` and
+`release()`, `call(behavior, operation, params)`, `instances.invoke` and
+`instances.invokeSchema` of writing operations, and `instances.create`.
+In a read-only operation `set`, `run`, `add`, `remove`, `stow` and
+`release` refuse, `call` and `invoke` reach only read-only operations,
+and `create` refuses; after a delete, `columns.get()` returns what the
+instance had and `set`, `add`, `remove`, `stow` and `call` refuse. There is no handle on the instances table beyond the
 read-only relation, the event log, another behavior's storage or the
 connection: a status one behavior owns changes at another's request only
 through its operations, whose guards run, on this instance or another.
@@ -1227,7 +1358,9 @@ call's namespace's instances of it), with the columns `id`, `seq`,
 `version` (the schema version the instance was last written with),
 `created_at`, `created_by`, `updated_at`, `updated_by` and `data` (the
 instance's own fields, as the JSON text the engine stores; read one with
-`json_extract(data, '$.title')`), then each of the behavior's own columns
+`json_extract(data, '$.title')`; a field the value store holds is its ref
+there, `{ "$value": <hash>, "bytes": <n> }`, so a statement filters and
+orders on small fields), then each of the behavior's own columns
 under its own name for it (`RELATION_COLUMNS` lists the first eight). No
 other behavior's column is there, and neither are the namespace and the
 schema. A behavior column named like one of the eight makes the relation
@@ -1486,6 +1619,34 @@ file), and full-text search needs fts5 alone. `PRAGMA`, `ATTACH`,
 transaction control, triggers, views and temporary objects are refused.
 Pass data as parameters.
 
+#### The value store in a behavior's tables
+
+A behavior that keeps an object in its own tables whose members can be
+large, a copy of the instance's own fields say, keeps it through the
+engine's value store ("The value store"), as `Revisions` does:
+
+```ts
+const stowed = context.values.stow(`revision ${revision}`, context.data);
+context.sql.run(`INSERT INTO ${context.sql.table('revisions')} (..., data, value_refs) VALUES (..., ?, ?)`, [..., stowed.json, stowed.refs]);
+// later
+const data = context.values.load(String(row.data), row.value_refs as string | null);
+```
+
+`stow(key, object)` stores each top-level member whose JSON is longer
+than the threshold once, by hash, and returns what the row keeps: `json`,
+the object with a ref in each such member's place, and `refs`, the
+pointers to them as JSON text, null for none. The row named by the
+behavior, the call's namespace and schema, the context's instance (none
+in a schema-level operation, a schedule or `afterConfigChange`) and
+`key` then holds those values and no longer what it held before.
+`load(json, refs)` returns the object with its values back, deep-frozen;
+`refs` null is an object stored with none, a row written before the
+behavior stowed included. `release(key)` drops what a row holds, and
+`release()` what every row of the context's instance holds: a behavior
+that deletes a row releases it, or its values stay. A value no row,
+instance or event holds is removed. A view, a reaction and a read-only
+operation load only.
+
 ### Publishing
 
 A publish runs a behavior's `afterConfigChange(context)` when the
@@ -1574,7 +1735,10 @@ operation, params, patch }`, with the merge patch of the own fields its
 `update()` changed and of the behaviors' fields; a read-only one appends
 none. A create's event carries the
 behaviors' fields, and an update's merges in any change they took, so
-the log replays to the instance a read returns.
+the log replays to the instance a read returns, each value the value
+store holds read back by its hash. A member of `params` or `patch`
+longer than the threshold is a ref there, as a field is in a create's
+event ("The value store").
 
 An operation event is a change to the instance a read returns, so a
 writing operation takes the instance's next sequence and moves its
@@ -1804,6 +1968,14 @@ reviewedAt?, reason?, revision? }`, `state` one of `pending`, `approved`
 and `rejected`; approving or rejecting one that is not pending is
 `vetoed`, and naming none is `invalid_argument`.
 
+A revision's fields and a proposal's patch go through the value store
+("The value store in a behavior's tables"): a field longer than the
+threshold is stored once, whichever revisions, proposals, events and the
+instance hold it, and the rows keep its ref, with the pointers in a
+`value_refs` column its second migration adds. `listRevisions`,
+`listProposals` and `approve` read the values back. Deleting the instance
+releases what its revisions and proposals held.
+
 #### Dependencies
 
 Blockers between instances, which hold up the type's Workflow.
@@ -2024,7 +2196,8 @@ instance's row in the transaction of its create, of an update or a
 writing operation that changes an indexed field (an approved revision
 included), and deletes it with the instance, so a search never sees a
 row the instances do not hold, and a write that fails takes its index
-change back with it.
+change back with it. It indexes a field the value store holds by its
+value, read back, at a write and at a publish's rebuild alike.
 
 A query is plain words by default. Each whitespace-separated word goes to
 FTS5 as a quoted string, so quotes, `AND`, `OR`, `NOT`, `NEAR`, `*`,
@@ -2644,9 +2817,9 @@ sees what the engine does not raise.
 | GET | `/namespaces/{namespace}/schemas/{name}/draft` | `schemas.draft` | 200, the draft |
 | GET | `/namespaces/{namespace}/schemas/{name}/versions/{version}` | `schemas.version` | 200, that version |
 | POST | `/namespaces/{namespace}/schemas/{name}/publish` | `schemas.publish` | 200, `{namespace, name, version, published}` |
-| GET | `/namespaces/{namespace}/schemas/{name}/instances?limit=&cursor=` | `instances.list` | 200, `{items, next}` |
+| GET | `/namespaces/{namespace}/schemas/{name}/instances?limit=&cursor=&valueRefs=` | `instances.list` | 200, `{items, next}` |
 | POST | `/namespaces/{namespace}/schemas/{name}/instances` | `instances.create`, body `{"id"?, "data", "behaviors"?}` | 201, the instance, `ETag`, `Location` |
-| GET | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.get` | 200, the instance, `ETag` |
+| GET | `/namespaces/{namespace}/schemas/{name}/instances/{id}?valueRefs=` | `instances.get` | 200, the instance, `ETag` |
 | PATCH | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.update`, body: a merge patch; `If-Match`, `Preconditions` | 200, the instance, `ETag` |
 | DELETE | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.delete`; `If-Match`, `Preconditions` | 200, `null` |
 | POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/operations/{operation}` | `instances.operate`, body: the parameters; `If-Match`, `Preconditions` | 200, the result, `ETag` |
@@ -2655,6 +2828,7 @@ sees what the engine does not raise.
 | GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
 | POST | `/namespaces/{namespace}/search` | `engine.search`, body: its parameters | 200, `{items, next}`, the hits of every schema that composes Search ("Search", "Across schemas") |
 | GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=&kind=&behavior=&exclude=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
+| GET | `/namespaces/{namespace}/values/{hash}` | `values.get` | 200, `{hash, bytes, value}`, a value of the value store a schema the caller may read references ("The value store") |
 | GET | `/behaviors` | `tools.listBehaviors` | 200, a summary of each behavior the engine runs ("The behavior catalog") |
 | GET | `/behaviors/{name}` | `tools.describeBehavior` | 200, the behavior's document |
 
@@ -2663,7 +2837,9 @@ A schema version is the stored record without its canonical text, which
 `schema`, `id`, `schemaNamespace`, `version`, `seq`, `data`, and who
 created and last updated it, and when); its `data` carries its
 behaviors' fields, which a create or an update may not set (422,
-`readOnly`). A create's `behaviors` gives the behaviors their create
+`readOnly`). With `valueRefs=true`, a get or a list returns each field
+the value store holds as its ref, and the instance lists them in
+`valueRefs` ("The value store"). A create's `behaviors` gives the behaviors their create
 parameters, by behavior name ("Create parameters" under "Behaviors");
 `null` is none. A request body is `application/json`, and an update's
 `application/merge-patch+json` (RFC 7386); another media type is 415,
@@ -2924,14 +3100,14 @@ included; `typeArguments(document, type, keys)` returns it for any type.
 (`ir.ToolManifest`, section "The tool documents" of the MCP tools
 reference): a tool per operation of every live schema the namespace
 reaches that the principal may read, by name, after the engine's tools:
-three schema tools, two behavior tools, and the search across schemas
-where one of those schemas composes Search.
+three schema tools, two behavior tools, the read of a value by its hash,
+and the search across schemas where one of those schemas composes Search.
 
 | Tool | Name | MCP handle | Arguments |
 | --- | --- | --- | --- |
 | create | `<schema>.create` | `<schema>_create` | `id` (optional), `data` (with its behaviors' `allOf`), and `behaviors` (optional) when a behavior takes create parameters |
-| get | `<schema>.get` | `<schema>_get` | `id` |
-| list | `<schema>.list` | `<schema>_list` | `limit`, `cursor` |
+| get | `<schema>.get` | `<schema>_get` | `id`, `valueRefs` |
+| list | `<schema>.list` | `<schema>_list` | `limit`, `cursor`, `valueRefs` |
 | update | `<schema>.update` | `<schema>_update` | `id`, `patch` (a merge patch; nothing required; its behaviors' `allOf` in patch form), `expectedSeq`, `preconditions` |
 | delete | `<schema>.delete` | `<schema>_delete` | `id`, `expectedSeq`, `preconditions` |
 | a behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `id`, `params` (its `paramsSchema`), `expectedSeq`, `preconditions` |
@@ -2941,6 +3117,7 @@ where one of those schemas composes Search.
 | define a draft | `engine.defineSchema` | `define_schema` | `document` |
 | list behaviors | `engine.listBehaviors` | `list_behaviors` | none |
 | describe a behavior | `engine.describeBehavior` | `describe_behavior` | `name` |
+| get a stored value | `engine.getValue` | `get_value` | `hash`: `values.get` ("The value store") |
 | search every schema | `engine.search` | `search` | `query`, `syntax`, `vector`, `model`, `limit`, `cursor` (`engine.search`'s); listed where a schema the principal may read composes Search |
 
 A name follows the SDK generators, `<namespace>.<method>`, with the schema
@@ -3109,8 +3286,8 @@ openEngine({
 ```
 
 - `invocationPolicy` is D11's key, values and default. A built-in
-  operation or engine tool (the schema tools, the behavior tools and
-  `search`) takes `invocation`'s value for it, else the default; a
+  operation or engine tool (the schema tools, the behavior tools,
+  `getValue` and `search`) takes `invocation`'s value for it, else the default; a
   behavior operation takes its declaration's `invocationPolicy`,
   else the default. Registration refuses a declaration whose value is not
   one of the values, as the compiler's `Finalize` does. The core's
@@ -3163,11 +3340,11 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
   invocation policy under the policy's key. The list is the caller's: a
   tool the policy refuses is not in it. The schema tools
-  (`list_schemas`, `describe_schema`, `define_schema`) and the behavior
-  tools (`list_behaviors`, `describe_behavior`) are in every caller's
-  list, since they name no schema until they are called: the access
-  policy answers the call, not the listing, and asks nothing of the
-  behavior tools. `search` is in the list of a caller who may read a
+  (`list_schemas`, `describe_schema`, `define_schema`), the behavior
+  tools (`list_behaviors`, `describe_behavior`) and `get_value` are in
+  every caller's list, since they name no schema until they are called:
+  the access policy answers the call, not the listing, and asks nothing
+  of the behavior tools. `search` is in the list of a caller who may read a
   schema that composes Search, and searches the ones it may read.
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:

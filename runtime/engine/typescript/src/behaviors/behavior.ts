@@ -32,6 +32,9 @@ and gets a context that reaches only what the behavior may touch:
   initialize and afterChange and its event (D16, amended);
 - references: the instances this one refers to, recorded with the engine
   so the behavior hears when one of them changes or goes;
+- values: the engine's value store, for an object the behavior keeps in
+  its own tables whose large members would otherwise be copied into each
+  of its rows (Revisions' copy of the instance at each revision);
 - in a write, call(), which runs another behavior's operation on the same
   instance, that behavior's guards and every other guard first;
 - in a writing operation, update(), which changes the instance's own
@@ -167,8 +170,9 @@ export interface SqlReader extends TableReader {
    * the call's namespace's own instances of it), one row per instance:
    * id, seq, version (the schema version it was last written with),
    * created_at, created_by, updated_at, updated_by, data (the instance's
-   * own fields, as the JSON text the engine stores), then each of the
-   * behavior's own columns under its own name for it. No other behavior's
+   * own fields, as the JSON text the engine stores, where a field the
+   * value store holds is its ref, `{ "$value": <hash>, "bytes": <n> }`),
+   * then each of the behavior's own columns under its own name for it. No other behavior's
    * column is there. It is not a table: the engine defines it ahead of
    * each statement that names it, and asks the access policy for read on
    * the schema as the call's principal, once for each such statement; a
@@ -181,6 +185,48 @@ export interface SqlReader extends TableReader {
 }
 
 export interface SqlWriter extends SqlReader, TableWriter {}
+
+/** What values.stow returns: what the behavior's row keeps. */
+export interface StowedObject {
+  /**
+   * The object as JSON text, a ref, `{ "$value": <hash>, "bytes": <n> }`,
+   * in place of each top-level member the value store holds.
+   */
+  readonly json: string;
+  /** The JSON pointers to those members, as JSON text; null when the store holds none. */
+  readonly refs: string | null;
+}
+
+/** The value store as a read reaches it. */
+export interface ValueReader {
+  /**
+   * The object a behavior's row keeps, from the JSON text and the refs
+   * values.stow returned, each ref back to its value; deep-frozen. refs
+   * null or absent is an object stored with none, a row written before
+   * the behavior stowed included.
+   */
+  load(json: string, refs?: string | null): FrozenJSON;
+}
+
+/**
+ * The engine's value store (D16, amended: a large value is stored once),
+ * for an object the behavior keeps in its own tables. stow stores each
+ * top-level member whose JSON is longer than the engine's threshold once,
+ * by the SHA-256 of its canonical JSON, and records that the behavior's
+ * row key holds it; the row keeps both texts stow returns, json and refs.
+ * One value stowed by many rows, or by the instance's own row and its
+ * events, is stored once. A row is named by the behavior, the call's
+ * namespace and schema, the context's instance ('' in a context with
+ * none) and the key, which the behavior chooses. A value no row, instance
+ * or event holds any more is removed, so a behavior that deletes a row
+ * releases it. In a read-only operation stow and release refuse.
+ */
+export interface ValueWriter extends ValueReader {
+  /** Stores the object for the behavior's row key, which then holds what it returns and no longer what it held before. */
+  stow(key: string, object: FrozenJSON): StowedObject;
+  /** Drops what the behavior's row key holds, or with no key every row's of the context's instance. */
+  release(key?: string): void;
+}
 
 /** How much of another instance a read returns. */
 export interface ReadOptions {
@@ -406,6 +452,8 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
   readonly sql: SqlReader;
   /** The references the behavior recorded from the instance. */
   readonly references: ReferenceReader;
+  /** What the behavior's rows keep in the value store. */
+  readonly values: ValueReader;
 }
 
 /**
@@ -422,6 +470,8 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
  */
 export interface SchemaContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlWriter;
+  /** The value store for the behavior's rows of the schema (instance ''); a read-only one's stow refuses. */
+  readonly values: ValueWriter;
 }
 
 /**
@@ -436,6 +486,8 @@ export interface SchemaContext<Config> extends BehaviorScope<Config> {
  */
 export interface WorkContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlReader;
+  /** What the behavior's rows keep in the value store. */
+  readonly values: ValueReader;
 }
 
 /** A reaction's context. */
@@ -459,6 +511,8 @@ export interface ReactionContext<Config> extends WorkContext<Config> {
  */
 export interface ScheduleContext<Config> extends WorkContext<Config> {
   readonly sql: SqlWriter;
+  /** The value store for the behavior's rows of the schema (instance ''). */
+  readonly values: ValueWriter;
   /** The schedule's name. */
   readonly schedule: string;
   /** When its previous run committed, in epoch milliseconds; undefined before its first. */
@@ -551,6 +605,8 @@ export interface InstanceContext<Config> extends InstanceView<Config> {
   readonly sql: SqlWriter;
   /** Records and removes the behavior's references from the instance. */
   readonly references: References;
+  /** The value store for the behavior's rows of the instance. */
+  readonly values: ValueWriter;
   /**
    * Calls an operation of a behavior the type composes, on this instance.
    * The parameters are checked against its paramsSchema, every behavior's
@@ -752,7 +808,13 @@ export interface PublishContext<Config> {
    * over the instances, which asks the policy as a principal this has not.
    */
   readonly sql: TableWriter;
-  /** Visits every instance of the schema in the namespace, in creation order, reading 500 at a time. */
+  /** The value store for the behavior's rows of the schema in the namespace (instance ''). */
+  readonly values: ValueWriter;
+  /**
+   * Visits every instance of the schema in the namespace, in creation
+   * order, reading 500 at a time, each with its own fields' values, the
+   * ones the value store holds included.
+   */
   eachInstance(visit: (instance: StoredInstance) => void): void;
   /** Checks a value against another type of the schema with the version being published (TypeCheck). */
   validate: TypeCheck;
