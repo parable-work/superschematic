@@ -2102,6 +2102,10 @@
           "default": "",
           "type": "string"
         },
+        "order": {
+          "default": 0,
+          "type": "integer"
+        },
         "parameters": {
           "default": [],
           "items": {

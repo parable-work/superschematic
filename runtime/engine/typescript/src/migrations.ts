@@ -42,6 +42,13 @@ caller's change.
 The define of a draft is an event too, of kind define, with no instance
 and no version, since a draft has none; an event a service's call wrote
 records the service's deployable (D37).
+
+engine_payloads is the value store's (values/store.ts): each large value
+once, under the SHA-256 of its canonical JSON. engine_payload_holders
+records who holds each one, an instance's row, an event or a row of a
+behavior's tables, by namespace and schema, and a value goes when its
+last holder does. value_refs on an instance and an event lists the JSON
+pointers of the members that hold a ref in place of their value.
 */
 
 import type { MigrationSet } from './storage/migrations.js';
@@ -307,6 +314,37 @@ ALTER TABLE engine_references ADD COLUMN hears TEXT;
 ALTER TABLE engine_references ADD COLUMN crosses REAL;
 
 CREATE INDEX engine_references_hears ON engine_references (namespace, target_schema, target_id, hears, crosses);
+`);
+      },
+    },
+    {
+      version: 9,
+      name: 'the value store',
+      // A row or event written before keeps its values inline and has no
+      // value_refs: an instance's row moves its large members to the store
+      // at its next write, and an event is never rewritten.
+      up(storage) {
+        storage.exec(`
+CREATE TABLE engine_payloads (
+  hash  TEXT    PRIMARY KEY,
+  value TEXT    NOT NULL CHECK (json_valid(value)),
+  bytes INTEGER NOT NULL CHECK (bytes >= 0)
+) STRICT;
+
+CREATE TABLE engine_payload_holders (
+  hash      TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  schema    TEXT NOT NULL,
+  holder    TEXT NOT NULL,
+  id        TEXT NOT NULL,
+  key       TEXT NOT NULL,
+  PRIMARY KEY (hash, namespace, schema, holder, id, key)
+) STRICT;
+
+CREATE INDEX engine_payload_holders_holder ON engine_payload_holders (namespace, schema, holder, id, key);
+
+ALTER TABLE engine_instances ADD COLUMN value_refs TEXT CHECK (value_refs IS NULL OR json_valid(value_refs));
+ALTER TABLE engine_events ADD COLUMN value_refs TEXT CHECK (value_refs IS NULL OR json_valid(value_refs));
 `);
       },
     },

@@ -187,6 +187,7 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.Display != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("display"), displayArgs(def.Display))
 	}
+	e.emitStackDeclarations(def)
 
 	fmt.Fprintf(&e.body, "export abstract class %s%s {\n", e.ident(def.Name, "type"), e.heritageClause(def))
 
@@ -276,15 +277,6 @@ func displayArgs(d *ir.TypeDisplay) string {
 		parts = append(parts, "transitions: { "+strings.Join(froms, ", ")+" }")
 	}
 	return "{ " + strings.Join(parts, ", ") + " }"
-}
-
-// propertyName writes an object literal's key: bare when it is an
-// identifier, quoted otherwise.
-func propertyName(key string) string {
-	if identifierPattern.MatchString(key) {
-		return key
-	}
-	return quote(key)
 }
 
 func versionedConfigArgs(cfg *ir.VersionedConfig) string {

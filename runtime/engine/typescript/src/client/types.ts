@@ -30,6 +30,12 @@ export interface Instance<T = JSONObject> {
   createdBy: string;
   updatedAt: number;
   updatedBy: string;
+  /**
+   * For a read that asked for valueRefs: the JSON pointers into data of
+   * the own fields that hold a ref, `{ "$value": <hash>, "bytes": <n> }`,
+   * in place of a value the value store holds. Absent when none does.
+   */
+  valueRefs?: string[];
 }
 
 /** A page of instances in creation order; `next` is null after the last. */
@@ -102,6 +108,13 @@ export interface EngineEvent {
   /** The instance for a create, the merge patch for an update, an OperationChange, null for a delete, the document for a publish, `{ hash }` for a define. */
   change: unknown;
   cause?: EventCause;
+  /**
+   * The JSON pointers into change of the members the log keeps in the
+   * value store: each holds a ref, `{ "$value": <hash>, "bytes": <n> }`,
+   * in place of a value whose JSON is longer than the engine's threshold.
+   * Absent when change holds none.
+   */
+  valueRefs?: string[];
 }
 
 /** The change of an operation event. */

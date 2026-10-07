@@ -1111,10 +1111,12 @@ with create parameters narrowed by them (an amendment below on each). A
 typed client of its HTTP API with the event stream and a reconciler
 (`@superschematic/engine/client`), and a worker over the client
 (`@superschematic/engine-workqueue/worker`), are built (the amendment "a
-typed client over the HTTP API, a worker and a reconciler" below).
-Display metadata is the core `@display` decorator (D48), which the
-describe document carries. Each change that lands a piece updates this
-paragraph. The names and rules are reversible until the first release.
+typed client over the HTTP API, a worker and a reconciler" below). A
+large field is stored once, by hash, in a value store in the same file
+(the amendment "a large value is stored once" below). Display metadata
+is the core `@display` decorator (D48), which the describe document
+carries. Each change that lands a piece updates this paragraph. The
+names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -1558,6 +1560,61 @@ process, its Hono app's `fetch` standing in for the network:
 `client-stream.test.ts` and `client-types.test.ts`, and
 `runtime/engine-workqueue/typescript/test/worker.test.ts`. The names and
 rules are reversible until the first release.
+
+### D16, amended: a worker beats the presence it stands for
+
+The worker of the amendment above beat no `Presence` instance, so a fleet
+that kept one per worker beat it by hand. `examples/engine-jobs` did, in a
+loop of its own over `fetch` that beat on the lease's timer while it held
+a job and between claims otherwise. That loop also polled an empty queue,
+dropped a failed heartbeat, ignored directives, worked one job at a time,
+gave its handler no signal, and read any Lease veto as the job gone, and
+the work-queues guide quoted it as the way to write a worker. The
+engine's server does not change here.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `QueueWorker` takes `presence: { schema, id, beatMs? }`, the Presence instance the worker stands for, in the worker's namespace, and beats it as the client's principal. `start()` reads that schema's describe document, which must compose Presence, and beats once before it claims; a failed or refused beat rejects the start. | Beating from the handler or on the lease's timer, which stops while no job is held and beats once per job when several are; claiming before the first beat, which runs a worker whose instance names another principal, or none, until a timed beat fails, and shows an operator a missing worker at work; a namespace of its own, when a miss releases leases only in the presence's namespace |
+| It beats on a timer of its own, every `beatMs` from when the last beat was sent: a third of the Presence `ttlMs` by default, and at most half of it, as Lease's `heartbeatMs` is at most half its `ttlMs`, so one late or failed beat is not a miss. Neither the claim loop nor a busy handler holds it back. | Beating every `ttlMs`, which a beat late by one request's length misses; beating between claims, which a long job starves |
+| The presence holds until the engine refuses a beat, a problem with a 4xx status but 408 and 429 (`not_principal`, `no_principal`, `not_found`, `forbidden`), or no beat has succeeded for the Presence `ttlMs` since the last one that did was sent, by the worker's clock. While it does not hold, the worker claims nothing and beats on, and the next beat that succeeds brings it back and looks for work at once. `onError` hears each failed beat and, once per loss, a `PresenceLostError` whose `reason` is `refused` or `lapsed`; `worker.present` says whether it holds. | Stopping the worker, which turns a re-registered worker instance or a healed partition into a fleet someone must restart; claiming on, which takes work the miss may release under it and shows a missing worker taking new work; the engine's `deadline`, which is the engine's clock |
+| The jobs the worker holds go on when its presence is lost, and their own heartbeats decide: a miss spares a lease renewed after the principal's last beat (the amendment on a live worker keeping its work) and expires the rest, which the next heartbeat finds `token_stale`. | Aborting every held job at a lost presence, which gives up work whose leases are still renewed, the case the miss's `notRenewedAfter` was made for |
+| A stop beats until it has released what the worker holds, then stops beating; the instance is missed a `ttlMs` later, with no lease left to release. | Stopping the beats first, which lets a long drain be missed; a last call that marks the worker gone, which Presence does not have |
+| `examples/engine-jobs` runs its workers on the client and `QueueWorker`, with `presence`, and its hand-written loop is deleted. Its test cuts a worker off from the engine, has the runner miss it and hand its job to another worker, and checks that the first worker's stale token stops its handler with nothing written; an operator's `cancel` directive fails a job through a terminal Retries class. The guide quotes the example. | Keeping the hand-written loop beside the worker, a second way to write one that the guide would teach with the edge cases the worker settles left open |
+
+The tests are `runtime/engine-workqueue/typescript/test/worker.test.ts`
+("the worker's presence") and `examples/engine-jobs/test/jobs.test.ts`.
+The names and rules are reversible until the first release.
+
+### D16, amended: a large value is stored once
+
+A step's result document can run to hundreds of kilobytes, and it sat
+inline in the instance's row. SQLite rewrites a whole row at any write,
+and the behaviors' columns are on that row, so every lease heartbeat
+rewrote the result. The create and every patch that touched the field
+copied it into the event log, a retried attempt's operation event twice
+(its params and its patch), and `Revisions` copied it into each revision.
+Nothing bounded any of it but the HTTP body limit. A field whose JSON is
+long is now stored once, by hash, and what holds it keeps a ref. This
+changes D16's Storage row: the engine owns two more tables, the value
+store's, beside its schemas, instances and log, and an instance's row no
+longer holds every field's value. The file still holds everything, and
+one process still writes it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A top-level member whose JSON is longer than a threshold is stored once, under the SHA-256 of its canonical JSON, and a ref takes its place: in an instance's row, its own fields; in an instance event, a create's instance, an update's patch, and an operation's `params` and `patch`; in a behavior's table, an object it stows. The ref is `{ "$value": <hex hash>, "bytes": <the canonical JSON's length> }`, and the row, the event or the behavior's row keeps beside it the JSON pointers of the members that hold one (`value_refs`). One value written by two instances, by an instance, its events and its revisions, or in two namespaces, is stored once. | Members at any depth, which every merge patch, diff and fold of the log would have to look through; a ref alone, without the pointers, which a `Generic.JSON` value can imitate; the whole row or event by hash, which a heartbeat still rewrites in full |
+| The canonical JSON is RFC 8785's (JCS): compact, members sorted, strings and numbers as `JSON.stringify` writes them, so any language with a JCS library computes a value's hash, and a client that fetches a value can check it. A value reads back in that form, its objects' members sorted; no JSON reader may rely on member order anyway. | `ir.CanonicalJSON`, whose Go escaping of `<`, `>` and `&` no other language's encoder writes by default; storing the value as written beside the hash of its canonical form, which a fetch cannot check against its hash |
+| The threshold is an engine option, `values.thresholdBytes`: 65536 by default, at least 1024, in UTF-8 bytes, for every schema. | Per schema, a document key or a decorator that every generator would read for a fact of the engine's storage, or an option keyed by schema name, which a namespace's copy of a schema escapes; per field, which no case needs yet |
+| The values live in the engine's file: `engine_payloads` (hash, canonical JSON, length), written in the write's transaction, and `engine_payload_holders`, which records who holds each value, an instance's row, an event or a behavior's row, by namespace and schema (engine migration 9, which also adds `value_refs` to `engine_instances` and `engine_events`). Where the values live is a driver (`values.driver`, a `ValueDriver`: `read`, `write`, `remove`), synchronous as everything in a write is; the default writes `engine_payloads`. A driver over other storage is not transactional: the engine removes a value only after the commit that dropped its last holder, and a write that rolls back can leave a value nothing holds. The holders stay in the file whatever the driver. No object-storage driver ships. | Files beside the database, which breaks D16's one file; an asynchronous driver, which a write inside D16's synchronous transaction cannot call, so an object store needs a synchronous read path, a local cache say, or the asynchronous transactions D16 leaves to a later entry |
+| Reads are transparent: `get`, `list`, a behavior's view and context (`data`), its reads of other instances, the field readers, the live version's validation and the behaviors' `validate` (`Variants`), `Search`'s index at a write and at a publish's rebuild (`eachInstance`), `before()` and `Revisions`' revisions and proposals see the value. The API's shapes and the fields' types do not change. The engine keeps the values it read last parsed and deep-frozen in memory (`values.cacheBytes`, 32 MiB by default), shared by its own reads, since a value never changes under its hash; a caller gets a copy. | Refs everywhere with a fetch per read, which changes every API shape and every behavior that reads a field; a getter per member that loads on access, which every spread, merge patch and freeze loads anyway |
+| An event read returns the event as the log keeps it, refs and all, with `valueRefs`, the pointers, and so does the stream. A reaction gets the same event, and its `before()` puts the values back. `get` and `list` return values by default and refs with `valueRefs: true` (`?valueRefs=true`, the tools' `valueRefs` argument), listing them in the record's `valueRefs`, so a dashboard pages through instances without their results. | An event read that fills the values, which loads every large value of a page inside one synchronous read for a stream that mostly wants statuses; refs by default on `list`, which changes what every client gets |
+| `sql.instances()` reads the rows as stored: a field the store holds is its ref in `data`. A behavior's statements filter and order on small fields and its own columns. | Resolving refs in the relation's SQL, which loads every large value a scan touches, the cost the store exists to save, and needs a SQL function the driver seam cannot register |
+| A write reuses the ref of each own field its patch leaves alone, neither hashing nor writing it again, and an operation reads the instance's own fields only when a behavior does. So a heartbeat, which writes Lease's columns, rewrites a row of refs and loads no large value, which a test with `Lease` and a counting driver checks. | Reading the own fields at every operation, as before, which loads each large value at each heartbeat; hashing every member at every write |
+| `engine.values.get(principal, hash, { namespace })`, `GET /namespaces/{namespace}/values/{hash}` and the MCP tool `get_value` return `{ hash, bytes, value }` to a caller the access policy allows `read` on a schema of the namespace that references the value: its instances, events or a behavior's rows, by the holders. Knowing a hash grants nothing: a value no schema of the namespace references, one only schemas the caller may not read reference, and one no namespace holds are all `not_found`. | Any authenticated caller who knows the hash, which makes a hash a capability anyone holds who reads it in a log line or computes it from a document they guess; `forbidden` where the caller may not read the referencing schema, which tells a caller whether the namespace holds a value it guessed; a route under one schema, which a client reading a ref from the event stream of many schemas would have to pick |
+| A value goes when its last holder does, in the transaction that drops it: an instance's row holds what it holds now, its delete drops them, a behavior's `stow` holds and `release` drops, and an event holds its values for good while the log has no retention. So today a field an instance held stays while an event records it, and a value that only a behavior's rows held, which a schema-level operation or a schedule wrote with no event, goes with its last row. The log's retention, a later change, is what will free most values. | A sweep on a runner schedule, which runs per behavior and schema, needs the runner started with a principal and reads every holder at each run, where one writer and synchronous transactions leave no orphan for it to find; bare reference counts, which a release run twice takes below the truth, removing a value still held |
+| A behavior keeps an object with large members in its own tables through `values` in its context: `stow(key, object)` returns the JSON text and the pointers its row keeps and holds the values for the row named by the behavior, the call's namespace and schema, the context's instance and key; `load(json, refs)` puts them back; `release(key?)` drops them. A read loads only. `Revisions` stows each revision's fields and each proposal's patch (its migration 2 adds `value_refs`) and releases them when the instance goes. | The engine writing behaviors' tables for them, which D16 rules out; `Revisions` copying the fields as before, a large field in every revision |
+| A row or an event written before migration 9 keeps its values inline. An instance's row moves a large field to the store at its next write; an event is never rewritten. | Moving every large value in migration 9, which hashes each one inside one migration's transaction and still cannot touch the append-only log |
+| The store sets no limit of its own on a value's size: the HTTP runtime's body limit bounds what a caller sends, and dedupe and refs bound the copies. | A maximum per value, which no case has asked for and which a client that hits it can only split by hand |
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -3919,6 +3976,28 @@ stack, where `values-schema.json` does not list it. A call between two
 APIs one server serves carries no credential, so a `@requireService`
 operation refuses it though section 9.3's check counts it, which section
 9.9 of `docs/stack-model.md` leaves open.
+
+The rule is reversible until the first release.
+
+## D47. A CI renderer writes each stack's workflow from its environments, and the project's number is a gcp value bootstrap records in the schema
+
+Milestone 6 of `docs/stack-model.md` generates a stack's CI. Section 11.3
+sketched it: a workflow per stack, checks and previews on a pull request,
+deploys on merge and approval, and Workload Identity Federation as
+bootstrap's `planner` and `deployer`. Designing it settled the rest.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A CI renderer is a registration, `registry.CIRendererSpec`: a name, its install directory, and a `Render` from the stack, its resolved environments and the release that renders to files. The core registers `github`, GitHub Actions. A stack opts in with `outputs.ci.<renderer>` in its config; the Stack kind's `ci` generator writes the files under `<output-root>/ci/<stack>/` and installs them under the repository root (`InstallTargetDir`) when the directory exists. | Every stack writing into `.github/workflows`, which an example in a repository with CI of its own would fill with workflows nobody asked for. A `stack ci` command, a second way to write an output the build owns. The renderer in an extension module: a workflow is text, with no dependency to keep out of the core. |
+| A target says how a CI job signs in to an environment through a seam on `TargetSpec`, `CI`: for a resolved environment and a role, `planner` or `deployer`, an identity a renderer turns into its own steps. gcp's is Workload Identity Federation: the provider `projects/<projectNumber>/locations/global/workloadIdentityPools/<stack>-github/providers/github` and the role's account, `<stack>-<role>@<project>.iam.gserviceaccount.com`, both bootstrap's (section 7.3). An environment the seam gives nothing for has no cloud jobs. | Each renderer knowing each target's sign-in, so every target edits every renderer. Account names entered in the stack, which bootstrap already decides. |
+| The project's number is a gcp value, `projectNumber`, a string of digits beside `project`: the provider's name holds it, and nothing else the environment declares gives it. Bootstrap returns it, and the core records it in the schema source: on the environment whose declaration sets `project`, written when absent, written again and reported when it differs, and left alone when it matches. A TypeScript schema changes in that property's text alone, through the compiler's syntax tree; for a JSON or YAML schema the core prints the property to add. A person may correct it by hand like any value. | GitHub repository variables that bootstrap sets, which need an admin token and keep the value outside the repository. A file bootstrap writes and the build reads, which a person correcting it would edit as generated output. The engineer entering it, with nothing to record or check it. |
+| Environments keep their declaration order. The TypeScript reader numbers each `@environment` class (`EnvironmentDecl.Order`): schema files in path order, and a file's classes in source order. `ir.StackOf` orders the stack's environments by it, then by name; a data form writes `order` itself. The workflow deploys the cloud environments without parameters in that order: the first on a push to the branch, each later one after the one before, in a GitHub environment of its name, whose required reviewers approve it. | Name order, which puts Production before Staging. A trigger on each environment, or a promotion list on `@stack`, which restate what the order already says. |
+| A pull request runs a `check` job with no credentials (levels 1 to 3), `stack plan` as `planner` per cloud environment without parameters (levels 5 and 6), and a member of each environment with one parameter, deployed as `deployer` with the pull request's number and destroyed when it closes. A fork's pull request runs `check` alone. | Level 4, `stack dev` with Docker, on every pull request, which an engineer runs on their machine. A workflow per environment, whose order across files GitHub cannot express. A reusable workflow or published action, a second artifact to version beside the binary. |
+| The workflow installs the release that generated it, from the release page of the binary's module, checked against the release's `SHA256SUMS`. The version comes from the binary's build information, as gcp's migration image does (D46); a binary built from a checkout has none, and its workflow's install step fails and says to generate again with a release. | `go install`, which refuses a module with `replace` directives (section 13 of `docs/stack-model.md`). The latest release, which changes a repository's CI with no change in it. |
+
+Status: not built. `projectNumber` is in gcp's values schema; bootstrap
+does not record it yet, the readers do not number environments, and no
+renderer, generator or CI seam exists.
 
 The rule is reversible until the first release.
 

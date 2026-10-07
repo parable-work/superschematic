@@ -98,8 +98,9 @@ type Stack struct {
 	// defaults of section 3.2. StackOf gives them in name order.
 	Deployables []*DeployableDecl `json:"deployables,omitempty" yaml:"deployables,omitempty"`
 
-	// Environments are the stack's environments. StackOf gives them in name
-	// order: a schema's types have no declaration order.
+	// Environments are the stack's environments. StackOf gives them in the
+	// order they are declared (EnvironmentDecl.Order), the order the
+	// generated CI deploys them in (D47).
 	Environments []*Environment `json:"environments,omitempty" yaml:"environments,omitempty"`
 }
 
@@ -231,7 +232,8 @@ type DatabaseDecl struct {
 
 // EnvironmentDecl is the declaration of an `@environment` class: an
 // Environment without the name and the parent, which are the class's name
-// and the class it extends. Its fields are Environment's.
+// and the class it extends, and with its place among the stack's
+// environments. Its other fields are Environment's.
 type EnvironmentDecl struct {
 	Target     string                `json:"target,omitempty" yaml:"target,omitempty"`
 	Values     map[string]any        `json:"values,omitempty" yaml:"values,omitempty"`
@@ -239,16 +241,23 @@ type EnvironmentDecl struct {
 	DNS        *DNSPlacement         `json:"dns,omitempty" yaml:"dns,omitempty"`
 	Settings   []*DeployableSettings `json:"settings,omitempty" yaml:"settings,omitempty"`
 	Parameters []string              `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+
+	// Order is the environment's place in declaration order, from 1. The
+	// TypeScript reader numbers the `@environment` classes: the schema
+	// files in path order, and the classes of a file in source order. A
+	// data form writes it; zero is none, and such an environment comes
+	// after those with one (D47).
+	Order int `json:"order,omitempty" yaml:"order,omitempty"`
 }
 
 // StackOf assembles the stack a Stack schema declares from its types'
 // declarations. The stack takes the schema's name, the `@stack` class gives
 // its entry points and what it exposes, each `@server` and `@database`
 // class is a declared deployable, and each `@environment` class is an
-// environment that extends the class it extends. It returns nil when no
-// type declares `@stack`, and reads the first by name when several do. It
-// checks nothing: the Stack kind's verification does, and resolution
-// checks the rest.
+// environment that extends the class it extends, in declaration order
+// (EnvironmentNames). It returns nil when no type declares `@stack`, and
+// reads the first by name when several do. It checks nothing: the Stack
+// kind's verification does, and resolution checks the rest.
 func StackOf(schema *Schema) *Stack {
 	if schema == nil {
 		return nil
@@ -260,7 +269,6 @@ func StackOf(schema *Schema) *Stack {
 	sort.Strings(names)
 	var stack *Stack
 	var deployables []*DeployableDecl
-	var environments []*Environment
 	for _, name := range names {
 		td := schema.Types[name]
 		if td == nil {
@@ -279,25 +287,50 @@ func StackOf(schema *Schema) *Stack {
 		if td.Database != nil {
 			deployables = append(deployables, &DeployableDecl{Name: td.Name, Kind: DeployableDatabase, Hosts: td.Database.Hosts})
 		}
-		if e := td.Environment; e != nil {
-			environments = append(environments, &Environment{
-				Name:       td.Name,
-				Extends:    td.Extends,
-				Target:     e.Target,
-				Values:     e.Values,
-				Domain:     e.Domain,
-				DNS:        e.DNS,
-				Settings:   e.Settings,
-				Parameters: e.Parameters,
-			})
-		}
 	}
 	if stack == nil {
 		return nil
 	}
 	stack.Deployables = deployables
-	stack.Environments = environments
+	for _, name := range EnvironmentNames(schema.Types) {
+		td := schema.Types[name]
+		e := td.Environment
+		stack.Environments = append(stack.Environments, &Environment{
+			Name:       td.Name,
+			Extends:    td.Extends,
+			Target:     e.Target,
+			Values:     e.Values,
+			Domain:     e.Domain,
+			DNS:        e.DNS,
+			Settings:   e.Settings,
+			Parameters: e.Parameters,
+		})
+	}
 	return stack
+}
+
+// EnvironmentNames returns the names of the types that declare an
+// `@environment`, in declaration order: by EnvironmentDecl.Order, then
+// those without one by name. Equal orders, which the Stack kind's
+// verification refuses, keep name order, so the result is the same on
+// every call.
+func EnvironmentNames(types map[string]*TypeDef) []string {
+	var names []string
+	for name, td := range types {
+		if td != nil && td.Environment != nil {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	order := func(name string) int { return max(types[name].Environment.Order, 0) }
+	sort.SliceStable(names, func(i, j int) bool {
+		a, b := order(names[i]), order(names[j])
+		if (a == 0) != (b == 0) {
+			return b == 0
+		}
+		return a < b
+	})
+	return names
 }
 
 // StackReferences returns every service handle the declarations of a Stack
