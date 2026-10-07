@@ -14,6 +14,7 @@ import {
   defineBehavior,
   openEngine,
   type BehaviorDeclaration,
+  type ConfigChange,
   type Engine,
 } from '../dist/index.js';
 import {
@@ -27,6 +28,7 @@ import {
   publishItem,
   tablesOf,
   tally,
+  type CounterConfig,
 } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, drivers, freshPath, schemaDocument, thrown, track } from './helpers.ts';
 
@@ -344,6 +346,50 @@ for (const driver of drivers) {
         thrown(() => engine.schemas.define(alice, itemDocument([]), { namespace: 'shared' }), IncompatibleChangeError).changes.map((change) => change.path),
         ['Item.behaviors.test.Flag']
       );
+    });
+
+    test('configChange sees whether the schema has instances, in any namespace that reads it, and publish asks again', () => {
+      const asked: boolean[] = [];
+      const counted = defineBehavior<CounterConfig>({
+        ...counter,
+        configChange(before: CounterConfig | undefined, after: CounterConfig | undefined, change: ConfigChange) {
+          if (before === undefined || after === undefined) {
+            return undefined;
+          }
+          asked.push(change.instances);
+          return before.start !== after.start && change.instances ? 'start cannot change while an instance counts from it' : undefined;
+        },
+      });
+      const engine = openBehaviorEngine({ driver, behaviors: [counted], namespaces: { names: ['shared', 'east'], shared: 'shared' } });
+      const define = (start: number) => engine.schemas.define(alice, itemDocument([{ name: 'test.Counter', config: { start } }]), { namespace: 'shared' });
+      define(1);
+      engine.schemas.publish(alice, 'Item', { namespace: 'shared' });
+      // No namespace holds an instance: start may change.
+      define(2);
+      // An instance in a namespace that reads the shared schema: the publish asks again, in its transaction.
+      engine.instances.create(alice, 'Item', { title: 'Desk' }, { namespace: 'east' });
+      assert.deepEqual(
+        thrown(() => engine.schemas.publish(alice, 'Item', { namespace: 'shared' }), IncompatibleChangeError).changes.map((change) => change.message),
+        ['behavior test.Counter on type Item cannot change its config from {"start":1} to {"start":2}: start cannot change while an instance counts from it']
+      );
+      assert.deepEqual(asked, [false, true]);
+    });
+
+    test('a configChange that never reads instances asks nothing of the store', () => {
+      const engine = published([{ name: 'test.Counter', config: { limit: 5 } }], false);
+      let reads = 0;
+      const all = engine.storage.all.bind(engine.storage);
+      const get = engine.storage.get.bind(engine.storage);
+      engine.storage.get = ((sql: string, params?: never) => {
+        reads += /FROM engine_instances/.test(sql) ? 1 : 0;
+        return get(sql, params);
+      }) as typeof engine.storage.get;
+      engine.storage.all = ((sql: string, params?: never) => {
+        reads += /FROM engine_instances/.test(sql) ? 1 : 0;
+        return all(sql, params);
+      }) as typeof engine.storage.all;
+      engine.schemas.define(alice, itemDocument([{ name: 'test.Counter', config: { limit: 9 } }]));
+      assert.equal(reads, 0);
     });
   });
 }

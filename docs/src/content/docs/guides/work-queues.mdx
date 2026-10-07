@@ -270,9 +270,9 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 
 | | |
 | --- | --- |
-| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission` |
+| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`[{ revised: { link }, name, data? }]`) |
 | Precondition | `{ token }`: `preconditions: { Lease: { token } }`, or the `Preconditions` header over HTTP |
-| Field | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }` |
+| Field | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }`; a list filters on `lease.holder`, null for a free instance |
 | Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder, notRenewedAfter? })` |
 | Schedule | `expire`, every `sweepMs`, on the runner |
 | Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, Queue's `refresh`, and principals with `overridePermission` |
@@ -309,6 +309,19 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   heartbeat's own `acknowledge`, stops them in the same write. A
   `dedupeKey` sends a directive once per lease, so a sender that fires
   on every change does not queue it twice. They end with the lease.
+- **Tell the holder a linked target moved.** `directOn` sends a
+  directive when the target of one of the type's links gains a revision
+  or a release, as `Reactions`' `revised` hears it: with
+  `{ "revised": { "link": "plan" }, "name": "rebase" }`, the holder of
+  each step pinned to an earlier revision of its plan hears `rebase`,
+  its `data.revised` saying which plan and which revision. The runner
+  sends it with `direct`, as its principal, which needs
+  `directPermission`, once per lease and move. A step with no lease
+  hears nothing, and nothing waits for its next holder, who takes it
+  after the move.
+- **List by holder.** `where: { "lease.holder": "worker-1" }` lists the
+  instances whose lease worker-1 holds, a lapsed one until its expiry is
+  applied, and `null` the free ones: what a worker reads at a restart.
 - **A gone holder.** `expireHolder` expires every lease one principal
   holds and returns the ids; `notRenewedAfter` spares a lease renewed
   after a time, whose own heartbeats show it alive.
@@ -339,14 +352,16 @@ One principal the instance is assigned to, or none.
 | | |
 | --- | --- |
 | Config | `permission`, optional |
-| Field | `assignee`, the principal's subject |
+| Field | `assignee`, the principal's subject; a list filters on it, null for the unassigned |
 | Operations | `assign({ to })`, `unassign()` |
 | Guard | while assigned, a `Lease.acquire` or `Queue.claim` by anyone but the assignee is `vetoed` (`assigned_to_another`) |
 
 A principal may assign an unassigned instance to itself and unassign
 itself; every other move needs `permission`. `claimNext` skips work
 assigned to someone else, so in the test above a worker never claims the
-job assigned to another, whatever its priority.
+job assigned to another, whatever its priority. A list of my work, or of
+work no one has, filters on the assignee:
+`where: { "assignee": [null, "worker-1"] }`.
 
 ## Queue
 
@@ -553,7 +568,7 @@ once.
 | | |
 | --- | --- |
 | Config | `classes` (required: `{ attempts, hint? }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `limitsPermission`, `keepBest`, `stuckAfter`, `resultField`, `from`, `permission` |
-| Field | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
+| Field | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }`; a list filters on `retries.exhausted` |
 | Operation | `recordAttempt({ failure?, score?, result?, signature?, predicates?, detail? })`, which returns the class's `hint` |
 | Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` (`exhausted`); `limitsField` changes only with `limitsPermission`, and never by the lease holder (`limits_fixed`) |
 

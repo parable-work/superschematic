@@ -303,9 +303,13 @@ function matchNames(key: string, implemented: Map<string, unknown>, declared: st
 
 const FILTER_TYPES: readonly string[] = ['string', 'number', 'integer', 'boolean'];
 
-// checkFilters holds filters to declared fields, each over a column the
-// migrations add, with a JSON type a where compares; it returns them with
-// the index a migration lists on the column alone.
+// A filter on a member of a field: the field, a dot, the member's camelCase name.
+const MEMBER_FILTER = /^([^.]+)\.([a-z][A-Za-z0-9]{0,63})$/;
+
+// checkFilters holds filters to declared fields, or to a member of one
+// (<field>.<member>), each over a column the migrations add, with a JSON
+// type a where compares and a description that is text; it returns them
+// with the index a migration lists on the column alone.
 function checkFilters(
   filters: unknown,
   declaration: BehaviorDeclaration,
@@ -322,13 +326,20 @@ function checkFilters(
     return checked;
   }
   const fields = (declaration.fields ?? []).map((field) => field.name);
-  for (const [field, filter] of Object.entries(filters as Record<string, unknown>)) {
-    const at = `filter ${field}`;
+  for (const [name, filter] of Object.entries(filters as Record<string, unknown>)) {
+    const at = `filter ${name}`;
+    const field = MEMBER_FILTER.exec(name)?.[1] ?? name;
     if (!fields.includes(field)) {
-      problems.push(`${at} names a field its declaration does not (${fields.join(', ') || 'none'})`);
+      problems.push(
+        `${at} names a field its declaration does not (${fields.join(', ') || 'none'}), or a member of one as <field>.<member>, the member camelCase`
+      );
       continue;
     }
-    const { column, type } = (typeof filter === 'object' && filter !== null ? filter : {}) as { column?: unknown; type?: unknown };
+    const { column, type, description } = (typeof filter === 'object' && filter !== null ? filter : {}) as {
+      column?: unknown;
+      type?: unknown;
+      description?: unknown;
+    };
     if (typeof column !== 'string' || !columns.includes(column)) {
       problems.push(`${at}: column is one of its migrations' columns (${columns.join(', ') || 'none'})`);
       continue;
@@ -337,10 +348,19 @@ function checkFilters(
       problems.push(`${at}: type is one of ${FILTER_TYPES.join(', ')}`);
       continue;
     }
+    if (description !== undefined && (typeof description !== 'string' || description.trim() === '')) {
+      problems.push(`${at}: description is text when it is given`);
+      continue;
+    }
     const index = migrations
       .flatMap((migration) => Object.entries(migration.indexes ?? {}))
       .find(([, list]) => list.length === 1 && list[0] === column)?.[0];
-    checked.set(field, { column, type: type as BehaviorFilter['type'], ...(index === undefined ? {} : { index }) });
+    checked.set(name, {
+      column,
+      type: type as BehaviorFilter['type'],
+      ...(description === undefined ? {} : { description }),
+      ...(index === undefined ? {} : { index }),
+    });
   }
   return checked;
 }

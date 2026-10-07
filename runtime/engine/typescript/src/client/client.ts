@@ -65,8 +65,9 @@ export interface ListOptions extends CallOptions {
   readonly limit?: number;
   readonly cursor?: string;
   /**
-   * Field values the instances hold, by field: a value, or a list any of
-   * which they hold; sent as a JSON object in the `where` query parameter.
+   * Field values the instances hold, by field: a value, null for none, or
+   * a list any of which they hold; sent as a JSON object in the `where`
+   * query parameter.
    * A filtered page can hold fewer instances than limit while next is not
    * null.
    */

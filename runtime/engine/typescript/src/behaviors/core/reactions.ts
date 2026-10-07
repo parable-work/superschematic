@@ -96,6 +96,7 @@ import { BehaviorConfigError, defineBehavior, type FrozenJSON, type ReactionCont
 import declaration from './declarations/Reactions.behavior.json' with { type: 'json' };
 import { reactionsGuidance } from './guidance/reactions.js';
 import { linkPin, type LinkPin } from './links.js';
+import { movedOn, targetMove } from './revised.js';
 import { MAX_ROLLUP_READ } from './rollups.js';
 import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
@@ -357,44 +358,6 @@ function madeHold(context: ReactionContext<ReactionsConfig>, rollup: ReactionsRo
   return holdsOver(rollup, as(leftBy(event, was))) && !holdsOver(rollup, as(was));
 }
 
-// revisedBy lists the instances of the home schema a revised rule moves on
-// an event of the link's schema: none unless the event is a new revision
-// (an update or an operation whose change carries revision, on a schema
-// that composes Revisions) or a release (Branches' releaseCommit); then
-// every instance whose link points at the event's instance, or, where the
-// link pins what the event made, a revision or a release, each one the
-// target has moved past.
-function revisedBy(context: ReactionContext<ReactionsConfig>, name: string, link: ReactionsRevisedLink, event: EngineEvent): string[] {
-  const revisions = context.schemas.config(link.schema, 'Revisions') !== undefined;
-  const branches = context.schemas.config(link.schema, 'Branches') !== undefined;
-  if (!revisions && !branches) {
-    throw new BehaviorError(NAME, `revised names link ${name} to ${link.schema}, which composes neither Revisions nor Branches, so it gains no revision or release`);
-  }
-  const change = event.change as Record<string, unknown> | null;
-  const patch = event.kind === 'operation' ? ((change as OperationChange | null)?.patch as Record<string, unknown> | undefined) : event.kind === 'update' ? change : undefined;
-  const revised = revisions && patch !== undefined && patch !== null && Object.prototype.hasOwnProperty.call(patch, 'revision');
-  const operation = event.kind === 'operation' ? (change as OperationChange | null) : null;
-  const released = branches && operation?.behavior === 'Branches' && operation.operation === 'releaseCommit';
-  if (!revised && !released) {
-    return [];
-  }
-  const stale = link.pin === (released ? 'release' : 'revision');
-  const found: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = context.instances.invokeSchema(context.schema, 'listLinked', {
-      name,
-      id: event.instanceId as string,
-      limit: PAGE,
-      ...(stale ? { stale: true } : {}),
-      ...(cursor === undefined ? {} : { cursor }),
-    } as FrozenJSON) as { items: Array<{ id: string }>; next: string | null };
-    found.push(...page.items.map((item) => item.id));
-    cursor = page.next ?? undefined;
-  } while (cursor !== undefined);
-  return found;
-}
-
 // apply moves a rule's target to its state, where it can. from, for an
 // enters rule on the instance itself, is the state the instance must
 // still be in.
@@ -638,10 +601,11 @@ export const reactions = defineBehavior<ReactionsConfig>({
         if ('revised' in rule.when) {
           const name = rule.when.revised.link;
           const link = context.config.revised[name];
-          if (event.schema !== link.schema || event.kind === 'create' || event.kind === 'delete') {
+          const move = targetMove(context, NAME, 'revised', name, link.schema, event);
+          if (move === undefined) {
             continue;
           }
-          for (const referrer of revisedBy(context, name, link, event)) {
+          for (const referrer of movedOn(context, name, link.pin, event.instanceId as string, move)) {
             apply(context, rule.then, referrer);
           }
           continue;

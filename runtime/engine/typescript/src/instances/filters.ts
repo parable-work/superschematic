@@ -8,8 +8,10 @@ together keep the instances every one keeps. A field is one of the
 instance type's own top-level fields that holds a string, a number or a
 boolean (indexes.ts, scalarFields), or a field a behavior lets a list
 filter on (BehaviorImplementation.filters), which the behavior keeps in
-one of its columns: Workflow's status. A value is of the field's JSON
-type; null is no value, and a list holds 1 to 100 of them.
+one of its columns: Workflow's status, Assignment's assignee, Lease's
+lease.holder, Retries' retries.exhausted. A value is of the field's JSON
+type, or null, which keeps the instances whose field holds no value
+(absent or null; a null column), and a list holds 1 to 100 of them.
 
 A page keeps creation order (position) and reads in one of two ways:
 
@@ -18,7 +20,10 @@ A page keeps creation order (position) and reads in one of two ways:
   combination of the members' values is one indexed range read past the
   cursor, in position order, at most 100 of them, and the page merges
   them. A unique index answers each combination with one instance at
-  most, so the whole answer is one page or a few.
+  most, so the whole answer is one page or a few. An own index holds no
+  instance without a value in each of its fields, so it serves no member
+  that lists null; a behavior's index on its column does, a null column
+  being one more range.
 - otherwise through the list index, as an unfiltered page reads,
   scanning at most FILTER_SCAN_ROWS instances past the cursor.
 
@@ -72,6 +77,8 @@ export interface Filterable {
   readonly column?: string;
   /** For a behavior's field, the SQL name of the behavior's index on that column alone, when it has one. */
   readonly index?: string;
+  /** For a behavior's field, what the value is, when the behavior's filter says. */
+  readonly description?: string;
   /** For an own field, whether a row may hold a long value of it by hash: no own index covers it. */
   readonly spillable?: boolean;
 }
@@ -82,7 +89,10 @@ export type FilterValue = string | number | boolean;
 /** One member of where, checked. */
 export interface WhereTerm {
   readonly filterable: Filterable;
+  /** The values it keeps, null aside. */
   readonly values: readonly FilterValue[];
+  /** Whether it lists null: it keeps the instances whose field holds no value. */
+  readonly none: boolean;
 }
 
 /** What a filtered page reads: the schema's rows in a namespace, its own indexes and the members. */
@@ -124,7 +134,12 @@ export function parseWhere(where: unknown, filterables: ReadonlyMap<string, Filt
     }
     const seen = new Set<string>();
     const kept: FilterValue[] = [];
+    let none = false;
     for (const value of values) {
+      if (value === null) {
+        none = true;
+        continue;
+      }
       checkValue(`where.${key}`, filterable.type, value);
       const id = JSON.stringify(value);
       if (!seen.has(id)) {
@@ -132,7 +147,7 @@ export function parseWhere(where: unknown, filterables: ReadonlyMap<string, Filt
         kept.push(value as FilterValue);
       }
     }
-    terms.push({ filterable, values: kept });
+    terms.push({ filterable, values: kept, none });
   }
   return terms;
 }
@@ -184,7 +199,7 @@ function checkValue(at: string, type: ScalarType, value: unknown): void {
   if (!fits) {
     throw new EngineError(
       'invalid_argument',
-      `${at} is ${type === 'integer' ? 'an integer' : `a ${type}`}${at.startsWith('where') ? ', or a list of them' : ''}, not ${value === null ? 'null' : JSON.stringify(value) ?? typeof value}`
+      `${at} is ${type === 'integer' ? 'an integer' : `a ${type}`}${at.startsWith('where') ? ' or null, or a list of them' : ''}, not ${value === null ? 'null' : JSON.stringify(value) ?? typeof value}`
     );
   }
 }
@@ -283,7 +298,9 @@ function drivingRead(storage: Storage, plan: FilterPlan): { ranges: Range[]; cov
   };
   for (const index of plan.indexes) {
     const terms = index.keys.map((key) => byKey.get(key));
-    if (terms.some((term) => term === undefined) || !indexExists(storage, index.name)) {
+    // The index is partial on a value in each field: it holds no instance
+    // a member listing null keeps.
+    if (terms.some((term) => term === undefined || term.none) || !indexExists(storage, index.name)) {
       continue;
     }
     const covered = terms as WhereTerm[];
@@ -307,13 +324,15 @@ function drivingRead(storage: Storage, plan: FilterPlan): { ranges: Range[]; cov
     consider({
       unique: false,
       terms: [term],
-      combinations: term.values.length,
-      ranges: () =>
-        term.values.map((value) => ({
+      combinations: term.values.length + (term.none ? 1 : 0),
+      ranges: () => [
+        ...term.values.map((value) => ({
           index,
           where: `namespace = ? AND schema = ? AND "${column}" = ?`,
           params: [plan.namespace, plan.schema, bind(value)],
         })),
+        ...(term.none ? [{ index, where: `namespace = ? AND schema = ? AND "${column}" IS NULL`, params: [plan.namespace, plan.schema] }] : []),
+      ],
     });
   }
   if (best === undefined) {
@@ -332,10 +351,16 @@ function combinations(lists: ReadonlyArray<readonly FilterValue[]>): FilterValue
 function conjunction(terms: readonly WhereTerm[]): { sql: string; params: SqlValue[] } {
   const parts: string[] = [];
   const params: SqlValue[] = [];
-  for (const { filterable, values } of terms) {
+  for (const { filterable, values, none } of terms) {
     const expression = filterable.column !== undefined ? `"${filterable.column}"` : valueExpression(filterable.key);
-    const alternatives = [`${expression} IN (${values.map(() => '?').join(', ')})`];
-    params.push(...values.map(bind));
+    const alternatives: string[] = [];
+    if (values.length > 0) {
+      alternatives.push(`${expression} IN (${values.map(() => '?').join(', ')})`);
+      params.push(...values.map(bind));
+    }
+    if (none) {
+      alternatives.push(`${expression} IS NULL`);
+    }
     if (filterable.spillable === true) {
       const hashes = values
         .filter((value): value is string => typeof value === 'string' && Buffer.byteLength(JSON.stringify(value), 'utf8') > MIN_VALUE_THRESHOLD)
@@ -354,7 +379,7 @@ function conjunction(terms: readonly WhereTerm[]): { sql: string; params: SqlVal
 export interface FilteringBehavior {
   readonly name: string;
   readonly prefix: string;
-  readonly filters: ReadonlyMap<string, { readonly column: string; readonly type: ScalarType; readonly index?: string }>;
+  readonly filters: ReadonlyMap<string, { readonly column: string; readonly type: ScalarType; readonly index?: string; readonly description?: string }>;
 }
 
 /**
@@ -380,6 +405,7 @@ export function filterablesOf(
         behavior: behavior.name,
         column: `${behavior.prefix}${filter.column}`,
         ...(filter.index === undefined ? {} : { index: indexName(behavior.prefix, filter.index) }),
+        ...(filter.description === undefined ? {} : { description: filter.description }),
       });
     }
   }

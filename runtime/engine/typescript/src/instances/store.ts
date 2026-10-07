@@ -214,11 +214,13 @@ export interface ListOptions extends InstanceTarget {
   /** As GetOptions.valueRefs. */
   valueRefs?: boolean;
   /**
-   * Field values the instances hold, by field: a value, or a list of 1 to
-   * 100 of which the instance holds one. A field is an own top-level field
-   * that holds a string, a number or a boolean, or one a behavior lets a
-   * list filter on (Workflow's status). A filtered page can hold fewer
-   * instances than limit, even none, while next is not null.
+   * Field values the instances hold, by field: a value, null for none
+   * (absent or null), or a list of 1 to 100 of which the instance holds
+   * one. A field is an own top-level field that holds a string, a number
+   * or a boolean, or one a behavior lets a list filter on (Workflow's
+   * status, or a member of a behavior's field, lease.holder). A filtered
+   * page can hold fewer instances than limit, even none, while next is
+   * not null.
    */
   where?: Readonly<Record<string, unknown>>;
 }

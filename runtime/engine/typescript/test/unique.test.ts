@@ -268,7 +268,7 @@ for (const driver of drivers) {
       );
       assert.match(described.operations[0].guidance.useWhen, /slug is unique; source and externalId together are unique: a value another Model holds is refused \(conflict\)\./);
       assert.match(described.operations[0].guidance.doNotUseWhen, /Do not create a Model whose slug or source and externalId another holds; call lookup to find it\./);
-      assert.match(described.operations[2].guidance.useWhen, /where keeps the ones whose fields hold the values it gives, a list of values meaning any of them: slug, title, source or externalId\./);
+      assert.match(described.operations[2].guidance.useWhen, /where keeps the ones whose fields hold the values it gives, null meaning no value and a list of values any of them: slug, title, source or externalId\./);
       // A schema without a unique field has no lookup.
       publish(engine, schemaDocument('Note', [{ name: 'body', typeRef: { name: 'string' } }]));
       assert.deepEqual(engine.tools.describe(alice, 'Note').operations.map((operation) => operation.name), ['create', 'get', 'list', 'update', 'delete']);

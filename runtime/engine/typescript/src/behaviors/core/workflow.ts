@@ -22,8 +22,9 @@ past the guard. The guard below checks every transition request, a
 caller's or another behavior's call(), before any handler runs, and the
 handler holds the column to what the guard allowed.
 
-configChange: a new version keeps every state of the old config, since an
-instance may be in any of them; transitions, their permissions, the
+configChange: while the schema has instances, a new version keeps every
+state of the old config, since an instance may be in any of them, and
+with none it may drop any; transitions, their permissions, the
 initial state and outcomes may change. Outcomes, like transitions, are
 read when another instance's field is computed or a rule runs, so a new
 version's outcome applies at the next read to the instances already in
@@ -145,12 +146,16 @@ export const workflow = defineBehavior<WorkflowConfig>({
     return config;
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before === undefined) {
       return 'the instances that exist have no status to start from';
     }
     if (after === undefined) {
       return 'the instances would lose their status';
+    }
+    // No instance is in a state the new config drops.
+    if (!change.instances) {
+      return undefined;
     }
     const gone = before.states.filter((state) => !after.states.includes(state));
     return gone.length > 0 ? `an instance may be in ${gone.map((state) => `"${state}"`).join(', ')}, which the new config drops` : undefined;
