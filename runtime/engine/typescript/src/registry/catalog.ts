@@ -8,7 +8,10 @@ with the draft's hash; publish makes the draft the next live version (1,
 Instances are read and written with the live version, the newest one.
 
 Both refuse a document the engine does not take (document.ts) and a
-version the compatibility rule refuses against the live one (compat.ts).
+version the compatibility rule refuses against the live one (compat.ts),
+and a version whose new unique field the stored instances break
+(instances/indexes.ts). publish creates and drops the indexes of the
+instance type's own fields as the version adds and removes them.
 publish loads the draft again, so it also meets the deployment's current
 meta-schema. A draft identical to the live version (the same canonical
 form, so the same hash) publishes nothing: no version is minted, no event
@@ -46,6 +49,8 @@ import type { BehaviorRegistry } from '../behaviors/registry.js';
 import { prefixOf, storedKey } from '../behaviors/storage.js';
 import { EngineError, IncompatibleChangeError, SchemaDocumentError } from '../errors.js';
 import { appendEvent, type DefineChange } from '../events/log.js';
+import { filterablesOf, type Filterable } from '../instances/filters.js';
+import { clashMessage, indexIssues, ownIndexes, scalarFields, syncOwnIndexes, uniqueClashes, type OwnIndex, type UniqueClash } from '../instances/indexes.js';
 import type { Namespaces } from '../namespaces.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
@@ -102,6 +107,12 @@ export interface VersionRuntime {
   readonly composition: Composition;
   /** Each composed behavior's storage prefix, by behavior name. */
   readonly prefixes: Prefixes;
+  /** The indexes of the instance type's own fields: its unique fields and its @index entries (instances/indexes.ts). */
+  readonly indexes: readonly OwnIndex[];
+  /** The own fields an index covers, which an instance's row keeps inline whatever their length. */
+  readonly inline: ReadonlySet<string>;
+  /** The fields a list filters on, by key (instances/filters.ts). */
+  readonly filters: ReadonlyMap<string, Filterable>;
 }
 
 /**
@@ -157,6 +168,10 @@ export class SchemaCatalog {
       const live = this.row(namespace, model.name, 'live');
       if (live) {
         this.checkCompatible(namespace, live, model);
+        // A unique field the live version lacks holds for the instances
+        // stored now; publish asks again, since they may change before it.
+        const before = modelOf(String(live.document));
+        this.refuseClashes(namespace, live, model, uniqueClashes(this.storage, namespace, model.name, ownIndexes(before, namespace), ownIndexes(model, namespace)));
       }
       this.storage.run(
         `INSERT INTO engine_schemas (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
@@ -205,6 +220,19 @@ export class SchemaCatalog {
       const composition = this.composeReaching(model, namespace, ask, `${namespace}/${name} draft`);
       for (const bound of composition.behaviors) {
         this.behaviors.ensureStorage(bound.behavior);
+      }
+      // The indexes of the instance type's own fields follow the version:
+      // the ones it drops go, and a new unique one the stored instances
+      // break refuses it.
+      const clashes = syncOwnIndexes(
+        this.storage,
+        namespace,
+        name,
+        live ? ownIndexes(modelOf(String(live.document)), namespace) : [],
+        ownIndexes(model, namespace)
+      );
+      if (live) {
+        this.refuseClashes(namespace, live, model, clashes);
       }
       const version = live ? Number(live.version) + 1 : 1;
       this.storage.run(
@@ -310,7 +338,24 @@ export class SchemaCatalog {
         prefixes.set(bound.behavior.name, prefixOf(stored));
       }
       const fields = new Map([...composition.fields].map(([field, bound]) => [field, bound.behavior.name]));
-      runtime = { validator: new SchemaValidator(model, fields), composition, prefixes };
+      const indexes = ownIndexes(model, record.namespace);
+      const filters = filterablesOf(
+        scalarFields(model.document, model.instanceType),
+        indexes,
+        composition.behaviors.map((bound) => ({
+          name: bound.behavior.name,
+          prefix: prefixes.get(bound.behavior.name) as string,
+          filters: bound.behavior.filters,
+        }))
+      );
+      runtime = {
+        validator: new SchemaValidator(model, fields),
+        composition,
+        prefixes,
+        indexes,
+        inline: new Set(indexes.flatMap((index) => index.keys)),
+        filters,
+      };
       this.runtimes.set(key, runtime);
     }
     return runtime;
@@ -321,7 +366,7 @@ export class SchemaCatalog {
     const model = readSchema(this.loader, text, source, (candidate) => {
       const composed = compose(candidate, this.behaviors);
       alone = composed.composition;
-      return composed.issues;
+      return [...composed.issues, ...indexIssues(candidate.document, candidate.instanceType)];
     });
     if (alone !== undefined) {
       this.alone.set(model, alone);
@@ -421,6 +466,25 @@ export class SchemaCatalog {
     if (changes.length > 0) {
       throw new IncompatibleChangeError(namespace, model.name, Number(live.version), changes);
     }
+  }
+
+  // refuseClashes refuses a version whose new unique fields the stored
+  // instances break, naming the values only where the namespace that
+  // holds the schema holds the instances.
+  private refuseClashes(namespace: string, live: Row, model: SchemaModel, clashes: readonly UniqueClash[]): void {
+    if (clashes.length === 0) {
+      return;
+    }
+    throw new IncompatibleChangeError(
+      namespace,
+      model.name,
+      Number(live.version),
+      clashes.map((clash) => ({
+        path: clash.index.fields.length === 1 ? `${model.instanceType}.${clash.index.fields[0]}` : model.instanceType,
+        message: clashMessage(clash, namespace, model.instanceType),
+      })),
+      'Make the values distinct first (list with where finds the instances that share one), or keep the field as it was'
+    );
   }
 
   // hasInstances reports whether any namespace holds an instance of the

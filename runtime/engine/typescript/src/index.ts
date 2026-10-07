@@ -32,6 +32,7 @@ export {
   OperationParamsError,
   PreconditionsError,
   SchemaDocumentError,
+  UniqueConflictError,
 } from './errors.js';
 export type { EngineErrorCode, SchemaChange, SchemaIssue, ValidationIssue, Veto } from './errors.js';
 
@@ -47,6 +48,7 @@ export { SchemaValidator } from './registry/validator.js';
 export { INSTANCE_ID, InstanceStore } from './instances/store.js';
 export type { CreateOptions, DeleteOptions, GetOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions, UpdateOptions } from './instances/store.js';
 export type { InvokeOptions, InvokeSchemaOptions, OperationOutcome } from './instances/store.js';
+export { FILTER_SCAN_ROWS, MAX_FILTER_RANGES, MAX_FILTER_VALUES } from './instances/filters.js';
 
 export { EVENT_KINDS, EventLog } from './events/log.js';
 export type { DefineChange, EngineEvent, EventCause, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
@@ -98,6 +100,7 @@ export { ENGINE_OWNER, engineMigrations } from './migrations.js';
 export { BehaviorConfigError, RELATION_COLUMNS, defineBehavior } from './behaviors/behavior.js';
 export type {
   AnyBehaviorImplementation,
+  BehaviorFilter,
   BehaviorGuidance,
   BehaviorImplementation,
   BehaviorMigration,
@@ -229,7 +232,7 @@ export type {
 } from './behaviors/core/index.js';
 
 // Storage.
-export { SQLITE_BUSY, SqliteError, isBun, openDriver } from './storage/driver.js';
+export { SQLITE_BUSY, SQLITE_CONSTRAINT_UNIQUE, SqliteError, isBun, openDriver } from './storage/driver.js';
 export type { DriverName, Row, RunResult, SqlDriver, SqlValue } from './storage/driver.js';
 export { DEFAULT_BUSY_TIMEOUT_MS, Storage } from './storage/storage.js';
 export type { StorageOptions } from './storage/storage.js';

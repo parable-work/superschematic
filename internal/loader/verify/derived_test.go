@@ -45,6 +45,25 @@ func TestEnvVarsFieldsThatCollideWithDerivedFields(t *testing.T) {
 		t.Errorf("with database = {SERVICE}_DSN: %+v", r.Errors)
 	}
 
+	stock := ir.NewSchema("stock-api", ir.SchemaKindAPI)
+	stock.OperationSets = []*ir.OperationSet{{Name: "Stock", Operations: []*ir.FieldDef{
+		{Name: "reindex", ServiceCallers: &ir.ServiceCallers{Mode: ir.ServiceCallersRequire}},
+	}}}
+	stock.Types["StockConfig"] = &ir.TypeDef{Name: "StockConfig", EnvVars: true, Fields: []*ir.FieldDef{
+		{Name: "STOCK_API_CALLERS_LIMIT"}, {Name: "STOCK_API_CALLER"},
+	}}
+	r = &Result{}
+	checkDerivedFields(stock, Input{}, r)
+	if len(r.Errors) != 1 || r.Errors[0].Msg != "@envVars field STOCK_API_CALLERS_LIMIT of StockConfig collides with STOCK_API_CALLERS, the callers field the http edges to stock-api derive; a stack's platform sets it, so rename the setting" {
+		t.Errorf("an API with a service clause: %+v", r.Errors)
+	}
+	stock.OperationSets = nil
+	r = &Result{}
+	checkDerivedFields(stock, Input{}, r)
+	if len(r.Errors) != 0 {
+		t.Errorf("an API without a service clause has no callers field: %+v", r.Errors)
+	}
+
 	general := ir.NewSchema("shop-config", ir.SchemaKindGeneral)
 	general.Dependencies = []ir.ServiceRef{{Name: "shop-db", Kind: ir.SchemaKindDB}}
 	general.Types["ShopConfig"] = &ir.TypeDef{Name: "ShopConfig", EnvVars: true, Fields: []*ir.FieldDef{{Name: "SHOP_DB_DATABASE"}}}

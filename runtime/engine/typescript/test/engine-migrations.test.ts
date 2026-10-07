@@ -12,6 +12,7 @@ import {
   ENGINE_OWNER,
   EngineError,
   Storage,
+  UniqueConflictError,
   allowAll,
   appliedMigrations,
   canonicalJSON,
@@ -344,9 +345,30 @@ const seeds: Record<number, Seed> = {
       checkOperationEvents(engine, 3);
     },
   },
-  // Version 9 had no namespaces but the configured ones, kept every event,
-  // and found where a subscription starts from its publish event.
+  // Version 9 ignored @unique, and kept a long slug by hash in the row.
   9: {
+    write(storage) {
+      writeModels(storage);
+    },
+    check(engine) {
+      // Migration 10 indexed the slug and put b's back inline in its row.
+      const row = engine.storage.get("SELECT data, value_refs FROM engine_instances WHERE id = 'b'");
+      assert.deepEqual([JSON.parse(String(row?.data)), row?.value_refs], [{ slug: longSlug() }, null]);
+      assert.equal(
+        Number(engine.storage.get("SELECT COUNT(*) AS n FROM engine_payload_holders WHERE holder = 'instance'")?.n),
+        0,
+        "b's row holds no value; its create event still does"
+      );
+      assert.equal(engine.instances.lookup(alice, 'Model', { slug: longSlug() })?.id, 'b');
+      assert.equal(engine.instances.lookup(alice, 'Model', { slug: 'models/plain' })?.id, 'a');
+      assert.throws(() => engine.instances.create(alice, 'Model', { slug: 'models/plain' }), UniqueConflictError);
+      engine.instances.create(alice, 'Model', { slug: 'models/new' }, { id: 'c' });
+      checkOperationEvents(engine, 4, 'create');
+    },
+  },
+  // Version 10 had no namespaces but the configured ones, kept every
+  // event, and found where a subscription starts from its publish event.
+  10: {
     write(storage) {
       const order = canonical(orderDocument());
       storage.run(
@@ -386,8 +408,8 @@ const seeds: Record<number, Seed> = {
       checkOperationEvents(engine, 4);
     },
   },
-  // Version 10 kept the namespaces a create made, and every event.
-  10: {
+  // Version 11 kept the namespaces a create made, and every event.
+  11: {
     write(storage) {
       const order = canonical(orderDocument());
       storage.run('INSERT INTO engine_namespaces (name, created_at, created_by, archived_at, archived_by) VALUES (?, ?, ?, ?, ?)', ['acme', 100, 'alice', 200, 'bob']);
@@ -420,6 +442,47 @@ const seeds: Record<number, Seed> = {
     },
   },
 };
+
+// A Model whose slug is @unique, which version 9 stored and ignored.
+const modelDocument = schemaDocument('Model', [
+  { name: 'slug', typeRef: { name: 'string' }, unique: true },
+  { name: 'title', typeRef: { name: 'string' } },
+]);
+
+/** longSlug is a slug a version 9 engine with a 1 KiB threshold stored by hash. */
+function longSlug(): string {
+  return `models/${'x'.repeat(2000)}`;
+}
+
+// writeModels writes version 1 of Model and its instances, as version 9
+// wrote them: a by its slug inline, b by its slug's ref, and the extra
+// rows given.
+function writeModels(storage: Storage, rows: Array<[string, string]> = []): void {
+  const model = canonical(modelDocument);
+  storage.run(
+    `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ['default', 'Model', 1, model.text, model.hash, 100, 'alice', 200, 'alice']
+  );
+  const json = canonicalJSON(longSlug());
+  const hash = createHash('sha256').update(json).digest('hex');
+  const ref = JSON.stringify({ slug: { $value: hash, bytes: json.length } });
+  storage.run('INSERT INTO engine_payloads (hash, value, bytes) VALUES (?, ?, ?)', [hash, json, json.length]);
+  const instance = `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by, value_refs)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  const event = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change, value_refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+  const holder = 'INSERT INTO engine_payload_holders (hash, namespace, schema, holder, id, key) VALUES (?, ?, ?, ?, ?, ?)';
+  storage.run(event, ['publish', 'default', 'Model', null, null, 1, 'alice', 200, model.text, null]);
+  storage.run(instance, ['default', 'Model', 'a', 'default', 1, 1, '{"slug":"models/plain"}', 300, 'alice', 300, 'alice', null]);
+  storage.run(event, ['create', 'default', 'Model', 'a', 1, 1, 'alice', 300, '{"slug":"models/plain"}', null]);
+  storage.run(instance, ['default', 'Model', 'b', 'default', 1, 1, ref, 300, 'alice', 300, 'alice', '["/slug"]']);
+  const created = storage.run(event, ['create', 'default', 'Model', 'b', 1, 1, 'alice', 300, ref, '["/slug"]']);
+  storage.run(holder, [hash, 'default', 'Model', 'instance', 'b', '']);
+  storage.run(holder, [hash, 'default', 'Model', 'event', 'b', String(created.lastInsertRowid)]);
+  for (const [id, data] of rows) {
+    storage.run(instance, ['default', 'Model', id, 'default', 1, 1, data, 300, 'alice', 300, 'alice', null]);
+  }
+}
 
 /** bulkLines is an order's lines whose JSON is past the default threshold, 64 KiB. */
 function bulkLines(): Array<{ sku: string; count: number }> {
@@ -507,6 +570,28 @@ for (const driver of drivers) {
         }
       });
     }
+
+    test('migration 10 refuses a file whose instances break a unique field the engine ignored before', () => {
+      const path = freshPath();
+      const storage = Storage.open(path, { driver });
+      migrate(storage, { owner: ENGINE_OWNER, migrations: engineMigrations.migrations.slice(0, 9) });
+      writeModels(storage, [
+        ['c', '{"slug":"models/plain"}'],
+        ['d', '{"slug":"models/plain"}'],
+      ]);
+      storage.close();
+      assert.throws(
+        () => openEngine({ path, driver, policy: allowAll }),
+        /engine migration 10: schema Model in namespace default has unique fields its stored instances break: field Model.slug becomes unique, and 3 instances in namespace default hold slug "models\/plain"/
+      );
+      // Nothing of the migration stays: the file is still at version 9.
+      const reopened = Storage.open(path, { driver });
+      assert.deepEqual(
+        appliedMigrations(reopened, ENGINE_OWNER).map((row) => row.version),
+        engineMigrations.migrations.slice(0, 9).map((migration) => migration.version)
+      );
+      reopened.close();
+    });
 
     test('an engine whose file is newer than the build refuses to open it', () => {
       const path = freshPath();

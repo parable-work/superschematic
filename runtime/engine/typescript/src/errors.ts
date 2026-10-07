@@ -25,7 +25,7 @@ export type EngineErrorCode =
   | 'forbidden'
   /** The instance, or an update's result, does not validate against the live version. */
   | 'invalid_instance'
-  /** An instance with the id already exists. */
+  /** An instance with the id already exists, or another instance holds the values of a unique field (UniqueConflictError). */
   | 'conflict'
   /** An update or delete named the instance's sequence, and the instance is no longer at it. */
   | 'seq_mismatch'
@@ -97,18 +97,50 @@ export interface SchemaChange {
   message: string;
 }
 
+/** What IncompatibleChangeError tells a definer to do, unless the caller says otherwise. */
+const INCOMPATIBLE_ADVICE =
+  'A new version may only add optional fields and enum values, widen bounds, change documentation and make the behavior changes each behavior allows; publish any other change under a new schema name';
+
 /** A new version the compatibility rule refuses. */
 export class IncompatibleChangeError extends EngineError {
   readonly changes: SchemaChange[];
 
-  constructor(namespace: string, name: string, liveVersion: number, changes: SchemaChange[]) {
+  /** advice replaces the closing sentence, for a change the stored instances refuse rather than the rule's diff (a new unique field). */
+  constructor(namespace: string, name: string, liveVersion: number, changes: SchemaChange[], advice = INCOMPATIBLE_ADVICE) {
     super(
       'incompatible_change',
-      `schema ${name} in namespace ${namespace}: a new version cannot replace version ${liveVersion}: ${changes.map((change) => change.message).join('; ')}. A new version may only add optional fields and enum values, widen bounds, change documentation and make the behavior changes each behavior allows; publish any other change under a new schema name`
+      `schema ${name} in namespace ${namespace}: a new version cannot replace version ${liveVersion}: ${changes.map((change) => change.message).join('; ')}. ${advice}`
     );
     this.name = 'IncompatibleChangeError';
     this.changes = changes;
   }
+}
+
+/**
+ * A create or an update that would give a second instance of a namespace
+ * the values of a unique field, or of a unique index's fields: fields
+ * names them by JSON key. The instance that holds them is not named, since
+ * the caller may write the schema without reading it.
+ */
+export class UniqueConflictError extends EngineError {
+  /** The JSON keys of the unique fields, in the index's order. */
+  readonly fields: string[];
+
+  constructor(namespace: string, schema: string, fields: readonly string[], values: readonly unknown[]) {
+    const held = fields.map((field, position) => `${field} ${shownValue(values[position])}`);
+    super(
+      'conflict',
+      `${schema} in namespace ${namespace}: another instance holds ${held.length < 2 ? held.join('') : `${held.slice(0, -1).join(', ')} and ${held[held.length - 1]}`}, and ${fields.length > 1 ? 'together they are' : 'it is'} unique`
+    );
+    this.name = 'UniqueConflictError';
+    this.fields = [...fields];
+  }
+}
+
+// shownValue writes a value for a message, cut short past 80 characters.
+function shownValue(value: unknown): string {
+  const text = JSON.stringify(value) ?? String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
 /** One reason an instance is refused, at a path such as `lines[2].sku`; an empty path is the instance itself. */

@@ -163,10 +163,12 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a service field per http edge. It holds the callee's base URL, the
   source of the service credential and the headers that carry it (section
   9.2);
-- a service-auth field on a server that an http edge reaches. It holds
-  what the server's `ServiceAuthenticator` checks: each inbound edge's
-  issuer, keys and audience, and the deployable each caller identity is
-  (section 9.2).
+- a callers field per served API with a service clause, `<API>_CALLERS`
+  (`SHOP_API_CALLERS`), named by the core's rule alone over the API's own
+  name. It holds what the server's `ServiceAuthenticator` checks: the
+  issuers it accepts, with their keys and audience, and the deployable
+  each caller identity is, which the connectors of the http edges to the
+  API write together (section 9.2).
 
 An API's database field comes from its `authDb`, or its one DB-kind
 dependency, as its sql edge does (section 3.3).
@@ -178,30 +180,38 @@ reads. `values-schema.json` lists each derived field in
 `x-superschematic.envVars` with `derived` (the edge kind), `service` and
 `variables`, and each of its variables as an optional string property
 that the platform sets, not a deployment's values. The TypeScript and Rust
-loaders read no derived field yet (section 12), and the service-auth field
-waits for the connectors that write it.
+loaders read no derived field yet (section 12). The callers field is in
+neither `EnvConfig` nor `values-schema.json`, since its variables follow
+the environment's edges: the generated entrypoint reads it with
+`stackconfig.LoadCallers` (section 8.1).
 
 What a connector derives for each edge kind has a contract, in
-`ir/derived_value.go`. Resolution checks every connector's value against
-it and refuses one that breaks it with a `lowering` failure that names the
-member at fault:
+`ir/derived_value.go` and `ir/service_auth.go`. Resolution checks every
+connector's value against it and refuses one that breaks it with a
+`lowering` failure that names the member at fault:
 
 | Edge | Value | Members |
 | --- | --- | --- |
 | sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
 | http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization` |
+| http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 
 A member holds a string or a reference to an output or a parameter. A
-credential's `source` and `headers` are literals, and a member the
-contract lacks, or that the credential's source does not read, is
-refused.
+credential's `source` and `headers` are literals, as are an issuer's
+aliases, algorithms, subject claim and maximum lifetime, a whole number,
+and a caller's deployable and the APIs it serves. A member the contract
+lacks, or that the credential's source does not read, is refused.
 
 In environment variables, a derived field is one variable per member:
 the field's name, an underscore and the member's path in upper snake case,
-with a list joined by commas (`SHOP_DB_DATABASE_URL`,
+with a list of strings joined by commas (`SHOP_DB_DATABASE_URL`,
 `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `SHOP_API_SERVICE_URL`,
-`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). `ir.DerivedVariables` encodes a
-value that way for platforms, and the generated loaders read it back.
+`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). A list of objects, or an empty
+list, is a variable that holds the list's length, and each object's
+members follow the list's name and the object's index
+(`SHOP_API_CALLERS_ISSUERS=1`, `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`). A
+whole number is its decimal. `ir.DerivedVariables` encodes a value that
+way for platforms, and the generated loaders read it back.
 Each variable is a plain string a platform can set from an output
 reference, or from its secret store for a member such as a signing key.
 
@@ -327,7 +337,12 @@ declaration names is an `@server` or `@database` class of the schema, so
 the data forms are held to it too. Each decorator writes a declaration on
 its class's `TypeDef` (`Stack`, `Server`, `Database` or `Environment`),
 and `ir.StackOf` assembles them into the `ir.Stack` the resolver reads,
-its deployables and environments in name order.
+its deployables in name order and its environments in the order they are
+declared, which the generated CI deploys them in (section 11.3). The
+TypeScript reader numbers each `@environment` class
+(`EnvironmentDecl.Order`): schema files in path order, and the classes of
+a file in source order. A data form writes `order` itself, and an
+environment without one comes after those with one, by name (D47).
 
 Every declaration has the JSON and YAML data forms every schema has. A
 class is a type, and its declaration the key the decorator writes. A
@@ -1105,6 +1120,10 @@ production and a parameterized preview environment.
 - `project` and `region`, which are required, and `production: true` for
   an environment the production defaults (section 7.5) and policy rules
   (section 7.6) apply to;
+- `projectNumber`, which bootstrap records (section 7.3) and a person may
+  correct later. The generated CI needs it (section 11.3): Workload
+  Identity Federation names its provider by the project's number, which no
+  other value gives;
 - `domain`, which is optional, and its DNS platform: Cloud DNS by default,
   or Cloudflare with the zone's name (`zone`) and identifier (`zoneId`),
   and an API token that bootstrap asks for (section 6.9). Cloud DNS
@@ -1122,7 +1141,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service mounts |
-| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for that URL as the service credential (section 9.2) |
+| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
@@ -1197,6 +1216,14 @@ again: each step creates what is missing and leaves the rest.
    credential, so its secret is not in the bootstrap graph, whose next
    apply for another environment would delete it, and a credential asked
    for once is not asked for again.
+5. It records the project's number in the schema, as `projectNumber` in
+   the `gcp` values of the environment that declares `project`, so an
+   environment that inherits its project inherits the number too. It
+   writes the value when the schema has none, writes it again when it
+   differs and says so, and leaves the file alone when it matches. In a
+   TypeScript schema it changes only that property's text, through the
+   compiler's syntax tree; for a JSON or YAML schema it prints the value to
+   add (D47).
 
 The bootstrap graph is checked in as a golden,
 `extensions/gcp/testdata/golden/bootstrap/Staging.json`, and validates
@@ -1298,12 +1325,13 @@ last build wrote, and a TypeScript or Rust server gets no entrypoint yet.
   seconds to finish.
 
 An API whose operations have a service clause also takes a service
-authenticator, a `serviceauth.Verifier` over the service-auth field of
-section 3.4. No connector derives that field yet, so until one does the
-entrypoint's `serviceAuthenticator` refuses to start such a server, rather
-than answer every service caller 401. OpenTelemetry export is not set up:
-the runtime records spans through the global tracer, and an exporter
-would add the OTLP client's dependencies to every server.
+authenticator, a `serviceauth.Verifier` over the API's callers field
+(section 9.2), which `serviceAuthenticator` in `serviceauth.go`, beside
+`main.go`, builds with `stackconfig.LoadCallers`. The server refuses to
+start without the field, and where no other server calls the API it starts
+with no issuers and refuses every service credential. OpenTelemetry export
+is not set up: the runtime records spans through the global tracer, and an
+exporter would add the OTLP client's dependencies to every server.
 
 The engineer writes the implementation of each served API, and nothing else
 (section 8.5). The entrypoint calls each implementation's constructor with
@@ -1420,11 +1448,6 @@ until the TypeScript and Rust entrypoints exist.
 
 Not built:
 
-- The callee's half of service auth. Which config field gives a callee
-  its verification keys is for the connectors and the generated entrypoint
-  to define together, in one change; the key pair node's `publicJwk`
-  output is what the local connector will put there. Until then the
-  entrypoint does not start a server whose API has a service clause.
 - Key rotation: a local key pair lasts until its file is removed.
 - Restarting a server that exits: `stack dev` stops the environment.
 
@@ -1592,19 +1615,72 @@ Service auth answers which deployable is calling, at two layers:
 The service credential is a short-lived JWT on every v1 platform, so one
 verifier in each runtime reads all of them. It knows JWTs and keys, not
 clouds; what is specific to a platform is data the connector writes into
-the callee's config (section 3.4).
+the callee's callers field (below).
 
 | Platform | The caller sends | Lifetime | The callee checks |
 | --- | --- | --- | --- |
-| Cloud Run | a Google ID token whose audience is the callee's URL, from the metadata server | 1 hour; fetched again 5 minutes before it expires | RS256 against Google's keys; `iss` `https://accounts.google.com` or `accounts.google.com`; `aud`; `exp`; the caller's service account by its unique id in `sub` |
+| Cloud Run | a Google ID token, from the metadata server, whose audience is the callee's custom audience: its full resource name, `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, which the callee's service lists | 1 hour; fetched again 5 minutes before it expires | RS256 against Google's keys; `iss` `https://accounts.google.com` or `accounts.google.com`; `aud`; `exp`; the caller's service account by its email in `email` |
 | Kubernetes | a projected service account token whose audience is the callee, read from the file the kubelet keeps current | 10 minutes, the shortest Kubernetes allows; the kubelet replaces it at 80% of that, and the caller reads the file again each minute | the signature against the issuer's keys; `iss`; `aud`; `exp`; the caller's service account in `sub` |
 | local, and the generic connector (section 6.2) | a token the caller signs with the edge's Ed25519 key | 5 minutes | the signature against the edge's public keys; `iss`; `aud`; `exp` |
 
-The callee's config holds, for each inbound edge, the issuer, the keys or
-where to fetch them, the audience, the claim that names the caller, and the
-deployable each caller identity is, with the APIs it serves. An identity
-the config does not list is no caller, whatever signed its token. The
-Kubernetes platform reads the issuer's keys from the API server's
+**The callers field.** The callee's config holds, for each API it serves
+with a service clause, a callers field: `<API>_CALLERS` (`SHOP_API_CALLERS`),
+the API's name in upper snake case and `_CALLERS`, which begins with no
+other derived field's name, so a server that serves an API and calls it
+holds both. Its value, `ir.ServiceAuth` in `ir/service_auth.go`, lists the
+issuers the API's server accepts, each with:
+
+- `issuer` and `issuerAliases`, the `iss` values it writes;
+- `audience`, which the token's `aud` must hold, and `algorithms`;
+- `jwksUrl`, where its keys are, or `keys`, each a public JWK's JSON or a
+  reference to an output that holds one;
+- `subjectClaim`, the claim that names the caller, `sub` when unset, and
+  `maxLifetimeSeconds`, the longest a token may live;
+- `callers`: each a `subject`, the claim's value, the `deployable` it is,
+  and the APIs that deployable `serves`, which a route's `from` is checked
+  against.
+
+An identity the field does not list is no caller, whatever signed its
+token. The value is the runtimes' `serviceauth` config, with two changes:
+the callers are a list, since a subject may be a reference, rather than a
+map keyed by subject; and a key is its JWK's JSON, since it may be an
+output.
+
+The connector of each http edge between two servers gives the callee an
+issuer that lists the edge's caller alone (`Connected.Callee`). Resolution
+checks it against the contract (`ir.CheckServiceAuthIssuer`), with the
+edge's caller as its deployable and that caller's APIs as what it serves,
+and refuses an edge to an API with a service clause whose connector gives
+none (`lowering`). It merges the entries of the edges to an API by issuer:
+two entries that name one issuer must agree on all but their callers. The
+binding names the API (`callersOf`) and the edges it comes from. An API no
+other server calls gets the field with no issuers, so its server starts
+and refuses every service credential.
+
+| Connector | Issuer | Keys | Audience | Caller |
+| --- | --- | --- | --- | --- |
+| local | the caller's deployable | the edge's key pair's `publicJwk` output | the callee's deployable | the caller's deployable in `sub`; a token lives at most 300 seconds |
+| gcp | `https://accounts.google.com`, alias `accounts.google.com` | `https://www.googleapis.com/oauth2/v3/certs` | the callee's custom audience | the caller's service account, `<service>@<project>.iam.gserviceaccount.com`, in `email` |
+
+In environment variables the field follows section 3.4's encoding, with
+two rules it adds: a list of objects is a variable that holds the list's
+length, and each object's members follow the list's name and the
+object's index; and a whole number is its decimal
+(`SHOP_API_CALLERS_ISSUERS=1`, `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`,
+`SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK`). No issuers is
+`SHOP_API_CALLERS_ISSUERS=0`. The Go runtime reads it with
+`stackconfig.LoadCallers`, which refuses a variable under the field's name
+that is no member, and the generated entrypoint builds the API's
+`serviceauth.Verifier` from it (section 8.1).
+
+Every Cloud Run service lists its full resource name as a custom
+audience, and a caller asks the metadata server for a token for it. The
+service's `run.app` URL is an output of the service, which its own
+callers field cannot reference without the service depending on itself;
+the resource name is composed from names, so the caller's credential and
+the callee's field both hold it.
+
+The Kubernetes platform reads the issuer's keys from the API server's
 `/openid/v1/jwks`, which default RBAC lets any service account read, with
 the server's own token.
 
@@ -1655,8 +1731,9 @@ generates, not a secret a person enters (section 4.2): the private key goes
 into the caller's secret store, the public key into the callee's config.
 
 The `local` target uses the same tokens. `stack dev` generates a key pair
-per edge into the gitignored local file, so a local stack runs the code
-path a deployed one does.
+per edge into the gitignored local file, and the callee's callers field
+references its public key, so a local stack runs the code path a deployed
+one does.
 
 Not taken:
 
@@ -1685,6 +1762,18 @@ Not taken:
   `jsonwebtoken`, and WebCrypto in Node.js 22.13, Bun and Workers.
 - No service auth locally, or a header that names the caller unsigned. It
   leaves a code path only production runs, and a mode that could ship.
+- One callers field per server, the union over its inbound edges. Without
+  `from`, a route lists every server with a `calls` edge to its API, and a
+  server whose edge reaches one API of the callee would pass a route of
+  another.
+- The callee's `run.app` URL as the audience on Cloud Run, an output of
+  the callee's own service.
+- The caller's unique id in `sub` on Cloud Run, which D37 first chose. It
+  is an output of the caller's account node, which every callee's config
+  would reference; the email is a name resolution composes, and the
+  account it names is the environment's own.
+- The field as one JSON document in one variable, which section 3.4
+  refuses for every derived field.
 
 ### 9.3 Schema surface
 
@@ -1841,9 +1930,10 @@ credential. It refuses a credential it cannot verify with 401, code
 `service_unauthorized`, and a verified identity that is no caller of this
 server with 403, code `service_forbidden`. A failure that is not the
 caller's, such as keys it cannot fetch, answers 503. Each runtime ships one
-implementation over the config of section 9.2, which the generated
-entrypoint builds; a deployment with a credential that config cannot
-express passes its own.
+implementation over the config of section 9.2, which the generated Go
+entrypoint builds from the API's callers field (section 8.1), and the
+TypeScript and Rust entrypoints will when they exist; a deployment with a
+credential that config cannot express passes its own.
 
 A route runs its steps in this order:
 
@@ -1956,6 +2046,24 @@ the decorators unchanged byte for byte. The SDK tests check the retry: one
 fresh service token on `service_unauthorized`, and the end-user refresh
 left alone.
 
+The callers field has its own tests:
+
+- `ir` checks the contract and its variables, and the resolver's tests
+  check the merge by issuer, an API no server calls, a call within one
+  server, the collisions, and each way a connector's entry can break the
+  contract;
+- the local and gcp targets' goldens resolve the shop with an
+  `@requireService` and an `@allowService` operation on shop-api, which
+  Orders calls (`stacktest.RequireServiceShop` and `AllowServiceShop`);
+- `stackconfig.LoadCallers` reads the variables into a verifier config
+  that admits a token signed with the edge's key, and servergen's golden
+  and compiled tests cover `serviceauth.go`;
+- `cli`'s `TestStackDevVerifiesServiceCallers` runs three Go servers with
+  `stack dev`: the caller's call is admitted with its end user forwarded,
+  a request with no credential, from a server with no edge, or for
+  another audience is 401 `service_unauthorized`, and a caller the
+  route's `from` leaves out is 403 `service_forbidden`.
+
 ### 9.9 Open
 
 - A deployable that serves no API, such as a job (section 3.1), has no
@@ -1976,6 +2084,15 @@ left alone.
   HTTP clients do not trust. Until the Kubernetes platform lands, a
   deployment passes a key fetcher or HTTP client that trusts it; the
   platform may add a CA to the callee config instead.
+- A call between two APIs one server serves stays on loopback and carries
+  no service credential, so a `@requireService` operation the other API
+  calls refuses it with 401, though resolution's check (section 9.3)
+  counts the call as admitted. The call could carry a token the server
+  signs for itself, or the check could leave such calls out.
+- The callers field of a server outside a stack. `values-schema.json`
+  does not list it, since its variables depend on the environment's
+  edges, so a deployment that sets its own config writes the variables by
+  hand.
 
 ## 10. Validation and simulation
 
@@ -2142,21 +2259,66 @@ servers with no image yet.
 
 ### 11.3 Generated CI
 
-A workflow per stack is installed into `.github/workflows/`, as an install
-target in the way `InstallTargetDir` serves charts:
+A CI renderer writes a workflow per stack from the stack and its resolved
+environments (D47). A stack opts in through its config, naming the
+renderer:
 
-- **On a pull request:** levels 1 to 6, plus a parameterized environment
-  when the stack declares one.
-- **On merge:** deploy the first environment.
-- **Later environments:** deploy on approval, through GitHub environments.
+```ts
+// schemas/services/shop-stack/schema.config.ts
+export default defineConfig({
+  name: "shop-stack",
+  kind: SchemaKind.Stack,
+  outputs: { ci: { github: { branch: "main" } } },
+});
+```
 
-The workflow authenticates through Workload Identity Federation, as
-`planner` for previews and `deployer` for deploys. Those are bootstrap's
-accounts, so no account name is copied by hand. Only affected servers are
-built and deployed, worked out from `.deps.json` and the stack's edges.
+The build writes the workflow under `<output-root>/ci/<stack>/` and
+installs it into the renderer's directory under the repository root,
+`.github/workflows/<stack>.yml`, when that directory exists, as
+`InstallTargetDir` installs any generator's output. GitHub Actions
+(`github`) is the first renderer. Others are registrations, as
+provisioners are. A stack without `outputs.ci` gets no workflow, so an
+example in a repository with CI of its own installs nothing.
 
-GitHub Actions is the first CI renderer. Like provisioners, others are
-registrations.
+The GitHub workflow:
+
+- **On a pull request:**
+  - A `check` job needs no credentials. It installs superschematic and
+    the schemas root's packages, builds, which resolves every environment
+    and checks its graph (levels 1 and 3), and compiles each server's
+    entrypoint (level 2).
+  - A `plan` job per cloud environment without parameters runs `stack
+    plan` as `planner`: the infrastructure diff, the migration plans and
+    their hazards (levels 5 and 6).
+  - A `preview` job per environment with one parameter runs `stack deploy
+    <environment> --param <parameter>=<pull request number>` as
+    `deployer`, a member per pull request, and `stack destroy` of that
+    member when the pull request closes (level 7). An environment with
+    more parameters has no CI job, and the workflow says so.
+  - A pull request from a fork runs `check` alone: GitHub gives its jobs
+    no identity token.
+- **On a push to the branch:** a `deploy` job per cloud environment
+  without parameters, in the order the environments are declared. The
+  first deploys at once; each later one waits for the one before, and runs
+  in a GitHub environment of its own name, so that environment's required
+  reviewers approve it. Reviewers are a setting of the repository, not of
+  the stack.
+- One run at a time per environment, and per preview member.
+- Local environments have no job. Level 4 runs on an engineer's machine.
+
+Each cloud job signs in through the target's CI identity (`TargetSpec.CI`):
+on gcp, Workload Identity Federation through the pool bootstrap creates,
+as `<stack>-planner` or `<stack>-deployer`. The provider's name holds the
+project's number, `projectNumber` (section 7.1), which bootstrap records.
+An environment without it has no cloud jobs, and the workflow names the
+bootstrap to run.
+
+The workflow installs the release of superschematic that generated it,
+checked against the release's `SHA256SUMS`. A binary built from a checkout
+is no release, so its workflow's install step fails and says to generate
+again with a released binary. Only servers whose build context changed
+are built and rolled (section 11.2), so the workflow builds and deploys
+whatever the deploy decides is affected, and needs no list of its own.
 
 ## 12. Core changes
 
@@ -2210,11 +2372,12 @@ registrations.
    every connector's value against it. The Go loader's `EnvConfig`, with
    a field per database and per `calls` entry named by `[derived_fields]`
    and read through the Go HTTP runtime's `stackconfig`;
-   `values-schema.json` marking those fields derived; and the loader's
-   refusal of an `@envVars` field that collides with one. Next: the
-   TypeScript and Rust loaders read the derived fields, in the PR that
-   gives them `Deps`, and the service-auth field arrives with the
-   connectors that write it.
+   `values-schema.json` marking those fields derived; the loader's
+   refusal of an `@envVars` field that collides with one; and the callers
+   field of an API with a service clause, `ir.ServiceAuth` in
+   `ir/service_auth.go`, which the local and gcp connectors write and
+   `stackconfig.LoadCallers` reads (section 9.2). Next: the TypeScript and
+   Rust loaders read the derived fields, in the PR that gives them `Deps`.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
    (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`;
@@ -2224,10 +2387,10 @@ registrations.
    (`internal/generator/servergen`), which writes each Go server's
    entrypoint module and Dockerfile at `server/<stack>/<server>` (sections
    8.1 and 8.2). Its clients send the D37 service credential each edge's
-   endpoint names, and a server some environment places on Cloud SQL links
-   the Cloud SQL connector. Next: the service authenticator, once a
-   connector derives the service-auth field; OpenTelemetry
-   export; then `Deps`, the constructor signature, the scaffold and the
+   endpoint names, `serviceauth.go` builds the service authenticator of
+   each API with a service clause from its callers field, and a server
+   some environment places on Cloud SQL links the Cloud SQL connector.
+   Next: OpenTelemetry export; then `Deps`, the constructor signature, the scaffold and the
    entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
    implementations at the scaffold layout, `go/shop-api` and
    `go/shop-orders`, which the entrypoints of its `shop-stack` import

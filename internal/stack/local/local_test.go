@@ -100,28 +100,59 @@ func TestGolden(t *testing.T) {
 	s := shop()
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			resolved := resolve(t, reg, s, stacktest.AcmeShop(), env.Name)
-			got, err := stack.Marshal(resolved)
-			if err != nil {
-				t.Fatal(err)
-			}
-			checkGolden(t, stack.EnvironmentPath(goldenRoot, "shop-stack", env.Name), got)
-
-			back, err := stack.Unmarshal(got)
-			if err != nil {
-				t.Fatal(err)
-			}
-			dir := t.TempDir()
-			if err := (&local.Provisioner{}).Render(back, dir); err != nil {
-				t.Fatal(err)
-			}
-			program, err := os.ReadFile(filepath.Join(dir, local.ProgramFile))
-			if err != nil {
-				t.Fatal(err)
-			}
-			checkGolden(t, filepath.Join(goldenRoot, "program", "shop-stack", env.Name, local.ProgramFile), program)
+			checkGoldenEnvironment(t, reg, s, stacktest.AcmeShop(), env.Name)
 		})
 	}
+}
+
+// TestServiceAuthGolden resolves the shop with a service clause on
+// shop-api, which Orders calls: require-stack's @requireService and
+// allow-stack's @allowService, whose shop-orders also has a clause no
+// server calls. shop-api's server gets SHOP_API_CALLERS, Orders as an
+// issuer of its own with the edge's public key, and allow-stack's Orders
+// gets SHOP_ORDERS_CALLERS with no issuers.
+func TestServiceAuthGolden(t *testing.T) {
+	reg := assemble(t)
+	for _, tc := range []struct {
+		stack    string
+		services []stack.Service
+	}{
+		{"require-stack", stacktest.RequireServiceShop()},
+		{"allow-stack", stacktest.AllowServiceShop()},
+	} {
+		t.Run(tc.stack, func(t *testing.T) {
+			s := shop()
+			s.Name = tc.stack
+			checkGoldenEnvironment(t, reg, s, tc.services, "Dev")
+		})
+	}
+}
+
+// checkGoldenEnvironment resolves env of s and checks its environment.json
+// and the program the provisioner renders from it against the golden
+// files.
+func checkGoldenEnvironment(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack.Service, env string) {
+	t.Helper()
+	resolved := resolve(t, reg, s, services, env)
+	got, err := stack.Marshal(resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkGolden(t, stack.EnvironmentPath(goldenRoot, s.Name, env), got)
+
+	back, err := stack.Unmarshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := (&local.Provisioner{}).Render(back, dir); err != nil {
+		t.Fatal(err)
+	}
+	program, err := os.ReadFile(filepath.Join(dir, local.ProgramFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkGolden(t, filepath.Join(goldenRoot, "program", s.Name, env, local.ProgramFile), program)
 }
 
 // TestWiring reads the resolved Dev environment for what the local
@@ -163,6 +194,25 @@ func TestWiring(t *testing.T) {
 	}}
 	if got := values["SHOP_API_SERVICE"]; !equalJSON(t, got, wantAPI) {
 		t.Errorf("Orders SHOP_API_SERVICE = %v, want %v", got, wantAPI)
+	}
+
+	clause := resolve(t, reg, shop(), stacktest.RequireServiceShop(), "Dev")
+	var callers *ir.Binding
+	for _, b := range clause.Deployable("shop-api").Bindings {
+		if b.Field == "SHOP_API_CALLERS" {
+			callers = b
+		}
+	}
+	wantCallers := map[string]any{"issuers": []any{map[string]any{
+		"issuer":             "Orders",
+		"audience":           "shop-api",
+		"algorithms":         []any{"EdDSA"},
+		"keys":               []any{map[string]any{"jwk": ir.Output{Resource: "Orders.calls.shop-api.key", Name: "publicJwk"}}},
+		"maxLifetimeSeconds": float64(300),
+		"callers":            []any{map[string]any{"subject": "Orders", "deployable": "Orders", "serves": []any{"shop-orders"}}},
+	}}}
+	if callers == nil || callers.CallersOf != "shop-api" || !equalJSON(t, callers.Value, wantCallers) {
+		t.Errorf("shop-api SHOP_API_CALLERS = %+v, want Orders, verified with its edge's public key", callers)
 	}
 
 	container := dev.Resources.Resource(local.PostgresContainer)

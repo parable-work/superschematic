@@ -849,6 +849,7 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 		for i, b := range d.Bindings {
 			copied := *b
 			copied.Value = deepCopy(b.Value)
+			copied.Edges = slices.Clone(b.Edges)
 			c.Bindings[i] = &copied
 		}
 	}

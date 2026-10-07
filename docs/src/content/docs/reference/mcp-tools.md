@@ -333,12 +333,14 @@ describe one by name (`list_behaviors`, `describe_behavior`), which every
 caller may call; `get_value` reads a value of the engine's value store by
 its hash, for a caller who may read a schema that references it, and a
 schema's `get` and `list` take `valueRefs` to return such values as
-refs; four list, create, archive and unarchive namespaces
-(`list_namespaces`, `create_namespace`, `archive_namespace`,
-`unarchive_namespace`), as the access policy's `manage` allows, and in
-an archived namespace every tool that writes there is hidden; and where
-a schema composes `Search`, one more, `search`, searches every such
-schema the caller may read. Where an SDK
+refs; a schema's `list` takes `where`, the values of the fields it
+filters on, and a schema with a `@unique` field has `lookup`, whose
+`key` names the values of one unique index's fields; four list, create,
+archive and unarchive namespaces (`list_namespaces`, `create_namespace`,
+`archive_namespace`, `unarchive_namespace`), as the access policy's
+`manage` allows, and in an archived namespace every tool that writes
+there is hidden; and where a schema composes `Search`, one more,
+`search`, searches every such schema the caller may read. Where an SDK
 tool's guidance is its operation's `@docs`, the engine writes its own:
 fixed for its tools, a base for the operations every schema has, and
 what each behavior the type composes says under its config: the states

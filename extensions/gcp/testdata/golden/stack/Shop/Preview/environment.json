@@ -110,10 +110,12 @@
           "value": {
             "credential": {
               "audience": {
-                "$output": {
-                  "resource": "shop-api.service",
-                  "name": "uri"
-                }
+                "$concat": [
+                  "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api-pr",
+                  {
+                    "$parameter": "pr"
+                  }
+                ]
               },
               "source": "google-id-token"
             },
@@ -475,6 +477,16 @@
         "id": "Orders.service",
         "type": "gcp:cloudrunv2/service:Service",
         "properties": {
+          "customAudiences": [
+            {
+              "$concat": [
+                "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/orders-pr",
+                {
+                  "$parameter": "pr"
+                }
+              ]
+            }
+          ],
           "deletionProtection": false,
           "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
           "invokerIamDisabled": false,
@@ -503,10 +515,12 @@
                   {
                     "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
                     "value": {
-                      "$output": {
-                        "resource": "shop-api.service",
-                        "name": "uri"
-                      }
+                      "$concat": [
+                        "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api-pr",
+                        {
+                          "$parameter": "pr"
+                        }
+                      ]
                     }
                   },
                   {
@@ -1298,6 +1312,16 @@
         "id": "shop-api.service",
         "type": "gcp:cloudrunv2/service:Service",
         "properties": {
+          "customAudiences": [
+            {
+              "$concat": [
+                "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api-pr",
+                {
+                  "$parameter": "pr"
+                }
+              ]
+            }
+          ],
           "deletionProtection": false,
           "ingress": "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER",
           "invokerIamDisabled": true,

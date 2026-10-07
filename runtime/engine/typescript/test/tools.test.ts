@@ -85,10 +85,16 @@ describe('the describe document', () => {
     assert.deepEqual(params, {
       create: [['data', 'id'], ['data']],
       get: [['id', 'valueRefs'], ['id']],
-      list: [['cursor', 'limit', 'valueRefs'], []],
+      list: [['cursor', 'limit', 'valueRefs', 'where'], []],
       update: [['expectedSeq', 'id', 'patch'], ['id', 'patch']],
       delete: [['expectedSeq', 'id'], ['id']],
     });
+    // where takes the own fields that hold a string, a number or a boolean,
+    // each a value or a list of them, never null; lines is a list.
+    const where = (operationOf(engine, 'Order', 'list').params.properties as Record<string, any>).where;
+    assert.deepEqual(Object.keys(where.properties), ['title', 'quantity', 'status']);
+    assert.deepEqual(where.properties.status.anyOf[0], { description: 'A OrderStatus value', enum: ['open', 'shipped'], type: 'string' });
+    assert.deepEqual(where.properties.status.anyOf[1], { type: 'array', items: where.properties.status.anyOf[0], minItems: 1, maxItems: 100 });
     // A patch takes any of the fields, nested objects' included.
     const patch = (operationOf(engine, 'Order', 'update').params.properties as Record<string, any>).patch;
     assert.equal(patch.required, undefined);

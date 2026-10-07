@@ -7,12 +7,15 @@ instances and an event log in one SQLite file.
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
-with its compatibility rule, instances, the event log with its filters
-and its retention, the value store, which keeps a large field once by
-hash and serves it by hash, the access policy with service callers
-(D37), the HTTP API with the event stream (`@superschematic/engine/http`), the behavior plug-in interface,
+with its compatibility rule, instances, with unique fields, lookups and
+list filters, the event log with its filters and its retention, the
+value store, which keeps a large field once by hash and serves it by
+hash, the access policy with service callers (D37), the HTTP API with
+the event stream (`@superschematic/engine/http`), the behavior plug-in interface,
 the runner of reactions and schedules, the describe and tools documents,
 the behavior catalog, the MCP endpoint (`@superschematic/engine/mcp`),
+a typed client of the HTTP API with the event stream and a reconciler
+(`@superschematic/engine/client`, "The client"),
 and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
 reach other instances, `Search`, full-text search with vectors an outside
@@ -40,6 +43,8 @@ engine.schemas.publish(me, 'Order');              // { version: 1, published: tr
 const order = engine.instances.create(me, 'Order', { title: 'Desk', quantity: 1 });
 engine.instances.update(me, 'Order', order.id, { quantity: null, status: 'open' });
 const page = engine.instances.list(me, 'Order', { limit: 20 });   // { items, next }
+const open = engine.instances.list(me, 'Order', { where: { status: ['open', 'shipped'] } });
+const desk = engine.instances.lookup(me, 'Order', { number: 'eu/2026/0042' });  // a @unique field
 const feed = engine.events.read(me, { after: 0 });                // { events, next, more }
 const live = engine.events.read(me, { after: 'head' });           // only what commits from now on
 engine.close();
@@ -58,7 +63,9 @@ itself (D3), and this package's own build and tests get them from
 HTTP runtime's framework-free entry point, for the default permission
 matcher, and not Hono; the `./http` entry point also needs `hono`, an
 optional peer dependency, and the `./mcp` entry point `hono` and
-`@modelcontextprotocol/server`, another. It depends on
+`@modelcontextprotocol/server`, another. The `./client` entry point
+imports nothing but its own modules, so it runs in a browser and a
+worker runtime too. It depends on
 `@superschematic/versiongraph` (D32), whose engine and SQLite adapter the
 core `Branches` behavior runs over the version graph's wasm core; the
 package.json spec is a `file:` path into this checkout, as the TypeScript
@@ -89,7 +96,7 @@ processes on the busy timeout, but the engine keeps per-process state
 (the cache of each version's validator and behaviors, the namespaces)
 that nothing coordinates across processes.
 
-The engine's tables, as its eleven migrations leave them:
+The engine's tables, as its twelve migrations leave them:
 
 ```sql
 -- Every schema document by namespace, name and version. Version 0 is the
@@ -104,7 +111,7 @@ CREATE TABLE engine_schemas (
   published_at INTEGER,                                        -- null for the draft
   defined_by   TEXT,                                           -- principal subjects; null
   published_by TEXT,                                           -- before migration 2
-  -- The cursor of the version's publish event (migration 11), where a
+  -- The cursor of the version's publish event (migration 12), where a
   -- subscription starts, after retention prunes the event; null for the
   -- draft, and for a version a version-1 file stored with no event.
   published_cursor INTEGER,
@@ -134,6 +141,14 @@ CREATE TABLE engine_instances (
   UNIQUE (namespace, schema, id)
 ) STRICT;
 CREATE INDEX engine_instances_list ON engine_instances (namespace, schema, position);
+-- Per schema, an index for each @unique or @key field and each @index
+-- entry of its live version ("Unique fields and indexes" under
+-- "Instances"), which publish creates and drops (migration 10 created
+-- the ones of the versions published before it), such as:
+-- CREATE UNIQUE INDEX engine_unique_<digest> ON engine_instances
+--   (namespace, json_extract(data, '$."slug"'))
+--   WHERE schema = 'Model' AND schema_namespace = 'default'
+--     AND json_extract(data, '$."slug"') IS NOT NULL;
 
 -- The append-only event log. A trigger refuses an UPDATE, and another a
 -- DELETE of an event after its namespace's floor (engine_log_floors).
@@ -254,7 +269,7 @@ CREATE TABLE engine_payload_holders (
 CREATE INDEX engine_payload_holders_holder ON engine_payload_holders (namespace, schema, holder, id, key);
 
 -- The namespaces a create made while an engine ran ("Namespaces"),
--- with who archived each and when while it is archived (migration 10).
+-- with who archived each and when while it is archived (migration 11).
 CREATE TABLE engine_namespaces (
   name        TEXT    PRIMARY KEY,
   created_at  INTEGER NOT NULL,
@@ -265,7 +280,7 @@ CREATE TABLE engine_namespaces (
 ) STRICT;
 
 -- How far retention has pruned each namespace's events ("Retention",
--- migration 11): every event of the namespace at or before floor is
+-- migration 12): every event of the namespace at or before floor is
 -- gone; publish_floor is the last of its publish events pruned.
 CREATE TABLE engine_log_floors (
   namespace     TEXT    PRIMARY KEY,
@@ -276,7 +291,7 @@ CREATE TABLE engine_log_floors (
 
 -- What retention kept of each instance's pruned events: the instance as
 -- the log had it after the last of them, null after a delete, and that
--- event's sequence (migration 11).
+-- event's sequence (migration 12).
 CREATE TABLE engine_event_bases (
   namespace   TEXT    NOT NULL,
   schema      TEXT    NOT NULL,
@@ -329,7 +344,11 @@ deployment's binary, the core's by default. The engine then requires:
   as a list or as a list of lists. A union or a map is refused, since the
   runtime checks neither;
 - behaviors on the instance type that this engine has implementations
-  for, composed as the compiler's loader requires (see "Behaviors").
+  for, composed as the compiler's loader requires (see "Behaviors");
+- `@unique`, `@key` and `@index` (a type's `indexes`) only on the
+  instance type's own fields whose value is a string, a number or a
+  boolean, an enum's included, and an index only over fields the type
+  has ("Unique fields and indexes" under "Instances").
 
 A refused document throws `SchemaDocumentError` with an issue per problem,
 each at a JSON pointer.
@@ -365,6 +384,8 @@ types, enums and scalars its fields reach.
 | | another instance type |
 | a behavior's config changed as its implementation allows | any other config change |
 | a behavior added or removed while the schema has no instances, or with its implementation's consent | a behavior added or removed while it has instances, otherwise |
+| `@unique`, `@key` or a unique `@index` added while no two instances of a namespace hold its values | the same while two do |
+| `@unique`, `@key` or an `@index` removed, a plain `@index` added | |
 
 The walk starts at the instance type, at each type a behavior's
 `validate` checks values against under both versions' configs
@@ -377,6 +398,15 @@ row of a kind say, so such a type is held as a type a field reaches. A
 type only the new version reads held no value yet and changes freely. A
 refused version throws `IncompatibleChangeError`, whose `changes` name
 each change and whose message says to use a new schema name.
+
+A unique field is the one row the documents cannot decide: it narrows
+what the schema accepts across instances, not what one instance holds.
+`define` and `publish` ask the stored instances instead, and refuse a
+unique index the live version lacks while instances of a namespace share
+its values, naming them where the namespace that holds the schema holds
+the instances; the message says to make the values distinct. `publish`
+asks again in its transaction, since the instances may change after the
+define, and creates the index there.
 
 ### Validation
 
@@ -411,17 +441,22 @@ holds instances in the namespace that creates them.
 
 - `create` validates the instance against the schema's live version,
   then asks its behaviors' `validate`, and refuses an id the namespace
-  already has for the schema (`conflict`).
+  already has for the schema, and a unique field's value another
+  instance holds (`conflict`).
   `behaviors` gives the type's behaviors their parameters, by behavior
   name, such as the links and blockers the instance holds from its
   create ("Create parameters" under "Behaviors"). Every behavior's guard
   may veto it, and each behavior initializes its state for it.
 - `get` returns the instance, or `undefined`.
+- `lookup` returns the instance whose unique fields hold a key's values,
+  `{ slug: 'openai/gpt-5' }`, or `undefined` (below).
 - `list` returns a page in creation order: `{ items, next }`, where `next`
   is an opaque cursor, null after the last page. A page holds 50 instances
   by default and at most 500 (`limit`). Each page is one indexed range
   read, so a list never loads the whole table, and an instance created or
   deleted while a client pages moves no other instance between pages.
+  `where` keeps the instances whose fields hold the values it names
+  ("Filters", below).
 - `get` and `list` take `valueRefs: true`: each own field the value store
   holds is then its ref, and the record lists the pointers to them in
   `valueRefs` ("The value store"), so a client that pages through
@@ -431,7 +466,8 @@ holds instances in the namespace that creates them.
   removes the member, and a list or any other value replaces what was
   there. The result is validated against the live version, then by the
   behaviors' `validate`; a patch that changes nothing writes nothing. The
-  behaviors' guards may veto it.
+  behaviors' guards may veto it, and a unique field's value another
+  instance holds refuses it (`conflict`).
 - `delete` removes the instance and returns whether there was one. The
   behaviors' guards may veto it.
 - `update`, `delete` and `invoke` take `expectedSeq`, the sequence the
@@ -463,6 +499,78 @@ rule keeps it valid under every later version, so reads return it as
 stored. In an archived namespace a create, an update, a delete and a
 writing operation are `namespace_archived` once the policy has allowed
 them, and reads go on ("Namespaces").
+
+### Unique fields and indexes
+
+`@unique` and `@key` on a field of the instance type, and each entry of
+the type's `indexes` (`@index<T>(keys, { unique? })`), are indexes the
+engine keeps on `engine_instances`: led by the namespace, then the value
+of each field, `json_extract(data, '$."<key>"')`, partial on the schema's
+rows. Each set of fields is one index, a unique one winning over a plain
+one on the same fields.
+
+- A field is a top-level own field whose value is a string, a number or a
+  boolean: a primitive, an enum, or a scalar of one of those JSON types.
+  `define` refuses one on a list, an object or a `Generic.JSON`, on a
+  field of any type but the instance type, and an index that names a
+  field the type lacks.
+- `@key` is a unique field; the instance's id stays its key.
+- A unique index refuses a create or an update, a behavior's `update()`
+  and `instances.create` included, that would give a second instance of
+  the namespace the same values: `UniqueConflictError`, code `conflict`,
+  whose `fields` are the index's keys. It does not name the instance that
+  holds them. A unique `@index` makes its fields unique together.
+- Absent and null are no value: an instance that lacks a field of an
+  index is not in it, so any number of instances lack a unique field.
+- A value is unique within its namespace; a shared schema holds each
+  namespace to its own.
+- An indexed field stays inline in the instance's row whatever its
+  length ("The value store").
+- `publish` creates the indexes a version adds and drops the ones it
+  removes; a new unique index the stored instances break refuses it
+  ("The compatibility rule"). Engine migration 10 created the indexes of
+  the versions published before it, and refuses to open a file whose
+  instances break one.
+
+`lookup(principal, schema, key, { namespace, valueRefs })` asks `read`
+and returns the instance whose fields hold `key`'s values, through the
+index. `key` names exactly the fields of one unique index, each with one
+value of its type: `{ slug: 'openai/gpt-5' }`, or `{ source: 'crm',
+externalId: 42 }` for a unique `@index` on both. Any other key, a value
+of another type, null, and a schema with no unique field are
+`invalid_argument`. Over HTTP the key travels as a query parameter, never
+in a path segment, so a value may hold `/`.
+
+### Filters
+
+`list`'s `where` is a JSON object of field values: a member keeps the
+instances whose field holds its value, a list of 1 to 100 values any of
+them (`MAX_FILTER_VALUES`), and the members together the instances every
+member keeps. `{}` filters nothing.
+
+- A field is a top-level own field whose value is a string, a number or
+  a boolean, as for an index, or one a behavior lets a list filter on
+  (its implementation's `filters`, "The implementation" under
+  "Behaviors"): `Workflow`'s `status`. A value has the field's JSON type,
+  an integer for an integer scalar; null, another type, an empty list and
+  a field that is not one of these are `invalid_argument`, the message
+  listing the fields.
+- A page keeps creation order. It reads through an index whose every
+  field a member names, unique first, then the one with the fewest
+  combinations of values: each combination is one indexed range read
+  past the cursor in position order, at most 100 of them
+  (`MAX_FILTER_RANGES`), merged. A unique index answers a combination
+  with one instance at most, and a behavior's index serves its filter
+  (`Workflow`'s on `status`). With none, the page reads the list index,
+  at most 1000 instances past the cursor (`FILTER_SCAN_ROWS`). The
+  members no index serves are tested in SQL on the rows read.
+- `next` is the position up to which every instance was read. So a page
+  that no index serves, or that merges ranges, can hold fewer instances
+  than its limit, even none, while `next` is not null: read on until it
+  is, as with a filtered page of the event log. A reader that goes on
+  from `next` misses no instance and reads none twice.
+- A member on an own field no index covers also matches a string the row
+  holds by hash, by its hash.
 
 ## The event log
 
@@ -613,6 +721,11 @@ and its events and revisions, or in two namespaces, is stored once.
 - A row or an event written before migration 9 keeps its values inline.
   An instance's row moves a large field to the store at its next write;
   an event is never rewritten.
+- A field an index of the instance type covers (a unique field, an
+  `@index`'s) stays inline in the row whatever its length, so the index
+  and a lookup compare the value itself; its events still hold it by
+  hash. `publish` puts back inline a value a row holds by hash under a
+  field a new index covers.
 
 `engine.values.get(principal, hash, { namespace })`, the route `GET
 /namespaces/{namespace}/values/{hash}` and the MCP tool `get_value`
@@ -1042,6 +1155,7 @@ function is synchronous (D16): one that returns a promise is a
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext`, whose `sql` writes the behavior's own tables in a writing one ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
+| `filters` | the declared fields a list filters on, `{ <field>: { column, type } }`: each one's value is one of its columns, by its own name, and `type` is its JSON type, `string`, `number`, `integer` or `boolean`. A list's `where` compares the column in SQL, so the field's reader must return what the column holds; a migration's index on that column alone serves the filter ("Filters" under "Instances") |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
 | `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"), as a guard does; the view is the referencing instance's, and the request carries no precondition |
 | `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference. Its context's `writing` says the referencing instance's own write made the change |
@@ -1054,9 +1168,10 @@ refuses, naming every problem, an implementation whose `operations` or
 without a `react` function; a schedule whose name is not camelCase, whose
 `everyMs` is neither an integer of at least 1000 nor a function, or that
 has no `run`; a declaration of the wrong shape, with an operation named
-`create`, `get`, `list`, `update` or `delete`, or with a schema that does
-not compile; and malformed migrations, columns or indexes, an index over
-a column no migration up to its own adds included; a veto code that is
+`create`, `get`, `list`, `update`, `delete` or `lookup`, or with a schema
+that does not compile; malformed migrations, columns or indexes, an index
+over a column no migration up to its own adds included; a filter on a
+field it does not declare or a column its migrations do not add; a veto code that is
 not lowercase snake case of at most 64 characters, or is listed twice.
 An operation's `paramsSchema` sets
 `additionalProperties: false`, so the handler and every guard read the
@@ -2011,7 +2126,7 @@ A state machine on the instance's `status`.
 | | |
 | --- | --- |
 | Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }`, `outcomes`: by terminal state, `success`, `failure` or `neutral`, optional |
-| Fields | `status` |
+| Fields | `status`, which a list filters on (`where: { status: 'doing' }`), through an index on its column (migration 2) |
 | Operations | `transition({ to })` -> `{ from, to }`, writes |
 | Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in (`already_in_state`), a transition the config does not list (`transition_not_allowed`, details `{ from, to, allowed }`) and a move out of a terminal state (`terminal_state`) are `vetoed`, as is an instance without a status (`no_status`); a transition that names a permission the caller lacks (`can`) is `forbidden` |
 | Events | `transition`'s operation event, `patch: { status }` |
@@ -3021,7 +3136,8 @@ sees what the engine does not raise.
 | GET | `/namespaces/{namespace}/schemas/{name}/draft` | `schemas.draft` | 200, the draft |
 | GET | `/namespaces/{namespace}/schemas/{name}/versions/{version}` | `schemas.version` | 200, that version |
 | POST | `/namespaces/{namespace}/schemas/{name}/publish` | `schemas.publish` | 200, `{namespace, name, version, published}` |
-| GET | `/namespaces/{namespace}/schemas/{name}/instances?limit=&cursor=&valueRefs=` | `instances.list` | 200, `{items, next}` |
+| GET | `/namespaces/{namespace}/schemas/{name}/instances?limit=&cursor=&where=&valueRefs=` | `instances.list`; `where` a JSON object | 200, `{items, next}` |
+| GET | `/namespaces/{namespace}/schemas/{name}/lookup?key=&valueRefs=` | `instances.lookup`; `key` a JSON object | 200, the instance, `ETag` |
 | POST | `/namespaces/{namespace}/schemas/{name}/instances` | `instances.create`, body `{"id"?, "data", "behaviors"?}` | 201, the instance, `ETag`, `Location` |
 | GET | `/namespaces/{namespace}/schemas/{name}/instances/{id}?valueRefs=` | `instances.get` | 200, the instance, `ETag` |
 | PATCH | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.update`, body: a merge patch; `If-Match`, `Preconditions` | 200, the instance, `ETag` |
@@ -3043,7 +3159,12 @@ created and last updated it, and when); its `data` carries its
 behaviors' fields, which a create or an update may not set (422,
 `readOnly`). With `valueRefs=true`, a get or a list returns each field
 the value store holds as its ref, and the instance lists them in
-`valueRefs` ("The value store"). A create's `behaviors` gives the behaviors their create
+`valueRefs` ("The value store"). A list's `where` and a lookup's `key`
+are JSON objects in their query parameter,
+`?where=%7B%22status%22%3A%22open%22%7D`, so a value keeps its type and
+any slash or comma in it; one that is not a JSON object is 400
+`bad_request`, and one the engine refuses 400 `invalid_argument`. A
+lookup that finds nothing is 404. A create's `behaviors` gives the behaviors their create
 parameters, by behavior name ("Create parameters" under "Behaviors");
 `null` is none. A request body is `application/json`, and an update's
 `application/merge-patch+json` (RFC 7386); another media type is 415,
@@ -3073,15 +3194,15 @@ the same in every namespace.
 
 | Status | `code` | When |
 | --- | --- | --- |
-| 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), a create's parameters the engine or a behavior refuses (`CreateParamsError`), or preconditions the engine refuses (`PreconditionsError`), `details.issues` |
-| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data, behaviors?}`, a namespace create body that is not `{name}`, a `Preconditions` header that is not a JSON object, a path that is not valid percent-encoding, an event `after` that is not a cursor or `head` |
+| 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses, a `where` or a lookup `key` it refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), a create's parameters the engine or a behavior refuses (`CreateParamsError`), or preconditions the engine refuses (`PreconditionsError`), `details.issues` |
+| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data, behaviors?}`, a namespace create body that is not `{name}`, a `Preconditions` header that is not a JSON object, a `where` or a `key` that is not a JSON object, a path that is not valid percent-encoding, an event `after` that is not a cursor or `head` |
 | 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject, and no verified service stands in for one |
 | 401 | `service_unauthorized` | a `Service-Authorization` credential that does not verify (the runtime's service step, D37) |
 | 403 | `forbidden` | the access policy refused, or a behavior refused a caller without the permission its config names |
 | 403 | `service_forbidden` | a verified service identity the service authenticator does not list as a caller |
 | 404 | `not_found` | no such version, draft or instance in the namespace, or no such route |
 | 404 | `unknown_namespace` | no such namespace, configured or created |
-| 409 | `conflict` | an instance with the id exists; a namespace with the name exists; an archive or unarchive of a configured namespace |
+| 409 | `conflict` | an instance with the id exists, or another instance holds a unique field's value, `details.fields` its keys; a namespace with the name exists; an archive or unarchive of a configured namespace |
 | 409 | `namespace_archived` | a write in an archived namespace |
 | 409 | `name_taken` | the name is defined on the other side of the shared lookup |
 | 409 | `incompatible_change` | the version breaks the compatibility rule; `details.changes` |
@@ -3276,8 +3397,13 @@ a schema's live version:
   guidance says it does under the config ("Guidance", below; absent for
   a behavior that gives none), its fields, operations and the codes its
   vetoes carry (`vetoes`).
-- `operations` lists `create`, `get`, `list`, `update`, `delete`, then each
-  behavior's operations in the type's list order. `create`'s `params`
+- `operations` lists `create`, `get`, `list`, `update`, `delete`, `lookup`
+  where the instance type has a unique field, then each behavior's
+  operations in the type's list order. `list`'s `params` has `where`,
+  with a member per field it filters on: the field's JSON Schema, or a
+  list of 1 to 100 of them (`anyOf`). `lookup`'s has `key`, a closed
+  object of one unique index's fields, each required (`oneOf` over the
+  indexes when there are several). `create`'s `params`
   has `behaviors` when a behavior the type composes declares a
   `createParamsSchema`: a closed object with each such behavior's
   schema under its name, as its implementation narrows it for the
@@ -3325,7 +3451,8 @@ schemas composes Search.
 | --- | --- | --- | --- |
 | create | `<schema>.create` | `<schema>_create` | `id` (optional), `data` (with its behaviors' `allOf`), and `behaviors` (optional) when a behavior takes create parameters |
 | get | `<schema>.get` | `<schema>_get` | `id`, `valueRefs` |
-| list | `<schema>.list` | `<schema>_list` | `limit`, `cursor`, `valueRefs` |
+| list | `<schema>.list` | `<schema>_list` | `limit`, `cursor`, `where` (when it filters on a field), `valueRefs` |
+| lookup | `<schema>.lookup` | `<schema>_lookup` | `key`, `valueRefs`; listed where the instance type has a unique field |
 | update | `<schema>.update` | `<schema>_update` | `id`, `patch` (a merge patch; nothing required; its behaviors' `allOf` in patch form), `expectedSeq`, `preconditions` |
 | delete | `<schema>.delete` | `<schema>_delete` | `id`, `expectedSeq`, `preconditions` |
 | a behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `id`, `params` (its `paramsSchema`), `expectedSeq`, `preconditions` |
@@ -3385,9 +3512,12 @@ members from what it knows:
   `list_behaviors`, `describe_behavior`, `get_value`, `search`,
   `list_namespaces`, `create_namespace`, `archive_namespace`,
   `unarchive_namespace`) carry fixed guidance;
-- `create`, `get`, `list`, `update` and `delete` carry the engine's base,
-  which names the schema's instance type and, for `create`, the
-  behaviors that take create parameters;
+- `create`, `get`, `list`, `update`, `delete` and `lookup` carry the
+  engine's base, which names the schema's instance type, for `create` the
+  behaviors that take create parameters, for `create` and `update` the
+  unique fields a repeated value of is a conflict, for `list` the fields
+  `where` takes and that a filtered page can be short, and for `lookup`
+  the unique fields its `key` names;
 - each behavior adds what its config says, through its implementation's
   `guidance(config, target)`: a `summary`, which the describe document's
   `behaviors` entry carries, and, by operation name, what it says about
@@ -3432,7 +3562,7 @@ in `@superschematic/engine-workqueue`):
 
 | Behavior | What it says |
 | --- | --- |
-| `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; create's initial status, and that update does not set `status` |
+| `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; create's initial status, that update does not set `status`, and list's `where` on it |
 | `Comments` | the thread; `comment` and `listComments` |
 | `Revisions` | that every change records a revision, and the review permission; without review, that the review operations are refused (`no_review`) |
 | `Dependencies` | the blocker schemas, the gated states, the outcomes that finish a blocker; `blocked` on `transition`, the edge refusals on `addBlocker` and `create` |
@@ -3512,10 +3642,11 @@ openEngine({
 ```
 
 - `invocationPolicy` is D11's key, values and default. A built-in
-  operation or engine tool (the schema tools, the behavior tools,
-  `getValue`, `search` and the namespace tools, `listNamespaces`,
-  `createNamespace`, `archiveNamespace` and `unarchiveNamespace`) takes
-  `invocation`'s value for it, else the default; a
+  operation (`create`, `get`, `list`, `update`, `delete`, `lookup`) or
+  engine tool (the schema tools, the behavior tools, `getValue`,
+  `search` and the namespace tools, `listNamespaces`, `createNamespace`,
+  `archiveNamespace` and `unarchiveNamespace`) takes `invocation`'s value
+  for it, else the default; a
   behavior operation takes its declaration's `invocationPolicy`,
   else the default. Registration refuses a declaration whose value is not
   one of the values, as the compiler's `Finalize` does. The core's
@@ -3592,6 +3723,147 @@ The route validates no `Origin` header: it requires a caller, and a
 deployment that serves it to a browser on a local address puts the SDK's
 `originValidationResponse` in front of it.
 
+## The client
+
+`@superschematic/engine/client` is a typed client of the HTTP API, its
+event stream and the controller pattern over it (D16, amended). It
+imports nothing of the server side, Node.js or the HTTP runtime, so it
+runs in a browser and a worker runtime as well as a server: a test reads
+the built files for imports, and `tsconfig.client.json` compiles it with
+the DOM's globals and no Node.js types. It declares the wire's shapes
+itself; `test/client-types.test.ts` holds each to the server's type.
+
+```ts
+import { EngineClient, isVeto } from '@superschematic/engine/client';
+import { signedTokenSource } from '@superschematic/http-runtime';
+
+const client = new EngineClient({
+  baseUrl: 'https://jobs.internal/api',             // where engineApp is mounted
+  auth: { getToken: () => session.token, refreshToken: () => session.refresh() },
+  serviceCredential: { token: signedTokenSource(edgeKey, { issuer: 'indexer', subject: 'indexer', audience: 'jobs' }) },
+});
+
+const job = await client.instances.create('jobs', { title: 'Index' }, { id: 'index', behaviors: { Links: { batch: 'b1' } } });
+await client.instances.update('jobs', job.id, { title: 'Reindex' }, { expectedSeq: job.seq });
+await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: { Lease: { token: 3 } } })
+  .catch((error) => { if (isVeto(error, 'Lease', ['lapsed', 'token_stale'])) stop(); else throw error; });
+```
+
+| Calls | Route |
+| --- | --- |
+| `namespaces.list`, `get`, `create`, `archive`, `unarchive` | the namespace routes ("Namespaces"), each naming the namespace it acts on |
+| `schemas.list`, `live`, `draft`, `version`, `define`, `publish`, `describe` | the schema routes and the describe document |
+| `instances.create` (`{ id?, behaviors? }`), `get`, `list` (`{ limit?, cursor?, where? }`), `lookup(schema, key)`, `update`, `delete`, `invoke`, `operate`, `invokeSchema` | the instance, lookup and operation routes |
+| `events.read` (`{ after?, limit?, schema?, instanceId?, kinds?, behaviors?, exclude? }`), `events.head`, `events.subscribe` | the event route, as a page or the stream |
+| `behaviors.list`, `behaviors.describe`, `tools()`, `search(params)` | the behavior catalog, the tools document, the search across schemas |
+
+- **Options.** Every call takes `namespace` (the client's `namespace`,
+  `default`, otherwise), `signal` and `forward`. A write (`update`,
+  `delete`, `invoke`, `operate`) also takes `expectedSeq`, sent as
+  `If-Match`, and `preconditions`, sent as the `Preconditions` header.
+  `operate` returns `{ result, seq }`, the sequence from the `ETag`.
+  `timeoutMs` (30000, 0 for none) bounds each call; the stream's covers
+  its headers only.
+- **A missing instance** is a thrown 404 `not_found`, as is a delete of
+  one: over HTTP a schema with no live version answers the same 404, so
+  `get` does not return undefined as the engine's does.
+- **Problems.** A refusal is an `EngineProblem`: `status`, `code`,
+  `detail`, `requestId`, `details`, and `issues` (`details.issues`, each
+  `{ path, rule?, message }`: a JSON pointer for parameters, preconditions
+  and a schema document, a field path for an instance), `changes`
+  (`incompatible_change`), `fields` (`details.fields` of a `conflict`
+  over unique fields), and `floor` and `head` (of a `cursor_expired`,
+  410: where a read may start again, "Retention"). A `vetoed` problem is an `EngineVeto` with
+  `behavior`, `action`, `reason`, `vetoCode` and `vetoDetails`;
+  `isVeto(error, behavior?, codes?)` and `isProblem(error, codes?)`
+  branch on them. An answer that is not a problem document (a proxy's
+  page) keeps its status and has no `code`. A request that got no answer
+  is an `EngineTransportError` (`timedOut` when the client's timeout ended
+  it); a caller's own abort rejects with its signal's reason.
+- **Credentials**, as the generated TypeScript SDK sends them (D15,
+  amended; D37). `auth.token` is the end user's token the client holds,
+  which `setToken`, `clearToken` and a refresh replace; while it holds
+  none, `auth.getToken` answers per request. `serviceCredential.token(fresh)`
+  goes in `Service-Authorization` (or its `headers`) on every request: the
+  HTTP runtime's `googleIdTokenSource`, `tokenFileSource` and
+  `signedTokenSource` fill it. A call's `forward` sends that end user's
+  token instead of the client's, or no `Authorization` when it has none,
+  so a service stands in for one.
+- **The retry rule.** A 401 `service_unauthorized` asks the service source
+  for a fresh token (`token(true)`) once and retries; the end-user refresh
+  does not run. Any other 401 runs `auth.refreshToken` once, shared by the
+  calls that meet it together, holds its token and retries; it never asks
+  for a fresh service token, and a forwarded user is never refreshed.
+
+### The event stream
+
+`events.subscribe(options)` reads the stream over fetch, since
+`EventSource` cannot send `Authorization` or `Service-Authorization`, and
+parses it by the HTML standard's rules (`SseParser`). Iterate it once:
+
+```ts
+const subscription = client.events.subscribe({ after: 'head', schema: 'jobs', exclude: ['heartbeat'] });
+for await (const message of subscription) {
+  if (message.type === 'ready') continue;          // { type: 'ready', cursor }, once per connection
+  handle(message.event);                           // { type: 'event', event }, each event of the log
+}
+```
+
+- It starts after `after`, a cursor or `head`, else at the start of the
+  log, which after retention is the oldest event kept, with the event
+  route's filters.
+- `cursor` is the id of the last message handed out: an event's, a
+  ready's, or one that only carries an id past events the filters dropped
+  ("The event stream" under "HTTP"). It moves as each message is handed
+  out, not as the parser reads ahead.
+- A dropped connection, or a stream the engine ended, is opened again
+  with `Last-Event-ID: <cursor>` after `reconnect`'s backoff (500 ms
+  doubling to 30 s; `false` to end instead), and `onReconnect` hears why.
+  It neither repeats nor skips an event. A 5xx, a 429 (after its
+  `Retry-After`) or a network failure is retried; a 4xx ends the
+  iteration with its problem, a policy that now refuses the caller say,
+  or the 410 `cursor_expired` of a cursor retention has pruned past,
+  whose `floor` and `head` say where a new subscription may start.
+- Breaking out of the loop, `close()` or the options' `signal` ends it
+  and cancels the connection.
+
+### Reconciling
+
+`reconcile(client, options)` is the controller pattern: a handler per
+event of a namespace's log, filtered, in log order, from where the last
+run left off.
+
+```ts
+import { reconcile } from '@superschematic/engine/client';
+
+const reconciler = reconcile(client, {
+  schema: 'projects', kinds: ['create', 'operation'],
+  cursor: { load: () => readCursor(), save: (cursor) => writeCursor(cursor) },
+  handle: async (event) => syncProject(event),
+  onError: (error, event, attempt) => log.warn({ error, cursor: event?.cursor, attempt }),
+});
+await reconciler.stop();                            // after the handler in progress returns
+```
+
+- It subscribes after the cursor `cursor.load()` returns, or at `start`
+  (`head` by default; 0 replays the log) when it returns none.
+  `memoryCursor()`, the default, keeps it in the process.
+- The handler runs once per event, one at a time, and the cursor is saved
+  once it returns: an event is handled at least once, again after a crash
+  between the handler and the save.
+- A handler that throws is retried on the same event after `retry`'s
+  backoff (500 ms doubling to 30 s) and never skipped; `onError` hears
+  each failure, and each dropped connection with no event.
+- A ready saves the stream's cursor, which may be past events the filters
+  dropped, so the next run does not scan them again.
+- `done` settles when it ends: after `stop()`, or with the problem that
+  refused the stream (which `stop()` rejects with too), the 410
+  `cursor_expired` of a stored cursor retention has pruned past among
+  them: it never skips what it did not handle.
+
+The work-queue package's worker (`runtime/engine-workqueue/README.md`,
+"The worker") is built on the client.
+
 ## Development
 
 ```
@@ -3612,4 +3884,8 @@ routes through Hono's `app.request`; `test/stream.test.ts` reads the event
 stream and `test/mcp.test.ts` speaks MCP with the official client
 (`@modelcontextprotocol/client`) to a listening server,
 `@hono/node-server` on Node.js and `Bun.serve` on Bun.
-`test/tools-parity.test.ts` asserts the Go vectors.
+`test/tools-parity.test.ts` asserts the Go vectors. `test/client.test.ts`
+and `test/client-stream.test.ts` drive the client against an engine
+served in process, its fetch handing each request to the app's;
+`test/client-types.test.ts` holds the client's types to the server's and
+reads the built client for imports.

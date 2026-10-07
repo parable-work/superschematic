@@ -287,6 +287,50 @@ describe('instances', () => {
     await problem(call(app, 'GET', `${ORDERS}?limit=two`), 400);
     await problem(call(app, 'GET', `${ORDERS}?cursor=not-ours`), 400);
   });
+
+  test('a list filters by a where query parameter, a JSON object, and pages on with its cursor', async () => {
+    const { app } = await withOrders();
+    for (const [id, status] of [['a', 'open'], ['b', 'shipped'], ['c', 'open'], ['d', 'open']]) {
+      await data(call(app, 'POST', ORDERS, { body: { id, data: { title: `a, b/${id}`, status } } }), 201);
+    }
+    const where = (value: unknown): string => `where=${encodeURIComponent(JSON.stringify(value))}`;
+    const first = await data(call(app, 'GET', `${ORDERS}?${where({ status: 'open' })}&limit=2`));
+    assert.deepEqual(first.items.map((item: { id: string }) => item.id), ['a', 'c']);
+    const second = await data(call(app, 'GET', `${ORDERS}?${where({ status: 'open' })}&limit=2&cursor=${encodeURIComponent(first.next)}`));
+    assert.deepEqual([second.items.map((item: { id: string }) => item.id), second.next], [['d'], null]);
+    // A value travels whole, a comma and a slash in it included.
+    const titled = await data(call(app, 'GET', `${ORDERS}?${where({ title: ['a, b/b', 'a, b/d'] })}`));
+    assert.deepEqual(titled.items.map((item: { id: string }) => item.id), ['b', 'd']);
+    assert.equal((await problem(call(app, 'GET', `${ORDERS}?where=status`), 400)).code, 'bad_request');
+    assert.equal((await problem(call(app, 'GET', `${ORDERS}?${where(['open'])}`), 400)).code, 'bad_request');
+    const refused = await problem(call(app, 'GET', `${ORDERS}?${where({ lines: 'x' })}`), 400);
+    assert.equal(refused.code, 'invalid_argument');
+  });
+
+  test('lookup reads an instance by a unique value in the query, a slash and all; a repeated value is a 409 naming the field', async () => {
+    const { app } = serve();
+    const models = '/namespaces/default/schemas/Model';
+    await data(call(app, 'POST', '/namespaces/default/schemas', { body: schemaDocument('Model', [{ name: 'slug', typeRef: { name: 'string' }, unique: true }]) }));
+    await data(call(app, 'POST', `${models}/publish`));
+    const created = await data(call(app, 'POST', `${models}/instances`, { body: { id: 'm1', data: { slug: 'openai/gpt-5' } } }), 201);
+    const key = (value: unknown): string => `key=${encodeURIComponent(JSON.stringify(value))}`;
+    const found = await answer(call(app, 'GET', `${models}/lookup?${key({ slug: 'openai/gpt-5' })}`));
+    assert.equal(found.status, 200);
+    assert.deepEqual((found.body.data as { id: string }).id, 'm1');
+    assert.equal(found.headers.get('etag'), `"${created.seq}"`);
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup?${key({ slug: 'openai' })}`), 404)).code, 'not_found');
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup?${key({ title: 'x' })}`), 400)).code, 'invalid_argument');
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup?key=slug`), 400)).code, 'bad_request');
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup`), 400)).code, 'bad_request');
+    assert.equal((await problem(call(app, 'GET', `${models}/lookup?${key({ slug: 'openai/gpt-5' })}`, { token: 'writer' }), 403)).code, 'forbidden');
+    const repeated = await problem(call(app, 'POST', `${models}/instances`, { body: { data: { slug: 'openai/gpt-5' } } }), 409);
+    assert.deepEqual([repeated.code, repeated.details], ['conflict', { fields: ['slug'] }]);
+    // Requests that race to create one value: one creates it, the rest are 409.
+    const racing = await Promise.all(
+      Array.from({ length: 8 }, (_, index) => answer(call(app, 'POST', `${models}/instances`, { body: { id: `r${index}`, data: { slug: 'race' } } })))
+    );
+    assert.deepEqual(racing.map((response) => response.status).sort(), [201, 409, 409, 409, 409, 409, 409, 409]);
+  });
 });
 
 describe('refusals', () => {

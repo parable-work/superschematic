@@ -41,7 +41,16 @@ through it too, on a chain whose cause each event it appends records.
 list pages through a schema's instances in creation order with an opaque
 cursor. Each page is one indexed range read of at most the page size, so
 a list never loads the whole table, and an instance created or deleted
-while a client pages moves no other instance between pages.
+while a client pages moves no other instance between pages. Its where
+keeps the instances whose fields hold the values it names, a page still
+reading a bounded number of rows in creation order (filters.ts). lookup
+reads the one instance whose unique fields hold a key's values, through
+their index.
+
+The indexes of the instance type's own fields (indexes.ts) refuse a
+create or an update that would repeat a unique field's value in the
+namespace (UniqueConflictError, conflict), and keep each field they
+cover inline in the row, whatever its length.
 
 A row keeps each own field whose JSON is longer than the value store's
 threshold as a ref, the value stored once by hash (values/store.ts), and
@@ -77,7 +86,7 @@ import {
 import { deepFreeze } from '../behaviors/json.js';
 import type { OperationSpec } from '../behaviors/registry.js';
 import { synchronous } from '../behaviors/storage.js';
-import { BehaviorError, BehaviorVetoError, CursorExpiredError, EngineError, InstanceValidationError, type ValidationIssue } from '../errors.js';
+import { BehaviorError, BehaviorVetoError, CursorExpiredError, EngineError, InstanceValidationError, UniqueConflictError, type ValidationIssue } from '../errors.js';
 import { actorOf, appendEvent, logFloor, logHead, nextSeq, type EngineEvent, type OperationChange } from '../events/log.js';
 import { foldEvent, instanceBase } from '../events/retention.js';
 import type { Namespaces } from '../namespaces.js';
@@ -85,11 +94,13 @@ import { pageSize } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, VersionRuntime } from '../registry/catalog.js';
 import { checkSchemaName } from '../registry/document.js';
 import { readOnlyIssue } from '../registry/validator.js';
-import type { Row } from '../storage/driver.js';
+import { SQLITE_CONSTRAINT_UNIQUE, SqliteError, type Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { diffPatch, isPlainObject, jsonEqual, mergePatch, setMember } from './patch.js';
 import { joinStowed, refsOf, refsText, valuesOf, type Stowed, type ValueHolder, type ValueStore } from '../values/store.js';
 import { ReferenceTable, moves, type IncomingReference, type Move } from './references.js';
+import { bind, filteredPage, lookupCondition, parseLookupKey, parseWhere } from './filters.js';
+import { failedIndex } from './indexes.js';
 
 /** An instance id: a letter or digit, then letters, digits, `.`, `_`, `:` and `-`, at most 256 characters. */
 export const INSTANCE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -202,6 +213,14 @@ export interface ListOptions extends InstanceTarget {
   cursor?: string;
   /** As GetOptions.valueRefs. */
   valueRefs?: boolean;
+  /**
+   * Field values the instances hold, by field: a value, or a list of 1 to
+   * 100 of which the instance holds one. A field is an own top-level field
+   * that holds a string, a number or a boolean, or one a behavior lets a
+   * list filter on (Workflow's status). A filtered page can hold fewer
+   * instances than limit, even none, while next is not null.
+   */
+  where?: Readonly<Record<string, unknown>>;
 }
 
 /** One page of a list. */
@@ -302,8 +321,8 @@ export class InstanceStore {
       const params = checkCreateParams(runtime.composition, schema, behaviors);
       const own = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
       const seq = nextSeq(this.storage, namespace, schema, id);
-      const stowed = this.values.stow(own);
-      const inserted = this.storage.run(
+      const stowed = this.values.stow(own, '', undefined, runtime.inline);
+      const inserted = this.unique(namespace, schema, runtime, own, () => this.storage.run(
         `INSERT INTO engine_instances
            (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by, value_refs)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -322,7 +341,7 @@ export class InstanceStore {
           subject,
           refsText(stowed.refs),
         ]
-      );
+      ));
       if (inserted.changes === 0) {
         throw new EngineError('conflict', `${schema} ${id} already exists in namespace ${namespace}`);
       }
@@ -369,7 +388,10 @@ export class InstanceStore {
     return row ? this.read(this.chain(principal, namespace), runtime, record, row, { valueRefs: options.valueRefs === true, copy: true }) : undefined;
   }
 
-  /** list returns a page of a schema's instances in creation order. */
+  /**
+   * list returns a page of a schema's instances in creation order; with
+   * where, of the ones whose fields hold the values it names.
+   */
   list(principal: Principal, schema: string, options: ListOptions = {}): InstancePage {
     const namespace = this.target(principal, 'read', schema, options);
     const limit = pageSize(options.limit);
@@ -377,16 +399,52 @@ export class InstanceStore {
     const record = this.live(namespace, schema);
     const runtime = this.catalog.runtimeOf(record);
     const chain = this.chain(principal, namespace);
-    const rows = this.storage.all(
-      `SELECT ${COLUMNS} FROM engine_instances
-       WHERE namespace = ? AND schema = ? AND position > ?
-       ORDER BY position LIMIT ?`,
-      [namespace, schema, after, limit + 1]
-    );
-    const items = rows.slice(0, limit);
-    const next = rows.length > limit ? encodeCursor(Number(items[items.length - 1].position)) : null;
+    const terms = parseWhere(options.where, runtime.filters, schema);
+    let items: Row[];
+    let next: string | null;
+    if (terms.length === 0) {
+      const rows = this.storage.all(
+        `SELECT ${COLUMNS} FROM engine_instances
+         WHERE namespace = ? AND schema = ? AND position > ?
+         ORDER BY position LIMIT ?`,
+        [namespace, schema, after, limit + 1]
+      );
+      items = rows.slice(0, limit);
+      next = rows.length > limit ? encodeCursor(Number(items[items.length - 1].position)) : null;
+    } else {
+      const page = filteredPage(this.storage, { namespace, schema, holder: record.namespace, indexes: runtime.indexes, terms }, after, limit);
+      items =
+        page.positions.length === 0
+          ? []
+          : this.storage.all(
+              `SELECT ${COLUMNS} FROM engine_instances
+               WHERE namespace = ? AND schema = ? AND position IN (${page.positions.map(() => '?').join(', ')})
+               ORDER BY position`,
+              [namespace, schema, ...page.positions]
+            );
+      next = page.next === null ? null : encodeCursor(page.next);
+    }
     const mode: ReadMode = { valueRefs: options.valueRefs === true, copy: true };
     return { items: items.map((row) => this.read(chain, runtime, record, row, mode)), next };
+  }
+
+  /**
+   * lookup returns the instance whose unique fields hold a key's values,
+   * or undefined when the namespace has none. The key names the fields of
+   * one unique index of the instance type, `{ slug: 'models/gpt' }` for a
+   * @unique field, each with one value of its type; any other key is
+   * invalid_argument. With valueRefs, as get.
+   */
+  lookup(principal: Principal, schema: string, key: unknown, options: GetOptions = {}): InstanceRecord | undefined {
+    const namespace = this.target(principal, 'read', schema, options);
+    const record = this.live(namespace, schema);
+    const runtime = this.catalog.runtimeOf(record);
+    const { index, values } = parseLookupKey(key, runtime.indexes, runtime.filters, schema);
+    const row = this.storage.get(`SELECT ${COLUMNS} FROM engine_instances WHERE ${lookupCondition(record.namespace, schema, index)} LIMIT 1`, [
+      namespace,
+      ...values.map(bind),
+    ]);
+    return row ? this.read(this.chain(principal, namespace), runtime, record, row, { valueRefs: options.valueRefs === true, copy: true }) : undefined;
   }
 
   /**
@@ -438,7 +496,7 @@ export class InstanceStore {
         execution.guard({ kind: 'update', patch: frozenPatch, after: deepFreeze(JSON.parse(JSON.stringify(merged)) as FrozenJSON) }, true, preconditions);
         const before = execution.fields();
         const seq = Number(row.seq) + 1;
-        this.writeOwn(namespace, schema, id, merged, new Set(Object.keys(patch)));
+        this.writeOwn(namespace, schema, id, merged, new Set(Object.keys(patch)), runtime);
         this.storage.run(
           `UPDATE engine_instances
            SET version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
@@ -1038,9 +1096,17 @@ export class InstanceStore {
   }
 
   // writeOwn stores an instance's own fields in its row, each large one by
-  // hash. A member the write did not change keeps the ref the row holds,
-  // so it is neither hashed nor written again.
-  private writeOwn(namespace: string, schema: string, id: string, data: Readonly<Record<string, unknown>>, changed: ReadonlySet<string>): void {
+  // hash but the ones an index covers. A member the write did not change
+  // keeps the ref the row holds, so it is neither hashed nor written
+  // again. A unique index the new values break refuses the write.
+  private writeOwn(
+    namespace: string,
+    schema: string,
+    id: string,
+    data: Readonly<Record<string, unknown>>,
+    changed: ReadonlySet<string>,
+    runtime: VersionRuntime = this.catalog.runtimeOf(this.live(namespace, schema))
+  ): void {
     const row = this.storage.get('SELECT data, value_refs FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?', [namespace, schema, id]);
     if (!row) {
       throw new EngineError('not_found', `${schema} ${id} does not exist in namespace ${namespace}`);
@@ -1051,22 +1117,47 @@ export class InstanceStore {
     const held = refsOf(row.value_refs) ?? [];
     for (const at of held) {
       const key = topKey(at);
-      if (key !== undefined && !changed.has(key) && Object.prototype.hasOwnProperty.call(data, key)) {
+      if (key !== undefined && !changed.has(key) && !runtime.inline.has(key) && Object.prototype.hasOwnProperty.call(data, key)) {
         setMember(object, key, stored[key]);
         known.add(at);
       }
     }
-    const stowed: Stowed = this.values.stow(object, '', known);
-    this.storage.run('UPDATE engine_instances SET data = ?, value_refs = ? WHERE namespace = ? AND schema = ? AND id = ?', [
-      JSON.stringify(stowed.value),
-      refsText(stowed.refs),
-      namespace,
-      schema,
-      id,
-    ]);
+    const stowed: Stowed = this.values.stow(object, '', known, runtime.inline);
+    this.unique(namespace, schema, runtime, data, () =>
+      this.storage.run('UPDATE engine_instances SET data = ?, value_refs = ? WHERE namespace = ? AND schema = ? AND id = ?', [
+        JSON.stringify(stowed.value),
+        refsText(stowed.refs),
+        namespace,
+        schema,
+        id,
+      ])
+    );
     // A row that held no value and holds none has no holds to change.
     if (held.length > 0 || stowed.hashes.size > 0) {
       this.values.hold(rowHolder(namespace, schema, id), stowed.hashes);
+    }
+  }
+
+  // unique runs a write of an instance's row and turns SQLite's refusal of
+  // it by a unique index of the version into the fields whose values
+  // another instance of the namespace holds; any other failure passes.
+  private unique<T>(namespace: string, schema: string, runtime: VersionRuntime, data: Readonly<Record<string, unknown>>, write: () => T): T {
+    try {
+      return write();
+    } catch (error) {
+      if (error instanceof SqliteError && error.code === SQLITE_CONSTRAINT_UNIQUE) {
+        const name = failedIndex(error.message);
+        const index = runtime.indexes.find((candidate) => candidate.name === name);
+        if (index !== undefined) {
+          throw new UniqueConflictError(
+            namespace,
+            schema,
+            index.keys,
+            index.keys.map((key) => data[key])
+          );
+        }
+      }
+      throw error;
     }
   }
 
