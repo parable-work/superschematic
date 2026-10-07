@@ -127,6 +127,19 @@ export interface BehaviorMigration {
   up?(sql: TableWriter): void;
 }
 
+/**
+ * A field of the behavior's a list may filter on (list's where): its
+ * value is one of the behavior's columns, which where compares for
+ * equality in SQL. A migration's index on that column alone lets a page
+ * read only the instances that hold a value, in creation order.
+ */
+export interface BehaviorFilter {
+  /** The column that holds the field's value, by the behavior's own name for it. */
+  readonly column: string;
+  /** The field's JSON type, which a value where gives must have; a boolean is compared as 1 or 0. */
+  readonly type: 'string' | 'number' | 'integer' | 'boolean';
+}
+
 /** The behavior's own columns on one instance. */
 export interface Columns {
   /** Every column the behavior's migrations add, by its own name for it. */
@@ -949,7 +962,7 @@ export interface ConfigSchema {
 /** One operation of a schema's instance type, as a behavior's guidance reads it (DescribeTarget.operations). */
 export interface DescribedTypeOperation {
   readonly name: string;
-  /** The behavior that adds it; absent for create, get, list, update and delete. */
+  /** The behavior that adds it; absent for create, get, list, update, delete and lookup. */
   readonly behavior?: string;
   readonly writes: boolean;
   readonly scope: OperationScope;
@@ -967,7 +980,7 @@ export interface DescribeTarget {
   readonly behaviors: readonly string[];
   /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
   readonly configs: Readonly<Record<string, unknown>>;
-  /** create, get, list, update and delete, then each behavior's operations in the type's list order. */
+  /** create, get, list, update, delete, lookup where the type has a unique field, then each behavior's operations in the type's list order. */
   readonly operations: readonly DescribedTypeOperation[];
 }
 
@@ -1010,7 +1023,8 @@ export interface BehaviorGuidance {
   readonly summary: string;
   /**
    * By operation name, what it says about each operation of the type: its
-   * own, the ones every schema has (create, get, list, update, delete) and
+   * own, the ones the engine serves on the schema (create, get, list,
+   * update, delete, and lookup where the type has a unique field) and
    * other behaviors' it guards, as DescribeTarget.operations names them.
    */
   readonly operations?: Readonly<Record<string, OperationGuidance>>;
@@ -1170,6 +1184,15 @@ export interface BehaviorImplementation<Config = unknown> {
 
   /** A reader per declared field. */
   readonly fields?: Readonly<Record<string, FieldReader<Config>>>;
+
+  /**
+   * The declared fields a list may filter on (where), by field name: each
+   * one whose value its reader takes from one of the behavior's columns,
+   * which the filter names. The engine compares the column in SQL, so the
+   * reader and the column must agree: an instance a filter keeps reads
+   * the value the filter named.
+   */
+  readonly filters?: Readonly<Record<string, BehaviorFilter>>;
 
   /**
    * Runs after a create (after every initialize), an update, a delete or a

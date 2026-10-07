@@ -21,7 +21,18 @@ import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } fr
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
 import { hold, holdDeclaration, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, notesDocument, openTestEngine, orderDocument, projectsDocument, stepsDocument, tasksDocument } from './helpers.ts';
+import {
+  alice,
+  cleanup,
+  documentsDocument,
+  notesDocument,
+  openTestEngine,
+  orderDocument,
+  projectsDocument,
+  schemaDocument,
+  stepsDocument,
+  tasksDocument,
+} from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 // The bearer token is the caller's subject; reader may only read.
@@ -442,6 +453,40 @@ describe('tools/call', () => {
     assert.equal(problemOf(await call('describe_behavior', {})).code, 'invalid_argument');
   });
 
+  test('a schema with a unique field has a lookup tool, its list takes where, and a repeated value is a tool error with the 409 problem', async () => {
+    const { url } = await served({}, {}, (engine) => {
+      const document = schemaDocument('Model', [
+        { name: 'slug', typeRef: { name: 'string' }, unique: true },
+        { name: 'kind', typeRef: { name: 'string' } },
+      ]) as { types: { Model: Record<string, unknown> } };
+      document.types.Model.behaviors = [{ name: 'Workflow', config: { states: ['todo', 'done'], transitions: [{ from: 'todo', to: 'done' }] } }];
+      engine.schemas.define(everything, document);
+      engine.schemas.publish(everything, 'Model');
+      engine.instances.create(everything, 'Model', { slug: 'org/a', kind: 'x' }, { id: 'a' });
+      engine.instances.create(everything, 'Model', { slug: 'org/b', kind: 'y' }, { id: 'b' });
+      engine.instances.invoke(everything, 'Model', 'b', 'transition', { to: 'done' });
+    });
+    const { client } = await connect(endpoint(url), 'reader');
+    const { tools } = await client.listTools();
+    const lookup = tools.find((tool) => tool.name === 'model_lookup');
+    assert.deepEqual([lookup?.annotations?.readOnlyHint, lookup?.inputSchema.required], [true, ['key']]);
+    assert.deepEqual((lookup?.inputSchema.properties as Record<string, any>).key.required, ['slug']);
+    assert.match(String((lookup?._meta as Record<string, any>)['superschematic/operation-guidance'].useWhen), /Use when you know the slug of the Model to read/);
+    const where = (tools.find((tool) => tool.name === 'model_list')?.inputSchema.properties as Record<string, any>).where;
+    assert.deepEqual(Object.keys(where.properties), ['slug', 'kind', 'status']);
+    const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as CallToolResult;
+    assert.equal((((await call('model_lookup', { key: { slug: 'org/b' } })).structuredContent) as { id: string }).id, 'b');
+    assert.equal(problemOf(await call('model_lookup', { key: { slug: 'org/c' } })).code, 'not_found');
+    assert.equal(problemOf(await call('model_lookup', { key: 'org/b' })).code, 'invalid_argument');
+    const listed = (await call('model_list', { where: { status: 'done' } })).structuredContent as { items: Array<{ id: string }> };
+    assert.deepEqual(listed.items.map((item) => item.id), ['b']);
+    const kinds = (await call('model_list', { where: { kind: ['y', 'x'] } })).structuredContent as { items: Array<{ id: string }> };
+    assert.deepEqual(kinds.items.map((item) => item.id), ['a', 'b']);
+    const { client: writer } = await connect(endpoint(url));
+    const repeated = problemOf((await writer.callTool({ name: 'model_create', arguments: { data: { slug: 'org/a' } } })) as CallToolResult);
+    assert.deepEqual([repeated.status, repeated.code, repeated.details], [409, 'conflict', { fields: ['slug'] }]);
+  });
+
   test('an unknown tool, or one the caller may not read, is a JSON-RPC invalid-params error', async () => {
     const { url } = await served({ policy: ({ principal, action, schema }) => policy({ principal, action, namespace: 'default', schema }) && !(principal.subject === 'reader' && schema === 'Item') });
     const { client } = await connect(endpoint(url), 'reader');
@@ -646,7 +691,7 @@ describe("the core's behaviors", () => {
       [
         ['tasks_create', false, 'behaviors data id'],
         ['tasks_get', true, 'id valueRefs'],
-        ['tasks_list', true, 'cursor limit valueRefs'],
+        ['tasks_list', true, 'cursor limit valueRefs where'],
         ['tasks_update', false, 'expectedSeq id patch'],
         ['tasks_delete', false, 'expectedSeq id'],
         ['tasks_transition', false, 'expectedSeq id params'],

@@ -11,6 +11,9 @@ existed. Workflow itself reads no outcome: Dependencies, Rollups and
 Reactions read it from another schema's config, through stateOutcome, to
 tell a blocker or a child that finished well from one that failed.
 
+A list filters on status (where: { status: 'doing' }), which Workflow's
+column holds and an index of its own on that column serves.
+
 Nothing else can move the status. It is Workflow's own column: a create
 or an update that sets `status` is refused (readOnly), and another
 behavior has no handle on the column. transition's parameter is `to`
@@ -155,7 +158,14 @@ export const workflow = defineBehavior<WorkflowConfig>({
 
   guidance: workflowGuidance,
 
-  migrations: [{ version: 1, name: 'status', columns: { status: { type: 'text' } } }],
+  // The index lets a list that filters on status read only the instances
+  // in the states it names, in creation order.
+  migrations: [
+    { version: 1, name: 'status', columns: { status: { type: 'text' } } },
+    { version: 2, name: 'status index', indexes: { status: ['status'] } },
+  ],
+
+  filters: { status: { column: 'status', type: 'string' } },
 
   initialize(context) {
     context.columns.set({ status: context.config.initial });
