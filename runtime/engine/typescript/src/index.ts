@@ -34,12 +34,26 @@ export { SCHEMA_NAME } from './registry/document.js';
 export { SchemaValidator } from './registry/validator.js';
 
 export { INSTANCE_ID, InstanceStore } from './instances/store.js';
-export type { CreateOptions, DeleteOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions, UpdateOptions } from './instances/store.js';
+export type { CreateOptions, DeleteOptions, GetOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions, UpdateOptions } from './instances/store.js';
 export type { InvokeOptions, InvokeSchemaOptions, OperationOutcome } from './instances/store.js';
 
 export { EVENT_KINDS, EventLog } from './events/log.js';
 export type { DefineChange, EngineEvent, EventCause, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
 export type { EventWatcher } from './events/notifier.js';
+
+// The value store (runtime/engine/README.md, "The value store").
+export {
+  DEFAULT_VALUE_CACHE_BYTES,
+  DEFAULT_VALUE_THRESHOLD,
+  MIN_VALUE_THRESHOLD,
+  SqliteValueDriver,
+  VALUE_HASH,
+  VALUE_REF_KEY,
+} from './values/store.js';
+export type { StoredValue, ValueDriver, ValueOptions, ValueRef } from './values/store.js';
+export { EngineValues } from './values/values.js';
+export type { ValueTarget } from './values/values.js';
+export { canonicalJSON } from './values/canonical.js';
 
 // The runner of reactions and schedules (runtime/engine/README.md, "The runner").
 export {
@@ -114,12 +128,15 @@ export type {
   SqlReader,
   SqlWriter,
   StoredInstance,
+  StowedObject,
   TableReader,
   TableWriter,
   TypeCheck,
   TypeSchema,
   ValidationContext,
   ValidationRequest,
+  ValueReader,
+  ValueWriter,
   WorkContext,
   WritableColumns,
 } from './behaviors/behavior.js';

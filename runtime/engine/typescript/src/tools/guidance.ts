@@ -56,7 +56,7 @@ export interface VersionGuidance {
 }
 
 /** The engine's own tools, by the kind the tool catalog names them with. */
-export type EngineTool = 'listSchemas' | 'describeSchema' | 'defineSchema' | 'listBehaviors' | 'describeBehavior' | 'search';
+export type EngineTool = 'listSchemas' | 'describeSchema' | 'defineSchema' | 'listBehaviors' | 'describeBehavior' | 'getValue' | 'search';
 
 const ENGINE_GUIDANCE: Readonly<Record<EngineTool, OperationGuidance>> = {
   listSchemas: {
@@ -84,6 +84,11 @@ const ENGINE_GUIDANCE: Readonly<Record<EngineTool, OperationGuidance>> = {
     useWhen: 'Use to learn what a behavior takes before composing it: its config, its create parameters, its preconditions and the codes its vetoes carry.',
     doNotUseWhen: "Do not use to read a schema's config of the behavior; call describe_schema.",
     success: "Returns the behavior's declaration, with its defaults filled in.",
+  },
+  getValue: {
+    useWhen: 'Use to read a large field an event, or an instance read with valueRefs, carries as a ref ({ "$value": <hash>, "bytes": <n> }), by its hash.',
+    doNotUseWhen: "Do not use to read an instance; call its schema's get, which returns every field inline unless valueRefs asks for refs.",
+    success: 'Returns the value with its hash and its size in bytes.',
   },
   search: {
     useWhen: 'Use to find instances across every schema this namespace reaches that composes Search, by words, by a vector, or both.',

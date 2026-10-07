@@ -905,9 +905,9 @@ surface, each spec carrying the extension's `Name()`:
 Resolution checks every resource against the schema of its type, so a
 target checks in the provider schemas it emits from a pinned provider
 version, as the gcp target does with pulumi-gcp's. A target that deploys
-also fills four seams on its `TargetSpec`, `State`, `Secrets`,
-`Bootstrap` and `Migrations`, and the core registers one target of its
-own, `local`, for `stack dev`.
+also fills five seams on its `TargetSpec`, `State`, `Secrets`,
+`Bootstrap`, `Migrations` and `Builder`, and the core registers one
+target of its own, `local`, for `stack dev`.
 [Stack targets](/superschematic/extending/stack-targets/) walks each
 registration, its seams and its offline tests.
 

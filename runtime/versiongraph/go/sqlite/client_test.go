@@ -294,45 +294,66 @@ func TestResultCodeOption(t *testing.T) {
 }
 
 // TestWriteLockWaits: a second connection's BEGIN IMMEDIATE waits for the
-// write lock, and then fails busy; once the first transaction commits, it
-// writes.
+// write lock. While the first connection's transaction holds it, one whose
+// busy timeout runs out first fails busy, and one with time to spare
+// begins once the first commits, reads what it wrote, and writes. Neither
+// runs its transaction without the lock.
+//
+// Nothing here times the wait. SQLite's busy handler adds up the delays it
+// asks for, not the time they take, and modernc.org/sqlite sleeps through
+// a raw nanosleep that a signal, such as the Go runtime's preemption, ends
+// early: on Linux a connection can give up well inside its busy timeout.
 func TestWriteLockWaits(t *testing.T) {
 	ctx := context.Background()
 	path := t.TempDir() + "/lock.sqlite"
 	a := newSetup(t, sqlite.Options{}, path)
-	second := openDB(t, path, "_pragma=busy_timeout(300)")
-	b := must(must(sqlite.New(readDescriptor(t), sqlite.Options{Graph: graph}))(t).Storage(ctx, sqlite.DB(second)))(t)
-	var waited time.Duration
+	adapter := must(sqlite.New(readDescriptor(t), sqlite.Options{Graph: graph}))(t)
+	impatient := must(adapter.Storage(ctx, sqlite.DB(openDB(t, path, "_pragma=busy_timeout(100)"))))(t)
+	// openDB's busy timeout, 5 seconds, outlasts the first transaction.
+	second := openDB(t, path, "")
+	patient := must(adapter.Storage(ctx, sqlite.DB(second)))(t)
 	var busy error
 	ran := false
+	wrote := make(chan error, 1)
 	must(in(a.storage, func(ctx context.Context, tx storage.Tx) (struct{}, error) {
-		if _, err := tx.CreateRef(ctx, storage.NewRef{Root: bread, Name: "main", Actor: cook}); err != nil {
+		first, err := tx.CreateRef(ctx, storage.NewRef{Root: bread, Name: "main", Actor: cook})
+		if err != nil {
 			return struct{}{}, err
 		}
-		started := time.Now()
-		_, busy = in(b, func(ctx context.Context, other storage.Tx) (storage.Ref, error) {
+		_, busy = in(impatient, func(ctx context.Context, other storage.Tx) (storage.Ref, error) {
 			ran = true
 			return other.ReadRef(ctx, "Missing")
 		})
-		waited = time.Since(started)
+		started := make(chan struct{})
+		go func() {
+			close(started)
+			_, err := in(patient, func(ctx context.Context, other storage.Tx) (storage.Ref, error) {
+				// The first transaction's ref is there only once it commits.
+				if _, err := other.ReadRef(ctx, first.ID); err != nil {
+					return storage.Ref{}, fmt.Errorf("reading the first transaction's ref: %w", err)
+				}
+				return other.CreateRef(ctx, storage.NewRef{Root: "Soup", Name: "main", Actor: cook})
+			})
+			wrote <- err
+		}()
+		// Hold the lock a while after the patient connection asks for it.
+		<-started
+		time.Sleep(100 * time.Millisecond)
 		return struct{}{}, nil
 	}))(t)
 	if code, ok := sqlite.ResultCode(busy); !ok || code != sqlite.ResultBusy {
-		t.Fatalf("the second connection's transaction = %v (code %d), want SQLITE_BUSY", busy, code)
-	}
-	if waited < 250*time.Millisecond {
-		t.Fatalf("the second connection waited %s for the lock, want its busy timeout, 300ms", waited)
+		t.Fatalf("the impatient connection's transaction = %v (code %d), want SQLITE_BUSY", busy, code)
 	}
 	// The transaction begins by taking the write lock, so even one that
 	// would only read never starts.
 	if ran {
-		t.Fatal("the second connection's transaction ran without the write lock")
+		t.Fatal("the impatient connection's transaction ran without the write lock")
 	}
-	must(in(b, func(ctx context.Context, other storage.Tx) (storage.Ref, error) {
-		return other.CreateRef(ctx, storage.NewRef{Root: "Soup", Name: "main", Actor: cook})
-	}))(t)
+	if err := <-wrote; err != nil {
+		t.Fatalf("the patient connection's transaction = %v, want it to wait for the first to commit and then write", err)
+	}
 	if n := count(t, second, `SELECT count(*) FROM "graph_ref"`); n != 2 {
-		t.Fatalf("the second connection reads %d refs, want both", n)
+		t.Fatalf("the patient connection reads %d refs, want both", n)
 	}
 }
 

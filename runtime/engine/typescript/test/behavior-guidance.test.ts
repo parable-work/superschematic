@@ -401,7 +401,7 @@ describe('where the guidance goes', () => {
     const engineTools = manifest.tools.filter((tool) => tool.namespace === 'engine');
     assert.deepEqual(
       engineTools.map((tool) => tool.name),
-      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior']
+      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue']
     );
     for (const tool of engineTools) {
       assert.ok(tool.guidance.useWhen.startsWith('Use '), tool.name);
