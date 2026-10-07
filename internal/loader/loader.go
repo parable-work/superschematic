@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
@@ -289,9 +290,10 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings print to [WarningWriter], errors fail the load. A schema
-// that verifies has its version graphs expanded into ordinary types, any
-// scalar only the generated fields use is hydrated from the registry, and
-// the services its stack declarations name join its references (D41).
+// that verifies has its version graphs expanded into ordinary types and the
+// tables its User and UserRole traits own added (D50), any scalar only the
+// generated fields use is hydrated from the registry, and the services its
+// stack declarations name join its references (D41).
 func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
@@ -300,7 +302,9 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	if err := res.Err(); err != nil {
 		return nil, err
 	}
-	if added := versiongraph.Expand(schema); len(added) > 0 {
+	added := versiongraph.Expand(schema)
+	added = append(added, identity.Expand(schema)...)
+	if len(added) > 0 {
 		reg := vin.Registry
 		if reg == nil {
 			reg = registry.New(vin.Naming.OrDefault())

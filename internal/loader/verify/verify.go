@@ -4,7 +4,8 @@
 // of any one authoring syntax: schema-kind / import-path compatibility,
 // cross-kind type-reference rules, the classes decorator arguments name,
 // full @source structural verification,
-// trait shape checks, version graph declarations, projection view
+// trait shape checks, version graph declarations,
+// the User and UserRole traits, projection view
 // declarations, the contexts that refuse an array of arrays, the arguments
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
 // cannot be encrypted, the service clauses an operation cannot take,
@@ -195,6 +196,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkTraits(schema, r)
 	checkVersioned(schema, r)
 	checkVersionGraphs(schema, r)
+	checkIdentity(schema, r)
 	checkProjections(schema, r)
 	checkArraysOfArrays(schema, r)
 	checkEncryptedArguments(schema, r)
