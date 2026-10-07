@@ -1011,23 +1011,23 @@ func TestGenerateRefusesTablesWithoutAUUIDScalar(t *testing.T) {
 }
 
 // TestGenerateRefusesAGraphColumnNoValueClassReads adds to a graph member a
-// string scalar the sql generator stores as POINT, as it stores the
-// catalog's Geo.Location. No value class reads POINT, so the graph has no
-// descriptor, and Generate fails with the descriptor's error, naming the
-// field and the SQL type, rather than writing a shell without one.
+// Geo.Location, a JSON object the sql generator stores as POINT, shaped as
+// the catalog's row hydrates it. No value class reads POINT, so the graph
+// has no descriptor, and Generate fails with the descriptor's error, naming
+// the field, the JSON object it holds and the SQL type, rather than writing
+// a shell without one.
 func TestGenerateRefusesAGraphColumnNoValueClassReads(t *testing.T) {
 	const svc = "fixture-version-graph-db"
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
 	if err != nil {
 		t.Fatalf("load %s: %v", svc, err)
 	}
-	schema.Scalars["Test.Location"] = &ir.ScalarDef{
-		Name: "Test.Location", LanguagePrimitive: ir.LanguageString, Primitive: "String",
-		Pattern:      `^-?\d+(\.\d+)?,-?\d+(\.\d+)?$`,
+	schema.Scalars["Geo.Location"] = &ir.ScalarDef{
+		Name: "Geo.Location", LanguagePrimitive: ir.LanguageString, Primitive: "String", HasCustomParse: true,
 		TypeMappings: map[string]string{"json_schema": ir.JSONSchemaObjectType, "sql": "POINT"},
 	}
 	schema.Types["Utensil"].Fields = append(schema.Types["Utensil"].Fields, &ir.FieldDef{
-		Name: "shelf", TypeRef: ir.TypeRef{Name: "Test.Location"}, Required: true,
+		Name: "shelf", TypeRef: ir.TypeRef{Name: "Geo.Location"}, Required: true,
 	})
 
 	_, err = Generate(schema, Options{
@@ -1036,8 +1036,9 @@ func TestGenerateRefusesAGraphColumnNoValueClassReads(t *testing.T) {
 		TypesModule: "example.com/schemas/types/go/" + svc,
 		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
-	if err == nil || !strings.HasPrefix(err.Error(), "graphdesc: version graph Recipe: Utensil.shelf: ") || !strings.Contains(err.Error(), "stored as POINT,") {
-		t.Fatalf("Generate = %v, want the descriptor's refusal of Utensil.shelf stored as POINT", err)
+	if err == nil || !strings.HasPrefix(err.Error(), "graphdesc: version graph Recipe: Utensil.shelf: ") ||
+		!strings.Contains(err.Error(), "Geo.Location holds a JSON object but is stored as POINT,") {
+		t.Fatalf("Generate = %v, want the descriptor's refusal of Utensil.shelf, a JSON object stored as POINT", err)
 	}
 }
 
