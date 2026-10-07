@@ -142,7 +142,7 @@ function builtinGuidance(type: string, takers: readonly string[], fields: FieldG
     list: {
       useWhen: `Use to page through ${type} instances, oldest first.${
         fields.filters.length > 0
-          ? ` where keeps the ones whose fields hold the values it gives, a list of values meaning any of them: ${list(fields.filters, 'or')}.`
+          ? ` where keeps the ones whose fields hold the values it gives, null meaning no value and a list of values any of them: ${list(fields.filters, 'or')}.`
           : ''
       }`,
       doNotUseWhen: `Do not use to read one instance whose id you have; call get.${keys.length > 0 ? ` Do not use to find one by its ${list(keys, 'or')}; call lookup.` : ''}`,

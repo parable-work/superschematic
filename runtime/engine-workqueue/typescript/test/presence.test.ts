@@ -382,6 +382,9 @@ for (const driver of drivers) {
       assert.match(thrown(() => engine.schemas.define(alice, next(undefined)), IncompatibleChangeError).message, /would stay behind/);
       publish(engine, next({ ...presenceConfig, ttlMs: 60000, sweepMs: 1000 }));
       assert.deepEqual(engine.instances.invoke(wren, 'Worker', 'w1', 'beat', {}), { deadline: T0 + 60000 });
+      // With no instance, no principal is held where the old config said: principalField may move.
+      engine.instances.delete(alice, 'Worker', 'w1');
+      publish(engine, next({ ...presenceConfig, principalField: 'name' }));
     });
 
     test('beat and miss take no parameters', () => {

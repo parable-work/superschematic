@@ -57,6 +57,9 @@ last signature and the best score, and tables for the counts by class and
 the attempts, whose last kept one the keep decision reads. The event log
 is never read.
 
+A list filters on retries.exhausted (where: { 'retries.exhausted': true }),
+the column the field's exhausted reads, through an index on it.
+
 recordAttempt needs the config's permission when it names one, and a
 Lease on the type refuses it to every principal but the holder while a
 lease is active, as any writing operation.
@@ -419,7 +422,12 @@ export const retries = defineBehavior<RetriesConfig>({
         ) STRICT`);
       },
     },
+    // The index lets a list that filters on retries.exhausted read only
+    // the exhausted instances, or the others, in creation order.
+    { version: 2, name: 'exhausted index', indexes: { exhausted: ['exhausted'] } },
   ],
+
+  filters: { 'retries.exhausted': { column: 'exhausted', type: 'boolean', description: 'Whether its retries are exhausted.' } },
 
   // Once exhausted, the instance moves only to exhaustedState and is not
   // taken again; limitsField changes only as a limit does. A create sets

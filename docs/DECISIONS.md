@@ -1116,8 +1116,13 @@ large field is stored once, by hash, in a value store in the same file
 (the amendment "a large value is stored once" below). The engine enforces
 `@unique`, `@key` and `@index`, finds an instance by its unique fields and
 filters a list by equality (the amendment "an instance is found by a
-unique field" below). Each change that lands a piece updates this
-paragraph. The names and rules are reversible until the first release.
+unique field" below), on Assignment's assignee, Lease's holder and
+Retries' exhaustion too, and on no value (the amendment "a list filters
+on who holds the work" below). Lease tells a holder that a linked target
+moved (`directOn`), and a behavior's `configChange` sees whether the
+schema has instances (the two amendments after it). Each change that
+lands a piece updates this paragraph. The names and rules are reversible
+until the first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -1648,6 +1653,67 @@ rather than of the two documents.
 | A filtered page keeps creation order and reads a bounded number of rows: through an index whose every field a member names, one range read per combination of the members' values in position order, at most 100, merged; else through the list index, at most 1000 instances past the cursor (`FILTER_SCAN_ROWS`). The members no index serves are tested in SQL on the rows read. `next` is the position up to which every instance was read, so a page can hold fewer instances than its limit, even none, while `next` is not null, as a filtered page of the event log can. | A SQL `LIMIT` on the rows kept, which scans without bound in one synchronous read for a rare value; a cursor per range, which a page merging ranges cannot give as one |
 | The typed client (`@superschematic/engine/client`) follows the routes: `instances.lookup(schema, key)`, a missing instance a thrown 404 as for `get`; `list`'s `where`; and an `EngineProblem`'s `fields`, `details.fields` of a conflict. | Leaving the client a step behind the HTTP API it types |
 | A behavior's implementation lists `filters`: its declared fields whose value is one of its columns, with the value's JSON type, which a list filters on as an own field. The engine compares the column in SQL; a migration's index on that column alone serves the filter. `Workflow` filters on `status`, and its migration 2 adds the index. | SQL each behavior writes for its filter, which the engine would check and splice like its other SQL; filtering on a field as its reader computes it, which reads every instance's behaviors to filter; every behavior field, many of which are computed from other instances |
+
+### D16, amended: a list filters on who holds the work, and on what ran out
+
+The amendment above gave a behavior's column a filter, and Workflow's
+`status` the first one. The questions a client asks of a work queue next
+had none: the work assigned to me, the work no one has, the leases a
+worker holds when it restarts, the free instances, the jobs whose
+retries ran out. `Assignment`'s assignee is a column with no filter, and
+`Lease`'s holder and `Retries`' exhaustion are members of object fields,
+which a filter could not name. And `where` refused null, so "no one" and
+"free" could not be asked at all. This changes that amendment's `where`
+row: null is a value a member may give.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior's filter may name `<field>.<member>`, a camelCase member of a declared field whose value is an object, as well as a declared field: `lease.holder`, `retries.exhausted`. Registration holds the field to the declaration and the member to camelCase. A filter may carry a `description`, which the list tool's `where` shows, the declared field's when absent. | A filter name that is no field (`holder`), which a read never shows; a field per member, one more member of every read; a JSON pointer (`/lease/holder`), which no other `where` key uses |
+| A `where` member may give null, alone or in a list: it keeps the instances whose field holds no value, absent or null for an own field and a null column for a behavior's. `{ "assignee": [null, "wren"] }` is wren's work and the work no one holds. The list tool's `where` takes null; a lookup's `key` still refuses it. | Refusing null, which leaves "unassigned" and "free" unaskable; a `missing` list beside `where`; a negation (`not`), which makes equality an expression language |
+| A behavior's index on its column serves null as one more range. An own index is partial on a value in each field, so it serves no member that lists null, whose page reads the list index, at most `FILTER_SCAN_ROWS` instances. | Own indexes over null too, which changes what a unique index holds and how it treats an instance without the value |
+| `Assignment` filters on `assignee`, through an index on its column (its migration 2). | |
+| `Lease` filters on `lease.holder`, its holder column, through an index on it alone (migration 4), since `held` leads with the holder and orders by `expires_at`. A lapsed lease keeps its holder until its expiry is applied, as the field reads it, which the runner's sweep does within `sweepMs`; null is a free instance. `active` turns false with the clock, which no column holds, so it is not filtered on; a worker that lists its leases at a restart reads `active` on each. | A filter on `active`, which needs the time in SQL and each instance's `maxHoldField`; a column the sweep sets, which lags as the holder does; a filter for "held by anyone", which equality cannot say |
+| `Retries` filters on `retries.exhausted`, a column only an attempt sets and nothing resets, through an index on it (its migration 2). | `stuck` as well, which no client has asked for |
+| `Dependencies`' `blocked` is not filtered on. It is computed at each read from the blockers, as the caller, under the live config (`satisfiedBy`, each blocker schema's outcomes), which a publish changes with no write. A copy would make Dependencies hear every blocker's status and append an event on each of its dependents at each change, the cost the amendment on what a reference hears removed, and would still go stale at a publish. Queue's copy is safe where this one is not: a stale copy costs `claimNext` a candidate it skips, and the claim checks again; a list has nothing that checks again. | A copied column, at that cost; a filter on Queue's copy, which is Queue's, on types that compose Queue only |
+| No engine migration: each index is a behavior migration, numbered per behavior. | |
+
+### D16, amended: a lease's holder hears that a linked target moved
+
+A worker holding a step pinned to a plan revision kept working when the
+plan moved on. `Reactions`' `revised` moves a status when a link's target
+gains a revision or a release, but D16 declined actions besides a
+transition, and a core behavior cannot name the work-queue package's
+`direct`. The holder is Lease's to tell, so Lease's config says when.
+The engine's runner gains one rule for it: a behavior's reactions can be
+off on a schema.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Lease` takes `directOn: [{ revised: { link }, name, data? }]`, one entry per link of the type's `Links`. When the link's target moves on, the runner sends directive `name` to the holder of each instance the move reaches. | A Reactions `then: { direct }`, which names a work-queue operation in the core; a rule on the target's schema, which would name every schema that links to it |
+| What moves a target on, and which instances it reaches, is `Reactions`' `revised` rule, which the engine exports and Reactions now calls: `targetMove` reads a revision of `Revisions` (an update or an operation whose change carries `revision`) or a release of `Branches` (`releaseCommit`), and `movedOn` lists the instances that point at the target through `Links`' `listLinked`, for a pinned link and a revision only the stale ones. A target schema with neither is a failure at run. | A copy in the work-queue package, which would drift from the rule it restates |
+| It is Lease's reactions, on the runner, as its principal, and each directive is Lease's `direct`, invoked, so its guard asks `directPermission`, or `overridePermission` when that is absent. `parseConfig` refuses `directOn` when the config names neither. A runner principal that lacks it fails the subscription, `forbidden`, where `engine.runner.status()` shows it, as any refusal of the policy does. | A way past the permission for the runner, which the guard cannot tell from any other caller; `call()`, which a reaction has no instance to make from |
+| The directive's data is the entry's, with `revised` set to what moved: `{ link, schema, id, revision }`, or `{ link, schema, id, commit }` for a release. An entry's `data` may not hold `revised`. | The entry's data alone, which leaves the holder to read the target to learn what moved and to what |
+| Its `dedupeKey` is `direct`'s: `revised <link> <revision>`, or `released <link> <version>`, the release pointer's version the release was fenced by. A holder hears each move once per lease, and two moves twice. | One key per link, under which a second move finds the first directive standing, acknowledged or not, and is never sent |
+| An instance whose lease is free hears nothing, and neither does its next holder: the runner reads Lease's holder column and invokes only where one is recorded, and a lapsed lease's `direct` is refused, which the reaction passes over, as Reactions passes over a veto. A directive belongs to a lease's token, and a new token deletes the last lease's directives; the next holder takes the instance after the move and reads its links as they are, and with Queue's `excludeStale` a stale pinned instance is not claimed at all. | Queueing it for the next holder, a directive outside any lease, which would tell a worker to redo work it had not started |
+| A behavior's `watches` may return null, which turns its reactions off on the schema, as a schedule's `everyMs` function returning null turns a schedule off (D32): the runner reads none of the schema's events for it, `status()` shows a subscription that has run as `off`, and one that never ran not at all. A subscription starts at the publish of the earliest version of the run of versions, up to the live one, that compose the behavior with its reactions on, so a version that turns them on starts at its own publish. Lease's are off without `directOn`. | Reactions on every schema that composes Lease, so the runner reads every heartbeat of every leased schema, and a deployment that upgrades replays the log from when each schema composed Lease, telling holders of moves long past; an `enabled(config)` hook beside `watches` |
+| With `directOn`, the subscription hears its own schema's events too, as every subscription does, and passes over them. | A `watches` that leaves out the schema itself, a change to every behavior's reactions for one case |
+
+### D16, amended: a config change sees whether the schema has instances
+
+A behavior's `configChange` saw two configs, so it refused a change that
+only stored instances could break on a schema that had none. Links
+refused making a link required, or a new required one, on an empty
+schema, and Workflow refused dropping a state, so a schema still being
+shaped needed a new name. The engine already asked whether instances
+exist before it asked a behavior about being added or removed.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `configChange(before, after, change)`: `change.instances` says whether an instance of the schema exists. It is true for an added or removed behavior, which is asked about only then. | A publish-time hook of its own; the count of instances, which no rule needs |
+| Any namespace that reads the version counts: for a schema of the shared namespace, every namespace that looks it up, since one published config serves them all. It is the question an add or a remove already asks. | The defining namespace alone, under which the shared namespace, which holds the schema and no instance of it, would let a link become required while another namespace's instances lack it |
+| It is read when the behavior reads it, at define and again at publish, in the publish's transaction, so a version defined while the schema was empty is refused at publish once an instance exists. | Reading it for every define, a query per namespace that no behavior may ask for |
+| With no instance, `Links` allows any change (a link made required, a new required link, a link gone, another schema); `Workflow` a dropped state; `Variants` a new `field`, `by` or type for a value; `Branches` a removed kind and a kind's type, parent, order, singleton or unit, since deleting an instance deletes its graph; `Budget` a removed meter; `Presence` a new `principalField`. The other behaviors refuse no config change. | Leaving each as it was |
+| The field rule, which refuses a field made required and a new required field, is the engine's and stays as it is, instances or not. | Relaxing it too, beyond this change, which would change D16's compatibility rule for every schema |
 
 ## D17. A version graph over versioned tables, with one merge core
 

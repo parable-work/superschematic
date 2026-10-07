@@ -43,6 +43,8 @@ export type { CommentRecord } from './comments.js';
 export type { ProposalRecord, ProposalState, RevisionRecord, RevisionsConfig } from './revisions.js';
 export type { BlockerRecord, DependenciesConfig, DependentRecord } from './dependencies.js';
 export type { LinkRecord, LinkSpec, LinksConfig } from './links.js';
+export { linkedTo, movedOn, targetMove } from './revised.js';
+export type { TargetMove } from './revised.js';
 export { MAX_ROLLUP_READ } from './rollups.js';
 export type { RollupFunction, RollupOver, RollupSpec, RollupsConfig } from './rollups.js';
 export { RRF_K, RRF_WINDOW, SEARCH_SCHEMAS_PARAMS, SIMILAR_TERMS, searchSchemas } from './search.js';

@@ -258,6 +258,25 @@ for (const driver of drivers) {
       assert.match(removed.message, /behavior Links cannot be removed from type Task, which has instances: the links and references its instances hold would stay behind/);
     });
 
+    test('with no instance in any namespace, the config may change in any way; the first instance holds it to the rules again', () => {
+      const engine = open();
+      publish(engine, schema('Person', []));
+      publish(engine, tasks({ owner: { schema: 'Person' }, related: { schema: 'Task' } }));
+      // A link made required, a new required one, a link gone and a link
+      // pointed at another schema: no instance holds a link or lacks one.
+      publish(engine, tasks({ owner: { schema: 'Person', required: true }, boss: { schema: 'Person', required: true } }));
+      engine.schemas.define(alice, tasks({ owner: { schema: 'Task' }, boss: { schema: 'Person', required: true } }));
+      assert.equal(engine.schemas.publish(alice, 'Task').version, 3);
+      engine.instances.create(alice, 'Person', { title: 'p1' }, { id: 'p1' });
+      engine.instances.create(alice, 'Task', { title: 't1' }, { id: 't1', behaviors: { Links: { boss: 'p1' } } });
+      const change = (links: Record<string, unknown>) => thrown(() => engine.schemas.define(alice, tasks(links)), IncompatibleChangeError).changes.map((c) => c.message);
+      assert.match(change({ owner: { schema: 'Task', required: true }, boss: { schema: 'Person', required: true } })[0], /link owner becomes required/);
+      assert.match(change({ boss: { schema: 'Person', required: true } })[0], /link owner is gone, and its instances may hold it/);
+      // Deleting the last instance frees the config again.
+      engine.instances.delete(alice, 'Task', 't1');
+      publish(engine, tasks({ boss: { schema: 'Person', required: true } }));
+    });
+
     test("a create gives links by name, a target's id or { id, revision }; they hold from its event, as link's do", () => {
       const engine = world();
       engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });

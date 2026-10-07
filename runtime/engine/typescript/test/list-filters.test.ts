@@ -1,12 +1,13 @@
 // A list's where: equality on the instance type's own fields and on a
-// field a behavior lets a list filter on (Workflow's status), a list of
-// values, paging with the cursor in creation order, a page read through
-// an index, a page that scans a bounded number of instances when none
-// serves it, and what where refuses.
+// field a behavior lets a list filter on (Workflow's status), or a member
+// of one, a list of values, null for no value, paging with the cursor in
+// creation order, a page read through an index, a page that scans a
+// bounded number of instances when none serves it, and what where
+// refuses.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, FILTER_SCAN_ROWS, type Engine, type ListOptions } from '../dist/index.js';
+import { EngineError, FILTER_SCAN_ROWS, defineBehavior, type BehaviorDeclaration, type Engine, type ListOptions } from '../dist/index.js';
 import { counter, openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
 
@@ -22,6 +23,37 @@ const WORKFLOW = {
     ],
   },
 };
+
+// test.Tag gives an instance an owner, or none, in a column the tag
+// field's owner member reads, which a list filters on as tag.owner
+// through an index on the column.
+const tagDeclaration: BehaviorDeclaration = {
+  name: 'test.Tag',
+  description: 'Tags an instance with an owner, or none.',
+  fields: [{ name: 'tag', description: 'The tag, { owner }.' }],
+  operations: [
+    {
+      name: 'own',
+      description: 'Sets the owner, or clears it with null.',
+      paramsSchema: { type: 'object', additionalProperties: false, required: ['owner'], properties: { owner: { type: ['string', 'null'] } } },
+      resultSchema: { type: 'object', additionalProperties: false },
+      writes: true,
+    },
+  ],
+};
+
+const tag = defineBehavior({
+  declaration: tagDeclaration,
+  migrations: [{ version: 1, name: 'tag', columns: { owner: { type: 'text' } }, indexes: { owner: ['owner'] } }],
+  filters: { 'tag.owner': { column: 'owner', type: 'string', description: 'Who owns it; null for no one.' } },
+  operations: {
+    own(context, params) {
+      context.columns.set({ owner: (params.owner as string | null) ?? null });
+      return {};
+    },
+  },
+  fields: { tag: (view) => ({ owner: view.columns.get().owner ?? null }) },
+});
 
 function jobDocument(): Record<string, unknown> {
   const document = schemaDocument(
@@ -49,12 +81,12 @@ function open(driver: (typeof drivers)[number]): Engine {
 
 // every reads every page of a filter from the start and returns the ids
 // in order, with how many items each page held.
-function every(engine: Engine, options: ListOptions): { ids: string[]; pages: number[] } {
+function every(engine: Engine, options: ListOptions, schema = 'Job'): { ids: string[]; pages: number[] } {
   const ids: string[] = [];
   const pages: number[] = [];
   let cursor: string | undefined;
   do {
-    const page = engine.instances.list(alice, 'Job', { ...options, ...(cursor === undefined ? {} : { cursor }) });
+    const page = engine.instances.list(alice, schema, { ...options, ...(cursor === undefined ? {} : { cursor }) });
     ids.push(...page.items.map((item) => item.id));
     pages.push(page.items.length);
     cursor = page.next ?? undefined;
@@ -169,7 +201,60 @@ for (const driver of drivers) {
       assert.match(thrown(() => ids({ count: 'two' }), EngineError).message, /where.count is an integer/);
     });
 
-    test('where refuses a field it does not filter on, a value of another type, null, and an empty or long list', () => {
+    test("null keeps the instances whose field holds no value, an own field's or a behavior's member's", () => {
+      const engine = openTestEngine({ driver, metaSchema: openMetaSchema(), behaviors: [tag] });
+      publishItem(engine, [{ name: 'test.Tag' }], [{ name: 'kind', typeRef: { name: 'string' } }]);
+      const owners: Array<[string, string | undefined, string | null]> = [
+        ['a', 'build', 'ann'],
+        ['b', undefined, null],
+        ['c', 'test', null],
+        ['d', undefined, 'bob'],
+        ['e', 'build', 'ann'],
+      ];
+      for (const [id, kind, owner] of owners) {
+        engine.instances.create(alice, 'Item', { title: id, ...(kind === undefined ? {} : { kind }) }, { id });
+        if (owner !== null) {
+          engine.instances.invoke(alice, 'Item', id, 'own', { owner });
+        }
+      }
+      // A cleared owner is none again.
+      engine.instances.invoke(alice, 'Item', 'e', 'own', { owner: null });
+      const ids = (where: Record<string, unknown>): string[] => engine.instances.list(alice, 'Item', { where }).items.map((item) => item.id);
+      assert.deepEqual(ids({ kind: null }), ['b', 'd']);
+      assert.deepEqual(ids({ kind: [null, 'test'] }), ['b', 'c', 'd']);
+      assert.deepEqual(ids({ 'tag.owner': 'ann' }), ['a']);
+      assert.deepEqual(ids({ 'tag.owner': null }), ['b', 'c', 'e']);
+      assert.deepEqual(ids({ 'tag.owner': [null, 'bob'], kind: null }), ['b', 'd']);
+      // What a read shows agrees with what the filter kept.
+      for (const item of engine.instances.list(alice, 'Item', { where: { 'tag.owner': null } }).items) {
+        assert.deepEqual(item.data.tag, { owner: null });
+      }
+      assert.match(thrown(() => ids({ 'tag.owner': 3 }), EngineError).message, /where.tag.owner is a string or null, or a list of them, not 3/);
+      assert.match(thrown(() => ids({ tag: 'ann' }), EngineError).message, /where names tag, which is not a field Item filters on; it filters on title, kind, tag.owner/);
+    });
+
+    test("a behavior's index serves null as one more range; an own index, partial on a value, serves none", () => {
+      const engine = openTestEngine({ driver, metaSchema: openMetaSchema(), behaviors: [tag] });
+      publishItem(engine, [{ name: 'test.Tag' }], [{ name: 'slug', typeRef: { name: 'string' }, unique: true }]);
+      const total = FILTER_SCAN_ROWS * 2 + 500;
+      const bare = new Set([10, FILTER_SCAN_ROWS + 500, FILTER_SCAN_ROWS * 2 + 400]);
+      engine.storage.transaction(() => {
+        for (let index = 0; index < total; index += 1) {
+          const id = `i${String(index).padStart(5, '0')}`;
+          engine.instances.create(alice, 'Item', { title: id, ...(bare.has(index) ? {} : { slug: id }) }, { id });
+          if (!bare.has(index)) {
+            engine.instances.invoke(alice, 'Item', id, 'own', { owner: 'many' });
+          }
+        }
+      });
+      const ids = [...bare].map((index) => `i${String(index).padStart(5, '0')}`);
+      assert.deepEqual(every(engine, { where: { 'tag.owner': null } }, 'Item'), { ids, pages: [3] });
+      assert.deepEqual(every(engine, { where: { slug: null } }, 'Item'), { ids, pages: [1, 1, 1] });
+      // With a value beside null, the unique index still serves no member.
+      assert.deepEqual(every(engine, { where: { slug: [null, 'i00000'] } }, 'Item').ids, ['i00000', ...ids]);
+    });
+
+    test('where refuses a field it does not filter on, a value of another type, and an empty or long list', () => {
       const engine = open(driver);
       const refused = (where: unknown, pattern: RegExp): void => {
         const error = thrown(() => engine.instances.list(alice, 'Job', { where: where as Record<string, unknown> }), EngineError);
@@ -179,10 +264,9 @@ for (const driver of drivers) {
       refused({ tags: 'a' }, /where names tags, which is not a field Job filters on; it filters on slug, kind, rank, urgent, status/);
       refused({ owner: { name: 'x' } }, /where names owner/);
       refused({ title: 'x' }, /where names title/);
-      refused({ kind: 1 }, /where.kind is a string, or a list of them, not 1/);
-      refused({ rank: 1.5 }, /where.rank is an integer, or a list of them, not 1.5/);
+      refused({ kind: 1 }, /where.kind is a string or null, or a list of them, not 1/);
+      refused({ rank: 1.5 }, /where.rank is an integer or null, or a list of them, not 1.5/);
       refused({ urgent: 'yes' }, /where.urgent is a boolean/);
-      refused({ kind: null }, /where.kind is a string, or a list of them, not null/);
       refused({ kind: [] }, /where.kind lists 1 to 100 values, got 0/);
       refused({ kind: Array.from({ length: 101 }, (_, index) => `k${index}`) }, /lists 1 to 100 values, got 101/);
       refused({ status: ['todo', 3] }, /where.status is a string/);

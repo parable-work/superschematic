@@ -7,11 +7,15 @@ A subscription is one behavior's reactions on one schema that composes
 it, in one namespace. It hears that schema's instance events and those
 of the schemas the behavior's watches names, from the publish that made
 the schema compose the behavior, and keeps the cursor of the last event
-it handled in engine_subscriptions. It handles one event at a time, in
-log order: the reaction runs in a savepoint of a batch's transaction,
-and the cursor's advance commits with it. A reaction that throws rolls
-its savepoint back; the batch commits what came before it and records
-the failure. The event runs again after a backoff, and after maxAttempts
+it handled in engine_subscriptions. A watches that returns null for the
+schema's config turns the reactions off there: the runner hands it no
+event, and a later version whose config turns them on starts the
+subscription at its publish, as for a schema that just came to compose
+the behavior, so react never sees an event from while they were off.
+It handles one event at a time, in log order: the reaction runs in a
+savepoint of a batch's transaction, and the cursor's advance commits
+with it. A reaction that throws rolls its savepoint back; the batch
+commits what came before it and records the failure. The event runs again after a backoff, and after maxAttempts
 failures the subscription halts at it until resume. So a reaction's
 database effects happen once per event, whatever fails or crashes
 before the commit; an effect outside the database happens at least once.
@@ -101,10 +105,13 @@ export interface SubscriptionKey {
 /**
  * active: it handles events as they come; retrying: its next event failed
  * and runs again at retryAt; halted: its next event failed maxAttempts
- * times and waits for resume; inactive: the schema's live version no
+ * times and waits for resume; off: the behavior's watches turns its
+ * reactions off for the live version's config, so it handles nothing
+ * until a publish turns them on; inactive: the schema's live version no
  * longer composes the behavior, or its implementation is not registered.
+ * An off subscription is listed only once it has run.
  */
-export type SubscriptionState = 'active' | 'retrying' | 'halted' | 'inactive';
+export type SubscriptionState = 'active' | 'retrying' | 'halted' | 'off' | 'inactive';
 
 export interface SubscriptionStatus extends SubscriptionKey {
   state: SubscriptionState;
@@ -188,8 +195,10 @@ interface Unit {
 
 interface ReactionUnit extends Unit {
   readonly reactions: BehaviorReactions<unknown>;
-  /** The cursor it starts after: the publish that made the schema compose the behavior. */
+  /** The cursor it starts after: the publish that made the schema compose the behavior, with its reactions on. */
   readonly start: number;
+  /** Whether watches turns the reactions off for the live version's config. */
+  readonly off: boolean;
 }
 
 interface ScheduleUnit extends Unit {
@@ -325,6 +334,12 @@ export class Runner {
     for (const unit of discovery.reactions) {
       const id = subscriptionId(unit);
       const row = this.subscriptionRow(unit);
+      if (unit.off) {
+        if (row) {
+          subscriptions.set(id, { ...subscriptionStatus(row), state: 'off', retryAt: null });
+        }
+        continue;
+      }
       subscriptions.set(id, row ? { ...subscriptionStatus(row), cursor: Math.max(Number(row.cursor), unit.start) } : fresh(unit));
     }
     const schedules = new Map<string, ScheduleStatus>();
@@ -479,8 +494,12 @@ export class Runner {
     }
   }
 
-  // react runs one batch of a subscription's events, if it is due.
+  // react runs one batch of a subscription's events, if it is due and its
+  // reactions are on.
   private react(unit: ReactionUnit, totals: Totals): void {
+    if (unit.off) {
+      return;
+    }
     const now = this.clock();
     const before = this.subscriptionRow(unit);
     // A row from before the schema last came to compose the behavior
@@ -705,8 +724,9 @@ export class Runner {
       return [unit.schema];
     }
     const named: unknown = watches.call(unit.reactions, unit.bound.config, unit.schema);
+    synchronous(unit.behavior, 'reactions.watches', named);
     if (!Array.isArray(named) || named.some((schema) => typeof schema !== 'string')) {
-      throw new BehaviorError(unit.behavior, 'reactions.watches returns a list of schema names');
+      throw new BehaviorError(unit.behavior, 'reactions.watches returns a list of schema names, or null to turn the reactions off');
     }
     for (const schema of named as string[]) {
       checkSchemaName(schema);
@@ -794,7 +814,9 @@ export class Runner {
           const implementation = bound.behavior.implementation;
           const unit = { behavior: bound.behavior.name, namespace, schema: record.name, record, runtime, bound };
           if (implementation.reactions !== undefined) {
-            reactions.push({ ...unit, reactions: implementation.reactions, start: this.startOf(record, bound.behavior.name) });
+            const off = reactionsOff(implementation.reactions, bound.config, record.name);
+            const start = off ? 0 : this.startOf(record, bound.behavior.name, implementation.reactions);
+            reactions.push({ ...unit, reactions: implementation.reactions, off, start });
           }
           for (const [name, spec] of Object.entries(implementation.schedules ?? {})) {
             schedules.push({ ...unit, name, spec, every: intervalOf(bound, name, spec) });
@@ -808,14 +830,28 @@ export class Runner {
     return this.discovery;
   }
 
+  // offIn reports whether a published version's config turns the
+  // behavior's reactions off. A version this engine cannot compose counts
+  // as on.
+  private offIn(record: SchemaRecord, behavior: string, reactions: BehaviorReactions<unknown>): boolean {
+    let runtime: VersionRuntime;
+    try {
+      runtime = this.catalog.runtimeOf(record);
+    } catch {
+      return false;
+    }
+    const bound = runtime.composition.behaviors.find((candidate) => candidate.behavior.name === behavior);
+    return bound !== undefined && reactionsOff(reactions, bound.config, record.name);
+  }
+
   // startOf is the cursor a subscription starts after: the publish of the
   // earliest version of the run of versions, up to the live one, that
-  // compose the behavior.
-  private startOf(live: SchemaRecord, behavior: string): number {
+  // compose the behavior with its reactions on.
+  private startOf(live: SchemaRecord, behavior: string, reactions: BehaviorReactions<unknown>): number {
     let first = live.version as number;
     for (let version = first - 1; version >= 1; version -= 1) {
       const older = this.catalog.find(live.name, live.namespace, version);
-      if (!older || !composes(older, behavior)) {
+      if (!older || !composes(older, behavior) || (reactions.watches !== undefined && this.offIn(older, behavior, reactions))) {
         break;
       }
       first = version;
@@ -860,6 +896,20 @@ function intervalOf(
     return { everyMs: value };
   } catch (error) {
     return { error };
+  }
+}
+
+// reactionsOff reports whether a behavior's watches turns its reactions
+// off for a config. One that throws, or answers anything but null, leaves
+// them on, and the subscription's pass records what is wrong.
+function reactionsOff(reactions: BehaviorReactions<unknown>, config: unknown, schema: string): boolean {
+  if (reactions.watches === undefined) {
+    return false;
+  }
+  try {
+    return reactions.watches.call(reactions, config, schema) === null;
+  } catch {
+    return false;
   }
 }
 

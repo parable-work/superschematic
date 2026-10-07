@@ -631,6 +631,46 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "directOn": {
+                    "description": "Directives the engine's runner sends the holder of an instance's active lease when the target of one of the instance's links moves on: a new revision of Revisions, or a release of Branches; for a pinned link, a revision tells only the instances the target moved past. The runner sends each with direct, as its principal, which needs directPermission, or overridePermission when that is absent, once per lease and move (dedupeKey). An instance with no lease held hears nothing, and its next holder nothing either. Needs Links on the type; one entry per link.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "data": {
+                          "description": "Its data, beside revised, which the runner sets: the link, the target's schema and id, and its revision or the release's commit.",
+                          "type": "object"
+                        },
+                        "name": {
+                          "description": "The directive's name, as direct takes it.",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+                          "type": "string"
+                        },
+                        "revised": {
+                          "additionalProperties": false,
+                          "description": "The link whose target's move sends the directive.",
+                          "properties": {
+                            "link": {
+                              "description": "A link of the type's Links config.",
+                              "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "link"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "revised",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array"
+                  },
                   "directPermission": {
                     "description": "The permission a principal needs to send the holder a directive; overridePermission when absent. With neither, direct is refused.",
                     "minLength": 1,

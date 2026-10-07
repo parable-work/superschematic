@@ -885,6 +885,10 @@ for (const driver of drivers) {
       assert.match(dropped.message, /meter gpu is gone, and its instances and the scopes they draw on may hold it/);
       const removed = thrown(() => engine.schemas.define(alice, budgetDocument('Pool', [{ name: 'Comments' }])), IncompatibleChangeError);
       assert.match(removed.message, /behavior Budget cannot be removed from type Pool, which has instances: the budgets its instances hold, and what enclosing scopes hold for them, would stay behind/);
+      // With no instance, nothing holds a meter: one may go.
+      invoke(engine, alice, 'Pool', 'p1', 'settle', { meter: 'cpu' });
+      engine.instances.delete(alice, 'Pool', 'p1');
+      publish(engine, budgetDocument('Pool', [{ name: 'Comments' }, { name: 'Budget', config: { meters: { cpu: { limit: 120 } } } }]));
     });
   });
 }

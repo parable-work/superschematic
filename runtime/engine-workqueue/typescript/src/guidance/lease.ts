@@ -1,7 +1,9 @@
 /*
 Lease's guidance: how long a lease lasts, how often its holder renews
-it, how long it may be held, what an expiry does to the status, and the
-token every write under it presents. Lease's guard refuses the writes of
+it, how long it may be held, what an expiry does to the status, the
+token every write under it presents, the directives the runner sends
+when a link's target moves on (directOn), and the filter a list takes on
+the holder. Lease's guard refuses the writes of
 other behaviors and the instance's updates and deletes while another
 principal holds the lease, so it adds its vetoes to each of those
 operations' guidance too, but for the ones its config exempts and
@@ -70,6 +72,9 @@ export function leaseGuidance(config: LeaseConfig, target: DescribeTarget): Beha
           }
         : fenced;
   }
+  const moved = config.directOn.map(
+    (rule) => `directive ${rule.name} when the ${rule.link} link's target gains ${rule.pinned ? 'a revision past the pinned one' : 'a revision'} or a release`
+  );
   return {
     summary: sentences(
       `A lease gives one principal the ${target.type} for ${duration(config.ttlMs)} at a time, renewed by heartbeat at least every ${duration(config.heartbeatMs)}${hold === undefined ? '' : `, and held ${hold}`}.`,
@@ -77,10 +82,16 @@ export function leaseGuidance(config: LeaseConfig, target: DescribeTarget): Beha
       config.maxExpiries === undefined
         ? undefined
         : `After ${config.maxExpiries} expiries it is not leased again${config.escalate === undefined ? '' : `, and that expiry ${moves(config.escalate)} instead`}.`,
-      `While a lease is active only its holder writes${config.exempt.length > 0 ? `, but for ${list(config.exempt)}` : ''}; each acquire gives a new token, which the holder presents as ${TOKEN}${config.requireToken ? ' on every write' : ''}.`
+      `While a lease is active only its holder writes${config.exempt.length > 0 ? `, but for ${list(config.exempt)}` : ''}; each acquire gives a new token, which the holder presents as ${TOKEN}${config.requireToken ? ' on every write' : ''}.`,
+      moved.length === 0
+        ? undefined
+        : `The runner sends the holder of an active lease ${list(moved)}; an instance with no lease held hears nothing, and its next holder nothing either.`
     ),
     operations: {
       ...others,
+      list: {
+        useWhen: `where: { "lease.holder": <subject> } lists the ${target.type} instances whose lease a principal holds, a lapsed one until the runner expires it, and "lease.holder": null the free ones.`,
+      },
       acquire: {
         useWhen: sentences(
           `Use to take the lease, for ${duration(config.ttlMs)} or a shorter ttlMs, before working on the instance alone.`,
@@ -91,7 +102,12 @@ export function leaseGuidance(config: LeaseConfig, target: DescribeTarget): Beha
       },
       heartbeat: {
         useWhen: `Use as the holder at least every ${duration(config.heartbeatMs)}, presenting the token, to keep the lease; acknowledge takes the ids of directives handled.`,
-        success: 'Returns the new expiresAt and the directives not yet acknowledged, oldest first.',
+        success: sentences(
+          'Returns the new expiresAt and the directives not yet acknowledged, oldest first.',
+          moved.length === 0
+            ? undefined
+            : `A directive the runner sends when a link's target moves on (${list(config.directOn.map((rule) => rule.name), 'or')}) carries data.revised: the link, the target, and its revision or the release's commit.`
+        ),
         errors: errors('not_leased', 'not_holder', 'token_required', 'token_stale', 'lapsed'),
       },
       release: {

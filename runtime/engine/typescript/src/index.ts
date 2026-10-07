@@ -92,6 +92,7 @@ export type {
   BehaviorSchedule,
   BehaviorScope,
   ColumnSpec,
+  ConfigChange,
   Columns,
   ConfigSchema,
   ConfigSchemas,
@@ -169,7 +170,10 @@ export {
   SEARCH_SCHEMAS_PARAMS,
   SIMILAR_TERMS,
   isTerminalState,
+  linkedTo,
+  movedOn,
   stateOutcome,
+  targetMove,
   uuidV5,
 } from './behaviors/core/index.js';
 export type {
@@ -208,6 +212,7 @@ export type {
   SearchHit,
   SearchVectors,
   SnippetPart,
+  TargetMove,
   VariantsConfig,
   WorkflowConfig,
   WorkflowOutcome,

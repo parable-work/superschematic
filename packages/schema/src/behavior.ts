@@ -360,12 +360,30 @@ export interface LeaseConfig {
   readonly overridePermission?: string;
   /** The permission a principal needs to send the holder a directive. */
   readonly directPermission?: string;
+  /**
+   * Directives the engine's runner sends the holder of an instance's
+   * active lease when the target of one of its links moves on: a new
+   * revision, or a release. One entry per link of the type's Links; needs
+   * directPermission or overridePermission, which the runner's principal
+   * must hold.
+   */
+  readonly directOn?: readonly LeaseDirectOn[];
 }
 
 /** A move of the status a lease's end makes: to transition, from one of from. */
 export interface LeaseTransition {
   readonly transition: string;
   readonly from: readonly string[];
+}
+
+/** A directive Lease's directOn sends when a link's target moves on. */
+export interface LeaseDirectOn {
+  /** The link of the type's Links whose target's new revision or release sends it. */
+  readonly revised: { readonly link: string };
+  /** The directive's name. */
+  readonly name: string;
+  /** Its data, beside revised, which the runner sets to what moved. */
+  readonly data?: Readonly<Record<string, unknown>>;
 }
 
 /** Assignment's config. */

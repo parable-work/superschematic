@@ -339,7 +339,8 @@ store"), has the rules.
 `where` filters a list by equality, a JSON object in the query: each
 member a note's own field that holds a string, a number or a boolean, or
 a behavior's field a list filters on, such as Workflow's `status`, with
-a value or a list of values any of which the note holds:
+a value or a list of values any of which the note holds, `null` meaning
+none:
 
 ```sh
 curl -s -G $API/schemas/notes/instances -H 'authorization: Bearer carol-token' \

@@ -37,15 +37,17 @@ points at a target, with each pinned link's revision and staleness, a
 page at a time, which answers which instances point at a superseded
 revision.
 
-configChange: every link keeps its name and schema, since instances may
-hold it; pinned may change (a link made before its spec was pinned
-records no revision until it is linked again), a required link may
-become optional, and optional links may be added. A link that becomes
-required, or a new required one, is refused, as a field made required
-is: an instance the live version accepts may not hold it. Links can be
-added to a schema that has instances, which start with none, unless it
-has a required link, and cannot be removed from one: their links and
-references would stay behind.
+configChange: while the schema has instances, every link keeps its name
+and schema, since instances may hold it; pinned may change (a link made
+before its spec was pinned records no revision until it is linked
+again), a required link may become optional, and optional links may be
+added. A link that becomes required, or a new required one, is refused,
+as a field made required is: an instance the live version accepts may
+not hold it. A schema with no instance, in any namespace that reads it,
+may change the config in any way, since no instance holds a link or
+lacks one. Links can be added to a schema that has instances, which
+start with none, unless it has a required link, and cannot be removed
+from one: their links and references would stay behind.
 */
 
 import { BehaviorVetoError, CreateParamsError, OperationParamsError, type SchemaIssue } from '../../errors.js';
@@ -223,13 +225,17 @@ export const links = defineBehavior<LinksConfig>({
     return { links: parsed };
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (after === undefined) {
       return 'the links and references its instances hold would stay behind';
     }
     if (before === undefined) {
       const required = Object.keys(after.links).filter((name) => after.links[name].required);
       return required.length > 0 ? `the instances that exist hold no link ${required.join(', ')}, which is required` : undefined;
+    }
+    // No instance holds a link, or lacks one, that the new config refuses.
+    if (!change.instances) {
+      return undefined;
     }
     for (const [name, link] of Object.entries(before.links)) {
       const next = Object.prototype.hasOwnProperty.call(after.links, name) ? after.links[name] : undefined;

@@ -76,7 +76,9 @@ nothing an operation returns. Without sweep the schedule is off there.
 configChange: a new version may add a kind, change a kind's fields as the
 compatibility rule allows a field to change, and change a retention,
 primary, snapshotEvery and sweep. Removing a kind, or changing a kind's
-type, parent, order, singleton or a field's unit, is refused. Branches can
+type, parent, order, singleton or a field's unit, is refused while the
+schema has instances; with none, no graph holds a row, since deleting an
+instance deletes its graph, and any change is allowed. Branches can
 be added to a schema that has instances and cannot be removed from one:
 the graphs would stay behind with nothing to delete them. The schema
 epoch stays 0, since every version reads every stored row.
@@ -1008,12 +1010,16 @@ export const branches = defineBehavior<BranchesConfig>({
     };
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before === undefined) {
       return undefined;
     }
     if (after === undefined) {
       return 'the graphs its instances root would stay behind with nothing to delete them';
+    }
+    // No instance roots a graph: a delete deletes its instance's graph.
+    if (!change.instances) {
+      return undefined;
     }
     for (const [name, kind] of Object.entries(before.kinds)) {
       const next = after.kinds[name];
