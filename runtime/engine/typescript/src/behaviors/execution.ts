@@ -464,7 +464,8 @@ export class Execution {
       this.guard(caller === undefined ? request : { ...request, caller }, operation.writes, caller === undefined ? preconditions : undefined);
       const bound = this.composition.bound(operation.behavior.name) as BoundBehavior;
       const said = { unchanged: false };
-      const before = this.storage.changes();
+      // A read-only operation writes nothing, and its claim means nothing.
+      const before = operation.writes ? this.storage.changes() : 0;
       const result: unknown = declaredVetoes(this.composition, () =>
         (operation.handler as OperationHandler<unknown>).call(
           bound.behavior.implementation.operations,
@@ -473,7 +474,7 @@ export class Execution {
         )
       );
       const checked = checkResult(operation, result);
-      if (said.unchanged && this.storage.changes() !== before) {
+      if (said.unchanged && operation.writes && this.storage.changes() !== before) {
         throw new BehaviorError(
           operation.behavior.name,
           `operation ${operation.name} said it changed nothing (unchanged()), and it wrote: a call that writes appends its event`
