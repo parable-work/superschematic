@@ -6,6 +6,7 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // isEnumType reports whether typeName refers to a local or imported enum.
@@ -72,11 +73,46 @@ func isValidatableScalarField(field FieldInfo) bool {
 	}
 	// JSON-like scalars map to generic Go values (for example
 	// interface{}) and do not provide scalar Validate /
-	// ValidateRequired methods.
-	if field.ScalarInfo.Traits.IsJSONLike {
+	// ValidateRequired methods. A JSON-object scalar (Generic.StringMap,
+	// Geo.Location) is the scalar package's own type, which has both, so
+	// superscalar checks what each of its values holds wherever it appears.
+	if field.ScalarInfo.Traits.IsJSONLike && !isJSONObjectField(field) {
 		return false
 	}
 	return true
+}
+
+// isJSONObjectField reports whether field holds values of a JSON-object
+// scalar: its json_schema type mapping is "object" and it has no string
+// rule (ir.ScalarDef.StructuredJSONType; Generic.StringMap, Geo.Location).
+// Its type's UnmarshalJSON checks each value's JSON with superscalar
+// (TypeInfo.JSONObjectFields), because encoding/json drops what the Go
+// type cannot hold.
+func isJSONObjectField(field FieldInfo) bool {
+	return field.IsScalar && !field.IsUnion && field.ScalarInfo != nil &&
+		field.ScalarInfo.Traits.StructuredJSON == ir.JSONSchemaObjectType
+}
+
+// jsonObjectFieldLiteral is the jsonObjectField literal a type's
+// UnmarshalJSON hands decodeJSONObjects for field.
+func jsonObjectFieldLiteral(field FieldInfo) string {
+	literal := fmt.Sprintf("jsonObjectField{name: %q, scalar: %q, value: &t.%s", field.Name, field.ScalarInfo.Name, field.GoName)
+	if requiredSingleValue(field) {
+		literal += ", required: true"
+	}
+	switch {
+	case field.IsArrayOfArrays:
+		literal += ", depth: 2"
+	case field.IsArray:
+		literal += ", depth: 1"
+	}
+	if field.IsMap {
+		literal += ", isMap: true"
+	}
+	if field.UsesWrapper {
+		literal += ", wrapped: true"
+	}
+	return literal + "}"
 }
 
 // requiredAnyJSONField reports whether field is a required single value of a
@@ -93,13 +129,13 @@ func requiredAnyJSONField(field FieldInfo) bool {
 }
 
 // requiredStructuredJSONField reports whether field is a required single
-// value of a scalar that holds a JSON object or array (its json_schema type
-// mapping is "object" or "array"; Generic.StringMap) and whose Go type
-// Validate cannot call (isValidatableScalarField). Validate checks its
-// presence: an absent value and JSON null decode to a nil map or slice,
-// which is "required"; an empty object or array is a value. Its decoder
-// already holds it to the Go type (a map of strings), so nothing else is
-// checked. A list of it is checked by its decoder, a map not at all.
+// value of a scalar that holds a JSON array (its json_schema type mapping is
+// "array"; Embedding.Vector) and whose Go type Validate cannot call
+// (isValidatableScalarField; a JSON-object scalar is validatable). Validate
+// checks its presence: an absent value and JSON null decode to a nil slice,
+// which is "required"; an empty array is a value. Its decoder already holds
+// it to the Go type (a slice of numbers), so nothing else is checked. A list
+// of it is checked by its decoder, a map not at all.
 func requiredStructuredJSONField(field FieldInfo) bool {
 	if !field.IsScalar || field.ScalarInfo == nil || field.ScalarInfo.Traits.StructuredJSON == "" ||
 		isValidatableScalarField(field) {
@@ -314,6 +350,7 @@ func templateFuncs() template.FuncMap {
 		"isValidatableScalarField":    isValidatableScalarField,
 		"requiredAnyJSONField":        requiredAnyJSONField,
 		"requiredStructuredJSONField": requiredStructuredJSONField,
+		"jsonObjectFieldLiteral":      jsonObjectFieldLiteral,
 		"isGeneratedType":             isGeneratedType,
 		"nestedList":                  newNestedList,
 		"autoFilledField":             autoFilledField,
