@@ -716,9 +716,11 @@ superschematic stack outputs Staging --out outputs.json
   by wave, callees first, the `contract` phase, then exposure. Each
   migration phase runs as an execution of the stack's Cloud Run job,
   `<stack>-migrate`, which also gives each server that connects to a
-  database its privileges. The deploy records a manifest in the state
-  bucket after every step, and refuses a migration hazard no `--allow`
-  acknowledges.
+  database its privileges. An execution that fails stops the deploy with
+  the runner's error, which the deploy reads from the execution's logs in
+  Cloud Logging, and the next deploy runs the phase again. The deploy
+  records a manifest in the state bucket after every step, and refuses a
+  migration hazard no `--allow` acknowledges.
 - **`destroy`** removes a run's resources and its manifest, and
   **`outputs`** prints the applied outputs.
 

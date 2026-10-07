@@ -322,7 +322,10 @@ roles that hold them. A role the user is granted, such as
 An empty `readWrite` takes every such grant back. Only the Postgres
 driver gives privileges.
 
-Exit codes: 0 done, 1 refused or failed, 2 usage.
+Exit codes: 0 done, 1 refused or failed, 2 usage. A job that fails writes
+its error to stderr on a line that begins `superschematic-migrate: `,
+which a gcp deploy reads from the execution's logs and reports; a failed
+step's statement follows on the lines after it.
 
 ## Layout
 

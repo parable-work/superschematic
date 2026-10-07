@@ -30,7 +30,9 @@ import (
 //  2. it finds the runner's image, or builds it with Cloud Build (below);
 //  3. it creates or updates the job to run that image, and runs it once
 //     with the job document's gs:// URL as its argument, waiting for the
-//     execution to finish.
+//     execution to finish. A failed execution fails the step with the
+//     runner's error, which it wrote to stderr and the deploy reads from
+//     Cloud Logging.
 //
 // The job reaches the Cloud SQL instance through the Cloud SQL Go connector
 // with IAM database authentication, as the migrator's IAM database user,
@@ -219,10 +221,48 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 		return err
 	}
 	if !run.Succeeded {
-		return fmt.Errorf("gcp: the %s phase on %s failed in job %s, execution %s: %s (logs: %s)", req.Phase, req.Database, name, run.Name, run.Message, run.LogURI)
+		return fmt.Errorf("gcp: the %s phase on %s failed in job %s, execution %s: %s", req.Phase, req.Database, name, run.Name, failure(ctx, cloud, run))
 	}
 	logf("execution %s finished", run.Name)
 	return nil
+}
+
+// runnerLogWait is how long a failed execution's stderr may take to reach
+// Cloud Logging.
+const runnerLogWait = 30 * time.Second
+
+// runnerPrefix begins the line the runner writes to stderr when it fails.
+const runnerPrefix = "superschematic-migrate: "
+
+// failure says why an execution failed, and where its logs are. Cloud Run
+// says only that the container exited with an error; the runner's own
+// error is in what it wrote to stderr, which failure reads from Cloud
+// Logging. When the runner wrote nothing there, as when the task did not
+// start, it is Cloud Run's message.
+func failure(ctx context.Context, cloud Cloud, run *JobRun) string {
+	if run.Name == "" {
+		return fmt.Sprintf("%s (logs: %s)", run.Message, run.LogURI)
+	}
+	lines, err := cloud.ExecutionStderr(ctx, run, runnerLogWait)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("%s (logs: %s; its stderr is unread: %v)", run.Message, run.LogURI, err)
+	case len(lines) == 0:
+		return fmt.Sprintf("%s (logs: %s; Cloud Logging held no stderr of it after %s)", run.Message, run.LogURI, runnerLogWait)
+	}
+	return fmt.Sprintf("%s (logs: %s)", runnerError(lines), run.LogURI)
+}
+
+// runnerError is the error in what an execution wrote to stderr: the last
+// line that begins with the runner's name, else the first line, such as a
+// panic's. A failed step's statement follows the runner's line.
+func runnerError(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], runnerPrefix) {
+			return lines[i]
+		}
+	}
+	return lines[0]
 }
 
 // migrationJob returns the job document of req, its plans' paths relative
