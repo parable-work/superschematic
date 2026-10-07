@@ -319,12 +319,12 @@ counts them.
 
 | | |
 | --- | --- |
-| Config | `claim`: `{ from, to }`, the Workflow states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field of the type; `match`, the type's own top-level scalar fields `claimNext` may filter on; `maxCandidates` (1 to 1000; 100 when absent); `excludeStale`, pinned links of the type's `Links` (1 to 16). Requires `Workflow` and `Lease` |
+| Config | `claim`: `{ from, to }`, the Workflow states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field of the type; `match`, the type's own top-level scalar fields `claimNext` may filter on; `maxCandidates` (1 to 1000; 100 when absent); `excludeStale`, pinned links of the type's `Links`, to a revision or a release (1 to 16). Requires `Workflow` and `Lease` |
 | Fields | none |
 | Operations | `claim({ ttlMs? })` -> `{ id, token, expiresAt, heartbeatMs }`, writes; `refresh()` -> `{}`, writes; schema-level `claimNext({ match?, assignedOnly?, ttlMs? })` -> `{ claimed }`, the claim or null, writes; schema-level `countClaimable({ match?, assignedOnly? })` -> `{ count }`, read-only. A `match` value is a value or a list of values |
 | Guards | Lease's `acquire` by anything but Queue's own claim: `vetoed` (`claim_required`), so the lease of a claimable instance is taken only by claiming it |
-| Refusals | `claim` of an instance whose status is not one of `claim.from` (`not_claimable`, details `{ status, from }`), that a blocker holds up (`blocked`), or one of whose `excludeStale` links is pinned to a revision its target has moved past (`stale_link`, details `{ links }`), and whatever Lease's `acquire`, Budget's `reserve`, Workflow's `transition` and the instance's guards refuse; `claimNext` and `countClaimable` with a `match` field the config does not name, or `assignedOnly` on a type without Assignment (`invalid_argument`); `claimNext` whose every candidate's claim was `forbidden` to the caller (that `forbidden`). Each code is a veto's (`vetoed`) |
-| Events | `claim`'s operation event carries the lease and the status; a blocker's status change appends a `refresh` event on each instance it holds up, and an enclosing budget scope's change, or a pinned link's target's new revision, one on each instance whose exclusion it moves |
+| Refusals | `claim` of an instance whose status is not one of `claim.from` (`not_claimable`, details `{ status, from }`), that a blocker holds up (`blocked`), or one of whose `excludeStale` links is pinned to a revision or a release its target has moved past (`stale_link`, details `{ links }`), and whatever Lease's `acquire`, Budget's `reserve`, Workflow's `transition` and the instance's guards refuse; `claimNext` and `countClaimable` with a `match` field the config does not name, or `assignedOnly` on a type without Assignment (`invalid_argument`); `claimNext` whose every candidate's claim was `forbidden` to the caller (that `forbidden`). Each code is a veto's (`vetoed`) |
+| Events | `claim`'s operation event carries the lease and the status; a blocker's status change appends a `refresh` event on each instance it holds up, and an enclosing budget scope's change, or a pinned link's target's new revision or release, one on each instance whose exclusion it moves |
 | `configChange` | `claim`, `priorityField`, `match`, `maxCandidates` and `excludeStale` may change. Not added to a schema with instances, which would have no copies for `claimNext` to find them by, and not removed from one |
 
 ```json
@@ -390,8 +390,8 @@ time:
 - with Retries on the type, while its `retries` field shows it exhausted:
   until a change;
 - while a link `excludeStale` names is `stale` in its `links` field, the
-  target having moved past the revision it pins: until a change, a new
-  `link` of it say;
+  target having moved past the revision or the release it pins: until a
+  change, a new `link` of it say;
 - with Budget on the type, while its `checkReserve` (Budget, below)
   says the reservation a claim makes does not fit, here or in an
   enclosing scope: until the start of the next UTC day when that day
@@ -400,11 +400,15 @@ time:
 
 Work done against a spec that changed is not claimed until it is pinned
 to the spec's new revision, which a `revised` rule of `Reactions` can
-send it back to review for (`runtime/engine/README.md`):
+send it back to review for (`runtime/engine/README.md`). Work pinned to
+a release of a schema that composes `Branches` waits the same way for
+the target's next release:
 
 ```json
-{ "name": "Links", "config": { "links": { "spec": { "schema": "specs", "pinned": true } } } },
-{ "name": "Queue", "config": { "claim": { "from": ["queued"], "to": "running" }, "excludeStale": ["spec"] } }
+{ "name": "Links", "config": { "links": {
+    "spec": { "schema": "specs", "pinned": true },
+    "recipe": { "schema": "recipes", "pinned": "release" } } } },
+{ "name": "Queue", "config": { "claim": { "from": ["queued"], "to": "running" }, "excludeStale": ["spec", "recipe"] } }
 ```
 
 What can move the copy, Queue hears through references, each hearing
@@ -417,6 +421,7 @@ but for its exclusion:
 | each blocker it reads through `Dependencies`' `listBlockers` | its `/status` | `''` |
 | each value of an enclosing scope `checkReserve` says its answer turns on | that value, across the number it gives | `budget <path> <number>` |
 | the target of each link `excludeStale` names, pinned to revision n | its `/revision`, across n + 1 | `stale <link>` |
+| the target of each link `excludeStale` names, pinned to release n | its `/release` (`Branches`' field), across n + 1 | `stale <link>` |
 
 A blocker's status change invokes `refresh` on the dependent. A scope's
 or a target's change first checks the instance's exclusion, through
@@ -440,10 +445,6 @@ exist. Each change runs as the principal that made it, who needs `write`
 on the dependent's schema, and a change of a candidate needs `read` on
 the schemas of its blockers, its scopes and its `excludeStale` links'
 targets.
-
-`excludeStale` reads `Links`' pins, and `Links` pins only revisions of
-`Revisions`: a link to a schema that composes `Branches` has no release
-to pin, so its staleness is not one Queue can read.
 
 ## Presence
 
@@ -570,8 +571,9 @@ key in `keyField`, the `copyFields` this instance holds, then the step's
 `data`, and its links and edges as create parameters
 (`runtime/engine/README.md`, "Create parameters"): `Links` gets
 `parentLink`, pointing at this instance, and each `copyLinks` link this
-instance holds, with the revision a pinned one records when the child's
-link is pinned too; `Dependencies` gets the children of the steps it
+instance holds, with the revision or the release this instance's link
+records when the child's link pins the same; `Dependencies` gets the
+children of the steps it
 comes after as its blockers. A child therefore holds its parent link
 from its create, so the child schema can make `parentLink` `required`,
 and it is blocked in its create event, so `claimNext` never finds it
@@ -594,7 +596,7 @@ create gives it (`Links` create parameters), else in the transaction of
 the first `link`, so the link and the children commit together, or
 neither does, and a refused stamp refuses the create or the link. The
 map is read from the revision the link pins, through `Revisions`'
-`listRevisions` on the definition, as the principal (who needs `read`
+`getRevision` on the definition, as the principal (who needs `read`
 on its schema): a later revision of the definition changes only what is
 stamped from then on, and a `revision` given with the link stamps an
 earlier one. `copyLinks` copies the links the instance holds when it is
@@ -616,17 +618,21 @@ other included steps.
 When the schema is defined or published, `parseConfig` checks the child
 schema's live version as the definer may read it: it composes Links with
 `parentLink` pointing at this schema (and this type lists Revisions
-before Blueprint when that link is pinned, so the parent has a revision
-to pin), `Constants` over `keyField` and every copied field,
+before Blueprint when that link is pinned to a revision, so the parent
+has a revision to pin; a link pinned to a release is refused, since the
+parent has no release when it stamps), `Constants` over `keyField` and
+every copied field,
 Dependencies with its own schema among its
 blockers' schemas when a step has `after`, and not Blueprint; `keyField`
 is a string field of its type, `copyFields` are fields of both types of
 one JSON type, and `data` sets fields of its type. `when` names a field
 of this type, a list for `includes`; `data` does not set `keyField`;
 inline steps name only steps the map has in `after` and form no cycle,
-which the refusal names, whatever their `when`. `from` names a pinned
-link of this type's Links to a schema that composes Revisions and has
-the field, an object or JSON; `copyLinks` are links of both Links
+which the refusal names, whatever their `when`. `from` names a link of
+this type's Links pinned to a revision, of a schema that composes
+Revisions and has the field, an object or JSON: a release pins the
+definition's version graph, not the fields the map is in. `copyLinks`
+are links of both Links
 configs to one schema. A map read through `from` is held to the same
 rules against this type when it is stamped.
 
@@ -666,10 +672,10 @@ points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) or `limitField` (an integer field of the type), `reserve` (at least 1) and `reserveField` (an integer field of the type, whose positive value replaces `reserve`), `scope` (a link of the type's `Links` config) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`); `escalate` (`{ transition, from }`, needs `Workflow`) |
+| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) and `limitField` (an integer field of the type, whose value of at least 0 replaces `limit`), `reserve` (at least 1) and `reserveField` (an integer field of the type, whose positive value replaces `reserve`), `scope` (a link of the type's `Links` config) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`); `escalate` (`{ transition, from }`, needs `Workflow`) |
 | Fields | `budget`: by meter, `{ used, reserved, limit, remaining }`, `limit` and `remaining` null without a limit; `reserved` counts what the instance holds for the instances inside it |
 | Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `checkReserve({ meter?, amount? })` -> `{ fits, until, scopes }`, each scope `{ schema, id, hears }`, read-only; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`, each overrun `{ schema, id, used, limit, escalated }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All but `checkReserve` write |
-| Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed` (`scope_reserved`); a change of a meter's `limitField` without `limitPermission` is `forbidden` (`not_configured` when the config names none), and below what is used and reserved `vetoed` (`below_committed`) |
+| Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed` (`scope_reserved`); a change of a meter's `limitField` without `limitPermission` is `forbidden` (`not_configured` when the config names none), and below what is used and reserved `vetoed` (`below_committed`), the config's `limit` counting for a change that empties the field |
 | Refusals | `reserve` that does not fit here or in a scope (`over_limit`, details `{ meter, amount, remaining, limit, scope }`, `scope` the instance whose limit refused it), through a scope its link has moved from while the old one holds a reservation (`scope_moved`), and on a type with `Lease` without an active lease (`not_leased`); an unknown meter, an amount without a meter, a meter without a configured reservation and no amount (`invalid_argument`); `setLimit` without `limitPermission` (`forbidden`, or `not_configured` when the config names none) and below what is used and reserved (`below_committed`); a scope operation from an instance that does not draw the meter from the scope (`invalid_argument`) or for more than it reserved (`exceeds_reservation`). `recordUsage` is never refused for its amount. Each code is a veto's (`vetoed`) |
 | Events | each operation's event, on the instance and on every scope it reaches; an escalation's status in the event of the usage that caused it |
 | `configChange` | a meter cannot be removed; anything else may change. Added to a schema with instances, whose meters start empty; not removed from one |
@@ -685,8 +691,17 @@ points at.
 ### Reservations and usage
 
 A reservation fits while the meter's used plus reserved plus the amount
-is within its limit: the config's `limit`, the instance's `limitField`,
-or the one `setLimit` set. `reserve` with no meter takes every meter
+is within its limit: the instance's `limitField` while it holds a value
+of at least 0, else the config's `limit`; without `limitField`, the one
+`setLimit` set, else the config's `limit`. So `limit` beside
+`limitField` is the limit of an instance whose field is empty, as
+`reserve` beside `reserveField` is the amount of one whose field is:
+
+```json
+{ "name": "Budget", "config": { "meters": { "cpu": { "limit": 600, "limitField": "cpuLimit", "reserve": 60, "reserveField": "cpuEstimate" } }, "limitPermission": "budget.limit" } }
+```
+
+`reserve` with no meter takes every meter
 whose `reserveField` or `reserve` gives an amount: the instance's
 `reserveField` when it holds a positive integer, else the config's
 `reserve`, as Lease's `maxHoldField` falls back to `maxHoldMs`. That is
@@ -792,7 +807,8 @@ transition leads from each `from` state.
 `setLimit` raises or lowers a limit, never below what is used and
 reserved, and needs `limitPermission`; a meter with `limitField` writes
 the field through `update()`, with an update's checks, and a direct
-update of the field is held to the same rules. A lease holder's lease
+update of the field is held to the same rules: one that empties it is
+held to the config's `limit`, which it falls back to. A lease holder's lease
 keeps others' `setLimit` out unless `Lease` exempts `Budget.setLimit`.
 
 A daily meter's usage counts from the start of the UTC day on the

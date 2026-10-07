@@ -32,13 +32,13 @@ schema that composes one until a deployment registers that package.
 | `Comments` | comments on the instance | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
-| `Links` | named links to instances of other schemas, optionally pinned to a revision | | [Links](#links) |
+| `Links` | named links to instances of other schemas, optionally pinned to a revision or a release | | [Links](#links) |
 | `Rollups` | values computed from the instances that link here, optionally gating the type's Workflow transitions | | [Rollups](#rollups) |
 | `Search` | full-text search over the type's text fields, vector search over embeddings an outside embedder computes, and a search across a namespace's schemas | | [Search](#search) |
 | `Reactions` | rules that move statuses after a change commits | `Workflow` | [Reactions](#reactions) |
 | `Constants` | fields that keep the value their create gives them, unless a caller holds the config's permission | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
-| `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases | | [Branches](#branches) |
+| `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases, the latest in its `release` field | | [Branches](#branches) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
 A running engine lists the behaviors it runs, an extension's included,
@@ -172,7 +172,7 @@ instance. Eight do so far:
 | --- | --- | --- |
 | `listLinked` | `Links` | the instances whose link points at a target |
 | `search` | `Search` | a full-text or vector search over the schema's instances |
-| `similar` | `Search` | the instances nearest to one |
+| `similar` | `Search` | the instances nearest to one, or to a draft's text |
 | `staleEmbeddings` | `Search` | the instances an embedder has a vector to compute for, read-only |
 | `settleEmbeddings` | `Search` | stores the vectors an embedder computed |
 | `claimNext` | `Queue` | claims the first instance the caller can claim |
@@ -384,18 +384,18 @@ a task's project, its parent, the spec it implements.
 
 | | |
 | --- | --- |
-| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`. A `pinned` link's target schema must compose `Revisions` |
-| Field | `links`: `{ <name>: { schema, id, revision?, stale? } }`, absent when the instance holds none |
-| Operations | `link({ name, id, revision? })`, `unlink({ name })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
-| Create parameters | by link name, the target's `id`, or `{ id, revision? }` for a pinned link |
+| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`. `pinned: true` (or `"revision"`) pins a revision, and the target schema must compose `Revisions`; `pinned: "release"` pins a release, and it must compose `Branches` |
+| Field | `links`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, absent when the instance holds none |
+| Operations | `link({ name, id, revision?, release? })`, `unlink({ name })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
+| Create parameters | by link name, the target's `id`, or `{ id, revision? }` or `{ id, release? }` for a pinned link |
 | Guard | deleting the target of a required link is `vetoed` (`required_target`) |
-| Vetoes | `no_revision`, a pinned link to a target with no revision yet, by `link` or at create; `required_link`, unlinking a required link; `required_target` |
+| Vetoes | `no_revision` and `no_release`, a pinned link to a target with no revision or no release yet, by `link` or at create; `required_link`, unlinking a required link; `required_target` |
 
 ```ts
 engine.instances.invoke(alice, 'Task', 't1', 'link', { name: 'owner', id: 'p1' });
 // { name: 'owner', schema: 'Person', id: 'p1' }
 engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: 's1' });
-// { items: [{ id: 't1', revision: 1, stale: true }, { id: 't2', revision: 2, stale: false }], next: null }
+// { items: [{ id: 't1', revision: 1, latest: 2, stale: true }, { id: 't2', revision: 2, latest: 2, stale: false }], next: null }
 ```
 
 - `link` again moves a link to another target.
@@ -405,10 +405,12 @@ engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: '
   cannot make a link required, as it cannot make a field required.
 - An **optional** link is cleared when its target is deleted, with an
   `unlink` event on each instance that pointed there.
-- A **pinned** link records the target's revision, and `links` reports
-  `stale: true` once the target has a later one.
-  `listLinked({ ..., stale: true })` finds every instance pointing at a
-  superseded revision.
+- A **pinned** link records the target's revision, or with `pinned:
+  "release"` its release (the target's `Branches` release pointer, its
+  `release` field), and `links` gives the target's latest beside it and
+  `stale: true` once the target has a later one: "pinned 3, latest 5"
+  in one read. `listLinked({ ..., stale: true })` finds every instance
+  pointing at a superseded revision or release.
 
 ## Rollups
 
@@ -417,7 +419,7 @@ count of tasks, its tasks by status, whether they have all finished.
 
 | | |
 | --- | --- |
-| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`; `countBy`, `sum`, `min` and `max` take a `field`; only `all` and `any` take `gatedStates` and `outcomes` |
+| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`. `function` is `count`, `countBy`, `sum`, `min`, `max`, `latest`, `all` or `any`; `countBy`, `sum`, `min`, `max` and `latest` take a `field`; only `all` and `any` take `gatedStates` and `outcomes` |
 | Field | `rollups`: `{ <name>: value }`, computed at each read |
 | Guard | a transition into a state an `all` or `any` rollup gates is `vetoed` (`not_held`) unless the rollup holds, with the rollup and its counts in `details.details` |
 
@@ -441,6 +443,7 @@ and cannot move to `done` until every task is done or dropped.
 | `countBy` | `{ <value>: count }` over a string, enum or boolean field | `{}` |
 | `sum` | the sum of a number field | `0` |
 | `min`, `max` | the least or greatest value | absent |
+| `latest` | a field's value on the instance created last, the greater id on a tie | absent |
 | `all` | whether every one is in a terminal state of its Workflow, with an outcome `outcomes` lists when given | `true` |
 | `any` | whether some one is | `false` |
 
@@ -467,7 +470,7 @@ computes from the same text.
 | | |
 | --- | --- |
 | Config | `fields`: 1 to 16 top-level fields, each a string or a string-valued scalar; `weights`: by field, above 0 and at most 1000 (1 when absent); `vectors`, optional: `dimensions` (1 to 4096), `model` (a label) and `permission` (what an embedder needs) |
-| Operations | all schema-level: `search({ query?, vector?, model?, syntax?, limit?, cursor? })` and `similar({ id, limit?, cursor? })`, which return a page of hits, and an embedder's `staleEmbeddings({ limit?, cursor? })` and `settleEmbeddings({ items })` |
+| Operations | all schema-level: `search({ query?, vector?, model?, syntax?, limit?, cursor? })` and `similar({ id } or { text, vector?, model? }, limit?, cursor?)`, which return a page of hits, and an embedder's `staleEmbeddings({ limit?, cursor? })` and `settleEmbeddings({ items })` |
 
 ```json
 "behaviors": [{ "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 },
@@ -551,7 +554,10 @@ engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', ve
 `similar({ id })` lists the instances nearest to one, leaving it out: by
 its own text and, once its vector is settled, by its vector too. An agent
 calls it before creating an instance like one it found, to reuse or link
-a near-duplicate instead.
+a near-duplicate instead. `similar({ text, vector? })` ranks the same way
+for an instance not yet created: the draft's indexed fields joined by a
+blank line, and optionally their vector from the config's model, so an
+agent checks for a near-duplicate before it creates one.
 
 ### Searching every schema
 
@@ -589,7 +595,8 @@ Rules that move Workflow statuses after a change commits. They need
   it holds.
 - `revised` fires when the instance `link` points to gains a revision
   of `Revisions`, or a release when its schema composes `Branches`; of a
-  pinned link, only on the instances the new revision leaves stale.
+  link pinned to the one it gains, only on the instances the new
+  revision or release leaves stale.
 - `then` moves this instance, or the one its `link` points to, to the
   state, through Workflow's `transition`, so every guard still runs.
 
@@ -834,6 +841,7 @@ const { ref: committed } = call("commit", { ref: ref.id, version: ref.version, m
 const merged = call("merge", { source: committed.id, target: main.id, targetVersion: main.version, tag: true });
 call("releaseCommit", { commit: merged.commit.id, version: 0 });  // 0: the first release
 call("released");                                                 // { release, tree, contentHash, findings }
+engine.instances.get(me, "Recipe", id)?.data.release;              // 1: the release pointer's version
 ```
 
 - **Operations.** `branch`, `save`, `commit`, `seal`, `merge`, `rebase`,
@@ -886,6 +894,10 @@ call("released");                                                 // { release, 
   one, so `materialize` of a commit made before returns the `contentHash`
   the commit stored and `history` returns; a value written to the field
   moves the hash, and `nothing_to_commit`, which compares trees, holds.
+- **The release field.** `release` is the number of the instance's
+  latest release, the release pointer's version, absent before the
+  first: what the next `releaseCommit` names, and what a `Links` link
+  pinned to a release records and compares.
 - **Deleting.** Deleting an instance deletes its graph.
 - **Lease.** The operation that points the release pointer is
   `releaseCommit`, not `release`, because `Lease` has `release`, so a

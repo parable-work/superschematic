@@ -530,6 +530,7 @@ describe("the core's behaviors", () => {
         ['documents_comment', false, 'auto'],
         ['documents_list_comments', true, 'auto'],
         ['documents_list_revisions', true, 'auto'],
+        ['documents_get_revision', true, 'auto'],
         ['documents_propose', false, 'auto'],
         ['documents_approve', false, 'auto'],
         ['documents_reject', false, 'auto'],
@@ -540,7 +541,7 @@ describe("the core's behaviors", () => {
     const { client: reader } = await connect(endpoint(url), 'reader');
     assert.deepEqual(
       (await reader.listTools()).tools.map((tool) => tool.name).filter((name) => name.startsWith('documents_')),
-      ['documents_get', 'documents_list', 'documents_list_comments', 'documents_list_revisions', 'documents_list_proposals']
+      ['documents_get', 'documents_list', 'documents_list_comments', 'documents_list_revisions', 'documents_get_revision', 'documents_list_proposals']
     );
   });
 
@@ -704,7 +705,7 @@ describe("the core's behaviors", () => {
     assert.deepEqual([gated.status, gated.code, gated.details.behavior], [409, 'vetoed', 'Dependencies']);
     const { client: reader } = await connect(endpoint(url), 'reader');
     const linked = await call(reader, 'tasks_list_linked', { params: { name: 'spec', id: 'doc-1' } });
-    assert.deepEqual(linked.structuredContent, { items: [{ id: 'build', revision: 1, stale: false }], next: null });
+    assert.deepEqual(linked.structuredContent, { items: [{ id: 'build', revision: 1, latest: 1, stale: false }], next: null });
     const required = problemOf(await call(client, 'projects_delete', { id: 'launch' }));
     assert.deepEqual([required.status, required.code, required.details.behavior], [409, 'vetoed', 'Links']);
     assert.ok(engine.instances.get(alice, 'projects', 'launch'));

@@ -85,8 +85,8 @@ test('an author creates a note; a reader may not', async () => {
   assert.equal(created.status, 201);
   assert.equal(created.etag, '"1"');
   // The behaviors' fields sit beside the note's own: Workflow's status,
-  // Comments' commentCount and Revisions' revision.
-  assert.deepEqual(created.body.data, { title: 'Launch', tags: ['launch'], status: 'draft', commentCount: 0, revision: 1 });
+  // Comments' commentCount and Revisions' revision and pendingProposals.
+  assert.deepEqual(created.body.data, { title: 'Launch', tags: ['launch'], status: 'draft', commentCount: 0, revision: 1, pendingProposals: 0 });
 });
 
 test('a transition that names a permission needs it', async () => {
@@ -140,6 +140,7 @@ test('a reader comments and proposes a change; an editor approves it', async () 
     status: 'published',
     commentCount: 1,
     revision: 2,
+    pendingProposals: 0,
   });
   const revisions = await operation('carol-token', 'listRevisions', {});
   assert.deepEqual(
