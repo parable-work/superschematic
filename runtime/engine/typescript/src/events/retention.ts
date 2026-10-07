@@ -33,8 +33,9 @@ The base holds the values of what it keeps, as an event did.
 
 Pruning changes nothing an operation returns and appends no event: what
 a read of an instance, a schema or a behavior returns stays as it was,
-and a read of the log answers either every event after its cursor or
-cursor_expired, never a page with a gap.
+and a read of the log from a cursor answers either every event after it
+or cursor_expired, never a page with a gap, while one from the start, no
+cursor or 0, reads what is kept.
 */
 
 import type { FrozenJSON } from '../behaviors/behavior.js';

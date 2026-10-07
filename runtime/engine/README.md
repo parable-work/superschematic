@@ -497,9 +497,10 @@ Read on from `next`. Without a schema filter, events of schemas the
 principal may not read are skipped, so a page can hold fewer events than
 its limit while `more` is true. `engine.events.head()` is the cursor of
 the last event, 0 for a log that never held one; retention never moves
-it back. A read from a cursor before the namespace's floor, where
-retention has pruned events after it, is `cursor_expired`
-("Retention"); so is a read with no `after` once it has.
+it back. A read with no `after`, or `after: 0`, starts at the start of
+the log, which after retention is the namespace's floor; one from any
+other cursor before the floor, where retention has pruned events after
+it, is `cursor_expired` ("Retention").
 
 - `after: 'head'` starts at the head: the page is empty, `next` is the
   head and `more` is false, so a client that wants only new events reads
@@ -686,14 +687,22 @@ when either lets it go. `openEngine` refuses anything else (`TypeError`).
   holds no other namespace's. So a halted subscription holds its
   namespace's log, and `status()` shows by whom
   ("Status" under "The runner"), until it is resumed.
-- **A read from before the floor is `cursor_expired`.** `events.read`
-  from a cursor before the floor of its namespace, or before the last
-  publish pruned of the shared namespace it reads, throws
-  `CursorExpiredError` with `floor` and `head`; over HTTP it is 410 with
-  `details: { after, floor, head }`, a stream's resume included ("The
-  event stream" under "HTTP"). A client that can take the gap reads on
-  from `floor`; one that cannot starts again from `head`. The head stays
-  the last cursor the log gave, and `after=head` works as before.
+- **A read from a cursor before the floor is `cursor_expired`.**
+  `events.read` from a cursor before the floor of its namespace, or
+  before the last publish pruned of the shared namespace it reads,
+  throws `CursorExpiredError` with `floor` and `head`; over HTTP it is
+  410 with `details: { after, floor, head }`, a stream's resume included
+  ("The event stream" under "HTTP"). A client that can take the gap
+  reads on from `floor`; one that cannot starts again from `head`. The
+  head stays the last cursor the log gave, and `after=head` works as
+  before.
+- **A read from the start reads what is kept.** A read with no cursor,
+  or with 0, which no event has, asks for the log from its start, and
+  starts at the floor: it is never `cursor_expired`, so a client that
+  reads the log from the start goes on working once retention has run.
+  The one cursor 0 a client can hold as a place is the head of a log
+  that never held an event, from which a reconnect after retention has
+  pruned what it missed reads on from the floor without a word.
 - **A reaction reads on as before.** Each pruned instance event folds
   into its instance's base (`engine_event_bases`): the instance as the
   log had it after the event, behaviors' fields included, or none after
@@ -719,8 +728,9 @@ writes to its own tables may not (D32). It runs on the started runner,
 or when the deployment calls `engine.runner.prune()`, which needs no
 runner principal. `runDue()` prunes when retention is due and adds
 `pruned` to what it returns; `status()` adds `retention` ("Status"). A
-reader of the log learns it was pruned from `cursor_expired`, never from
-a page with a gap.
+reader that names a cursor learns the log was pruned past it from
+`cursor_expired`, never from a page with a gap; one that reads from the
+start reads what is kept.
 
 ## The runner
 
@@ -3050,8 +3060,8 @@ The event route's `after` is a cursor or `head`; `kind`, `behavior` and
 (`kind=create,update`), with `events.read`'s meaning ("The event log").
 An `after` that is neither is 400 `bad_request`; a filter value the
 engine refuses is 400 `invalid_argument`; a cursor before the
-namespace's floor, given or by default, is 410 `cursor_expired`
-("Retention").
+namespace's floor is 410 `cursor_expired` ("Retention"), and no `after`,
+or `after=0`, reads from the floor.
 
 A namespace's create takes `{"name": "<namespace>"}` and nothing else
 (400 `bad_request` otherwise); its archive and unarchive take no body.
@@ -3177,10 +3187,11 @@ data: {"cursor":41}
   `EventSource` sends, else after `after` (a cursor, or `head` for no
   replay), else at the start of the log. `schema`, `instanceId`, `kind`,
   `behavior` and `exclude` filter as on the JSON route; `limit` applies
-  to the JSON route only. A start before the namespace's floor is the
-  410 `cursor_expired` problem ("Retention"), so a client knows to start
-  again from the head; a stream whose cursor retention passes while it
-  is open ends, and its reconnect gets that problem.
+  to the JSON route only. With neither, or from 0, it replays from the
+  namespace's floor ("Retention"). Any other start before the floor is
+  the 410 `cursor_expired` problem, so a client knows to start again
+  from the head; a stream whose cursor retention passes while it is open
+  ends, and its reconnect gets that problem.
 - It replays in pages of `stream.pageSize` (100) and reads the next page
   only when the server has sent the previous one, so a slow client holds
   one page and replay never loads the backlog. The first page that is the

@@ -480,7 +480,7 @@ describe('event stream', () => {
     assert.equal(engine.events.watching, 0);
   });
 
-  test('a resume from before the floor is 410 cursor_expired; a stream retention passes ends, and its reconnect gets the problem', async () => {
+  test('a resume from before the floor is 410 cursor_expired, a stream from the start replays from the floor, and a stream retention passes ends', async () => {
     const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } }, { retention: { maxEvents: 1 } });
     publishOrders(engine);
     engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
@@ -490,6 +490,16 @@ describe('event stream', () => {
     assert.equal(expired.response.headers.get('content-type'), 'application/problem+json');
     const body = (await expired.response.json()) as { code: string; details: unknown };
     assert.deepEqual([body.code, body.details], ['cursor_expired', { after: 1, floor: 2, head: 3 }]);
+
+    // A stream from the start, with no cursor, replays what the log holds,
+    // from the floor.
+    const fromStart = await open(`${base}/namespaces/default/events`);
+    await fromStart.until((frame) => frame.event === 'ready');
+    assert.deepEqual(
+      fromStart.events().map((event) => event.cursor),
+      [3]
+    );
+    fromStart.disconnect();
 
     // From the head the stream goes on; two commits and a prune before it
     // reads them leave its cursor behind the floor, and it ends.
@@ -504,7 +514,7 @@ describe('event stream', () => {
     const reconnected = await open(`${base}/namespaces/default/events`, { 'last-event-id': client.lastId() as string });
     assert.equal(reconnected.response.status, 410);
     await reconnected.response.body?.cancel();
-    assert.equal(engine.events.watching, 0);
+    await eventually(() => engine.events.watching === 0, 'every stream to stop watching');
   });
 
   test('a client that disconnects stops its stream and its watcher', async () => {

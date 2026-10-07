@@ -86,12 +86,19 @@ for (const driver of drivers) {
       assert.deepEqual(engine.runner.prune(), { pruned: 3 });
       assert.deepEqual([engine.events.floor(), engine.events.head()], [3, 6]);
       assert.deepEqual(cursors(engine, 3), [4, 5, 6]);
-      for (const after of [0, 2]) {
+      for (const after of [1, 2]) {
         const error = thrown(() => engine.events.read(alice, { after }), CursorExpiredError);
         assert.deepEqual([error.code, error.after, error.floor, error.head], ['cursor_expired', after, 3, 6]);
       }
       // A schema's events and one instance's are expired alike.
-      assert.equal(thrown(() => engine.events.read(alice, { schema: 'Note', instanceId: 'n1' }), EngineError).code, 'cursor_expired');
+      assert.equal(thrown(() => engine.events.read(alice, { schema: 'Note', instanceId: 'n1', after: 1 }), EngineError).code, 'cursor_expired');
+      // A read from the start, with no cursor or 0, which no event has,
+      // reads what the log holds, from the floor.
+      for (const after of [undefined, 0]) {
+        assert.deepEqual(engine.events.read(alice, { after }), engine.events.read(alice, { after: 3 }));
+      }
+      assert.deepEqual(engine.events.read(alice, { schema: 'Note', instanceId: 'n4' }).events.map((event) => event.cursor), [6]);
+      assert.deepEqual(engine.events.read(alice, { schema: 'Note', instanceId: 'n1' }).events, []);
       assert.deepEqual(engine.events.read(alice, { after: 'head' }), { events: [], next: 6, more: false });
       // Nothing an instance read returns changed, and the log goes on.
       assert.equal(engine.instances.get(alice, 'Note', 'n1')?.data.title, 'n1');

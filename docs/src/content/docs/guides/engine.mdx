@@ -658,10 +658,11 @@ adds a comment and receives its event.
 This server keeps every event. One that passes `retention` to
 `openEngine`, `{ maxAgeMs }`, `{ maxEvents }` or both, has its runner
 prune the oldest, each namespace's apart, and never one a subscription
-has yet to handle. A read or a stream's resume from a cursor retention
-has pruned past is 410 `cursor_expired`, whose `details` carry the
-`floor` to read on from, taking the gap, and the `head` to start again
-from. The README's
+has yet to handle. A read from the start, with no `after` or
+`after=0`, reads what is kept, from the oldest event. A read or a
+stream's resume from a cursor retention has pruned past is 410
+`cursor_expired`, whose `details` carry the `floor` to read on from,
+taking the gap, and the `head` to start again from. The README's
 [retention](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#retention)
 section has the rules.
 

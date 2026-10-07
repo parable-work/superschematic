@@ -304,7 +304,8 @@ engine.runner.stop();      // engine.close() stops it too
   namespace at a time, and never past an event a subscription there has
   yet to handle, halted ones included. `engine.runner.prune()` prunes now
   and needs no principal. A reaction's `before()` still reads an instance
-  whose create was pruned.
+  whose create was pruned, and a read of the log from the start reads
+  what is kept.
 - **`runDue()` drives it by hand.** It runs everything due now, started or
   not, and returns `{ handled, skipped, failed, scheduled }`, and
   `pruned` with retention. Tests use it with a clock they move.

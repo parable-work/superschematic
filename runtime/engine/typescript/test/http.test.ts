@@ -331,7 +331,7 @@ describe('refusals', () => {
       ['invalid_instance', () => post(ORDERS, { data: { title: 3 } }), 'issues'],
       ['unavailable', () => call(app, 'GET', '/namespaces/default/schemas/Gadget/instances')],
       ['namespace_archived', () => post('/namespaces/acme/schemas', noteDocument)],
-      ['cursor_expired', () => call(app, 'GET', '/namespaces/default/events?after=0')],
+      ['cursor_expired', () => call(app, 'GET', '/namespaces/default/events?after=1')],
     ];
     assert.deepEqual(cases.map(([code]) => code).sort(), Object.keys(ENGINE_ERROR_STATUS).sort(), 'a case per engine error code');
     for (const [code, request, details] of cases) {
@@ -591,7 +591,7 @@ describe('events as JSON', () => {
     assert.equal(resumed.events.length, all.events.length + 1);
   });
 
-  test('after retention, a read from before the floor is 410 cursor_expired with the floor and the head; from them it reads on', async () => {
+  test('after retention, a read from a cursor before the floor is 410 cursor_expired with the floor and the head; one from the start reads from the floor', async () => {
     const { app, engine } = serve({}, { retention: { maxEvents: 2 } });
     await data(call(app, 'POST', '/namespaces/default/schemas', { body: orderDocument() }));
     await data(call(app, 'POST', '/namespaces/default/schemas/Order/publish'));
@@ -599,7 +599,7 @@ describe('events as JSON', () => {
       await data(call(app, 'POST', ORDERS, { body: { id, data: { title: id } } }), 201);
     }
     assert.deepEqual(engine.runner.prune(), { pruned: 2 });
-    for (const path of ['/namespaces/default/events', '/namespaces/default/events?after=1&kind=create', '/namespaces/default/events?schema=Order&instanceId=o1']) {
+    for (const path of ['/namespaces/default/events?after=1', '/namespaces/default/events?after=1&kind=create', '/namespaces/default/events?schema=Order&instanceId=o1&after=1']) {
       const expired = await problem(call(app, 'GET', path), 410);
       assert.equal(expired.code, 'cursor_expired');
       assert.equal(expired.details.floor, 2);
@@ -607,6 +607,17 @@ describe('events as JSON', () => {
     }
     assert.equal((await problem(call(app, 'GET', '/namespaces/default/events', { headers: { 'last-event-id': '1' } }), 410)).code, 'cursor_expired');
     assert.deepEqual((await data(call(app, 'GET', '/namespaces/default/events?after=2'))).events.map((event: { cursor: number }) => event.cursor), [3, 4]);
+    // From the start, with no cursor or 0, which no event has, a read
+    // takes what the log holds: it starts at the floor.
+    for (const path of ['/namespaces/default/events', '/namespaces/default/events?after=0']) {
+      const page = await data(call(app, 'GET', path));
+      assert.deepEqual([page.events.map((event: { cursor: number }) => event.cursor), page.next, page.more], [[3, 4], 4, false]);
+    }
+    assert.deepEqual(
+      (await data(call(app, 'GET', '/namespaces/default/events?schema=Order&instanceId=o1'))).events.map((event: { cursor: number }) => event.cursor),
+      [3]
+    );
+    assert.deepEqual((await data(call(app, 'GET', '/namespaces/default/events?limit=1&kind=update'))).next, 3, 'a page of nothing kept moves past the floor');
     assert.deepEqual(await data(call(app, 'GET', '/namespaces/default/events?after=head')), { events: [], next: 4, more: false });
     // A namespace retention has pruned nothing of reads from 0.
     assert.deepEqual((await data(call(app, 'GET', '/namespaces/east/events'))).events, []);

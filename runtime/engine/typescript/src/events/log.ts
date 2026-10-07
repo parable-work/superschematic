@@ -14,8 +14,10 @@ oldest events first: a namespace's floor is the last cursor retention
 pruned of its events, and a read of the namespace from a cursor before
 it, or before the last publish it pruned of the shared namespace the
 namespace reads, is cursor_expired (CursorExpiredError), since the events
-after the cursor are no longer all there. The head stays the last cursor
-the log gave, whatever retention pruned.
+after the cursor are no longer all there. A read from the start, with no
+cursor or 0, starts at the floor instead: it asked for what the log
+holds, not for a place in it. The head stays the last cursor the log
+gave, whatever retention pruned.
 
 Reading is paged from a cursor, within one namespace and optionally one
 schema and instance. A namespace that looks schema names up in a shared
@@ -149,10 +151,11 @@ export interface ReadEventsOptions {
   /** Only this instance's events; needs schema. */
   instanceId?: string;
   /**
-   * Events after this cursor; 0, the start of the log, when absent;
-   * `head`, the log's last event, for an empty page whose next is that
-   * cursor. A cursor before the namespace's floor, where retention has
-   * pruned events after it, is cursor_expired.
+   * Events after this cursor; the start of the log when absent or 0,
+   * which no event has: after retention, the oldest event it kept, never
+   * cursor_expired. `head`, the log's last event, for an empty page whose
+   * next is that cursor. Any other cursor before the namespace's floor,
+   * where retention has pruned events after it, is cursor_expired.
    */
   after?: number | 'head';
   /** How many events to scan, 50 by default and at most 500. */
@@ -302,8 +305,9 @@ export class EventLog {
   /**
    * read returns the page of events after a cursor that the principal may
    * read and the filters keep. From `head` it returns no events, and the
-   * log's last cursor as next. From a cursor before the namespace's floor
-   * it throws CursorExpiredError (cursor_expired).
+   * log's last cursor as next. With no cursor, or 0, it starts at the
+   * namespace's floor, the oldest event retention kept; from a cursor
+   * before the floor it throws CursorExpiredError (cursor_expired).
    */
   read(principal: Principal, options: ReadEventsOptions = {}): EventPage {
     checkPrincipal(principal);
@@ -325,12 +329,15 @@ export class EventLog {
     if (fromHead) {
       return { events: [], next: this.head(), more: false };
     }
-    // A read from before the floor would miss what retention pruned; one
-    // instance's events leave the shared namespace's publishes out.
+    // A read from the start, with no cursor or 0, which no event has,
+    // starts at the floor. One from a cursor before it would miss what
+    // retention pruned. One instance's events leave the shared namespace's
+    // publishes out.
     const floor = logFloor(this.storage, this.namespaces, namespace, options.instanceId === undefined);
-    if (after < floor) {
+    if (after > 0 && after < floor) {
       throw new CursorExpiredError(namespace, after, floor, this.head());
     }
+    const from = Math.max(after, floor);
     let rows: Row[];
     if (options.instanceId !== undefined) {
       // One instance's events come from its own index, in sequence order,
@@ -338,10 +345,10 @@ export class EventLog {
       rows = this.storage.all(
         `SELECT ${EVENT_COLUMNS} FROM engine_events INDEXED BY engine_events_instance
          WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor > ? ORDER BY seq LIMIT ?`,
-        [namespace, options.schema as string, options.instanceId, after, limit + 1]
+        [namespace, options.schema as string, options.instanceId, from, limit + 1]
       );
     } else {
-      rows = this.namespaceRows(namespace, options.schema, after, limit + 1);
+      rows = this.namespaceRows(namespace, options.schema, from, limit + 1);
     }
     const scanned = rows.slice(0, limit);
     const readable = new Map<string, boolean>();
@@ -363,7 +370,7 @@ export class EventLog {
     }
     // Next is past every event scanned, kept or not.
     const last = scanned[scanned.length - 1];
-    return { events, next: last ? Number(last.cursor) : after, more: rows.length > limit };
+    return { events, next: last ? Number(last.cursor) : from, more: rows.length > limit };
   }
 
   /**
