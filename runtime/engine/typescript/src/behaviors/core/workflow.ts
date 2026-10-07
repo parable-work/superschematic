@@ -11,6 +11,9 @@ existed. Workflow itself reads no outcome: Dependencies, Rollups and
 Reactions read it from another schema's config, through stateOutcome, to
 tell a blocker or a child that finished well from one that failed.
 
+A list filters on status (where: { status: 'doing' }), which Workflow's
+column holds and an index of its own on that column serves.
+
 Nothing else can move the status. It is Workflow's own column: a create
 or an update that sets `status` is refused (readOnly), and another
 behavior has no handle on the column. transition's parameter is `to`
@@ -19,8 +22,9 @@ past the guard. The guard below checks every transition request, a
 caller's or another behavior's call(), before any handler runs, and the
 handler holds the column to what the guard allowed.
 
-configChange: a new version keeps every state of the old config, since an
-instance may be in any of them; transitions, their permissions, the
+configChange: while the schema has instances, a new version keeps every
+state of the old config, since an instance may be in any of them, and
+with none it may drop any; transitions, their permissions, the
 initial state and outcomes may change. Outcomes, like transitions, are
 read when another instance's field is computed or a rule runs, so a new
 version's outcome applies at the next read to the instances already in
@@ -142,12 +146,16 @@ export const workflow = defineBehavior<WorkflowConfig>({
     return config;
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before === undefined) {
       return 'the instances that exist have no status to start from';
     }
     if (after === undefined) {
       return 'the instances would lose their status';
+    }
+    // No instance is in a state the new config drops.
+    if (!change.instances) {
+      return undefined;
     }
     const gone = before.states.filter((state) => !after.states.includes(state));
     return gone.length > 0 ? `an instance may be in ${gone.map((state) => `"${state}"`).join(', ')}, which the new config drops` : undefined;
@@ -155,7 +163,14 @@ export const workflow = defineBehavior<WorkflowConfig>({
 
   guidance: workflowGuidance,
 
-  migrations: [{ version: 1, name: 'status', columns: { status: { type: 'text' } } }],
+  // The index lets a list that filters on status read only the instances
+  // in the states it names, in creation order.
+  migrations: [
+    { version: 1, name: 'status', columns: { status: { type: 'text' } } },
+    { version: 2, name: 'status index', indexes: { status: ['status'] } },
+  ],
+
+  filters: { status: { column: 'status', type: 'string' } },
 
   initialize(context) {
     context.columns.set({ status: context.config.initial });

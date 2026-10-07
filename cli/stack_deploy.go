@@ -22,6 +22,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	"github.com/parable-work/superschematic/internal/stack"
@@ -113,6 +114,7 @@ func (g *gateFlags) gate() (stackdeploy.Gate, error) {
 type deployContext struct {
 	project  *stackProject
 	reg      *registry.Registry
+	schema   *ir.Schema
 	env      *ir.ResolvedEnvironment
 	version  *schemaVersion
 	services []stack.Service
@@ -148,6 +150,7 @@ func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environmen
 	if err != nil {
 		return fail(err)
 	}
+	c.schema = schema
 	st := ir.StackOf(schema)
 	if st == nil {
 		return fail(fmt.Errorf("stack %s: no class declares @stack", p.stack.Name))
@@ -285,9 +288,10 @@ func (c *deployContext) options(cmd *cobra.Command, params map[string]string) st
 
 // sources says where the stack's build wrote each server's Dockerfile, and
 // every image's build context: the repository root, the parent of the
-// schemas root (docs/stack-model.md, section 8.2).
+// schemas root, or the naming file's [paths] build_context
+// (docs/stack-model.md, section 8.2).
 func (c *deployContext) sources() *stackdeploy.Sources {
-	return &stackdeploy.Sources{OutputRoot: c.project.outputRoot, RepositoryRoot: filepath.Dir(c.project.schemasRoot)}
+	return &stackdeploy.Sources{OutputRoot: c.project.outputRoot, RepositoryRoot: c.project.names.BuildContext(filepath.Dir(c.project.schemasRoot))}
 }
 
 // digests returns the IR digest of each service the stack reaches:
@@ -363,7 +367,16 @@ the APIs, creates the state bucket and its KMS key, applies the Artifact
 Registry repository, the deployer and planner accounts and Workload
 Identity Federation for the GitHub repository the git remote names, and
 creates the secret of each platform credential the environment needs.
-Then it asks for each credential that has no value, without echoing it.`,
+
+Then it records what only the cloud knows in the stack's schema: on gcp,
+the project's number, as projectNumber in the gcp values of the
+environment that sets project, which the generated CI's identity needs.
+It writes the value when the schema has none or holds another, leaves the
+file alone when it matches, and prints a line for each. A TypeScript
+schema changes in that property alone; for a JSON or YAML schema it
+prints the property to add.
+
+Last, it asks for each credential that has no value, without echoing it.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := openDeployContext(cmd, a, flags, args[0], false)
@@ -374,16 +387,31 @@ Then it asks for each credential that has no value, without echoing it.`,
 			if !cmd.Flags().Changed("repository") {
 				repository = gitHubRepository(cmd.Context(), filepath.Dir(c.version.servicesRoot))
 			}
-			return stackdeploy.Bootstrap(cmd.Context(), stackdeploy.BootstrapOptions{
+			recorded, err := stackdeploy.Bootstrap(cmd.Context(), stackdeploy.BootstrapOptions{
 				Options:    c.options(cmd, nil),
 				Repository: repository,
 				Prompter:   terminalPrompter(cmd),
+				Source:     &stackdeploy.SchemaSource{Schema: c.schema, Dir: c.project.dir, EditTypeScript: editTypeScript},
 			})
+			// A value recorded before a credential's prompt failed is
+			// in the schema all the same, so its line is printed.
+			for _, r := range recorded {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), r)
+			}
+			return err
 		},
 	}
 	flags.register(cmd, false)
 	cmd.Flags().StringVar(&repository, "repository", "", "the GitHub repository the CI runs in, owner/name (default: read from the git remote origin)")
 	return cmd
+}
+
+// editTypeScript is the TypeScript reader's edit of an environment's
+// value, which bootstrap records the values its target returns with
+// (D47). The CLI hands it in so that internal/stackdeploy, and the stack
+// package extensions import, never link the compiler.
+func editTypeScript(fileName string, src []byte, v stackdeploy.EnvironmentValue) ([]byte, string, bool, error) {
+	return tsreader.SetEnvironmentValue(fileName, src, tsreader.EnvironmentValue(v))
 }
 
 // gitHubRepositoryPattern reads owner/name from a GitHub remote URL, over

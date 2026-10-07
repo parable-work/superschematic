@@ -207,6 +207,33 @@ describe('the event stream', () => {
     assert.equal(served.requests.length, 1);
     assert.equal(subscription.closed, true);
   });
+
+  test('from the start it replays what retention kept; a resume from a cursor retention passed ends it with cursor_expired', async () => {
+    const served = serve({}, { retention: { maxEvents: 1 } });
+    const client = served.client();
+    await client.instances.create('Task', { title: 'Plan' }, { id: 'plan' });
+    served.engine.runner.prune();
+    const head = served.engine.events.head();
+    const fromStart = client.events.subscribe({ schema: 'Task' });
+    const messages = fromStart[Symbol.asyncIterator]();
+    const first = (await messages.next()).value as StreamMessage;
+    assert.ok(first.type === 'event' && first.event.cursor === head);
+    assert.deepEqual((await messages.next()).value, { type: 'ready', cursor: head });
+    fromStart.close();
+
+    const resumed = client.events.subscribe({ after: 1, reconnect: { initialMs: 1, maxMs: 1 } });
+    const expired = await refused(
+      (async () => {
+        for await (const _message of resumed) {
+          assert.fail('no message comes from before the floor');
+        }
+      })(),
+      410,
+      'cursor_expired'
+    );
+    assert.deepEqual([expired.floor, expired.head], [served.engine.events.floor(), head]);
+    assert.equal(resumed.closed, true);
+  });
 });
 
 describe('reconcile', () => {

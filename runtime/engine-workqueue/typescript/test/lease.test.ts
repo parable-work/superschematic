@@ -102,6 +102,42 @@ for (const driver of drivers) {
       assert.deepEqual(leaseOf(engine), { holder: 'wren', token: 3, acquiredAt: T0 + 0, renewedAt: T0 + 30000, expiresAt: T0 + 90000, active: false, expiries: 0, ended: null });
     });
 
+    test("a heartbeat neither rewrites nor loads a large field the value store holds: the job's row keeps its ref", () => {
+      // A value driver that counts its reads and writes, with no cache.
+      const stored = new Map<string, string>();
+      const counts = { reads: 0, writes: 0 };
+      const values = {
+        read: (hash: string) => {
+          counts.reads += 1;
+          return stored.get(hash);
+        },
+        write: (hash: string, json: string) => {
+          counts.writes += 1;
+          stored.set(hash, json);
+        },
+        remove: (hash: string) => {
+          stored.delete(hash);
+        },
+      };
+      const clock = new Clock(T0);
+      const engine = openTestEngine({ driver, clock: clock.now, values: { thresholdBytes: 1024, driver: values, cacheBytes: 0 } });
+      publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease' }, { name: 'Comments' }]));
+      const topic = 'build log '.repeat(200);
+      engine.instances.create(alice, 'Job', { title: 'Build', topic }, { id: 'j1' });
+      const row = () => engine.storage.get("SELECT data, value_refs FROM engine_instances WHERE id = 'j1'");
+      const before = row();
+      assert.equal(before?.value_refs, '["/topic"]');
+      assert.deepEqual(counts, { reads: 0, writes: 1 });
+      invoke(engine, worker, 'acquire');
+      for (let beat = 1; beat <= 3; beat += 1) {
+        clock.advance(10000);
+        invoke(engine, worker, 'heartbeat', {}, 'j1', 1);
+      }
+      assert.deepEqual(row(), before);
+      assert.deepEqual(counts, { reads: 0, writes: 1 });
+      assert.equal(engine.instances.get(alice, 'Job', 'j1')?.data.topic, topic);
+    });
+
     test('release ends the lease and advances the token, so the next acquire is two tokens on', () => {
       const { engine } = world();
       invoke(engine, worker, 'acquire');
@@ -824,6 +860,31 @@ for (const driver of drivers) {
       // There must still be a lease to direct.
       invoke(engine, worker, 'release', {}, 'j1', 1);
       assert.equal(veto(() => invoke(engine, worker, 'signal', { name: 'stop' })).reason, 'no lease is active, so there is no holder to direct');
+    });
+  });
+
+  describe(`Lease: a call that changes nothing writes nothing (${driver})`, () => {
+    // seqAndEvents is the job's sequence and how many events it has.
+    const seqAndEvents = (engine: Engine) => [
+      engine.instances.get(alice, 'Job', 'j1')?.seq,
+      engine.events.read(alice, { schema: 'Job', instanceId: 'j1', limit: 500 }).events.length,
+    ];
+
+    test('an expire that expires nothing, a directive sent already, an acknowledgement made already and a reset of no expiries append no event', () => {
+      const { engine } = world({ overridePermission: 'jobs.override', directPermission: 'jobs.direct' });
+      invoke(engine, worker, 'acquire');
+      invoke(engine, sender, 'direct', { name: 'cancel', dedupeKey: 'once' });
+      invoke(engine, worker, 'acknowledge', { ids: [1] }, 'j1', 1);
+      const before = seqAndEvents(engine);
+      assert.deepEqual(invoke(engine, other, 'expire'), { expired: false });
+      assert.deepEqual(invoke(engine, operator, 'expire', { holder: 'someone-else' }), { expired: false });
+      assert.deepEqual(invoke(engine, operator, 'expire', { holder: 'wren', notRenewedAfter: T0 - 1 }), { expired: false });
+      assert.deepEqual(invoke(engine, sender, 'direct', { name: 'cancel', dedupeKey: 'once' }), { id: 1, created: false });
+      assert.deepEqual(invoke(engine, worker, 'acknowledge', { ids: [1] }, 'j1', 1), {});
+      assert.deepEqual(invoke(engine, operator, 'resetExpiries'), { expiries: 0 });
+      assert.deepEqual(seqAndEvents(engine), before);
+      // An If-Match read before them still matches.
+      engine.instances.update(worker, 'Job', 'j1', { title: 'Same tag' }, { expectedSeq: before[0] as number });
     });
   });
 

@@ -88,6 +88,17 @@ export interface DeployableSettings {
   values?: { [key: string]: unknown };
 }
 
+/**
+ * How a UI shows one Workflow state: its label, the present-progressive form
+ * it shows while an instance is in the state, and a tone, what the state means
+ * to a reader.
+ */
+export interface DisplayState {
+  activeForm?: string;
+  label?: string;
+  tone?: 'muted' | 'active' | 'success' | 'warning' | 'danger';
+}
+
 export interface Document {
   comment?: string;
   description?: string;
@@ -136,6 +147,7 @@ export interface EnvValue {
 export interface EnvironmentDecl {
   dns?: DNSPlacement;
   domain?: string;
+  order?: number;
   parameters?: string[];
   settings?: DeployableSettings[];
   target?: string;
@@ -499,6 +511,7 @@ export interface TypeDef {
   database?: DatabaseDecl;
   denyUnknownFields?: boolean;
   description?: string;
+  display?: TypeDisplay;
   envVars?: boolean;
   environment?: EnvironmentDecl;
   extends?: string;
@@ -524,6 +537,22 @@ export interface TypeDef {
   versionGraph?: VersionGraphConfig;
   versioned?: boolean;
   versionedConfig?: VersionedConfig;
+}
+
+/**
+ * What a UI reads to render the instances of a type (@display): what to call
+ * one and many, which field is an instance's title, what a create button says,
+ * which fields summarize it in a list, and the labels of its Workflow's states
+ * and transitions.
+ */
+export interface TypeDisplay {
+  createLabel?: string;
+  noun?: string;
+  plural?: string;
+  states?: { [key: string]: DisplayState };
+  summaryFields?: string[];
+  titleField?: string;
+  transitions?: { [key: string]: { [key: string]: string } };
 }
 
 export interface TypeRef {

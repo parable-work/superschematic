@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -38,18 +39,41 @@ type fakeCloud struct {
 
 	// images holds each pushed image's digest by `<repository>:<tag>`;
 	// builds and jobs what RunBuild and EnsureJob were last given; runs
-	// the arguments of each job run.
-	images map[string]string
-	builds []BuildSpecRecord
-	jobs   map[string]gcp.JobSpec
-	runs   [][]string
+	// the arguments of each job run; stderr what each failed execution
+	// wrote to stderr, by its name, and stderrReads each read of it.
+	images      map[string]string
+	builds      []BuildSpecRecord
+	jobs        map[string]gcp.JobSpec
+	runs        [][]string
+	stderr      map[string][]string
+	stderrReads []stderrRead
 
 	// failRun fails the next job run whose arguments hold the string,
 	// and failBuild every build of an image that starts with the string.
-	failRun   map[string]string
-	failBuild map[string]string
+	// failWait fails the wait for the next job run, which the fake starts;
+	// failStderr fails each read of an execution's stderr.
+	failRun    map[string]fakeFailure
+	failBuild  map[string]string
+	failWait   error
+	failStderr error
+
+	// numbers holds each project's number.
+	numbers map[string]string
 
 	log *stacktest.FakeProvisioner
+}
+
+// fakeFailure is an execution that fails: Cloud Run's message, and the
+// lines its task wrote to stderr.
+type fakeFailure struct {
+	message string
+	stderr  []string
+}
+
+// stderrRead is a read of an execution's stderr.
+type stderrRead struct {
+	execution string
+	wait      time.Duration
 }
 
 // BuildSpecRecord is a build the fake ran.
@@ -69,8 +93,9 @@ func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
 		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{},
 		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{},
-		images: map[string]string{}, jobs: map[string]gcp.JobSpec{},
-		failRun: map[string]string{}, failBuild: map[string]string{},
+		images: map[string]string{}, jobs: map[string]gcp.JobSpec{}, stderr: map[string][]string{},
+		failRun: map[string]fakeFailure{}, failBuild: map[string]string{},
+		numbers: map[string]string{"acme-staging": "123456789012", "acme-prod": "210987654321"},
 	}
 }
 
@@ -131,13 +156,28 @@ func (c *fakeCloud) RunJob(_ context.Context, project, region, job string, args 
 	c.runs = append(c.runs, slices.Clone(args))
 	name := fmt.Sprintf("%s/executions/%d", key, len(c.runs))
 	c.record("cloud run job %s", strings.Join(args, " "))
-	for match, msg := range c.failRun {
+	if err := c.failWait; err != nil {
+		c.failWait = nil
+		return nil, fmt.Errorf("gcp: job %s: waiting for execution %s, which may still be running: %w", key, name, err)
+	}
+	for match, fail := range c.failRun {
 		if strings.Contains(strings.Join(args, " "), match) {
 			delete(c.failRun, match)
-			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: msg}, nil
+			c.stderr[name] = fail.stderr
+			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: fail.message}, nil
 		}
 	}
 	return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Succeeded: true}, nil
+}
+
+func (c *fakeCloud) ExecutionStderr(_ context.Context, run *gcp.JobRun, wait time.Duration) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stderrReads = append(c.stderrReads, stderrRead{run.Name, wait})
+	if c.failStderr != nil {
+		return nil, c.failStderr
+	}
+	return slices.Clone(c.stderr[run.Name]), nil
 }
 
 func (c *fakeCloud) change(format string, args ...any) {
@@ -160,6 +200,16 @@ func (c *fakeCloud) EnableServices(_ context.Context, project string, services [
 		}
 	}
 	return nil
+}
+
+func (c *fakeCloud) ProjectNumber(_ context.Context, project string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	number, ok := c.numbers[project]
+	if !ok {
+		return "", fmt.Errorf("project %s does not exist", project)
+	}
+	return number, nil
 }
 
 func (c *fakeCloud) EnsureBucket(_ context.Context, project, bucket, location string) (bool, error) {
@@ -438,8 +488,9 @@ func TestStores(t *testing.T) {
 
 // TestBootstrap bootstraps Staging's project twice: the first run enables
 // the APIs, creates the state bucket and key, applies the bootstrap graph
-// and creates each credential's secret; the second changes nothing and
-// applies the same graph.
+// and creates each credential's secret, and returns the project's number to
+// record beside project (D47); the second changes nothing, applies the
+// same graph and returns the same number.
 func TestBootstrap(t *testing.T) {
 	f := newDeployFixture(t, false)
 	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
@@ -451,8 +502,13 @@ func TestBootstrap(t *testing.T) {
 		Credentials: []registry.Credential{cred, cred},
 		Provisioner: f.prov, Dir: t.TempDir(),
 	}
-	if err := target.Bootstrap.Bootstrap(ctx, req); err != nil {
+	result, err := target.Bootstrap.Bootstrap(ctx, req)
+	if err != nil {
 		t.Fatal(err)
+	}
+	wantNumber := []registry.BootstrapValue{{Key: "projectNumber", Value: "123456789012", Beside: "project"}}
+	if result == nil || !slices.Equal(result.Values, wantNumber) {
+		t.Errorf("bootstrap returned %+v, want %+v", result, wantNumber)
 	}
 	first := f.cloud.Changes()
 	for _, want := range []string{
@@ -474,8 +530,12 @@ func TestBootstrap(t *testing.T) {
 	graph := f.prov.Rendered()
 	applied := f.prov.Calls()
 
-	if err := target.Bootstrap.Bootstrap(ctx, req); err != nil {
+	result, err = target.Bootstrap.Bootstrap(ctx, req)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result == nil || !slices.Equal(result.Values, wantNumber) {
+		t.Errorf("the second bootstrap returned %+v, want %+v", result, wantNumber)
 	}
 	if again := f.cloud.Changes(); len(again) != len(first) {
 		t.Errorf("the second bootstrap changed %v", again[len(first):])

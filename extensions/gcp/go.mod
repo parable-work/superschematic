@@ -7,12 +7,16 @@ require (
 	cloud.google.com/go/cloudbuild v1.34.0
 	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
+	cloud.google.com/go/logging v1.19.0
+	cloud.google.com/go/resourcemanager v1.17.0
 	cloud.google.com/go/run v1.23.0
 	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/serviceusage v1.16.0
 	cloud.google.com/go/storage v1.69.0
+	github.com/googleapis/gax-go/v2 v2.26.2
 	github.com/parable-work/superschematic v0.0.0
 	github.com/parable-work/superschematic/ir v0.0.0
+	google.golang.org/api v0.288.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.11
 )
@@ -40,7 +44,6 @@ require (
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.17 // indirect
-	github.com/googleapis/gax-go/v2 v2.26.2 // indirect
 	github.com/parable-work/superscalar/go v0.0.0-20260928143325-10cf493f485e // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
@@ -61,7 +64,6 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/api v0.288.0 // indirect
 	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260715232425-e75dac1f907d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260715232425-e75dac1f907d // indirect

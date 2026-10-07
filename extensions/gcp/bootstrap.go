@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -31,7 +32,11 @@ import (
 //  4. it creates each platform credential's secret directly, readable by
 //     `deployer` and `planner` only. Environments may share a credential,
 //     and the bootstrap graph of one would delete another's, so the secret
-//     is not in it.
+//     is not in it;
+//  5. it reads the project's number from Resource Manager and returns it
+//     as `projectNumber`, beside `project`, which the core records in the
+//     schema (D47): the generated CI's Workload Identity Federation names
+//     its provider by the number, which no other value gives.
 //
 // The network a calling server's Direct VPC egress needs is not here: it
 // is in the environment's graph, which only lowers it when an edge needs
@@ -41,7 +46,8 @@ import (
 // bootstrap's own (Service Usage, Resource Manager, IAM and its
 // credentials and token exchange for Workload Identity Federation,
 // Storage and KMS for the state, Artifact Registry for the images), Cloud
-// Build and Cloud Logging for the image builds, and Secret Manager.
+// Build and Cloud Logging for the image builds, Cloud Logging for the
+// migration job's errors too, and Secret Manager.
 var apiServices = []string{
 	"artifactregistry.googleapis.com",
 	"cloudbuild.googleapis.com",
@@ -85,8 +91,8 @@ func servicesFor(env *ir.ResolvedEnvironment) []string {
 // The roles of the two accounts that run the generated CI (section 11.3).
 var (
 	// deployerRoles let `deployer` apply every resource the gcp target
-	// emits, push images, run image builds and migration jobs, and enable
-	// APIs.
+	// emits, push images, run image builds and migration jobs, read a
+	// failed execution's stderr from Cloud Logging, and enable APIs.
 	deployerRoles = []string{
 		"roles/artifactregistry.writer",
 		"roles/certificatemanager.owner",
@@ -97,6 +103,7 @@ var (
 		"roles/dns.admin",
 		"roles/iam.serviceAccountAdmin",
 		"roles/iam.serviceAccountUser",
+		"roles/logging.viewer",
 		"roles/resourcemanager.projectIamAdmin",
 		"roles/run.admin",
 		"roles/secretmanager.admin",
@@ -177,8 +184,8 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, repository string) (*ir.R
 			return nil, fmt.Errorf("gcp: the service account id %s is %d characters, and GCP allows 30; name the stack with at most %d", id, len(id), 30-len(role)-1)
 		}
 	}
-	if len(stack)+len("-github") > 32 {
-		return nil, fmt.Errorf("gcp: the workload identity pool id %s-github is longer than GCP's 32 characters; name the stack with at most 25", stack)
+	if pool := workloadIdentityPool(env.Stack); len(pool) > 32 {
+		return nil, fmt.Errorf("gcp: the workload identity pool id %s is longer than GCP's 32 characters; name the stack with at most 25", pool)
 	}
 	var nodes []*ir.Resource
 	add := func(id, typ string, props map[string]any) {
@@ -259,14 +266,14 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, repository string) (*ir.R
 	if repository != "" {
 		add("github", TypeWorkloadIdentityPool, map[string]any{
 			"project":                v.project,
-			"workloadIdentityPoolId": stack + "-github",
+			"workloadIdentityPoolId": workloadIdentityPool(env.Stack),
 			"displayName":            "GitHub Actions",
 			"description":            fmt.Sprintf("The CI of %s", repository),
 		})
 		add("github.provider", TypeWorkloadIdentityProvider, map[string]any{
 			"project":                        v.project,
 			"workloadIdentityPoolId":         ir.Output{Resource: "github", Name: "workloadIdentityPoolId"},
-			"workloadIdentityPoolProviderId": "github",
+			"workloadIdentityPoolProviderId": workloadIdentityProvider,
 			"displayName":                    "GitHub",
 			"attributeMapping": map[string]any{
 				"google.subject":       "assertion.sub",
@@ -300,12 +307,13 @@ type bootstrapper struct{ ext Extension }
 
 var _ registry.Bootstrapper = bootstrapper{}
 
-// Bootstrap runs the four steps above for req's environment.
-func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapRequest) error {
+// Bootstrap runs the steps above for req's environment, and returns the
+// project's number for the core to record beside `project`.
+func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapRequest) (*registry.BootstrapResult, error) {
 	env := req.Environment
 	v, err := envValues(env)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	log := req.Log
 	if log == nil {
@@ -317,42 +325,57 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 	services := servicesFor(env)
 	logf("enable %d APIs on %s", len(services), v.project)
 	if err := cloud.EnableServices(ctx, v.project, services); err != nil {
-		return err
+		return nil, err
 	}
 
+	// Every call from here on may meet an API enabled moments ago.
+	retry := func(what string, do func() error) error { return untilEnabled(ctx, logf, what, do) }
+
 	bucket := stateBucket(v.project)
-	created, err := cloud.EnsureBucket(ctx, v.project, bucket, v.region)
-	if err != nil {
+	var created bool
+	err = retry("the state bucket", func() (err error) {
+		created, err = cloud.EnsureBucket(ctx, v.project, bucket, v.region)
 		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 	logf("state bucket gs://%s: %s", bucket, createdOrKept(created))
-	if created, err = cloud.EnsureKey(ctx, v.project, v.region, stateKeyRing, stateKey); err != nil {
+	err = retry("the state key", func() (err error) {
+		created, err = cloud.EnsureKey(ctx, v.project, v.region, stateKeyRing, stateKey)
 		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 	logf("state key %s: %s", stateKeyName(v), createdOrKept(created))
 
 	graph, err := BootstrapEnvironment(env, req.Repository)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if req.Repository == "" {
 		logf("no GitHub repository in the git remote: Workload Identity Federation is left out")
 	}
 	if req.Provisioner == nil || req.Dir == "" {
-		return fmt.Errorf("gcp: bootstrap needs the provisioner and a directory for its program")
+		return nil, fmt.Errorf("gcp: bootstrap needs the provisioner and a directory for its program")
 	}
 	dir := filepath.Join(req.Dir, "bootstrap")
 	if err := req.Provisioner.Render(graph, dir); err != nil {
-		return err
+		return nil, err
 	}
 	backend, err := stateStore(b).Backend(ctx, env)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logf("apply the bootstrap graph: %d nodes", len(graph.Resources.Resources))
-	if err := req.Provisioner.Apply(ctx, registry.ProvisionRequest{Environment: graph, Dir: dir, Backend: backend}, *graph.DeployOrder[0]); err != nil {
-		return err
+	err = retry("the bootstrap graph", func() error {
+		return req.Provisioner.Apply(ctx, registry.ProvisionRequest{Environment: graph, Dir: dir, Backend: backend}, *graph.DeployOrder[0])
+	})
+	if err != nil {
+		return nil, err
 	}
+	logf("bootstrap graph applied")
 
 	members := []string{accountMember(v, env.Stack, "deployer"), accountMember(v, env.Stack, "planner")}
 	seen := map[string]bool{}
@@ -361,16 +384,64 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 			continue
 		}
 		seen[c.Secret] = true
-		created, err := cloud.EnsureSecret(ctx, v.project, c.Secret)
+		err := retry("credential secret "+c.Secret, func() (err error) {
+			if created, err = cloud.EnsureSecret(ctx, v.project, c.Secret); err != nil {
+				return err
+			}
+			return cloud.GrantSecretAccess(ctx, v.project, c.Secret, members)
+		})
 		if err != nil {
-			return err
-		}
-		if err := cloud.GrantSecretAccess(ctx, v.project, c.Secret, members); err != nil {
-			return err
+			return nil, err
 		}
 		logf("credential secret %s: %s, readable by deployer and planner", c.Secret, createdOrKept(created))
 	}
-	return nil
+
+	var number string
+	err = retry("the project's number", func() (err error) {
+		number, err = cloud.ProjectNumber(ctx, v.project)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	logf("project %s is number %s", v.project, number)
+	return &registry.BootstrapResult{Values: []registry.BootstrapValue{{Key: "projectNumber", Value: number, Beside: "project"}}}, nil
+}
+
+// apiPropagation bounds how long bootstrap retries a call that an API it
+// has just enabled refuses, and apiRetry is the wait between tries.
+var apiPropagation, apiRetry = 5 * time.Minute, 15 * time.Second
+
+// untilEnabled runs do until it succeeds, fails for another reason than an
+// API that is not enabled, or apiPropagation passes. Enabling an API
+// finishes before every Google server sees it, and for some minutes the
+// API may refuse a call as one the project has not enabled: the first
+// bootstrap of a fresh project met it from Cloud KMS, both on creating
+// the key ring and, through the provisioner, on reading the key's IAM
+// policy.
+func untilEnabled(ctx context.Context, logf func(string, ...any), what string, do func() error) error {
+	deadline := time.Now().Add(apiPropagation)
+	for {
+		err := do()
+		if err == nil || !serviceDisabled(err) || time.Now().After(deadline) {
+			return err
+		}
+		logf("%s: an API enabled moments ago refuses calls yet; retry in %s", what, apiRetry)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(apiRetry):
+		}
+	}
+}
+
+// serviceDisabled reports whether err is Google's refusal of a call to an
+// API the project has not enabled, by the text both the client libraries'
+// and the provisioner's errors carry: the 403's message, or its
+// SERVICE_DISABLED reason.
+func serviceDisabled(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "SERVICE_DISABLED") || strings.Contains(msg, "before or it is disabled")
 }
 
 func createdOrKept(created bool) string {

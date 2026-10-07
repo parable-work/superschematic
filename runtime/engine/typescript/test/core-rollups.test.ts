@@ -1,5 +1,6 @@
 // Rollups, the core's values derived from linked instances: every
 // function over the instances that point at one through a Links link,
+// latest's order by creation,
 // computed at each read with no event on the instance read, the bound of
 // 500 linked instances, reads as the caller, the Workflow gate, all and
 // any limited to outcomes, the config rules at define and publish, a
@@ -195,6 +196,36 @@ for (const driver of drivers) {
       });
     });
 
+    test('latest is a field\'s value on the linked instance created last, the greater id on a tie, and absent when that one holds none', () => {
+      let now = 100;
+      const engine = open({ clock: () => now });
+      publish(engine, tasks());
+      publish(
+        engine,
+        projects({ lastKind: rollup('latest', { field: 'kind' }), lastNotes: rollup('latest', { field: 'notes' }), lastStatus: rollup('latest', { field: 'status' }) })
+      );
+      engine.instances.create(alice, 'Project', { title: 'p1' }, { id: 'p1' });
+      assert.deepEqual(rollupsOf(engine, 'p1'), {}, 'over no instance it has no value');
+      task(engine, 't2', { kind: 'bug', notes: { size: 1 } }, 'p1');
+      task(engine, 't1', { kind: 'feature' }, 'p1');
+      // t1 and t2 were created at once: the greater id is the latest.
+      assert.deepEqual(rollupsOf(engine, 'p1'), { lastKind: 'bug', lastNotes: { size: 1 }, lastStatus: 'todo' });
+      now = 200;
+      task(engine, 't0', { notes: [1, 2] }, 'p1');
+      assert.deepEqual(rollupsOf(engine, 'p1'), { lastNotes: [1, 2], lastStatus: 'todo' }, 'the latest holds no kind, so lastKind has no value');
+      move(engine, 'Task', 't0', 'doing');
+      assert.equal((rollupsOf(engine, 'p1') as { lastStatus: string }).lastStatus, 'doing');
+      // Creation orders, not linking: an older instance linked now is not the latest.
+      now = 50;
+      task(engine, 'old', { kind: 'feature' });
+      now = 300;
+      engine.instances.invoke(alice, 'Task', 'old', 'link', { name: 'project', id: 'p1' });
+      assert.deepEqual(rollupsOf(engine, 'p1'), { lastNotes: [1, 2], lastStatus: 'doing' });
+      // The latest gone, the one created before it is.
+      engine.instances.delete(alice, 'Task', 't0');
+      assert.deepEqual(rollupsOf(engine, 'p1'), { lastKind: 'bug', lastNotes: { size: 1 }, lastStatus: 'todo' });
+    });
+
     test("a linked instance's change shows at the next read, with no event on the instance read", () => {
       const engine = world();
       const before = engine.instances.get(alice, 'Project', 'p1');
@@ -381,11 +412,18 @@ for (const driver of drivers) {
         refusal({ finished: { schema: 'Plain', link: 'project', function: 'all' } }),
         "rollup finished: all reads the terminal states of Plain's Workflow, which it does not compose"
       );
+      assert.equal(refusal({ last: rollup('latest', { field: 'missing' }) }), 'rollup last: Task has no field missing; latest takes a field of its type, or status when it composes Workflow');
+      assert.equal(
+        refusal({ last: { schema: 'Plain', link: 'project', function: 'latest', field: 'status' } }),
+        'rollup last: Plain has no field status; latest takes a field of its type, or status when it composes Workflow'
+      );
       // The core meta-schema holds the config to the declaration's configSchema first.
       const shape = (rollups: unknown) => thrown(() => engine.schemas.define(alice, projects(rollups as Record<string, unknown>)), SchemaDocumentError).issues;
       assert.ok(shape({}).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups'));
       assert.ok(shape({ Tasks: rollup('count') }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups'));
       assert.ok(shape({ total: rollup('sum') }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups/total'));
+      assert.ok(shape({ last: rollup('latest') }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups/last'));
+      assert.ok(shape({ last: rollup('latest', { field: 'kind', gatedStates: ['done'] }) }).some((issue) => issue.path.startsWith('/types/Project/behaviors/1/config/rollups/last')));
       assert.ok(shape({ tasks: rollup('count', { field: 'title' }) }).some((issue) => issue.path === '/types/Project/behaviors/1/config/rollups/tasks'));
       assert.ok(shape({ tasks: rollup('count', { gatedStates: ['done'] }) }).some((issue) => issue.path.startsWith('/types/Project/behaviors/1/config/rollups/tasks')));
       assert.ok(shape({ tasks: rollup('count', { outcomes: ['success'] }) }).some((issue) => issue.path.startsWith('/types/Project/behaviors/1/config/rollups/tasks')));

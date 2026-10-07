@@ -111,6 +111,10 @@ type ORMOutput struct {
 	// version-graph binding, relative to the output directory. Empty omits
 	// the directive; it is only written when the schema has a graph.
 	VersionGraphReplacePath string
+
+	// Pins are the runtime modules go.mod takes from the module proxy, at
+	// the release that generates it (SetReleasePins).
+	Pins naming.Pins
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -581,6 +585,19 @@ func SetReplacePaths(output *ORMOutput, paths naming.LocalPaths, outputDir strin
 		}
 	}
 	return nil
+}
+
+// SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
+// modules the ORM reaches: the scalar library, the schema IR and, when the
+// schema has a version graph, the version-graph binding. go.mod requires
+// each pinned module at its pin and replaces every version of it with that
+// pin.
+func SetReleasePins(output *ORMOutput, pins naming.Pins) {
+	modules := []string{output.Naming.ScalarGoModule, output.Naming.SchemaIRGoModule}
+	if len(output.VersionGraphs) > 0 {
+		modules = append(modules, output.Naming.VersionGraphGoModule)
+	}
+	output.Pins = pins.Of(modules...)
 }
 
 // scalarLookup carries per-scalar naming and trait info for field mapping.

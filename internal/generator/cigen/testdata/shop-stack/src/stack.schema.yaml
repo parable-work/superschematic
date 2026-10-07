@@ -1,0 +1,61 @@
+# The shop stack over the services of ../../../../stackgen/testdata/services,
+# on the core's local target and stacktest's fake target: Dev runs locally,
+# Beta and Live are cloud environments with a CI identity, and Review
+# extends Beta with a parameter. The names sort in the order the stack
+# deploys them, so the workflow is the same whether the environments come
+# in name or in declaration order.
+kind: Stack
+types:
+  Shop:
+    name: Shop
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: shop-api, kind: API }
+        - { name: shop-orders, kind: API }
+      expose:
+        - service: { name: shop-api, kind: API }
+  Orders:
+    name: Orders
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: shop-orders, kind: API }
+  Dev:
+    name: Dev
+    role: EmbeddedStruct
+    environment:
+      target: local
+      settings:
+        - of: { deployable: Orders }
+          env: { FULFILLMENT_REGION: { value: us } }
+  Beta:
+    name: Beta
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-beta, projectNumber: "123456789012", region: us-east1 }
+      settings:
+        - of: { deployable: Orders }
+          env: { FULFILLMENT_REGION: { value: us } }
+  Live:
+    name: Live
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-live, projectNumber: "210987654321", region: us-east1, production: true }
+      settings:
+        - of: { service: { name: shop-db, kind: DB } }
+          values: { tier: large, highAvailability: true }
+        - of: { deployable: Orders }
+          env: { FULFILLMENT_REGION: { value: us } }
+  Review:
+    name: Review
+    role: EmbeddedStruct
+    extends: Beta
+    rawHeritage: { extends: Beta }
+    environment:
+      parameters: [pr]
+      settings:
+        - of: { service: { name: shop-api, kind: API } }
+          env: { PREVIEW_ID: { parameter: pr } }

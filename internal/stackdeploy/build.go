@@ -33,7 +33,8 @@ type Sources struct {
 	OutputRoot string
 
 	// RepositoryRoot is every image's build context: the repository root,
-	// the parent of the schemas root.
+	// the parent of the schemas root, or the naming file's [paths]
+	// build_context.
 	RepositoryRoot string
 }
 

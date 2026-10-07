@@ -8,12 +8,14 @@ plus what it holds for the instances inside it; the own part is kept
 apart, with the lease token it was made under, so settling releases
 exactly that.
 
-A meter's limit is the config's limit, or the instance's limitField, or
-the one setLimit set; with none, the meter counts without a limit of its
-own. A reservation fits while used plus reserved plus the amount is
-within the limit. What a claim reserves of a meter is the instance's
-reserveField when it holds a positive integer, else the config's reserve,
-as Lease's maxHoldField falls back to maxHoldMs.
+A meter's limit is the instance's limitField while it holds a count, else
+the config's limit; without limitField, the one setLimit set, else the
+config's limit, as reserveField falls back to reserve. With none, the
+meter counts without a limit of its own. A reservation fits while used
+plus reserved plus the amount is within the limit. What a claim
+reserves of a meter is the instance's reserveField when it holds a
+positive integer, else the config's reserve, as Lease's maxHoldField
+falls back to maxHoldMs.
 
 Scopes. A meter may name a scope: a link of the type's Links config whose
 target encloses the instance, a pool its work draws on, say. The target's
@@ -89,8 +91,9 @@ not_leased, scope_moved, scope_reserved, below_committed,
 exceeds_reservation, not_configured), but a permission the caller lacks,
 which is forbidden.
 
-configChange: a meter cannot be removed, since instances and scopes hold
-it; limits, reservations, scopes, resets and the rest may change. A
+configChange: a meter cannot be removed while the schema has instances,
+since instances and scopes hold it, and can with none; limits,
+reservations, scopes, resets and the rest may change. A
 reservation is always released where it was held. Budget can be added to
 a schema that has instances, whose rows start empty, and cannot be
 removed from one: their budgets, and what scopes hold for them, would
@@ -277,13 +280,22 @@ function usedNow(view: InstanceView<BudgetConfig>, spec: BudgetMeter, meter: Met
   return rolled(view, spec, meter) ? 0 : meter.used;
 }
 
-/** limitOf is the one rule for a meter's limit on an instance: its limitField, setLimit's, or the config's; null for none. */
+/**
+ * limitOf is the one rule for a meter's limit on an instance: its
+ * limitField while it holds a count, else the config's; without
+ * limitField, setLimit's, else the config's; null for none.
+ */
 function limitOf(view: InstanceView<BudgetConfig>, spec: BudgetMeter, meter: Meter): number | null {
   if (spec.limitField !== undefined) {
-    const value = view.data[spec.limitField];
-    return isCount(value) ? value : null;
+    return fieldLimit(spec, view.data[spec.limitField]);
   }
   return meter.limitValue ?? spec.limit ?? null;
+}
+
+// fieldLimit is the limit of a meter with limitField when the field
+// holds value: the value when it is a count, else the config's limit.
+function fieldLimit(spec: BudgetMeter, value: unknown): number | null {
+  return isCount(value) ? value : (spec.limit ?? null);
 }
 
 function recordOf(view: InstanceView<BudgetConfig>, spec: BudgetMeter, meter: Meter): MeterRecord {
@@ -851,12 +863,16 @@ export const budget = defineBehavior<BudgetConfig>({
     };
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before === undefined) {
       return undefined;
     }
     if (after === undefined) {
       return 'the budgets its instances hold, and what enclosing scopes hold for them, would stay behind';
+    }
+    // No instance holds a meter, nor a scope one for an instance.
+    if (!change.instances) {
+      return undefined;
     }
     for (const name of Object.keys(before.meters)) {
       if (own(after.meters, name) === undefined) {
@@ -921,8 +937,9 @@ export const budget = defineBehavior<BudgetConfig>({
       return undefined;
     }
     // limitField changes as a limit does: with limitPermission, and never
-    // below what the instance has used and reserved. setLimit's own
-    // update() was asked already.
+    // below what the instance has used and reserved, the config's limit
+    // counting for a field the change empties. setLimit's own update() was
+    // asked already.
     if (request.kind === 'update' && request.caller !== NAME) {
       for (const [meter, spec] of Object.entries(view.config.meters)) {
         const field = spec.limitField;
@@ -936,10 +953,10 @@ export const budget = defineBehavior<BudgetConfig>({
         if (!view.can(permission)) {
           throw forbidden(view, `change ${field}, the limit of meter ${meter}, of`, permission);
         }
-        const limit = request.after[field];
+        const limit = fieldLimit(spec, request.after[field]);
         const row = rowOf(view, meter);
         const committed = usedNow(view, spec, row) + row.reserved;
-        if (isCount(limit) && limit < committed) {
+        if (limit !== null && limit < committed) {
           return { reason: `meter ${meter} has ${committed} used and reserved, more than the limit ${limit}`, code: 'below_committed', details: { meter, committed } };
         }
       }
@@ -1051,6 +1068,9 @@ export const budget = defineBehavior<BudgetConfig>({
       if (released > 0) {
         hold(context, meter, inner, held - released);
         release(context, meter, released, 0);
+      } else {
+        // Nothing held here is the inner instance's to release.
+        context.unchanged();
       }
       return { released };
     },

@@ -226,6 +226,22 @@ for (const driver of drivers) {
       );
     });
 
+    test('with no instance, field, by and each type may change', () => {
+      const engine = openTestEngine({ driver });
+      const document = steps();
+      publish(engine, document);
+      const next = clone(document);
+      delete variantsOf(next).types.review;
+      variantsOf(next).types.verify = 'ReviewResult';
+      variantsOf(next).by = 'title';
+      publish(engine, next);
+      engine.instances.create(alice, 'Step', { title: 'verify', kind: 'note', result: { approved: true } }, { id: 's1' });
+      assert.match(
+        thrown(() => engine.schemas.define(alice, document as unknown as Record<string, unknown>), IncompatibleChangeError).message,
+        /field and by stay result and title/
+      );
+    });
+
     test('a type it checks is held to the compatibility rule as a type a field reaches, while both versions check it; a type nothing reaches stays free', () => {
       const engine = openTestEngine({ driver });
       const document = steps();

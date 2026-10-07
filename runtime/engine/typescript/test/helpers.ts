@@ -127,6 +127,20 @@ export function documentsDocument(): Record<string, unknown> {
 }
 
 /**
+ * ticketsDocument is the General schema-file document the core binary
+ * loads with no extension linked (fixture-display-json, which
+ * `superschematic format --to=json` wrote from its TypeScript twin): its
+ * Ticket type composes Workflow and Comments and declares @display over
+ * its fields, its states and its transitions, and its fields' titles and
+ * icons.
+ */
+export function ticketsDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-display-json/src/ticket.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}
+
+/**
  * tasksDocument is the General schema-file document the core binary loads
  * with no extension linked beside documentsDocument (make cli-smoke,
  * fixture-cross-instance-json): its Task type composes Workflow,

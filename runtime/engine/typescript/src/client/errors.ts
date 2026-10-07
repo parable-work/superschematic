@@ -55,6 +55,16 @@ export class EngineProblem extends Error {
   readonly issues: readonly ProblemIssue[];
   /** `details.changes` of an `incompatible_change`; empty otherwise. */
   readonly changes: readonly ProblemChange[];
+  /** `details.fields` of a `conflict` over unique fields, the fields another instance holds the values of; empty otherwise. */
+  readonly fields: readonly string[];
+  /**
+   * `details.floor` of a `cursor_expired` (410): the earliest cursor a read
+   * of the namespace may start from, retention having pruned the events
+   * before it; undefined otherwise.
+   */
+  readonly floor: number | undefined;
+  /** `details.head` of a `cursor_expired`: the log's last cursor, to start again from; undefined otherwise. */
+  readonly head: number | undefined;
   /** Seconds to wait before trying again, from `Retry-After` (429). */
   readonly retryAfter: number | undefined;
   /** The document as the engine sent it; a document of `about:blank` built from the status when the answer was not one. */
@@ -71,6 +81,9 @@ export class EngineProblem extends Error {
     this.details = problem.details;
     this.issues = issuesOf(problem.details);
     this.changes = changesOf(problem.details);
+    this.fields = fieldsOf(problem.details);
+    this.floor = numberOf(problem.details, 'floor');
+    this.head = numberOf(problem.details, 'head');
     this.retryAfter = retryAfter;
     this.problem = problem;
   }
@@ -182,6 +195,18 @@ function changesOf(details: unknown): ProblemChange[] {
     const { path, message } = change as Record<string, unknown>;
     return { path: typeof path === 'string' ? path : '', message: typeof message === 'string' ? message : '' };
   });
+}
+
+function fieldsOf(details: unknown): string[] {
+  if (!isObject(details) || !Array.isArray((details as Record<string, unknown>).fields)) {
+    return [];
+  }
+  return ((details as Record<string, unknown>).fields as unknown[]).filter((field): field is string => typeof field === 'string');
+}
+
+function numberOf(details: unknown, key: string): number | undefined {
+  const value = isObject(details) ? (details as Record<string, unknown>)[key] : undefined;
+  return typeof value === 'number' ? value : undefined;
 }
 
 function isObject(value: unknown): value is object {

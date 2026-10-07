@@ -147,6 +147,13 @@ not yet acknowledged, and `heartbeat({ acknowledge: ids })` acknowledges
 the ones handled in the same write. A failed attempt's result carries its
 class's `hint`, which can steer the next attempt.
 
+A large result, a field whose JSON is longer than 64 KiB that
+`recordAttempt` keeps or the worker writes, is stored once in the
+engine's value store, and the job's row and events keep a ref to it, so
+heartbeats and the other writes under the lease never rewrite it. A
+dashboard that lists jobs passes `valueRefs` to receive the refs rather
+than the results ([The engine](/superschematic/guides/engine/#instances)).
+
 A refusal carries a code to branch on. A worker whose lease is gone gets
 409 `vetoed` with `details.behavior` `Lease` and `details.code`
 `token_stale` (another lease replaced it) or `lapsed` (it ran out), and
@@ -263,9 +270,9 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 
 | | |
 | --- | --- |
-| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission` |
+| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`[{ revised: { link }, name, data? }]`) |
 | Precondition | `{ token }`: `preconditions: { Lease: { token } }`, or the `Preconditions` header over HTTP |
-| Field | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }` |
+| Field | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }`; a list filters on `lease.holder`, null for a free instance |
 | Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder, notRenewedAfter? })` |
 | Schedule | `expire`, every `sweepMs`, on the runner |
 | Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, Queue's `refresh`, and principals with `overridePermission` |
@@ -302,6 +309,19 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   heartbeat's own `acknowledge`, stops them in the same write. A
   `dedupeKey` sends a directive once per lease, so a sender that fires
   on every change does not queue it twice. They end with the lease.
+- **Tell the holder a linked target moved.** `directOn` sends a
+  directive when the target of one of the type's links gains a revision
+  or a release, as `Reactions`' `revised` hears it: with
+  `{ "revised": { "link": "plan" }, "name": "rebase" }`, the holder of
+  each step pinned to an earlier revision of its plan hears `rebase`,
+  its `data.revised` saying which plan and which revision. The runner
+  sends it with `direct`, as its principal, which needs
+  `directPermission`, once per lease and move. A step with no lease
+  hears nothing, and nothing waits for its next holder, who takes it
+  after the move.
+- **List by holder.** `where: { "lease.holder": "worker-1" }` lists the
+  instances whose lease worker-1 holds, a lapsed one until its expiry is
+  applied, and `null` the free ones: what a worker reads at a restart.
 - **A gone holder.** `expireHolder` expires every lease one principal
   holds and returns the ids; `notRenewedAfter` spares a lease renewed
   after a time, whose own heartbeats show it alive.
@@ -332,14 +352,16 @@ One principal the instance is assigned to, or none.
 | | |
 | --- | --- |
 | Config | `permission`, optional |
-| Field | `assignee`, the principal's subject |
+| Field | `assignee`, the principal's subject; a list filters on it, null for the unassigned |
 | Operations | `assign({ to })`, `unassign()` |
 | Guard | while assigned, a `Lease.acquire` or `Queue.claim` by anyone but the assignee is `vetoed` (`assigned_to_another`) |
 
 A principal may assign an unassigned instance to itself and unassign
 itself; every other move needs `permission`. `claimNext` skips work
 assigned to someone else, so in the test above a worker never claims the
-job assigned to another, whatever its priority.
+job assigned to another, whatever its priority. A list of my work, or of
+work no one has, filters on the assignee:
+`where: { "assignee": [null, "worker-1"] }`.
 
 ## Queue
 
@@ -348,14 +370,14 @@ takes its lease and moves its status.
 
 | | |
 | --- | --- |
-| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, pinned `Links` links |
+| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, `Links` links pinned to a revision or a release |
 | Operations | `claim({ ttlMs? })`, `refresh()`, the schema-level `claimNext({ match?, assignedOnly?, ttlMs? })`, which returns `{ claimed }`, a claim or null, and the schema-level, read-only `countClaimable({ match?, assignedOnly? })`, which returns `{ count }` |
 | Guard | `Lease.acquire` other than through a claim is `vetoed` (`claim_required`), so a claimable instance's lease is taken only by claiming it |
 
 `claim` expires a lapsed lease first, then checks the status is one of
 `claim.from`, that no `Dependencies` blocker holds the instance up, and
-that no link `excludeStale` names is pinned to a revision its target has
-moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
+that no link `excludeStale` names is pinned to a revision or a release its
+target has moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
 transitions to `claim.to`. A refusal at any step leaves nothing behind.
 
 A claim waits on blockers; a plain `transition` to `claim.to` does not,
@@ -369,7 +391,7 @@ dependent's `satisfiedBy` lists, a success by default
 `claimNext` tries candidates highest priority first (an instance with no
 priority last), then oldest, then by id, skipping work that is blocked,
 assigned to another principal, at `maxExpiries`, exhausted by `Retries`,
-pinned to a superseded revision or over its `Budget`, and claims the first that succeeds; a claim
+pinned to a superseded revision or release or over its `Budget`, and claims the first that succeeds; a claim
 refused to this caller (`vetoed`, `conflict` or `forbidden`) passes to
 the next. Calls are synchronous and the engine writes from one process,
 so two claims never interleave.
@@ -388,7 +410,9 @@ so two claims never interleave.
 - **Outdated work is not tried.** With `excludeStale: ["spec"]` and a
   pinned `spec` link, a job whose spec has a newer revision than the one
   it pins is out of the candidates, and `claim` refuses it, until it is
-  linked to the spec again. A `revised` rule of `Reactions` can send it
+  linked to the spec again. A link pinned to a release (`pinned:
+  "release"`, to a schema that composes `Branches`) keeps its job out
+  the same way once the target is released again. A `revised` rule of `Reactions` can send it
   back to review ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
 - **Your own work.** `assignedOnly: true` takes only work assigned to
   the caller.
@@ -514,12 +538,13 @@ the enclosing scopes its `scope` link points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, by name): each `limit` or `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
+| Config | `meters` (required, by name): each `limit` and `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
 | Field | `budget`: by meter, `{ used, reserved, limit, remaining }` |
 | Operations | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, and the scope side, `reserveFor`, `settleFor` and `recordUsageFor` |
 
 - A claim reserves each meter's amount, the instance's `reserveField`
-  or else `reserve`, and is refused when it does not fit (`over_limit`).
+  or else `reserve`, and is refused when it does not fit (`over_limit`)
+  in the meter's limit, the instance's `limitField` or else `limit`.
   `checkReserve` says whether it would fit, without reserving, and which
   values of each scope its answer turns on; Queue copies it, so
   `claimNext` does not try work over its budget.
@@ -543,7 +568,7 @@ once.
 | | |
 | --- | --- |
 | Config | `classes` (required: `{ attempts, hint? }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `limitsPermission`, `keepBest`, `stuckAfter`, `resultField`, `from`, `permission` |
-| Field | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
+| Field | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }`; a list filters on `retries.exhausted` |
 | Operation | `recordAttempt({ failure?, score?, result?, signature?, predicates?, detail? })`, which returns the class's `hint` |
 | Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` (`exhausted`); `limitsField` changes only with `limitsPermission`, and never by the lease holder (`limits_fixed`) |
 

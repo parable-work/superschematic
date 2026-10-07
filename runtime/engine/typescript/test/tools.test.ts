@@ -18,6 +18,8 @@ import {
   type EngineOptions,
   type Principal,
   type ToolDefinition,
+  type ToolFilter,
+  type ToolSummary,
 } from '../dist/index.js';
 import { counterDeclaration, flagDeclaration, hold, holdDeclaration, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown, track } from './helpers.ts';
@@ -84,11 +86,17 @@ describe('the describe document', () => {
     );
     assert.deepEqual(params, {
       create: [['data', 'id'], ['data']],
-      get: [['id'], ['id']],
-      list: [['cursor', 'limit'], []],
+      get: [['id', 'valueRefs'], ['id']],
+      list: [['cursor', 'limit', 'valueRefs', 'where'], []],
       update: [['expectedSeq', 'id', 'patch'], ['id', 'patch']],
       delete: [['expectedSeq', 'id'], ['id']],
     });
+    // where takes the own fields that hold a string, a number or a boolean,
+    // each a value, null for none, or a list of them; lines is a list.
+    const where = (operationOf(engine, 'Order', 'list').params.properties as Record<string, any>).where;
+    assert.deepEqual(Object.keys(where.properties), ['title', 'quantity', 'status']);
+    assert.deepEqual(where.properties.status.anyOf[0], { description: 'A OrderStatus value', enum: ['open', 'shipped', null], type: ['string', 'null'] });
+    assert.deepEqual(where.properties.status.anyOf[1], { type: 'array', items: where.properties.status.anyOf[0], minItems: 1, maxItems: 100 });
     // A patch takes any of the fields, nested objects' included.
     const patch = (operationOf(engine, 'Order', 'update').params.properties as Record<string, any>).patch;
     assert.equal(patch.required, undefined);
@@ -163,7 +171,7 @@ describe('the describe document', () => {
       [
         ['Constants', []],
         ['Variants', []],
-        ['Links', ['no_revision', 'required_link', 'required_target']],
+        ['Links', ['no_revision', 'no_release', 'required_link', 'required_target']],
         ['test.Hold', ['stale', 'required', 'refused']],
       ]
     );
@@ -248,6 +256,11 @@ describe('the tools document', () => {
         ['engine.defineSchema', 'define_schema', 'engine', 'defineSchema'],
         ['engine.listBehaviors', 'list_behaviors', 'engine', 'listBehaviors'],
         ['engine.describeBehavior', 'describe_behavior', 'engine', 'describeBehavior'],
+        ['engine.getValue', 'get_value', 'engine', 'getValue'],
+        ['engine.listNamespaces', 'list_namespaces', 'engine', 'listNamespaces'],
+        ['engine.createNamespace', 'create_namespace', 'engine', 'createNamespace'],
+        ['engine.archiveNamespace', 'archive_namespace', 'engine', 'archiveNamespace'],
+        ['engine.unarchiveNamespace', 'unarchive_namespace', 'engine', 'unarchiveNamespace'],
         ['item.create', 'item_create', 'item', 'create'],
         ['item.get', 'item_get', 'item', 'get'],
         ['item.list', 'item_list', 'item', 'list'],
@@ -331,15 +344,58 @@ describe('the tools document', () => {
     const tools = engine.tools.manifest(reader).tools;
     assert.deepEqual(
       tools.filter((entry) => !entry.mcp.hidden).map((entry) => entry.name),
-      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'item.get', 'item.list', 'item.history']
+      ['engine.listSchemas', 'engine.describeSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue', 'item.get', 'item.list', 'item.history']
     );
     assert.equal(
       (tool(engine, 'item.increment', reader).mcp as { hiddenReason: string }).hiddenReason,
       'the access policy refuses reader write on Item (increment)'
     );
+    // define_schema and the namespace tools ask the listing question their
+    // calls would answer: the policy refuses reader define and manage.
+    assert.equal((tool(engine, 'engine.defineSchema', reader).mcp as { hiddenReason: string }).hiddenReason, 'the access policy refuses reader define in namespace default');
+    assert.equal(
+      (tool(engine, 'engine.archiveNamespace', reader).mcp as { hiddenReason: string }).hiddenReason,
+      'the access policy refuses reader manage (archive) of namespaces'
+    );
+    // A hidden engine tool can still be called; the call asks its own question.
+    assert.equal(thrown(() => engine.tools.call(reader, 'define_schema', { document: schemaDocument('Other', []) }), EngineError).code, 'forbidden');
     assert.equal((tool(engine, 'item.create', reader).mcp as { hiddenReason: string }).hiddenReason, 'the access policy refuses reader write on Item');
     assert.ok(!tools.some((entry) => entry.name.startsWith('secret.')));
     assert.ok(tool(engine, 'secret.create', alice));
+  });
+
+  test("a mount's filter narrows a caller's tools: hidden with its reason, and its call is a tool the namespace does not have", () => {
+    const engine = openBehaviorEngine({ policy });
+    publishItem(engine, [{ name: 'test.Counter' }]);
+    publish(engine, schemaDocument('Other', [{ name: 'code', typeRef: { name: 'string' } }]));
+    const seen: ToolSummary[] = [];
+    // An agent's session: Item's operations alone, and nothing that writes but increment.
+    const filter: ToolFilter = (principal, summary) => {
+      seen.push(summary);
+      return principal.subject !== 'agent' || (summary.schema === 'Item' && (!summary.writes || summary.operation === 'increment'));
+    };
+    const agent: Principal = { subject: 'agent', permissions: ['read', 'write'] };
+    const visible = engine.tools
+      .manifest(agent, { filter })
+      .tools.filter((entry) => !entry.mcp.hidden)
+      .map((entry) => entry.name);
+    assert.deepEqual(visible, ['item.get', 'item.list', 'item.increment', 'item.history']);
+    assert.equal(
+      (engine.tools.manifest(agent, { filter }).tools.find((entry) => entry.name === 'other.get')?.mcp as { hiddenReason: string }).hiddenReason,
+      "this mount's tool filter leaves it out of agent's tools"
+    );
+    assert.deepEqual(
+      seen.find((summary) => summary.name === 'item.increment'),
+      { handle: 'item_increment', name: 'item.increment', schema: 'Item', operation: 'increment', behavior: 'test.Counter', writes: true }
+    );
+    assert.deepEqual(seen.find((summary) => summary.name === 'engine.listSchemas'), { handle: 'list_schemas', name: 'engine.listSchemas', operation: 'listSchemas', writes: false });
+    engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
+    assert.deepEqual(engine.tools.call(agent, 'item_increment', { id: 'i1' }, { filter }), { count: 1 });
+    assert.ok(thrown(() => engine.tools.call(agent, 'item_create', { data: { title: 'Desk' } }, { filter }), UnknownToolError));
+    assert.ok(thrown(() => engine.tools.call(agent, 'list_schemas', {}, { filter }), UnknownToolError));
+    // Another caller through the same filter keeps every tool, and with no filter the agent does too.
+    assert.ok(engine.tools.manifest(alice, { filter }).tools.every((entry) => !entry.mcp.hidden));
+    assert.equal((engine.tools.call(agent, 'list_schemas', {}) as unknown[]).length, 2);
   });
 
   test('lists no tool of a schema whose behaviors the engine cannot run', () => {
@@ -351,7 +407,7 @@ describe('the tools document', () => {
     publish(engine, orderDocument());
     assert.deepEqual(
       engine.tools.manifest(alice).tools.map((entry) => entry.namespace),
-      ['engine', 'engine', 'engine', 'engine', 'engine', 'order', 'order', 'order', 'order', 'order']
+      [...Array.from({ length: 10 }, () => 'engine'), 'order', 'order', 'order', 'order', 'order']
     );
   });
 });
@@ -369,6 +425,11 @@ describe('invocation policies', () => {
       'engine.defineSchema': 'ask',
       'engine.listBehaviors': 'auto',
       'engine.describeBehavior': 'auto',
+      'engine.getValue': 'auto',
+      'engine.listNamespaces': 'auto',
+      'engine.createNamespace': 'auto',
+      'engine.archiveNamespace': 'auto',
+      'engine.unarchiveNamespace': 'auto',
       'item.create': 'auto',
       'item.get': 'auto',
       'item.list': 'auto',
@@ -407,6 +468,11 @@ describe('invocation policies', () => {
         ['engine.defineSchema', 'on-write'],
         ['engine.listBehaviors', 'on-write'],
         ['engine.describeBehavior', 'on-write'],
+        ['engine.getValue', 'on-write'],
+        ['engine.listNamespaces', 'on-write'],
+        ['engine.createNamespace', 'on-write'],
+        ['engine.archiveNamespace', 'on-write'],
+        ['engine.unarchiveNamespace', 'on-write'],
         ['item.create', 'on-write'],
         ['item.get', 'never'],
         ['item.list', 'never'],
@@ -464,6 +530,7 @@ describe("the core's behaviors", () => {
         ['documents.comment', 'documents_comment', 'writes'],
         ['documents.listComments', 'documents_list_comments', 'read_only'],
         ['documents.listRevisions', 'documents_list_revisions', 'read_only'],
+        ['documents.getRevision', 'documents_get_revision', 'read_only'],
         ['documents.propose', 'documents_propose', 'writes'],
         ['documents.approve', 'documents_approve', 'writes'],
         ['documents.reject', 'documents_reject', 'writes'],
@@ -492,6 +559,7 @@ describe("the core's behaviors", () => {
         ['Comments', 'comment', true, 'auto'],
         ['Comments', 'listComments', false, 'auto'],
         ['Revisions', 'listRevisions', false, 'auto'],
+        ['Revisions', 'getRevision', false, 'auto'],
         ['Revisions', 'propose', true, 'auto'],
         ['Revisions', 'approve', true, 'auto'],
         ['Revisions', 'reject', true, 'auto'],
@@ -500,8 +568,8 @@ describe("the core's behaviors", () => {
     );
     const properties = described.instance.properties as Record<string, { readOnly?: boolean }>;
     assert.deepEqual(
-      ['status', 'commentCount', 'revision', 'title'].map((field) => properties[field]?.readOnly === true),
-      [true, true, true, false]
+      ['status', 'commentCount', 'revision', 'pendingProposals', 'title'].map((field) => properties[field]?.readOnly === true),
+      [true, true, true, true, false]
     );
   });
 
@@ -521,6 +589,7 @@ describe("the core's behaviors", () => {
         ['documents.comment', 'always'],
         ['documents.listComments', 'always'],
         ['documents.listRevisions', 'always'],
+        ['documents.getRevision', 'always'],
         ['documents.propose', 'always'],
         ['documents.approve', 'always'],
         ['documents.reject', 'always'],

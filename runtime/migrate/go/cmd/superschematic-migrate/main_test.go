@@ -122,6 +122,18 @@ func TestUsage(t *testing.T) {
 	}
 }
 
+// TestFailureLine: a command that fails writes its error to stderr on a
+// line that begins with the binary's name, which gcp's deploy reads from a
+// failed job's logs and reports (D46, amended).
+func TestFailureLine(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "job.json")
+	got := invoke(t, nil, "job", "--job", missing).expect(t, exitFailed)
+	lines := strings.Split(strings.TrimSuffix(got.stderr, "\n"), "\n")
+	if want := "superschematic-migrate: open " + missing + ": no such file or directory"; len(lines) != 1 || lines[0] != want || got.stdout != "" {
+		t.Errorf("a failed job wrote %q to stderr and %q to stdout, want the line %q", got.stderr, got.stdout, want)
+	}
+}
+
 // TestVersion: version prints the version a release stamps, else the module
 // version go install recorded, else (devel).
 func TestVersion(t *testing.T) {

@@ -42,6 +42,7 @@ http_runtime_npm_package = "@superschematic/http-runtime"
 versiongraph_npm_package = "@superschematic/versiongraph"
 versiongraph_pypi_dist = "superschematic-versiongraph"
 versiongraph_python_module = "superschematic_versiongraph"
+engine_npm_package = "@superschematic/engine"
 ptr_go_module = "github.com/parable-work/superschematic/runtime/schema/go/ptr"
 
 # Prose the generated readmes and package manifests carry.

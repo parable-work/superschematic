@@ -200,6 +200,14 @@ Python import name of the Python version-graph runtime. A generated
 facade (`<module>/versiongraph_<name>.py`) imports the facade base from
 its `facade` module.
 
+### `engine_npm_package`
+
+Default: `@superschematic/engine`
+
+npm package name of the engine. The module `superschematic engine-client`
+writes imports the typed client from its `/client` entry point
+([CLI](/superschematic/reference/cli/#engine-client---out-filets-schema-file)).
+
 ### `ptr_go_module`
 
 Default: `github.com/parable-work/superschematic/runtime/schema/go/ptr`
@@ -371,14 +379,25 @@ replace, Cargo `path`, npm `file:`). Every key is optional and
 repo-relative. The repository root is the parent of the schemas root. An
 absolute value is an error that names the key. An unset key emits no path
 dependency, so the generated manifest resolves the published module; set
-the key until that module is published.
+the key until that module is published. For a Go runtime module, a
+release of superschematic pins an unset key's module in every generated
+`go.mod` to itself: superschematic's modules at the release's tag and the
+scalar library's Go module at the version the release links. A binary
+built from a checkout pins nothing, and those `go.mod` files require
+versions no module proxy serves.
 
 ### `paths.scalar_go`
 
 Default: unset. This repository's own file sets
 `third_party/superscalar/go`.
 
-Directory of the scalar library's Go module (`go.mod`).
+Directory of the scalar library's Go module (`go.mod`). A stack's server
+Dockerfiles build superscalar's static archive, and the version graph's,
+from the checkout that holds it. Unset, a release of superschematic pins
+the module to the version the release links, and its server Dockerfiles
+download the archives the release ships
+([Stacks](/superschematic/guides/stacks/)); a binary built from a
+checkout writes no Dockerfile.
 
 ### `paths.scalar_typescript`
 
@@ -471,6 +490,19 @@ Default: unset.
 
 Directory of the `ptr` Go module when it is a module of its own rather
 than a package of the schema runtime.
+
+### `paths.build_context`
+
+Default: unset, the repository root. `examples/acme-shop` sets `../..`.
+
+The build context of a stack's server images: the directory the generated
+`Dockerfile` copies from, and the root `stack build` and `stack deploy`
+archive for each build
+([The commands](/superschematic/guides/stacks/#the-commands)). Every
+module a server's `go.mod` replaces must lie under it, or the server gets
+no `Dockerfile`. Set it when the runtime modules the other keys name lie
+above the repository root, as in an example inside a checkout of
+superschematic.
 
 ## `[deps]`
 

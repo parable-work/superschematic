@@ -49,14 +49,25 @@ export interface ToolGuidance {
 export interface VersionGuidance {
   /** Each behavior's summary, by name; a behavior without guidance has none. */
   readonly summaries: ReadonlyMap<string, string>;
-  /** Each operation's guidance, by name: create, get, list, update, delete and every behavior's. */
+  /** Each operation's guidance, by name: create, get, list, update, delete, lookup where the type has a unique field, and every behavior's. */
   readonly operations: ReadonlyMap<string, ToolGuidance>;
   /** The create parameters each behavior takes under its config, by name, for one whose implementation narrows them. */
   readonly createParams: ReadonlyMap<string, JSONSchema>;
 }
 
 /** The engine's own tools, by the kind the tool catalog names them with. */
-export type EngineTool = 'listSchemas' | 'describeSchema' | 'defineSchema' | 'listBehaviors' | 'describeBehavior' | 'search';
+export type EngineTool =
+  | 'listSchemas'
+  | 'describeSchema'
+  | 'defineSchema'
+  | 'listBehaviors'
+  | 'describeBehavior'
+  | 'getValue'
+  | 'search'
+  | 'listNamespaces'
+  | 'createNamespace'
+  | 'archiveNamespace'
+  | 'unarchiveNamespace';
 
 const ENGINE_GUIDANCE: Readonly<Record<EngineTool, OperationGuidance>> = {
   listSchemas: {
@@ -85,10 +96,37 @@ const ENGINE_GUIDANCE: Readonly<Record<EngineTool, OperationGuidance>> = {
     doNotUseWhen: "Do not use to read a schema's config of the behavior; call describe_schema.",
     success: "Returns the behavior's declaration, with its defaults filled in.",
   },
+  getValue: {
+    useWhen: 'Use to read a large field an event, or an instance read with valueRefs, carries as a ref ({ "$value": <hash>, "bytes": <n> }), by its hash.',
+    doNotUseWhen: "Do not use to read an instance; call its schema's get, which returns every field inline unless valueRefs asks for refs.",
+    success: 'Returns the value with its hash and its size in bytes.',
+  },
   search: {
     useWhen: 'Use to find instances across every schema this namespace reaches that composes Search, by words, by a vector, or both.',
     doNotUseWhen: "Do not use to page through one schema's instances; call its list.",
     success: 'Returns hits best first, each naming its schema and how it matched, and next for the page after.',
+  },
+  listNamespaces: {
+    useWhen: 'Use to learn which namespaces you may see, and whether each is archived.',
+    doNotUseWhen: "Do not use to list a namespace's schemas; call list_schemas.",
+    success: "Returns each namespace's name, origin (configured by the engine's options, or created), whether it is the shared namespace, and its state (active or archived).",
+  },
+  createNamespace: {
+    useWhen:
+      "Use to make a namespace for a new project: it starts with no schemas of its own and looks schema names up in the shared namespace after itself.",
+    doNotUseWhen: 'Do not use to make a schema; call define_schema in the namespace. Do not use for a name that is a namespace already, archived or not: the create is refused (conflict).',
+    success: 'Returns the namespace, active, with who made it and when.',
+  },
+  archiveNamespace: {
+    useWhen:
+      'Use when a project made with create_namespace is finished: its schemas, instances and events stay readable, every write is refused (namespace_archived), and its reactions and schedules stop.',
+    doNotUseWhen: "Do not use on a namespace the engine's options configure, which is refused (conflict), or to remove data: nothing is removed.",
+    success: 'Returns the namespace, archived, with who archived it and when; archiving an archived namespace changes nothing.',
+  },
+  unarchiveNamespace: {
+    useWhen: 'Use to write again to an archived namespace.',
+    doNotUseWhen: 'Do not use on an active namespace, which stays as it is.',
+    success: 'Returns the namespace, active; its reactions and schedules pick up where they stopped.',
   },
 };
 
@@ -98,30 +136,57 @@ export function engineGuidance(tool: EngineTool): ToolGuidance {
   return { useWhen: base.useWhen ?? '', doNotUseWhen: base.doNotUseWhen ?? '', success: base.success ?? '', errors: [] };
 }
 
-// builtinGuidance is the engine's base for the operations every schema
-// has, on its instance type. takers names the behaviors that take create
-// parameters.
-function builtinGuidance(type: string, takers: readonly string[]): Record<string, OperationGuidance> {
+/**
+ * What the engine knows of a version's own fields for its guidance: the
+ * keys of each unique index (a unique field's, or a composite's), and the
+ * fields a list filters on.
+ */
+export interface FieldGuidance {
+  readonly unique: ReadonlyArray<readonly string[]>;
+  readonly filters: readonly string[];
+}
+
+const NO_FIELDS: FieldGuidance = { unique: [], filters: [] };
+
+// builtinGuidance is the engine's base for the operations it serves on
+// the schema, on its instance type. takers names the behaviors that take
+// create parameters.
+function builtinGuidance(type: string, takers: readonly string[], fields: FieldGuidance): Record<string, OperationGuidance> {
+  const keys = fields.unique.map((index) => list(index));
+  const singles = fields.unique.filter((index) => index.length === 1).map((index) => index[0]);
+  const together = fields.unique.filter((index) => index.length > 1).map((index) => `${list(index)} together are unique`);
+  const claims = [...(singles.length === 0 ? [] : [singles.length === 1 ? `${singles[0]} is unique` : `${list(singles)} are each unique`]), ...together];
+  const unique = claims.length === 0 ? undefined : `${claims.join('; ')}: a value another ${type} holds is refused (conflict).`;
   return {
     create: {
       useWhen: `Use to create a new ${type}: data holds its own fields, and id names it, or the engine makes one.${
         takers.length > 0 ? ` behaviors gives ${list(takers)} their create parameters, which hold from the create on.` : ''
+      }${unique === undefined ? '' : ` ${unique}`}`,
+      doNotUseWhen: `Do not use to change one that exists; call update.${
+        keys.length > 0 ? ` Do not create a ${type} whose ${list(keys, 'or')} another holds; call lookup to find it.` : ''
       }`,
-      doNotUseWhen: 'Do not use to change one that exists; call update.',
       success: "Returns the new instance with its id, its seq and its behaviors' fields.",
     },
     get: {
       useWhen: `Use when you have the id of the ${type} to read.`,
-      doNotUseWhen: `Do not use to find ${type} instances; call list.`,
+      doNotUseWhen: `Do not use to find ${type} instances; call ${keys.length > 0 ? `lookup with a ${list(keys, 'or')}, or ` : ''}list.`,
       success: "Returns the instance with its seq and its behaviors' fields.",
     },
     list: {
-      useWhen: `Use to page through every ${type} instance, oldest first.`,
-      doNotUseWhen: 'Do not use to read one instance whose id you have; call get.',
-      success: 'Returns items and next; pass next as cursor for the page after, until it is null.',
+      useWhen: `Use to page through ${type} instances, oldest first.${
+        fields.filters.length > 0
+          ? ` where keeps the ones whose fields hold the values it gives, null meaning no value and a list of values any of them: ${list(fields.filters, 'or')}.`
+          : ''
+      }`,
+      doNotUseWhen: `Do not use to read one instance whose id you have; call get.${keys.length > 0 ? ` Do not use to find one by its ${list(keys, 'or')}; call lookup.` : ''}`,
+      success: `Returns items and next; pass next as cursor for the page after, until it is null.${
+        fields.filters.length > 0 ? ' With where, a page can hold fewer items than limit, even none, while next is not null: read on until it is.' : ''
+      }`,
     },
     update: {
-      useWhen: `Use to change the own fields of the ${type} with the id, as a JSON merge patch; with expectedSeq, the update is refused if the instance changed since that seq.`,
+      useWhen: `Use to change the own fields of the ${type} with the id, as a JSON merge patch; with expectedSeq, the update is refused if the instance changed since that seq.${
+        unique === undefined ? '' : ` ${unique}`
+      }`,
       doNotUseWhen: "Do not use to set a behavior's field, which is read-only; call the behavior's operation.",
       success: 'Returns the instance as the patch left it, with its next seq.',
     },
@@ -129,12 +194,26 @@ function builtinGuidance(type: string, takers: readonly string[]): Record<string
       useWhen: `Use to delete the ${type} with the id for good; with expectedSeq, the delete is refused if the instance changed since that seq.`,
       success: 'Returns null; the instance and what its behaviors kept for it are gone.',
     },
+    ...(keys.length === 0
+      ? {}
+      : {
+          lookup: {
+            useWhen: `Use when you know the ${list(keys, 'or')} of the ${type} to read: key names the field${
+              fields.unique.some((index) => index.length > 1) ? 's of one unique index' : ''
+            } and the value, as { ${fields.unique[0].map((key) => `"${key}": ...`).join(', ')} }; a value may hold a slash.`,
+            doNotUseWhen: `Do not use when you have the id; call get. Do not use to find instances by another field; call list with where.`,
+            success: "Returns the instance whose fields hold the values, with its seq and its behaviors' fields; not_found when none does.",
+          },
+        }),
   };
 }
 
-/** describeTarget is what guidance and createParamsSchema are told about the type. */
-export function describeTarget(schema: string, composition: Composition): DescribeTarget {
-  const operations: DescribedTypeOperation[] = BUILTIN_OPERATIONS.map((name) => ({
+/**
+ * describeTarget is what guidance and createParamsSchema are told about
+ * the type: lookup is among its operations when it has a unique field.
+ */
+export function describeTarget(schema: string, composition: Composition, fields: FieldGuidance = NO_FIELDS): DescribeTarget {
+  const operations: DescribedTypeOperation[] = BUILTIN_OPERATIONS.filter((name) => name !== 'lookup' || fields.unique.length > 0).map((name) => ({
     name,
     writes: name === 'create' || name === 'update' || name === 'delete',
     scope: 'instance',
@@ -163,8 +242,8 @@ export function describeTarget(schema: string, composition: Composition): Descri
  * returns, and merges each operation's guidance: the engine's base, the
  * owner's, then the others' in list order.
  */
-export function versionGuidance(schema: string, composition: Composition): VersionGuidance {
-  const target = describeTarget(schema, composition);
+export function versionGuidance(schema: string, composition: Composition, fields: FieldGuidance = NO_FIELDS): VersionGuidance {
+  const target = describeTarget(schema, composition, fields);
   const owners = new Map<string, string | undefined>(target.operations.map((operation) => [operation.name, operation.behavior]));
   const said = new Map<string, Said>();
   const summaries = new Map<string, string>();
@@ -181,7 +260,7 @@ export function versionGuidance(schema: string, composition: Composition): Versi
     }
   }
   const takers = composition.behaviors.filter((bound) => bound.behavior.createParams !== undefined).map((bound) => bound.behavior.name);
-  const base = new Map(Object.entries(builtinGuidance(composition.type, takers)));
+  const base = new Map(Object.entries(builtinGuidance(composition.type, takers, fields)));
   const operations = new Map<string, ToolGuidance>();
   for (const { name, behavior: owner } of target.operations) {
     const merged = new Merged();
@@ -364,7 +443,7 @@ function createParamsOf(bound: BoundBehavior, target: DescribeTarget): JSONSchem
   return deepFreeze(copied.value as JSONSchema);
 }
 
-// list joins names as a sentence does: a, b and c.
-function list(names: readonly string[]): string {
-  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+// list joins names as a sentence does: a, b and c, or a, b or c.
+function list(names: readonly string[], conjunction: 'and' | 'or' = 'and'): string {
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} ${conjunction} ${names[names.length - 1]}`;
 }

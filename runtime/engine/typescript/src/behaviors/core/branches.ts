@@ -41,6 +41,13 @@ engine's release under another name: Lease, which a type may compose
 beside Branches, has release, and a type's behaviors share one namespace
 of operation names.
 
+One read-only field, release, holds the number of the instance's latest
+release, the release pointer's version, read from the behavior's own
+table at each read; it is absent before the first release. So a
+releaseCommit's event carries it, and Links pins a release, and reports
+the latest, through it, as it pins a revision through Revisions'
+revision.
+
 The graph's tables are the behavior's own: the SQLite adapter's fixed
 layout (sqliteLayout) under sql.table's names, which its migration
 creates, beside roots, which maps each root to its instance, and actors,
@@ -76,7 +83,9 @@ nothing an operation returns. Without sweep the schedule is off there.
 configChange: a new version may add a kind, change a kind's fields as the
 compatibility rule allows a field to change, and change a retention,
 primary, snapshotEvery and sweep. Removing a kind, or changing a kind's
-type, parent, order, singleton or a field's unit, is refused. Branches can
+type, parent, order, singleton or a field's unit, is refused while the
+schema has instances; with none, no graph holds a row, since deleting an
+instance deletes its graph, and any change is allowed. Branches can
 be added to a schema that has instances and cannot be removed from one:
 the graphs would stay behind with nothing to delete them. The schema
 epoch stays 0, since every version reads every stored row.
@@ -1008,12 +1017,16 @@ export const branches = defineBehavior<BranchesConfig>({
     };
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before === undefined) {
       return undefined;
     }
     if (after === undefined) {
       return 'the graphs its instances root would stay behind with nothing to delete them';
+    }
+    // No instance roots a graph: a delete deletes its instance's graph.
+    if (!change.instances) {
+      return undefined;
     }
     for (const [name, kind] of Object.entries(before.kinds)) {
       const next = after.kinds[name];
@@ -1279,6 +1292,18 @@ export const branches = defineBehavior<BranchesConfig>({
     history(context, params) {
       const graph = graphOf(context);
       return guarded(context, 'history', () => ({ commits: commitsOf(graph, graph.engine.history(ownRef(context, graph, 'history', 'ref', params.ref))) }));
+    },
+  },
+
+  fields: {
+    // The release pointer's version, through its unique index on the
+    // graph and the root; absent before the first release.
+    release: (view) => {
+      const row = view.sql.get(`SELECT _version FROM ${view.sql.table('release')} WHERE graph = ? AND root_id = ?`, [
+        `${view.namespace}/${view.schema}`,
+        rootOf(view.id),
+      ]);
+      return row === undefined ? undefined : Number(row._version);
     },
   },
 

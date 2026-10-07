@@ -32,6 +32,9 @@ and gets a context that reaches only what the behavior may touch:
   initialize and afterChange and its event (D16, amended);
 - references: the instances this one refers to, recorded with the engine
   so the behavior hears when one of them changes or goes;
+- values: the engine's value store, for an object the behavior keeps in
+  its own tables whose large members would otherwise be copied into each
+  of its rows (Revisions' copy of the instance at each revision);
 - in a write, call(), which runs another behavior's operation on the same
   instance, that behavior's guards and every other guard first;
 - in a writing operation, update(), which changes the instance's own
@@ -124,6 +127,23 @@ export interface BehaviorMigration {
   up?(sql: TableWriter): void;
 }
 
+/**
+ * A field of the behavior's a list may filter on (list's where), or a
+ * member of one whose value is an object (`lease.holder`): its value is
+ * one of the behavior's columns, which where compares for equality in
+ * SQL, a null column holding no value. A migration's index on that column
+ * alone lets a page read only the instances that hold a value, in
+ * creation order.
+ */
+export interface BehaviorFilter {
+  /** The column that holds the field's value, by the behavior's own name for it. */
+  readonly column: string;
+  /** The field's JSON type, which a value where gives must have; a boolean is compared as 1 or 0. */
+  readonly type: 'string' | 'number' | 'integer' | 'boolean';
+  /** What the value is, for the list tool's where; the declared field's description when absent. */
+  readonly description?: string;
+}
+
 /** The behavior's own columns on one instance. */
 export interface Columns {
   /** Every column the behavior's migrations add, by its own name for it. */
@@ -167,8 +187,9 @@ export interface SqlReader extends TableReader {
    * the call's namespace's own instances of it), one row per instance:
    * id, seq, version (the schema version it was last written with),
    * created_at, created_by, updated_at, updated_by, data (the instance's
-   * own fields, as the JSON text the engine stores), then each of the
-   * behavior's own columns under its own name for it. No other behavior's
+   * own fields, as the JSON text the engine stores, where a field the
+   * value store holds is its ref, `{ "$value": <hash>, "bytes": <n> }`),
+   * then each of the behavior's own columns under its own name for it. No other behavior's
    * column is there. It is not a table: the engine defines it ahead of
    * each statement that names it, and asks the access policy for read on
    * the schema as the call's principal, once for each such statement; a
@@ -181,6 +202,48 @@ export interface SqlReader extends TableReader {
 }
 
 export interface SqlWriter extends SqlReader, TableWriter {}
+
+/** What values.stow returns: what the behavior's row keeps. */
+export interface StowedObject {
+  /**
+   * The object as JSON text, a ref, `{ "$value": <hash>, "bytes": <n> }`,
+   * in place of each top-level member the value store holds.
+   */
+  readonly json: string;
+  /** The JSON pointers to those members, as JSON text; null when the store holds none. */
+  readonly refs: string | null;
+}
+
+/** The value store as a read reaches it. */
+export interface ValueReader {
+  /**
+   * The object a behavior's row keeps, from the JSON text and the refs
+   * values.stow returned, each ref back to its value; deep-frozen. refs
+   * null or absent is an object stored with none, a row written before
+   * the behavior stowed included.
+   */
+  load(json: string, refs?: string | null): FrozenJSON;
+}
+
+/**
+ * The engine's value store (D16, amended: a large value is stored once),
+ * for an object the behavior keeps in its own tables. stow stores each
+ * top-level member whose JSON is longer than the engine's threshold once,
+ * by the SHA-256 of its canonical JSON, and records that the behavior's
+ * row key holds it; the row keeps both texts stow returns, json and refs.
+ * One value stowed by many rows, or by the instance's own row and its
+ * events, is stored once. A row is named by the behavior, the call's
+ * namespace and schema, the context's instance ('' in a context with
+ * none) and the key, which the behavior chooses. A value no row, instance
+ * or event holds any more is removed, so a behavior that deletes a row
+ * releases it. In a read-only operation stow and release refuse.
+ */
+export interface ValueWriter extends ValueReader {
+  /** Stores the object for the behavior's row key, which then holds what it returns and no longer what it held before. */
+  stow(key: string, object: FrozenJSON): StowedObject;
+  /** Drops what the behavior's row key holds, or with no key every row's of the context's instance. */
+  release(key?: string): void;
+}
 
 /** How much of another instance a read returns. */
 export interface ReadOptions {
@@ -406,6 +469,8 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
   readonly sql: SqlReader;
   /** The references the behavior recorded from the instance. */
   readonly references: ReferenceReader;
+  /** What the behavior's rows keep in the value store. */
+  readonly values: ValueReader;
 }
 
 /**
@@ -422,6 +487,8 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
  */
 export interface SchemaContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlWriter;
+  /** The value store for the behavior's rows of the schema (instance ''); a read-only one's stow refuses. */
+  readonly values: ValueWriter;
 }
 
 /**
@@ -436,6 +503,8 @@ export interface SchemaContext<Config> extends BehaviorScope<Config> {
  */
 export interface WorkContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlReader;
+  /** What the behavior's rows keep in the value store. */
+  readonly values: ValueReader;
 }
 
 /** A reaction's context. */
@@ -459,6 +528,8 @@ export interface ReactionContext<Config> extends WorkContext<Config> {
  */
 export interface ScheduleContext<Config> extends WorkContext<Config> {
   readonly sql: SqlWriter;
+  /** The value store for the behavior's rows of the schema (instance ''). */
+  readonly values: ValueWriter;
   /** The schedule's name. */
   readonly schedule: string;
   /** When its previous run committed, in epoch milliseconds; undefined before its first. */
@@ -475,9 +546,13 @@ export interface ScheduleContext<Config> extends WorkContext<Config> {
 export interface BehaviorReactions<Config> {
   /**
    * The schemas besides its own whose instance events the reactions on a
-   * schema hear, for the schema's config. Absent, its own alone.
+   * schema hear, for the schema's config. Absent, its own alone. null
+   * turns the reactions off on the schema: the runner keeps no
+   * subscription there, and a version whose config turns them on starts
+   * one at its publish, as a schema that just came to compose the
+   * behavior does, so no event from before it is handed to react.
    */
-  watches?(config: Config, schema: string): readonly string[];
+  watches?(config: Config, schema: string): readonly string[] | null;
   /** Handles one event. It is synchronous; it returns nothing. */
   react(context: ReactionContext<Config>, event: EngineEvent): void;
 }
@@ -551,6 +626,8 @@ export interface InstanceContext<Config> extends InstanceView<Config> {
   readonly sql: SqlWriter;
   /** Records and removes the behavior's references from the instance. */
   readonly references: References;
+  /** The value store for the behavior's rows of the instance. */
+  readonly values: ValueWriter;
   /**
    * Calls an operation of a behavior the type composes, on this instance.
    * The parameters are checked against its paramsSchema, every behavior's
@@ -587,6 +664,18 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
    * it. Empty when it would validate.
    */
   validateUpdate(patch: FrozenJSON): readonly ValidationIssue[];
+  /**
+   * Says this call changed nothing, as an update whose patch changes
+   * nothing writes nothing: the engine appends no event for it, the
+   * instance keeps its seq (its ETag), updatedAt and updatedBy, and no
+   * afterChange or afterReferenceChange runs. The handler still returns
+   * its result. The call must write no row anywhere: its columns, tables,
+   * values and references, the instance's own fields, and the operations
+   * it calls or invokes and the instances it creates. One that wrote and
+   * says so is a BehaviorError, which rolls it back. In a read-only
+   * operation, which appends nothing anyway, it does nothing.
+   */
+  unchanged(): void;
 }
 
 /**
@@ -729,6 +818,24 @@ export interface StoredInstance {
 }
 
 /**
+ * What configChange knows of the schema a new version changes, beside the
+ * two configs.
+ */
+export interface ConfigChange {
+  /**
+   * Whether an instance of the schema exists: in any namespace that reads
+   * the version, so for a schema of the shared namespace in every
+   * namespace that looks it up, since one published config serves them
+   * all. It is read when the behavior reads it, at define and again at
+   * publish, in the publish's transaction, so a version defined while the
+   * schema was empty is refused at publish once an instance exists. On an
+   * added or a removed behavior it is always true: configChange is asked
+   * about those only on a schema with instances.
+   */
+  readonly instances: boolean;
+}
+
+/**
  * afterConfigChange's context: the schema's instances in one namespace,
  * in the publish's transaction. It has no principal and asks no policy:
  * the publish was allowed, and what the behavior reads here goes into its
@@ -752,7 +859,13 @@ export interface PublishContext<Config> {
    * over the instances, which asks the policy as a principal this has not.
    */
   readonly sql: TableWriter;
-  /** Visits every instance of the schema in the namespace, in creation order, reading 500 at a time. */
+  /** The value store for the behavior's rows of the schema in the namespace (instance ''). */
+  readonly values: ValueWriter;
+  /**
+   * Visits every instance of the schema in the namespace, in creation
+   * order, reading 500 at a time, each with its own fields' values, the
+   * ones the value store holds included.
+   */
   eachInstance(visit: (instance: StoredInstance) => void): void;
   /** Checks a value against another type of the schema with the version being published (TypeCheck). */
   validate: TypeCheck;
@@ -887,7 +1000,7 @@ export interface ConfigSchema {
 /** One operation of a schema's instance type, as a behavior's guidance reads it (DescribeTarget.operations). */
 export interface DescribedTypeOperation {
   readonly name: string;
-  /** The behavior that adds it; absent for create, get, list, update and delete. */
+  /** The behavior that adds it; absent for create, get, list, update, delete and lookup. */
   readonly behavior?: string;
   readonly writes: boolean;
   readonly scope: OperationScope;
@@ -905,7 +1018,7 @@ export interface DescribeTarget {
   readonly behaviors: readonly string[];
   /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
   readonly configs: Readonly<Record<string, unknown>>;
-  /** create, get, list, update and delete, then each behavior's operations in the type's list order. */
+  /** create, get, list, update, delete, lookup where the type has a unique field, then each behavior's operations in the type's list order. */
   readonly operations: readonly DescribedTypeOperation[];
 }
 
@@ -948,7 +1061,8 @@ export interface BehaviorGuidance {
   readonly summary: string;
   /**
    * By operation name, what it says about each operation of the type: its
-   * own, the ones every schema has (create, get, list, update, delete) and
+   * own, the ones the engine serves on the schema (create, get, list,
+   * update, delete, and lookup where the type has a unique field) and
    * other behaviors' it guards, as DescribeTarget.operations names them.
    */
   readonly operations?: Readonly<Record<string, OperationGuidance>>;
@@ -993,11 +1107,14 @@ export interface BehaviorImplementation<Config = unknown> {
    * Whether a new version of a schema may change the config: return a
    * reason to refuse, or undefined to allow. Called for a changed config,
    * and on a schema with instances for an added behavior (before is
-   * undefined) and a removed one (after is undefined). Absent, only an
-   * identical config is allowed, and the behavior can be neither added to
-   * nor removed from a schema that has instances.
+   * undefined) and a removed one (after is undefined). change says
+   * whether the schema has instances, so a change only stored instances
+   * could break, a link made required say, is refused only while there
+   * are some. Absent, only an identical config is allowed, and the
+   * behavior can be neither added to nor removed from a schema that has
+   * instances.
    */
-  configChange?(before: Config | undefined, after: Config | undefined): string | undefined;
+  configChange?(before: Config | undefined, after: Config | undefined, change: ConfigChange): string | undefined;
 
   /**
    * Brings the behavior's own storage in line with a published config:
@@ -1108,6 +1225,17 @@ export interface BehaviorImplementation<Config = unknown> {
 
   /** A reader per declared field. */
   readonly fields?: Readonly<Record<string, FieldReader<Config>>>;
+
+  /**
+   * What a list may filter on (where), by name: a declared field whose
+   * value its reader takes from one of the behavior's columns, or
+   * `<field>.<member>`, a member of a declared field whose value is an
+   * object, taken from one. The filter names the column. The engine
+   * compares the column in SQL, so the reader and the column must agree:
+   * an instance a filter keeps reads the value the filter named, and one
+   * a null filter keeps reads none (absent or null).
+   */
+  readonly filters?: Readonly<Record<string, BehaviorFilter>>;
 
   /**
    * Runs after a create (after every initialize), an update, a delete or a

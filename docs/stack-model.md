@@ -342,7 +342,10 @@ declared, which the generated CI deploys them in (section 11.3). The
 TypeScript reader numbers each `@environment` class
 (`EnvironmentDecl.Order`): schema files in path order, and the classes of
 a file in source order. A data form writes `order` itself, and an
-environment without one comes after those with one, by name (D47).
+environment without one comes after those with one, by name (D47); the
+kind's verification refuses two environments with one order. The
+TypeScript writer writes the environment classes last, in their order,
+and leaves the property out.
 
 Every declaration has the JSON and YAML data forms every schema has. A
 class is a type, and its declaration the key the decorator writes. A
@@ -357,6 +360,7 @@ types:
     name: Production
     role: EmbeddedStruct
     environment:
+      order: 3
       target: gcp
       values: { project: acme-prod, region: us-east1 }
       domain: acme.dev
@@ -588,7 +592,7 @@ supplies it at run time.
 
 ## 6. Plug-in interfaces
 
-Five registrations keep platforms and tools independent of each other and
+Six registrations keep platforms and tools independent of each other and
 of the core:
 
 - a deployable is placed on a **platform**;
@@ -596,7 +600,9 @@ of the core:
 - a **target** names a platform for each deployable kind;
 - a **DNS platform** holds an environment's domain records (section 6.9);
 - a **provisioner** turns the resulting resource graph into running
-  resources.
+  resources;
+- a **CI renderer** writes a stack's workflow for one CI system from its
+  resolved environments (section 11.3).
 
 ### 6.1 Platform
 
@@ -920,10 +926,11 @@ last part is not built: the Stack IR has no field for the program yet.
 
 ### 6.7 Registry surface
 
-There are five specs, registered like the others in section 3 of
+There are six specs, registered like the others in section 3 of
 `docs/extension-model.md`. The core registers one target, `local`, with
 its platforms, connectors and provisioner (section 8.3, and D30, amended:
-the core registers the local target); every other is an extension's.
+the core registers the local target), and one CI renderer, `github`
+(D47); every other is an extension's.
 
 - `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a server platform without languages or a
@@ -937,7 +944,9 @@ the core registers the local target); every other is an extension's.
   unknown deployable kind, a values or resource type schema that does not
   compile, a resource type another target or a DNS platform registered
   with a different schema, and a policy rule without a name or a check, or
-  with a repeated name.
+  with a repeated name, and a deploy seam it cannot use (section 11.1):
+  any but `Secrets` without a provisioner, and `Bootstrap`, `Migrations`,
+  `Builder` or `CI` without `State`.
 - `RegisterDNSPlatform(DNSPlatformSpec)` refuses a malformed or repeated
   name, the reserved name `manual`, a values or resource type schema that
   does not compile, a resource type a target or another DNS platform
@@ -947,7 +956,12 @@ the core registers the local target); every other is an extension's.
   name the secrets its provider reads when the provisioner runs (section
   6.9).
 - `RegisterProvisioner(ProvisionerSpec)` refuses a malformed or repeated
-  name and a missing implementation.
+  name, a missing implementation, and a tool without a name or a version,
+  or listed twice. Its `Tools` are the command-line tools it runs, which
+  a generated CI job installs (section 11.3).
+- `RegisterCIRenderer(CIRendererSpec)` refuses a malformed or repeated
+  name, a missing `Render`, and an install directory that is not a
+  relative path inside the repository.
 
 A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
 `Finalize` checks that each connector joins registered platforms of the
@@ -1176,7 +1190,10 @@ again: each step creates what is missing and leaves the rest.
    Build and Cloud Logging), the accounts and Workload Identity
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager and Cloud DNS as the graph's resource types need
-   them, Cloud Run with any database for its migration job.
+   them, Cloud Run with any database for its migration job. An API
+   enabled moments ago can refuse calls as one the project has not
+   enabled, so each later step retries such a refusal for up to five
+   minutes.
 2. It creates the state bucket and the KMS key directly, since Pulumi needs
    them before it can run: the bucket `<project>-superschematic-state`,
    with uniform access, public access prevention and object versioning,
@@ -1194,7 +1211,8 @@ again: each step creates what is missing and leaves the rest.
      resource and IAM policy a preview refreshes and sees whether a secret
      has a value, without reading one; it writes objects in the bucket,
      since a preview takes the stack's lock. `deployer` also runs Cloud
-     Build builds and the migration job, as the next two accounts;
+     Build builds and the migration job, as the next two accounts, and
+     reads a failed execution's stderr with the Logs Viewer role;
    - a `builder` account, `<stack>-builder`, that image builds run as
      (section 11.2): it pushes to the stack's repository, writes its
      logs, and reads the build contexts in the state bucket, under
@@ -1366,7 +1384,9 @@ build the stack again.
 
 A generated Dockerfile per server builds the entrypoint and the
 implementations together. Its build context is the repository root, the
-parent of the schemas root, after the stack's services are built:
+parent of the schemas root, after the stack's services are built, unless
+the naming file's `[paths] build_context` names a directory above it, as
+`examples/acme-shop` does to reach the runtime modules of its checkout:
 
 ```sh
 docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
@@ -1374,32 +1394,59 @@ docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
 
 `Dockerfile.dockerignore` beside it cuts the context down to the
 directories the build reads: the server's module, the generated modules,
-the runtime modules, the implementations' modules and the superscalar
-checkout. A server whose modules lie outside the repository root, or a
-naming file without `[paths] scalar_go`, gets no Dockerfile, and the build
-says why.
+the runtime modules and the implementations' modules that the server's
+`go.mod` replaces with a directory, and the superscalar checkout when the
+image builds from one. A server whose modules lie outside the build
+context gets no Dockerfile, and the build says why.
 
 The generated Go code links superscalar's static archive through cgo (D3),
-so the binary cannot be a `CGO_ENABLED=0` build. The image is built in
-stages:
+so the binary cannot be a `CGO_ENABLED=0` build, and a server whose
+database declares a version graph links the version graph's archive too.
+No Go module the module proxy serves carries either, so they come from
+one of two places (D47, amended):
 
-- a Rust stage builds the archive for the image's platform from the
-  checkout `[paths] scalar_go` names, with `tools.env`'s Rust release, the
-  one the host's archives are built with. A second stage builds the
-  version graph's archive when a database the server connects to declares
-  a version graph;
-- a Go stage, on the Go release `tools.env` pins, puts each archive where
-  its binding's cgo flags look, then builds the server with `-mod=mod`;
-- the binary runs on distroless `cc`, which holds the glibc and libgcc
-  the archives need and nothing else, as a non-root user.
+- **A checkout.** With the naming file's `[paths] scalar_go` naming a
+  superscalar checkout, a Rust stage builds superscalar's archive for the
+  image's platform from it, with `tools.env`'s Rust release, the one the
+  host's archives are built with, and a second stage builds the version
+  graph's from the crate beside `[paths] versiongraph_go`. A Go stage puts
+  each archive where its binding's cgo flags look.
+- **The release.** Without `[paths] scalar_go`, as in a project that
+  takes the runtime modules from the module proxy, the image takes the
+  archives the release of superschematic that wrote the Dockerfile ships:
+  `superschematic-archives_<version>_<platform>.tar.gz` beside the CLI on
+  the release page, both archives built with one Rust release under
+  `lib/`. The release builds them before the CLIs and links each CLI with
+  every platform's digest (`internal/release`), so the Dockerfile pins the
+  digest for `linux/amd64` and `linux/arm64`. The Go stage downloads the
+  tarball for its platform from `SUPERSCHEMATIC_RELEASE`, a build argument
+  whose default is the release's page, checks it, and points
+  `CGO_LDFLAGS` at it. The server's `go.mod` replaces each runtime module
+  no `[paths]` key names, every version of it, with the module at the
+  release: superschematic's at the release's tag and superscalar's Go
+  binding at the version the release links, since the runtime modules
+  require one another at versions only a checkout's replace resolves.
+  Every generated Go module's `go.mod` pins the ones it reaches the same
+  way, so each also builds on its own. A binary built from a checkout is
+  no release, and one the release workflow did not build names no
+  digests: neither writes a Dockerfile without `[paths] scalar_go`, and
+  the build says why.
+
+Either way the Go stage, on the Go release `tools.env` pins, builds the
+server with `-mod=mod`, and the binary runs on distroless `cc`, which
+holds the glibc and libgcc the archives need and nothing else, as a
+non-root user.
 
 TypeScript and Rust servers get their own Dockerfiles with their
 entrypoints.
 
 Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
-the scalar library allows; and fetching a prebuilt archive, which
-superscalar does not publish yet. When it does, the Rust stage becomes a
-download.
+the scalar library allows; the archives superscalar's own release
+pipeline publishes, which it builds with its own Rust release and for
+musl, while a server links them beside the version graph's archive, which
+must come from the same Rust release; and building the archives from
+source in every image without a checkout, which the release already
+does once.
 
 ### 8.3 Local stack
 
@@ -1485,8 +1532,16 @@ through the target's `Migrations` seam:
    `migrator` account (section 7.3), with one task, no retry and an hour to
    finish, and runs it once with the document's `gs://` URL as its
    argument, `superschematic-migrate job --job <url>`. It waits for the
-   execution, and a failed one fails the step with the execution's name
-   and logs.
+   execution, and a failed one fails the step with the execution's name,
+   its logs' URL and the runner's error. Cloud Run says only that the
+   container exited with an error, so the deploy reads what the task wrote
+   to stderr from Cloud Logging, for up to 30 seconds while none has
+   arrived, and reports the runner's error, the last line that begins
+   `superschematic-migrate: `, else the first line, such as a panic's.
+   With no line, or none it can read, it reports Cloud Run's message and
+   says why. An error while waiting is not a failed execution: the step
+   fails saying the execution may still be running, and the next deploy
+   runs the phase again, which the runner resumes.
 3. The job reads the document and the plans through Cloud Storage's API,
    and reaches each database through the Cloud SQL Go connector, with IAM
    database authentication as the migrator's IAM database user, so there
@@ -1500,7 +1555,9 @@ USAGE on the schemas that hold the migrator's objects, SELECT, INSERT,
 UPDATE and DELETE on its tables, SELECT on its views and USAGE and SELECT
 on its sequences, leaving out the runner's state tables, and takes every
 such privilege back from a user it gave them to that no longer connects,
-all in one transaction. The grant is table-level DML, not what each API
+all in one transaction. It takes nothing from a role the migrator is
+granted: Cloud SQL gives `cloudsqlsuperuser` CREATE on the public schema
+itself, and the first live deploy's job reported taking that back. The grant is table-level DML, not what each API
 reads. The deploy manifest records the servers each DB service's job saw
 connect, and a deploy runs the expand phase of a DB service whose servers
 changed even when its plan has no steps, before the new server rolls out
@@ -2139,7 +2196,8 @@ parameter's value as `--param pr=123`. `bootstrap`, `secrets set`,
 `stack`; the reference page "CLI" lists their flags. `build` builds the
 images a deploy would build (section 11.2) and deploys nothing: it prints
 each as an `--image` flag and writes no manifest. A target plugs into
-them through five seams on its `TargetSpec` (D45, D46):
+them, and into the generated CI, through six seams on its `TargetSpec`
+(D45, D46, D47):
 
 - `State`, a state store: the provisioner's state backend for an
   environment, and each run's deploy manifest;
@@ -2151,7 +2209,11 @@ them through five seams on its `TargetSpec` (D45, D46):
   servers that connect their privileges (section 8.4);
 - `Builder`, an image builder: a build request is a server, its
   Dockerfile and its build context, which the deploy writes as an
-  archive, and the result is the image by digest. Cloud Build on gcp.
+  archive, and the result is the image by digest. Cloud Build on gcp;
+- `CI`, how a generated CI job signs in to a resolved environment as
+  `planner` or `deployer` (section 11.3): an identity, a kind and its
+  fields, which a CI renderer turns into its own steps, or none yet.
+  Workload Identity Federation on gcp.
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -2213,7 +2275,11 @@ executable bit, so the same files give the same archive on any machine.
 The digest of its tar stream decides whether the server changed: it
 covers the server's entrypoint module, the generated and runtime modules,
 the implementations and the superscalar checkout the image builds from,
-and nothing the ignore file leaves out. On gcp the builder uploads the
+or the Dockerfile that pins the release's archives, and nothing the
+ignore file leaves out. A context that lacks a path the ignore file takes
+in by name, such as a superscalar checkout a CI runner never made, or
+holds one under a symbolic link, which a context carries as a link and
+not its files, is refused before the upload. On gcp the builder uploads the
 archive to the state bucket, under `superschematic/builds/`, and runs a
 Cloud Build build of the Dockerfile with BuildKit, as the `builder`
 account (section 7.3), which pushes to the stack's repository with the tag
@@ -2273,51 +2339,85 @@ export default defineConfig({
 });
 ```
 
-The build writes the workflow under `<output-root>/ci/<stack>/` and
-installs it into the renderer's directory under the repository root,
-`.github/workflows/<stack>.yml`, when that directory exists, as
-`InstallTargetDir` installs any generator's output. GitHub Actions
-(`github`) is the first renderer. Others are registrations, as
-provisioners are. A stack without `outputs.ci` gets no workflow, so an
-example in a repository with CI of its own installs nothing.
+Each renderer takes `branch`, which pull requests target and pushes
+deploy from, `main` unless set, and `install`, the renderer's directory
+unless set. Only a Stack service takes `outputs.ci`, and a renderer no
+extension registered fails the build. The Stack kind's `ci` generator
+resolves every environment as the `stack` generator does, asks each
+environment's target for its identities (`TargetSpec.CI`) and its
+provisioner for its tools (`ProvisionerSpec.Tools`), and renders. It
+writes the workflow under `<output-root>/ci/<stack>/<renderer>/` and
+installs it into the install directory under the repository root,
+`.github/workflows/<stack>.yml`, when that directory exists, through
+`InstallTargetDir`. Without the directory, or outside a git repository,
+it logs why and installs nothing. GitHub Actions (`github`) is the first
+renderer. Others are registrations, as provisioners are. A stack without
+`outputs.ci` gets no workflow, so an example in a repository with CI of
+its own installs nothing. The paths in the workflow are relative to the
+repository root, where a CI job starts, and its build writes to the
+default output root, `<schemas-root>/dist`, which the `stack` commands
+read.
 
 The GitHub workflow:
 
 - **On a pull request:**
-  - A `check` job needs no credentials. It installs superschematic and
-    the schemas root's packages, builds, which resolves every environment
-    and checks its graph (levels 1 and 3), and compiles each server's
-    entrypoint (level 2).
+  - A `check` job needs no credentials. It installs superschematic, the
+    static archives the release ships for the runner's platform (section
+    8.2), checked against the digest the binary names, with
+    `CGO_LDFLAGS` pointing at them, and the schemas root's packages, by
+    the root's lockfile (`bun install --frozen-lockfile` or `npm ci`),
+    runs `build-all` over the services root, which resolves every
+    environment and checks its graph (levels 1 and 3), and compiles each
+    Go server's entrypoint module with `go build -mod=mod` (level 2). It
+    runs on a push too. A binary the release workflow did not build names
+    no digests, and its archives step fails.
   - A `plan` job per cloud environment without parameters runs `stack
-    plan` as `planner`: the infrastructure diff, the migration plans and
-    their hazards (levels 5 and 6).
+    plan` as `planner`, after `check`: the infrastructure diff, the
+    migration plans and their hazards (levels 5 and 6).
   - A `preview` job per environment with one parameter runs `stack deploy
     <environment> --param <parameter>=<pull request number>` as
-    `deployer`, a member per pull request, and `stack destroy` of that
-    member when the pull request closes (level 7). An environment with
-    more parameters has no CI job, and the workflow says so.
+    `deployer` after `check`, a member per pull request, and `stack
+    destroy` of that member when the pull request closes, when `check`
+    does not run (level 7). An environment with more parameters has no CI
+    job, and the workflow says so.
   - A pull request from a fork runs `check` alone: GitHub gives its jobs
     no identity token.
 - **On a push to the branch:** a `deploy` job per cloud environment
   without parameters, in the order the environments are declared. The
-  first deploys at once; each later one waits for the one before, and runs
-  in a GitHub environment of its own name, so that environment's required
-  reviewers approve it. Reviewers are a setting of the repository, not of
-  the stack.
-- One run at a time per environment, and per preview member.
+  first deploys once `check` passes; each later one waits for the one
+  before. Each runs in a GitHub environment of its own name, so that
+  environment's required reviewers approve it. Reviewers are a setting of
+  the repository, not of the stack. `workflow_dispatch` runs `check` and,
+  from the branch, the deploys.
+- One deploy at a time per environment, and one preview job per member,
+  neither cancelled by the next. A plan job has a group per pull request
+  and environment: GitHub keeps one pending job per group and cancels the
+  one it replaces, so a plan sharing the environment's group could cancel
+  a pending deploy. A plan that meets a running deploy's lock fails, and
+  runs again.
 - Local environments have no job. Level 4 runs on an engineer's machine.
+  The workflow's header names each environment that has no job and why.
 
 Each cloud job signs in through the target's CI identity (`TargetSpec.CI`):
 on gcp, Workload Identity Federation through the pool bootstrap creates,
 as `<stack>-planner` or `<stack>-deployer`. The provider's name holds the
 project's number, `projectNumber` (section 7.1), which bootstrap records.
 An environment without it has no cloud jobs, and the workflow names the
-bootstrap to run.
+bootstrap to run. `google-github-actions/auth` signs in, and its
+credentials file gives superschematic and Pulumi application default
+credentials. The cloud jobs install the provisioner's tools: the Pulumi
+provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
+is built with.
 
 The workflow installs the release of superschematic that generated it,
-checked against the release's `SHA256SUMS`. A binary built from a checkout
-is no release, so its workflow's install step fails and says to generate
-again with a released binary. Only servers whose build context changed
+the version of the root module in the binary's build information, from
+its repository's release page, checked against the release's
+`SHA256SUMS`. A binary built from a checkout is no release, so its
+workflow's install step fails and says to generate again with a released
+binary. Every action is pinned by commit, and the file holds no
+timestamp. The build cache keys the workflow on the stack's inputs, which
+hold its config, and on the binary, which names the release, so it needs
+no key of its own. Only servers whose build context changed
 are built and rolled (section 11.2), so the workflow builds and deploys
 whatever the deploy decides is affected, and needs no list of its own.
 
@@ -2440,7 +2540,9 @@ whatever the deploy decides is affected, and needs no list of its own.
 ## 13. Module layout
 
 - **The root module:** the Stack kind, the resolver, the registry specs,
-  the `local` target and the `stack` commands.
+  the `local` target, the `stack` commands, and the `ci` generator with
+  the `github` CI renderer (`internal/generator/cigen`): a workflow is
+  text, with no dependency to keep out of the core (D47).
 - **`extensions/gcp`**, a Go module of its own (D1): the gcp target's
   platforms, connectors and Cloud DNS platform, its policy rules, and its
   pinned provider schemas with the tool that keeps them current (sections
@@ -2558,9 +2660,10 @@ model, or retired, when it lands.
    services planned an update on every preview, from a
    `minInstanceCount` of 0 that Cloud Run does not return; and the
    migration job reported taking back Cloud SQL's own grant to
-   `cloudsqlsuperuser`. A failed job execution fails its step with Cloud
-   Run's "The container exited with an error", the execution's name and
-   the URL of its logs, where the runner's own error is. Not run: a
+   `cloudsqlsuperuser`. A failed job execution failed its step with only
+   Cloud Run's "The container exited with an error", the execution's name
+   and the URL of its logs, where the runner's own error was; the deploy
+   now reads that error from Cloud Logging (D46, amended). Not run: a
    domain, its load balancer and either DNS platform, secrets (acme-shop
    has none), Workload Identity Federation, a parameterized environment,
    and a calling server's network, which waits for a stack with `calls`

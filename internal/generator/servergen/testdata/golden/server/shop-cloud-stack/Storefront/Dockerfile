@@ -2,9 +2,10 @@
 #
 # The image of server Storefront of stack shop-cloud-stack (docs/stack-model.md,
 # section 8.2). The build context is the repository root, the parent of the
-# schemas root. Build the stack's services first (superschematic build-all),
-# so that every module the server's go.mod replaces is on disk, then run,
-# from the repository root:
+# schemas root, or the directory the naming file's [paths] build_context
+# names. Build the stack's services first (superschematic build-all), so
+# that every module the server's go.mod replaces is on disk, then run, from
+# the build context:
 #
 #   docker build -f schemas/dist/server/shop-cloud-stack/Storefront/Dockerfile .
 #

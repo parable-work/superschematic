@@ -1,8 +1,8 @@
 /*
 A typed client for the engine's HTTP API (runtime/engine/README.md,
-"HTTP"), grouped as the engine's own calls are: schemas, instances,
-events and behaviors, beside the tools document and the search across a
-namespace's schemas. Each call unwraps the success envelope, sends the
+"HTTP"), grouped as the engine's own calls are: namespaces, schemas,
+instances, events and behaviors, beside the tools document and the
+search across a namespace's schemas. Each call unwraps the success envelope, sends the
 sequence a write expects as If-Match and its preconditions in the
 Preconditions header, and turns a refusal into an EngineProblem
 (errors.ts). Credentials and the retry rule are the transport's.
@@ -19,6 +19,7 @@ import type {
   Instance,
   InstancePage,
   JSONObject,
+  NamespaceRecord,
   Preconditions,
   PublishResult,
   SchemaSummary,
@@ -63,10 +64,23 @@ export interface CreateOptions extends CallOptions {
 export interface ListOptions extends CallOptions {
   readonly limit?: number;
   readonly cursor?: string;
+  /**
+   * Field values the instances hold, by field: a value, null for none, or
+   * a list any of which they hold; sent as a JSON object in the `where`
+   * query parameter.
+   * A filtered page can hold fewer instances than limit while next is not
+   * null.
+   */
+  readonly where?: Readonly<Record<string, unknown>>;
 }
 
 export interface ReadEventsOptions extends EventFilters, CallOptions {
-  /** Events after this cursor; `head` for an empty page whose next is the log's last event; 0 when absent. */
+  /**
+   * Events after this cursor; `head` for an empty page whose next is the
+   * log's last event. Absent or 0, the start of the log: after retention,
+   * the oldest event it kept. A cursor retention has pruned past is 410
+   * `cursor_expired`, whose problem carries the floor and the head.
+   */
   readonly after?: number | 'head';
   /** How many events to scan, 50 by default and at most 500. */
   readonly limit?: number;
@@ -84,6 +98,7 @@ const segment = encodeURIComponent;
 
 /** The engine's HTTP API, typed. */
 export class EngineClient {
+  readonly namespaces: NamespaceCalls;
   readonly schemas: SchemaCalls;
   readonly instances: InstanceCalls;
   readonly events: EventCalls;
@@ -97,6 +112,7 @@ export class EngineClient {
     this.transport = new Transport(options);
     this.namespace = options.namespace ?? DEFAULT_NAMESPACE;
     this.scope = new Scope(this.transport, this.namespace);
+    this.namespaces = new NamespaceCalls(this.scope);
     this.schemas = new SchemaCalls(this.scope);
     this.instances = new InstanceCalls(this.scope);
     this.events = new EventCalls(this.scope);
@@ -145,6 +161,40 @@ class Scope {
 
   async data<T>(spec: RequestSpec): Promise<T> {
     return (await this.transport.json<T>(spec)).data;
+  }
+}
+
+/**
+ * The namespaces themselves: list, read, create, archive and unarchive,
+ * as the engine's access policy allows (`manage`). Each names the
+ * namespace it acts on, whatever the client's namespace is.
+ */
+export class NamespaceCalls {
+  constructor(private readonly scope: Scope) {}
+
+  /** list returns the namespaces the caller may list. */
+  list(options: CallOptions = {}): Promise<NamespaceRecord[]> {
+    return this.scope.data({ method: 'GET', path: '/namespaces', options });
+  }
+
+  /** get reads one namespace; one there is not is 404 `unknown_namespace`. */
+  get(name: string, options: CallOptions = {}): Promise<NamespaceRecord> {
+    return this.scope.data({ method: 'GET', path: `/namespaces/${segment(name)}`, options });
+  }
+
+  /** create makes a namespace; a name that is one already is 409 `conflict`. */
+  create(name: string, options: CallOptions = {}): Promise<NamespaceRecord> {
+    return this.scope.data({ method: 'POST', path: '/namespaces', body: { name }, options });
+  }
+
+  /** archive archives a namespace a create made: it is read as it was, and every write is 409 `namespace_archived`. */
+  archive(name: string, options: CallOptions = {}): Promise<NamespaceRecord> {
+    return this.scope.data({ method: 'POST', path: `/namespaces/${segment(name)}/archive`, options });
+  }
+
+  /** unarchive lets an archived namespace be written again. */
+  unarchive(name: string, options: CallOptions = {}): Promise<NamespaceRecord> {
+    return this.scope.data({ method: 'POST', path: `/namespaces/${segment(name)}/unarchive`, options });
   }
 }
 
@@ -216,7 +266,19 @@ export class InstanceCalls {
     if (options.cursor !== undefined) {
       query.push(['cursor', options.cursor]);
     }
+    if (options.where !== undefined) {
+      query.push(['where', JSON.stringify(options.where)]);
+    }
     return this.scope.data({ method: 'GET', path: `${this.scope.schema(options, schema)}/instances`, query, options });
+  }
+
+  /**
+   * lookup reads the instance whose unique fields hold a key's values,
+   * `{ slug: 'openai/gpt-5' }`, sent as a JSON object in the query, so a
+   * value may hold a slash; none is 404 `not_found`, as for get.
+   */
+  lookup<T = JSONObject>(schema: string, key: JSONObject, options: CallOptions = {}): Promise<Instance<T>> {
+    return this.scope.data({ method: 'GET', path: `${this.scope.schema(options, schema)}/lookup`, query: [['key', JSON.stringify(key)]], options });
   }
 
   /** update applies a JSON merge patch (RFC 7386) and returns the instance. */

@@ -112,11 +112,15 @@ for (const driver of drivers) {
       clock.advance(TTL - 1);
       assert.deepEqual(invoke(engine, otto, 'miss'), { missed: false });
       assert.equal(statusOf(engine), 'idle');
+      // A miss that finds the deadline ahead changes nothing, and appends no event.
+      assert.equal(engine.instances.get(alice, 'Worker', 'w1')?.seq, 1);
       clock.advance(1);
       assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true, released: {} });
       assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: true, released: {} });
       assert.equal(statusOf(engine), 'missing');
+      const seq = engine.instances.get(alice, 'Worker', 'w1')?.seq;
       assert.deepEqual(invoke(engine, otto, 'miss'), { missed: false });
+      assert.equal(engine.instances.get(alice, 'Worker', 'w1')?.seq, seq);
     });
 
     test('onMissed moves the status only from its from states: a stopped worker stays stopped', () => {
@@ -382,6 +386,9 @@ for (const driver of drivers) {
       assert.match(thrown(() => engine.schemas.define(alice, next(undefined)), IncompatibleChangeError).message, /would stay behind/);
       publish(engine, next({ ...presenceConfig, ttlMs: 60000, sweepMs: 1000 }));
       assert.deepEqual(engine.instances.invoke(wren, 'Worker', 'w1', 'beat', {}), { deadline: T0 + 60000 });
+      // With no instance, no principal is held where the old config said: principalField may move.
+      engine.instances.delete(alice, 'Worker', 'w1');
+      publish(engine, next({ ...presenceConfig, principalField: 'name' }));
     });
 
     test('beat and miss take no parameters', () => {

@@ -255,17 +255,19 @@ describe('the describe and tools routes', () => {
     const tools = (await data(call(app, 'GET', '/namespaces/default/tools', { token: 'reader' }))).data;
     assert.deepEqual(tools, engine.tools.manifest({ subject: 'reader', permissions: ['read'] }));
     const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
-    assert.deepEqual(visible, [
-      'engine.listSchemas',
-      'engine.describeSchema',
-      'engine.defineSchema',
-      'engine.listBehaviors',
-      'engine.describeBehavior',
-      'item.get',
-      'item.list',
-      'item.history',
-    ]);
+    // The policy refuses reader define and manage, so define_schema and the namespace tools are hidden too.
+    assert.deepEqual(visible, ['engine.listSchemas', 'engine.describeSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue', 'item.get', 'item.list', 'item.history']);
     await problem(call(app, 'GET', '/namespaces/nowhere/tools'), 404);
+  });
+
+  test("the tools route answers through the mount's tool filter", async () => {
+    const { engine } = withItem();
+    const app = engineApp(engine, { authenticate, tools: (principal, tool) => principal.subject !== 'reader' || tool.schema === 'Item' });
+    const tools = (await data(call(app, 'GET', '/namespaces/default/tools', { token: 'reader' }))).data;
+    const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
+    assert.deepEqual(visible, ['item.get', 'item.list', 'item.history']);
+    const listSchemas = tools.tools.find((tool: { name: string }) => tool.name === 'engine.listSchemas');
+    assert.equal(listSchemas.mcp.hiddenReason, "this mount's tool filter leaves it out of reader's tools");
   });
 });
 
@@ -361,7 +363,7 @@ describe("the core's behaviors over HTTP", () => {
     );
     assert.equal((await problem(call(app, 'POST', build('addBlocker'), { body: { id: 'build' } }), 400)).code, 'invalid_argument');
     assert.deepEqual(await data(call(app, 'POST', `${TASKS}/operations/listLinked`, { token: 'reader', body: { name: 'spec', id: 'doc-1' } })), {
-      data: { items: [{ id: 'build', revision: 1, stale: false }], next: null },
+      data: { items: [{ id: 'build', revision: 1, latest: 1, stale: false }], next: null },
       etag: null,
     });
     const required = await problem(call(app, 'DELETE', '/namespaces/default/schemas/projects/instances/launch'), 409);

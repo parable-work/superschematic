@@ -116,7 +116,7 @@
                 },
                 "revised": {
                   "additionalProperties": false,
-                  "description": "The rule fires on an instance when the instance its link points to gains a new revision of Revisions, or, when its schema composes Branches, a new release (releaseCommit). For a pinned link, only an instance the new revision leaves stale.",
+                  "description": "The rule fires on an instance when the instance its link points to gains a new revision of Revisions, or, when its schema composes Branches, a new release (releaseCommit). For a link pinned to a revision, only an instance a new revision leaves stale, and for one pinned to a release, only an instance a new release leaves stale.",
                   "properties": {
                     "link": {
                       "description": "A link of the type's Links config.",

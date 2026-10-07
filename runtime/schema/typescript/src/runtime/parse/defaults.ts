@@ -44,16 +44,26 @@ export function applyDefault(
   }
 }
 
+/**
+ * primitiveForBuiltin is the primitive a builtin name stands for: a GraphQL
+ * scalar's, or the IR's number, boolean and string, whose default text
+ * reads as a number, a boolean and the text itself (D14, amended: the
+ * loader checks defaults and examples by the validators' rules); '' for any
+ * other name.
+ */
 export function primitiveForBuiltin(name: string): string {
   switch (name) {
     case 'Int':
       return 'Int';
     case 'Float':
+    case 'number':
       return 'Float';
     case 'Boolean':
+    case 'boolean':
       return 'Boolean';
     case 'String':
     case 'ID':
+    case 'string':
       return 'String';
     default:
       return '';
