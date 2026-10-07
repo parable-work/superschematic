@@ -15,6 +15,8 @@ type Environment struct {
 	ShopAPI ShopAPI
 	// ShopDB is database shop-db.
 	ShopDB ShopDB
+	// ShopOrdersShipOrders is job shop-orders-ship-orders.
+	ShopOrdersShipOrders ShopOrdersShipOrders
 }
 
 // DNS holds the outputs of the nodes of an environment's DNS records.
@@ -81,6 +83,34 @@ type ShopDB struct {
 	DatabaseShopDB ShopDBDatabaseShopDB
 	// Instance is node shop-db.instance, a fake:sql/instance:Instance.
 	Instance ShopDBInstance
+}
+
+// ShopOrdersShipOrders is job shop-orders-ship-orders: its name and address in
+// an environment, and the outputs of the nodes it owns.
+type ShopOrdersShipOrders struct {
+	// Name is the job's name in the environment.
+	Name string
+	// Account is node shop-orders-ship-orders.account, a
+	// fake:iam/account:Account.
+	Account ShopOrdersShipOrdersAccount
+	// InvokesShopAPI is node shop-orders-ship-orders.invokes.shop-api, a
+	// fake:iam/grant:Grant.
+	InvokesShopAPI ShopOrdersShipOrdersInvokesShopAPI
+	// Job is node shop-orders-ship-orders.job, a fake:run/job:Job.
+	Job ShopOrdersShipOrdersJob
+	// ReadsPaymentsSecretsStripeKey is node
+	// shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, a
+	// fake:iam/grant:Grant.
+	ReadsPaymentsSecretsStripeKey ShopOrdersShipOrdersReadsPaymentsSecretsStripeKey
+	// SQLShopDB is node shop-orders-ship-orders.sql.shop-db, a
+	// fake:iam/grant:Grant.
+	SQLShopDB ShopOrdersShipOrdersSQLShopDB
+	// Schedule is node shop-orders-ship-orders.schedule, a
+	// fake:scheduler/job:Job.
+	Schedule ShopOrdersShipOrdersSchedule
+	// SecretPaymentsSecretsStripeKey is node secret.PaymentsSecrets.STRIPE_KEY, a
+	// fake:secrets/secret:Secret.
+	SecretPaymentsSecretsStripeKey SecretPaymentsSecretsStripeKey
 }
 
 // OrdersAccount holds the outputs of node Orders.account.
@@ -186,6 +216,50 @@ type ShopDBInstance struct {
 	Name string
 }
 
+// ShopOrdersShipOrdersAccount holds the outputs of node
+// shop-orders-ship-orders.account.
+type ShopOrdersShipOrdersAccount struct {
+	// Email is the node's email output.
+	Email string
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersShipOrdersInvokesShopAPI holds the outputs of node
+// shop-orders-ship-orders.invokes.shop-api.
+type ShopOrdersShipOrdersInvokesShopAPI struct {
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersShipOrdersJob holds the outputs of node
+// shop-orders-ship-orders.job.
+type ShopOrdersShipOrdersJob struct {
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersShipOrdersReadsPaymentsSecretsStripeKey holds the outputs of node
+// shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY.
+type ShopOrdersShipOrdersReadsPaymentsSecretsStripeKey struct {
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersShipOrdersSchedule holds the outputs of node
+// shop-orders-ship-orders.schedule.
+type ShopOrdersShipOrdersSchedule struct {
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersShipOrdersSQLShopDB holds the outputs of node
+// shop-orders-ship-orders.sql.shop-db.
+type ShopOrdersShipOrdersSQLShopDB struct {
+	// ID is the node's id output.
+	ID string
+}
+
 // Staging is environment Staging, as its last apply left it.
 var Staging = Environment{
 	DNS: DNS{
@@ -253,6 +327,12 @@ var Staging = Environment{
 			ConnectionName: "staging:shop-db.instance.connectionName",
 			ID:             "staging:shop-db.instance.id",
 			Name:           "staging:shop-db.instance.name",
+		},
+	},
+	ShopOrdersShipOrders: ShopOrdersShipOrders{
+		Name: "shop-orders-ship-orders",
+		SecretPaymentsSecretsStripeKey: SecretPaymentsSecretsStripeKey{
+			ID: "staging:secret.PaymentsSecrets.STRIPE_KEY.id",
 		},
 	},
 }
@@ -324,6 +404,12 @@ var Production = Environment{
 			ConnectionName: "production:shop-db.instance.connectionName",
 			ID:             "production:shop-db.instance.id",
 			Name:           "production:shop-db.instance.name",
+		},
+	},
+	ShopOrdersShipOrders: ShopOrdersShipOrders{
+		Name: "shop-orders-ship-orders",
+		SecretPaymentsSecretsStripeKey: SecretPaymentsSecretsStripeKey{
+			ID: "production:secret.PaymentsSecrets.STRIPE_KEY.id",
 		},
 	},
 }

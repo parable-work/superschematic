@@ -294,6 +294,8 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 			keyPairs = append(keyPairs, k)
 		} else if s := prog.server(id); s != nil {
 			servers = append(servers, s)
+		} else if prog.job(id) != nil {
+			// A job's entrypoint is not built yet, so stack dev runs none.
 		} else {
 			return fmt.Errorf("local: step %s applies %s, which is not in the program", step.Step, id)
 		}

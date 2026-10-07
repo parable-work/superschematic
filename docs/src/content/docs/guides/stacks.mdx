@@ -35,6 +35,7 @@ resources that the Pulumi provisioner applies.
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, and Go's `Jobs` and `NewJobs` | a job's entrypoint and image; `stack dev`'s schedules and `stack run`; jobs on gcp |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -45,9 +46,10 @@ and D30, D45, D46 and D47 in `docs/DECISIONS.md` record the decisions.
 A stack has three tiers:
 
 - **Schemas** are your DB and API services, as they are today.
-- **Deployables** are what runs. A database hosts DB schemas, and a server
-  serves API schemas. With nothing declared, each API service is one
-  server and each DB service one database.
+- **Deployables** are what runs. A database hosts DB schemas, a server
+  serves API schemas, and a job runs one of an API's `@job` classes to
+  completion. With nothing declared, each API service is one server, each
+  of its jobs one job, and each DB service one database.
 - **Environments** place the deployables on a target and set the values
   only a person decides: a project, a region, a domain, instance sizes and
   settings.
@@ -57,11 +59,11 @@ most of them:
 
 | Edge | From | To | Comes from |
 | --- | --- | --- | --- |
-| sql | a server | a database | each served API's `authDb`, or its one DB-kind dependency |
-| http | a server | a server | `calls` in the config of each API the calling server serves |
+| sql | a server or a job | a database | each served API's `authDb`, or its one DB-kind dependency |
+| http | a server or a job | a server | `calls` in the config of each API the calling server serves |
 
 A server's edges are the union of its APIs' edges, so grouping two APIs on
-one server restates nothing.
+one server restates nothing. A job's are its API's.
 
 ## Wire the services
 
@@ -360,7 +362,7 @@ TypeScript twin.
 | `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production }`, or `local: { postgresImage, postgresPort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
-| `settings` | per deployable: `of` a handle or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's |
+| `settings` | per deployable: `of` a handle or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)) |
 | `parameters` | makes the environment a family, one member per value |
 
 `env` binds the server's `@envVars` fields, each to a literal or to
@@ -381,6 +383,76 @@ files in path order, and the classes of a file in source order. Above,
 that is Dev, Staging, Production and Preview. In a data form each
 environment's `order` gives it, and one without comes after those with
 one, by name; two environments with one order fail the build.
+
+## Jobs
+
+A job is background work of an API: a run to completion, on a schedule or
+on demand, with the API's connections and clients. Declare one with `@job`
+on a class of the API's schema, which holds no fields:
+
+```ts
+// schemas/services/shop-orders/src/jobs.schema.ts
+import { job } from "@superschematic/api";
+
+// The warehouse's pick run: ships each placed order.
+@job({ schedule: "*/15 * * * *", timeout: "5m", retries: 1 })
+export abstract class ShipOrders {}
+```
+
+Every argument is optional:
+
+| Argument | What it sets |
+| --- | --- |
+| `schedule` | a five-field cron: minute, hour, day of the month, month and day of the week. Without one the job runs only on demand |
+| `timeZone` | the IANA time zone the schedule is read in; UTC unless set |
+| `timeout` | how long one run may take, as `90s`, `10m` or `1h30m`; ten minutes unless set |
+| `retries` | how many times a failed run is run again; none unless set |
+
+The API's Go package gets `Jobs`, a method per job, and the signature of
+the constructor your implementation writes beside `New`:
+
+```go
+type Jobs interface {
+	ShipOrders(ctx context.Context) error
+}
+
+type JobsConstructor func(deps Deps) (Jobs, error)
+```
+
+The scaffold writes `NewJobs`, and each method returns the
+not-implemented error until you write it. Your `NewJobs` takes the same
+`Deps` as `New`. Since the build never writes into a package that exists,
+an API whose implementation predates its jobs fails the stack's build,
+which says what to add.
+
+In a stack each job is a deployable of its own, named after its API and
+its class in kebab case: `shop-orders-ship-orders`. Its edges are its
+API's, so it connects to the same database and calls the same APIs, as a
+caller of its own that serves its API: an operation whose `from` lists
+`ShopOrders` admits the job too. It reads its API's config, with the
+`env` its API's server is given.
+
+An environment changes a job's schedule, or turns it off, in its
+settings:
+
+```ts
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-staging", region: "us-east1" },
+  settings: [{ of: ShopOrders, job: "ShipOrders", schedule: "0 * * * *", timeZone: "America/New_York" }],
+})
+export abstract class Staging {}
+
+@environment({ parameters: ["pr"] })
+export abstract class Preview extends Staging {}
+```
+
+`job` takes only a job the API declares, which its handle names, and
+`enabled: false` turns the schedule off. A member of a parameterized
+environment, such as a preview, runs no schedule unless its settings turn
+it on with `enabled: true`. Each job's resolved deployable records what
+runs in the environment: its schedule, empty for none, its time zone,
+timeout and retries.
 
 ## Build a stack
 

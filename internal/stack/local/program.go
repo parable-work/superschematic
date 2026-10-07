@@ -57,6 +57,9 @@ type Program struct {
 
 	// Servers are the processes, in deploy order: callees first.
 	Servers []*Server `json:"servers,omitempty"`
+
+	// Jobs are the jobs, in deploy order: each after its callees (D52).
+	Jobs []*Job `json:"jobs,omitempty"`
 }
 
 // Container is a Docker container node.
@@ -116,6 +119,27 @@ type Server struct {
 	Env        []EnvVar `json:"env,omitempty"`
 }
 
+// Job is a job node (D52): the job's entrypoint module, built with the
+// servers and run with its environment on its schedule, in its time zone,
+// while the environment runs, or once by `stack run`. A run that outlives
+// TimeoutSeconds is stopped, and a failed run is run again up to Retries
+// times.
+type Job struct {
+	ID             string   `json:"id"`
+	Deployable     string   `json:"deployable"`
+	Name           string   `json:"name"`
+	Wave           int      `json:"wave"`
+	Module         string   `json:"module"`
+	Binary         string   `json:"binary"`
+	API            string   `json:"api"`
+	Job            string   `json:"job"`
+	Schedule       string   `json:"schedule,omitempty"`
+	TimeZone       string   `json:"timeZone"`
+	TimeoutSeconds int      `json:"timeoutSeconds"`
+	Retries        int      `json:"retries,omitempty"`
+	Env            []EnvVar `json:"env,omitempty"`
+}
+
 // EnvVar is one environment variable of a process or a container: a value,
 // which may reference a parameter or an output, or the ID of a secret the
 // provisioner reads from the environment's secrets file.
@@ -150,6 +174,7 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 	}
 	prog := &Program{Version: ProgramVersion, Stack: env.Stack, Environment: env.Environment}
 	servers := map[string]*Server{}
+	jobs := map[string]*Job{}
 	containers := map[string]*Container{}
 	for _, res := range env.Resources.Resources {
 		if res.Inherited {
@@ -177,6 +202,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			var s *Server
 			if s, err = serverOf(res); err == nil {
 				servers[s.ID] = s
+			}
+		case TypeJob:
+			var j *Job
+			if j, err = jobOf(res); err == nil {
+				jobs[j.ID] = j
 			}
 		default:
 			err = fmt.Errorf("it has type %s, which is not the local provider's", res.Type)
@@ -224,6 +254,10 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 					s.Wave = step.Wave
 					prog.Servers = append(prog.Servers, s)
 				}
+				if j, ok := jobs[id]; ok {
+					j.Wave = step.Wave
+					prog.Jobs = append(prog.Jobs, j)
+				}
 			}
 		}
 	}
@@ -232,7 +266,32 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			return nil, fmt.Errorf("local: process %s is in no rollout step", id)
 		}
 	}
+	for id := range jobs {
+		if !slices.ContainsFunc(prog.Jobs, func(j *Job) bool { return j.ID == id }) {
+			return nil, fmt.Errorf("local: job %s is in no rollout step", id)
+		}
+	}
 	return prog, nil
+}
+
+// job returns the job node id, or nil.
+func (p *Program) job(id string) *Job {
+	for _, j := range p.Jobs {
+		if j.ID == id {
+			return j
+		}
+	}
+	return nil
+}
+
+// JobOf returns the job whose deployable is name, or nil.
+func (p *Program) JobOf(name string) *Job {
+	for _, j := range p.Jobs {
+		if j.Deployable == name {
+			return j
+		}
+	}
+	return nil
 }
 
 func (p *Program) database(id string) *Database {
@@ -416,6 +475,47 @@ func serverOf(res *ir.Resource) (*Server, error) {
 	}
 	s.Env = env
 	return s, nil
+}
+
+func jobOf(res *ir.Resource) (*Job, error) {
+	j := &Job{ID: res.ID, Deployable: strings.TrimSuffix(res.ID, ".job")}
+	if len(res.Owners) == 1 {
+		j.Deployable = res.Owners[0]
+	}
+	var ok bool
+	if j.Name, ok = res.Properties["name"].(string); !ok || j.Name == "" {
+		return nil, fmt.Errorf("its name is not a string; a job is named with no parameter")
+	}
+	if j.Module, ok = res.Properties["module"].(string); !ok || j.Module == "" {
+		return nil, fmt.Errorf("its module is not a string")
+	}
+	if j.API, ok = res.Properties["api"].(string); !ok || j.API == "" {
+		return nil, fmt.Errorf("its api is not a string")
+	}
+	if j.Job, ok = res.Properties["job"].(string); !ok || j.Job == "" {
+		return nil, fmt.Errorf("its job is not a string")
+	}
+	if schedule, set := res.Properties["schedule"]; set {
+		if j.Schedule, ok = schedule.(string); !ok {
+			return nil, fmt.Errorf("its schedule is not a string")
+		}
+	}
+	if j.TimeZone, ok = res.Properties["timeZone"].(string); !ok || j.TimeZone == "" {
+		return nil, fmt.Errorf("its timeZone is not a string")
+	}
+	if j.TimeoutSeconds, ok = intValue(res.Properties["timeoutSeconds"]); !ok || j.TimeoutSeconds <= 0 {
+		return nil, fmt.Errorf("its timeoutSeconds is not a positive number")
+	}
+	if j.Retries, ok = intValue(res.Properties["retries"]); !ok || j.Retries < 0 {
+		return nil, fmt.Errorf("its retries is not a number of zero or more")
+	}
+	j.Binary = filepath.ToSlash(filepath.Join(binDir, j.Name))
+	env, err := envOf(res.Properties["env"])
+	if err != nil {
+		return nil, err
+	}
+	j.Env = env
+	return j, nil
 }
 
 // envOf reads a node's env list.

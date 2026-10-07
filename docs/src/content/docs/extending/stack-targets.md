@@ -102,6 +102,17 @@ Resolution validates each `settings` element against it, and refuses a
 server whose language is not in `Languages`, or a database whose hosted
 schemas do not all support one of its `Dialects`, with `unrealizable`.
 
+A job platform (`Kind: ir.DeployableJob`) places an API's jobs. It
+declares `Languages`, as a server platform does, since a job is written in
+its API's language. Its `AddressOf` may return nil: nothing reaches a job.
+Its `Lower` reads what runs from the deployable's `Job`, an
+`ir.ResolvedJob`: the API and the `@job` class, the schedule the
+environment runs, empty when it runs only on demand, its time zone, the
+timeout in seconds and the retries. A job has a server's bindings, from
+its API's config and its own edges, and no callers field.
+`stack/stacktest`'s `fake.job` lowers one to a job with its own account
+and, for a schedule, a scheduler entry.
+
 ## A connector
 
 `Connect` receives a `registry.ConnectorContext`: the environment, the
@@ -124,12 +135,21 @@ server serves runs from the server to itself, and its connector derives
 the server's own address. Return an error for an edge the platforms
 cannot serve, as the gcp sql connector does for a Rust server.
 
+A connector's `From` is a server or a job platform. A job takes its API's
+edges, so a target with a job platform registers a connector from it for
+each edge its server platform has; it may share the server connector's
+`Connect`, which sees the job as `From`. For an http edge, the callee's
+issuer lists the job as a caller that serves its API.
+
 ## A target
 
-A `TargetSpec` names a platform for each deployable kind, the JSON Schema
-of an environment's values under the target's name, its default DNS
-platform, its provisioner, the schema of every resource type its
-platforms, connectors and default DNS platform emit, and its policy rules.
+A `TargetSpec` names a platform for each deployable kind (`server`,
+`database` and `job`), the JSON Schema of an environment's values under
+the target's name, its default DNS platform, its provisioner, the schema
+of every resource type its platforms, connectors and default DNS platform
+emit, and its policy rules. A kind it names no platform for is refused in
+its environments, so a stack whose APIs declare jobs resolves on it only
+with each job placed on another target's platform.
 
 A policy rule is a name and a `Check` over the whole resolved
 environment that returns one message per violation:

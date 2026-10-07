@@ -21,7 +21,7 @@ func TestPolicyHighAvailability(t *testing.T) {
 	s := shop()
 	prod := s.Environment("Production")
 	prod.Settings[0].Values["highAvailability"] = false
-	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Production"})
+	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: "Production"})
 	var errs *stack.Errors
 	if !errors.As(err, &errs) || len(errs.List) != 1 || errs.List[0].Code != stack.CodePolicy ||
 		!strings.Contains(err.Error(), gcp.PolicyHighAvailability) || !strings.Contains(err.Error(), "shop-db.instance") {
@@ -29,7 +29,7 @@ func TestPolicyHighAvailability(t *testing.T) {
 	}
 
 	delete(prod.Settings[0].Values, "highAvailability")
-	if _, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Production"}); err == nil {
+	if _, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: "Production"}); err == nil {
 		t.Error("a production database with the default settings passed; the default is not highly available")
 	}
 

@@ -60,6 +60,10 @@ type Document struct {
 	// OperationSets lists operation sets in declaration order.
 	OperationSets []*ir.OperationSet `json:"operationSets,omitempty" yaml:"operationSets,omitempty"`
 
+	// Jobs lists an API service's jobs in declaration order: ir.Schema.Jobs,
+	// which the TypeScript form declares with @job on a class (D52).
+	Jobs []*ir.Job `json:"jobs,omitempty" yaml:"jobs,omitempty"`
+
 	// Documents holds sidecar documents keyed by document name, copied into
 	// [ir.Schema.Documents] in canonical JSON (see [ir.CanonicalJSON]).
 	Documents map[string]json.RawMessage `json:"documents,omitempty" yaml:"documents,omitempty"`
@@ -87,7 +91,7 @@ var singleDefKinds = map[string]bool{
 // TestDocumentCollectionKeysMatchTheDocument keeps the two in step.
 var documentCollectionKeys = []string{
 	"imports", "references", "scalars", "types", "enums", "unions",
-	"operationSets", "documents", "extensions",
+	"operationSets", "jobs", "documents", "extensions",
 }
 
 // form identifies which on-disk shape a payload uses.

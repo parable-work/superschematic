@@ -2,7 +2,8 @@
 //
 // superschematic wrote this package once, as a scaffold, because it was
 // missing. It never writes it again: the package is yours. Each method
-// answers 501 Not Implemented until you implement it.
+// answers 501 Not Implemented until you implement it. Each job fails
+// until you implement it.
 package shoporders
 
 import (
@@ -24,6 +25,24 @@ func New(deps api.Deps) (api.Implementations, error) {
 }
 
 var _ api.Constructor = New
+
+// NewJobs builds the jobs of shop-orders from the API's dependencies. Its
+// signature is the generated one, api.JobsConstructor.
+func NewJobs(deps api.Deps) (api.Jobs, error) {
+	return &jobs{deps: deps}, nil
+}
+
+var _ api.JobsConstructor = NewJobs
+
+// jobs implements api.Jobs.
+type jobs struct {
+	deps api.Deps
+}
+
+// ExpireOrders runs the job ExpireOrders.
+func (j *jobs) ExpireOrders(ctx context.Context) error {
+	return api.NotImplementedError("job ExpireOrders")
+}
 
 // PayloadDecryptor decrypts the request bodies of the encrypted operations
 // of shop-orders. The server's entrypoint passes it to the generated

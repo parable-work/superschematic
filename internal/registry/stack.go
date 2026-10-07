@@ -84,9 +84,10 @@ type PlatformSpec struct {
 	// Kind is the deployable kind the platform realizes.
 	Kind ir.DeployableKind
 
-	// Languages are the server languages a server platform runs, as
-	// `outputs.api.language` spells them (APILanguageGo, ...). Required
-	// for a server platform, refused for a database platform.
+	// Languages are the server languages a server or job platform runs,
+	// as `outputs.api.language` spells them (APILanguageGo, ...): a job is
+	// written in its API's language. Required for a server or job
+	// platform, refused for a database platform.
 	Languages []string
 
 	// Dialects are the SQL dialects a database platform runs
@@ -166,9 +167,11 @@ type ConnectorSpec struct {
 	// Edge is the edge kind the connector realizes.
 	Edge ir.EdgeKind
 
-	// From and To name the platforms at the two ends. From is a server
-	// platform; To is a database platform for sql and a server platform for
-	// http.
+	// From and To name the platforms at the two ends. From is a server or
+	// a job platform; To is a database platform for sql and a server
+	// platform for http. A job's edges are its API's (D52), so a target
+	// that places jobs registers a connector from its job platform for
+	// each edge its servers take.
 	From string
 	To   string
 
@@ -469,10 +472,10 @@ func checkStackKey(what, name string) error {
 var serverLanguages = []string{APILanguageGo, APILanguageRust, APILanguageTypeScript}
 
 // RegisterPlatform adds a platform. It refuses a malformed or duplicate
-// name, an unknown kind, a server platform without languages or a database
-// platform without dialects (or either with the other's list), an unknown
-// or repeated language or dialect, a settings schema that does not compile,
-// and a missing NameOf, AddressOf or Lower.
+// name, an unknown kind, a server or job platform without languages or a
+// database platform without dialects (or either with the other's list), an
+// unknown or repeated language or dialect, a settings schema that does not
+// compile, and a missing NameOf, AddressOf or Lower.
 func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	if err := r.registrable("platform " + spec.Name); err != nil {
 		return err
@@ -484,14 +487,14 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		return fmt.Errorf("registry: platform %q is already registered", spec.Name)
 	}
 	switch spec.Kind {
-	case ir.DeployableServer:
+	case ir.DeployableServer, ir.DeployableJob:
 		if len(spec.Languages) == 0 {
-			return fmt.Errorf("registry: server platform %q declares no languages", spec.Name)
+			return fmt.Errorf("registry: %s platform %q declares no languages", spec.Kind, spec.Name)
 		}
 		if len(spec.Dialects) > 0 {
-			return fmt.Errorf("registry: server platform %q declares SQL dialects; only a database platform does", spec.Name)
+			return fmt.Errorf("registry: %s platform %q declares SQL dialects; only a database platform does", spec.Kind, spec.Name)
 		}
-		if err := checkList("server platform "+spec.Name, "language", spec.Languages, serverLanguages); err != nil {
+		if err := checkList(string(spec.Kind)+" platform "+spec.Name, "language", spec.Languages, serverLanguages); err != nil {
 			return err
 		}
 	case ir.DeployableDatabase:
@@ -499,13 +502,13 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: database platform %q declares no SQL dialects", spec.Name)
 		}
 		if len(spec.Languages) > 0 {
-			return fmt.Errorf("registry: database platform %q declares server languages; only a server platform does", spec.Name)
+			return fmt.Errorf("registry: database platform %q declares server languages; only a server or job platform does", spec.Name)
 		}
 		if err := checkList("database platform "+spec.Name, "SQL dialect", spec.Dialects, SQLDialectNames); err != nil {
 			return err
 		}
 	default:
-		return fmt.Errorf("registry: platform %q has deployable kind %q (want %s or %s)", spec.Name, spec.Kind, ir.DeployableDatabase, ir.DeployableServer)
+		return fmt.Errorf("registry: platform %q has deployable kind %q (want %s)", spec.Name, spec.Kind, deployableKindList())
 	}
 	if spec.NameOf == nil || spec.AddressOf == nil || spec.Lower == nil {
 		return fmt.Errorf("registry: platform %q needs NameOf, AddressOf and Lower", spec.Name)
@@ -595,7 +598,7 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 	for _, kind := range slices.Sorted(maps.Keys(spec.Platforms)) {
 		platform := spec.Platforms[kind]
 		if !kind.Valid() {
-			return fmt.Errorf("registry: target %q names a platform for deployable kind %q (want %s or %s)", spec.Name, kind, ir.DeployableDatabase, ir.DeployableServer)
+			return fmt.Errorf("registry: target %q names a platform for deployable kind %q (want %s)", spec.Name, kind, deployableKindList())
 		}
 		if platform == "" {
 			return fmt.Errorf("registry: target %q names an empty platform for %s", spec.Name, kind)
@@ -752,14 +755,21 @@ func (r *Registry) checkStackReferences() error {
 		}
 		for _, end := range []struct {
 			role, platform string
-			kind           ir.DeployableKind
-		}{{"From", spec.From, ir.DeployableServer}, {"To", spec.To, toKind}} {
+			kinds          []ir.DeployableKind
+		}{
+			{"From", spec.From, []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob}},
+			{"To", spec.To, []ir.DeployableKind{toKind}},
+		} {
 			platform, ok := r.stack.platforms[end.platform]
 			if !ok {
 				return fmt.Errorf("registry: connector %q %s names platform %q, which is not registered (registered platforms: %v)", name, end.role, end.platform, keysOf(r.stack.platforms))
 			}
-			if platform.Kind != end.kind {
-				return fmt.Errorf("registry: connector %q %s names platform %q, a %s platform; a %s edge's %s is a %s", name, end.role, end.platform, platform.Kind, spec.Edge, strings.ToLower(end.role), end.kind)
+			if !slices.Contains(end.kinds, platform.Kind) {
+				want := make([]string, len(end.kinds))
+				for i, kind := range end.kinds {
+					want[i] = string(kind)
+				}
+				return fmt.Errorf("registry: connector %q %s names platform %q, a %s platform; a %s edge's %s is a %s", name, end.role, end.platform, platform.Kind, spec.Edge, strings.ToLower(end.role), strings.Join(want, " or a "))
 			}
 		}
 	}
@@ -933,4 +943,15 @@ func canonicalJSON(data []byte) ([]byte, error) {
 
 func keysOf[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
+}
+
+// deployableKindList names the deployable kinds for an error message:
+// "database, server or job".
+func deployableKindList() string {
+	kinds := ir.DeployableKinds()
+	names := make([]string, len(kinds))
+	for i, kind := range kinds {
+		names[i] = string(kind)
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }
