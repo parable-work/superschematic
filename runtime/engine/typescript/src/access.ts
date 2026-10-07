@@ -8,6 +8,11 @@ says it writes and `read` otherwise, and names the operation. Those
 questions name a schema. One names none: `manage`, asked about a
 namespace itself, with what is done to it as its operation (`create`,
 `archive`, `unarchive`, or `list` to see it among the namespaces). The
+tools document asks one more kind when it lists a caller's tools: a
+listing question, marked `listing`, about an engine tool that names its
+schema or its namespace only when called (define_schema and the
+namespace tools), whether the caller may do that at all here; a refusal
+hides the tool, and its call still asks the question the call asks. The
 engine has no roles and no default policy; `allowAll` is explicit, for
 tests and local use.
 
@@ -82,8 +87,12 @@ export type Action = SchemaAction | 'manage';
 /** What `manage` asks to do with a namespace: make it, archive it, unarchive it, or see it among the namespaces. */
 export type NamespaceOperation = 'create' | 'archive' | 'unarchive' | 'list';
 
-/** One question the engine asks the policy: about a schema of a namespace, or about a namespace itself. */
-export type AccessRequest = SchemaAccessRequest | NamespaceAccessRequest;
+/**
+ * One question the engine asks the policy: about a schema of a namespace,
+ * about a namespace itself, or, while it lists a caller's tools, whether
+ * the caller may do what an engine tool does at all.
+ */
+export type AccessRequest = SchemaAccessRequest | NamespaceAccessRequest | ListingAccessRequest;
 
 /** A question about one schema of a namespace: its instances, events, drafts and versions. */
 export interface SchemaAccessRequest {
@@ -110,6 +119,30 @@ export interface NamespaceAccessRequest {
   readonly operation: NamespaceOperation;
   /** None: a namespace's own question names no schema. */
   readonly schema?: undefined;
+}
+
+/**
+ * A question the tools document asks when it lists a caller's tools, of an
+ * engine tool that names its schema or its namespace only when called:
+ * `define` for define_schema, whether the principal may define some
+ * schema of the namespace; `manage` with the operation for the namespace
+ * tools (create_namespace, archive_namespace, unarchive_namespace,
+ * list_namespaces), whether it may do that to some namespace. It names no
+ * schema, and `listing` marks it. A policy that cannot answer without a
+ * name answers false, which hides the tool from the caller with the
+ * reason; a call of the tool still asks the question its call asks, with
+ * the name it gives.
+ */
+export interface ListingAccessRequest {
+  readonly principal: Principal;
+  readonly action: 'define' | 'manage';
+  /** The namespace whose tools are listed: where a define would store its draft, or whose endpoint serves the namespace tools. */
+  readonly namespace: string;
+  /** For manage, what the tool does to a namespace; absent for define. */
+  readonly operation?: NamespaceOperation;
+  /** None: the tool names its schema only when called. */
+  readonly schema?: undefined;
+  readonly listing: true;
 }
 
 /** Answers true to allow. It runs synchronously, before the engine's transaction. */
@@ -181,6 +214,15 @@ export class Access {
   /** allowsManage asks the policy about a namespace itself (`manage`); only a literal true allows. */
   allowsManage(principal: Principal, namespace: string, operation: NamespaceOperation): boolean {
     return this.ask({ principal, action: 'manage', namespace, operation });
+  }
+
+  /**
+   * allowsListing asks the policy whether the principal may do what an
+   * engine tool does at all, for the tools document (ListingAccessRequest);
+   * only a literal true allows.
+   */
+  allowsListing(principal: Principal, action: 'define' | 'manage', namespace: string, operation?: NamespaceOperation): boolean {
+    return this.ask(operation === undefined ? { principal, action, namespace, listing: true } : { principal, action, namespace, operation, listing: true });
   }
 
   /** requireManage throws forbidden unless the policy allows the operation on the namespace. */

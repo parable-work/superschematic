@@ -303,8 +303,23 @@ describe('tools/list', () => {
     const { client } = await connect(endpoint(url), 'reader');
     assert.deepEqual(
       (await client.listTools()).tools.map((tool) => tool.name),
-      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'list_namespaces', 'create_namespace', 'archive_namespace', 'unarchive_namespace', 'item_get', 'item_list', 'item_history']
+      ['list_schemas', 'describe_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'item_get', 'item_list', 'item_history']
     );
+  });
+
+  test("the mount's tools filter narrows a caller's list, and a call of a tool it leaves out is a tool the namespace does not have", async () => {
+    const { url } = await served({}, { tools: (principal, tool) => principal.subject !== 'alice' || (tool.schema === 'Item' && !tool.writes) });
+    const { client } = await connect(endpoint(url));
+    assert.deepEqual(
+      (await client.listTools()).tools.map((tool) => tool.name),
+      ['item_get', 'item_list', 'item_history']
+    );
+    assert.equal(((await client.callTool({ name: 'item_get', arguments: { id: 'i1' } })) as CallToolResult).isError, undefined);
+    await assert.rejects(client.callTool({ name: 'item_increment', arguments: { id: 'i1' } }), /no tool "item_increment"/);
+    await assert.rejects(client.callTool({ name: 'list_schemas', arguments: {} }), /no tool "list_schemas"/);
+    // A caller the filter keeps whole lists what the policy shows it.
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    assert.ok((await reader.listTools()).tools.some((tool) => tool.name === 'list_schemas'));
   });
 });
 
@@ -444,8 +459,8 @@ describe('tools/call', () => {
     const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
     assert.deepEqual(
       [...byName.keys()],
-      ['list_schemas', 'describe_schema', 'define_schema', 'list_behaviors', 'describe_behavior', 'get_value', 'list_namespaces', 'create_namespace', 'archive_namespace', 'unarchive_namespace'],
-      'reader may read no schema, and still lists the engine tools'
+      ['list_schemas', 'describe_schema', 'list_behaviors', 'describe_behavior', 'get_value'],
+      'reader may read no schema, and still lists the engine tools that only read; define and manage the policy refuses it'
     );
     assert.deepEqual(byName.get('list_behaviors')?.annotations, { readOnlyHint: true });
     assert.deepEqual(byName.get('describe_behavior')?.inputSchema.required, ['name']);

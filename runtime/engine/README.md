@@ -1063,7 +1063,19 @@ A question about a namespace itself names no schema:
 union on `action` (`SchemaAccessRequest`, `NamespaceAccessRequest`), so
 a policy that reads `schema` says what it does for `manage`; one that
 builds a permission from the schema's name, as the examples' do, refuses
-it. Only `true` allows, and anything else is `forbidden`. It runs synchronously. There is no default
+it.
+
+The tools document asks a third kind while it lists a caller's tools
+(`ListingAccessRequest`): of an engine tool that names its schema or
+namespace only when called, whether the caller may do that at all here.
+It is `{ principal, action: 'define', namespace, listing: true }` for
+`define_schema`, and `{ principal, action: 'manage', namespace,
+operation, listing: true }` for the namespace tools, the operation
+`list`, `create`, `archive` or `unarchive`, and it names no schema. A
+refusal hides the tool from the caller; a call of it asks the question
+its call asks, with the name it gives. A policy that cannot answer
+without a name answers false. Only `true` allows, and anything else is
+`forbidden`. It runs synchronously. There is no default
 policy: `allowAll` is explicit, for tests and local use. The engine has
 no roles; a policy can hold the principal's `permissions` to whatever
 rule the deployment has, through the HTTP runtime's `PermissionMatcher`
@@ -3193,7 +3205,8 @@ serve({ fetch: app.fetch, port: 8080 });
 The options are the HTTP runtime's router options (`authenticate`,
 `authenticateService`, `permissionMatcher`, `onError`, `bodyLimitBytes`,
 `rateLimit`), with `rateLimitPerMinute` and `timeoutSeconds` for every
-route and `stream: { pageSize, heartbeatMs }`. The deployment's `onError`
+route, `stream: { pageSize, heartbeatMs }` and `tools`, a filter of the
+tools document per caller ("MCP"). The deployment's `onError`
 sees what the engine does not raise.
 
 ### Routes
@@ -3262,6 +3275,11 @@ or `after=0`, reads from the floor.
 
 A namespace's create takes `{"name": "<namespace>"}` and nothing else
 (400 `bad_request` otherwise); its archive and unarchive take no body.
+
+The tools route answers the tools document as the caller sees it. The
+`tools` option narrows it per caller as the MCP endpoint's does ("MCP"):
+a tool it leaves out is hidden, with the reason. It narrows only the
+document; each route still answers as the access policy says.
 
 The behavior routes carry no namespace: the behaviors an engine runs are
 the same in every namespace.
@@ -3552,9 +3570,13 @@ same parts in snake case (`line_item_add_note`). A handle `@mcp` would
 refuse (not lowercase snake case, longer than 48 characters), one two
 tools derive, or an engine tool's hides the tool with its reason in
 `hiddenReason`; the engine's tools keep theirs. A tool the access policy
-refuses the principal is hidden too, with that reason, and so is, in an
-archived namespace, every tool that writes there, the namespace tools
-aside: the namespace refuses the write. `requiresAuth` is
+refuses the principal is hidden too, with that reason: a schema's tool
+asks what its call asks, and `define_schema` and the namespace tools,
+which name their schema or namespace only when called, ask a listing
+question ("Access"). So is, in an archived namespace, every tool that
+writes there, the namespace tools aside: the namespace refuses the
+write; and every tool a mount's `tools` filter leaves out of the
+caller's set ("MCP"). `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
 `replay` is `read_only`, `inputSchemaDigest` hashes the arguments as
 the Go encoder writes them, and `guidance` is the tool's guidance
@@ -3775,16 +3797,38 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
   invocation policy under the policy's key. The list is the caller's: a
   tool the policy refuses is not in it, nor, in an archived namespace, a
-  tool that writes there. The schema tools (`list_schemas`,
-  `describe_schema`, `define_schema`), the behavior tools
-  (`list_behaviors`, `describe_behavior`), `get_value` and the namespace
-  tools (`list_namespaces`, `create_namespace`, `archive_namespace`,
-  `unarchive_namespace`) are in every caller's list, since they name no
-  schema until they are called: the access policy answers the call, not
-  the listing, and asks nothing of the behavior tools. The namespace
-  tools act on the namespace they name, whichever namespace's endpoint
-  serves them. `search` is in the list of a caller who may read a
-  schema that composes Search, and searches the ones it may read.
+  tool that writes there. `define_schema` and the namespace tools
+  (`list_namespaces`, `create_namespace`, `archive_namespace`,
+  `unarchive_namespace`) name their schema or namespace only when
+  called, so the list asks the policy a listing question for each
+  (`define`, or `manage` with what the tool does; "Access"): a caller the
+  policy would refuse does not see them, and a call of one still asks
+  the question its call asks. The tools that only read, `list_schemas`,
+  `describe_schema`, the behavior tools (`list_behaviors`,
+  `describe_behavior`) and `get_value`, are in every caller's list: each
+  answers with what the policy lets the caller read, and the behavior
+  tools ask it nothing. The namespace tools act on the namespace they
+  name, whichever namespace's endpoint serves them. `search` is in the
+  list of a caller who may read a schema that composes Search, and
+  searches the ones it may read.
+- `tools`, an option of the mount, narrows each caller's tools further:
+  `(principal, tool, namespace) => boolean`, asked of every tool with
+  `{ handle, name, schema?, operation, behavior?, writes }`, true to keep
+  it. A tool it leaves out is not in that caller's `tools/list`, and a
+  `tools/call` of it is the invalid-params error of a tool the namespace
+  does not have, so a deployment gives an agent's session a narrower set,
+  one schema's operations say, with nothing else to call:
+
+  ```ts
+  app.route('/api', engineMcp(engine, {
+    ...options,
+    tools: (principal, tool) => principal.claims?.session !== 'agent' || tool.schema === 'jobs',
+  }));
+  ```
+
+  It narrows only: a tool the policy hides stays hidden, and what a kept
+  tool's call may do is still the policy's. It is synchronous, and only
+  `true` keeps a tool.
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:
   `isError`, with the problem document the HTTP API answers with as text

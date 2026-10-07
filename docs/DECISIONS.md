@@ -1752,6 +1752,27 @@ they now read it as the loader does.
 | The compatibility rule is unchanged: a version's default may change, since a default applies at a create, and a stored value satisfied the version that normalized it. A row written before keeps its values as given until a write sets them; a unique field's old value does not collide with its normalized form, and a lookup by the normalized form does not find it. Flagged: a deployment that needs them normalized rewrites the field with an update. | A migration that normalizes every row, which rewrites instances without an event, so the log no longer replays to them |
 | The Go, TypeScript and Python schema runtimes read a default of the IR's `number` as a number, of `boolean` as a boolean and of `string` as its text, as they read `Float`, `Boolean` and `String`. | Leaving the text, which every validator then refuses as `type` |
 
+### D16, amended: each caller's tools are the ones it may use
+
+Every MCP caller listed `define_schema` and the four namespace tools,
+including a caller the policy refuses all of them, since they name no
+schema until called and the policy answered only the call. An agent
+saw tools it could never use and spent turns learning so. And a
+deployment that gives an agent a session for one job could not narrow
+the session to that job's schema: the list was every tool the policy
+allowed the principal anywhere in the namespace. This changes the rows
+of the amendments "the engine serves the behaviors it runs" and
+"namespaces made while the engine runs" that put those tools in every
+caller's list.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The tools document asks the policy a listing question of each engine tool that names its schema or namespace only when called: `{ principal, action: 'define', namespace, listing: true }` for `define_schema`, `{ principal, action: 'manage', namespace, operation, listing: true }` for `list_namespaces`, `create_namespace`, `archive_namespace` and `unarchive_namespace`, the operation `list`, `create`, `archive` or `unarchive`. A refusal hides the tool with `hiddenReason`, as a refused schema tool is hidden. `AccessRequest` gains the member (`ListingAccessRequest`), which names no schema. | Asking `define` about a schema the namespace holds, which says nothing of a new name and nothing in an empty namespace; a wildcard schema (`*`), which a policy that builds a permission from the name turns into a permission no one holds, or worse one someone does; a separate policy for tools beside the access policy, a second place a deployment states who may define |
+| A hidden engine tool can still be called by its handle, and the call asks the question its call asks, with the name it gives, as a hidden schema tool's call does. A policy that cannot answer a listing question without a name answers false and loses only the listing. | Refusing the call of a hidden tool, which makes the listing question decide calls it cannot see the name of |
+| The engine tools that only read stay in every caller's list: `list_schemas`, `describe_schema` and `get_value` answer with what the policy lets the caller read, and the behavior tools ask nothing (that amendment's rule). | Hiding them from a caller who may read no schema now, which a publish changes without the list knowing |
+| `engineMcp` and `engineApp` take `tools`, a `ToolFilter`: `(principal, tool, namespace) => boolean`, asked of each tool with `{ handle, name, schema?, operation, behavior?, writes }`. A tool it leaves out is hidden from that caller with a reason in the tools document, absent from `tools/list`, and a `tools/call` of it is `UnknownToolError`, the invalid-params error of a tool the namespace does not have. So a session limited to one schema's operations, or to its reads, reaches nothing else through the endpoint. It narrows only: a tool the policy hides stays hidden, and a kept tool's call is still the policy's to allow. | A filter on the engine, which every mount would share where each endpoint serves a different audience; a list of handles in the options, which cannot follow a schema's tools as versions add operations; hiding without refusing the call, which leaves the narrower set a suggestion |
+| On the HTTP mount the filter narrows the tools document only: the routes answer as the policy says. | Refusing routes by tool, which would make the filter a second access policy for HTTP |
+
 ## D17. A version graph over versioned tables, with one merge core
 
 A distribution built a version graph on the source tree for one domain.

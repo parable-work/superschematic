@@ -13,6 +13,7 @@ export type {
   AccessPolicy,
   AccessRequest,
   Action,
+  ListingAccessRequest,
   NamespaceAccessRequest,
   NamespaceOperation,
   Principal,
@@ -247,8 +248,10 @@ export type {
   DescribedOperation,
   JSONSchemaObject,
   ToolDefinition,
+  ToolFilter,
   ToolMCPRecord,
   ToolManifest,
+  ToolSummary,
   ToolTarget,
 } from './tools/catalog.js';
 export type { BehaviorDocument, BehaviorOperationDocument, BehaviorSummary } from './tools/behaviors.js';

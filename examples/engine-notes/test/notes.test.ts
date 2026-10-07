@@ -262,9 +262,9 @@ test('the MCP tools: each caller lists what the policy lets them call, and calls
   for (const name of ['notes_create', 'notes_update', 'notes_delete', 'notes_transition', 'notes_approve']) {
     assert.ok(!carols.includes(name), `carol does not list ${name}`);
   }
-  // The schema tools name no schema until they are called, so everyone
-  // lists them and the policy answers the call.
-  assert.ok(carols.includes('define_schema'));
+  // define_schema names its schema only when called: the policy, asked
+  // whether carol may define at all, hides it, and still answers a call.
+  assert.ok(!carols.includes('define_schema') && carols.includes('list_schemas'));
   const define = (await carol.callTool({ name: 'define_schema', arguments: { document: notesSchema } })) as CallToolResult;
   assert.equal(define.isError, true);
   assert.equal((define.structuredContent as { code: string }).code, 'forbidden');

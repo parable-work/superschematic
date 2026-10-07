@@ -54,10 +54,20 @@ tools, with the reason; the engine's schema tools keep theirs. A tool the access
 policy refuses the caller is hidden too, with that reason, and can still
 be called by its handle: the call is refused. So is every tool that
 writes in an archived namespace, the namespace tools aside, since the
-namespace refuses the write.
+namespace refuses the write. The engine tools that name their schema or
+their namespace only when called, define_schema and the namespace tools,
+are asked about with a listing question (access.ts,
+ListingAccessRequest): a principal the policy would refuse them does not
+see them either.
+
+A mount, the MCP endpoint or the tools route, can narrow what a caller
+is offered further with a ToolFilter, asked per principal and tool: a
+tool it leaves out is hidden from that caller with its reason, and a
+call of it is a tool the namespace does not have (UnknownToolError), so
+an agent's session limited to one schema's operations reaches no other.
 */
 
-import { checkPrincipal, type Access, type Principal, type SchemaAction } from '../access.js';
+import { checkPrincipal, type Access, type NamespaceOperation, type Principal, type SchemaAction } from '../access.js';
 import type { InstanceSchemaForm, TypeSchema } from '../behaviors/behavior.js';
 import { SEARCH_SCHEMAS_PARAMS, searchSchemas } from '../behaviors/core/index.js';
 import { BEHAVIOR_NAME, type BehaviorDeclaration, type BehaviorOperationDeclaration, type OperationScope } from '../behaviors/declaration.js';
@@ -196,7 +206,37 @@ export interface ToolManifest {
 /** Where a call looks: a namespace, `default` when absent. */
 export interface ToolTarget {
   namespace?: string;
+  /**
+   * The mount's narrowing of the tools a caller is offered: a tool it
+   * leaves out is hidden from the caller, and calling it is
+   * UnknownToolError. Absent, every tool the policy lets the caller see.
+   */
+  filter?: ToolFilter;
 }
+
+/** What a ToolFilter is told of one tool. */
+export interface ToolSummary {
+  /** Its MCP handle, `order_create`, `define_schema`. */
+  readonly handle: string;
+  /** Its name in the tools document, `order.create`, `engine.defineSchema`. */
+  readonly name: string;
+  /** The schema a schema's tool reaches; absent for the engine's own tools. */
+  readonly schema?: string;
+  /** The operation it runs: `create`, `get`, ..., a behavior's operation, or the engine tool's (`defineSchema`). */
+  readonly operation: string;
+  /** The behavior whose operation it runs; absent for the others. */
+  readonly behavior?: string;
+  /** Whether it writes. */
+  readonly writes: boolean;
+}
+
+/**
+ * ToolFilter narrows what one caller is offered: true keeps a tool, and
+ * anything else leaves it out of the caller's list and refuses its call.
+ * It runs synchronously, for every tool of every listing and call. It
+ * narrows only: a tool the access policy hides stays hidden.
+ */
+export type ToolFilter = (principal: Principal, tool: ToolSummary, namespace: string) => boolean;
 
 /** A tool call named a handle the namespace has no tool for, as the caller sees it. */
 export class UnknownToolError extends EngineError {
@@ -233,6 +273,33 @@ type ToolKind =
 // The engine's tools that act on namespaces themselves, not in the
 // namespace whose tools they are among.
 const NAMESPACE_TOOLS: ReadonlySet<ToolKind> = new Set(['listNamespaces', 'createNamespace', 'archiveNamespace', 'unarchiveNamespace']);
+
+// The listing question each engine tool that names its schema or its
+// namespace only when called asks the policy (ListingAccessRequest).
+const LISTING_QUESTIONS: ReadonlyMap<ToolKind, { action: 'define' | 'manage'; operation?: NamespaceOperation }> = new Map([
+  ['defineSchema', { action: 'define' }],
+  ['listNamespaces', { action: 'manage', operation: 'list' }],
+  ['createNamespace', { action: 'manage', operation: 'create' }],
+  ['archiveNamespace', { action: 'manage', operation: 'archive' }],
+  ['unarchiveNamespace', { action: 'manage', operation: 'unarchive' }],
+]);
+
+// kept asks a mount's filter about one tool; only a literal true keeps it.
+function kept(filter: ToolFilter, principal: Principal, namespace: string, tool: ToolSpec): boolean {
+  const summary: ToolSummary = Object.freeze({
+    handle: tool.handle,
+    name: tool.name,
+    ...(tool.schema === undefined ? {} : { schema: tool.schema.name }),
+    operation: tool.methodName,
+    ...(tool.behavior === undefined ? {} : { behavior: tool.behavior.name }),
+    writes: tool.writes,
+  });
+  const answer: unknown = filter(principal, summary, namespace);
+  if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
+    throw new TypeError('a tool filter is synchronous: it returned a promise');
+  }
+  return answer === true;
+}
 
 // One tool before it is rendered: its names, what it does, and who may see it.
 interface ToolSpec {
@@ -390,7 +457,7 @@ export class ToolCatalog {
       $schema: TOOL_SCHEMA,
       title: `Namespace ${namespace} Tool Definitions`,
       description: `MCP tool bindings for the schemas namespace ${namespace} reaches`,
-      tools: tools.map((tool) => this.definition(principal, namespace, tool)),
+      tools: tools.map((tool) => this.definition(principal, namespace, tool, target.filter)),
     };
   }
 
@@ -408,7 +475,7 @@ export class ToolCatalog {
       typeof handle === 'string'
         ? this.toolSet(principal, namespace).find((candidate) => candidate.handle === handle && candidate.hidden === undefined)
         : undefined;
-    if (!tool) {
+    if (!tool || (target.filter !== undefined && !kept(target.filter, principal, namespace, tool))) {
       throw new UnknownToolError(String(handle), namespace);
     }
     const input = argumentsOf(tool, args);
@@ -818,12 +885,17 @@ export class ToolCatalog {
   }
 
   // definition renders a tool as tools/schema.json writes it. A tool the
-  // policy refuses the principal is hidden with that reason.
-  private definition(principal: Principal, namespace: string, tool: ToolSpec): ToolDefinition {
+  // policy refuses the principal, or the mount's filter leaves out, is
+  // hidden with that reason.
+  private definition(principal: Principal, namespace: string, tool: ToolSpec, filter: ToolFilter | undefined): ToolDefinition {
     const keys = this.options.keys;
     const guidance = this.toolGuidance(tool);
     const refusal = tool.hidden === undefined ? this.refusal(principal, namespace, tool) : undefined;
-    const hidden = tool.hidden ?? refusal;
+    const filtered =
+      tool.hidden === undefined && refusal === undefined && filter !== undefined && !kept(filter, principal, namespace, tool)
+        ? `this mount's tool filter leaves it out of ${principal.subject}'s tools`
+        : undefined;
+    const hidden = tool.hidden ?? refusal ?? filtered;
     const mcp: ToolMCPRecord =
       hidden !== undefined
         ? { hidden: true, hiddenReason: hidden }
@@ -863,13 +935,22 @@ export class ToolCatalog {
   }
 
   // refusal is why the policy hides a tool from the principal: a schema
-  // tool asks the action its call asks. The schema tools and the
-  // namespace tools name no schema until they are called, so the policy
-  // answers each call. In an archived namespace a tool that writes there
-  // is hidden: the namespace refuses the write.
+  // tool asks the action its call asks. define_schema and the namespace
+  // tools name their schema or namespace only when called, so they ask a
+  // listing question (ListingAccessRequest): define, or manage with what
+  // the tool does. The other engine tools only read, and answer with what
+  // the policy lets the caller read, so they are in every list. In an
+  // archived namespace a tool that writes there is hidden: the namespace
+  // refuses the write.
   private refusal(principal: Principal, namespace: string, tool: ToolSpec): string | undefined {
     if (tool.writes && !NAMESPACE_TOOLS.has(tool.kind) && this.namespaces.archived(namespace)) {
       return `namespace ${namespace} is archived: it refuses every write until it is unarchived`;
+    }
+    const listing = LISTING_QUESTIONS.get(tool.kind);
+    if (listing !== undefined) {
+      return this.access.allowsListing(principal, listing.action, namespace, listing.operation)
+        ? undefined
+        : `the access policy refuses ${principal.subject} ${listing.operation === undefined ? `${listing.action} in namespace ${namespace}` : `${listing.action} (${listing.operation}) of namespaces`}`;
     }
     if (!tool.schema) {
       return undefined;
