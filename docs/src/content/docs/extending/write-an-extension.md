@@ -853,8 +853,10 @@ the config takes, narrower than the declaration's. The engine's README
 `parseConfig`, `configChange`, `afterConfigChange`, `migrations`,
 `initialize`, `validate`, `checkedTypes`, `instanceSchema`, `guidance`,
 `createParamsSchema`, `guard`, `operations`, `schemaOperations`,
-`fields`, `afterChange`, `guardReference`, `afterReferenceChange`,
-`reactions` and `schedules`.
+`fields`, `filters`, `afterChange`, `guardReference`,
+`afterReferenceChange`, `reactions` and `schedules`. `configChange`'s
+third argument says whether the schema has instances, so a change only
+stored ones could break is refused only while there are some.
 
 A deployment registers the implementation with the engine and passes the
 meta-schema its binary writes, which declares the behavior, and the tool

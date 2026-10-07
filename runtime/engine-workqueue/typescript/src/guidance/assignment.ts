@@ -1,7 +1,8 @@
 /*
-Assignment's guidance: who may assign whom, and that an assigned
-instance's lease and claim are its assignee's alone, which it adds to
-Lease's acquire and Queue's claim when the type composes them.
+Assignment's guidance: who may assign whom, that an assigned instance's
+lease and claim are its assignee's alone, which it adds to Lease's
+acquire and Queue's claim when the type composes them, and the filter a
+list takes on the assignee.
 */
 
 import type { BehaviorGuidance, DescribeTarget, OperationGuidance } from '@superschematic/engine';
@@ -47,6 +48,9 @@ export function assignmentGuidance(config: AssignmentConfig, target: DescribeTar
           { code: 'not_assigned', commonCorrection: 'None: the instance is not assigned.' },
           ...(permission === undefined ? [notConfigured] : []),
         ],
+      },
+      list: {
+        useWhen: `where: { assignee: <subject> } lists the ${target.type} instances assigned to a principal, assignee: null the unassigned ones, and [null, <subject>] both.`,
       },
       ...(names.has('acquire') ? { acquire: TAKEN } : {}),
       ...(names.has('claim') ? { claim: TAKEN } : {}),

@@ -497,6 +497,9 @@ describe('tools/call', () => {
     assert.match(String((lookup?._meta as Record<string, any>)['superschematic/operation-guidance'].useWhen), /Use when you know the slug of the Model to read/);
     const where = (tools.find((tool) => tool.name === 'model_list')?.inputSchema.properties as Record<string, any>).where;
     assert.deepEqual(Object.keys(where.properties), ['slug', 'kind', 'status']);
+    // A filter takes null, for no value; a lookup's key does not.
+    assert.deepEqual(where.properties.status.anyOf[0].type, ['string', 'null']);
+    assert.deepEqual((lookup?.inputSchema.properties as Record<string, any>).key.properties.slug.type, 'string');
     const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as CallToolResult;
     assert.equal((((await call('model_lookup', { key: { slug: 'org/b' } })).structuredContent) as { id: string }).id, 'b');
     assert.equal(problemOf(await call('model_lookup', { key: { slug: 'org/c' } })).code, 'not_found');
@@ -505,6 +508,8 @@ describe('tools/call', () => {
     assert.deepEqual(listed.items.map((item) => item.id), ['b']);
     const kinds = (await call('model_list', { where: { kind: ['y', 'x'] } })).structuredContent as { items: Array<{ id: string }> };
     assert.deepEqual(kinds.items.map((item) => item.id), ['a', 'b']);
+    const none = (await call('model_list', { where: { kind: [null, 'y'] } })).structuredContent as { items: Array<{ id: string }> };
+    assert.deepEqual(none.items.map((item) => item.id), ['b']);
     const { client: writer } = await connect(endpoint(url));
     const repeated = problemOf((await writer.callTool({ name: 'model_create', arguments: { data: { slug: 'org/a' } } })) as CallToolResult);
     assert.deepEqual([repeated.status, repeated.code, repeated.details], [409, 'conflict', { fields: ['slug'] }]);

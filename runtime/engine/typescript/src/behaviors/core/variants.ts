@@ -32,8 +32,9 @@ holds field to null when by holds another value or none. In a patch, the
 type has nothing required and an if needs by in the patch, since a patch
 that leaves by alone does not show it.
 
-configChange: field and by stay; each value keeps its type, and a value
-may be added, since no stored instance holds a value for it. Removing
+configChange: while the schema has instances, field and by stay; each
+value keeps its type, and a value may be added, since no stored instance
+holds a value for it. With none, any change is allowed. Removing
 the behavior is allowed, which leaves field open JSON again; adding it
 to a schema with instances is not, since their values were never checked.
 */
@@ -120,11 +121,15 @@ export const variants = defineBehavior<VariantsConfig>({
     return { field: raw.field, by: raw.by, types: { ...raw.types }, required: !nullable(fieldSchema) };
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before === undefined) {
       return `the instances already hold values of ${(after as VariantsConfig).field} that no type checked`;
     }
     if (after === undefined) {
+      return undefined;
+    }
+    // No instance holds a value a type checked.
+    if (!change.instances) {
       return undefined;
     }
     if (before.field !== after.field || before.by !== after.by) {

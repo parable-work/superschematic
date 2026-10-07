@@ -42,6 +42,7 @@ export type {
   ConstantsConfig,
   DependenciesConfig,
   LeaseConfig,
+  LeaseDirectOn,
   LeaseTransition,
   LinkConfig,
   LinksConfig,

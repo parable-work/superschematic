@@ -41,6 +41,9 @@ export function retriesGuidance(config: RetriesConfig, target: DescribeTarget): 
         doNotUseWhen: `Do not move an exhausted instance anywhere but ${config.exhaustedState}.`,
         errors: exhausted.errors,
       },
+      list: {
+        useWhen: `where: { "retries.exhausted": true } lists the ${target.type} instances whose retries are exhausted, and false the ones that may run again.`,
+      },
       ...(operations.has('acquire') ? { acquire: exhausted } : {}),
       ...(operations.has('claim') ? { claim: exhausted } : {}),
       ...(limits === undefined

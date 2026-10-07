@@ -768,6 +768,13 @@ for (const driver of drivers) {
         refused(() => engine.schemas.define(alice, recipeDocument(null) as unknown as Record<string, unknown>)),
         /the graphs its instances root would stay behind with nothing to delete them/
       );
+      // Deleting the last instance deletes its graph: with no instance, a
+      // kind may go and a singleton change.
+      engine.instances.delete(alice, 'Recipe', 'soup');
+      next((config) => {
+        delete (config.kinds as Record<string, unknown>).cover;
+        (config.kinds.step as Record<string, unknown>).units = {};
+      })();
     });
 
     test("after a new version adds a field to a kind's type, materialize of a commit made before returns the contentHash history stored", () => {

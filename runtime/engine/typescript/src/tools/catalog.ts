@@ -1137,8 +1137,8 @@ export class ToolCatalog {
   }
 
   // whereProperty is a list's where argument: a member per field the
-  // version filters on, a value of its type or a list of them; undefined
-  // when it filters on none.
+  // version filters on, a value of its type or null or a list of them;
+  // undefined when it filters on none.
   private whereProperty(record: SchemaRecord, behaviors: ComposedBehavior[]): Property | undefined {
     const filters = this.catalog.runtimeOf(record).filters;
     if (filters.size === 0) {
@@ -1146,7 +1146,7 @@ export class ToolCatalog {
     }
     const properties: Record<string, unknown> = {};
     for (const filterable of filters.values()) {
-      const one = this.filterValueSchema(record, behaviors, filterable.key, filterable.behavior, filterable.type);
+      const one = this.filterValueSchema(record, behaviors, filterable, true);
       properties[filterable.key] = {
         anyOf: [one, { type: 'array', items: one, minItems: 1, maxItems: MAX_FILTER_VALUES }],
       };
@@ -1154,7 +1154,7 @@ export class ToolCatalog {
     return {
       raw: {
         type: 'object',
-        description: `The values the instances hold, by field: a value, or a list of 1 to ${MAX_FILTER_VALUES} meaning any of them; every member must hold`,
+        description: `The values the instances hold, by field: a value, null for none, or a list of 1 to ${MAX_FILTER_VALUES} meaning any of them; every member must hold`,
         additionalProperties: false,
         properties,
       },
@@ -1169,7 +1169,7 @@ export class ToolCatalog {
       type: 'object',
       additionalProperties: false,
       properties: Object.fromEntries(
-        index.keys.map((key) => [key, this.filterValueSchema(record, [], key, undefined, (filters.get(key) as Filterable).type)])
+        index.keys.map((key) => [key, this.filterValueSchema(record, [], filters.get(key) as Filterable, false)])
       ),
       required: [...index.keys],
     }));
@@ -1178,17 +1178,20 @@ export class ToolCatalog {
   }
 
   // filterValueSchema is the JSON Schema of one value of a field a filter
-  // or a key names: an own field's, not null, or a behavior field's type
-  // with its declared description.
-  private filterValueSchema(record: SchemaRecord, behaviors: ComposedBehavior[], key: string, behavior: string | undefined, type: string): unknown {
+  // or a key names: an own field's, or a behavior filter's type with its
+  // description or its declared field's; null among them for a filter,
+  // which keeps the instances that hold no value, and not for a key.
+  private filterValueSchema(record: SchemaRecord, behaviors: ComposedBehavior[], filterable: Filterable, nullable: boolean): unknown {
+    const { key, behavior, type } = filterable;
     if (behavior === undefined) {
       const property = this.fieldsOf(record).input.properties.get(key);
       if (property !== undefined) {
-        return renderProperty({ ...property, nullable: false }, this.options.keys.scalar);
+        return renderProperty({ ...property, nullable }, this.options.keys.scalar);
       }
     }
-    const declared = behaviors.find((candidate) => candidate.name === behavior)?.declaration.fields?.find((field) => field.name === key);
-    return { type, ...(declared?.description ? { description: declared.description } : {}) };
+    const description =
+      filterable.description ?? behaviors.find((candidate) => candidate.name === behavior)?.declaration.fields?.find((field) => field.name === key)?.description;
+    return { type: nullable ? [type, 'null'] : type, ...(description ? { description } : {}) };
   }
 
   // instanceSchema is an instance's data as reads return it: its own

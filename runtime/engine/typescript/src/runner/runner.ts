@@ -7,14 +7,19 @@ A subscription is one behavior's reactions on one schema that composes
 it, in one namespace. It hears that schema's instance events and those
 of the schemas the behavior's watches names, from the publish that made
 the schema compose the behavior, and keeps the cursor of the last event
-it handled in engine_subscriptions. It handles one event at a time, in
-log order: the reaction runs in a savepoint of a batch's transaction,
-and the cursor's advance commits with it. A reaction that throws rolls
-its savepoint back; the batch commits what came before it and records
-the failure. The event runs again after a backoff, and after maxAttempts
-failures the subscription halts at it until resume. So a reaction's
-database effects happen once per event, whatever fails or crashes
-before the commit; an effect outside the database happens at least once.
+it handled in engine_subscriptions. A watches that returns null for the
+schema's config turns the reactions off there: the runner hands it no
+event, and a later version whose config turns them on starts the
+subscription at its publish, as for a schema that just came to compose
+the behavior, so react never sees an event from while they were off.
+It handles one event at a time, in log order: the reaction runs in a
+savepoint of a batch's transaction, and the cursor's advance commits
+with it. A reaction that throws rolls its savepoint back; the batch
+commits what came before it and records the failure. The event runs
+again after a backoff, and after maxAttempts failures the subscription
+halts at it until resume. So a reaction's database effects happen once
+per event, whatever fails or crashes before the commit; an effect
+outside the database happens at least once.
 
 A schedule is one behavior's named timed work on one schema that
 composes it, in one namespace, with the time of its next run in
@@ -55,15 +60,15 @@ With the engine's retention, the runner also prunes the event log
 transaction, yielding between batches. It never prunes a namespace's
 events past its hold: the cursor of the least advanced subscription
 there that composes a behavior with reactions, halted, retrying and
-archived ones included, or, where the behavior is not registered, that
-has run. With retention's maxHoldMs, a subscription that does not
-advance (halted, archived or unregistered) holds no event older than
-that. A subscription whose cursor is behind its namespace's floor all
-the same (an implementation that gained reactions after retention pruned
-past the publish its subscription starts from) halts with
-cursor_expired: resume with skip moves it to the floor, past what
-retention pruned. Pruning acts for no principal, so prune() runs without
-the runner's.
+archived ones included, but not one whose watches turns them off, or,
+where the behavior is not registered, that has run. With retention's
+maxHoldMs, a subscription that does not advance (halted, archived or
+unregistered) holds no event older than that. A subscription whose
+cursor is behind its namespace's floor all the same (an implementation
+that gained reactions after retention pruned past the publish its
+subscription starts from) halts with cursor_expired: resume with skip
+moves it to the floor, past what retention pruned. Pruning acts for no
+principal, so prune() runs without the runner's.
 */
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
@@ -123,11 +128,14 @@ export interface SubscriptionKey {
  * active: it handles events as they come; retrying: its next event failed
  * and runs again at retryAt; halted: its next event failed maxAttempts
  * times, or retention pruned past its cursor, and it waits for resume;
+ * off: the behavior's watches turns its reactions off for the live
+ * version's config, so it handles nothing until a publish turns them on;
  * archived: its namespace is archived, and it runs nothing until the
  * namespace is unarchived; inactive: the schema's live version no longer
- * composes the behavior, or its implementation is not registered.
+ * composes the behavior, or its implementation is not registered. An off
+ * subscription is listed only once it has run.
  */
-export type SubscriptionState = 'active' | 'retrying' | 'halted' | 'archived' | 'inactive';
+export type SubscriptionState = 'active' | 'retrying' | 'halted' | 'off' | 'archived' | 'inactive';
 
 export interface SubscriptionStatus extends SubscriptionKey {
   state: SubscriptionState;
@@ -271,8 +279,10 @@ interface Unit {
 
 interface ReactionUnit extends Unit {
   readonly reactions: BehaviorReactions<unknown>;
-  /** The cursor it starts after: the publish that made the schema compose the behavior. */
+  /** The cursor it starts after: the publish that made the schema compose the behavior, with its reactions on. */
   readonly start: number;
+  /** Whether watches turns the reactions off for the live version's config. */
+  readonly off: boolean;
 }
 
 interface ScheduleUnit extends Unit {
@@ -292,8 +302,9 @@ interface Hold extends NamespaceHold {
 }
 
 // A subscription that holds retention, or would once it has run: a
-// behavior with reactions, or one not registered, on a schema's live
-// version in a namespace, archived ones included, with where it starts.
+// behavior with reactions its config does not turn off, or one not
+// registered, on a schema's live version in a namespace, archived ones
+// included, with where it starts.
 interface Holder extends SubscriptionKey {
   readonly start: number;
   /** Its behavior is not registered: it holds only once it has run, which a row in engine_subscriptions shows. */
@@ -482,6 +493,12 @@ export class Runner {
     for (const unit of discovery.reactions) {
       const id = subscriptionId(unit);
       const row = this.subscriptionRow(unit);
+      if (unit.off) {
+        if (row) {
+          subscriptions.set(id, { ...subscriptionStatus(row), state: unit.archived ? 'archived' : 'off', retryAt: null });
+        }
+        continue;
+      }
       const status = row ? { ...subscriptionStatus(row), cursor: Math.max(Number(row.cursor), unit.start) } : fresh(unit);
       subscriptions.set(id, unit.archived ? { ...status, state: 'archived', retryAt: null } : status);
     }
@@ -768,8 +785,12 @@ export class Runner {
     return holds;
   }
 
-  // react runs one batch of a subscription's events, if it is due.
+  // react runs one batch of a subscription's events, if it is due and its
+  // reactions are on.
   private react(unit: ReactionUnit, totals: Totals): void {
+    if (unit.off) {
+      return;
+    }
     const now = this.clock();
     const before = this.subscriptionRow(unit);
     // A row from before the schema last came to compose the behavior
@@ -1017,8 +1038,9 @@ export class Runner {
       return [unit.schema];
     }
     const named: unknown = watches.call(unit.reactions, unit.bound.config, unit.schema);
+    synchronous(unit.behavior, 'reactions.watches', named);
     if (!Array.isArray(named) || named.some((schema) => typeof schema !== 'string')) {
-      throw new BehaviorError(unit.behavior, 'reactions.watches returns a list of schema names');
+      throw new BehaviorError(unit.behavior, 'reactions.watches returns a list of schema names, or null to turn the reactions off');
     }
     for (const schema of named as string[]) {
       checkSchemaName(schema);
@@ -1096,8 +1118,11 @@ export class Runner {
         }
         for (const ref of composed(record)) {
           const registered = this.behaviors.lookup(ref);
-          if (registered === undefined || registered.implementation.reactions !== undefined) {
-            holders.push({ behavior: ref, namespace, schema: record.name, start: this.startOf(record, ref), unregistered: registered === undefined });
+          const reacts = registered?.implementation.reactions;
+          // Reactions the config turns off hold nothing: turned on, they
+          // start at the publish that does it.
+          if (registered === undefined || (reacts !== undefined && !(reacts.watches !== undefined && this.offIn(record, ref, reacts)))) {
+            holders.push({ behavior: ref, namespace, schema: record.name, start: this.startOf(record, ref, reacts), unregistered: registered === undefined });
           }
         }
         let runtime: VersionRuntime;
@@ -1115,7 +1140,9 @@ export class Runner {
           const implementation = bound.behavior.implementation;
           const unit = { behavior: bound.behavior.name, namespace, schema: record.name, record, runtime, bound, archived };
           if (implementation.reactions !== undefined) {
-            reactions.push({ ...unit, reactions: implementation.reactions, start: this.startOf(record, bound.behavior.name) });
+            const off = reactionsOff(implementation.reactions, bound.config, record.name);
+            const start = off ? 0 : this.startOf(record, bound.behavior.name, implementation.reactions);
+            reactions.push({ ...unit, reactions: implementation.reactions, off, start });
           }
           for (const [name, spec] of Object.entries(implementation.schedules ?? {})) {
             schedules.push({ ...unit, name, spec, every: intervalOf(bound, name, spec) });
@@ -1129,13 +1156,28 @@ export class Runner {
     return this.discovery;
   }
 
+  // offIn reports whether a published version's config turns the
+  // behavior's reactions off. A version this engine cannot compose counts
+  // as on.
+  private offIn(record: SchemaRecord, behavior: string, reactions: BehaviorReactions<unknown>): boolean {
+    let runtime: VersionRuntime;
+    try {
+      runtime = this.catalog.runtimeOf(record);
+    } catch {
+      return false;
+    }
+    const bound = runtime.composition.behaviors.find((candidate) => candidate.behavior.name === behavior);
+    return bound !== undefined && reactionsOff(reactions, bound.config, record.name);
+  }
+
   // startOf is the cursor a subscription starts after: the publish of the
   // earliest version of the run of versions, up to the live one, that
-  // compose the behavior, as the version keeps it (published_cursor), so
-  // retention pruning the event moves nothing. A version a version-1 file
-  // stored with no publish event starts at 0.
-  private startOf(live: SchemaRecord, behavior: string): number {
-    const id = `${live.namespace}\u0000${live.name}\u0000${String(live.version)}\u0000${behavior}`;
+  // compose the behavior with its reactions on, as the version keeps it
+  // (published_cursor), so retention pruning the event moves nothing. A
+  // version a version-1 file stored with no publish event starts at 0.
+  // reactions is the behavior's, absent for one not registered.
+  private startOf(live: SchemaRecord, behavior: string, reactions?: BehaviorReactions<unknown>): number {
+    const id = `${live.namespace}\u0000${live.name}\u0000${String(live.version)}\u0000${behavior}\u0000${reactions?.watches === undefined ? '' : 'watches'}`;
     const known = this.starts.get(id);
     if (known !== undefined) {
       return known;
@@ -1143,7 +1185,7 @@ export class Runner {
     let first = live.version as number;
     for (let version = first - 1; version >= 1; version -= 1) {
       const older = this.catalog.find(live.name, live.namespace, version);
-      if (!older || !composes(older, behavior)) {
+      if (!older || !composes(older, behavior) || (reactions?.watches !== undefined && this.offIn(older, behavior, reactions))) {
         break;
       }
       first = version;
@@ -1196,6 +1238,20 @@ function intervalOf(
     return { everyMs: value };
   } catch (error) {
     return { error };
+  }
+}
+
+// reactionsOff reports whether a behavior's watches turns its reactions
+// off for a config. One that throws, or answers anything but null, leaves
+// them on, and the subscription's pass records what is wrong.
+function reactionsOff(reactions: BehaviorReactions<unknown>, config: unknown, schema: string): boolean {
+  if (reactions.watches === undefined) {
+    return false;
+  }
+  try {
+    return reactions.watches.call(reactions, config, schema) === null;
+  } catch {
+    return false;
   }
 }
 

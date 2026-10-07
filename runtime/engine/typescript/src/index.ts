@@ -112,6 +112,7 @@ export type {
   BehaviorSchedule,
   BehaviorScope,
   ColumnSpec,
+  ConfigChange,
   Columns,
   ConfigSchema,
   ConfigSchemas,
@@ -190,7 +191,10 @@ export {
   SIMILAR_TERMS,
   isTerminalState,
   linkPin,
+  linkedTo,
+  movedOn,
   stateOutcome,
+  targetMove,
   uuidV5,
 } from './behaviors/core/index.js';
 export type {
@@ -231,6 +235,7 @@ export type {
   SearchHit,
   SearchVectors,
   SnippetPart,
+  TargetMove,
   VariantsConfig,
   WorkflowConfig,
   WorkflowOutcome,

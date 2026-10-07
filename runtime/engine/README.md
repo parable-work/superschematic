@@ -350,7 +350,7 @@ deployment's binary, the core's by default. The engine then requires:
 - `@unique`, `@key` and `@index` (a type's `indexes`) only on the
   instance type's own fields whose value is a string, a number or a
   boolean, an enum's included, and an index only over fields the type
-  has ("Unique fields and indexes" under "Instances").
+  has ("Unique fields and indexes" under "Instances");
 - each type's display (`@display`, D48 in `docs/DECISIONS.md`) held to
   the type, as the compiler's loader holds it, with its wording, at
   `/types/<Type>/display`: `titleField` names one of the type's own
@@ -609,24 +609,34 @@ in a path segment, so a value may hold `/`.
 
 `list`'s `where` is a JSON object of field values, each on an own field
 normalized as a write stores it: a member keeps the instances whose
-field holds its value, a list of 1 to 100 values any of
-them (`MAX_FILTER_VALUES`), and the members together the instances every
-member keeps. `{}` filters nothing.
+field holds its value, `null` the ones whose field holds none (absent or
+null), a list of 1 to 100 values any of them (`MAX_FILTER_VALUES`), and
+the members together the instances every member keeps. `{}` filters
+nothing. `{ "assignee": [null, "wren"] }` is the work wren holds and the
+work no one holds.
 
 - A field is a top-level own field whose value is a string, a number or
   a boolean, as for an index, or one a behavior lets a list filter on
   (its implementation's `filters`, "The implementation" under
-  "Behaviors"): `Workflow`'s `status`. A value has the field's JSON type,
-  an integer for an integer scalar; null, another type, an empty list and
-  a field that is not one of these are `invalid_argument`, the message
-  listing the fields.
+  "Behaviors"): `Workflow`'s `status`, and in the work-queue package
+  `Assignment`'s `assignee`, `Lease`'s `lease.holder` and `Retries`'
+  `retries.exhausted`, the last two members of the behavior's field. A
+  value has the field's JSON type, an integer for an integer scalar, or
+  is null; another type, an empty list and a field that is not one of
+  these are `invalid_argument`, the message listing the fields.
+- A behavior's field computed from other instances is not filtered on:
+  a column copied from them would have to hear every change of each, the
+  cost "What a reference hears" removes, and would go stale when a
+  config changes with no write. `Dependencies`' `blocked` is one.
 - A page keeps creation order. It reads through an index whose every
   field a member names, unique first, then the one with the fewest
   combinations of values: each combination is one indexed range read
   past the cursor in position order, at most 100 of them
   (`MAX_FILTER_RANGES`), merged. A unique index answers a combination
   with one instance at most, and a behavior's index serves its filter
-  (`Workflow`'s on `status`). With none, the page reads the list index,
+  (`Workflow`'s on `status`), null being one more range. An own index
+  holds no instance without a value in each of its fields, so it serves
+  no member that lists null. With none, the page reads the list index,
   at most 1000 instances past the cursor (`FILTER_SCAN_ROWS`). The
   members no index serves are tested in SQL on the rows read.
 - `next` is the position up to which every instance was read. So a page
@@ -892,8 +902,9 @@ what is new, not the whole log.
   ("Subscriptions" under "The runner"): one whose schema's live version
   composes a behavior with reactions, at its cursor, or where it starts
   before it has run, whether it is active, retrying, halted or in an
-  archived namespace; and one whose behavior is not registered, once it
-  has run. Retention prunes none of the namespace's events after it, and
+  archived namespace, but not one whose `watches` turns its reactions off
+  (`Lease` without `directOn`), which starts at the publish that turns
+  them on; and one whose behavior is not registered, once it has run. Retention prunes none of the namespace's events after it, and
   holds no other namespace's. So a halted subscription holds its
   namespace's log, and `status()` shows by whom, in what state, and since
   when ("Status" under "The runner"), until it is resumed.
@@ -1012,7 +1023,14 @@ that made the schema compose the behavior on: the publish of the earliest
 version of the run of versions, up to the live one, that compose it. A
 schema whose live version stops composing the behavior leaves its
 subscription `inactive`; composed again, it starts over at that publish,
-and the events between belong to no subscription.
+and the events between belong to no subscription. A `watches` that
+returns `null` for the schema's config turns the reactions off there, as
+a schedule's `everyMs` function does a schedule: the runner hands them no
+event, shows a subscription that has run as `off` (one that never ran is
+not listed), and a version whose config turns them on starts the
+subscription at its publish, so `react` never sees an event from while
+they were off. `Lease` turns its reactions off when its config has no
+`directOn`.
 
 - **Database effects once per event.** The subscription's cursor is a row
   of `engine_subscriptions`. Each event's reaction runs in a savepoint of
@@ -1097,7 +1115,7 @@ later, with no `previous`.
 | | |
 | --- | --- |
 | `running`, `principal`, `head` | whether it is started, the principal's subject, and the log's last cursor, which retention never moves back |
-| `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` (after `maxAttempts` failures, or behind its namespace's floor), `archived` (its namespace is) or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
+| `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` (after `maxAttempts` failures, or behind its namespace's floor), `off` (its `watches` returns `null` for the schema's config; listed once it has run), `archived` (its namespace is) or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
 | `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying`, `off` (its function returns `null` for the schema's config), `archived` (its namespace is) or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema; an `off` schedule has no `previous` and its `next` is null |
 | `retention` | on an engine with retention: `{ maxAgeMs, maxEvents, maxHoldMs, everyMs, previous, next, namespaces }`, when the runner last finished pruning and prunes next (null before its first pass), and per namespace pruned or held `{ namespace, floor, pruned, heldAt, heldBy, heldState, heldSince, heldUntil }`: its floor, the events pruned of it, the cursor and subscription that hold it, that subscription's state (`active` or `retrying`, which advance; `halted`, `archived` or `inactive`, which do not), when the oldest event it keeps was appended, and, for one that does not advance under `maxHoldMs`, the time its hold lasts to, after which retention prunes past it; each null when none holds it |
 | `error` | the runner's own last error outside any reaction (a busy file, say), cleared by the next pass that works |
@@ -1263,7 +1281,7 @@ function is synchronous (D16): one that returns a promise is a
 | --- | --- |
 | `declaration` | the declaration the compiler registers, as its JSON file holds it |
 | `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), the document's other `types` (their `names`, and `get(name)`, each one's fields, which holds the type to the version's checks: "Other types"), every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
-| `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
+| `configChange(before, after, change)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. `change.instances` says whether an instance of the schema exists, in any namespace that reads the version (every namespace that looks a shared schema up), read at define and again in the publish's transaction, so a change only stored instances could break is refused only while there are some; it is true for an add or a remove, which are asked only then. Absent, only an identical config, and no adding or removing while there are instances |
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
 | `initialize(context, params)` | sets up its state for a new instance; `params` is its own entry of the create's parameters, `{}` when the create gives none ("Create parameters"); it refuses with a `BehaviorVetoError`, whose code its declaration lists |
@@ -1276,7 +1294,7 @@ function is synchronous (D16): one that returns a promise is a
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext`, whose `sql` writes the behavior's own tables in a writing one ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
-| `filters` | the declared fields a list filters on, `{ <field>: { column, type } }`: each one's value is one of its columns, by its own name, and `type` is its JSON type, `string`, `number`, `integer` or `boolean`. A list's `where` compares the column in SQL, so the field's reader must return what the column holds; a migration's index on that column alone serves the filter ("Filters" under "Instances") |
+| `filters` | what a list filters on, `{ <name>: { column, type, description? } }`: a declared field, or `<field>.<member>`, a camelCase member of a declared field whose value is an object (`lease.holder`), whose value is one of its columns, by its own name; `type` is its JSON type, `string`, `number`, `integer` or `boolean`, and `description` what the list tool's `where` says of it, the declared field's when absent. A list's `where` compares the column in SQL, a null column holding no value, so the field's reader must return what the column holds, and nothing (absent or null) for null; a migration's index on that column alone serves the filter ("Filters" under "Instances") |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
 | `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"), as a guard does; the view is the referencing instance's, and the request carries no precondition |
 | `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference. Its context's `writing` says the referencing instance's own write made the change |
@@ -1292,7 +1310,7 @@ has no `run`; a declaration of the wrong shape, with an operation named
 `create`, `get`, `list`, `update`, `delete` or `lookup`, or with a schema
 that does not compile; malformed migrations, columns or indexes, an index
 over a column no migration up to its own adds included; a filter on a
-field it does not declare or a column its migrations do not add; a veto code that is
+field it does not declare, or a member of one whose name is not `<field>.<member>` with a camelCase member, or a column its migrations do not add; a veto code that is
 not lowercase snake case of at most 64 characters, or is listed twice.
 An operation's `paramsSchema` sets
 `additionalProperties: false`, so the handler and every guard read the
@@ -2278,7 +2296,7 @@ A state machine on the instance's `status`.
 | Operations | `transition({ to })` -> `{ from, to }`, writes |
 | Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in (`already_in_state`), a transition the config does not list (`transition_not_allowed`, details `{ from, to, allowed }`) and a move out of a terminal state (`terminal_state`) are `vetoed`, as is an instance without a status (`no_status`); a transition that names a permission the caller lacks (`can`) is `forbidden` |
 | Events | `transition`'s operation event, `patch: { status }` |
-| `configChange` | every old state stays; transitions, permissions, `initial` and `outcomes` may change. Not added to or removed from a schema with instances |
+| `configChange` | every old state stays while the schema has instances, and with none a state may go; transitions, permissions, `initial` and `outcomes` may change. Not added to or removed from a schema with instances |
 
 A new instance starts in `initial`. The status is Workflow's own column,
 so a create or an update that sets it is refused (`readOnly`), and
@@ -2416,7 +2434,7 @@ Blockers between instances, which hold up the type's Workflow.
 | | |
 | --- | --- |
 | Config | `schemas`: the schemas a blocker may be an instance of, each composing Workflow (the type's own when absent); `gatedStates`: the states of the type's Workflow a transition into waits for every blocker to finish, terminal or not (every terminal state when absent); `satisfiedBy`: the outcomes of a blocker's terminal state that finish it (`["success"]` when absent). Requires `Workflow` |
-| Fields | `blocked`: whether a blocker is not finished |
+| Fields | `blocked`: whether a blocker is not finished. A list does not filter on it: it is computed from the blockers at each read, as the caller, and a copy would have to hear every blocker's status ("Filters") |
 | Operations | `addBlocker({ schema?, id })` -> `{ schema, id, status?, open }`, writes; `removeBlocker({ schema?, id })` -> `{ schema, id }`, writes; `listBlockers({ limit?, cursor? })` -> a page of `{ schema, id, status?, open }`, read-only; `listDependents({ limit?, cursor? })` -> a page of `{ schema, id }`, read-only |
 | Create parameters | `{ blockers?: [{ schema?, id }] }`, at most 500: the instance's blockers from its create, each added with `addBlocker`'s checks, against the Workflow's initial state: open until it finishes by `satisfiedBy`, and refused while open when the initial state is gated and no transition leaves it |
 | Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed` (`blocked`), naming the open blockers, details `{ blockers: [{ schema, id, status? }] }` |
@@ -2488,7 +2506,7 @@ Typed links from the instance to instances of other schemas, or its own.
 | Refusals | a name the config does not give, a target that does not exist, a `revision` for a link not pinned to a revision or past the target's latest, a `release` for one not pinned to a release or past the target's latest, a link pinned to a revision whose schema does not compose Revisions or to a release whose schema does not compose Branches (`invalid_argument`); a target with no revision yet (`no_revision`) or no release yet (`no_release`), unlinking a required link (`required_link`), all `vetoed`; unlinking a link the instance does not hold (`invalid_argument`). A create without a required link, and a create's link that `link` would refuse, at `/behaviors/Links` or `/behaviors/Links/<name>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` |
 | Deletes | an optional link's target's delete unlinks it: its reference, which hears the target's delete alone, invokes `unlink` on each instance that points at it, as the caller, each with its own event; no other change of a target asks Links anything. Deleting an instance deletes its links |
 | Events | a create's event carries the links it gives; `link`'s and `unlink`'s operation events carry `links` |
-| `configChange` | every link keeps its name and schema; `pinned` may change, to the other kind too, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is; added to a schema with instances, which start with none, unless a link is required; not removed from one |
+| `configChange` | while the schema has instances, every link keeps its name and schema; `pinned` may change, to the other kind too, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is. With no instance in any namespace that reads the schema, any change. Added to a schema with instances, which start with none, unless a link is required; not removed from one |
 
 A link holds one target, an instance of its schema in the same namespace
 (the schema looked up as any name is: the namespace, then the shared
@@ -2984,6 +3002,17 @@ No transition makes a revision or a release, so a `revised` rule never
 sets itself off; its moves chain only through other rules, which the
 depth limit stops.
 
+The rule for what moves a link's target on, and which instances it moves
+on, is exported for a behavior of another package to hear the same way,
+as `Lease`'s `directOn` does: `targetMove(scope, behavior, form, link,
+schema, event)` reads an event as a `{ kind: 'revision', revision }` or a
+`{ kind: 'release', release, commit }`, `release` the pointer's version
+the release made, or undefined, and refuses a schema with neither
+`Revisions` nor `Branches` (a `BehaviorError`); `movedOn(scope, link,
+pin, id, move)`, `pin` as `linkPin` reads the link, lists the instances
+of the scope's schema it moves on, through `listLinked`, and `linkedTo`
+lists them with or without `stale`.
+
 #### Constants
 
 Fields of the type that its create sets and nothing changes after.
@@ -3036,7 +3065,7 @@ A field typed by another field's value.
 | Validates | while `by` holds a value `types` lists, `field`, when it holds one, against that value's type, strictly (`checkType`); while `by` holds another value or none, `field` holds none (rule `variant`). Both on a create and an update (`invalid_instance`) |
 | Refusals at define | a `field` or `by` that is not one of the type's own, the two the same, a `field` whose values are not open objects (a string, a list, a type of the document), a `by` that is not a string or an enum, a type that is not one of the document's besides the instance type, a value that is not a member of `by`'s enum, and a type whose fields the schema runtime cannot check (`invalid_schema`) |
 | Describe | an `if`/`then` per listed value and one for every other value, under the instance's `allOf`, in create's `data` and, in patch form, in update's `patch` |
-| `configChange` | `field` and `by` stay; each listed value keeps its type, and another value may gain one; removed from a schema with instances, not added to one |
+| `configChange` | while the schema has instances, `field` and `by` stay and each listed value keeps its type, and another value may gain one; with none, any change. Removed from a schema with instances, not added to one |
 
 A step's result has a different shape for each kind of step. The engine
 refuses a union field, which the schema runtime does not check, so
@@ -3106,7 +3135,7 @@ release log, which `releases` reads.
 | Schedule | `sweep`, every `sweep.intervalMs` on a schema whose config gives `sweep`, off on any other |
 | Vetoes | the version graph engine's codes: `version_conflict`, `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`, `entity_not_found`, `invalid_tree` (the core's findings in `details.findings`), `merge_into_itself`, `no_parent`, `not_tagged`, `walk_ceiling`; and `primary_line`, a `discard` of the primary line |
 | Refusals at define | a kind whose type is no type of the document besides the instance type; a field whose JSON key is a role or audit column's; a field of a scalar no value class reads (`Geo.Location`); a parent that is no kind of the config, or whose key is not a field of the kind's type holding a UUID; an order that is not an integer field; a unit on a field the type lacks, a `keyed` or `jsonSchema` unit on a field that is not JSON, an excluded order or parent key; and what else the version graph's core refuses in the descriptor (`invalid_schema`) |
-| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change, and a unit be given a field the old type lacked; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused. Added to a schema with instances, not removed from one. A field a version adds moves no earlier commit's hash ("A field a version adds") |
+| `configChange` | a kind may be added, and a kind's fields change as the compatibility rule lets a field change; a retention, `primary`, `snapshotEvery` and `sweep` may change, and a unit be given a field the old type lacked; removing a kind, or changing a kind's type, parent, order, singleton or a field's unit, is refused while the schema has instances, and allowed with none, since deleting an instance deletes its graph. Added to a schema with instances, not removed from one. A field a version adds moves no earlier commit's hash ("A field a version adds") |
 
 | Operation | Takes | Returns |
 | --- | --- | --- |

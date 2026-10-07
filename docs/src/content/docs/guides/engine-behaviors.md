@@ -454,8 +454,10 @@ engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: '
 - `link` again moves a link to another target.
 - A **required** link is given at every create, so every instance holds
   it: a create without it is refused, it can be moved but not unlinked,
-  and its target cannot be deleted while it points there. A new version
-  cannot make a link required, as it cannot make a field required.
+  and its target cannot be deleted while it points there. While the
+  schema has instances, a new version cannot make a link required, as it
+  cannot make a field required; with none, in any namespace that reads
+  it, a new version may change its links in any way.
 - An **optional** link is cleared when its target is deleted, with an
   `unlink` event on each instance that pointed there.
 - A **pinned** link records the target's revision, or with `pinned:
@@ -803,10 +805,11 @@ engine.instances.update(me, 'Step', lint.id, { kind: 'review' });
 - **Strict at every depth.** A result is held to its type as a field of
   that type would be: its fields' types and bounds, and no key the type
   does not declare, down through nested objects and lists.
-- **New versions.** A new version keeps `field`, `by` and each kind's
-  type, and the types themselves are held to the compatibility rule as a
-  field's type is: `VerifyResult` can gain an optional field, not a
-  required one. `Constants` can change freely.
+- **New versions.** While the schema has instances, a new version keeps
+  `field`, `by` and each kind's type, and the types themselves are held
+  to the compatibility rule as a field's type is: `VerifyResult` can gain
+  an optional field, not a required one. With none, any of them may
+  change. `Constants` can change freely.
 - **What a client sees.** The describe document's instance and the
   create and update tools carry an `if`/`then` per kind under `allOf`, so
   an MCP client or an agent sees which shape each kind takes before it
@@ -942,7 +945,9 @@ engine.instances.get(me, "Recipe", id)?.data.release;              // 1: the rel
   as the compatibility rule allows a field to change, and change a
   retention, `primary`, `snapshotEvery` and `sweep`; removing a kind or
   changing a kind's type, parent, order, singleton or a field's unit is
-  refused, and so is a version without `Branches`. Every stored row reads
+  refused while the schema has instances, and so is a version without
+  `Branches`. With none, deleting the last instance having deleted its
+  graph, the kinds may change in any way. Every stored row reads
   a field a version adds as null, and a null field hashes as an absent
   one, so `materialize` of a commit made before returns the `contentHash`
   the commit stored and `history` returns; a value written to the field

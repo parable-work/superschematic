@@ -128,16 +128,20 @@ export interface BehaviorMigration {
 }
 
 /**
- * A field of the behavior's a list may filter on (list's where): its
- * value is one of the behavior's columns, which where compares for
- * equality in SQL. A migration's index on that column alone lets a page
- * read only the instances that hold a value, in creation order.
+ * A field of the behavior's a list may filter on (list's where), or a
+ * member of one whose value is an object (`lease.holder`): its value is
+ * one of the behavior's columns, which where compares for equality in
+ * SQL, a null column holding no value. A migration's index on that column
+ * alone lets a page read only the instances that hold a value, in
+ * creation order.
  */
 export interface BehaviorFilter {
   /** The column that holds the field's value, by the behavior's own name for it. */
   readonly column: string;
   /** The field's JSON type, which a value where gives must have; a boolean is compared as 1 or 0. */
   readonly type: 'string' | 'number' | 'integer' | 'boolean';
+  /** What the value is, for the list tool's where; the declared field's description when absent. */
+  readonly description?: string;
 }
 
 /** The behavior's own columns on one instance. */
@@ -542,9 +546,13 @@ export interface ScheduleContext<Config> extends WorkContext<Config> {
 export interface BehaviorReactions<Config> {
   /**
    * The schemas besides its own whose instance events the reactions on a
-   * schema hear, for the schema's config. Absent, its own alone.
+   * schema hear, for the schema's config. Absent, its own alone. null
+   * turns the reactions off on the schema: the runner keeps no
+   * subscription there, and a version whose config turns them on starts
+   * one at its publish, as a schema that just came to compose the
+   * behavior does, so no event from before it is handed to react.
    */
-  watches?(config: Config, schema: string): readonly string[];
+  watches?(config: Config, schema: string): readonly string[] | null;
   /** Handles one event. It is synchronous; it returns nothing. */
   react(context: ReactionContext<Config>, event: EngineEvent): void;
 }
@@ -807,6 +815,24 @@ export interface StoredInstance {
   readonly id: string;
   /** The instance's own fields, without any behavior's; deep-frozen. */
   readonly data: FrozenJSON;
+}
+
+/**
+ * What configChange knows of the schema a new version changes, beside the
+ * two configs.
+ */
+export interface ConfigChange {
+  /**
+   * Whether an instance of the schema exists: in any namespace that reads
+   * the version, so for a schema of the shared namespace in every
+   * namespace that looks it up, since one published config serves them
+   * all. It is read when the behavior reads it, at define and again at
+   * publish, in the publish's transaction, so a version defined while the
+   * schema was empty is refused at publish once an instance exists. On an
+   * added or a removed behavior it is always true: configChange is asked
+   * about those only on a schema with instances.
+   */
+  readonly instances: boolean;
 }
 
 /**
@@ -1081,11 +1107,14 @@ export interface BehaviorImplementation<Config = unknown> {
    * Whether a new version of a schema may change the config: return a
    * reason to refuse, or undefined to allow. Called for a changed config,
    * and on a schema with instances for an added behavior (before is
-   * undefined) and a removed one (after is undefined). Absent, only an
-   * identical config is allowed, and the behavior can be neither added to
-   * nor removed from a schema that has instances.
+   * undefined) and a removed one (after is undefined). change says
+   * whether the schema has instances, so a change only stored instances
+   * could break, a link made required say, is refused only while there
+   * are some. Absent, only an identical config is allowed, and the
+   * behavior can be neither added to nor removed from a schema that has
+   * instances.
    */
-  configChange?(before: Config | undefined, after: Config | undefined): string | undefined;
+  configChange?(before: Config | undefined, after: Config | undefined, change: ConfigChange): string | undefined;
 
   /**
    * Brings the behavior's own storage in line with a published config:
@@ -1198,11 +1227,13 @@ export interface BehaviorImplementation<Config = unknown> {
   readonly fields?: Readonly<Record<string, FieldReader<Config>>>;
 
   /**
-   * The declared fields a list may filter on (where), by field name: each
-   * one whose value its reader takes from one of the behavior's columns,
-   * which the filter names. The engine compares the column in SQL, so the
-   * reader and the column must agree: an instance a filter keeps reads
-   * the value the filter named.
+   * What a list may filter on (where), by name: a declared field whose
+   * value its reader takes from one of the behavior's columns, or
+   * `<field>.<member>`, a member of a declared field whose value is an
+   * object, taken from one. The filter names the column. The engine
+   * compares the column in SQL, so the reader and the column must agree:
+   * an instance a filter keeps reads the value the filter named, and one
+   * a null filter keeps reads none (absent or null).
    */
   readonly filters?: Readonly<Record<string, BehaviorFilter>>;
 
