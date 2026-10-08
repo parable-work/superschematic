@@ -3123,7 +3123,13 @@ model, or retired, when it lands.
    workflow signs in with. No generated workflow has run on GitHub yet.
 7. **Breadth.** Jobs and scheduled jobs, buckets, queues and static sites,
    and a second target (GKE or Cloudflare) added as a registration, with
-   the generic connector (section 6.2) so compute can mix.
+   the generic connector (section 6.2) so compute can mix. Built so far:
+   - TypeScript servers on Bun (section 8.6, D51);
+   - jobs and scheduled jobs, on the local target and on gcp as Cloud
+     Run jobs with Cloud Scheduler (section 8.7, D52).
+   
+   Not yet: buckets, queues with their workers, static sites and a
+   second target.
 
 ## 15. Open questions
 

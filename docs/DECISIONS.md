@@ -4557,7 +4557,31 @@ logger.
 | The image builds superscalar's Node addon for Linux in a Rust stage, as Go's image builds its archive, then installs the workspace and runs `main.ts` as a non-root user. | superscalar's WebAssembly fallback, which the checkout does not build and which runs slower. |
 | acme-shop proves it: the storefront's implementation moves to `typescript/shop-storefront`, `shop-stack` deploys and exposes it, `stack dev` runs it on Bun, and `TestStackDevRunsTheShop` calls it. | A fixture alone, which nothing would run end to end. |
 
-Status: not built.
+Status: built.
+- #319 adds to the HTTP runtime:
+  - `loadDatabase`, `loadService` and `loadCallers`, which
+    `runtime/http/testdata/stackconfig_parity.json` holds to Go's
+    encoding;
+  - `serviceCredentialFor` and `createLogger`;
+  - `@superschematic/http-runtime/postgres`, with `connectPostgres` and
+    `ping`.
+- #321 writes `deps.ts` and `loadEnvConfig()` into each API package, and
+  adds `[implementation_paths] typescript` with its scaffold and the Bun
+  workspace rooted at `<output-root>/package.json`.
+- #323 writes each TypeScript server's package, `main.ts` and Dockerfile
+  through the `server` generator, and `stack dev` runs the server on Bun.
+  acme-shop's storefront runs in `shop-stack`, where
+  `TestStackDevRunsTheShop` calls it. The image was built and served
+  locally from the context the deploy writes.
+- #327 is the amendment below.
+
+No TypeScript server has run on Cloud Run.
+
+Not built:
+- TypeScript jobs;
+- passing manual-route handlers to `buildRouter`;
+- OpenTelemetry export;
+- `stack init`, which would write the amendment's ignore rule.
 
 The rule is reversible until the first release.
 
@@ -4579,7 +4603,40 @@ API's connections and clients.
 | On gcp a job is a Cloud Run job (`gcp:cloudrunv2/job:Job`), with its own account, its API's Cloud SQL and egress, one task, and the decorator's timeout and retries. An enabled schedule is a Cloud Scheduler job (`gcp:cloudscheduler/job:Job`) that runs it through the Cloud Run Admin API as an account allowed to run only that job. Bootstrap enables Cloud Scheduler and gives `deployer` its role. | The scheduler calling an operation of the API over HTTP: Scheduler's token goes in `Authorization`, not `Service-Authorization` (D37), and a job's timeout is longer than a request's. |
 | Workers, which run until stopped, come with queues; a job that runs on every deploy is not built. | A `worker` kind now, before the queues it serves. |
 
-Status: not built.
+Status: built.
+- #320 adds:
+  - `@job` and `ir.Job`;
+  - the generated `Jobs` interface and its scaffold;
+  - the `job` kind, with settings (`{ of, job, schedule, timeZone,
+    enabled }`) that tsc checks against the API's sentinel;
+  - `TargetSpec.Jobs`.
+- #322 gives each job a Go module and image at `server/<stack>/<job>/`,
+  extends images and the manifest to every deployable that has one, and
+  adds `stack dev`'s schedules and `stack run`.
+- #325 adds gcp's `cloudrunjob` platform and its connectors.
+  - Each enabled schedule is a Cloud Scheduler job. It runs as the job's
+    own account, which holds `roles/run.invoker` on that job alone.
+  - Bootstrap enables Cloud Scheduler's API and gives `deployer` its
+    role.
+  - `RunJob` reads a failed execution's error from Cloud Logging.
+
+acme-shop's `shop-orders` declares `ShipOrders`, and
+`TestStackDevRunsTheShop` runs it through `stack run` and on its
+schedule.
+
+No job has run on Google Cloud. A live run should check:
+- that `maxRetries: 0` arrives as 0;
+- that Cloud Scheduler's POST runs the job with `roles/run.invoker`
+  alone;
+- that a preview member's account id fits in 30 characters.
+
+Cloud Run starts an execution on every firing, even while the last one
+runs, where `stack dev` skips that firing.
+
+Not built:
+- TypeScript jobs;
+- a job that runs on every deploy (Cloud Run's `runExecutionToken`);
+- workers.
 
 The rule is reversible until the first release.
 
