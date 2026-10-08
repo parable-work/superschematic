@@ -99,6 +99,21 @@
           "edge": "sql:shop-orders-ship-orders->shop-db"
         }
       ]
+    },
+    {
+      "name": "shop-storefront",
+      "kind": "server",
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "shop-storefront",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "exposed": true,
+      "resourceName": "shop-storefront",
+      "address": "http://127.0.0.1:22420"
     }
   ],
   "edges": [
@@ -258,6 +273,21 @@
         "owners": [
           "shop-orders"
         ]
+      },
+      {
+        "id": "shop-storefront.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "language": "typescript",
+          "module": "server/shop-stack/shop-storefront",
+          "name": "shop-storefront",
+          "port": 22420,
+          "readiness": "/readyz"
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront"
+        ]
       }
     ]
   },
@@ -282,12 +312,14 @@
       "deployables": [
         "shop-api",
         "shop-orders",
-        "shop-orders-ship-orders"
+        "shop-orders-ship-orders",
+        "shop-storefront"
       ],
       "resources": [
         "shop-api.process",
         "shop-orders-ship-orders.job",
-        "shop-orders.process"
+        "shop-orders.process",
+        "shop-storefront.process"
       ]
     },
     {

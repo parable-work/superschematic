@@ -30,9 +30,9 @@ import (
 // Sources says where a stack's build wrote each server's and job's
 // Dockerfile, and the directory every image builds from.
 type Sources struct {
-	// OutputRoot is where the stack's build wrote: a Go server's
-	// Dockerfile is at server/<stack>/<server>/Dockerfile under it, and a
-	// Go job's at server/<stack>/<job>/Dockerfile.
+	// OutputRoot is where the stack's build wrote: a Go or TypeScript
+	// server's Dockerfile is at server/<stack>/<server>/Dockerfile under it,
+	// and a Go job's at server/<stack>/<job>/Dockerfile.
 	OutputRoot string
 
 	// RepositoryRoot is every image's build context: the repository root,

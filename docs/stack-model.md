@@ -1370,18 +1370,18 @@ The target sets defaults that `settings` can override:
 
 ### 8.1 Server entrypoint
 
-A generator per server language, Go first, writes each server's entrypoint
-when its stack builds. The Stack kind's `server` generator
+A generator per server language writes each server's entrypoint when its
+stack builds. The Stack kind's `server` generator
 (`internal/generator/servergen`) reads the stack's servers, which no
 environment changes (`stack.Servers`), and writes a Go module per Go
 server at `<output-root>/server/<stack>/<server>/`, holding `main.go`,
-`go.mod` and a Dockerfile (section 8.2). A server takes its name in the
-stack: a declared server's class name, or the API service a default server
-serves. Each job of a Go API gets a module of its own beside them, under
-its deployable's name (section 8.7). The output root's `server/<stack>`
-directory holds only what the last build wrote. A TypeScript server gets
-its entrypoint from the same generator, on Bun (section 8.6, D51), and a
-Rust server gets none yet.
+`go.mod` and a Dockerfile (section 8.2), and in the same pass a package
+per TypeScript server at the same place, which Bun runs (section 8.6,
+D51). A server takes its name in the stack: a declared server's class
+name, or the API service a default server serves. Each job of a Go API
+gets a module of its own beside them, under its deployable's name
+(section 8.7). The output root's `server/<stack>` directory holds only
+what the last build wrote. A Rust server gets no entrypoint yet.
 
 `main` reads its whole configuration from the environment, and:
 
@@ -1508,8 +1508,8 @@ server with `-mod=mod`, and the binary runs on distroless `cc`, which
 holds the glibc and libgcc the archives need and nothing else, as a
 non-root user.
 
-TypeScript and Rust servers get their own Dockerfiles with their
-entrypoints.
+A TypeScript server's Dockerfile builds superscalar's Node addon and
+installs the Bun workspace (section 8.6). A Rust server gets none yet.
 
 Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
 the scalar library allows; the archives superscalar's own release
@@ -1540,7 +1540,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | --- | --- |
 | database | one Postgres container per environment, `superschematic-<stack>-<environment>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
-| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
+| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1), or a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
@@ -1558,15 +1558,21 @@ The provisioner renders `local.json` into
 `<output-root>/program/<stack>/<environment>`: the containers, databases,
 migrations, servers and jobs it runs. Beside it are the models `stack
 dev` writes for it (`models/<service>.json`), the plans it applies
-(`migrations/<service>.plan.json`) and the binaries it builds (`bin/`).
-Each server runs in a process group of its own, so Ctrl-C reaches `stack
-dev` first, which sends each server SIGTERM, callers first, and SIGKILL
-ten seconds later.
+(`migrations/<service>.plan.json`) and the Go servers' and jobs' binaries
+it builds (`bin/`). A TypeScript server has no binary: the provisioner
+runs `bun install` once at the output root, whatever the number of
+TypeScript servers and waves, then starts each with `bun main.ts`. That
+install also links the implementations, which lie outside the output
+root, to it, so a `stack dev --out` elsewhere leaves them linked to that
+output root until the next install in the usual one. Each server runs in
+a process group of its own, so Ctrl-C reaches `stack dev` first, which
+sends each server SIGTERM, callers first, and SIGKILL ten seconds later.
 
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
-on one port (`local-distinct-ports`). The platform runs Go servers only,
-until the TypeScript and Rust entrypoints exist.
+on one port (`local-distinct-ports`). The platform runs Go and TypeScript
+servers; a Rust server, which has no entrypoint yet, does not resolve
+(`unrealizable`).
 
 Not built:
 
@@ -1788,28 +1794,75 @@ as they are, with no build step (D51). The pieces mirror Go's:
   the API packages import without naming. `bun install` runs in the output
   root, or in a generated package under it; an install inside an
   implementation does not find the root, and the lockfile lives in the
-  output root.
-- **Entrypoint.** `<output-root>/server/<stack>/<server>/` holds
-  `package.json`, `main.ts` and a Dockerfile. `main.ts` does what Go's
-  `main` does (section 8.1):
-  - loads each API's config and opens a pool per database, through the
-    Cloud SQL Node connector when some environment places the database
-    there;
-  - builds an SDK client per `calls` edge with its credential source
-    (`serviceCredentialFor`), and calls each constructor;
-  - mounts each API's `buildRouter`, with `authenticateService` for an API
-    with a service clause;
-  - serves `/healthz` and `/readyz` on `$PORT` with `Bun.serve`, and
-    drains for ten seconds on SIGTERM.
+  output root. A `file:` path or pattern climbs from the output root's
+  physical path, the one Bun runs in, so an output root under a symbolic
+  link, such as a temporary directory on macOS, resolves too.
+- **Entrypoint.** The `server` generator writes
+  `<output-root>/server/<stack>/<server>/` for a TypeScript server in the
+  pass that writes the Go ones (section 8.1): `package.json`
+  (`<npm_scope>/<stack>-<server>-server`, a workspace member that depends
+  with `workspace:*` on each served API package, each implementation by
+  the name its `package.json` gives it, and each callee's SDK, and on the
+  runtime, Hono and, with a database, `pg`), `tsconfig.json` and
+  `main.ts`. `main.ts` does what Go's `main` does:
+  - reads `$PORT`, 8080 when unset, and logs JSON lines through the HTTP
+    runtime's `createLogger`, bound to the stack and the server;
+  - loads each API's config with `loadEnvConfig()`, and opens one pool per
+    database with `connectPostgres`, shared by every API on it. Only a
+    server some environment places on Cloud SQL depends on the Cloud SQL
+    Node connector; any other refuses a Cloud SQL configuration at
+    startup and says to build the stack again, as Go's does;
+  - builds one SDK client per API called, with the endpoint's URL and
+    `serviceCredentialFor` its credential, and calls each implementation's
+    `create(deps)`, and its `authenticate(deps)` where a route needs an end
+    user. The end user travels per call, `{ forward: ctx }` (D37), so no
+    handler captures it as Go's `CaptureAuthorization` does;
+  - mounts each API's `buildRouter` on one Hono app, with
+    `authenticateService: serviceAuthenticator(config.<API>_CALLERS)` for
+    an API with a service clause, then the runtime's `notFoundHandler` and
+    `errorHandler`. The build refuses two served APIs that register one
+    method and path, a manually routed operation included, which a
+    TypeScript router mounts;
+  - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
+    shutdown and 503 `unavailable` with each database whose ping fails
+    within two seconds, through `Bun.serve`, which it hands Hono as the
+    routes' bindings, so the runtime reads the peer's address from it;
+  - on SIGTERM or SIGINT stops taking requests, gives those in flight ten
+    seconds, ends the pools and exits; a second signal exits at once.
 
-  It logs JSON lines through the HTTP runtime's logger.
-- **Image.** A Rust stage builds superscalar's Node addon for Linux, as
-  Go's image builds its archive, and the image installs the workspace on
-  `oven/bun` and runs `main.ts`.
+  Bun runs `main.ts` as it is. A mismatch between the implementation and
+  `Deps` shows when `tsc` checks the package, not when Bun runs it.
+- **Image.** With the naming file's `[paths]` naming the checkouts of
+  superscalar's TypeScript binding and the HTTP runtime's package, which
+  no registry serves yet, the Dockerfile's addon stage builds
+  superscalar's Node addon with `cargo build -p superscalar-napi` for the
+  image's platform, on `rust` at the release `tools.env` pins, against the
+  glibc of the Debian release the Bun image runs on. The build stage, on
+  `oven/bun` at `tools.env`'s Bun release, puts the addon in the binding's
+  `native/`, builds the binding's and the runtime's `dist/`, which the
+  root's overrides copy, and installs the workspace without development
+  packages: `--frozen-lockfile` when the context holds the lockfile the
+  output root's install wrote, and resolved afresh in a clean checkout,
+  where none exists. The image copies the output root and the
+  implementations it runs from that stage and runs `bun main.ts` as the
+  non-root `bun` user, with `PORT=8080`. `Dockerfile.dockerignore` takes
+  in the workspace's root and lockfile, every member's manifest by
+  pattern, so the context does not depend on which services built before
+  the stack, every types package, each package the server depends on
+  whole, the two checkouts without their build output, and the
+  superscalar crates. Without either `[paths]` key no Dockerfile is
+  written, and the build says why. The deploy builds it as it builds Go's,
+  from the Dockerfile at the server's path.
 
-`stack dev` runs a TypeScript server with Bun beside the Go servers.
-acme-shop's storefront is the proof: its implementation moves to
-`typescript/shop-storefront`, and `shop-stack` deploys and exposes it.
+`stack dev` runs a TypeScript server on Bun beside the Go servers (section
+8.3). acme-shop's storefront is the proof: its implementation is the
+workspace package `typescript/shop-storefront`, whose `create` keeps carts
+in memory and whose `authenticate` knows its callers by static tokens,
+built from `Deps`; `shop-stack` deploys and exposes it; and
+`TestStackDevRunsTheShop` waits for its `/readyz` and reads a cart through
+its API. The example's other TypeScript, its clients and type tests, is a
+second member, `typescript/clients`, so nothing in the example links a
+package by hand.
 
 ### 8.7 Jobs
 
@@ -2818,14 +2871,16 @@ whatever the deploy decides is affected, and needs no list of its own.
    endpoint names, `serviceauth.go` builds the service authenticator of
    each API with a service clause from its callers field, and a server
    some environment places on Cloud SQL links the Cloud SQL connector.
-   For TypeScript, `Deps`, `Constructor` and the scaffold have landed, and
-   the output root's Bun workspace holds the implementations (section
-   8.6). Next: OpenTelemetry export; the TypeScript entrypoint; then
-   `Deps`, the constructor signature, the scaffold and the entrypoint in
-   Rust. `examples/acme-shop/go` keeps its
-   implementations at the scaffold layout, `go/shop-api` and
-   `go/shop-orders`, which the entrypoints of its `shop-stack` import
-   (section 14, milestone 1).
+   For TypeScript, `Deps`, `Constructor` and the scaffold have landed, the
+   output root's Bun workspace holds the implementations, and the
+   `server` generator writes each TypeScript server's package, `main.ts`
+   and Dockerfile at `server/<stack>/<server>` in the pass that writes the
+   Go servers' (section 8.6). Next: OpenTelemetry export; then `Deps`, the
+   constructor signature, the scaffold and the entrypoint in Rust.
+   `examples/acme-shop` keeps its implementations at the scaffold layout,
+   `go/shop-api`, `go/shop-orders` and `typescript/shop-storefront`,
+   which the entrypoints of its `shop-stack` import (section 14,
+   milestone 1, and section 8.6).
 5. **Config and build plan.** `calls` is in the schema config, beside
    `authDb`, in the TypeScript type and the data-form schema, valid on an
    API config and naming API services. It is a build-order edge for the
@@ -2864,8 +2919,8 @@ whatever the deploy decides is affected, and needs no list of its own.
    `dns.credentials`. Next: a deploy lock beyond the provisioner's and
    the runner's, and the generated CI of section 11.3.
 8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
-   and `bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and
-   `outputs` (section 11).
+   which runs Go and TypeScript servers, and `bootstrap`, `secrets set`,
+   `plan`, `deploy`, `destroy` and `outputs` (section 11).
 
 ## 13. Module layout
 

@@ -1,0 +1,20 @@
+# Two TypeScript servers: ts-shop, on ts-db, calls ts-pricing, which admits
+# only calling services. Its one environment, Local, runs on the local
+# target, whose sql edges derive a connection string, so no entrypoint
+# depends on the Cloud SQL connector.
+kind: Stack
+types:
+  Shop:
+    name: Shop
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-shop, kind: API }
+        - { name: ts-pricing, kind: API }
+      expose:
+        - service: { name: ts-shop, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

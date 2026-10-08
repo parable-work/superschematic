@@ -30,7 +30,7 @@ const ModelsDir = "models"
 // `<service>.plan.json`.
 const MigrationsDir = "migrations"
 
-// binDir is the directory, under the program directory, each server's
+// binDir is the directory, under the program directory, each Go server's
 // binary is built into.
 const binDir = "bin"
 
@@ -104,15 +104,18 @@ type Migration struct {
 	Plan     string `json:"plan"`
 }
 
-// Server is a process node: the server's entrypoint module, built and
-// started with its environment, then probed until it is ready.
+// Server is a process node: the server's entrypoint, started with its
+// environment, then probed until it is ready. A Go server's module is
+// built into Binary first; a TypeScript server's main.ts runs on Bun, with
+// no binary.
 type Server struct {
 	ID         string   `json:"id"`
 	Deployable string   `json:"deployable"`
 	Name       string   `json:"name"`
 	Wave       int      `json:"wave"`
+	Language   string   `json:"language"`
 	Module     string   `json:"module"`
-	Binary     string   `json:"binary"`
+	Binary     string   `json:"binary,omitempty"`
 	Port       int      `json:"port"`
 	URL        string   `json:"url"`
 	Readiness  string   `json:"readiness"`
@@ -461,6 +464,13 @@ func serverOf(res *ir.Resource) (*Server, error) {
 	if s.Module, ok = res.Properties["module"].(string); !ok || s.Module == "" {
 		return nil, fmt.Errorf("its module is not a string")
 	}
+	switch s.Language, _ = res.Properties["language"].(string); s.Language {
+	case LanguageGo:
+		s.Binary = filepath.ToSlash(filepath.Join(binDir, s.Name))
+	case LanguageTypeScript:
+	default:
+		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s and %s servers", s.Language, LanguageGo, LanguageTypeScript)
+	}
 	if s.Port, ok = intValue(res.Properties["port"]); !ok {
 		return nil, fmt.Errorf("its port is not a number")
 	}
@@ -468,7 +478,6 @@ func serverOf(res *ir.Resource) (*Server, error) {
 		return nil, fmt.Errorf("its readiness path is not a path")
 	}
 	s.URL = ServerURL(s.Port)
-	s.Binary = filepath.ToSlash(filepath.Join(binDir, s.Name))
 	env, err := envOf(res.Properties["env"])
 	if err != nil {
 		return nil, err

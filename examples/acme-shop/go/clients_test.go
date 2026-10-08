@@ -130,7 +130,7 @@ func runClients(t *testing.T, baseURL string) {
 	}
 
 	clients := map[string][]string{
-		"typescript": {"bun", "run", "../typescript/orders-client.ts", baseURL},
+		"typescript": {"bun", "run", "../typescript/clients/orders-client.ts", baseURL},
 		"python":     {os.Getenv("ACME_SHOP_PYTHON"), "-B", "../python/orders_client.py", baseURL},
 		"rust":       {rustClient(), baseURL},
 	}

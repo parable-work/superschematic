@@ -374,6 +374,64 @@ func TestNpmTypesPackageKeepsSingleSuffix(t *testing.T) {
 	}
 }
 
+// TestNpmServerPackage: a TypeScript server's package is named after its
+// stack and its name in lower case, a capital starting a word.
+func TestNpmServerPackage(t *testing.T) {
+	n := Default()
+	for server, want := range map[string]string{
+		"shop-storefront": "@schemas/shop-stack-shop-storefront-server",
+		"ShopStorefront":  "@schemas/shop-stack-shop-storefront-server",
+		"Storefront":      "@schemas/shop-stack-storefront-server",
+		"APIGateway":      "@schemas/shop-stack-apigateway-server",
+	} {
+		if got := n.NpmServerPackage("shop-stack", server); got != want {
+			t.Errorf("NpmServerPackage(shop-stack, %s) = %q, want %q", server, got, want)
+		}
+	}
+}
+
+// TestPhysicalRelPath: a path Bun resolves from an output root under a
+// symbolic link climbs from the link's target, which is where Bun runs,
+// and descends to the target as it is named, through a link on the way;
+// with no link it is RelPath's.
+func TestPhysicalRelPath(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"real/out", "repo/runtime", "elsewhere/checkout"} {
+		if err := os.MkdirAll(filepath.Join(base, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{"linked": "real", "repo/third_party": "../elsewhere"} {
+		if err := os.Symlink(target, filepath.Join(base, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct{ out, target, want string }{
+		{"repo/dist", "repo/runtime", "../runtime"},
+		{"linked/out", "repo/runtime", "../../repo/runtime"},
+		{"linked/out/not-yet/built", "repo/runtime", "../../../../repo/runtime"},
+		{"repo/dist", "repo/third_party/checkout", "../third_party/checkout"},
+	} {
+		got, err := PhysicalRelPath(filepath.Join(base, tc.out), filepath.Join(base, tc.target))
+		if err != nil || got != tc.want {
+			t.Errorf("PhysicalRelPath(%s, %s) = %q, %v; want %q", tc.out, tc.target, got, err, tc.want)
+		}
+		// Where the output root exists, the path reaches the target from its
+		// physical path, as Bun resolves it.
+		if from, err := filepath.EvalSymlinks(filepath.Join(base, tc.out)); err == nil {
+			if _, err := os.Stat(filepath.Join(from, filepath.FromSlash(got))); err != nil {
+				t.Errorf("%s from %s does not reach %s: %v", got, from, tc.target, err)
+			}
+		}
+	}
+	if got, err := PhysicalRelPath(filepath.Join(base, "repo/dist"), ""); got != "" || err != nil {
+		t.Errorf("an unset target = %q, %v; want none", got, err)
+	}
+}
+
 func TestSetActiveFillsDefaults(t *testing.T) {
 	t.Cleanup(func() { SetActive(Default()) })
 	SetActive(Naming{GoModuleRoot: "example.com/acme/schemas"})

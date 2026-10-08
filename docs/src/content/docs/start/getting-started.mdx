@@ -121,7 +121,6 @@ builds report the sentinel up to date.
     - enums.go
     - scalars.go
   - typescript/
-    - package.json a Bun workspace of every generated types package
     - shop-common/ the npm package @acme/shop-common-types
       - types/
       - validators/
@@ -177,10 +176,11 @@ does a currency outside the enum.
     describes first.
   </TabItem>
   <TabItem label="TypeScript">
-    <Snippet file="typescript/price.test.ts" />
-    `schemas/dist/types/typescript` is a Bun workspace. Run `bun install`
-    there after each build; a service that consumes the package adds that
-    directory to its own workspace. The
+    <Snippet file="typescript/clients/price.test.ts" />
+    `schemas/dist` is a Bun workspace of every generated TypeScript
+    package, and of the packages under `typescript/`, such as the
+    example's `typescript/clients`, which runs this test. Run `bun install`
+    there after each build. The
     [TypeScript page](/superschematic/install/typescript/) covers the
     install in more detail.
   </TabItem>

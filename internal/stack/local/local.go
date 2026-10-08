@@ -1,7 +1,8 @@
 // Package local is the core's `local` target (docs/stack-model.md,
 // sections 6.3 and 8.3): it runs an environment of a stack on the machine
-// at hand. A server is a process built from its generated entrypoint
-// module, every database deployable of the environment shares one Postgres
+// at hand. A server is a process run from its generated entrypoint: a Go
+// server's binary, built from its module, or a TypeScript server's main.ts
+// on Bun (D51). Every database deployable of the environment shares one Postgres
 // container, with a database per hosted DB schema, a sql edge derives a
 // connection string to that container, and an http edge the callee's
 // loopback URL with a service credential the caller signs with the edge's
@@ -17,7 +18,8 @@
 // target).
 //
 // The platforms and connectors are pure. Provisioner applies their graph:
-// it runs Docker, the migration runner, `go build` and the servers.
+// it runs Docker, the migration runner, `go build`, `bun install` and the
+// servers.
 package local
 
 import (
@@ -81,12 +83,25 @@ const (
 	// references.
 	TypeKeyPair = "local:serviceauth/keyPair:KeyPair"
 
-	// TypeProcess is a server process built from its entrypoint module.
+	// TypeProcess is a server process run from its entrypoint: built from
+	// its module, or run by Bun.
 	TypeProcess = "local:process/process:Process"
 
 	// TypeJob is a job built from its entrypoint module, which the
 	// provisioner runs on its schedule while the environment runs (D52).
 	TypeJob = "local:process/job:Job"
+)
+
+// The languages of a process, as its node's language property names them:
+// a server's API language in lower case.
+const (
+	// LanguageGo is a Go server, whose module `go build` builds.
+	LanguageGo = "go"
+
+	// LanguageTypeScript is a TypeScript server, whose main.ts Bun runs
+	// after one `bun install` at the output root, the Bun workspace's root
+	// (D51).
+	LanguageTypeScript = "typescript"
 )
 
 // Register adds the local target, its three platforms and four connectors,
@@ -97,7 +112,7 @@ func Register(r *registry.Registry) error {
 		{
 			Name:      ServerPlatform,
 			Kind:      ir.DeployableServer,
-			Languages: []string{registry.APILanguageGo},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			Settings:  json.RawMessage(serverSettings),
 			NameOf:    processName,
 			AddressOf: processAddress,
@@ -236,7 +251,7 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
-	    "language": {"enum": ["go"]},
+	    "language": {"enum": ["go", "typescript"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
 	    "readiness": {"type": "string", "pattern": "^/"},
 	    "env": {"type": "array", "items": {

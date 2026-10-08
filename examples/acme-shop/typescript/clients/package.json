@@ -1,0 +1,20 @@
+{
+  "name": "@acme/shop-clients",
+  "version": "0.0.0",
+  "description": "acme-shop's TypeScript clients and type tests: they call the APIs and decode their types through the generated packages, which the output root's Bun workspace links.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@acme/shop-common-types": "workspace:*",
+    "@acme/shop-orders-sdk": "workspace:*",
+    "@acme/shop-orders-types": "workspace:*",
+    "superscalar": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}
