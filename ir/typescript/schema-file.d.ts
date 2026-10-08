@@ -308,6 +308,8 @@ export interface OperationSet {
   name: string;
   operations: FieldDef[];
   serviceCallers?: ServiceCallers;
+  userAdministration?: UserAdministrationConfig;
+  userSessions?: UserSessionsConfig;
 }
 
 export interface OperationSetFile {
@@ -320,6 +322,8 @@ export interface OperationSetFile {
   name: string;
   operations: FieldDef[];
   serviceCallers?: ServiceCallers;
+  userAdministration?: UserAdministrationConfig;
+  userSessions?: UserSessionsConfig;
 }
 
 export interface ProjectionCollapse {
@@ -551,7 +555,17 @@ export interface UnionFile {
   types: string[];
 }
 
+export interface UserAdministrationConfig {
+  path?: string;
+}
+
 export interface UserRoleTrait {
+}
+
+export interface UserSessionsConfig {
+  noLogin?: boolean;
+  path?: string;
+  register?: boolean;
 }
 
 export interface UserTrait {

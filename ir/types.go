@@ -484,6 +484,12 @@ type FieldDef struct {
 	// the set's (see [EffectiveServiceCallers]).
 	ServiceCallers *ServiceCallers `json:"serviceCallers,omitempty" yaml:"serviceCallers,omitempty"`
 
+	// IdentityOperation names the user model's operation (D50) the loader
+	// expanded this operation from, one of the IdentityOp constants: a
+	// server routes it to its runtime's identity package. Empty for every
+	// authored operation. The data forms have no key for it.
+	IdentityOperation string `json:"identityOperation,omitempty" yaml:"identityOperation,omitempty" jsonschema:"-"`
+
 	// HTTPMethod is the explicit HTTP method for operation fields
 	// ("GET", "POST", "PUT", "PATCH", "DELETE"). There is no
 	// Queries-versus-Mutations default inference in v2: every operation

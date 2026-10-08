@@ -2783,6 +2783,12 @@
         },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
+        },
+        "userAdministration": {
+          "$ref": "#/$defs/UserAdministrationConfig"
+        },
+        "userSessions": {
+          "$ref": "#/$defs/UserSessionsConfig"
         }
       },
       "required": [
@@ -2847,6 +2853,12 @@
         },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
+        },
+        "userAdministration": {
+          "$ref": "#/$defs/UserAdministrationConfig"
+        },
+        "userSessions": {
+          "$ref": "#/$defs/UserSessionsConfig"
         }
       },
       "required": [
@@ -3749,9 +3761,37 @@
       ],
       "type": "object"
     },
+    "UserAdministrationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "UserRoleTrait": {
       "additionalProperties": false,
       "properties": {},
+      "type": "object"
+    },
+    "UserSessionsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "noLogin": {
+          "default": false,
+          "type": "boolean"
+        },
+        "path": {
+          "default": "",
+          "type": "string"
+        },
+        "register": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "UserTrait": {
