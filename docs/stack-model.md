@@ -509,7 +509,7 @@ line that holds it.
   ```ts
   declare module "@superschematic/stack" {
     interface Targets {
-      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings };
+      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings; job: CloudRunJobSettings };
     }
   }
   ```
@@ -1162,14 +1162,15 @@ change reads as a diff.
 
 ## 7. The gcp target
 
-`extensions/gcp` builds this section: the target, its Cloud Run and Cloud
-SQL platforms, their connectors, the Cloud DNS platform, the policy
-rules, the pinned provider schemas (section 6.4), at pulumi-gcp 9.37.1,
-bootstrap with the target's Secret Manager store and state bucket
-(section 7.3), image builds on Cloud Build, and the migration job
-(section 8.4, D46). Its golden
-environments resolve the acme-shop stack of section 4.1 in a staging, a
-production and a parameterized preview environment.
+`extensions/gcp` builds this section: the target, its Cloud Run, Cloud
+Run job and Cloud SQL platforms, their connectors, the Cloud DNS
+platform, the policy rules, the pinned provider schemas (section 6.4), at
+pulumi-gcp 9.37.1, bootstrap with the target's Secret Manager store and
+state bucket (section 7.3), image builds on Cloud Build, the migration
+job (section 8.4, D46), and a job's run on demand (section 8.7, D52). Its
+golden environments resolve the acme-shop stack of section 4.1,
+shop-orders' job included, in a staging, a production and a parameterized
+preview environment.
 
 ### 7.1 What the engineer enters
 
@@ -1196,13 +1197,15 @@ Bootstrap reads the GitHub repository from the git remote.
 | --- | --- |
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service mounts |
-| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2) |
+| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
+| schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or the job's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service or the job mounts |
+| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
-| calling server | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable |
+| calling server or job | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
-| secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's account, and an environment variable that references its latest version |
-| image | built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
+| secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's or job's account, and an environment variable that references its latest version |
+| image | a server's or a job's, built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
 | parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits |
 
 A caller reaches every callee at its `run.app` URL, exposed or not, from
@@ -1216,6 +1219,21 @@ Each exposed server gets a load balancer of its own. A platform lowers one
 deployable, so it cannot write the host rules of a load balancer the
 environment's exposed servers would share; sharing one waits for a
 lowering that sees the whole environment.
+
+A schedule runs as its job's own account, which may run that job and no
+other. An account per stack, with a grant on each job, could run every job
+of the stack's environments in the project; an account per schedule would
+add an account, whose id must fit 30 characters beside the job's, to do
+what the job's account may do already. The job's account holds what the
+job's runs reach, so letting it start a run adds no reach. Cloud
+Scheduler's service agent mints the token, through the role Google gives
+it when the project enables Cloud Scheduler, and `deployer`, which names
+the account in the scheduler job, acts as it through
+`roles/iam.serviceAccountUser` (section 7.3). Cloud Run starts an
+execution each time the schedule fires, whether or not the last has
+ended, where `stack dev` skips a run that comes due while the last goes
+on (section 8.7): a job whose run may outlast its interval keeps its runs
+apart itself.
 
 Every node sets its `project`, so the provisioner needs no provider
 configuration, and the network lives in the environment's graph rather
@@ -1231,8 +1249,9 @@ again: each step creates what is missing and leaves the rest.
    of the state, the images and their builds (Artifact Registry, Cloud
    Build and Cloud Logging), the accounts and Workload Identity
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
-   Certificate Manager and Cloud DNS as the graph's resource types need
-   them, Cloud Run with any database for its migration job. An API
+   Certificate Manager, Cloud DNS and Cloud Scheduler as the graph's
+   resource types need them, Cloud Run with any database for its migration
+   job, and Cloud Scheduler for a job's schedule (D52). An API
    enabled moments ago can refuse calls as one the project has not
    enabled, so each later step retries such a refusal for up to five
    minutes.
@@ -1254,7 +1273,11 @@ again: each step creates what is missing and leaves the rest.
      has a value, without reading one; it writes objects in the bucket,
      since a preview takes the stack's lock. `deployer` also runs Cloud
      Build builds and the migration job, as the next two accounts, and
-     reads a failed execution's stderr with the Logs Viewer role;
+     reads a failed execution's stderr with the Logs Viewer role. It
+     applies a job's schedule with Cloud Scheduler's admin role, the role
+     that creates, updates and deletes scheduler jobs, and runs a job's
+     executions for `stack run` with the Cloud Run admin role it applies
+     the job with (D52);
    - a `builder` account, `<stack>-builder`, that image builds run as
      (section 11.2): it pushes to the stack's repository, writes its
      logs, and reads the build contexts in the state bucket, under
@@ -1320,14 +1343,15 @@ in its database; the migration job grants them (section 8.4, D46).
 
 The target sets defaults that `settings` can override:
 
-- one service account per server;
+- one service account per server and per job;
 - deletion protection on production databases (`deletionProtection`);
 - a zonal instance unless `highAvailability` is set, on the
   `db-custom-1-3840` tier of the Enterprise edition (`tier`), running
   Postgres 16, the version CI tests against (`version`), with backups on
   and point-in-time recovery in production;
 - one CPU, 512 MiB and no minimum instances per server (`cpu`, `memory`,
-  `minInstances`, `maxInstances`, `concurrency`);
+  `minInstances`, `maxInstances`, `concurrency`), and one CPU and 512 MiB
+  per job's task (`cpu`, `memory`);
 - logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
   OpenTelemetry setup.
 
@@ -1339,7 +1363,8 @@ The target sets defaults that `settings` can override:
   anything but an exposed server. It refuses an internal server's service
   that takes outside traffic or turns its invoker check off, a load
   balancer's address or forwarding rule, a grant to `allUsers` or
-  `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`.
+  `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`. A
+  job is never exposed, so a grant that lets anyone run it is refused too.
 
 ## 8. Generated build and runtime
 
@@ -1894,12 +1919,40 @@ export abstract class ShipOrders {}
   deployed job, with the image the deploy manifest records, through the
   target's `Jobs` seam (section 11.1), and refuses a target without one
   and a run whose last deploy did not roll the job out.
-- **gcp.**
-  - A job is a Cloud Run job, with its own account, its API's Cloud SQL
-    and egress, one task, and the decorator's timeout and retries.
-  - An enabled schedule is a Cloud Scheduler job that runs it through the
-    Cloud Run Admin API as an account that may run only that job.
-  - Bootstrap enables Cloud Scheduler.
+- **gcp.** The job platform is `gcp.cloudrunjob` (section 7.2), with
+  connectors from it to Cloud SQL and to Cloud Run that share the server's
+  `Connect`.
+  - A job is a Cloud Run job named after the deployable, as a server's
+    service is, with a service account of its own by the same name, the
+    API's secrets, Cloud SQL volume and config, and Direct VPC egress when
+    its API calls another. It has one task, the decorator's timeout for
+    each try and its retries, which Cloud Run caps at 10, so a job with
+    more fails to lower; its settings are the task's `cpu` and `memory`.
+    The deploy pins its image as a server's. Its account's id is its name,
+    which GCP holds to 30 characters, the value of each parameter
+    included: `shop-orders-ship-orders-pr` leaves four for a pull
+    request's number.
+  - An enabled schedule is a Cloud Scheduler job, named as the job is,
+    that POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth
+    token for the job's own account, which holds `roles/run.invoker` on
+    that job alone and so may run only it. A schedule that is off leaves
+    the Cloud Run job, which runs on demand, and neither the scheduler job
+    nor the grant.
+  - `stack run` runs an execution of the job as the last deploy left it,
+    with no overrides, after checking that it runs the image the deploy
+    manifest records, and refuses one that runs another, as during a
+    deploy. It waits for the execution's end, retries included, and on a
+    failure reports the last try's error: the error of its `job failed`
+    line, or its panic, which it reads from Cloud Logging as the migration
+    job's error is read (D46), with Cloud Run's account of the try and the
+    URL of the logs.
+  - Bootstrap enables Cloud Scheduler for an environment that runs a
+    schedule, and gives `deployer` Cloud Scheduler's admin role (section
+    7.3). The migration job gives a job's IAM database user its privileges
+    as it gives a server's (section 8.4).
+  - The Cloud Run job resource can also start an execution when it is
+    created or updated (`runExecutionToken`, `startExecutionToken` in the
+    pinned schema), which a job that runs on every deploy could use.
 
 Workers, which run until stopped, come with queues. A job that runs on
 every deploy is not built.
@@ -2483,8 +2536,9 @@ seven seams on its `TargetSpec` (D45, D46, D47, D52):
   image the deploy manifest records for it, and the runner runs the
   deployed job once, as its platform runs it on its schedule, and returns
   when the run ends, with the last try's error when it fails (section
-  8.7). Without it, `stack run` refuses the target's environments. A
-  Cloud Run job's execution on gcp, which is not built yet.
+  8.7). Without it, `stack run` refuses the target's environments. On
+  gcp, an execution of the job's Cloud Run job, whose error the runner
+  reads from Cloud Logging as the migration job's.
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -2824,7 +2878,8 @@ whatever the deploy decides is affected, and needs no list of its own.
   pinned provider schemas with the tool that keeps them current (sections
   6.4 and 7), and its bootstrap, secret store and state store over Google
   Cloud's client libraries (section 7.3), which stay out of the root
-  module, and its image builder and migration runner (D46).
+  module, its image builder and migration runner (D46), and its job
+  runner (D52).
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
   binding generator (sections 6.5 and 6.6). Built: it registers provisioner
   `pulumi`, its `bindings` package is the generator, and it joins

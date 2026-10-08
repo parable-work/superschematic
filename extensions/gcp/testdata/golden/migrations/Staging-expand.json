@@ -13,7 +13,8 @@
       "privileges": {
         "readWrite": [
           "orders@acme-staging.iam",
-          "shop-api@acme-staging.iam"
+          "shop-api@acme-staging.iam",
+          "shop-orders-ship-orders@acme-staging.iam"
         ]
       }
     }

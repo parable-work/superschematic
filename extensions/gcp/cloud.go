@@ -107,18 +107,24 @@ type Cloud interface {
 	// from spec, and reports whether it changed anything.
 	EnsureJob(ctx context.Context, project, region string, spec JobSpec) (changed bool, err error)
 
-	// RunJob runs a job once, with args in place of its container's, and
-	// returns once the execution finished, whether it succeeded or not. An
-	// error means it could not start the execution or wait for it to
-	// finish, which may still be running.
+	// JobImage returns the image of a job's one container, or an error
+	// that wraps fs.ErrNotExist when the job does not exist.
+	JobImage(ctx context.Context, project, region, job string) (string, error)
+
+	// RunJob runs a job once, with args in place of its container's, or
+	// as the job is when args is nil, and returns once the execution
+	// finished, whether it succeeded or not, after the retries the job
+	// gives its task. An error means it could not start the execution or
+	// wait for it to finish, which may still be running.
 	RunJob(ctx context.Context, project, region, job string, args []string) (*JobRun, error)
 
 	// ExecutionStderr returns the lines the task of run, an execution
-	// RunJob finished, wrote to stderr, oldest first, from Cloud Logging.
-	// Cloud Logging receives them seconds after the execution ends, so it
-	// reads again until it finds some or wait has passed, and then returns
-	// none.
-	ExecutionStderr(ctx context.Context, run *JobRun, wait time.Duration) ([]string, error)
+	// RunJob finished, wrote to stderr, oldest first, from Cloud Logging:
+	// those match selects, a Cloud Logging filter, or all of them when it
+	// is empty. Cloud Logging receives them seconds after the execution
+	// ends, so it reads again until it finds some or wait has passed, and
+	// then returns none.
+	ExecutionStderr(ctx context.Context, run *JobRun, match string, wait time.Duration) ([]string, error)
 }
 
 // BuildSpec is a Cloud Build build of a Docker image.
@@ -716,25 +722,48 @@ func (c *googleCloud) EnsureJob(ctx context.Context, project, region string, spe
 	return true, nil
 }
 
+func (c *googleCloud) JobImage(ctx context.Context, project, region, job string) (string, error) {
+	if err := c.clients(ctx); err != nil {
+		return "", err
+	}
+	name := jobResource(project, region, job)
+	current, err := c.jobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
+	switch {
+	case status.Code(err) == codes.NotFound:
+		return "", fmt.Errorf("gcp: job %s: %w", name, fs.ErrNotExist)
+	case err != nil:
+		return "", fmt.Errorf("gcp: job %s: %w", name, err)
+	}
+	containers := current.GetTemplate().GetTemplate().GetContainers()
+	if len(containers) != 1 {
+		return "", fmt.Errorf("gcp: job %s has %d containers, not one", name, len(containers))
+	}
+	return containers[0].GetImage(), nil
+}
+
 func (c *googleCloud) RunJob(ctx context.Context, project, region, job string, args []string) (*JobRun, error) {
 	if err := c.clients(ctx); err != nil {
 		return nil, err
 	}
 	name := jobResource(project, region, job)
-	current, err := c.jobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
-	if err != nil {
-		return nil, fmt.Errorf("gcp: job %s: %w", name, err)
-	}
-	container := ""
-	if containers := current.GetTemplate().GetTemplate().GetContainers(); len(containers) == 1 {
-		container = containers[0].GetName()
-	}
-	op, err := c.jobs.RunJob(ctx, &runpb.RunJobRequest{
-		Name: name,
-		Overrides: &runpb.RunJobRequest_Overrides{
+	req := &runpb.RunJobRequest{Name: name}
+	// A run of the job as it is, a graph-owned job's (D52), sends no
+	// overrides, which would need run.jobs.runWithOverrides beside
+	// run.jobs.run.
+	if args != nil {
+		current, err := c.jobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
+		if err != nil {
+			return nil, fmt.Errorf("gcp: job %s: %w", name, err)
+		}
+		container := ""
+		if containers := current.GetTemplate().GetTemplate().GetContainers(); len(containers) == 1 {
+			container = containers[0].GetName()
+		}
+		req.Overrides = &runpb.RunJobRequest_Overrides{
 			ContainerOverrides: []*runpb.RunJobRequest_Overrides_ContainerOverride{{Name: container, Args: args}},
-		},
-	})
+		}
+	}
+	op, err := c.jobs.RunJob(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gcp: run job %s: %w", name, err)
 	}
@@ -797,8 +826,8 @@ func executionRun(execution *runpb.Execution) *JobRun {
 // stderrLines is the most lines ExecutionStderr returns.
 const stderrLines = 100
 
-func (c *googleCloud) ExecutionStderr(ctx context.Context, run *JobRun, wait time.Duration) ([]string, error) {
-	project, filter, err := stderrFilter(run)
+func (c *googleCloud) ExecutionStderr(ctx context.Context, run *JobRun, match string, wait time.Duration) ([]string, error) {
+	project, filter, err := stderrFilter(run, match)
 	if err != nil {
 		return nil, err
 	}
@@ -855,9 +884,10 @@ func (c *googleCloud) logLines(ctx context.Context, project, filter string) ([]s
 }
 
 // stderrFilter returns the project of run's execution and the Cloud
-// Logging filter of the lines its task wrote to stderr: Cloud Run logs
-// each as an entry of the job's resource, labeled with the execution.
-func stderrFilter(run *JobRun) (project, filter string, err error) {
+// Logging filter of the lines its task wrote to stderr that match selects,
+// every one when it is empty: Cloud Run logs each as an entry of the job's
+// resource, labeled with the execution.
+func stderrFilter(run *JobRun, match string) (project, filter string, err error) {
 	// projects/<project>/locations/<region>/jobs/<job>/executions/<execution>
 	parts := strings.Split(run.Name, "/")
 	if len(parts) != 8 || parts[0] != "projects" || parts[2] != "locations" || parts[4] != "jobs" || parts[6] != "executions" || slices.Contains(parts, "") {
@@ -874,6 +904,9 @@ func stderrFilter(run *JobRun) (project, filter string, err error) {
 	if !run.Created.IsZero() {
 		// A minute early, for the task's clock against Cloud Run's.
 		clauses = append(clauses, fmt.Sprintf("timestamp>=%q", run.Created.Add(-time.Minute).UTC().Format(time.RFC3339)))
+	}
+	if match != "" {
+		clauses = append(clauses, "("+match+")")
 	}
 	return project, strings.Join(clauses, " AND "), nil
 }
