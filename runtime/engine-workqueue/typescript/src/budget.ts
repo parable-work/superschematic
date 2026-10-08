@@ -30,7 +30,7 @@ back the whole chain. The invoked operations run as the caller, so the
 access policy and the scope's own guards are asked as for any operation.
 
 The scope operations cannot free budget an instance still holds. A scope
-reads the instance through its budget field before it releases anything,
+reads the instance through its meters field before it releases anything,
 and releases at most what it holds for the instance beyond what the
 instance still has reserved; it holds no more for an instance than the
 instance has reserved; and it takes reservations and usage only from an
@@ -66,10 +66,13 @@ them (ReferenceHears): the meter's remaining, which the reservation fits
 while it is at or above the amount less what the settlement releases
 there; where a daily meter keeps it out now, the scope's reserved and
 its limit, which decide whether the next day lets it in; and the link to
-the scope's own scope. It reads the scopes through their budget and
-links fields, never their rows. Queue copies its answer so that work
-over its budget is not tried, and records a reference to each value, so
-a write to a scope reaches only the instances whose answer it can move.
+the scope's own scope: each a pointer into the scope as a read returns
+it, /behaviors/Budget/meters/<meter>/remaining say, or
+/behaviors/Links/targets/<link>. It reads the scopes through their
+meters and Links targets fields, never their rows. Queue copies its
+answer so that work over its budget is not tried, and records a
+reference to each value, so a write to a scope reaches only the
+instances whose answer it can move.
 The remaining's number is exact while the scope holds what the instance
 reserved through it, which the scope operations keep.
 
@@ -104,8 +107,12 @@ import {
   BehaviorConfigError,
   BehaviorVetoError,
   EngineError,
+  LINKS_TARGETS,
   OperationParamsError,
+  WORKFLOW_STATUS,
+  behaviorField,
   defineBehavior,
+  fieldPath,
   type BehaviorScope,
   type ConfigTarget,
   type FrozenJSON,
@@ -149,7 +156,7 @@ export interface BudgetTransition {
   readonly from: readonly string[];
 }
 
-/** One meter, as the budget field holds it. */
+/** One meter, as the meters field holds it. */
 export interface MeterRecord {
   readonly used: number;
   /** The instance's own reservation and what it holds for the instances inside it. */
@@ -170,7 +177,7 @@ export interface Overrun {
   readonly escalated: boolean;
 }
 
-/** A value of a scope a checkReserve answer turns on, as a reference hears it: a JSON pointer into the scope's data, and the number it crosses. */
+/** A value of a scope a checkReserve answer turns on, as a reference hears it: a JSON pointer into the scope as a read returns it, and the number it crosses. */
 export interface ScopeValue {
   readonly path: string;
   readonly crosses?: number;
@@ -194,6 +201,11 @@ export interface ReserveCheck {
 
 const NAME = 'Budget';
 const DAY_MS = 86_400_000;
+
+/** The fields Budget reads of an instance, its own and others', by qualified name. */
+const METERS = fieldPath(NAME, 'meters');
+const LEASE_TOKEN = fieldPath('Lease', 'token');
+const LEASE_ACTIVE = fieldPath('Lease', 'active');
 
 /** The most enclosing scopes checkReserve walks up a meter's chain. */
 const MAX_CHAIN = 16;
@@ -395,19 +407,21 @@ function planOf(view: InstanceView<BudgetConfig>, operation: string, params: Fro
 }
 
 // scopeOf reads where a meter's scope link points now, through the
-// instance's links field, as the caller; undefined when the meter has no
-// scope or the link is not set.
+// instance's Links targets field, as the caller; undefined when the meter
+// has no scope or the link is not set.
 function scopeOf(view: InstanceView<BudgetConfig>, meter: string): Target | undefined {
   const link = view.config.meters[meter].scope;
   if (link === undefined) {
     return undefined;
   }
-  const links = view.instances.get(view.schema, view.id, { fields: ['links'] })?.data.links as Readonly<Record<string, Target>> | undefined;
+  const links = behaviorField(view.instances.get(view.schema, view.id, { fields: [LINKS_TARGETS] }), 'Links', 'targets') as
+    | Readonly<Record<string, Target>>
+    | undefined;
   const target = own(links, link);
   return target === undefined ? undefined : { schema: target.schema, id: target.id };
 }
 
-/** The instance's lease, read through Lease's field; undefined on a type without Lease. */
+/** The instance's lease, read through Lease's token and active fields; undefined on a type without Lease. */
 interface LeaseState {
   readonly token: number;
   readonly active: boolean;
@@ -417,23 +431,34 @@ function leaseOf(view: InstanceView<BudgetConfig>): LeaseState | undefined {
   if (!view.config.leased) {
     return undefined;
   }
-  const lease = view.instances.get(view.schema, view.id, { fields: ['lease'] })?.data.lease as { token?: unknown; active?: unknown } | undefined;
-  return lease === undefined ? undefined : { token: Number(lease.token), active: lease.active === true };
+  const lease = view.instances.get(view.schema, view.id, { fields: [LEASE_TOKEN, LEASE_ACTIVE] });
+  return lease === undefined
+    ? undefined
+    : { token: Number(behaviorField(lease, 'Lease', 'token')), active: behaviorField(lease, 'Lease', 'active') === true };
+}
+
+// metersIn reads an instance's meters field, of what a read returns.
+function metersIn(record: InstanceRecord | undefined): Readonly<Record<string, MeterRecord>> | undefined {
+  return behaviorField(record, NAME, 'meters') as Readonly<Record<string, MeterRecord>> | undefined;
+}
+
+// linksIn reads an instance's Links targets field, of what a read returns.
+function linksIn(record: InstanceRecord | undefined): Readonly<Record<string, Target>> | undefined {
+  return behaviorField(record, 'Links', 'targets') as Readonly<Record<string, Target>> | undefined;
 }
 
 function reservedIn(record: InstanceRecord | undefined, meter: string): number {
-  const budget = record?.data.budget as Readonly<Record<string, MeterRecord>> | undefined;
-  return own(budget, meter)?.reserved ?? 0;
+  return own(metersIn(record), meter)?.reserved ?? 0;
 }
 
 // innerOf reads an instance that asks a scope operation of this one: its
-// reservation of the meter, through its budget field. It refuses one whose
+// reservation of the meter, through its meters field. It refuses one whose
 // schema's meter does not draw on a scope link that points here.
 function innerOf(context: OperationContext<BudgetConfig>, operation: string, meter: string, inner: Target): number {
   const config = context.schemas.config(inner.schema, NAME) as { meters?: Readonly<Record<string, { scope?: string }>> } | undefined;
   const link = own(config?.meters, meter)?.scope;
-  const record = link === undefined ? undefined : context.instances.get(inner.schema, inner.id, { fields: ['budget', 'links'] });
-  const target = link === undefined ? undefined : own(record?.data.links as Readonly<Record<string, Target>> | undefined, link);
+  const record = link === undefined ? undefined : context.instances.get(inner.schema, inner.id, { fields: [METERS, LINKS_TARGETS] });
+  const target = link === undefined ? undefined : own(linksIn(record), link);
   if (target === undefined || target.schema !== context.schema || target.id !== context.id) {
     throw new OperationParamsError(NAME, operation, [
       { path: '/id', message: `${inner.schema} ${inner.id} does not draw meter ${meter} from ${context.schema} ${context.id}` },
@@ -629,7 +654,7 @@ function escalate(context: OperationContext<BudgetConfig>): boolean {
   if (rule === undefined) {
     return false;
   }
-  const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
+  const status = behaviorField(context.instances.get(context.schema, context.id, { fields: [WORKFLOW_STATUS] }), 'Workflow', 'status');
   if (typeof status !== 'string' || !rule.from.includes(status)) {
     return false;
   }
@@ -653,9 +678,9 @@ function hear(scope: { hears: ScopeValue[] }, value: ScopeValue): void {
 
 // checkReserve answers whether a plan would fit now: here, after the own
 // reservation of an ended lease is settled as reserve settles it first,
-// and at each scope up the chain, read through its budget and links
-// fields, less what that settlement releases there. When it does not
-// fit, until is the next UTC day's start if the daily meters starting
+// and at each scope up the chain, read through its meters and Links
+// targets fields, less what that settlement releases there. When it does
+// not fit, until is the next UTC day's start if the daily meters starting
 // again make it fit. Each scope comes with the values of it the answer
 // turns on: its remaining crosses the amount less the release exactly
 // when the reservation's fit there flips; where a daily meter keeps it
@@ -694,7 +719,7 @@ function checkReserve(view: InstanceView<BudgetConfig>, plan: ReadonlyArray<[str
     while (target !== undefined && walked.size < MAX_CHAIN && !walked.has(targetKey(target))) {
       const at: Target = target;
       walked.add(targetKey(at));
-      const record = view.instances.get(at.schema, at.id, { fields: ['budget', 'links'] });
+      const record = view.instances.get(at.schema, at.id, { fields: [METERS, LINKS_TARGETS] });
       if (record === undefined) {
         break;
       }
@@ -705,12 +730,12 @@ function checkReserve(view: InstanceView<BudgetConfig>, plan: ReadonlyArray<[str
         scopes.push(scope);
       }
       const theirs = own((view.schemas.config(at.schema, NAME) as { meters?: Readonly<Record<string, { scope?: string; reset?: string }>> } | undefined)?.meters, meter);
-      const counted = own(record.data.budget as Readonly<Record<string, MeterRecord>> | undefined, meter);
+      const counted = own(metersIn(record), meter);
       if (theirs === undefined || counted === undefined) {
         break;
       }
       for (const unsettled of released > 0 ? [released, 0] : [0]) {
-        hear(scope, { path: `/budget/${meter}/remaining`, crosses: amount - unsettled });
+        hear(scope, { path: `/behaviors/${NAME}/meters/${meter}/remaining`, crosses: amount - unsettled });
       }
       if (counted.limit !== null) {
         const held = Math.max(0, counted.reserved - released);
@@ -719,16 +744,16 @@ function checkReserve(view: InstanceView<BudgetConfig>, plan: ReadonlyArray<[str
         later &&= (theirs.reset === 'daily' ? 0 : counted.used) + held + amount <= counted.limit;
         if (theirs.reset === 'daily' && !now) {
           for (const unsettled of released > 0 ? [released, 0] : [0]) {
-            hear(scope, { path: `/budget/${meter}/reserved`, crosses: counted.limit - amount + unsettled + 1 });
+            hear(scope, { path: `/behaviors/${NAME}/meters/${meter}/reserved`, crosses: counted.limit - amount + unsettled + 1 });
           }
-          hear(scope, { path: `/budget/${meter}/limit` });
+          hear(scope, { path: `/behaviors/${NAME}/meters/${meter}/limit` });
         }
       }
       const link = theirs.scope;
       if (link !== undefined) {
-        hear(scope, { path: `/links/${link}` });
+        hear(scope, { path: `/behaviors/Links/targets/${link}` });
       }
-      const next = link === undefined ? undefined : own(record.data.links as Readonly<Record<string, Target>> | undefined, link);
+      const next = link === undefined ? undefined : own(linksIn(record), link);
       target = next === undefined ? undefined : { schema: next.schema, id: next.id };
     }
   }
@@ -1063,7 +1088,7 @@ export const budget = defineBehavior<BudgetConfig>({
       specOf(context, 'settleFor', meter);
       const inner = innerTarget(params);
       const held = heldFor(context, meter, inner);
-      const still = held === 0 ? 0 : reservedIn(context.instances.get(inner.schema, inner.id, { fields: ['budget'] }), meter);
+      const still = held === 0 ? 0 : reservedIn(context.instances.get(inner.schema, inner.id, { fields: [METERS] }), meter);
       const released = Math.min(params.amount as number, Math.max(0, held - still));
       if (released > 0) {
         hold(context, meter, inner, held - released);
@@ -1094,7 +1119,7 @@ export const budget = defineBehavior<BudgetConfig>({
   },
 
   fields: {
-    budget(view) {
+    meters(view) {
       const found = rows(view);
       const out: Record<string, MeterRecord> = {};
       for (const [meter, spec] of Object.entries(view.config.meters)) {

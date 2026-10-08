@@ -11,11 +11,13 @@ existed. Workflow itself reads no outcome: Dependencies, Rollups and
 Reactions read it from another schema's config, through stateOutcome, to
 tell a blocker or a child that finished well from one that failed.
 
-A list filters on status (where: { status: 'doing' }), which Workflow's
-column holds and an index of its own on that column serves.
+A read returns the status as Workflow.status, under the behavior's name,
+apart from the type's own fields. A list filters on it
+(where: { 'Workflow.status': 'doing' }), which Workflow's column holds and
+an index of its own on that column serves.
 
 Nothing else can move the status. It is Workflow's own column: a create
-or an update that sets `status` is refused (readOnly), and another
+or an update writes own fields only, so neither reaches it, and another
 behavior has no handle on the column. transition's parameter is `to`
 alone, and its paramsSchema is closed, so no alias reaches the handler
 past the guard. The guard below checks every transition request, a

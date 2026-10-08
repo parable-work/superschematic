@@ -914,12 +914,12 @@ The loader checks every type's list in every frontend (verify, after the
 core checks and before the kind's `Verify`), and each failure names the
 type and the behavior: a behavior that is not registered, one listed
 twice, a config its schema rejects, a requirement the type does not list,
-a conflict it does, a field that collides with the type's own fields or
-another behavior's, and two behaviors that add an operation of the same
-name. A behavior field collides with a type's own field that has its
-name or its JSON key (`jsonTag`), since an instance's JSON holds the two
-side by side; either fails as `type <T>: behavior <B> adds field <f>,
-which the type declares`, the engine's wording. The data-form readers
+a conflict it does, and two behaviors that add an operation of the same
+name. A behavior's field collides with nothing: an instance keeps it
+under the behavior's name, apart from the type's own fields and every
+other behavior's (D16, amended: a behavior's fields sit under its name),
+and a string names it by its qualified name, `<behavior>.<field>`
+(`Workflow.status`), which a display's `summaryFields` takes. The data-form readers
 check names and configs before JSON Schema validation, with the same
 wording (section 5). The strict loader in
 `@superschematic/schema-runtime` checks them through the meta-schema

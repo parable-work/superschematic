@@ -92,7 +92,7 @@ describe('the core behaviors say what their config means', () => {
     assert.deepEqual(codes(transition), ['transition_not_allowed', 'already_in_state', 'terminal_state', 'no_status']);
     assert.match(transition.errors[0].description, /^Workflow: /, "each error's description names its behavior");
     assert.match(guidanceOf(engine, 'Doc', 'create').success, /A new instance's status is draft\./);
-    assert.match(guidanceOf(engine, 'Doc', 'update').doNotUseWhen, /Do not set status: it is read-only; call transition\./);
+    assert.match(guidanceOf(engine, 'Doc', 'update').doNotUseWhen, /Do not use to move Workflow's status, which behaviors\.Workflow holds; call transition\./);
 
     // A config no transition leaves no state of has no terminal state, and no terminal_state refusal.
     assert.match(summaryOf(engine, 'Light', 'Workflow') as string, /No state is terminal/);
@@ -148,7 +148,7 @@ describe('the core behaviors say what their config means', () => {
     assert.match(rollups, /A move into done waits until tasksFinished holds\./);
     const transition = guidanceOf(engine, 'projects', 'transition');
     assert.deepEqual(codes(transition).at(-1), 'not_held');
-    assert.match(transition.doNotUseWhen, /Read rollups before a move: a move into done waits until tasksFinished holds\./);
+    assert.match(transition.doNotUseWhen, /Read behaviors\.Rollups\.values before a move: a move into done waits until tasksFinished holds\./);
   });
 
   test('Links says what each pinned link pins, Rollups what latest reads, Revisions how to read one revision and what waits for review', () => {
@@ -163,7 +163,7 @@ describe('the core behaviors say what their config means', () => {
     );
     const links = summaryOf(engine, 'Cook', 'Links') as string;
     assert.match(links, /by name: doc to documents \(pinned to a revision\) and recipe to Recipe \(pinned to a release\)\./);
-    assert.match(links, /A link pinned to a release records the target's release; links gives the target's latest beside it and says stale once the target has released again\./);
+    assert.match(links, /A link pinned to a release records the target's release; behaviors\.Links\.targets gives the target's latest beside it and says stale once the target has released again\./);
     assert.deepEqual(codes(guidanceOf(engine, 'Cook', 'link')), ['no_revision', 'no_release']);
     assert.match(guidanceOf(engine, 'Cook', 'link').useWhen, /doc records the target's latest revision, or the one given\. recipe records the target's latest release, or the one given\./);
     assert.match(guidanceOf(engine, 'Cook', 'create').useWhen, /each the target's id, or \{ id, revision \} for doc, or \{ id, release \} for recipe\./);

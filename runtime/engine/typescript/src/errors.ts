@@ -170,8 +170,9 @@ export interface ValidationIssue {
   path: string;
   /**
    * The rule it breaks: the schema runtime's (`required`, `type`, `pattern`,
-   * `enum`, ...), `unknown` for an undeclared key, or `readOnly` for a field
-   * a behavior adds, which only its operations change.
+   * `enum`, ...), `unknown` for an undeclared key, a behavior's field among
+   * them, since an instance's data holds its own fields only, or a rule a
+   * behavior's validate names.
    */
   rule: string;
   message: string;

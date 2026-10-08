@@ -141,8 +141,8 @@
   },
   "fields": [
     {
-      "name": "blueprint",
-      "description": "What was stamped: children, each step's key and its child's id, in the order they were created; absent until the instance is stamped."
+      "name": "children",
+      "description": "What was stamped: each step's key and its child's id, in the order they were created; absent until the instance is stamped."
     }
   ],
   "vetoes": [

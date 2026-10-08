@@ -140,7 +140,7 @@ func TestDisplayLoadsIntoIR(t *testing.T) {
 		t.Fatal(err)
 	}
 	display := schema.Types["Ticket"].Display
-	if display == nil || display.Noun != "Ticket" || display.TitleField != "title" || strings.Join(display.SummaryFields, ",") != "status,assignee" {
+	if display == nil || display.Noun != "Ticket" || display.TitleField != "title" || strings.Join(display.SummaryFields, ",") != "Workflow.status,assignee" {
 		t.Fatalf("Ticket display = %+v", display)
 	}
 	if state := display.States["implementing"]; state.ActiveForm != "Implementing" || state.Tone != ir.DisplayToneActive {

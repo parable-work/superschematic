@@ -272,7 +272,7 @@ for (const driver of drivers) {
 
       // Reads go on.
       assert.equal(engine.instances.get(alice, 'Order', 'o1', target)?.data.title, 'Desk');
-      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1', target)?.data.notes, ['first']);
+      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1', target)?.behaviors['test.Ledger']?.notes, ['first']);
       assert.equal(engine.instances.list(alice, 'Order', target).items.length, 1);
       assert.equal(engine.instances.invokeSchema(alice, 'Order', 'count', {}, target), 1);
       assert.equal(engine.schemas.live(alice, 'Order', target)?.version, 1);
@@ -315,7 +315,7 @@ for (const driver of drivers) {
       engine.namespaces.archive(alice, 'acme');
       // The create and the operation event its reaction wrote.
       assert.equal(engine.runner.runDue().handled, 2);
-      assert.equal(engine.instances.get(alice, 'Order', 'o1', { namespace: 'acme' })?.data.notes, undefined);
+      assert.equal(engine.instances.get(alice, 'Order', 'o1', { namespace: 'acme' })?.behaviors['test.Ledger']?.notes, undefined);
       const states = () => engine.runner.status().subscriptions.map((status) => [status.namespace, status.state]);
       assert.deepEqual(states(), [
         ['acme', 'archived'],
@@ -335,7 +335,7 @@ for (const driver of drivers) {
 
       engine.namespaces.unarchive(alice, 'acme');
       assert.equal(engine.runner.runDue().handled, 2);
-      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1', { namespace: 'acme' })?.data.notes, [`create ${engine.events.read(alice, { namespace: 'acme', kinds: ['create'] }).events[0].cursor}`]);
+      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1', { namespace: 'acme' })?.behaviors['test.Ledger']?.notes, [`create ${engine.events.read(alice, { namespace: 'acme', kinds: ['create'] }).events[0].cursor}`]);
       assert.deepEqual(states(), [
         ['acme', 'active'],
         ['default', 'active'],

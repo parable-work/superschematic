@@ -91,7 +91,7 @@ function publish(engine: Engine, document: Record<string, unknown>): void {
 }
 
 function status(engine: Engine, schema: string, id: string): unknown {
-  return engine.instances.get(alice, schema, id)?.data.status;
+  return engine.instances.get(alice, schema, id)?.behaviors.Workflow.status;
 }
 
 function move(engine: Engine, schema: string, id: string, ...to: string[]): EngineEvent {
@@ -206,7 +206,7 @@ for (const driver of drivers) {
       engine.instances.delete(alice, 'Step', 's3');
       engine.runner.runDue();
       assert.equal(status(engine, 'Run', 'r2'), 'open');
-      assert.equal((engine.instances.get(alice, 'Run', 'r2')?.data.rollups as Record<string, unknown>).stepsPassed, true);
+      assert.equal((engine.instances.get(alice, 'Run', 'r2')?.behaviors.Rollups.values as Record<string, unknown>).stepsPassed, true);
     });
 
     test('up a tree of its own schema, each parent completes as its last subtask does, to the depth limit', () => {

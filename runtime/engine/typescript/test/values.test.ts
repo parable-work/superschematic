@@ -1,15 +1,15 @@
 // The value store (D16, amended: a large value is stored once): a
 // top-level member whose JSON is longer than the threshold is stored once
-// by the SHA-256 of its canonical JSON, and the row, the event and a
-// behavior's row (Revisions') keep a ref in its place. Every read puts the
-// value back: get, list, an operation's view and context, a field reader,
-// another behavior's read, validation (Variants), Search's index and
-// before(). An event read returns the refs, as does a get or a list that
-// asks for valueRefs; a value is read by its hash only through a schema of
-// the namespace the caller may read that references it. A write that
-// leaves a large field alone neither hashes nor rewrites it, and an
-// operation that never reads the own fields loads none. A value goes when
-// its last holder does.
+// by the SHA-256 of its canonical JSON, and the row, the event (for a
+// behavior's large field too) and a behavior's row (Revisions') keep a ref
+// in its place. Every read puts the value back: get, list, an operation's
+// view and context, a field reader, another behavior's read, validation
+// (Variants), Search's index and before(). An event read returns the refs,
+// as does a get or a list that asks for valueRefs; a value is read by its
+// hash only through a schema of the namespace the caller may read that
+// references it. A write that leaves a large field alone neither hashes
+// nor rewrites it, and an operation that never reads the own fields loads
+// none. A value goes when its last holder does.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, test } from 'node:test';
@@ -197,6 +197,14 @@ const shelf = defineBehavior({
   },
 });
 
+// test.Mirror reads the step's body back in a field of its own: a
+// behavior's field as large as the own field it reads.
+const mirror = defineBehavior({
+  declaration: { name: 'test.Mirror', fields: [{ name: 'echo', description: "The step's body, read back." }] },
+  configChange: () => undefined,
+  fields: { echo: (view) => view.data.body },
+});
+
 type Behaviors = Array<{ name: string; config?: unknown }>;
 
 /** steps is the Variants fixture's Step, with a body field and more behaviors after its own. */
@@ -340,7 +348,7 @@ for (const driver of drivers) {
 
       const got = engine.instances.get(alice, 'Step', 's1');
       assert.deepEqual(got?.data.result, result);
-      assert.equal(got?.data.seen, 60);
+      assert.equal(got?.behaviors['test.Shelf']?.seen, 60);
       // A caller's record is its own to change.
       (got?.data.result as { checks: Check[] }).checks.length = 0;
       assert.deepEqual(engine.instances.get(alice, 'Step', 's1')?.data.result, result);
@@ -354,7 +362,7 @@ for (const driver of drivers) {
       const refs = engine.instances.list(alice, 'Step', { valueRefs: true });
       assert.deepEqual(refs.items[0].data.result, refOf(result));
       assert.deepEqual(refs.items[0].valueRefs, ['/result']);
-      assert.equal(refs.items[0].data.seen, 60);
+      assert.equal(refs.items[0].behaviors['test.Shelf']?.seen, 60);
       assert.deepEqual(refs.items[1].data.result, verify(2));
       assert.equal(refs.items[1].valueRefs, undefined);
       const one = engine.instances.get(alice, 'Step', 's1', { valueRefs: true });
@@ -415,13 +423,23 @@ for (const driver of drivers) {
       engine.instances.update(alice, 'Step', 's1', { result: second });
       engine.instances.invoke(alice, 'Step', 's1', 'record', { result: third });
 
+      // Each ref is a pointer into the change: its own fields under data, a
+      // behavior's under behaviors and its name.
       const [create, update, operation] = events(engine, 's1');
-      assert.deepEqual(create.change, { title: 'Check', kind: 'verify', result: refOf(first), seen: 60 });
-      assert.deepEqual(create.valueRefs, ['/result']);
-      assert.deepEqual(update.change, { result: refOf(second) });
-      assert.deepEqual(update.valueRefs, ['/result']);
-      assert.deepEqual(operation.change, { behavior: 'test.Shelf', operation: 'record', params: { result: refOf(third) }, patch: { result: refOf(third) } });
-      assert.deepEqual(operation.valueRefs, ['/params/result', '/patch/result']);
+      assert.deepEqual(create.change, {
+        data: { title: 'Check', kind: 'verify', result: refOf(first) },
+        behaviors: { 'test.Shelf': { seen: 60 }, 'test.Ledger': {} },
+      });
+      assert.deepEqual(create.valueRefs, ['/data/result']);
+      assert.deepEqual(update.change, { data: { result: refOf(second) } });
+      assert.deepEqual(update.valueRefs, ['/data/result']);
+      assert.deepEqual(operation.change, {
+        behavior: 'test.Shelf',
+        operation: 'record',
+        params: { result: refOf(third) },
+        patch: { data: { result: refOf(third) } },
+      });
+      assert.deepEqual(operation.valueRefs, ['/params/result', '/patch/data/result']);
       const longest = Number(engine.storage.get("SELECT max(length(change)) AS longest FROM engine_events WHERE schema = 'Step' AND instance_id IS NOT NULL")?.longest);
       assert.ok(longest < 400, `the longest change holds ${longest} characters`);
       // The value the operation's params and patch name is stored once.
@@ -431,15 +449,45 @@ for (const driver of drivers) {
       const seen: Array<[string, unknown, unknown]> = [];
       probe.react = (context, event) => {
         if (event.cause === undefined) {
-          seen.push([event.kind, event.valueRefs, (context.before(event) as { result?: unknown } | undefined)?.result]);
+          seen.push([event.kind, event.valueRefs, context.before(event)?.data.result]);
         }
       };
       engine.runner.runDue();
       assert.deepEqual(seen, [
-        ['create', ['/result'], undefined],
-        ['update', ['/result'], first],
-        ['operation', ['/params/result', '/patch/result'], second],
+        ['create', ['/data/result'], undefined],
+        ['update', ['/data/result'], first],
+        ['operation', ['/params/result', '/patch/data/result'], second],
       ]);
+    });
+
+    test("a large field of a behavior's is stowed on its own in the log, at a pointer under the behavior's name", () => {
+      const engine = open(driver, { behaviors: [mirror, ledger] });
+      publish(engine, steps([{ name: 'test.Mirror' }, { name: 'test.Ledger' }]));
+      const [first, second] = ['a', 'b'].map((letter) => letter.repeat(THRESHOLD));
+      engine.instances.create(alice, 'Step', { title: 'Long', kind: 'note', body: first }, { id: 's1' });
+      engine.instances.update(alice, 'Step', 's1', { body: second });
+
+      const [create, update] = events(engine, 's1');
+      assert.deepEqual(create.change, {
+        data: { title: 'Long', kind: 'note', body: refOf(first) },
+        behaviors: { 'test.Mirror': { echo: refOf(first) }, 'test.Ledger': {} },
+      });
+      assert.deepEqual(create.valueRefs, ['/data/body', '/behaviors/test.Mirror/echo']);
+      assert.deepEqual(update.change, { data: { body: refOf(second) }, behaviors: { 'test.Mirror': { echo: refOf(second) } } });
+      assert.deepEqual(update.valueRefs, ['/data/body', '/behaviors/test.Mirror/echo']);
+      // Each value is stored once, though the row and the behavior's field both name it.
+      assert.deepEqual(payloads(engine), [first, second].map(hashOf).sort());
+      assert.equal(engine.instances.get(alice, 'Step', 's1')?.behaviors['test.Mirror']?.echo, second);
+
+      // before() puts the behavior's field back as it puts back an own one.
+      const seen: unknown[] = [];
+      probe.react = (context, event) => {
+        if (event.cause === undefined) {
+          seen.push(context.before(event)?.behaviors['test.Mirror']?.echo);
+        }
+      };
+      engine.runner.runDue();
+      assert.deepEqual(seen, [undefined, first]);
     });
 
     test("Revisions keeps refs in its revisions and proposals, and reads them back whole", () => {
@@ -539,7 +587,7 @@ for (const driver of drivers) {
       assert.deepEqual(rowOf(engine, 's1').data.result, refOf(result));
       assert.equal(values.writes, 1);
       const got = engine.instances.get(alice, 'Step', 's1');
-      assert.equal(got?.data.count, 3);
+      assert.equal(got?.behaviors['test.Counter']?.count, 3);
       assert.deepEqual(got?.data.result, result);
     });
 

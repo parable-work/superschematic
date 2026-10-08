@@ -27,18 +27,18 @@ the instance (afterChange) and of every change of an instance it waits on
 that can move them (afterReferenceChange, which invokes refresh). They
 are the status, the blocked field of Dependencies, the assignee of
 Assignment, the expiries of Lease, the priority field's value, and until
-when the instance is excluded: until a change while Retries' field shows
-it exhausted, or while a link excludeStale names is stale (Links' links
-field), and, when Budget's checkReserve says the reservation a claim
-makes does not fit, until the next UTC day when that day alone makes it
-fit, else until a change does. The status, the expiries and the rest are
-copied as facts, not as booleans of the config, so a new version's
-claim.from or maxExpiries applies to every instance at once. A candidate
-is in a claimable state, not blocked, at fewer than maxExpiries
-expiries, not excluded now, unassigned or assigned to the caller (only
-assigned to the caller with assignedOnly), and holds each match value or
-one of a match list; candidates go highest priority first, an instance
-without one last, then oldest, then by id. claimNext invokes claim on
+when the instance is excluded: until a change while Retries' exhausted
+field shows it exhausted, or while a link excludeStale names is stale
+(Links' targets field), and, when Budget's checkReserve says the
+reservation a claim makes does not fit, until the next UTC day when that
+day alone makes it fit, else until a change does. The status, the
+expiries and the rest are copied as facts, not as booleans of the
+config, so a new version's claim.from or maxExpiries applies to every
+instance at once. A candidate is in a claimable state, not blocked, at
+fewer than maxExpiries expiries, not excluded now, unassigned or
+assigned to the caller (only assigned to the caller with assignedOnly),
+and holds each match value or one of a match list; candidates go highest
+priority first, an instance without one last, then oldest, then by id. claimNext invokes claim on
 each in turn, as the caller, until one succeeds, taking a veto, a
 conflict or a forbidden to mean that one cannot be claimed by this
 caller now, up to maxCandidates; when every one it tried was forbidden,
@@ -80,13 +80,18 @@ import {
   BehaviorConfigError,
   BehaviorVetoError,
   EngineError,
+  LINKS_TARGETS,
   OperationParamsError,
+  WORKFLOW_STATUS,
+  behaviorField,
   defineBehavior,
+  fieldPath,
   linkPin,
   type ConfigTarget,
   type FrozenJSON,
   type InstanceChange,
   type InstanceContext,
+  type InstanceFields,
   type InstanceView,
   type Reference,
   type ReferenceContext,
@@ -144,7 +149,20 @@ const SCOPE = 'budget';
 const STALE = 'stale';
 
 // What a reference to a blocker hears: its status, which alone moves whether it is open.
-const STATUS = { path: '/status' } as const;
+const STATUS = { path: '/behaviors/Workflow/status' } as const;
+
+// What a reference to a stale link's target hears, by what the link pins:
+// its revision, or its release.
+const PINNED = { revision: '/behaviors/Revisions/revision', release: '/behaviors/Branches/release' } as const;
+
+// The fields of other behaviors Queue reads of its own instance, by
+// qualified name.
+const LEASE_HOLDER = fieldPath('Lease', 'holder');
+const LEASE_ACTIVE = fieldPath('Lease', 'active');
+const LEASE_EXPIRIES = fieldPath('Lease', 'expiries');
+const ASSIGNEE = fieldPath('Assignment', 'assignee');
+const EXHAUSTED = fieldPath('Retries', 'exhausted');
+const BLOCKED = fieldPath('Dependencies', 'blocked');
 
 /** The facts of one instance claimNext filters and orders on: Queue's own columns. */
 interface Facts {
@@ -177,7 +195,7 @@ interface ReserveCheck {
   readonly scopes: ReadonlyArray<{ readonly schema: string; readonly id: string; readonly hears?: readonly Value[] }>;
 }
 
-/** A link of Links' links field, as Queue reads it. */
+/** A link of Links' targets field, as Queue reads it. */
 interface LinkRecord {
   readonly schema?: unknown;
   readonly id?: unknown;
@@ -265,14 +283,15 @@ function blockersOf(context: InstanceContext<QueueConfig>, changes: Changes): bo
 // past the pinned one when the target moves on; and while Budget's
 // checkReserve says a claim's reservation does not fit, until the day
 // that alone makes it fit, else until a change does, hearing each value of
-// a scope the answer says it turns on. fields are the instance's retries
-// and links fields; check runs checkReserve on the instance.
-function exclusionOf(config: QueueConfig, fields: FrozenJSON, check: () => ReserveCheck): Exclusion {
-  if (config.retries && (fields.retries as { exhausted?: unknown } | undefined)?.exhausted === true) {
+// a scope the answer says it turns on. record is the instance as a read
+// returns it, with its Retries exhausted and Links targets fields; check
+// runs checkReserve on the instance.
+function exclusionOf(config: QueueConfig, record: InstanceFields | undefined, check: () => ReserveCheck): Exclusion {
+  if (config.retries && behaviorField(record, 'Retries', 'exhausted') === true) {
     return { until: EXCLUDED, hearing: [] };
   }
   const hearing: Hearing[] = [];
-  const links = fields.links as Readonly<Record<string, LinkRecord>> | undefined;
+  const links = behaviorField(record, 'Links', 'targets') as Readonly<Record<string, LinkRecord>> | undefined;
   for (const name of config.excludeStale) {
     const link = own(links, name);
     // Links gives stale while the target has a revision or a release to
@@ -285,7 +304,7 @@ function exclusionOf(config: QueueConfig, fields: FrozenJSON, check: () => Reser
     if (link.stale === true) {
       return { until: EXCLUDED, hearing: [] };
     }
-    hearing.push({ schema: link.schema, id: link.id, key: `${STALE} ${name}`, hears: { path: `/${pin}`, crosses: (link[pin] as number) + 1 } });
+    hearing.push({ schema: link.schema, id: link.id, key: `${STALE} ${name}`, hears: { path: PINNED[pin], crosses: (link[pin] as number) + 1 } });
   }
   if (!config.budget) {
     return { until: 0, hearing };
@@ -300,34 +319,38 @@ function exclusionOf(config: QueueConfig, fields: FrozenJSON, check: () => Reser
   return { until: answer.fits ? 0 : (answer.until ?? EXCLUDED), hearing };
 }
 
-// The fields of its own instance Queue reads, beyond its own columns.
+// The fields of its own instance Queue reads, beyond its own columns, by
+// qualified name.
 function fieldsRead(config: QueueConfig): string[] {
-  return ['status', 'lease', 'assignee', 'retries', ...(config.excludeStale.length > 0 ? ['links'] : [])];
+  return [WORKFLOW_STATUS, LEASE_EXPIRIES, ASSIGNEE, EXHAUSTED, ...(config.excludeStale.length > 0 ? [LINKS_TARGETS] : [])];
 }
 
 // factsOf reads the facts a claim checks from the instance as it is now:
-// its own priority field, and the status, lease, assignee, retries and
-// links fields and the budget check of the behaviors that keep them, read
-// as the caller; and the values whose moves can change its exclusion.
+// its own priority field, and the Workflow status, Lease expiries,
+// Assignment assignee, Retries exhausted and Links targets fields and the
+// budget check of the behaviors that keep them, read as the caller; and
+// the values whose moves can change its exclusion.
 function factsOf(context: InstanceContext<QueueConfig>, changes: Changes): { facts: Facts; hearing: readonly Hearing[] } {
   const { config } = context;
-  const fields = context.instances.get(context.schema, context.id, { fields: fieldsRead(config) })?.data ?? {};
-  const lease = fields.lease as { expiries?: unknown } | undefined;
+  const record = context.instances.get(context.schema, context.id, { fields: fieldsRead(config) });
   const priority = config.priorityField === undefined ? undefined : context.data[config.priorityField];
-  const status = typeof fields.status === 'string' ? fields.status : null;
+  const held = behaviorField(record, 'Workflow', 'status');
+  const status = typeof held === 'string' ? held : null;
   const blocked = config.dependencies && blockersOf(context, changes) ? 1 : 0;
   // An instance no claim can take for its status or a blocker is no
   // candidate whatever else holds it: nothing to check, and nothing to hear.
   const exclusion =
     status !== null && config.claim.from.includes(status) && blocked === 0
-      ? exclusionOf(config, fields, () => context.call('Budget', 'checkReserve', {}) as ReserveCheck)
+      ? exclusionOf(config, record, () => context.call('Budget', 'checkReserve', {}) as ReserveCheck)
       : { until: 0, hearing: [] };
+  const assignee = behaviorField(record, 'Assignment', 'assignee');
+  const expiries = behaviorField(record, 'Lease', 'expiries');
   return {
     facts: {
       status,
       blocked,
-      assignee: typeof fields.assignee === 'string' ? fields.assignee : null,
-      expiries: typeof lease?.expiries === 'number' ? lease.expiries : 0,
+      assignee: typeof assignee === 'string' ? assignee : null,
+      expiries: typeof expiries === 'number' ? expiries : 0,
       priority: typeof priority === 'number' && Number.isSafeInteger(priority) ? priority : null,
       excluded_until: exclusion.until,
     },
@@ -394,7 +417,7 @@ function sameColumn(stored: unknown, value: string | number | null): boolean {
 // outdated reports whether a change of a value the instance hears leaves
 // its exclusion, or what it hears, other than its copies say: read
 // through checkReserve, invoked on the instance as the principal who
-// made the change, and the Retries and Links fields.
+// made the change, and the Retries exhausted and Links targets fields.
 function outdated(context: ReferenceContext<QueueConfig>): boolean {
   const { config } = context;
   const columns = context.columns.get();
@@ -402,10 +425,9 @@ function outdated(context: ReferenceContext<QueueConfig>): boolean {
     // No candidate hears a scope or a link's target: refresh lets go of it.
     return true;
   }
-  const fields = config.retries || config.excludeStale.length > 0
-    ? (context.instances.get(context.schema, context.id, { fields: ['retries', 'links'] })?.data ?? {})
-    : {};
-  const exclusion = exclusionOf(config, fields, () => context.instances.invoke(context.schema, context.id, 'checkReserve', {}) as ReserveCheck);
+  const record =
+    config.retries || config.excludeStale.length > 0 ? context.instances.get(context.schema, context.id, { fields: [EXHAUSTED, LINKS_TARGETS] }) : undefined;
+  const exclusion = exclusionOf(config, record, () => context.instances.invoke(context.schema, context.id, 'checkReserve', {}) as ReserveCheck);
   const now = heard(context).map((reference) => `${refKey(reference)}\u0000${hearsKey(reference.hears)}`).sort();
   const then = exclusion.hearing.map((one) => `${refKey(one)}\u0000${hearsKey(one.hears)}`).sort();
   return Number(columns.excluded_until) !== exclusion.until || now.length !== then.length || now.some((key, index) => key !== then[index]);
@@ -498,7 +520,7 @@ function checkStale(target: ConfigTarget, names: readonly string[]): void {
 
 // staleOf lists the links excludeStale names that are pinned to a
 // revision or a release their targets have moved past, read through
-// Links' field.
+// Links' targets field.
 function staleOf(config: QueueConfig, links: unknown): string[] {
   return config.excludeStale.filter((name) => own(links as Readonly<Record<string, LinkRecord>> | undefined, name)?.stale === true);
 }
@@ -599,28 +621,27 @@ export const queue = defineBehavior<QueueConfig>({
   operations: {
     claim(context, params) {
       const { config } = context;
-      const lease = context.instances.get(context.schema, context.id, { fields: ['lease'] })?.data.lease as
-        | { holder: string | null; active: boolean }
-        | undefined;
-      if (lease !== undefined && lease.holder !== null && !lease.active) {
+      const lease = context.instances.get(context.schema, context.id, { fields: [LEASE_HOLDER, LEASE_ACTIVE] });
+      if (behaviorField(lease, 'Lease', 'holder') !== undefined && behaviorField(lease, 'Lease', 'active') !== true) {
         context.call('Lease', 'expire');
       }
-      const now =
-        context.instances.get(context.schema, context.id, { fields: ['status', 'blocked', ...(config.excludeStale.length > 0 ? ['links'] : [])] })?.data ?? {};
-      if (typeof now.status !== 'string' || !config.claim.from.includes(now.status)) {
-        throw vetoed(context, 'claim', `it is ${String(now.status)}, and it is claimed from ${config.claim.from.join(', ')}`, 'not_claimable', {
-          status: typeof now.status === 'string' ? now.status : null,
+      const now = context.instances.get(context.schema, context.id, {
+        fields: [WORKFLOW_STATUS, BLOCKED, ...(config.excludeStale.length > 0 ? [LINKS_TARGETS] : [])],
+      });
+      const status = behaviorField(now, 'Workflow', 'status');
+      if (typeof status !== 'string' || !config.claim.from.includes(status)) {
+        throw vetoed(context, 'claim', `it is ${String(status)}, and it is claimed from ${config.claim.from.join(', ')}`, 'not_claimable', {
+          status: typeof status === 'string' ? status : null,
           from: [...config.claim.from],
         });
       }
-      if (config.dependencies && now.blocked === true) {
+      if (config.dependencies && behaviorField(now, 'Dependencies', 'blocked') === true) {
         throw vetoed(context, 'claim', 'a blocker holds it up', 'blocked');
       }
-      const stale = staleOf(config, now.links);
+      const links = behaviorField(now, 'Links', 'targets') as Readonly<Record<string, LinkRecord>> | undefined;
+      const stale = staleOf(config, links);
       if (stale.length > 0) {
-        const pins = [
-          ...new Set(stale.map((name) => (typeof own(now.links as Readonly<Record<string, LinkRecord>> | undefined, name)?.release === 'number' ? 'release' : 'revision'))),
-        ];
+        const pins = [...new Set(stale.map((name) => (typeof own(links, name)?.release === 'number' ? 'release' : 'revision')))];
         throw vetoed(
           context,
           'claim',

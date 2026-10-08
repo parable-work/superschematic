@@ -1,9 +1,9 @@
-// A list's where: equality on the instance type's own fields and on a
-// field a behavior lets a list filter on (Workflow's status), or a member
-// of one, a list of values, null for no value, paging with the cursor in
-// creation order, a page read through an index, a page that scans a
-// bounded number of instances when none serves it, and what where
-// refuses.
+// A list's where: equality on the instance type's own fields, by key, and
+// on a field a behavior lets a list filter on, or a member of one, by its
+// qualified name (Workflow.status), a list of values, null for no value,
+// paging with the cursor in creation order, a page read through an index,
+// a page that scans a bounded number of instances when none serves it,
+// and what where refuses.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -25,8 +25,8 @@ const WORKFLOW = {
 };
 
 // test.Tag gives an instance an owner, or none, in a column the tag
-// field's owner member reads, which a list filters on as tag.owner
-// through an index on the column.
+// field's owner member reads, which a list filters on as
+// test.Tag.tag.owner through an index on the column.
 const tagDeclaration: BehaviorDeclaration = {
   name: 'test.Tag',
   description: 'Tags an instance with an owner, or none.',
@@ -127,17 +127,17 @@ for (const driver of drivers) {
       assert.deepEqual(ids({ rank: [2, 0] }), ['j00000', 'j00002', 'j00003', 'j00005', 'j00006']);
       assert.deepEqual(ids({ urgent: true }), ['j00000', 'j00001']);
       assert.deepEqual(ids({ urgent: false, kind: 'build' }), ['j00002', 'j00004', 'j00006']);
-      assert.deepEqual(ids({ status: 'doing' }), ['j00001', 'j00005']);
-      assert.deepEqual(ids({ status: ['done', 'todo'] }), ['j00000', 'j00002', 'j00003', 'j00004', 'j00006', 'j00007']);
-      assert.deepEqual(ids({ status: 'todo', kind: 'build' }), ['j00000', 'j00002', 'j00004', 'j00006']);
+      assert.deepEqual(ids({ 'Workflow.status': 'doing' }), ['j00001', 'j00005']);
+      assert.deepEqual(ids({ 'Workflow.status': ['done', 'todo'] }), ['j00000', 'j00002', 'j00003', 'j00004', 'j00006', 'j00007']);
+      assert.deepEqual(ids({ 'Workflow.status': 'todo', kind: 'build' }), ['j00000', 'j00002', 'j00004', 'j00006']);
       assert.deepEqual(ids({ slug: ['org/job-6', 'org/job-1', 'org/missing'] }), ['j00001', 'j00006']);
-      assert.deepEqual(ids({ slug: 'org/job-1', status: 'todo' }), []);
+      assert.deepEqual(ids({ slug: 'org/job-1', 'Workflow.status': 'todo' }), []);
       assert.deepEqual(ids({ kind: 'deploy' }), []);
       // An empty where, or none, lists every instance.
       assert.equal(every(engine, { where: {} }).ids.length, 8);
       // valueRefs and the rest of a read work as an unfiltered list's.
-      const page = engine.instances.list(alice, 'Job', { where: { status: 'doing' }, valueRefs: true });
-      assert.deepEqual(page.items[0].data, { slug: 'org/job-1', kind: 'test', rank: 1, urgent: true, status: 'doing' });
+      const page = engine.instances.list(alice, 'Job', { where: { 'Workflow.status': 'doing' }, valueRefs: true });
+      assert.deepEqual([page.items[0].data, page.items[0].behaviors], [{ slug: 'org/job-1', kind: 'test', rank: 1, urgent: true }, { Workflow: { status: 'doing' } }]);
     });
 
     test('pages keep creation order across the cursor, a list of values merged', () => {
@@ -150,13 +150,13 @@ for (const driver of drivers) {
       assert.deepEqual(kinds.ids, expected);
       assert.deepEqual(kinds.pages, [4, 4, 4, 4, 4]);
       // Through Workflow's index, one range read per state.
-      const states = every(engine, { where: { status: ['done', 'todo'] }, limit: 4 });
+      const states = every(engine, { where: { 'Workflow.status': ['done', 'todo'] }, limit: 4 });
       assert.deepEqual(states.ids, expected);
       assert.deepEqual(states.pages, [4, 4, 4, 4, 4]);
       // An instance created behind the cursor moves nothing between pages.
-      const first = engine.instances.list(alice, 'Job', { where: { status: 'todo' }, limit: 2 });
+      const first = engine.instances.list(alice, 'Job', { where: { 'Workflow.status': 'todo' }, limit: 2 });
       engine.instances.create(alice, 'Job', { slug: 'late' }, { id: 'late' });
-      const rest = every(engine, { where: { status: 'todo' }, cursor: first.next as string });
+      const rest = every(engine, { where: { 'Workflow.status': 'todo' }, cursor: first.next as string });
       assert.deepEqual([...first.items.map((item) => item.id), ...rest.ids].slice(-2), ['j00027', 'late']);
     });
 
@@ -172,7 +172,7 @@ for (const driver of drivers) {
       );
       const ids = [...rare].map((index) => `j${String(index).padStart(5, '0')}`);
       // Workflow's index on its status reads the three in one page.
-      assert.deepEqual(every(engine, { where: { status: 'doing' } }), { ids, pages: [3] });
+      assert.deepEqual(every(engine, { where: { 'Workflow.status': 'doing' } }), { ids, pages: [3] });
       // So does the unique index on slug, a combination at a time.
       assert.deepEqual(every(engine, { where: { slug: [...rare].map((index) => `s${index}`) } }), { ids, pages: [3] });
       // No index serves kind: each page reads FILTER_SCAN_ROWS instances
@@ -181,7 +181,7 @@ for (const driver of drivers) {
       assert.deepEqual(every(engine, { where: { kind: 'none' } }), { ids: [], pages: [0, 0, 0] });
       // A member no index serves beside one an index does is tested on the
       // rows the index reads.
-      assert.deepEqual(every(engine, { where: { status: 'doing', kind: 'rare', slug: `s${FILTER_SCAN_ROWS + 500}` } }).ids, [ids[1]]);
+      assert.deepEqual(every(engine, { where: { 'Workflow.status': 'doing', kind: 'rare', slug: `s${FILTER_SCAN_ROWS + 500}` } }).ids, [ids[1]]);
     });
 
     test("a behavior's filter with no index of its own reads as an own field's does", () => {
@@ -196,9 +196,9 @@ for (const driver of drivers) {
         engine.instances.invoke(alice, 'Item', id, 'increment', { by });
       }
       const ids = (where: Record<string, unknown>): string[] => engine.instances.list(alice, 'Item', { where }).items.map((item) => item.id);
-      assert.deepEqual(ids({ count: 2 }), ['a', 'c']);
-      assert.deepEqual(ids({ count: [1, 3], title: ['a', 'b'] }), ['b']);
-      assert.match(thrown(() => ids({ count: 'two' }), EngineError).message, /where.count is an integer/);
+      assert.deepEqual(ids({ 'test.Counter.count': 2 }), ['a', 'c']);
+      assert.deepEqual(ids({ 'test.Counter.count': [1, 3], title: ['a', 'b'] }), ['b']);
+      assert.match(thrown(() => ids({ 'test.Counter.count': 'two' }), EngineError).message, /where.test.Counter.count is an integer/);
     });
 
     test("null keeps the instances whose field holds no value, an own field's or a behavior's member's", () => {
@@ -222,15 +222,20 @@ for (const driver of drivers) {
       const ids = (where: Record<string, unknown>): string[] => engine.instances.list(alice, 'Item', { where }).items.map((item) => item.id);
       assert.deepEqual(ids({ kind: null }), ['b', 'd']);
       assert.deepEqual(ids({ kind: [null, 'test'] }), ['b', 'c', 'd']);
-      assert.deepEqual(ids({ 'tag.owner': 'ann' }), ['a']);
-      assert.deepEqual(ids({ 'tag.owner': null }), ['b', 'c', 'e']);
-      assert.deepEqual(ids({ 'tag.owner': [null, 'bob'], kind: null }), ['b', 'd']);
+      assert.deepEqual(ids({ 'test.Tag.tag.owner': 'ann' }), ['a']);
+      assert.deepEqual(ids({ 'test.Tag.tag.owner': null }), ['b', 'c', 'e']);
+      assert.deepEqual(ids({ 'test.Tag.tag.owner': [null, 'bob'], kind: null }), ['b', 'd']);
       // What a read shows agrees with what the filter kept.
-      for (const item of engine.instances.list(alice, 'Item', { where: { 'tag.owner': null } }).items) {
-        assert.deepEqual(item.data.tag, { owner: null });
+      for (const item of engine.instances.list(alice, 'Item', { where: { 'test.Tag.tag.owner': null } }).items) {
+        assert.deepEqual(item.behaviors['test.Tag'], { tag: { owner: null } });
       }
-      assert.match(thrown(() => ids({ 'tag.owner': 3 }), EngineError).message, /where.tag.owner is a string or null, or a list of them, not 3/);
-      assert.match(thrown(() => ids({ tag: 'ann' }), EngineError).message, /where names tag, which is not a field Item filters on; it filters on title, kind, tag.owner/);
+      assert.match(thrown(() => ids({ 'test.Tag.tag.owner': 3 }), EngineError).message, /where.test.Tag.tag.owner is a string or null, or a list of them, not 3/);
+      // The member's name alone, or the field's, names nothing a list filters on.
+      assert.match(
+        thrown(() => ids({ 'tag.owner': 'ann' }), EngineError).message,
+        /where names tag.owner, which is not a field Item filters on; it filters on title, kind, test.Tag.tag.owner/
+      );
+      assert.match(thrown(() => ids({ 'test.Tag.tag': 'ann' }), EngineError).message, /where names test.Tag.tag, which is not a field Item filters on/);
     });
 
     test("a behavior's index serves null as one more range; an own index, partial on a value, serves none", () => {
@@ -248,7 +253,7 @@ for (const driver of drivers) {
         }
       });
       const ids = [...bare].map((index) => `i${String(index).padStart(5, '0')}`);
-      assert.deepEqual(every(engine, { where: { 'tag.owner': null } }, 'Item'), { ids, pages: [3] });
+      assert.deepEqual(every(engine, { where: { 'test.Tag.tag.owner': null } }, 'Item'), { ids, pages: [3] });
       assert.deepEqual(every(engine, { where: { slug: null } }, 'Item'), { ids, pages: [1, 1, 1] });
       // With a value beside null, the unique index still serves no member.
       assert.deepEqual(every(engine, { where: { slug: [null, 'i00000'] } }, 'Item').ids, ['i00000', ...ids]);
@@ -261,7 +266,9 @@ for (const driver of drivers) {
         assert.equal(error.code, 'invalid_argument');
         assert.match(error.message, pattern);
       };
-      refused({ tags: 'a' }, /where names tags, which is not a field Job filters on; it filters on slug, kind, rank, urgent, status/);
+      refused({ tags: 'a' }, /where names tags, which is not a field Job filters on; it filters on slug, kind, rank, urgent, Workflow.status/);
+      // Workflow's status goes by its qualified name: a bare key names an own field, and Job has no own status.
+      refused({ status: 'todo' }, /where names status, which is not a field Job filters on/);
       refused({ owner: { name: 'x' } }, /where names owner/);
       refused({ title: 'x' }, /where names title/);
       refused({ kind: 1 }, /where.kind is a string or null, or a list of them, not 1/);
@@ -269,7 +276,7 @@ for (const driver of drivers) {
       refused({ urgent: 'yes' }, /where.urgent is a boolean/);
       refused({ kind: [] }, /where.kind lists 1 to 100 values, got 0/);
       refused({ kind: Array.from({ length: 101 }, (_, index) => `k${index}`) }, /lists 1 to 100 values, got 101/);
-      refused({ status: ['todo', 3] }, /where.status is a string/);
+      refused({ 'Workflow.status': ['todo', 3] }, /where.Workflow.status is a string/);
       refused(['kind'], /where is a JSON object/);
     });
   });

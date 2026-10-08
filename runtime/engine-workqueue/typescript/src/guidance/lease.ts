@@ -23,7 +23,7 @@ const CORRECTIONS: Readonly<Record<string, string>> = {
   not_leased: 'Acquire the lease (or claim the instance) first.',
   not_holder: 'Only the holder may do this; acquire the lease once it is free.',
   lapsed: 'Stop working on the instance: the lease has lapsed. Acquire it again once it has expired.',
-  token_stale: 'Stop: a newer lease replaced yours. Read the lease field, and acquire again only if it is free.',
+  token_stale: 'Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free.',
   token_required: `Present the lease's token as ${TOKEN}.`,
   max_expiries: 'A caller with the override permission resets the count with resetExpiries.',
   hold_limit_fixed: 'Change the field once the lease has ended, or with the override permission.',
@@ -93,7 +93,7 @@ export function leaseGuidance(config: LeaseConfig, target: DescribeTarget): Beha
     operations: {
       ...others,
       list: {
-        useWhen: `where: { "lease.holder": <subject> } lists the ${target.type} instances whose lease a principal holds, a lapsed one until the runner expires it, and "lease.holder": null the free ones.`,
+        useWhen: `where: { "Lease.holder": <subject> } lists the ${target.type} instances whose lease a principal holds, a lapsed one until the runner expires it, and "Lease.holder": null the free ones.`,
       },
       acquire: {
         useWhen: sentences(

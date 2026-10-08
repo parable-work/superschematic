@@ -12,6 +12,7 @@ import { EngineTransportError } from './errors.js';
 import { EventSubscription, eventQuery, type EventFilters, type SubscribeOptions } from './stream.js';
 import { Transport, seqOf, type CallOptions, type EndUserAuth, type FetchLike, type RequestSpec, type ServiceCredential } from './transport.js';
 import type {
+  BehaviorFieldsJSON,
   BehaviorDocument,
   BehaviorSummary,
   DescribeDocument,
@@ -65,9 +66,10 @@ export interface ListOptions extends CallOptions {
   readonly limit?: number;
   readonly cursor?: string;
   /**
-   * Field values the instances hold, by field: a value, null for none, or
-   * a list any of which they hold; sent as a JSON object in the `where`
-   * query parameter.
+   * Field values the instances hold, by field: an own field by its key, a
+   * behavior's by its qualified name (`Workflow.status`); a value, null
+   * for none, or a list any of which they hold; sent as a JSON object in
+   * the `where` query parameter.
    * A filtered page can hold fewer instances than limit while next is not
    * null.
    */
@@ -243,7 +245,7 @@ export class InstanceCalls {
   constructor(private readonly scope: Scope) {}
 
   /** create stores a new instance, with its behaviors' create parameters. */
-  create<T = JSONObject>(schema: string, data: JSONObject, options: CreateOptions = {}): Promise<Instance<T>> {
+  create<T = JSONObject, B = BehaviorFieldsJSON>(schema: string, data: JSONObject, options: CreateOptions = {}): Promise<Instance<T, B>> {
     return this.scope.data({
       method: 'POST',
       path: `${this.scope.schema(options, schema)}/instances`,
@@ -253,12 +255,12 @@ export class InstanceCalls {
   }
 
   /** get reads an instance; one that does not exist is 404 `not_found`. */
-  get<T = JSONObject>(schema: string, id: string, options: CallOptions = {}): Promise<Instance<T>> {
+  get<T = JSONObject, B = BehaviorFieldsJSON>(schema: string, id: string, options: CallOptions = {}): Promise<Instance<T, B>> {
     return this.scope.data({ method: 'GET', path: this.scope.instance(options, schema, id), options });
   }
 
   /** list returns a page of instances in creation order. */
-  list<T = JSONObject>(schema: string, options: ListOptions = {}): Promise<InstancePage<T>> {
+  list<T = JSONObject, B = BehaviorFieldsJSON>(schema: string, options: ListOptions = {}): Promise<InstancePage<T, B>> {
     const query: Array<[string, string]> = [];
     if (options.limit !== undefined) {
       query.push(['limit', String(options.limit)]);
@@ -277,12 +279,12 @@ export class InstanceCalls {
    * `{ slug: 'openai/gpt-5' }`, sent as a JSON object in the query, so a
    * value may hold a slash; none is 404 `not_found`, as for get.
    */
-  lookup<T = JSONObject>(schema: string, key: JSONObject, options: CallOptions = {}): Promise<Instance<T>> {
+  lookup<T = JSONObject, B = BehaviorFieldsJSON>(schema: string, key: JSONObject, options: CallOptions = {}): Promise<Instance<T, B>> {
     return this.scope.data({ method: 'GET', path: `${this.scope.schema(options, schema)}/lookup`, query: [['key', JSON.stringify(key)]], options });
   }
 
   /** update applies a JSON merge patch (RFC 7386) and returns the instance. */
-  update<T = JSONObject>(schema: string, id: string, patch: JSONObject, options: WriteOptions = {}): Promise<Instance<T>> {
+  update<T = JSONObject, B = BehaviorFieldsJSON>(schema: string, id: string, patch: JSONObject, options: WriteOptions = {}): Promise<Instance<T, B>> {
     return this.scope.data({
       method: 'PATCH',
       path: this.scope.instance(options, schema, id),

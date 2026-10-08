@@ -12,8 +12,8 @@ Queue's claim by every principal but the assignee, whoever made the call
 (a claim calls acquire for its caller), so an assigned instance is
 claimed only by its assignee.
 
-A list filters on the assignee (where: { assignee: 'alice' }), null
-keeping the unassigned instances, through an index on its column.
+A list filters on the assignee (where: { 'Assignment.assignee': 'alice' }),
+null keeping the unassigned instances, through an index on its column.
 
 Every refusal is a veto with a code the declaration lists
 (assigned_to_another, already_assigned, not_assigned, not_configured),

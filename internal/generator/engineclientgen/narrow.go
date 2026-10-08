@@ -27,9 +27,9 @@ type alias struct {
 	schema any
 }
 
-// fieldShape is a behavior field as a read returns it: its JSON Schema, and
-// whether every read holds it (an engine leaves out a field whose reader
-// returns nothing).
+// fieldShape is a behavior field as a read returns it, under its behavior's
+// name: its JSON Schema, and whether every read holds it (an engine leaves
+// out a field whose reader returns nothing).
 type fieldShape struct {
 	schema  any
 	present bool
@@ -77,11 +77,11 @@ var coreNarrowers = map[string]narrower{
 	"Rollups":      narrowRollups,
 	"Variants":     narrowVariants,
 	"Assignment":   narrowAssignment,
-	"Lease":        objectFields,
-	"Presence":     objectFields,
-	"Blueprint":    objectFields,
-	"Budget":       objectFields,
-	"Retries":      objectFields,
+	"Lease":        narrowLease,
+	"Presence":     narrowPresence,
+	"Blueprint":    narrowBlueprint,
+	"Budget":       narrowBudget,
+	"Retries":      narrowRetries,
 }
 
 // idPattern is the pattern of an instance id, as the engine's declarations
@@ -211,12 +211,29 @@ func setOperationProperty(schemas map[string]any, operation string, path []strin
 	return nil
 }
 
+// setField types a field of the behavior, keeping its declaration's
+// description. The field must be declared, so a narrowing cannot drift from
+// its declaration unnoticed.
+func setField(n *narrowing, name string, schema map[string]any, present bool) error {
+	current, ok := n.fields[name]
+	if !ok {
+		return fmt.Errorf("the declaration has no field %s", name)
+	}
+	if description := descriptionOf(current.schema); description != "" {
+		schema["description"] = description
+	}
+	n.fields[name] = fieldShape{schema: schema, present: present}
+	return nil
+}
+
 // Workflow: the status and transition's states are the config's.
 func narrowWorkflow(n *narrowing, config map[string]any, target narrowTarget) error {
 	states := stringsOf(config["states"])
 	state := target.base + "State"
 	n.aliases = append(n.aliases, alias{name: state, doc: fmt.Sprintf("A state of %s's Workflow.", an(target.base)), schema: enumOf(states)})
-	n.fields["status"] = fieldShape{schema: ref(state, describedField(n, "status")), present: true}
+	if err := setField(n, "status", ref(state, ""), true); err != nil {
+		return err
+	}
 	if err := setOperationProperty(n.params, "transition", nil, "to", ref(state, "")); err != nil {
 		return err
 	}
@@ -228,21 +245,17 @@ func narrowWorkflow(n *narrowing, config map[string]any, target narrowTarget) er
 	return nil
 }
 
-// describedField is the declaration's description of a field.
-func describedField(n *narrowing, name string) string {
-	return descriptionOf(n.fields[name].schema)
-}
-
 // Comments: the count is always there.
 func narrowComments(n *narrowing, _ map[string]any, _ narrowTarget) error {
-	n.fields["commentCount"] = fieldShape{schema: map[string]any{"type": "integer", "description": describedField(n, "commentCount")}, present: true}
-	return nil
+	return setField(n, "commentCount", map[string]any{"type": "integer"}, true)
 }
 
 // Revisions: a proposal's patch is the type's patch, a revision's data its
 // own fields; the revision number is absent until the first revision.
 func narrowRevisions(n *narrowing, _ map[string]any, target narrowTarget) error {
-	n.fields["revision"] = fieldShape{schema: map[string]any{"type": "integer", "description": describedField(n, "revision")}}
+	if err := setField(n, "revision", map[string]any{"type": "integer"}, false); err != nil {
+		return err
+	}
 	patch := target.base + "Patch"
 	if err := setOperationProperty(n.params, "propose", nil, "patch", ref(patch, "")); err != nil {
 		return err
@@ -317,8 +330,7 @@ func narrowDependencies(n *narrowing, config map[string]any, target narrowTarget
 	if err := setOperationProperty(n.results, "listBlockers", []string{"properties", "items", "items"}, "schema", enumOf(schemas)); err != nil {
 		return err
 	}
-	n.fields["blocked"] = fieldShape{schema: map[string]any{"type": "boolean", "description": describedField(n, "blocked")}, present: true}
-	return nil
+	return setField(n, "blocked", map[string]any{"type": "boolean"}, true)
 }
 
 // linkSpec is one link of a Links config.
@@ -359,9 +371,9 @@ func linkPin(pinned any) string {
 // Links: the names are the config's; the create parameters are the
 // engine's narrowing (linksCreateParams): a property per link, the
 // required ones required, the revision or release it records only for a
-// pinned link; the field holds each link the instance has, with its
-// target's schema, and for a pinned link its pin, the target's latest of
-// that kind and whether the target has moved past the pin.
+// pinned link; the targets field holds each link the instance has, with
+// its target's schema, and for a pinned link its pin, the target's latest
+// of that kind and whether the target has moved past the pin.
 func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error {
 	links := linksOf(config)
 	names := make([]string, 0, len(links))
@@ -416,7 +428,6 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 		"properties":           createProperties,
 	}
 	field := map[string]any{
-		"description":          describedField(n, "links"),
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties":           fieldProperties,
@@ -426,7 +437,9 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 		field["required"] = required
 	}
 	n.createParams = created
-	n.fields["links"] = fieldShape{schema: field, present: len(required) > 0}
+	if err := setField(n, "targets", field, len(required) > 0); err != nil {
+		return err
+	}
 
 	for _, op := range []string{"link", "unlink", "listLinked"} {
 		if err := setOperationProperty(n.params, op, nil, "name", ref(linkName, "")); err != nil {
@@ -441,9 +454,9 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 	return nil
 }
 
-// Rollups: each rollup's value by its function, or { over: true } when its
-// link holds more instances than it reads. min and max have no value over
-// no instance.
+// Rollups: the values field holds each rollup's value by its function, or
+// { over: true } when its link holds more instances than it reads. min and
+// max have no value over no instance.
 func narrowRollups(n *narrowing, config map[string]any, _ narrowTarget) error {
 	rollups, _ := config["rollups"].(map[string]any)
 	over := map[string]any{
@@ -479,7 +492,6 @@ func narrowRollups(n *narrowing, config map[string]any, _ narrowTarget) error {
 		}
 	}
 	field := map[string]any{
-		"description":          describedField(n, "rollups"),
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties":           properties,
@@ -487,8 +499,7 @@ func narrowRollups(n *narrowing, config map[string]any, _ narrowTarget) error {
 	if len(required) > 0 {
 		field["required"] = required
 	}
-	n.fields["rollups"] = fieldShape{schema: field, present: true}
-	return nil
+	return setField(n, "values", field, true)
 }
 
 // Variants: the type's own field takes a type per value of another; the
@@ -549,15 +560,112 @@ func enumValues(enum *ir.EnumDef) []string {
 
 // Assignment: the assignee's subject, absent when unassigned.
 func narrowAssignment(n *narrowing, _ map[string]any, _ narrowTarget) error {
-	n.fields["assignee"] = fieldShape{schema: map[string]any{"type": "string", "description": describedField(n, "assignee")}}
+	return setField(n, "assignee", map[string]any{"type": "string"}, false)
+}
+
+// typedField is one field of a behavior as its narrowing types it.
+type typedField struct {
+	name    string
+	schema  map[string]any
+	present bool
+}
+
+// setFields types the fields given, in order.
+func setFields(n *narrowing, fields ...typedField) error {
+	for _, field := range fields {
+		if err := setField(n, field.name, field.schema, field.present); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// objectFields types each field of a work-queue behavior as a JSON object,
-// which is all their declarations say of them.
-func objectFields(n *narrowing, _ map[string]any, _ narrowTarget) error {
-	for _, name := range sortedKeys(n.fields) {
-		n.fields[name] = fieldShape{schema: map[string]any{"type": "object", "description": describedField(n, name)}}
+// integer and boolean return the schema of a value of their type.
+func integer() map[string]any { return map[string]any{"type": "integer"} }
+func boolean() map[string]any { return map[string]any{"type": "boolean"} }
+
+// leaseEnds are the ways a lease ends, as ended's reason holds them: a
+// release, an abandon, or the reason expire gives.
+var leaseEnds = []string{"release", "abandon", "ttl", "maxHold", "holder"}
+
+// Lease: the holder and the lease's times are absent while the instance is
+// free, and how the last lease ended while one is held and before the
+// first; the token, active and the expiries are always there.
+func narrowLease(n *narrowing, _ map[string]any, _ narrowTarget) error {
+	ended := map[string]any{
+		"type": "object", "additionalProperties": false, "required": []any{"reason", "at"},
+		"properties": map[string]any{
+			"reason": enumOf(leaseEnds),
+			"at":     integer(),
+		},
 	}
-	return nil
+	return setFields(n,
+		typedField{"holder", map[string]any{"type": "string"}, false},
+		typedField{"token", integer(), true},
+		typedField{"acquiredAt", integer(), false},
+		typedField{"renewedAt", integer(), false},
+		typedField{"expiresAt", integer(), false},
+		typedField{"active", boolean(), true},
+		typedField{"expiries", integer(), true},
+		typedField{"ended", ended, false},
+	)
+}
+
+// Presence: the deadline and the last beat are absent before the first
+// beat, and the released leases before a miss; missed is always there.
+func narrowPresence(n *narrowing, _ map[string]any, _ narrowTarget) error {
+	released := map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}
+	return setFields(n,
+		typedField{"deadline", integer(), false},
+		typedField{"lastBeatAt", integer(), false},
+		typedField{"missed", boolean(), true},
+		typedField{"released", released, false},
+	)
+}
+
+// Retries: the attempts by class hold every class of the config; the best
+// score is absent when no scored result is kept.
+func narrowRetries(n *narrowing, config map[string]any, _ narrowTarget) error {
+	classes, _ := config["classes"].(map[string]any)
+	properties := map[string]any{}
+	required := make([]any, 0, len(classes))
+	for _, name := range sortedKeys(classes) {
+		properties[name] = integer()
+		required = append(required, name)
+	}
+	classAttempts := map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required}
+	return setFields(n,
+		typedField{"total", integer(), true},
+		typedField{"classAttempts", classAttempts, true},
+		typedField{"bestScore", map[string]any{"type": "number"}, false},
+		typedField{"exhausted", boolean(), true},
+		typedField{"stuck", boolean(), true},
+	)
+}
+
+// Blueprint: the children, each step's key and its child's id, are absent
+// until the instance is stamped.
+func narrowBlueprint(n *narrowing, _ map[string]any, _ narrowTarget) error {
+	child := map[string]any{
+		"type": "object", "additionalProperties": false, "required": []any{"key", "id"},
+		"properties": map[string]any{"key": map[string]any{"type": "string"}, "id": map[string]any{"type": "string"}},
+	}
+	return setField(n, "children", map[string]any{"type": "array", "items": child}, false)
+}
+
+// Budget: the meters field holds every meter of the config, by name; a
+// meter with no limit holds null for its limit and what remains of it.
+func narrowBudget(n *narrowing, config map[string]any, _ narrowTarget) error {
+	meters, _ := config["meters"].(map[string]any)
+	nullable := func() map[string]any { return map[string]any{"type": []any{"integer", "null"}} }
+	properties := map[string]any{}
+	required := make([]any, 0, len(meters))
+	for _, name := range sortedKeys(meters) {
+		properties[name] = map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"used", "reserved", "limit", "remaining"},
+			"properties": map[string]any{"used": integer(), "reserved": integer(), "limit": nullable(), "remaining": nullable()},
+		}
+		required = append(required, name)
+	}
+	return setField(n, "meters", map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required}, true)
 }

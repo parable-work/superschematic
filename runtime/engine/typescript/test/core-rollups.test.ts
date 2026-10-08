@@ -77,7 +77,7 @@ const rollup = (fn: string, extra: Record<string, unknown> = {}) => ({ schema: '
 
 const every = {
   tasks: rollup('count'),
-  byStatus: rollup('countBy', { field: 'status' }),
+  byStatus: rollup('countBy', { field: 'Workflow.status' }),
   byKind: rollup('countBy', { field: 'kind' }),
   byUrgency: rollup('countBy', { field: 'urgent' }),
   estimate: rollup('sum', { field: 'estimate' }),
@@ -128,7 +128,7 @@ for (const driver of drivers) {
   };
   const move = (engine: Engine, schemaName: string, id: string, to: string, principal: Principal = alice) =>
     engine.instances.invoke(principal, schemaName, id, 'transition', { to });
-  const rollupsOf = (engine: Engine, id: string, principal: Principal = alice) => engine.instances.get(principal, 'Project', id)?.data.rollups;
+  const rollupsOf = (engine: Engine, id: string, principal: Principal = alice) => engine.instances.get(principal, 'Project', id)?.behaviors.Rollups.values;
 
   // Projects p1, p2 and p3; tasks t1 to t3 point at p1, t4 at p2 and t5 at none.
   function world(options: Partial<EngineOptions> = {}, rollups: Record<string, unknown> = every): Engine {
@@ -189,11 +189,14 @@ for (const driver of drivers) {
       });
       // None point at p3: all of none holds, any of none does not, and min and max have no value.
       assert.deepEqual(rollupsOf(engine, 'p3'), { byKind: {}, byStatus: {}, byUrgency: {}, estimate: 0, finished: true, started: false, tasks: 0 });
-      assert.deepEqual(engine.instances.get(alice, 'Project', 'p3')?.data, {
-        title: 'p3',
-        status: 'active',
-        rollups: { byKind: {}, byStatus: {}, byUrgency: {}, estimate: 0, finished: true, started: false, tasks: 0 },
-      });
+      const p3 = engine.instances.get(alice, 'Project', 'p3');
+      assert.deepEqual([p3?.data, p3?.behaviors], [
+        { title: 'p3' },
+        {
+          Workflow: { status: 'active' },
+          Rollups: { values: { byKind: {}, byStatus: {}, byUrgency: {}, estimate: 0, finished: true, started: false, tasks: 0 } },
+        },
+      ]);
     });
 
     test('latest is a field\'s value on the linked instance created last, the greater id on a tie, and absent when that one holds none', () => {
@@ -202,7 +205,7 @@ for (const driver of drivers) {
       publish(engine, tasks());
       publish(
         engine,
-        projects({ lastKind: rollup('latest', { field: 'kind' }), lastNotes: rollup('latest', { field: 'notes' }), lastStatus: rollup('latest', { field: 'status' }) })
+        projects({ lastKind: rollup('latest', { field: 'kind' }), lastNotes: rollup('latest', { field: 'notes' }), lastStatus: rollup('latest', { field: 'Workflow.status' }) })
       );
       engine.instances.create(alice, 'Project', { title: 'p1' }, { id: 'p1' });
       assert.deepEqual(rollupsOf(engine, 'p1'), {}, 'over no instance it has no value');
@@ -226,6 +229,32 @@ for (const driver of drivers) {
       assert.deepEqual(rollupsOf(engine, 'p1'), { lastKind: 'bug', lastNotes: { size: 1 }, lastStatus: 'todo' });
     });
 
+    test("a bare status names the linked type's own field, Workflow.status its Workflow's: a rollup reads each apart", () => {
+      const engine = open();
+      const document = tasks() as { types: { Task: { fields: unknown[] } } };
+      document.types.Task.fields.push({ name: 'status', typeRef: { name: 'string' } });
+      publish(engine, document);
+      publish(
+        engine,
+        projects({
+          byOwn: rollup('countBy', { field: 'status' }),
+          byWorkflow: rollup('countBy', { field: 'Workflow.status' }),
+          lastOwn: rollup('latest', { field: 'status' }),
+          lastWorkflow: rollup('latest', { field: 'Workflow.status' }),
+        })
+      );
+      engine.instances.create(alice, 'Project', { title: 'p1' }, { id: 'p1' });
+      task(engine, 't1', { status: 'billed' }, 'p1');
+      task(engine, 't2', { status: 'billed' }, 'p1');
+      move(engine, 'Task', 't2', 'doing');
+      assert.deepEqual(rollupsOf(engine, 'p1'), {
+        byOwn: { billed: 2 },
+        byWorkflow: { doing: 1, todo: 1 },
+        lastOwn: 'billed',
+        lastWorkflow: 'doing',
+      });
+    });
+
     test("a linked instance's change shows at the next read, with no event on the instance read", () => {
       const engine = world();
       const before = engine.instances.get(alice, 'Project', 'p1');
@@ -237,7 +266,7 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Task', 't4', 'link', { name: 'project', id: 'p1' });
       const after = engine.instances.get(alice, 'Project', 'p1');
       assert.deepEqual(
-        [after?.seq, after?.data.rollups],
+        [after?.seq, after?.behaviors.Rollups.values],
         [
           before?.seq,
           {
@@ -259,7 +288,7 @@ for (const driver of drivers) {
       assert.equal(engine.events.read(alice, { schema: 'Project', instanceId: 'p1' }).events.length, events, 'no event on the project');
       // The project's own change carries no rollup in its event: they are the same before and after it.
       engine.instances.update(alice, 'Project', 'p1', { title: 'Renamed' });
-      assert.deepEqual(engine.events.read(alice, { schema: 'Project', instanceId: 'p1' }).events.at(-1)?.change, { title: 'Renamed' });
+      assert.deepEqual(engine.events.read(alice, { schema: 'Project', instanceId: 'p1' }).events.at(-1)?.change, { data: { title: 'Renamed' } });
     });
 
     test('a transition into a gated state waits for its rollup to hold, whoever asks; other states do not', () => {
@@ -276,7 +305,7 @@ for (const driver of drivers) {
           { rollup: 'finished', to: 'done', over: false, linked: 3, counted: 0 },
         ]
       );
-      assert.equal(engine.instances.get(alice, 'Project', 'p1')?.data.status, 'active');
+      assert.equal(engine.instances.get(alice, 'Project', 'p1')?.behaviors.Workflow.status, 'active');
       move(engine, 'Task', 't1', 'done');
       move(engine, 'Task', 't2', 'dropped');
       assert.match(thrown(() => move(engine, 'Project', 'p1', 'done'), BehaviorVetoError).reason, /1 of the 3 instances of Task/);
@@ -379,7 +408,7 @@ for (const driver of drivers) {
       assert.equal(thrown(() => engine.instances.list(bob, 'Project'), EngineError).code, 'forbidden');
       const refused = thrown(() => move(engine, 'Project', 'p3', 'done', bob), EngineError);
       assert.deepEqual([refused.code, refused.message], ['forbidden', 'bob may not read Task in namespace default']);
-      assert.equal(engine.instances.get(alice, 'Project', 'p3')?.data.status, 'active');
+      assert.equal(engine.instances.get(alice, 'Project', 'p3')?.behaviors.Workflow.status, 'active');
       // Defining a rollup asks read on the schema it names, as the caller who defines it.
       const definer = thrown(() => engine.schemas.define(bob, projects({ tasks: rollup('count') })), EngineError);
       assert.deepEqual([definer.code, definer.message], ['forbidden', 'bob may not read Task in namespace default']);
@@ -398,24 +427,35 @@ for (const driver of drivers) {
       assert.equal(refusal({ tasks: { schema: 'Note', link: 'project', function: 'count' } }), 'rollup tasks: Note does not compose Links, so none of its instances points at Project');
       assert.equal(refusal({ tasks: rollup('count', { link: 'parent' }) }), 'rollup tasks: Task has no link parent (its links: owner, project)');
       assert.equal(refusal({ tasks: rollup('count', { link: 'owner' }) }), "rollup tasks: Task's link owner points at Person, not Project");
-      assert.equal(refusal({ byTitle: rollup('countBy', { field: 'missing' }) }), 'rollup byTitle: Task has no field missing; countBy takes a string, enum or boolean field of its type, or status when it composes Workflow');
+      assert.equal(
+        refusal({ byTitle: rollup('countBy', { field: 'missing' }) }),
+        'rollup byTitle: Task has no field missing; countBy takes a string, enum or boolean field of its type, or Workflow.status when it composes Workflow'
+      );
+      // Workflow's status goes by its qualified name: a bare status names an own field, and Task has none.
+      assert.equal(
+        refusal({ byStatus: rollup('countBy', { field: 'status' }) }),
+        'rollup byStatus: Task has no field status; countBy takes a string, enum or boolean field of its type, or Workflow.status when it composes Workflow'
+      );
       assert.equal(refusal({ byHours: rollup('countBy', { field: 'hours' }) }), "rollup byHours: countBy takes a string, enum or boolean field, and Task's hours holds an integer");
       assert.equal(refusal({ byLabel: rollup('countBy', { field: 'labels' }) }), "rollup byLabel: countBy takes a string, enum or boolean field, and Task's labels holds a list");
       assert.equal(
-        refusal({ byStatus: { schema: 'Plain', link: 'project', function: 'countBy', field: 'status' } }),
-        'rollup byStatus: Plain has no field status; countBy takes a string, enum or boolean field of its type, or status when it composes Workflow'
+        refusal({ byStatus: { schema: 'Plain', link: 'project', function: 'countBy', field: 'Workflow.status' } }),
+        'rollup byStatus: Plain has no field Workflow.status; countBy takes a string, enum or boolean field of its type, or Workflow.status when it composes Workflow'
       );
       assert.equal(refusal({ total: rollup('sum', { field: 'title' }) }), "rollup total: sum takes a number or integer field, and Task's title holds a string");
       assert.equal(refusal({ least: rollup('min', { field: 'notes' }) }), "rollup least: min takes a number or integer field, and Task's notes holds any JSON value");
-      assert.equal(refusal({ most: rollup('max', { field: 'status' }) }), 'rollup most: Task has no field status; max takes a number or integer field of its type');
+      assert.equal(refusal({ most: rollup('max', { field: 'Workflow.status' }) }), 'rollup most: Task has no field Workflow.status; max takes a number or integer field of its type');
       assert.equal(
         refusal({ finished: { schema: 'Plain', link: 'project', function: 'all' } }),
         "rollup finished: all reads the terminal states of Plain's Workflow, which it does not compose"
       );
-      assert.equal(refusal({ last: rollup('latest', { field: 'missing' }) }), 'rollup last: Task has no field missing; latest takes a field of its type, or status when it composes Workflow');
       assert.equal(
-        refusal({ last: { schema: 'Plain', link: 'project', function: 'latest', field: 'status' } }),
-        'rollup last: Plain has no field status; latest takes a field of its type, or status when it composes Workflow'
+        refusal({ last: rollup('latest', { field: 'missing' }) }),
+        'rollup last: Task has no field missing; latest takes a field of its type, or Workflow.status when it composes Workflow'
+      );
+      assert.equal(
+        refusal({ last: { schema: 'Plain', link: 'project', function: 'latest', field: 'Workflow.status' } }),
+        'rollup last: Plain has no field Workflow.status; latest takes a field of its type, or Workflow.status when it composes Workflow'
       );
       // The core meta-schema holds the config to the declaration's configSchema first.
       const shape = (rollups: unknown) => thrown(() => engine.schemas.define(alice, projects(rollups as Record<string, unknown>)), SchemaDocumentError).issues;
@@ -459,8 +499,8 @@ for (const driver of drivers) {
       }
       engine.instances.invoke(alice, 'Task', 't2', 'link', { name: 'parent', id: 't1' });
       engine.instances.invoke(alice, 'Task', 't3', 'link', { name: 'parent', id: 't1' });
-      assert.deepEqual(engine.instances.get(alice, 'Task', 't1')?.data.rollups, { done: false, subtasks: 2 });
-      assert.deepEqual(engine.instances.get(alice, 'Task', 't2')?.data.rollups, { done: true, subtasks: 0 });
+      assert.deepEqual(engine.instances.get(alice, 'Task', 't1')?.behaviors.Rollups.values, { done: false, subtasks: 2 });
+      assert.deepEqual(engine.instances.get(alice, 'Task', 't2')?.behaviors.Rollups.values, { done: true, subtasks: 0 });
       move(engine, 'Task', 't1', 'doing');
       assert.equal(thrown(() => move(engine, 'Task', 't1', 'done'), BehaviorVetoError).behavior, 'Rollups');
       move(engine, 'Task', 't2', 'dropped');
@@ -480,7 +520,7 @@ for (const driver of drivers) {
       publish(engine, tasks([{ name: 'Workflow', config: taskFlow }, { name: 'Links', config: { links: { project: { schema: 'Other' } } } }]));
       engine.instances.create(alice, 'Other', { title: 'same id' }, { id: 'p1' });
       task(engine, 't1', { estimate: 4 }, 'p1');
-      assert.deepEqual(engine.instances.get(alice, 'Task', 't1')?.data.links, { project: { schema: 'Other', id: 'p1' } });
+      assert.deepEqual(engine.instances.get(alice, 'Task', 't1')?.behaviors.Links.targets, { project: { schema: 'Other', id: 'p1' } });
       assert.deepEqual(rollupsOf(engine, 'p1'), { estimate: 0, tasks: 0 }, "a task that points at Other p1 is not Project p1's");
     });
 
@@ -496,7 +536,8 @@ for (const driver of drivers) {
       assert.deepEqual(rollupsOf(engine, 'p1'), { estimate: 2, finished: false });
       assert.equal(thrown(() => move(engine, 'Project', 'p1', 'done'), BehaviorVetoError).behavior, 'Rollups');
       publish(engine, schema('Project', [{ name: 'Workflow', config: projectFlow }]));
-      assert.deepEqual(engine.instances.get(alice, 'Project', 'p1')?.data, { title: 'p1', status: 'active' });
+      const p1 = engine.instances.get(alice, 'Project', 'p1');
+      assert.deepEqual([p1?.data, p1?.behaviors], [{ title: 'p1' }, { Workflow: { status: 'active' } }]);
       assert.deepEqual(move(engine, 'Project', 'p1', 'done'), { from: 'active', to: 'done' });
     });
   });

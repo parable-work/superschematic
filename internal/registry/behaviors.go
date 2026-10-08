@@ -80,12 +80,22 @@ type BehaviorVeto struct {
 }
 
 // BehaviorField is a field a behavior adds to a type. It carries a name and
-// a description only: a field's type can depend on the behavior's config,
-// and the loader needs only the name to refuse a collision with the type's
-// own fields or another behavior's.
+// a description only: a field's type can depend on the behavior's config.
+// An instance keeps a behavior's fields under the behavior's name, apart
+// from the type's own and every other behavior's, so a field collides with
+// nothing (D16, amended: a behavior's fields sit under its name); a string
+// names one by BehaviorFieldPath.
 type BehaviorField struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+}
+
+// BehaviorFieldPath is a behavior field's qualified name: the behavior's
+// name, a dot, the field's, as Workflow.status and acme.Rating.count name
+// theirs. A display's summaryFields, a list's filter and a rollup's field
+// name a behavior's field by it; an own field's name holds no dot.
+func BehaviorFieldPath(behavior, field string) string {
+	return behavior + "." + field
 }
 
 // BehaviorOperation is an operation a behavior adds to a type.

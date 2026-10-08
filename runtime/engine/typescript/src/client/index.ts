@@ -35,6 +35,7 @@ export { DEFAULT_TIMEOUT_MS, SERVICE_AUTHORIZATION_HEADER } from './transport.js
 export type { CallOptions, EndUserAuth, FetchLike, ForwardedUser, ServiceCredential } from './transport.js';
 export type {
   BehaviorDocument,
+  BehaviorFieldsJSON,
   BehaviorOperationDocument,
   BehaviorSummary,
   DescribeDocument,

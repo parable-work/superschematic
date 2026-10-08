@@ -34,7 +34,7 @@ for (const driver of drivers) {
 
   const invoke = (engine: Engine, who: Principal, operation: string, params: Record<string, unknown> = {}) =>
     engine.instances.invoke(who, 'Job', 'j1', operation, params);
-  const assigneeOf = (engine: Engine) => engine.instances.get(alice, 'Job', 'j1')?.data.assignee;
+  const assigneeOf = (engine: Engine) => engine.instances.get(alice, 'Job', 'j1')?.behaviors.Assignment?.assignee;
   const veto = (fn: () => unknown) => thrown(fn, BehaviorVetoError);
 
   describe(`Assignment (${driver})`, () => {
@@ -53,8 +53,8 @@ for (const driver of drivers) {
       assert.deepEqual(
         events.map((event) => [event.actor, (event.change as { operation: string; patch: unknown }).operation, (event.change as { patch: unknown }).patch]),
         [
-          ['wren', 'assign', { assignee: 'wren' }],
-          ['wren', 'unassign', { assignee: null }],
+          ['wren', 'assign', { behaviors: { Assignment: { assignee: 'wren' } } }],
+          ['wren', 'unassign', { behaviors: { Assignment: { assignee: null } } }],
         ]
       );
     });

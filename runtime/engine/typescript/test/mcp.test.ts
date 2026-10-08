@@ -450,7 +450,7 @@ describe('tools/call', () => {
     assert.deepEqual([invalid.status, invalid.code, invalid.details.issues], [400, 'invalid_argument', [{ path: '/test.Nope', message: 'Item composes no behavior test.Nope' }]]);
     assert.equal(problemOf(await call('item_increment', { id: 'i1', preconditions: 'test.Hold' })).code, 'invalid_argument');
     assert.equal((await call('item_increment', { id: 'i1', preconditions: fenced(1) })).isError, undefined);
-    assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 1);
+    assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Counter'].count, 1);
   });
 
   test('list_behaviors and describe_behavior read the behaviors the engine runs, for any caller', async () => {
@@ -496,15 +496,16 @@ describe('tools/call', () => {
     assert.deepEqual((lookup?.inputSchema.properties as Record<string, any>).key.required, ['slug']);
     assert.match(String((lookup?._meta as Record<string, any>)['superschematic/operation-guidance'].useWhen), /Use when you know the slug of the Model to read/);
     const where = (tools.find((tool) => tool.name === 'model_list')?.inputSchema.properties as Record<string, any>).where;
-    assert.deepEqual(Object.keys(where.properties), ['slug', 'kind', 'status']);
+    // Workflow's status goes by its qualified name.
+    assert.deepEqual(Object.keys(where.properties), ['slug', 'kind', 'Workflow.status']);
     // A filter takes null, for no value; a lookup's key does not.
-    assert.deepEqual(where.properties.status.anyOf[0].type, ['string', 'null']);
+    assert.deepEqual(where.properties['Workflow.status'].anyOf[0].type, ['string', 'null']);
     assert.deepEqual((lookup?.inputSchema.properties as Record<string, any>).key.properties.slug.type, 'string');
     const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as CallToolResult;
     assert.equal((((await call('model_lookup', { key: { slug: 'org/b' } })).structuredContent) as { id: string }).id, 'b');
     assert.equal(problemOf(await call('model_lookup', { key: { slug: 'org/c' } })).code, 'not_found');
     assert.equal(problemOf(await call('model_lookup', { key: 'org/b' })).code, 'invalid_argument');
-    const listed = (await call('model_list', { where: { status: 'done' } })).structuredContent as { items: Array<{ id: string }> };
+    const listed = (await call('model_list', { where: { 'Workflow.status': 'done' } })).structuredContent as { items: Array<{ id: string }> };
     assert.deepEqual(listed.items.map((item) => item.id), ['b']);
     const kinds = (await call('model_list', { where: { kind: ['y', 'x'] } })).structuredContent as { items: Array<{ id: string }> };
     assert.deepEqual(kinds.items.map((item) => item.id), ['a', 'b']);
@@ -640,7 +641,7 @@ describe("the core's behaviors", () => {
     const { client: pat } = await connect(endpoint(url), 'pat');
     const published = await call(pat, 'documents_transition', { id: 'doc-1', params: { to: 'published' }, expectedSeq: 3 });
     assert.deepEqual(published.structuredContent, { from: 'review', to: 'published' });
-    assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.data.status, 'published');
+    assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.behaviors.Workflow.status, 'published');
   });
 
   test("Constants and Variants add no tool: create's data and update's patch show each variant, and a result in the wrong shape and a changed kind are tool errors with the 422 problem", async () => {
@@ -760,12 +761,15 @@ describe("the core's behaviors", () => {
       data: { title: 'Build' },
       behaviors: { Links: { project: 'launch', parent: 'plan' }, Dependencies: { blockers: [{ id: 'plan' }] } },
     });
-    assert.deepEqual((created.structuredContent as { seq: number; data: unknown }).data, {
-      title: 'Build',
-      status: 'todo',
-      blocked: true,
-      links: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } },
-    });
+    const instance = created.structuredContent as { seq: number; data: unknown; behaviors: unknown };
+    assert.deepEqual([instance.data, instance.behaviors], [
+      { title: 'Build' },
+      {
+        Workflow: { status: 'todo' },
+        Dependencies: { blocked: true },
+        Links: { targets: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } } },
+      },
+    ]);
     assert.deepEqual((await call(client, 'tasks_add_blocker', { id: 'build', params: { schema: 'documents', id: 'doc-1' } })).structuredContent, {
       schema: 'documents',
       id: 'doc-1',
@@ -784,7 +788,7 @@ describe("the core's behaviors", () => {
     assert.ok(engine.instances.get(alice, 'projects', 'launch'));
   });
 
-  test('Rollups adds a field and no tool: get carries the rollups, computed at the read, and a gated transition is a tool error with the 409 problem', async () => {
+  test("Rollups adds a field and no tool: get carries the rollups' values, computed at the read, and a gated transition is a tool error with the 409 problem", async () => {
     const { url, engine } = await withDocument();
     for (const document of [tasksDocument(), projectsDocument()]) {
       engine.schemas.define(everything, document);
@@ -799,7 +803,11 @@ describe("the core's behaviors", () => {
     );
     const { client: reader } = await connect(endpoint(url), 'reader');
     const read = await call(reader, 'projects_get', { id: 'launch' });
-    assert.deepEqual((read.structuredContent as { data: Record<string, unknown> }).data.rollups, { tasks: 1, tasksByStatus: { todo: 1 }, tasksFinished: false });
+    assert.deepEqual((read.structuredContent as { behaviors: Record<string, Record<string, unknown>> }).behaviors.Rollups.values, {
+      tasks: 1,
+      tasksByStatus: { todo: 1 },
+      tasksFinished: false,
+    });
     const gated = problemOf(await call(client, 'projects_transition', { id: 'launch', params: { to: 'done' } }));
     assert.deepEqual(
       [gated.status, gated.code, gated.details.behavior, gated.details.code, gated.details.details],
@@ -807,7 +815,11 @@ describe("the core's behaviors", () => {
     );
     await call(client, 'tasks_transition', { id: 'plan', params: { to: 'dropped' } });
     const again = await call(reader, 'projects_get', { id: 'launch' });
-    assert.deepEqual((again.structuredContent as { data: Record<string, unknown> }).data.rollups, { tasks: 1, tasksByStatus: { dropped: 1 }, tasksFinished: true });
+    assert.deepEqual((again.structuredContent as { behaviors: Record<string, Record<string, unknown>> }).behaviors.Rollups.values, {
+      tasks: 1,
+      tasksByStatus: { dropped: 1 },
+      tasksFinished: true,
+    });
     assert.deepEqual((await call(client, 'projects_transition', { id: 'launch', params: { to: 'done' } })).structuredContent, { from: 'active', to: 'done' });
   });
 });

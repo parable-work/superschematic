@@ -3825,7 +3825,7 @@
         },
         "summaryFields": {
           "default": [],
-          "description": "The fields that summarize an instance in a list, in order: the type's own, or fields its behaviors add.",
+          "description": "The fields that summarize an instance in a list, in order: the type's own, by name, or fields its behaviors add, by qualified name (Workflow.status).",
           "items": {
             "minLength": 1,
             "type": "string"

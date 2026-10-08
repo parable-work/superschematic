@@ -134,8 +134,14 @@ export interface DescribeDocument {
   display?: TypeDisplay;
   /** The instance type's own fields, in declaration order, each with its title and icon where declared. */
   fields: DescribedField[];
-  /** The JSON Schema of an instance's data: closed, its behaviors' fields read-only. */
+  /** The JSON Schema of an instance's data: its own fields, closed. */
   instance: JSONSchemaObject;
+  /**
+   * The JSON Schema of an instance's behaviors: by behavior name, an
+   * object of each field the behavior declares, read-only, for every
+   * behavior on the type that declares one.
+   */
+  instanceBehaviors: JSONSchemaObject;
   behaviors: DescribedBehavior[];
   /** create, get, list, update, delete, lookup when the type has a unique field, then each behavior's operations in the type's list order. */
   operations: DescribedOperation[];
@@ -446,7 +452,8 @@ export class ToolCatalog {
         ...(field.title ? { title: field.title } : {}),
         ...(field.icon ? { icon: field.icon } : {}),
       })),
-      instance: this.instanceSchema(record, behaviors),
+      instance: this.instanceSchema(record),
+      instanceBehaviors: behaviorsSchema(behaviors),
       behaviors: behaviors.map((bound) => ({
         name: bound.name,
         ...(bound.declaration.description ? { description: bound.declaration.description } : {}),
@@ -846,7 +853,7 @@ export class ToolCatalog {
       }),
       spec('get', 'get', {
         title: `Get ${name}`,
-        description: `Returns the ${name} with the id, its behaviors' fields included.`,
+        description: `Returns the ${name} with the id: its own fields in data, its behaviors' in behaviors.`,
         writes: false,
         policy: invocation.get,
         httpMethod: 'GET',
@@ -887,7 +894,7 @@ export class ToolCatalog {
       tools.push(
         spec('lookup', 'lookup', {
           title: `Look up ${name}`,
-          description: `Returns the ${name} whose unique fields hold the values key gives (${unique.map((index) => index.keys.join(' and ')).join('; ')}), its behaviors' fields included.`,
+          description: `Returns the ${name} whose unique fields hold the values key gives (${unique.map((index) => index.keys.join(' and ')).join('; ')}), its own fields in data, its behaviors' in behaviors.`,
           writes: false,
           policy: invocation.lookup,
           httpMethod: 'GET',
@@ -1183,6 +1190,8 @@ export class ToolCatalog {
   // which keeps the instances that hold no value, and not for a key.
   private filterValueSchema(record: SchemaRecord, behaviors: ComposedBehavior[], filterable: Filterable, nullable: boolean): unknown {
     const { key, behavior, type } = filterable;
+    // A behavior filter's key is its qualified name: the behavior's, a dot, the filter's.
+    const name = behavior === undefined ? key : key.slice(behavior.length + 1);
     if (behavior === undefined) {
       const property = this.fieldsOf(record).input.properties.get(key);
       if (property !== undefined) {
@@ -1190,22 +1199,16 @@ export class ToolCatalog {
       }
     }
     const description =
-      filterable.description ?? behaviors.find((candidate) => candidate.name === behavior)?.declaration.fields?.find((field) => field.name === key)?.description;
+      filterable.description ?? behaviors.find((candidate) => candidate.name === behavior)?.declaration.fields?.find((field) => field.name === name)?.description;
     return { type: nullable ? [type, 'null'] : type, ...(description ? { description } : {}) };
   }
 
   // instanceSchema is an instance's data as reads return it: its own
-  // fields, then its behaviors' fields, read-only, with what the behaviors
-  // hold the own fields to.
-  private instanceSchema(record: SchemaRecord, behaviors: ComposedBehavior[]): JSONSchemaObject {
+  // fields, with what the behaviors hold them to. Its behaviors' fields
+  // sit apart, under behaviors (behaviorsSchema).
+  private instanceSchema(record: SchemaRecord): JSONSchemaObject {
     const { input, rules } = this.fieldsOf(record);
-    const properties = new Map(input.properties);
-    for (const behavior of behaviors) {
-      for (const field of behavior.declaration.fields ?? []) {
-        properties.set(field.name, { raw: { ...(field.description ? { description: field.description } : {}), readOnly: true } });
-      }
-    }
-    const schema = renderArguments({ vendor: [], properties, required: input.required }, this.options.keys.scalar);
+    const schema = renderArguments({ vendor: [], properties: new Map(input.properties), required: input.required }, this.options.keys.scalar);
     return rules.instance.length > 0 ? { ...schema, allOf: [...rules.instance] } : schema;
   }
 
@@ -1293,13 +1296,13 @@ export class ToolCatalog {
       case 'get':
       case 'update':
       case 'lookup':
-        return instanceRecordSchema(this.instanceSchema(record, behaviors));
+        return instanceRecordSchema(this.instanceSchema(record), behaviorsSchema(behaviors));
       case 'list':
         return {
           type: 'object',
           additionalProperties: false,
           properties: {
-            items: { type: 'array', items: instanceRecordSchema(this.instanceSchema(record, behaviors)) },
+            items: { type: 'array', items: instanceRecordSchema(this.instanceSchema(record), behaviorsSchema(behaviors)) },
             next: { type: ['string', 'null'], description: "The next page's cursor; null after the last page" },
           },
           required: ['items', 'next'],
@@ -1407,8 +1410,40 @@ function paramsRequired(params: unknown): boolean {
   });
 }
 
+/**
+ * behaviorsSchema is the JSON Schema of an instance's behaviors as reads
+ * return them: by behavior name, for each behavior on the type that
+ * declares a field, an object of its fields, read-only, each absent while
+ * it holds no value.
+ */
+function behaviorsSchema(behaviors: readonly ComposedBehavior[]): JSONSchemaObject {
+  const properties: Record<string, unknown> = {};
+  for (const behavior of behaviors) {
+    const fields = behavior.declaration.fields ?? [];
+    if (fields.length === 0) {
+      continue;
+    }
+    properties[behavior.name] = {
+      type: 'object',
+      description: `The fields of behavior ${behavior.name}`,
+      additionalProperties: false,
+      readOnly: true,
+      properties: Object.fromEntries(
+        fields.map((field) => [field.name, { ...(field.description ? { description: field.description } : {}), readOnly: true }])
+      ),
+    };
+  }
+  return {
+    type: 'object',
+    description: "The instance's behaviors' fields, by behavior name, apart from its own fields",
+    additionalProperties: false,
+    properties,
+    required: Object.keys(properties),
+  };
+}
+
 /** The JSON Schema of an instance as the engine returns it. */
-function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
+function instanceRecordSchema(data: JSONSchemaObject, behaviors: JSONSchemaObject): JSONSchemaObject {
   return {
     type: 'object',
     additionalProperties: false,
@@ -1420,6 +1455,7 @@ function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
       version: { type: 'integer', description: 'The schema version the instance was last written with' },
       seq: { type: 'integer', description: "The sequence of the instance's last event: its entity tag" },
       data,
+      behaviors,
       createdAt: { type: 'integer', description: 'Epoch milliseconds' },
       createdBy: { type: 'string' },
       updatedAt: { type: 'integer', description: 'Epoch milliseconds' },
@@ -1430,7 +1466,7 @@ function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
         description: 'For a read with valueRefs: the JSON pointers into data of the fields that hold a ref, { "$value": <hash>, "bytes": <n> }, in place of a value the value store holds',
       },
     },
-    required: ['namespace', 'schema', 'id', 'schemaNamespace', 'version', 'seq', 'data', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
+    required: ['namespace', 'schema', 'id', 'schemaNamespace', 'version', 'seq', 'data', 'behaviors', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
   };
 }
 

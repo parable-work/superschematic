@@ -49,6 +49,9 @@ export { SchemaValidator } from './registry/validator.js';
 
 export { INSTANCE_ID, InstanceStore } from './instances/store.js';
 export type { CreateOptions, DeleteOptions, GetOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions, UpdateOptions } from './instances/store.js';
+// An instance's behavior fields, under each behavior's name, and their qualified names (D16, amended: a behavior's fields sit under its name).
+export { BRANCHES_RELEASE, LINKS_TARGETS, REVISIONS_REVISION, WORKFLOW_STATUS, behaviorField, fieldPath } from './behaviors/fields.js';
+export type { BehaviorFields, InstanceFields } from './behaviors/fields.js';
 export type { InvokeOptions, InvokeSchemaOptions, OperationOutcome } from './instances/store.js';
 export { FILTER_SCAN_ROWS, MAX_FILTER_RANGES, MAX_FILTER_VALUES } from './instances/filters.js';
 

@@ -8,15 +8,18 @@ loader does (internal/loader/verify/display.go), with the same wording:
   key, that holds a single text value: a string primitive, or a scalar
   whose values are strings, not a list or a map, and neither secret nor
   uiHidden;
-- each summaryFields entry names one of the type's own fields, or a field
-  one of its behaviors adds, that is neither secret nor uiHidden;
+- each summaryFields entry names one of the type's own fields that is
+  neither secret nor uiHidden, or a field one of its behaviors adds, by
+  its qualified name (Workflow.status), as a read returns it under the
+  behavior's name;
 - states and transitions label the states and transitions of the type's
   Workflow, as its config lists them, so a type that does not compose
   Workflow, a nested type among them, takes neither.
 
 describedDisplay writes a display as the describe document carries it:
-titleField and summaryFields name each field by its JSON key, the key an
-instance's data has it under.
+titleField and summaryFields name each own field by its JSON key, the key
+an instance's data has it under, and each behavior field by its qualified
+name.
 */
 
 import type { Document, FieldDef, TypeDef, TypeDisplay } from '@superschematic/schema-ir/schema-file';
@@ -96,7 +99,15 @@ function typeIssues(document: Document, typeName: string, type: TypeDef, composi
     if (field !== undefined) {
       shown(field, 'summaryFields', at);
     } else if (!composition?.fields.has(name)) {
-      issues.push({ path: at, message: `type ${type.name}: @display summaryFields lists ${JSON.stringify(name)}, which is not a field of the type or of its behaviors${listed}` });
+      // A behavior's field named bare: say the name that reaches it.
+      const qualified = (composition?.behaviors ?? [])
+        .filter((bound) => bound.behavior.fields.some((candidate) => candidate.name === name))
+        .map((bound) => `${bound.behavior.name}.${name}`);
+      const hint = qualified.length === 0 ? '' : `; a behavior's field is named by its qualified name: ${qualified.join(' or ')}`;
+      issues.push({
+        path: at,
+        message: `type ${type.name}: @display summaryFields lists ${JSON.stringify(name)}, which is not a field of the type or of its behaviors${listed}${hint}`,
+      });
     }
   });
 

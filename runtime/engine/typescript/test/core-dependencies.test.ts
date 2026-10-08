@@ -114,25 +114,26 @@ for (const driver of drivers) {
   describe(`Dependencies (${driver})`, () => {
     test('an instance is blocked while a blocker is not in a terminal state of its Workflow, and addBlocker says so', () => {
       const engine = world();
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false);
       assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' }), { schema: 'Task', id: 't2', status: 'todo', open: true });
-      assert.deepEqual(engine.instances.get(alice, 'Task', 't1')?.data, { title: 't1', status: 'todo', blocked: true });
+      const t1 = engine.instances.get(alice, 'Task', 't1');
+      assert.deepEqual([t1?.data, t1?.behaviors], [{ title: 't1' }, { Workflow: { status: 'todo' }, Dependencies: { blocked: true } }]);
       assert.deepEqual(engine.events.read(alice, { schema: 'Task', instanceId: 't1' }).events.at(-1)?.change, {
         behavior: 'Dependencies',
         operation: 'addBlocker',
         params: { id: 't2' },
-        patch: { blocked: true },
+        patch: { behaviors: { Dependencies: { blocked: true } } },
       });
       move(engine, 't2', 'doing');
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, true);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, true);
       move(engine, 't2', 'done');
       // Read when read: the blocker's change shows at t1's next read, with no event on t1.
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false);
       assert.equal(engine.instances.get(alice, 'Task', 't1')?.seq, 2);
       const dropped = world();
       dropped.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
       move(dropped, 't2', 'dropped');
-      assert.equal(dropped.instances.get(alice, 'Task', 't1')?.data.blocked, false, 'every terminal state of the blocker counts, not only the gated one');
+      assert.equal(dropped.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false, 'every terminal state of the blocker counts, not only the gated one');
     });
 
     test('the guard holds a transition into a gated state while blocked, whoever asks; other transitions pass', () => {
@@ -154,7 +155,7 @@ for (const driver of drivers) {
         BehaviorVetoError
       );
       assert.equal(invoked.behavior, 'Dependencies');
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.status, 'doing');
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Workflow.status, 'doing');
       // Dropping is terminal but not gated here.
       assert.deepEqual(move(engine, 't1', 'dropped'), { from: 'doing', to: 'dropped' });
       engine.instances.create(alice, 'Task', { title: 't4' }, { id: 't4' });
@@ -174,10 +175,10 @@ for (const driver of drivers) {
         open: true,
       });
       move(engine, 't1', 'doing');
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, true);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, true);
       assert.equal(thrown(() => move(engine, 't1', 'done'), BehaviorVetoError).reason, 'Task t1 cannot move to done while it is blocked by Milestone m1 (active)');
       engine.instances.invoke(alice, 'Milestone', 'm1', 'transition', { to: 'shipped' });
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false);
       assert.deepEqual(move(engine, 't1', 'done'), { from: 'doing', to: 'done' });
     });
 
@@ -208,7 +209,7 @@ for (const driver of drivers) {
       assert.equal(refused.reason, 'it is done, a gated state no transition leaves, so it takes no blocker that is not finished: Task t2 (todo)');
       move(engine, 't3', 'dropped');
       assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't3' }), { schema: 'Task', id: 't3', status: 'dropped', open: false });
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false);
     });
 
     test('a blocker is finished only in a terminal state whose outcome satisfiedBy lists, success by default', () => {
@@ -224,7 +225,7 @@ for (const driver of drivers) {
       }
       engine.instances.create(alice, 'Milestone', { title: 'Launch' }, { id: 'm1' });
       const check = (id: string, to: string) => engine.instances.invoke(alice, 'Check', id, 'transition', { to });
-      const blocked = (id: string) => engine.instances.get(alice, 'Task', id)?.data.blocked;
+      const blocked = (id: string) => engine.instances.get(alice, 'Task', id)?.behaviors.Dependencies.blocked;
 
       // A failed check does not let the step after it through.
       engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { schema: 'Check', id: 'c1' });
@@ -265,7 +266,7 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
       const refused = thrown(() => move(engine, 't1', 'doing'), BehaviorVetoError);
       assert.deepEqual([refused.behavior, refused.reason], ['Dependencies', 'Task t1 cannot move to doing while it is blocked by Task t2 (todo)']);
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.status, 'todo');
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Workflow.status, 'todo');
       move(engine, 't2', 'dropped');
       assert.deepEqual(move(engine, 't1', 'doing'), { from: 'todo', to: 'doing' }, 'dropped is terminal and a success: the blocker is finished');
       // An instance in doing, a gated state a transition leaves, takes an open blocker, which holds its move to done.
@@ -275,7 +276,7 @@ for (const driver of drivers) {
         status: 'active',
         open: true,
       });
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, true);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, true);
       assert.equal(thrown(() => move(engine, 't1', 'done'), BehaviorVetoError).reason, 'Task t1 cannot move to done while it is blocked by Milestone m1 (active)');
       engine.instances.invoke(alice, 'Milestone', 'm1', 'transition', { to: 'shipped' });
       assert.deepEqual(move(engine, 't1', 'done'), { from: 'doing', to: 'done' });
@@ -285,7 +286,7 @@ for (const driver of drivers) {
       const engine = world();
       engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
       assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'removeBlocker', { id: 't2' }), { schema: 'Task', id: 't2' });
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false);
       assert.deepEqual(thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'removeBlocker', { id: 't2' }), OperationParamsError).issues, [
         { path: '/id', message: 'Task t2 does not block Task t1' },
       ]);
@@ -349,11 +350,11 @@ for (const driver of drivers) {
         engine.events.read(alice, { after }).events.map((event) => [event.kind, event.schema, event.instanceId, (event.change as { patch?: unknown } | null)?.patch]),
         [
           ['delete', 'Milestone', 'm1', undefined],
-          ['operation', 'Task', 't1', { blocked: false }],
-          ['operation', 'Task', 't2', { blocked: false }],
+          ['operation', 'Task', 't1', { behaviors: { Dependencies: { blocked: false } } }],
+          ['operation', 'Task', 't2', { behaviors: { Dependencies: { blocked: false } } }],
         ]
       );
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false);
       assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'listBlockers', {}), { items: [], next: null });
     });
 
@@ -363,7 +364,7 @@ for (const driver of drivers) {
       engine.instances.delete(alice, 'Task', 't1');
       assert.deepEqual(engine.instances.invoke(alice, 'Task', 't2', 'listDependents', {}), { items: [], next: null });
       engine.instances.create(alice, 'Task', { title: 'again' }, { id: 't1' });
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false);
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false);
       assert.equal(engine.instances.delete(alice, 'Task', 't2'), true);
     });
 
@@ -371,7 +372,7 @@ for (const driver of drivers) {
       const engine = world({ policy: recording(({ schema }) => schema === 'Task') });
       engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { schema: 'Milestone', id: 'm1' });
       assert.equal(thrown(() => engine.instances.get(bob, 'Task', 't1'), EngineError).code, 'forbidden');
-      assert.equal(engine.instances.get(bob, 'Task', 't2')?.data.blocked, false);
+      assert.equal(engine.instances.get(bob, 'Task', 't2')?.behaviors.Dependencies.blocked, false);
       assert.equal(thrown(() => engine.instances.invoke(bob, 'Task', 't2', 'addBlocker', { schema: 'Milestone', id: 'm1' }), EngineError).code, 'forbidden');
     });
 
@@ -405,7 +406,7 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Task', { title: 't1' }, { id: 't1' });
       engine.instances.create(alice, 'Task', { title: 't2' }, { id: 't2' });
       publish(engine, tasks({ gatedStates: ['done'] }));
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, false, 'an instance that exists starts with no blocker');
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, false, 'an instance that exists starts with no blocker');
       engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
       publish(engine, tasks({ schemas: ['Task', 'Milestone'] }));
       move(engine, 't1', 'doing');
@@ -414,7 +415,7 @@ for (const driver of drivers) {
       assert.deepEqual(move(engine, 't1', 'dropped'), { from: 'doing', to: 'dropped' }, 'dropped is not gated now');
       engine.schemas.define(alice, tasks({ schemas: ['Milestone'] }));
       assert.equal(engine.schemas.publish(alice, 'Task').published, true);
-      assert.equal(engine.instances.get(alice, 'Task', 't1')?.data.blocked, true, 'an edge made before stays');
+      assert.equal(engine.instances.get(alice, 'Task', 't1')?.behaviors.Dependencies.blocked, true, 'an edge made before stays');
       const removed = thrown(() => engine.schemas.define(alice, schema('Task', [{ name: 'Workflow', config: taskFlow }])), IncompatibleChangeError);
       assert.deepEqual(removed.changes, [
         {
@@ -432,10 +433,10 @@ for (const driver of drivers) {
         { title: 't4' },
         { id: 't4', behaviors: { Dependencies: { blockers: [{ id: 't1' }, { schema: 'Milestone', id: 'm1' }] } } }
       );
-      assert.deepEqual(created.data, { title: 't4', status: 'todo', blocked: true });
+      assert.deepEqual([created.data, created.behaviors], [{ title: 't4' }, { Workflow: { status: 'todo' }, Dependencies: { blocked: true } }]);
       assert.deepEqual(
         engine.events.read(alice, { schema: 'Task', instanceId: 't4' }).events.map((event) => [event.kind, event.change]),
-        [['create', { title: 't4', status: 'todo', blocked: true }]]
+        [['create', { data: { title: 't4' }, behaviors: { Workflow: { status: 'todo' }, Dependencies: { blocked: true } } }]]
       );
       assert.deepEqual(
         (engine.instances.invoke(alice, 'Task', 't4', 'listBlockers', {}) as { items: unknown[] }).items,
@@ -507,15 +508,18 @@ for (const driver of drivers) {
       );
       move(engine, 't1', 'doing');
       move(engine, 't1', 'done');
-      assert.deepEqual(create({ schema: 'Task', id: 't1' }).data, { title: 'g1', blocked: false, status: 'done' });
+      // Its behaviors' fields come in the order the type lists them.
+      const finished = create({ schema: 'Task', id: 't1' });
+      assert.deepEqual([finished.data, finished.behaviors], [{ title: 'g1' }, { Dependencies: { blocked: false }, Workflow: { status: 'done' } }]);
+      assert.deepEqual(Object.keys(finished.behaviors), ['Dependencies', 'Workflow']);
       gate({ schemas: ['Task', 'Check'], satisfiedBy: ['success', 'failure'] });
-      assert.deepEqual(create({ schema: 'Check', id: 'c1' }).data, { title: 'g1', blocked: false, status: 'done' });
+      assert.deepEqual(create({ schema: 'Check', id: 'c1' }).behaviors, { Dependencies: { blocked: false }, Workflow: { status: 'done' } });
     });
 
     test("a create in a gated state a transition leaves takes an open blocker, which holds its first move into a gated state", () => {
       const engine = world({}, { schemas: ['Task', 'Milestone'], gatedStates: ['todo', 'doing', 'done'] });
       const created = engine.instances.create(alice, 'Task', { title: 't4' }, { id: 't4', behaviors: { Dependencies: { blockers: [{ id: 't1' }] } } });
-      assert.deepEqual(created.data, { title: 't4', status: 'todo', blocked: true });
+      assert.deepEqual(created.behaviors, { Workflow: { status: 'todo' }, Dependencies: { blocked: true } });
       assert.equal(thrown(() => move(engine, 't4', 'doing'), BehaviorVetoError).reason, 'Task t4 cannot move to doing while it is blocked by Task t1 (todo)');
       move(engine, 't1', 'dropped');
       assert.deepEqual(move(engine, 't4', 'doing'), { from: 'todo', to: 'doing' });

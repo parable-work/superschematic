@@ -112,7 +112,7 @@ function publish(engine: Engine, document: Record<string, unknown>): void {
 }
 
 function status(engine: Engine, schema: string, id: string): unknown {
-  return engine.instances.get(alice, schema, id)?.data.status;
+  return engine.instances.get(alice, schema, id)?.behaviors.Workflow.status;
 }
 
 function move(engine: Engine, schema: string, id: string, to: string): EngineEvent {
@@ -160,7 +160,7 @@ for (const driver of drivers) {
         [
           'operation',
           'runner',
-          { behavior: 'Workflow', operation: 'transition', params: { to: 'active' }, patch: { status: 'active' } },
+          { behavior: 'Workflow', operation: 'transition', params: { to: 'active' }, patch: { behaviors: { Workflow: { status: 'active' } } } },
           { behavior: 'Reactions', event: started.cursor, depth: 1 },
         ]
       );

@@ -88,12 +88,13 @@ for (const driver of drivers) {
   describe(`Workflow (${driver})`, () => {
     test('a new instance starts in the initial state, the first state when the config names none', () => {
       const engine = published();
-      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.data, { title: 'Desk', status: 'draft' });
+      const order = engine.instances.get(alice, 'Order', 'o1');
+      assert.deepEqual([order?.data, order?.behaviors], [{ title: 'Desk' }, { Workflow: { status: 'draft' } }]);
       const other = published({ ...orderFlow, initial: 'open' });
-      assert.equal(other.instances.get(alice, 'Order', 'o1')?.data.status, 'open');
+      assert.equal(other.instances.get(alice, 'Order', 'o1')?.behaviors.Workflow.status, 'open');
       assert.deepEqual(
         other.events.read(alice, { schema: 'Order', instanceId: 'o1' }).events.map((event) => event.change),
-        [{ title: 'Desk', status: 'open' }]
+        [{ data: { title: 'Desk' }, behaviors: { Workflow: { status: 'open' } } }]
       );
     });
 
@@ -101,12 +102,12 @@ for (const driver of drivers) {
       const engine = published();
       assert.deepEqual(engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'open' }), { from: 'draft', to: 'open' });
       const order = engine.instances.get(alice, 'Order', 'o1');
-      assert.deepEqual([order?.data.status, order?.seq], ['open', 2]);
+      assert.deepEqual([order?.behaviors.Workflow.status, order?.seq], ['open', 2]);
       assert.deepEqual(engine.events.read(alice, { schema: 'Order', instanceId: 'o1' }).events.at(-1)?.change, {
         behavior: 'Workflow',
         operation: 'transition',
         params: { to: 'open' },
-        patch: { status: 'open' },
+        patch: { behaviors: { Workflow: { status: 'open' } } },
       });
     });
 
@@ -149,17 +150,40 @@ for (const driver of drivers) {
         "must have required property 'to'",
       ]);
       thrown(() => engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'open', status: 'shipped' }), OperationParamsError);
-      assert.equal(engine.instances.get(alice, 'Order', 'o1')?.data.status, 'draft');
+      assert.equal(engine.instances.get(alice, 'Order', 'o1')?.behaviors.Workflow.status, 'draft');
     });
 
-    test('the status is not a field a create or an update sets', () => {
+    test('the status is not a field a create or an update sets: data holds own fields only, so a status key there is unknown', () => {
       const engine = published();
       const create = thrown(() => engine.instances.create(alice, 'Order', { title: 'Lamp', status: 'shipped' }), InstanceValidationError);
-      assert.deepEqual(create.issues.map((issue) => [issue.path, issue.rule]), [['status', 'readOnly']]);
+      assert.deepEqual(create.issues, [{ path: 'status', rule: 'unknown', message: 'Order has no field status' }]);
       const update = thrown(() => engine.instances.update(alice, 'Order', 'o1', { status: 'shipped' }), InstanceValidationError);
-      assert.deepEqual(update.issues.map((issue) => [issue.path, issue.rule]), [['status', 'readOnly']]);
-      thrown(() => engine.instances.update(alice, 'Order', 'o1', { status: null }), InstanceValidationError);
-      assert.equal(engine.instances.get(alice, 'Order', 'o1')?.data.status, 'draft');
+      assert.deepEqual(update.issues.map((issue) => [issue.path, issue.rule]), [['status', 'unknown']]);
+      // A patch that removes an own status the order does not have changes nothing.
+      assert.equal(engine.instances.update(alice, 'Order', 'o1', { status: null }).seq, 1);
+      assert.equal(engine.instances.get(alice, 'Order', 'o1')?.behaviors.Workflow.status, 'draft');
+    });
+
+    test("an own field named status sits beside Workflow's: each is read, written and filtered apart", () => {
+      const engine = open();
+      const document = orderSchema() as { types: { Order: { fields: unknown[] } } };
+      document.types.Order.fields.push({ name: 'status', typeRef: { name: 'string' } });
+      engine.schemas.define(alice, document);
+      engine.schemas.publish(alice, 'Order');
+      engine.instances.create(alice, 'Order', { title: 'Desk', status: 'paid' }, { id: 'o1' });
+      engine.instances.create(alice, 'Order', { title: 'Lamp', status: 'unpaid' }, { id: 'o2' });
+      engine.instances.invoke(alice, 'Order', 'o2', 'transition', { to: 'open' });
+      // An update writes the own status and leaves Workflow's where it is.
+      const desk = engine.instances.update(alice, 'Order', 'o1', { status: 'refunded' });
+      assert.deepEqual([desk.data, desk.behaviors], [{ title: 'Desk', status: 'refunded' }, { Workflow: { status: 'draft' } }]);
+      const lamp = engine.instances.get(alice, 'Order', 'o2');
+      assert.deepEqual([lamp?.data, lamp?.behaviors], [{ title: 'Lamp', status: 'unpaid' }, { Workflow: { status: 'open' } }]);
+      // A bare key filters on the own field, the qualified name on Workflow's.
+      const ids = (where: Record<string, unknown>) => engine.instances.list(alice, 'Order', { where }).items.map((item) => item.id);
+      assert.deepEqual(ids({ status: 'unpaid' }), ['o2']);
+      assert.deepEqual(ids({ 'Workflow.status': 'draft' }), ['o1']);
+      assert.deepEqual(ids({ status: 'refunded', 'Workflow.status': 'draft' }), ['o1']);
+      assert.deepEqual(ids({ status: 'draft' }), []);
     });
 
     test('another behavior moves the status only through transition, whose guard and permission gate run for it too', () => {
@@ -179,8 +203,8 @@ for (const driver of drivers) {
       assert.deepEqual(
         events.map((event) => event.change),
         [
-          { behavior: 'test.Dispatch', operation: 'dispatch', params: { to: 'open' }, patch: { status: 'open' } },
-          { behavior: 'test.Dispatch', operation: 'dispatch', params: { to: 'shipped' }, patch: { status: 'shipped' } },
+          { behavior: 'test.Dispatch', operation: 'dispatch', params: { to: 'open' }, patch: { behaviors: { Workflow: { status: 'open' } } } },
+          { behavior: 'test.Dispatch', operation: 'dispatch', params: { to: 'shipped' }, patch: { behaviors: { Workflow: { status: 'shipped' } } } },
         ]
       );
     });
@@ -238,7 +262,7 @@ for (const driver of drivers) {
       );
       assert.deepEqual(engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'open' }), { from: 'draft', to: 'open' });
       assert.deepEqual(engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'shipped' }), { from: 'open', to: 'shipped' });
-      assert.equal(engine.instances.create(alice, 'Order', { title: 'Lamp' }).data.status, 'open');
+      assert.equal(engine.instances.create(alice, 'Order', { title: 'Lamp' }).behaviors.Workflow.status, 'open');
 
       const dropped = thrown(
         () => version({ states: ['draft', 'open', 'shipped'], transitions: [{ from: 'draft', to: 'open' }, { from: 'open', to: 'shipped' }] }),

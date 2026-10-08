@@ -30,7 +30,7 @@ func TestTSWriterEmitsDisplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `@behavior("Comments")
-@display({ noun: "Ticket", plural: "Tickets", titleField: "title", createLabel: "New ticket", summaryFields: ["status", "assignee"], ` +
+@display({ noun: "Ticket", plural: "Tickets", titleField: "title", createLabel: "New ticket", summaryFields: ["Workflow.status", "assignee"], ` +
 		`states: { done: { label: "Done", tone: "success" }, dropped: { label: "Dropped", tone: "danger" }, ` +
 		`implementing: { label: "Implement", activeForm: "Implementing", tone: "active" }, review: { label: "Review", activeForm: "In review", tone: "warning" }, ` +
 		`todo: { label: "To do", tone: "muted" } }, transitions: { implementing: { review: "Send to review" }, ` +

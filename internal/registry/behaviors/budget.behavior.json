@@ -77,10 +77,7 @@
     }
   },
   "fields": [
-    {
-      "name": "budget",
-      "description": "Each meter, by name: used, reserved (this instance's own reservation and what it holds for the instances inside it), limit and remaining (limit minus used and reserved), limit and remaining null when the meter has no limit. A daily meter whose day has passed shows used 0."
-    }
+    { "name": "meters", "description": "Each meter, by name: used, reserved (this instance's own reservation and what it holds for the instances inside it), limit and remaining (limit minus used and reserved), limit and remaining null when the meter has no limit. A daily meter whose day has passed shows used 0." }
   ],
   "operations": [
     {
@@ -136,7 +133,7 @@
                 "schema": { "type": "string" },
                 "id": { "type": "string" },
                 "hears": {
-                  "description": "The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope's data, and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope.",
+                  "description": "The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope as a read returns it (/behaviors/Budget/meters/<meter>/remaining, /behaviors/Links/targets/<link>), and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope.",
                   "type": "array",
                   "items": {
                     "type": "object",
