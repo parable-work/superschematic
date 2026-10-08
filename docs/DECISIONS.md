@@ -4527,3 +4527,39 @@ API's connections and clients.
 Status: not built.
 
 The rule is reversible until the first release.
+
+### D51, amended: the project commits the output root's lockfile, and the images and the generated CI install from it
+
+D51 put the root of the Bun workspace at `<output-root>/package.json`, a
+generated file, and the install's `bun.lock` beside it, in the output root
+projects ignore. A fresh checkout had no lockfile. The TypeScript server's
+image installed frozen only when its context held one and otherwise
+resolved that day's versions, so two deploys of one commit could install
+different packages, and no dependency change reached review. The generated
+CI installed nothing of the workspace and set up an unpinned Bun.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The project commits `<output-root>/bun.lock`. No build removes it: each generator empties only directories of its own under the output root, such as `server/<stack>`, never the root. The root's `package.json` is the same bytes on every build of the same schemas, so a committed lockfile stays current until a manifest changes. Nothing else under the output root is committed for it: the build writes the root and every generated member's manifest before an install, and the implementations' manifests are the project's. The lockfile to commit is the one an install writes after `build-all`: a frozen install needs every member it names that another member depends on, and an install after a partial build drops the members it did not find. | Resolving afresh in every image and CI run, which lets two deploys of one commit differ and keeps dependency changes out of review. Moving the workspace's root to the repository's `package.json`, the project's own file, which the generator would then edit, and whose lockfile would mix the project's packages with the generated ones. |
+| A project ignores the output root's contents, not the directory, and takes the lockfile back: `dist/*` and `!dist/bun.lock`, since git cannot take back a file under an ignored directory. Where a broader rule ignores the directory, the schemas root's `.gitignore` takes it back first (`!/dist/`). The rules are the project's: the build of a stack with a TypeScript server asks git whether it ignores the lockfile (`git check-ignore`) and, when it does, prints one line naming the rule and the fix. `stack init` (section 11.1 of `docs/stack-model.md`), which is not built, will write the rule. | The build editing `.gitignore`, a file the project owns, behind its back. Committing the whole output root, which puts every generated file in review twice. |
+| A server's image keeps installing frozen when its context holds the lockfile, and keeps resolving afresh without one, now printing that it does. The generated CI enforces the lockfile instead: `check` refuses a missing or stale one, and every plan, preview and deploy job waits for `check`. | The image refusing a missing lockfile when `CI=true`, a build argument the deploy would pass and a second rule for one file, which would still leave a deploy from an engineer's machine resolving afresh. Refusing it always, which would stop a deploy from a checkout where no install has run and no lockfile is committed yet. |
+| For a stack with a TypeScript server, the `github` renderer's `check` installs the output root's workspace after the build, `bun install --frozen-lockfile` in a step named for the lockfile, which first refuses a missing lockfile, since Bun's frozen install installs without one, and says to run `bun install` after `build-all` and commit it. Then each TypeScript server's entrypoint package and the implementation of each API one serves type-checks, `bun x --no-install tsc --noEmit -p tsconfig.json`. The ci generator finds the implementations where the server generator does and hands them to the renderer, `CIStack.TypeScriptImplementations`. Every job that sets up Bun pins `oven-sh/setup-bun` to `tools.env`'s release, `servergen.BunVersion`. | `bunx tsc`, which downloads the npm package named `tsc` where none is installed. Building the runtime checkouts `[paths]` names in the workflow, as the image does, which repeats the image's knowledge of each checkout for a project whose CI checkout may not hold them; the published packages carry their declarations. |
+| `stack dev` runs a plain `bun install`, as an engineer would: it writes the lockfile, or brings the committed one up to date with the build's packages, so the lockfile follows the schemas through normal use, and it never fails on a missing lockfile. `CI=true` does not make Bun 1.4's install frozen. | A frozen install in `stack dev`, which would refuse every schema change until someone installed by hand. |
+| acme-shop commits `examples/acme-shop/schemas/dist/bun.lock`, which `schemas/.gitignore` takes back from the repository's `dist/` rule. `scripts/check.sh` keeps it when it empties `dist`, installs frozen to it, and with `UPDATE=1` brings it up to date. Its `file:` paths are relative to the output root, so it is the same bytes on macOS under Bun 1.4.2 and on Linux under 1.4.0. A change to a generated package's dependencies, to the HTTP runtime's `package.json` or to superscalar's binding at a new pin makes it stale, which `check.sh` reports in CI's full tier (D40) and `UPDATE=1` fixes. | Leaving acme's lockfile uncommitted, so that the example would not follow the rule it documents. |
+
+This builds two items D47 left out: a pinned Bun in the workflow, and
+installing and type-checking the TypeScript servers in `check`.
+
+Status: built. `tsgen.IgnoredLockfile` and `TestIgnoredLockfile` cover the
+rule's cases: a rule on the directory, the contents rule, a nested
+exception, a tracked lockfile and no repository.
+`TestTypeScriptBuildKeepsTheLockfile` builds a stack twice over a
+lockfile, which stays, with the root unchanged, and holds the build's one
+line to an ignoring rule and its silence otherwise. The `cigen` goldens
+pin Bun, and `storefront-stack.yml` shows `check` for TypeScript servers;
+`TestTheWorkspaceStepRefusesALockfileItCannotInstall` runs the step's
+script with no lockfile, a current one and a stale one.
+`TestLocalTypeScriptServerRuns` brings a stale lockfile up to date under
+`CI=true`. No generated workflow has run on GitHub Actions.
+
+The rule is reversible until the first release.

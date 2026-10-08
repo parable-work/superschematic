@@ -198,6 +198,77 @@ func TestTypeScriptEntrypointWithoutCheckoutsHasNoDockerfile(t *testing.T) {
 	}
 }
 
+// TestTypeScriptBuildKeepsTheLockfile: the lockfile the workspace's
+// install writes beside the root, which the project commits (D51,
+// amended), outlasts every build of the stack, and the root it pairs with
+// is the same bytes on each. In a repository whose rules ignore the output
+// root itself, the stack's build says in one line how to commit the
+// lockfile, and changes no ignore file; once the rules take the lockfile
+// back, it says nothing.
+func TestTypeScriptBuildKeepsTheLockfile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(global, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	repoRoot := t.TempDir()
+	if out, err := exec.Command("git", "-C", repoRoot, "init", "--quiet").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	gitignore := filepath.Join(repoRoot, ".gitignore")
+	if err := os.WriteFile(gitignore, []byte("schemas/dist/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := loadTypeScriptFixture(t)
+	f.build(t, repoRoot, tsFakePaths(repoRoot), tsAPIs...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	lock := filepath.Join(out, "bun.lock")
+	const pinned = "{\n  \"lockfileVersion\": 1,\n  \"workspaces\": {}\n}\n"
+	if err := os.WriteFile(lock, []byte(pinned), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := func() string {
+		t.Helper()
+		var log strings.Builder
+		opts := f.options(repoRoot, tsFakePaths(repoRoot))
+		opts.Log = &log
+		if _, err := generator.Run(f.schemas["ts-stack"], f.configs["ts-stack"], opts); err != nil {
+			t.Fatalf("build ts-stack: %v\n%s", err, log.String())
+		}
+		return log.String()
+	}
+	log := build()
+	root, err := os.ReadFile(filepath.Join(out, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "  - " + lock + " is ignored by .gitignore:1:schemas/dist/; commit it, so images and CI install the TypeScript versions it pins: ignore the output root's contents, not the directory (dist/* and !dist/bun.lock in place of dist/; docs/stack-model.md, section 8.6)\n"; !strings.Contains(log, want) {
+		t.Errorf("the build did not say how to commit the lockfile, %q:\n%s", want, log)
+	}
+	if got, err := os.ReadFile(gitignore); err != nil || string(got) != "schemas/dist/\n" {
+		t.Errorf("the build changed .gitignore: %q, %v", got, err)
+	}
+
+	if err := os.WriteFile(gitignore, []byte("schemas/dist/*\n!schemas/dist/bun.lock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.build(t, repoRoot, tsFakePaths(repoRoot), tsAPIs...)
+	if log := build(); strings.Contains(log, "bun.lock") {
+		t.Errorf("the build mentions the lockfile, which git does not ignore:\n%s", log)
+	}
+	if got, err := os.ReadFile(lock); err != nil || string(got) != pinned {
+		t.Errorf("the builds did not keep the lockfile: %q, %v", got, err)
+	}
+	if again, err := os.ReadFile(filepath.Join(out, "package.json")); err != nil || string(again) != string(root) {
+		t.Errorf("the workspace's root changed between builds: %v\n%s\nthen\n%s", err, root, again)
+	}
+}
+
 // tsPricingImplementation quotes a price per SKU for a calling service.
 const tsPricingImplementation = `import type { Constructor } from '@schemas/ts-pricing-api';
 

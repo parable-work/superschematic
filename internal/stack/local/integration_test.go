@@ -301,7 +301,8 @@ func TestLocalStackRuns(t *testing.T) {
 
 // TestLocalTypeScriptServerRuns applies a local environment of one
 // TypeScript server for real, with Bun and no Docker: the provisioner
-// installs the output root's Bun workspace, runs a fake server's main.ts
+// installs the output root's Bun workspace, which brings a stale lockfile
+// up to date as a developer's install does, runs a fake server's main.ts
 // that honours the entrypoint's contract, waits for /readyz, and the
 // server reads its resolved environment and no more of the test's. Destroy
 // stops it with SIGTERM, which it answers before it exits.
@@ -353,6 +354,15 @@ func TestLocalTypeScriptServerRuns(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outputRoot, "package.json"), []byte(`{"name": "ledger-workspace", "private": true, "workspaces": ["server/*/*"]}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A lockfile from before the server joined the workspace, as a project
+	// commits it (D51, amended): the install brings it up to date as a
+	// developer's would, even where CI is set, which a frozen install would
+	// refuse.
+	stale := "{\n  \"lockfileVersion\": 2,\n  \"configVersion\": 1,\n  \"workspaces\": {\n    \"\": {\n      \"name\": \"ledger-workspace\",\n    },\n  },\n  \"packages\": {},\n}\n"
+	if err := os.WriteFile(filepath.Join(outputRoot, "bun.lock"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CI", "true")
 	stateDir, err := local.EnsureStateDir(filepath.Join(root, "schemas"), stackName, "Dev")
 	if err != nil {
 		t.Fatal(err)
@@ -377,8 +387,8 @@ func TestLocalTypeScriptServerRuns(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(outputRoot, "bun.lock")); err != nil {
-		t.Errorf("the provisioner did not install the workspace: %v", err)
+	if lock, err := os.ReadFile(filepath.Join(outputRoot, "bun.lock")); err != nil || !strings.Contains(string(lock), `"fake-ts-server@workspace:server/`+stackName+`/ledger-web"`) {
+		t.Errorf("the provisioner's install did not bring the lockfile up to date with the server: %v\n%s", err, lock)
 	}
 
 	resp, err := http.Get(local.ServerURL(port) + "/env")

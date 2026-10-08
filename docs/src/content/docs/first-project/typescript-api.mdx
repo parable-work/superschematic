@@ -143,6 +143,15 @@ router, with nothing linked by hand:
 cd schemas/dist && bun install
 ```
 
+The install writes the workspace's lockfile, `schemas/dist/bun.lock`.
+Commit it: the storefront's image and the generated CI install frozen to
+it, so every install of one commit takes the same versions. The rest of
+`schemas/dist` stays ignored; acme-shop's `schemas/.gitignore` ignores
+the output root's contents and takes the lockfile back
+([Stacks](/superschematic/guides/stacks/#the-generated-server) has the
+rule). Install after building every service, as `build-all` does, so
+the lockfile names every package.
+
 Then run the tests from `examples/acme-shop/typescript`:
 
 ```sh

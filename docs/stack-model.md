@@ -1482,7 +1482,8 @@ holds the glibc and libgcc the archives need and nothing else, as a
 non-root user.
 
 A TypeScript server's Dockerfile builds superscalar's Node addon and
-installs the Bun workspace (section 8.6). A Rust server gets none yet.
+installs the Bun workspace, frozen to the lockfile the project commits
+(section 8.6). A Rust server gets none yet.
 
 Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
 the scalar library allows; the archives superscalar's own release
@@ -1531,7 +1532,11 @@ for it (`models/<service>.json`), the plans it applies
 (`migrations/<service>.plan.json`) and the Go servers' binaries it builds
 (`bin/`). A TypeScript server has no binary: the provisioner runs `bun
 install` once at the output root, whatever the number of TypeScript
-servers and waves, then starts each with `bun main.ts`. That install also
+servers and waves, then starts each with `bun main.ts`. The install is
+the one an engineer runs, not frozen: it writes the workspace's lockfile,
+or brings the committed one up to date with the packages the build
+wrote, so the lockfile follows the schemas through `stack dev` (section
+8.6). That install also
 links the implementations, which lie outside the output root, to it, so a
 `stack dev --out` elsewhere leaves them linked to that output root until
 the next install in the usual one. Each server runs in a process group of
@@ -1767,6 +1772,36 @@ as they are, with no build step (D51). The pieces mirror Go's:
   output root. A `file:` path or pattern climbs from the output root's
   physical path, the one Bun runs in, so an output root under a symbolic
   link, such as a temporary directory on macOS, resolves too.
+- **Lockfile.** The install writes `bun.lock` beside the root, and the
+  project commits it (D51, amended), so every install of one commit takes
+  the same versions: the image's, the generated CI's and an engineer's.
+  No build removes it, and the root it pairs with is the same bytes on
+  every build of the same schemas. The members' manifests are the build's
+  and the implementations' are the project's, so nothing else is
+  committed for it. A frozen install needs every member the lockfile
+  names that another member depends on, so the lockfile to commit is the
+  one an install writes after `build-all`: an install after building only
+  some services, as `stack dev`'s first in a fresh clone of a project
+  whose stack does not reach them all, drops the others' packages from it.
+  Its `file:` paths, like the root's overrides, are relative to the output
+  root, so it is the same on every machine with the same layout, and a
+  change to the manifest of a checkout `[paths]` names changes it too. An
+  output root is usually ignored whole (`dist/`), and git cannot take back
+  a file under an ignored directory, so the rule ignores the output
+  root's contents and takes the lockfile back:
+
+  ```gitignore
+  schemas/dist/*
+  !schemas/dist/bun.lock
+  ```
+
+  Where a broader rule ignores the directory, such as a repository's
+  `dist/`, the schemas root's `.gitignore` takes it back first (`!/dist/`,
+  `/dist/*`, `!/dist/bun.lock`), as acme-shop's does. The ignore rules are
+  the project's: the build of a stack with a TypeScript server, in a
+  repository whose rules ignore the lockfile, prints one line naming the
+  rule and the fix, and changes no ignore file. `stack init` (section
+  11.1), when it is built, writes the rule.
 - **Entrypoint.** The `server` generator writes
   `<output-root>/server/<stack>/<server>/` for a TypeScript server in the
   pass that writes the Go ones (section 8.1): `package.json`
@@ -1801,7 +1836,8 @@ as they are, with no build step (D51). The pieces mirror Go's:
     seconds, ends the pools and exits; a second signal exits at once.
 
   Bun runs `main.ts` as it is. A mismatch between the implementation and
-  `Deps` shows when `tsc` checks the package, not when Bun runs it.
+  `Deps` shows when `tsc` checks the package, as the generated CI's
+  `check` does (section 11.3), not when Bun runs it.
 - **Image.** With the naming file's `[paths]` naming the checkouts of
   superscalar's TypeScript binding and the HTTP runtime's package, which
   no registry serves yet, the Dockerfile's addon stage builds
@@ -1811,9 +1847,13 @@ as they are, with no build step (D51). The pieces mirror Go's:
   `oven/bun` at `tools.env`'s Bun release, puts the addon in the binding's
   `native/`, builds the binding's and the runtime's `dist/`, which the
   root's overrides copy, and installs the workspace without development
-  packages: `--frozen-lockfile` when the context holds the lockfile the
-  output root's install wrote, and resolved afresh in a clean checkout,
-  where none exists. The image copies the output root and the
+  packages, frozen to the committed lockfile, which fails when the
+  lockfile no longer matches the packages the build wrote. A context
+  without the lockfile, as in a project that has not committed it,
+  resolves afresh and prints that it does, so two images of one commit
+  may differ. The image keeps that fallback rather than refusing: the
+  generated CI's `check` refuses a missing or stale lockfile, and every
+  deploy job waits for it (section 11.3). The image copies the output root and the
   implementations it runs from that stage and runs `bun main.ts` as the
   non-root `bun` user, with `PORT=8080`. `Dockerfile.dockerignore` takes
   in the workspace's root and lockfile, every member's manifest by
@@ -2652,6 +2692,22 @@ The GitHub workflow:
     Go server's entrypoint module with `go build -mod=mod` (level 2). It
     runs on a push too. A binary the release workflow did not build names
     no digests, and its archives step fails.
+  - For a stack with a TypeScript server, `check` then installs the
+    output root's Bun workspace from the lockfile the project commits
+    (section 8.6), `bun install --frozen-lockfile` in
+    `<schemas-root>/dist`, in a step that names the lockfile. It fails
+    when the lockfile is missing, where a frozen install alone would
+    install without one, or no longer matches the packages the build
+    wrote, and says to run `bun install` there after `build-all` and
+    commit it. Then each
+    TypeScript server's entrypoint package and the implementation of each
+    API one serves type-checks with `tsc --noEmit` (level 2), through `bun
+    x --no-install`, so the compiler is the one the package depends on and
+    the install linked, never one bunx downloads. The type-check reads the
+    runtime packages as the install linked them: from the registry they
+    carry their declarations, while a checkout that `[paths]` names needs
+    its build output in the CI checkout, which the image builds for itself
+    and the workflow does not.
   - A `plan` job per cloud environment without parameters runs `stack
     plan` as `planner`, after `check`: the infrastructure diff, the
     migration plans and their hazards (levels 5 and 6).
@@ -2688,7 +2744,8 @@ bootstrap to run. `google-github-actions/auth` signs in, and its
 credentials file gives superschematic and Pulumi application default
 credentials. The cloud jobs install the provisioner's tools: the Pulumi
 provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
-is built with.
+is built with. A job that installs Bun installs `tools.env`'s release, the
+one a TypeScript server's image runs on.
 
 The workflow installs the release of superschematic that generated it,
 the version of the root module in the binary's build information, from

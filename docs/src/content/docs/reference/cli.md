@@ -130,7 +130,12 @@ stack's: building a `Stack` service writes each Go and TypeScript server's
 entrypoint under `server/<stack>/<server>` in the output root and
 scaffolds, with no
 flag, each API its servers serve whose implementation is missing, with a
-`go.mod` beside a Go one when no module holds the package.
+`go.mod` beside a Go one when no module holds the package. A build never
+removes the output root's `bun.lock`, the lockfile of its Bun workspace,
+which the project commits. When git ignores it, the build of a stack with
+a TypeScript server prints one line naming the rule and saying to ignore
+the output root's contents instead (`dist/*` and `!dist/bun.lock` in
+place of `dist/`); it edits no ignore file.
 
 ```
 superschematic build ./schemas/services/shop-db
@@ -515,7 +520,8 @@ design is section 8.3 of
 5. Build each Go server's entrypoint module at
    `<out>/server/<stack>/<server>` with `go build`, and for the TypeScript
    servers run `bun install` once in `<out>`, the root of their Bun
-   workspace. Start each server with its resolved config and `PORT`,
+   workspace, which writes `<out>/bun.lock` or brings it up to date, as
+   your own install would; the project commits it. Start each server with its resolved config and `PORT`,
    callees first, a TypeScript one as `bun main.ts` in its entrypoint
    package at the same place, and wait until it answers `/readyz`. Each
    line a server prints is printed with its name in front. Go servers need
