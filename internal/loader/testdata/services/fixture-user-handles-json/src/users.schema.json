@@ -8,8 +8,7 @@
     },
     "Identity.Slug": {
       "name": "Identity.Slug",
-      "languagePrimitive": "string",
-      "caseInsensitive": true
+      "languagePrimitive": "string"
     },
     "Identity.UUID": {
       "name": "Identity.UUID",

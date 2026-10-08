@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -275,6 +276,18 @@ func stripScalarLibHydratedMetadata(name string, def *ir.ScalarDef, catalog regi
 	}
 	if def.Format == metadata.Format {
 		def.Format = ""
+	}
+	if def.CaseInsensitive == metadata.CaseInsensitive {
+		def.CaseInsensitive = false
+	}
+	if slices.Equal(def.ReservedWords, metadata.ReservedWords) || len(def.ReservedWords) == 0 && len(metadata.ReservedWords) == 0 {
+		def.ReservedWords = nil
+	}
+	if def.ReservedWordsCaseInsensitive == metadata.ReservedWordsCaseInsensitive {
+		def.ReservedWordsCaseInsensitive = false
+	}
+	if def.ReservedWordsMatchPartial == metadata.ReservedWordsMatchPartial {
+		def.ReservedWordsMatchPartial = false
 	}
 	def.HasCustomNormalize = false
 	def.HasCustomParse = false

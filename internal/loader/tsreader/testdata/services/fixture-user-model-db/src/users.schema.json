@@ -5,8 +5,7 @@
   "scalars": {
     "Contact.Email": {
       "name": "Contact.Email",
-      "languagePrimitive": "string",
-      "caseInsensitive": true
+      "languagePrimitive": "string"
     },
     "Identity.Name": {
       "name": "Identity.Name",

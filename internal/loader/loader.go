@@ -330,8 +330,8 @@ func HydrateScalars(schema *ir.Schema, catalog registry.ScalarCatalog) error {
 }
 
 // hydrateScalarsFromRegistry fills every ScalarDef the schema references
-// from the scalar catalog: description, primitive, constraints, custom
-// hooks, upload metadata (from an UploadCatalog) and the per-language type
+// from the scalar catalog: description, primitive, constraints, case and
+// reserved words, custom hooks, upload metadata (from an UploadCatalog) and the per-language type
 // mappings. A name the catalog does not know is an error when the schema
 // declares nothing about it beyond its identity (a TypeScript brand or a
 // bare data-form entry, which can only have meant a catalog scalar); a
@@ -369,6 +369,16 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 		scalar.Minimum = metadata.Minimum
 		scalar.Pattern = metadata.Pattern
 		scalar.Format = metadata.Format
+		// The catalog's declarations replace any a data form wrote, so a
+		// schema cannot declare a catalog scalar case-insensitive that the
+		// scalar package does not (D50's login rule reads it).
+		scalar.CaseInsensitive = metadata.CaseInsensitive
+		scalar.ReservedWords = nil
+		if len(metadata.ReservedWords) > 0 {
+			scalar.ReservedWords = append([]string(nil), metadata.ReservedWords...)
+		}
+		scalar.ReservedWordsCaseInsensitive = metadata.ReservedWordsCaseInsensitive
+		scalar.ReservedWordsMatchPartial = metadata.ReservedWordsMatchPartial
 		scalar.HasCustomNormalize = metadata.HasCustomNormalize
 		scalar.HasCustomParse = metadata.HasCustomParse
 		scalar.HasCustomValidate = metadata.HasCustomValidate

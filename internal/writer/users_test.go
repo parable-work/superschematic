@@ -8,29 +8,8 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/loader"
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
-
-// skipUntilCatalogCaseInsensitive skips a test that loads a TypeScript
-// schema whose User login is typed by a catalog scalar. A data form can
-// declare its login's scalar case-insensitive, but the TypeScript form
-// cannot, and the scalar catalog declares none until superscalar's Go
-// metadata exports the flag and the pin moves; until then the loader
-// refuses every such login (D50). The skip lifts itself when hydration
-// marks Contact.Email case-insensitive.
-func skipUntilCatalogCaseInsensitive(t *testing.T) {
-	t.Helper()
-	catalog := registry.CoreScalars()
-	schema := ir.NewSchema("temp-service", ir.SchemaKindGeneral)
-	schema.Scalars["Contact.Email"] = &ir.ScalarDef{Name: "Contact.Email"}
-	if err := loader.HydrateScalars(schema, catalog); err != nil {
-		t.Fatal(err)
-	}
-	if !schema.Scalars["Contact.Email"].CaseInsensitive {
-		t.Skip("the scalar catalog declares no scalar case-insensitive yet, so a TypeScript schema's User login fails verification (D50)")
-	}
-}
 
 // writtenSource writes schema in the format into a temp directory and
 // returns every written file's content, concatenated.
@@ -62,7 +41,6 @@ func writtenSource(t *testing.T, schema *ir.Schema, format Format) string {
 // and reloads it. The traits lead the implements clause, after the base
 // class, and import from @superschematic/db.
 func TestTSWriterRoundTripsUserTraits(t *testing.T) {
-	skipUntilCatalogCaseInsensitive(t)
 	schema, err := loader.LoadService(tsFixtures + "/fixture-users-db")
 	if err != nil {
 		t.Fatalf("loading fixture: %v", err)
@@ -88,9 +66,6 @@ func TestTSWriterRoundTripsUserTraits(t *testing.T) {
 // traits of those names, so the written file imports the traits under an
 // alias, which the reader knows by its import.
 func TestTSWriterAliasesUserTraits(t *testing.T) {
-	// The fixture declares its login's scalar case-insensitive, metadata the
-	// TypeScript form cannot express, until the catalog declares it.
-	skipUntilCatalogCaseInsensitive(t)
 	schema, err := loader.LoadService(dataFixtures + "/fixture-user-handles-json")
 	if err != nil {
 		t.Fatalf("loading fixture: %v", err)
@@ -113,7 +88,6 @@ func TestTSWriterAliasesUserTraits(t *testing.T) {
 // the file back gives the IR without them, which the loader's own
 // expansion then adds again.
 func TestWritersSkipIdentityTables(t *testing.T) {
-	skipUntilCatalogCaseInsensitive(t)
 	schema, err := loader.LoadService(tsFixtures + "/fixture-users-db")
 	if err != nil {
 		t.Fatalf("loading fixture: %v", err)

@@ -7,7 +7,9 @@
       "minLength": 1,
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "data-analysis",
+      "x-reservedWordsCaseInsensitive": true,
       "x-scalar": "AgentSkill_Name",
       "x-typeMapping": {
         "go": "AgentSkillName",
@@ -43,6 +45,7 @@
       "maxLength": 255,
       "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-hasCustomNormalize": true,
       "x-hasCustomValidate": true,
       "x-scalar": "Contact_Email",
@@ -270,6 +273,7 @@
       "minLength": 1,
       "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "acme-corp",
       "x-scalar": "Identity_Slug",
       "x-typeMapping": {
@@ -494,6 +498,7 @@
       "maxLength": 63,
       "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "mycompany",
       "x-scalar": "Network_DnsLabel",
       "x-typeMapping": {
@@ -507,6 +512,7 @@
       "maxLength": 255,
       "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)*$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "example.com",
       "x-scalar": "Network_DomainName",
       "x-typeMapping": {
@@ -969,6 +975,7 @@
       "minLength": 2,
       "pattern": "^[Qq][1-4]$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "Q1",
       "x-scalar": "Temporal_Quarter",
       "x-typeMapping": {
