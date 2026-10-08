@@ -484,6 +484,20 @@ Default: unset. This repository's own file sets `runtime/http/rust`.
 
 Directory of the HTTP runtime Rust crate.
 
+### `paths.http_runtime_typescript`
+
+Default: unset. This repository's own file sets
+`runtime/http/typescript`.
+
+Directory of the HTTP runtime's npm package (`package.json`). The
+generated TypeScript API packages, and the implementations the scaffold
+writes, depend on `@superschematic/http-runtime` with `*`; with this key
+set, the output root's Bun workspace overrides that with a `file:` path
+to the checkout, which the install copies from its `dist/`, so build the
+runtime first (`bun install && bun run build` in
+`runtime/http/typescript`). Unset, the install fetches the package, which
+fails with a 404 until it is published.
+
 ### `paths.ptr`
 
 Default: unset.
@@ -548,9 +562,9 @@ Where each API service's implementation lives, per language, as a path
 from the repository root (the parent of the schemas root) in which
 `{service}` is the service's name. A stack's build writes a missing
 implementation there for each API its servers serve, and
-`build --scaffold` and `build-all --scaffold` for each Go API built. A
-server's generated entrypoint imports the implementation from there. An
-absolute path, or one without `{service}`, is an error.
+`build --scaffold` and `build-all --scaffold` for each Go or TypeScript
+API built. A server's generated entrypoint imports the implementation
+from there. An absolute path, or one without `{service}`, is an error.
 
 ### `implementation_paths.go`
 
@@ -558,6 +572,17 @@ Default: `go/{service}`
 
 The Go package of the implementation, whose `New(deps Deps)
 (Implementations, error)` the generated API's `Constructor` types.
+
+### `implementation_paths.typescript`
+
+Default: `typescript/{service}`
+
+The npm package of the implementation, whose `create` the generated API
+package's `Constructor` types. The scaffold names it
+`<npm_scope>/<service>-implementation`, a name you may change. The
+output root's Bun workspace has every directory the template matches,
+with `*` for `{service}`, as a member, so keep other packages out of
+them.
 
 ## `[extension.<name>]`
 

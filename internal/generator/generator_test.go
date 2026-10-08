@@ -156,7 +156,7 @@ func TestRunAPISchemaSelectsTypeScriptAPI(t *testing.T) {
 	if result.Outputs["api-typescript"] != wantAPIDir {
 		t.Errorf("expected api-typescript output at %q, got %q", wantAPIDir, result.Outputs["api-typescript"])
 	}
-	for _, name := range []string{"package.json", "interfaces.ts", "router.ts", "openapi.json"} {
+	for _, name := range []string{"package.json", "interfaces.ts", "router.ts", "deps.ts", "config.ts", "openapi.json"} {
 		if _, err := os.Stat(filepath.Join(wantAPIDir, name)); err != nil {
 			t.Errorf("expected generated %s: %v", name, err)
 		}
@@ -164,9 +164,12 @@ func TestRunAPISchemaSelectsTypeScriptAPI(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wantAPIDir, "routes.go")); err == nil {
 		t.Error("TypeScript API output must not carry the Go server")
 	}
-	// fixture-api declares no @envVars class: no values-schema.json.
-	if _, err := os.Stat(filepath.Join(wantAPIDir, "values-schema.json")); err == nil {
-		t.Error("unexpected values-schema.json for a schema without @envVars")
+	// fixture-api declares no @envVars class, but takes its database from
+	// its one DB-kind dependency: values-schema.json lists the field that
+	// edge derives, which config.ts reads (D51).
+	values, err := os.ReadFile(filepath.Join(wantAPIDir, "values-schema.json"))
+	if err != nil || !strings.Contains(string(values), "FIXTURE_DB_DATABASE") {
+		t.Errorf("values-schema.json lists no FIXTURE_DB_DATABASE field: %v\n%s", err, values)
 	}
 	if result.Outputs["sdk-typescript"] != SDKDir(outputRoot, "typescript", "fixture-api") {
 		t.Errorf("expected the TypeScript SDK beside the TypeScript API, got %v", result.Outputs)

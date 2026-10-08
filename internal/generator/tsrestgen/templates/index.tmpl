@@ -2,3 +2,7 @@
 
 export * from './interfaces';
 export * from './router';
+export * from './deps';
+{{- if .HasEnvConfig }}
+export * from './config';
+{{- end }}

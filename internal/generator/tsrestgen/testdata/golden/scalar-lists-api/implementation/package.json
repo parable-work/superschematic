@@ -1,0 +1,21 @@
+{
+  "name": "@schemas/scalar-lists-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the scalar-lists-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/scalar-lists-api-api": "workspace:*",
+    "@schemas/scalar-lists-api-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

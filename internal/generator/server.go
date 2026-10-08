@@ -12,6 +12,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
+	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
 	ir "github.com/parable-work/superschematic/ir"
@@ -24,8 +25,9 @@ const serverGenerator = "server"
 // generateServers writes the entrypoint of each Go server of the stack the
 // schema declares under servergen.StackDir (docs/stack-model.md, sections
 // 8.1 and 8.2), and of each Go job beside them (section 8.7, D52), and
-// scaffolds each served API's implementation that is missing (section
-// 8.5). No environment changes the servers or the jobs, but the entrypoint
+// scaffolds each served API's implementation that is missing, a Go
+// server's in Go and a TypeScript server's in TypeScript (sections 8.5 and
+// 8.6). No environment changes the servers or the jobs, but the entrypoint
 // of one that some environment connects to a database on Cloud SQL links
 // the Cloud SQL connector. It plans every entrypoint before it writes
 // anything, so one it refuses leaves the last build's entrypoints and
@@ -59,18 +61,27 @@ func (r run) generateServers() error {
 	}
 	var plans []planned
 	scaffolding := map[string]bool{}
+	var tsScaffolds []*tsrestgen.APIOutput
 	for _, s := range servers {
-		if s.Language != APILanguageGo {
+		switch s.Language {
+		case APILanguageGo:
+			server, scaffolds, err := r.planEntrypoint(st.Name, s, cloudSQL[s.Name])
+			if err != nil {
+				return err
+			}
+			plans = append(plans, planned{server, scaffolds})
+			for _, sc := range scaffolds {
+				scaffolding[sc.output.SchemaName] = true
+			}
+		case APILanguageTypeScript:
+			scaffolds, err := r.planTypeScriptServer(st.Name, s)
+			if err != nil {
+				return err
+			}
+			tsScaffolds = append(tsScaffolds, scaffolds...)
 			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
-			continue
-		}
-		server, scaffolds, err := r.planEntrypoint(st.Name, s, cloudSQL[s.Name])
-		if err != nil {
-			return err
-		}
-		plans = append(plans, planned{server, scaffolds})
-		for _, sc := range scaffolds {
-			scaffolding[sc.output.SchemaName] = true
+		default:
+			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
 		}
 	}
 	jobs, err := stack.Jobs(stack.Input{Stack: st, Services: services})
@@ -98,6 +109,17 @@ func (r run) generateServers() error {
 			if err := sc.write(r); err != nil {
 				return err
 			}
+		}
+	}
+	for _, output := range tsScaffolds {
+		if err := r.scaffoldTypeScriptImplementation(output, r.Options.RepositoryRoot); err != nil {
+			return err
+		}
+	}
+	if len(tsScaffolds) > 0 {
+		// The implementations join the output root's Bun workspace.
+		if err := r.writeTypeScriptWorkspace(); err != nil {
+			return fmt.Errorf("stack %s: %w", st.Name, err)
 		}
 	}
 	dir := servergen.StackDir(r.Options.OutputRoot, st.Name)
@@ -251,6 +273,36 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 	return server, scaffolds, nil
 }
 
+// planTypeScriptServer reads the TypeScript API package of each API the
+// TypeScript server s of the stack serves, as that API's own build writes
+// it, and returns those whose implementation, at the naming file's
+// [implementation_paths] typescript template, is missing, which the caller
+// scaffolds (D51). The server's entrypoint comes with section 8.6.
+func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable) ([]*tsrestgen.APIOutput, error) {
+	var scaffolds []*tsrestgen.APIOutput
+	for _, ref := range s.Services {
+		served, err := r.servedRun(stackName, s.Name, ref.Name)
+		if err != nil {
+			return nil, err
+		}
+		output, _, err := served.typeScriptAPI()
+		if err != nil {
+			return nil, err
+		}
+		if output == nil {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+		}
+		exists, err := tsrestgen.ImplementationExists(r.Options.Naming.TypeScriptImplementationDir(r.Options.RepositoryRoot, ref.Name))
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			scaffolds = append(scaffolds, output)
+		}
+	}
+	return scaffolds, nil
+}
+
 // cloudSQLDatabases resolves every environment of the stack and returns, by
 // server, the DB services, sorted, that some environment's sql edge
 // connects the server to with a Cloud SQL connector configuration. The
@@ -302,24 +354,10 @@ func derivesCloudSQL(value any) bool {
 // servedAPI is the Go server output of the API service a server serves, as
 // the API's own build prepares it.
 func (r run) servedAPI(stackName, server, service string) (*apigen.APIOutput, error) {
-	schema, err := r.LoadDependency(service)
+	served, err := r.servedRun(stackName, server, service)
 	if err != nil {
-		return nil, fmt.Errorf("stack %s: server %s serves %s: %w", stackName, server, service, err)
+		return nil, err
 	}
-	cfg, err := r.Options.LoadDependencyConfig(service)
-	if err != nil {
-		return nil, fmt.Errorf("stack %s: server %s serves %s: %w", stackName, server, service, err)
-	}
-	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
-	if err != nil {
-		return nil, fmt.Errorf("schema config for %s: %w", service, err)
-	}
-	if !outputs.APIEnabled() {
-		return nil, fmt.Errorf("stack %s: server %s serves %s, whose config generates no API server; enable outputs.api in %s's config", stackName, server, service, service)
-	}
-	opts := r.Options
-	opts.Stage = registry.StageAll
-	served, _ := newRun(schema, cfg, outputs, opts, r.Registry)
 	output, err := served.goServerOutput()
 	if err != nil {
 		return nil, err
@@ -328,6 +366,30 @@ func (r run) servedAPI(stackName, server, service string) (*apigen.APIOutput, er
 		return nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, server, service)
 	}
 	return output, nil
+}
+
+// servedRun is the run of the API service a server serves, as the API's
+// own build makes it.
+func (r run) servedRun(stackName, server, service string) (run, error) {
+	schema, err := r.LoadDependency(service)
+	if err != nil {
+		return run{}, fmt.Errorf("stack %s: server %s serves %s: %w", stackName, server, service, err)
+	}
+	cfg, err := r.Options.LoadDependencyConfig(service)
+	if err != nil {
+		return run{}, fmt.Errorf("stack %s: server %s serves %s: %w", stackName, server, service, err)
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+	if err != nil {
+		return run{}, fmt.Errorf("schema config for %s: %w", service, err)
+	}
+	if !outputs.APIEnabled() {
+		return run{}, fmt.Errorf("stack %s: server %s serves %s, whose config generates no API server; enable outputs.api in %s's config", stackName, server, service, service)
+	}
+	opts := r.Options
+	opts.Stage = registry.StageAll
+	served, _ := newRun(schema, cfg, outputs, opts, r.Registry)
+	return served, nil
 }
 
 // implementation finds the implementation of service: its package at the
