@@ -4481,3 +4481,49 @@ a test in such a project, and `stack dev`, still need `CGO_LDFLAGS` set
 by hand.
 
 The rule is reversible until the first release.
+
+## D51. A TypeScript server gets a generated entrypoint on Bun, a `Deps` over a pg Pool, and an implementation in one Bun workspace with the generated packages
+
+Section 8.1 of `docs/stack-model.md` wrote an entrypoint for Go servers
+only, so a stack could not deploy a TypeScript API, and acme-shop left its
+storefront out of `shop-stack`. Milestone 7 starts with the TypeScript
+twin. The TypeScript side had no `Deps`, no reader of the derived fields
+(section 3.4), no Postgres access but the version graph's adapter, and no
+logger.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A TypeScript server runs on Bun: its image is `oven/bun` at the release `tools.env` pins, and it runs `main.ts` as it is, as `stack dev` does. The generated packages are `.ts` with extensionless imports, which Bun runs and Node does not. | Node with a bundle from `bun build --target=node`: a build step, and a bundler's edge cases with superscalar's native addon. A runtime per stack, which builds every path twice. |
+| The derived fields reach TypeScript through the API package's `loadEnvConfig()`, which joins the types package's `@envVars` loader with the HTTP runtime's readers, `loadDatabase`, `loadService` and `loadCallers`. These read the variables Go's `stackconfig` reads, and shared vectors (`runtime/http/testdata`) hold both runtimes to one encoding, as the service-auth vectors do. | The derived readers in the types package, which depends on nothing but superscalar and would gain the HTTP runtime's types. |
+| `deps.db` is a `pg` Pool opened from the derived connection: a URL, or Cloud SQL through `@google-cloud/cloud-sql-connector` with IAM authentication, which only a server some environment places on Cloud SQL depends on, as Go's does (D30, amended). `/readyz` pings each pool. A TypeScript ORM, when one exists, adds a typed client on the same pool and leaves `db` as it is. | No database for a TypeScript server until an ORM exists, which keeps TypeScript APIs with a database out of stacks. Writing the ORM first, a project of its own. |
+| The API generator writes `deps.ts`: `Deps` (`config`, `db`, a client per callee, `logger`) and the constructor's type, the twin of Go's `deps.go`. `[implementation_paths] typescript` defaults to `typescript/{service}`, and the scaffold writes the package there once, never into a directory that holds a `.ts` file. | The implementation beside the schema, which mixes runtime code into the tree every command reads. |
+| One Bun workspace spans the generated TypeScript packages, the servers and the implementations, so their imports resolve with `workspace:*` and nothing is symlinked. | `file:` dependencies per package, which Bun 1.4 resolves wrongly when nested (D44's notes). |
+| The entrypoint is `<output-root>/server/<stack>/<server>/` with `package.json`, `main.ts` and a Dockerfile. `main.ts`: loads each API's config; opens a pool per database; builds an SDK client per `calls` edge with its credential source; calls each constructor; mounts each `buildRouter`, with `authenticateService` where an API has a service clause; serves `/healthz` and `/readyz` on `$PORT` with `Bun.serve`; and drains for ten seconds on SIGTERM. It logs JSON lines through a logger the HTTP runtime gains, with no dependency. | `@hono/node-server`, which Bun does not need. pino, a dependency for one line format. |
+| The image builds superscalar's Node addon for Linux in a Rust stage, as Go's image builds its archive, then installs the workspace and runs `main.ts` as a non-root user. | superscalar's WebAssembly fallback, which the checkout does not build and which runs slower. |
+| acme-shop proves it: the storefront's implementation moves to `typescript/shop-storefront`, `shop-stack` deploys and exposes it, `stack dev` runs it on Bun, and `TestStackDevRunsTheShop` calls it. | A fixture alone, which nothing would run end to end. |
+
+Status: not built.
+
+The rule is reversible until the first release.
+
+## D52. A job is a run to completion an API service declares, a deployable that shares its API's `Deps`, edges and identity, on a schedule environments may change
+
+Section 3.1 of `docs/stack-model.md` left jobs for later, and section 9.9
+left open how a deployable that serves no API is named in `from`. A job
+belongs to an API service: it does the API's background work with the
+API's connections and clients.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API service declares a job with `@job` on a class of its schema: `schedule` (a five-field cron), `timeZone` (UTC unless set), `timeout` and `retries`, all optional. The class's name is the job's. A job without a schedule runs only on demand. | A Job schema kind with its own config, sentinel and implementation directory: a fourth kind for what is the API's work. `@job` in the Stack schema, whose classes no callee can import for `from`, and whose edges it would restate. |
+| The API's implementation package implements its jobs with the API's `Deps`: the API generator writes a `Jobs` interface, a method per job taking a context and returning an error, and the scaffold writes each method returning the not-implemented error. | A `Deps` per job, which would restate the API's edges. |
+| Each job of an API in the stack is a deployable of kind `job` by default, named after its API and its class. Its edges are its API's, its sql edge to the API's database and its http edges to the API's callees, and it serves its API in a callee's callers field, so `from: [ShopOrders]` admits ShopOrders' server and jobs alike. | A job's own handle in `from`, which needs a kind with a sentinel. |
+| The decorator's schedule is the default. An environment's settings change it, or turn it off, and a member of a parameterized environment runs none unless its settings turn one on. | The schedule only in the schema, which staging cannot slow and a preview cannot stop. The schedule only per environment, restated in each. |
+| A job gets its own module and image at `<output-root>/server/<stack>/<job>/`: a `main` that builds `Deps` as a server's does, runs the job with a context SIGTERM cancels, and exits non-zero when it fails. Builds, `--image`, image pinning and the manifest cover every deployable with an image. | The API server's image with a subcommand, which ties a job's image to a server a declared `@server` may share with other APIs. |
+| `stack dev` runs each schedule beside the servers: never two runs of one job at once, the job's name before each line, and a job's exit never stops the environment. `superschematic stack run <environment> <job>` runs a job once, against the running `stack dev` or in the cloud through the target, waits, and reports its error. | Jobs only on demand under `stack dev`, which never exercises a schedule before the cloud. |
+| On gcp a job is a Cloud Run job (`gcp:cloudrunv2/job:Job`), with its own account, its API's Cloud SQL and egress, one task, and the decorator's timeout and retries. An enabled schedule is a Cloud Scheduler job (`gcp:cloudscheduler/job:Job`) that runs it through the Cloud Run Admin API as an account allowed to run only that job. Bootstrap enables Cloud Scheduler and gives `deployer` its role. | The scheduler calling an operation of the API over HTTP: Scheduler's token goes in `Authorization`, not `Service-Authorization` (D37), and a job's timeout is longer than a request's. |
+| Workers, which run until stopped, come with queues; a job that runs on every deploy is not built. | A `worker` kind now, before the queues it serves. |
+
+Status: not built.
+
+The rule is reversible until the first release.
