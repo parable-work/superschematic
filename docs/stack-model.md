@@ -1352,8 +1352,9 @@ server at `<output-root>/server/<stack>/<server>/`, holding `main.go`,
 stack: a declared server's class name, or the API service a default server
 serves. Each job of a Go API gets a module of its own beside them, under
 its deployable's name (section 8.7). The output root's `server/<stack>`
-directory holds only what the last build wrote. A TypeScript server gets its entrypoint from the same
-generator, on Bun (section 8.6, D51), and a Rust server gets none yet.
+directory holds only what the last build wrote. A TypeScript server gets
+its entrypoint from the same generator, on Bun (section 8.6, D51), and a
+Rust server gets none yet.
 
 `main` reads its whole configuration from the environment, and:
 
@@ -1425,10 +1426,11 @@ build the stack again.
 ### 8.2 Container image
 
 A generated Dockerfile per server, and per job (section 8.7), builds the
-entrypoint and the implementations together. Its build context is the repository root, the
-parent of the schemas root, after the stack's services are built, unless
-the naming file's `[paths] build_context` names a directory above it, as
-`examples/acme-shop` does to reach the runtime modules of its checkout:
+entrypoint and the implementations together. Its build context is the
+repository root, the parent of the schemas root, after the stack's
+services are built, unless the naming file's `[paths] build_context`
+names a directory above it, as `examples/acme-shop` does to reach the
+runtime modules of its checkout:
 
 ```sh
 docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
@@ -1527,8 +1529,8 @@ which the provisioner reads when it starts the caller.
 
 The provisioner renders `local.json` into
 `<output-root>/program/<stack>/<environment>`: the containers, databases,
-migrations, servers and jobs it runs. Beside it are the models `stack dev` writes
-for it (`models/<service>.json`), the plans it applies
+migrations, servers and jobs it runs. Beside it are the models `stack
+dev` writes for it (`models/<service>.json`), the plans it applies
 (`migrations/<service>.plan.json`) and the binaries it builds (`bin/`).
 Each server runs in a process group of its own, so Ctrl-C reaches `stack
 dev` first, which sends each server SIGTERM, callers first, and SIGKILL
