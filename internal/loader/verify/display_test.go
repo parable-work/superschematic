@@ -42,7 +42,7 @@ func displaySchema(change func(*ir.TypeDef)) *ir.Schema {
 		Display: &ir.TypeDisplay{
 			Noun:          "Ticket",
 			TitleField:    "title",
-			SummaryFields: []string{"status", "commentCount", "owner"},
+			SummaryFields: []string{"Workflow.status", "Comments.commentCount", "owner"},
 			States:        map[string]ir.DisplayState{"todo": {Label: "To do"}, "doing": {Label: "Do", ActiveForm: "Doing", Tone: ir.DisplayToneActive}},
 			Transitions:   map[string]map[string]string{"todo": {"doing": "Start"}, "doing": {"done": "Finish"}},
 		},
@@ -76,7 +76,7 @@ func TestDisplaysVerify(t *testing.T) {
 		{"a title by its JSON key", title("legacyTitle"), nil},
 		{"no display", func(td *ir.TypeDef) { td.Display = nil }, nil},
 		{"a title that is no field", title("ghost"), []string{prefix + `titleField "ghost" is not a field of the type` + fields}},
-		{"a title a behavior adds", title("status"), []string{prefix + `titleField "status" is a field behavior Workflow adds; a title is one of the type's own fields` + fields}},
+		{"a title a behavior adds", title("Workflow.status"), []string{prefix + `titleField "Workflow.status" is a field behavior Workflow adds; a title is one of the type's own fields` + fields}},
 		{"a list title", title("tags"), []string{prefix + "titleField tags has type string[]" + text}},
 		{"a map title", title("labels"), []string{prefix + "titleField labels has type a map of string" + text}},
 		{"a number title", title("points"), []string{prefix + "titleField points has type Generic.Int64" + text}},
@@ -84,8 +84,12 @@ func TestDisplaysVerify(t *testing.T) {
 		{"an array scalar title", title("vector"), []string{prefix + "titleField vector has type Embedding.Vector" + text}},
 		{"a secret title", title("token"), []string{prefix + "titleField names field token, which is secret"}},
 		{"a hidden title", title("internal"), []string{prefix + "titleField names field internal, which is @uiHidden"}},
-		{"summary fields that are no fields", func(td *ir.TypeDef) { td.Display.SummaryFields = []string{"owner", "ghost", "status"} },
+		{"summary fields that are no fields", func(td *ir.TypeDef) { td.Display.SummaryFields = []string{"owner", "ghost", "Workflow.status"} },
 			[]string{prefix + `summaryFields lists "ghost", which is not a field of the type or of its behaviors` + fields}},
+		// A behavior's field is named by its qualified name: its bare name
+		// is no field of the type's.
+		{"a behavior's field by its bare name", func(td *ir.TypeDef) { td.Display.SummaryFields = []string{"status"} },
+			[]string{prefix + `summaryFields lists "status", which is not a field of the type or of its behaviors` + fields + `; a behavior's field is named by its qualified name: Workflow.status`}},
 		{"a secret summary field", func(td *ir.TypeDef) { td.Display.SummaryFields = []string{"token"} },
 			[]string{prefix + "summaryFields names field token, which is secret"}},
 		{"unknown states and transitions", func(td *ir.TypeDef) {
@@ -99,7 +103,7 @@ func TestDisplaysVerify(t *testing.T) {
 		}},
 		{"states without Workflow", func(td *ir.TypeDef) {
 			td.Behaviors = td.Behaviors[1:]
-			td.Display.SummaryFields = []string{"commentCount"}
+			td.Display.SummaryFields = []string{"Comments.commentCount"}
 		}, []string{prefix + "states and transitions label a Workflow's; the type does not compose Workflow"}},
 		{"transitions alone without Workflow", func(td *ir.TypeDef) {
 			td.Behaviors = nil

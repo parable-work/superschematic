@@ -106,10 +106,11 @@ export interface EngineEvent {
   /** When, in epoch milliseconds. */
   at: number;
   /**
-   * create: the instance, its behaviors' fields included; update: a merge
-   * patch of the instance, the caller's patch and any change its
-   * behaviors' fields took; operation: an OperationChange; delete: null;
-   * publish: the schema document; define: a DefineChange.
+   * create: the instance as a read returns it, { data, behaviors }; update:
+   * a merge patch of that, the caller's patch under data and any change
+   * its behaviors' fields took under behaviors; operation: an
+   * OperationChange; delete: null; publish: the schema document; define: a
+   * DefineChange.
    */
   change: unknown;
   /** What caused it, for an event a reaction or a schedule wrote; absent for a caller's change. */
@@ -131,9 +132,10 @@ export interface OperationChange {
   /** The parameters, as its guards and handler got them. */
   params: Record<string, unknown>;
   /**
-   * A merge patch of the instance as a read returns it, from before the
-   * call to after it: its own fields an update() in the operation changed,
-   * and its behaviors' fields.
+   * A merge patch of the instance as a read returns it, { data, behaviors },
+   * from before the call to after it: under data its own fields an update()
+   * in the operation changed, under behaviors its behaviors' fields; a part
+   * the call did not change is absent.
    */
   patch: Record<string, unknown>;
 }

@@ -15,7 +15,7 @@ import {
   type Engine,
   type EngineEvent,
   type EngineOptions,
-  type FrozenJSON,
+  type InstanceFields,
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, freshPath, schemaDocument, thrown, track } from './helpers.ts';
@@ -184,7 +184,7 @@ for (const driver of drivers) {
       assert.deepEqual([caught.state, caught.cursor], ['active', engine.events.head()]);
       engine.runner.prune();
       assert.equal(engine.events.floor(), engine.events.head() - 1);
-      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.data.notes, [`create ${halted.failure?.cursor}`]);
+      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.behaviors['test.Ledger']?.notes, [`create ${halted.failure?.cursor}`]);
     });
 
     test("by count, each namespace keeps its own newest maxEvents: a busy namespace's events do not push a quiet one's out", () => {
@@ -288,7 +288,7 @@ for (const driver of drivers) {
       const engine = open({ retention: { maxEvents: 1 } });
       publish(engine, ledgerDocument('Order'));
       engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
-      const seen: Array<FrozenJSON | undefined> = [];
+      const seen: Array<InstanceFields | undefined> = [];
       const expired: string[] = [];
       let created: EngineEvent | undefined;
       probe.react = (_context, event) => {
@@ -313,7 +313,11 @@ for (const driver of drivers) {
         }
       };
       engine.runner.runDue();
-      assert.deepEqual(seen, [{ title: 'Desk' }, { title: 'Lamp' }]);
+      // As a read returns it, test.Ledger's entry empty while it holds no notes.
+      assert.deepEqual(seen, [
+        { data: { title: 'Desk' }, behaviors: { 'test.Ledger': {} } },
+        { data: { title: 'Lamp' }, behaviors: { 'test.Ledger': {} } },
+      ]);
       assert.deepEqual(expired, ['cursor_expired', 'cursor_expired']);
 
       // With every event of it pruned, a reaction to its next one still
@@ -325,7 +329,7 @@ for (const driver of drivers) {
       seen.length = 0;
       engine.instances.update(alice, 'Order', 'o1', { title: 'Stool' });
       engine.runner.runDue();
-      assert.deepEqual(seen, [{ title: 'Chair' }]);
+      assert.deepEqual(seen, [{ data: { title: 'Chair' }, behaviors: { 'test.Ledger': {} } }]);
     });
 
     test('a create after a delete goes on from the sequence retention kept', () => {

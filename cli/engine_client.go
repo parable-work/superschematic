@@ -35,11 +35,11 @@ func newEngineClientCmd(a *app) *cobra.Command {
 		Short: "Write a TypeScript module of typed wrappers over the engine's client for engine schemas",
 		Long: `engine-client writes one TypeScript module that types the engine's client
 (@superschematic/engine/client) for the schemas given: per schema, the
-instance with its own fields and its behaviors' fields, the create input
-with each behavior's create parameters, the update patch, each operation's
-parameters and result, the preconditions and the veto codes, as the
-behaviors' configs narrow them (a Workflow's states, Links' names), and a
-wrapper whose methods call the client with them.
+instance's own fields and its behaviors' fields by behavior name, the
+create input with each behavior's create parameters, the update patch,
+each operation's parameters and result, the preconditions and the veto
+codes, as the behaviors' configs narrow them (a Workflow's states, Links'
+names), and a wrapper whose methods call the client with them.
 
 Each file is one schema document as the engine takes it: kind General, a
 name, no imports. A .schema.json or .schema.yaml file is read on its own; a

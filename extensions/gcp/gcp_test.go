@@ -56,7 +56,10 @@ func assemble(t *testing.T) *registry.Registry {
 // shop-orders are deployed and shop-api is exposed; the declared server
 // Orders serves shop-orders and calls shop-api. Staging writes its records
 // into the acme-dev zone; Production takes the target's default DNS
-// platform and zone; Preview extends Staging with a parameter.
+// platform and zone; Preview extends Staging with a parameter. shop-orders'
+// job ShipOrders (D52) runs hourly in New York's time in Staging, on its
+// decorator's schedule with two CPUs and 1 GiB in Production, and only on
+// demand in Preview, whose members run no schedule they do not turn on.
 func shop() *ir.Stack {
 	return &ir.Stack{
 		Name:   "Shop",
@@ -76,6 +79,7 @@ func shop() *ir.Stack {
 				DNS:    &ir.DNSPlacement{Platform: gcp.CloudDNS, Values: map[string]any{"zone": "acme-dev"}},
 				Settings: []*ir.DeployableSettings{
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
+					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Schedule: "0 * * * *", TimeZone: "America/New_York"},
 				},
 			},
 			{
@@ -87,6 +91,7 @@ func shop() *ir.Stack {
 					{Of: stacktest.Of(stacktest.ShopDB), Values: map[string]any{"tier": "db-custom-2-7680", "highAvailability": true}},
 					{Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"minInstances": float64(1)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "warn"}}},
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Values: map[string]any{"memory": "1Gi"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
+					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Values: map[string]any{"cpu": "2", "memory": "1Gi"}},
 				},
 			},
 			{
@@ -101,11 +106,10 @@ func shop() *ir.Stack {
 	}
 }
 
-// resolve resolves an environment of s over services without their jobs:
-// the gcp target places no job yet (D52).
+// resolve resolves an environment of s over services.
 func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack.Service, env string) *ir.ResolvedEnvironment {
 	t.Helper()
-	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutJobs(services), Environment: env})
+	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: services, Environment: env})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,8 +204,9 @@ func checkGolden(t *testing.T, reg *registry.Registry, s *ir.Stack, services []s
 }
 
 // TestDeployOrder reads the order the graph gives Staging: the network,
-// accounts, secrets, grants and database first, shop-api before its caller
-// Orders, and the load balancer and records last.
+// accounts, secrets, grants and database first, shop-api before its
+// callers Orders and shop-orders' job, whose schedule comes with it, and
+// the load balancer and records last.
 func TestDeployOrder(t *testing.T) {
 	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Staging")
 	var order []string
@@ -219,10 +224,12 @@ func TestDeployOrder(t *testing.T) {
 		"infrastructure (Orders.account, Orders.cloudsql-client.shop-db, Orders.cloudsql-login.shop-db, Orders.database-user.shop-db, " +
 			"Orders.reads.PaymentsSecrets.STRIPE_KEY, Orders.trace-agent, network, network.nat, network.router, network.subnet, " +
 			"secret.PaymentsSecrets.STRIPE_KEY, shop-api.account, shop-api.cloudsql-client.shop-db, shop-api.cloudsql-login.shop-db, " +
-			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.trace-agent, shop-db.database.shop-db, shop-db.instance, shop-db.migrator)",
+			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.trace-agent, shop-db.database.shop-db, shop-db.instance, shop-db.migrator, " +
+			"shop-orders-ship-orders.account, shop-orders-ship-orders.cloudsql-client.shop-db, shop-orders-ship-orders.cloudsql-login.shop-db, " +
+			"shop-orders-ship-orders.database-user.shop-db, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-ship-orders.trace-agent)",
 		"migrate expand (shop-db)",
-		"rollout 1 (shop-api, Orders.run-invoker.shop-api, shop-api.service)",
-		"rollout 2 (Orders, Orders.service)",
+		"rollout 1 (shop-api, Orders.run-invoker.shop-api, shop-api.service, shop-orders-ship-orders.run-invoker.shop-api)",
+		"rollout 2 (Orders, shop-orders-ship-orders, Orders.service, shop-orders-ship-orders.job, shop-orders-ship-orders.schedule, shop-orders-ship-orders.schedule-invoker)",
 		"migrate contract (shop-db)",
 		"exposure (dns.shop-api.a, dns.shop-api.cname, shop-api.address, shop-api.backend, shop-api.certificate, shop-api.certificate-map, " +
 			"shop-api.certificate-map-entry, shop-api.dns-authorization, shop-api.endpoint-group, shop-api.forwarding-rule, shop-api.https-proxy, shop-api.url-map)",
@@ -278,7 +285,7 @@ func TestProjectNumber(t *testing.T) {
 	for _, bad := range []any{"acme-staging", "0123456789", "1234", float64(123456789012)} {
 		s := shop()
 		s.Environments[0].Values["projectNumber"] = bad
-		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: "Staging"})
+		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
 		if err == nil || !strings.Contains(err.Error(), "projectNumber") {
 			t.Errorf("projectNumber %v: err = %v, want a refusal naming projectNumber", bad, err)
 		}

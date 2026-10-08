@@ -9,6 +9,9 @@ const (
 	TypeProjectIAMMember    = "gcp:projects/iAMMember:IAMMember"
 	TypeService             = "gcp:cloudrunv2/service:Service"
 	TypeServiceIAMMember    = "gcp:cloudrunv2/serviceIamMember:ServiceIamMember"
+	TypeJob                 = "gcp:cloudrunv2/job:Job"
+	TypeJobIAMMember        = "gcp:cloudrunv2/jobIamMember:JobIamMember"
+	TypeSchedulerJob        = "gcp:cloudscheduler/job:Job"
 	TypeSecret              = "gcp:secretmanager/secret:Secret"
 	TypeSecretIAMMember     = "gcp:secretmanager/secretIamMember:SecretIamMember"
 	TypeInstance            = "gcp:sql/databaseInstance:DatabaseInstance"
@@ -64,6 +67,17 @@ const cloudRunSettings = `{
     "minInstances": {"type": "integer", "minimum": 0},
     "maxInstances": {"type": "integer", "minimum": 1},
     "concurrency": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
+    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
+  },
+  "additionalProperties": false
+}`
+
+// cloudRunJobSettings is the schema of a job's settings on Cloud Run
+// (D52): the resources of its one task, as a server's container takes.
+const cloudRunJobSettings = `{
+  "type": "object",
+  "properties": {
     "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
     "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
   },
@@ -137,6 +151,10 @@ const (
 	livenessPeriod   = 15
 	livenessTimeout  = 5
 	livenessFailures = 3
+
+	// maxJobRetries is the most retries Cloud Run gives a job's task
+	// (D52).
+	maxJobRetries = 10
 
 	defaultCPU      = "1"
 	defaultMemory   = "512Mi"

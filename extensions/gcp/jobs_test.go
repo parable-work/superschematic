@@ -64,12 +64,12 @@ func (f *deployFixture) ready(t *testing.T) {
 }
 
 // shopSources writes a repository with the Dockerfile the shop's build
-// writes for each of its servers.
+// writes for each of its servers and its job.
 func shopSources(t *testing.T) *stack.Sources {
 	t.Helper()
 	root := t.TempDir()
 	src := &stack.Sources{OutputRoot: filepath.Join(root, "schemas", "dist"), RepositoryRoot: root}
-	for _, server := range []string{"shop-api", "Orders"} {
+	for _, server := range []string{"shop-api", "Orders", "shop-orders-ship-orders"} {
 		dockerfile := src.Dockerfile("Shop", server)
 		for path, content := range map[string]string{
 			dockerfile:                   "FROM scratch\n",
@@ -161,9 +161,9 @@ func (f *deployFixture) jobDocument(t *testing.T, args []string) (string, map[st
 }
 
 // TestDeployBuildsAndMigratesOnGCP deploys Staging on gcp with fakes and
-// no image: the deploy builds each server's image with Cloud Build before
-// it changes anything, pins the digests it pushed, and runs each
-// migration phase as an execution of the stack's Cloud Run job, whose
+// no image: the deploy builds each server's and the job's image with Cloud
+// Build before it changes anything, pins the digests it pushed, and runs
+// each migration phase as an execution of the stack's Cloud Run job, whose
 // image it builds from the release once. A deploy with nothing changed
 // builds and runs nothing.
 func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
@@ -183,7 +183,8 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	want := []string{
 		"cloud build " + shopRepo + "orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-api:context-<hex>",
-		"render 35 nodes",
+		"cloud build " + shopRepo + "shop-orders-ship-orders:context-<hex>",
+		"render 45 nodes",
 		"apply infrastructure",
 		"cloud build " + migrateRepo + ":1.2.3",
 		"cloud run job job --job gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-<hex>.json",
@@ -222,8 +223,16 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		t.Errorf("Orders.service runs %v, want the image built, %s", got, orders)
 	}
 
+	// The job's image, pinned in its Cloud Run job as a server's is in its
+	// service (D52).
+	job := m.Images["shop-orders-ship-orders"]
+	task := f.prov.Rendered().Resources.Resource("shop-orders-ship-orders.job").Properties["template"].(map[string]any)["template"].(map[string]any)
+	if got := task["containers"].([]any)[0].(map[string]any)["image"]; !strings.HasPrefix(job, shopRepo+"shop-orders-ship-orders@sha256:") || got != job {
+		t.Errorf("shop-orders-ship-orders.job runs %v, want the image built, %s", got, job)
+	}
+
 	// The runner's image, from the release's module.
-	runner := f.cloud.builds[2]
+	runner := f.cloud.builds[3]
 	if runner.Image != migrateRepo+":1.2.3" || runner.Dockerfile != "Dockerfile" || runner.Object != "superschematic/builds/shop/superschematic-migrate/1.2.3.tar.gz" {
 		t.Errorf("the runner's build: %+v", runner)
 	}
@@ -239,11 +248,11 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		}
 	}
 
-	// The job: the runner's image, as the migrator.
-	job := f.cloud.jobs[jobKey]
-	if job.Image != migrateRepo+"@"+f.cloud.images[migrateRepo+":1.2.3"] || job.Container != "migrate" ||
-		job.ServiceAccount != "shop-migrator@acme-staging.iam.gserviceaccount.com" || job.Timeout != time.Hour {
-		t.Errorf("job %+v", job)
+	// The migration job: the runner's image, as the migrator.
+	migrate := f.cloud.jobs[jobKey]
+	if migrate.Image != migrateRepo+"@"+f.cloud.images[migrateRepo+":1.2.3"] || migrate.Container != "migrate" ||
+		migrate.ServiceAccount != "shop-migrator@acme-staging.iam.gserviceaccount.com" || migrate.Timeout != time.Hour {
+		t.Errorf("job %+v", migrate)
 	}
 
 	// The expand phase's job document, checked in as a golden the runner's
@@ -281,9 +290,10 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 }
 
 // TestMigrationJobGrantsAndRecovers: a deploy whose plan has no steps runs
-// the job for the servers that connect when they changed, with no plan in
-// the document; an execution that fails stops the deploy with the runner's
-// error and its logs, and the next deploy runs the phase again.
+// the job for the servers and jobs that connect when they changed, with no
+// plan in the document; an execution that fails stops the deploy with the
+// runner's error and its logs, and the next deploy runs the phase again. A
+// job of the graph connects by its own IAM database user (D52).
 func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
@@ -319,12 +329,12 @@ func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	if name, _ := f.jobDocument(t, f.cloud.runs[n]); !strings.Contains(name, "/shop-db/expand-") {
 		t.Errorf("the next deploy ran %s first", name)
 	}
-	if got := m.Databases["shop-db"]["shop-db"].Servers; !slices.Equal(got, []string{"Orders", "shop-api"}) {
+	if got := m.Databases["shop-db"]["shop-db"].Servers; !slices.Equal(got, []string{"Orders", "shop-api", "shop-orders-ship-orders"}) {
 		t.Errorf("the manifest records servers %v", got)
 	}
 
-	// A manifest from before Orders connected: the job runs for the
-	// servers alone.
+	// A manifest from before Orders and the job connected: the migration
+	// job runs for the privileges alone.
 	m.Databases["shop-db"]["shop-db"].Servers = []string{"shop-api"}
 	data, err := m.Marshal()
 	if err != nil {
@@ -342,7 +352,7 @@ func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	}
 	_, doc := f.jobDocument(t, f.cloud.runs[n])
 	got, _ := json.Marshal(doc["databases"])
-	if want := `[{"database":"shop_db","privileges":{"readWrite":["orders@acme-staging.iam","shop-api@acme-staging.iam"]},"service":"shop-db"}]`; string(got) != want {
+	if want := `[{"database":"shop_db","privileges":{"readWrite":["orders@acme-staging.iam","shop-api@acme-staging.iam","shop-orders-ship-orders@acme-staging.iam"]},"service":"shop-db"}]`; string(got) != want {
 		t.Errorf("the job's databases: %s\nwant %s", got, want)
 	}
 }
@@ -451,7 +461,8 @@ func TestMigrationJobReportsTheRunnerError(t *testing.T) {
 }
 
 // TestMigrationJobOfAMember: a run of the parameterized Preview migrates
-// its own database on the parent's instance, for its own servers' users.
+// its own database on the parent's instance, for its own servers' and
+// job's users.
 func TestMigrationJobOfAMember(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateImage: migrateRepo + "@sha256:" + strings.Repeat("c", 64)})
 	f.ready(t)
@@ -477,7 +488,7 @@ func TestMigrationJobOfAMember(t *testing.T) {
 	got, _ := json.Marshal(map[string]any{"cloudSql": doc["cloudSql"], "privileges": doc["databases"].([]any)[0].(map[string]any)["privileges"],
 		"database": doc["databases"].([]any)[0].(map[string]any)["database"]})
 	want := `{"cloudSql":{"instance":"acme-staging:us-east1:shop-db","user":"shop-migrator@acme-staging.iam"},"database":"shop_db_pr7",` +
-		`"privileges":{"readWrite":["orders-pr7@acme-staging.iam","shop-api-pr7@acme-staging.iam"]}}`
+		`"privileges":{"readWrite":["orders-pr7@acme-staging.iam","shop-api-pr7@acme-staging.iam","shop-orders-ship-orders-pr7@acme-staging.iam"]}}`
 	if string(got) != want {
 		t.Errorf("the member's job: %s\nwant %s", got, want)
 	}
@@ -526,12 +537,12 @@ func TestBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.cloud.builds) != 2 {
+	if len(f.cloud.builds) != 3 {
 		t.Fatalf("stack build ran %d builds", len(f.cloud.builds))
 	}
 	f.cloud.failBuild[migrateRepo+":1.2.3"] = "step 0 exited 1"
 	_, err = stack.Deploy(context.Background(), o)
-	if len(f.cloud.builds) != 3 || err == nil || !strings.Contains(err.Error(), "step 0 exited 1") {
+	if len(f.cloud.builds) != 4 || err == nil || !strings.Contains(err.Error(), "step 0 exited 1") {
 		t.Fatalf("deploy = %v after %d builds", err, len(f.cloud.builds))
 	}
 	data, rerr := f.cloud.ReadObject(context.Background(), stateBucket, "superschematic/manifests/shop/Staging.json")
@@ -550,7 +561,7 @@ func TestBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.cloud.builds) != 4 || m2.Images["Orders"] != built.Images["Orders"] {
+	if len(f.cloud.builds) != 5 || m2.Images["Orders"] != built.Images["Orders"] {
 		t.Errorf("the next deploy ran %d builds in all and runs Orders at %s, want stack build's %s", len(f.cloud.builds), m2.Images["Orders"], built.Images["Orders"])
 	}
 

@@ -28,15 +28,15 @@ const serverGenerator = "server"
 
 // generateServers writes the entrypoint of each Go and TypeScript server of
 // the stack the schema declares under servergen.StackDir (docs/stack-model.md,
-// sections 8.1, 8.2 and 8.6), and scaffolds each served API's
-// implementation that is missing, a Go server's in Go and a TypeScript
-// server's in TypeScript (sections 8.5 and 8.6). No environment changes
-// the servers, but the entrypoint of one that some environment connects to
-// a database on Cloud SQL links the Cloud SQL connector, or depends on the
-// Node one. It plans every server before it
-// writes anything, so a server it refuses leaves the last build's
-// entrypoints and every implementation as they were. A build without a
-// repository root writes none: the implementations live under it.
+// sections 8.1, 8.2 and 8.6), and of each Go job beside them (section 8.7,
+// D52), and scaffolds each served API's implementation that is missing, a
+// Go server's in Go and a TypeScript server's in TypeScript (sections 8.5
+// and 8.6). No environment changes the servers or the jobs, but the
+// entrypoint of one that some environment connects to a database on Cloud
+// SQL links the Cloud SQL connector, or depends on the Node one. It plans
+// every entrypoint before it writes anything, so one it refuses leaves the
+// last build's entrypoints and every implementation as they were. A build
+// without a repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
 		r.Skip(serverGenerator)
@@ -70,7 +70,7 @@ func (r run) generateServers() error {
 	for _, s := range servers {
 		switch s.Language {
 		case APILanguageGo:
-			server, scaffolds, err := r.planServer(st.Name, s, cloudSQL[s.Name])
+			server, scaffolds, err := r.planEntrypoint(st.Name, s, cloudSQL[s.Name])
 			if err != nil {
 				return err
 			}
@@ -95,6 +95,18 @@ func (r run) generateServers() error {
 	}
 	if err := r.checkJobs(st.Name, jobs, services, scaffolding); err != nil {
 		return err
+	}
+	for _, j := range jobs {
+		if j.Language != APILanguageGo {
+			r.Logf("  - job %s: a %s job, which gets no generated entrypoint yet\n", j.Name, j.Language)
+			continue
+		}
+		// The servers' plans scaffold the job's API, which a server serves.
+		job, _, err := r.planEntrypoint(st.Name, j, cloudSQL[j.Name])
+		if err != nil {
+			return err
+		}
+		plans = append(plans, planned{server: job})
 	}
 
 	for _, p := range plans {
@@ -130,7 +142,7 @@ func (r run) generateServers() error {
 			return err
 		}
 		if p.server.Docker == nil {
-			r.Logf("  - server %s: no Dockerfile, since %s\n", p.server.Name, p.server.NoDocker)
+			r.Logf("  - %s %s: no Dockerfile, since %s\n", p.server.Kind, p.server.Name, p.server.NoDocker)
 		}
 	}
 	for _, server := range tsPlans {
@@ -233,13 +245,13 @@ func (sc scaffold) write(r run) error {
 	return nil
 }
 
-// planServer plans the entrypoint of server s of the stack: the Go server
-// output of each API it serves, read as that API's own build reads it,
-// where each implementation lives, and every module the build needs.
-// cloudSQL are the DB services some environment connects it to on Cloud
-// SQL. It returns the implementations that are missing, which the caller
-// scaffolds.
-func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, []scaffold, error) {
+// planEntrypoint plans the entrypoint of deployable s of the stack, a
+// server or a job: the Go server output of each API it serves, or of its
+// job's API, read as that API's own build reads it, where each
+// implementation lives, and every module the build needs. cloudSQL are the
+// DB services some environment connects it to on Cloud SQL. It returns the
+// implementations that are missing, which the caller scaffolds.
+func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, []scaffold, error) {
 	in := servergen.Input{
 		Stack:          stackName,
 		Server:         s.Name,
@@ -249,6 +261,9 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []s
 		ScalarGo:       r.Options.Paths.ScalarGo,
 		Release:        r.Options.ReleaseInfo(),
 		CloudSQL:       cloudSQL,
+	}
+	if s.Job != nil {
+		in.Job = &servergen.JobInput{Name: s.Job.Name}
 	}
 	var scaffolds []scaffold
 	var versionGraph bool

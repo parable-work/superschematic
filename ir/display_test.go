@@ -16,7 +16,7 @@ func ticketDisplay() *TypeDisplay {
 		Plural:        "Tickets",
 		TitleField:    "title",
 		CreateLabel:   "New ticket",
-		SummaryFields: []string{"status", "assignee"},
+		SummaryFields: []string{"Workflow.status", "assignee"},
 		States: map[string]DisplayState{
 			"todo":         {Label: "To do", Tone: DisplayToneMuted},
 			"implementing": {Label: "Implement", ActiveForm: "Implementing", Tone: DisplayToneActive},
@@ -45,7 +45,7 @@ func TestTypeDisplay_KeyPositionOmissionAndRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `"behaviors":[{"name":"Workflow"}],"display":{"noun":"Ticket","plural":"Tickets","titleField":"title","createLabel":"New ticket",` +
-		`"summaryFields":["status","assignee"],"states":{"implementing":{"label":"Implement","activeForm":"Implementing","tone":"active"},"todo":{"label":"To do","tone":"muted"}},` +
+		`"summaryFields":["Workflow.status","assignee"],"states":{"implementing":{"label":"Implement","activeForm":"Implementing","tone":"active"},"todo":{"label":"To do","tone":"muted"}},` +
 		`"transitions":{"todo":{"implementing":"Start"}}},"rawHeritage":`
 	if !bytes.Contains(data, []byte(want)) {
 		t.Fatalf("marshaled type = %s\nwant it to contain %s", data, want)

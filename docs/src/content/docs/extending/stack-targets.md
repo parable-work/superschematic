@@ -111,7 +111,11 @@ environment runs, empty when it runs only on demand, its time zone, the
 timeout in seconds and the retries. A job has a server's bindings, from
 its API's config and its own edges, and no callers field.
 `stack/stacktest`'s `fake.job` lowers one to a job with its own account
-and, for a schedule, a scheduler entry.
+and, for a schedule, a scheduler entry. gcp's `gcp.cloudrunjob` lowers
+one to a Cloud Run job, sharing the Cloud Run service's lowering of the
+account, secrets, config, Cloud SQL volume and egress, and for a schedule
+to a Cloud Scheduler job and the grant that lets the job's account run
+it.
 
 ## A connector
 
@@ -138,8 +142,8 @@ cannot serve, as the gcp sql connector does for a Rust server.
 A connector's `From` is a server or a job platform. A job takes its API's
 edges, so a target with a job platform registers a connector from it for
 each edge its server platform has; it may share the server connector's
-`Connect`, which sees the job as `From`. For an http edge, the callee's
-issuer lists the job as a caller that serves its API.
+`Connect`, which sees the job as `From`, as gcp's do. For an http edge,
+the callee's issuer lists the job as a caller that serves its API.
 
 ## A target
 
@@ -169,7 +173,7 @@ under the name `pulumi` for that reason.
 
 A target that resolves can be built and checked. To bootstrap, plan and
 deploy it with the `stack` commands and the generated CI, it also fills
-six seams on its `TargetSpec`, each an interface in `registry`:
+seven seams on its `TargetSpec`, each an interface in `registry`:
 
 | Field | Interface | Does |
 | --- | --- | --- |
@@ -177,20 +181,24 @@ six seams on its `TargetSpec`, each an interface in `registry`:
 | `Secrets` | `SecretStore` | sets, gets, lists and checks secret values, keyed by a secret's identity (`PaymentsSecrets.STRIPE_KEY`) or a platform credential's secret name |
 | `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs, and returns the values only the cloud knows, each a `BootstrapValue` the core records in the schema beside the value it belongs with (gcp's `projectNumber`, beside `project`) |
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
-| `Builder` | `ImageBuilder` | builds a server's image from the Dockerfile a stack's build writes, and returns it by digest |
+| `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
+| `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run`: a `JobRunRequest` names the run, the job and the image the deploy manifest records, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
 
 A target with none of them resolves and does not deploy. `RegisterTarget`
-refuses `State`, `Bootstrap`, `Migrations`, `Builder` or `CI` without a
-provisioner, and `Bootstrap`, `Migrations`, `Builder` or `CI` without
-`State`. With no `Migrations`, a deploy that has a migration to run is
-refused; with no `Builder`, every server's image comes from `--image` or
-the deploy manifest. The gcp target fills all six: its migrations run
+refuses `State`, `Bootstrap`, `Migrations`, `Builder`, `CI` or `Jobs`
+without a provisioner, and `Bootstrap`, `Migrations`, `Builder`, `CI` or
+`Jobs` without `State`. With no `Migrations`, a deploy that has a
+migration to run is refused; with no `Builder`, every image comes from
+`--image` or the deploy manifest; with no `Jobs`, `stack run` refuses the
+target's environments. The gcp target fills all seven: its migrations run
 each phase as an execution of the stack's Cloud Run job, which runs
 `superschematic-migrate` on Cloud SQL (`gcp.Extension{Migrations: ...}`
 takes a runner of your own instead), its builder builds each changed
-server's image on Cloud Build (D46), and its CI identity signs a job in
-through Workload Identity Federation (D47). Each operation works on a
+server's and job's image on Cloud Build (D46), its CI identity signs a
+job in through Workload Identity Federation (D47), and its job runner
+runs an execution of a job's Cloud Run job and reads a failed one's error
+from Cloud Logging (D52). Each operation works on a
 `registry.Run`: the resolved environment and the values of its
 parameters.
 
@@ -348,10 +356,10 @@ pass your extension to `cli.New` and run `build`, as
 does with the fake target.
 
 The deploy itself is public too: `stack.Deploy`, `stack.Plan`,
-`stack.Destroy`, `stack.Outputs`, `stack.Bootstrap` and `stack.SetSecrets`
-are what the commands call. `stack/stacktest` has in-memory seams
-(`FakeState`, `FakeSecrets`, `FakeMigrations`, `FakeBootstrap` and
-`FakeBuilder`) that record each call, so a test reads the order a deploy
+`stack.Destroy`, `stack.Outputs`, `stack.Bootstrap`, `stack.SetSecrets`
+and `stack.RunJob` are what the commands call. `stack/stacktest` has
+in-memory seams (`FakeState`, `FakeSecrets`, `FakeMigrations`,
+`FakeBootstrap`, `FakeBuilder` and `FakeJobs`) that record each call, so a test reads the order a deploy
 ran in, and `FakeCI`, a CI seam shaped like gcp's.
 `extensions/pulumi/deploy_test.go` deploys through the real provisioner
 against a `file://` backend.

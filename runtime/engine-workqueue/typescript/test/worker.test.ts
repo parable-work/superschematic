@@ -132,8 +132,14 @@ function start<T = Record<string, unknown>>(client: EngineClient, options: Parti
   return worker.start().then(() => worker);
 }
 
-function job(engine: Engine, id: string): Record<string, any> {
-  return engine.instances.get(alice, 'Job', id)?.data as Record<string, any>;
+/** A job as a read returns it: its own fields in data, its behaviors' in behaviors. */
+function job(engine: Engine, id: string): { data: Record<string, any>; behaviors: Record<string, Record<string, any>> } {
+  return engine.instances.get(alice, 'Job', id) as { data: Record<string, any>; behaviors: Record<string, Record<string, any>> };
+}
+
+/** A job's Workflow status; undefined once it is gone. */
+function statusOf(engine: Engine, id: string): unknown {
+  return engine.instances.get(alice, 'Job', id)?.behaviors.Workflow?.status;
 }
 
 /** The operations of an instance's events, in order. */
@@ -180,17 +186,20 @@ describe('the worker', () => {
       match: { topic: 'search' },
       handle: async (job) => {
         const instance = await job.instance.get();
-        order.push(`${instance.id} ${String(instance.data.status)} ${String((instance.data.lease as { token: number }).token === job.token)}`);
+        order.push(`${instance.id} ${String(instance.behaviors.Workflow?.status)} ${String(instance.behaviors.Lease?.token === job.token)}`);
         await until(() => operations(engine, job.id).filter((name) => name === 'heartbeat').length >= 2, 'two heartbeats');
         await job.instance.update({ title: `${String(instance.data.title)}, done` });
         return { transition: 'done', attempt: { detail: { pages: 3 } } };
       },
     });
-    await until(() => job(engine, 'low')?.status === 'done' && job(engine, 'high')?.status === 'done', 'both search jobs done');
+    await until(() => statusOf(engine, 'low') === 'done' && statusOf(engine, 'high') === 'done', 'both search jobs done');
     assert.deepEqual(order, ['high running true', 'low running true']);
-    assert.equal(job(engine, 'other').status, 'queued');
+    assert.equal(statusOf(engine, 'other'), 'queued');
     const done = job(engine, 'high');
-    assert.deepEqual([done.title, done.lease.holder, done.lease.ended.reason, done.lease.expiries, done.retries.total], ['index first, done', null, 'release', 0, 0]);
+    assert.deepEqual(
+      [done.data.title, done.behaviors.Lease.holder, done.behaviors.Lease.ended.reason, done.behaviors.Lease.expiries, done.behaviors.Retries.total],
+      ['index first, done', undefined, 'release', 0, 0]
+    );
     const ran = operations(engine, 'high');
     assert.deepEqual([ran[0], ...ran.slice(-3)], ['claim', 'recordAttempt', 'transition', 'release']);
     assert.ok(ran.filter((name) => name === 'heartbeat').length >= 2);
@@ -216,7 +225,7 @@ describe('the worker', () => {
     });
     await until(() => claimed !== undefined, 'the claim');
     engine.instances.invoke(operator, 'Job', 'crawl', 'direct', { name: 'slowDown', data: { by: 2 } });
-    await until(() => job(engine, 'crawl').status === 'done', 'the job done');
+    await until(() => statusOf(engine, 'crawl') === 'done', 'the job done');
     assert.deepEqual(heard, ['1 slowDown {"by":2}']);
   });
 
@@ -236,7 +245,7 @@ describe('the worker', () => {
         return { transition: 'done' };
       },
     });
-    await until(() => job(engine, 'long').status === 'running', 'the claim');
+    await until(() => statusOf(engine, 'long') === 'running', 'the claim');
     served.skew(10 * 60_000);
     await until(() => outcome.length === 4, 'the handler to stop');
     const [reason, update, release, sent] = outcome as [LeaseLostError, LeaseLostError, LeaseLostError, number];
@@ -249,7 +258,7 @@ describe('the worker', () => {
     const written = engine.events.read(alice, { schema: 'Job', instanceId: 'long', limit: 500 }).events;
     assert.deepEqual(new Set(written.map((event) => event.kind)), new Set(['create', 'operation']));
     assert.ok(operations(engine, 'long').every((name) => name === 'claim' || name === 'heartbeat'));
-    assert.deepEqual([job(engine, 'long').title, job(engine, 'long').status], ['long', 'running']);
+    assert.deepEqual([job(engine, 'long').data.title, statusOf(engine, 'long')], ['long', 'running']);
   });
 
   test('a lease another replaced is stale: the handler is aborted by the next heartbeat', async () => {
@@ -269,11 +278,11 @@ describe('the worker', () => {
         return undefined;
       },
     });
-    await until(() => job(engine, 'contested').status === 'running', 'the claim');
+    await until(() => statusOf(engine, 'contested') === 'running', 'the claim');
     engine.instances.invoke(operator, 'Job', 'contested', 'expire', { holder: 'worker' });
-    await until(() => job(engine, 'contested').status === 'done', 'the job claimed again and done');
+    await until(() => statusOf(engine, 'contested') === 'done', 'the job claimed again and done');
     assert.deepEqual(reasons, ['token_stale']);
-    assert.equal(job(engine, 'contested').title, 'contested');
+    assert.equal(job(engine, 'contested').data.title, 'contested');
   });
 
   test('a deleted instance loses the lease at the next heartbeat', async () => {
@@ -286,7 +295,7 @@ describe('the worker', () => {
         return { transition: 'done' };
       },
     });
-    await until(() => job(engine, 'doomed')?.status === 'running', 'the claim');
+    await until(() => statusOf(engine, 'doomed') === 'running', 'the claim');
     engine.instances.delete(operator, 'Job', 'doomed');
     await until(() => lost !== undefined, 'the loss');
     assert.equal(lost?.reason, 'not_found');
@@ -317,7 +326,7 @@ describe('the worker', () => {
     await until(() => blockedSend !== -1, 'the blocked write');
     assert.equal(blockedSend, 0);
     assert.ok(errors.length > 0 && errors.every((error) => /network down/u.test(String(error))));
-    assert.equal(job(engine, 'cut').title, 'cut off');
+    assert.equal(job(engine, 'cut').data.title, 'cut off');
   });
 
   test('an abandon counts as an expiry, so a job every attempt gives up escalates at maxExpiries', async () => {
@@ -333,10 +342,10 @@ describe('the worker', () => {
         throw attempts === 1 ? new Error('unexpected input') : new WorkFailure('cannot parse it', { abandon: true });
       },
     });
-    await until(() => job(engine, 'poison').status === 'failed', 'the escalation');
+    await until(() => statusOf(engine, 'poison') === 'failed', 'the escalation');
     assert.equal(attempts, 2);
-    const poison = job(engine, 'poison');
-    assert.deepEqual([poison.lease.expiries, poison.lease.ended.reason, poison.lease.holder], [2, 'abandon', null]);
+    const poison = job(engine, 'poison').behaviors.Lease;
+    assert.deepEqual([poison.expiries, poison.ended.reason, poison.holder], [2, 'abandon', undefined]);
     assert.deepEqual(errors.map(String), ['Error: unexpected input']);
   });
 
@@ -353,9 +362,9 @@ describe('the worker', () => {
         return { transition: 'done', attempt: { score: 1 } };
       },
     });
-    await until(() => job(engine, 'flaky').status === 'done', 'the second attempt');
-    const flaky = job(engine, 'flaky');
-    assert.deepEqual([flaky.retries.total, flaky.retries.classAttempts.timeout, flaky.lease.expiries], [1, 1, 0]);
+    await until(() => statusOf(engine, 'flaky') === 'done', 'the second attempt');
+    const flaky = job(engine, 'flaky').behaviors;
+    assert.deepEqual([flaky.Retries.total, flaky.Retries.classAttempts.timeout, flaky.Lease.expiries], [1, 1, 0]);
     const recorded = engine.events
       .read(alice, { schema: 'Job', instanceId: 'flaky', behaviors: ['Retries'], limit: 500 })
       .events.map((event) => (event.change as { params: unknown }).params);
@@ -383,9 +392,9 @@ describe('the worker', () => {
     await until(() => worker.active === 2, 'two claims');
     await sleep(80);
     assert.equal(worker.active, 2);
-    assert.equal(job(engine, 'c').status, 'queued');
+    assert.equal(statusOf(engine, 'c'), 'queued');
     open = true;
-    await until(() => ['a', 'b', 'c'].every((id) => job(engine, id).status === 'done'), 'every job done');
+    await until(() => ['a', 'b', 'c'].every((id) => statusOf(engine, id) === 'done'), 'every job done');
     assert.equal(most, 2);
   });
 
@@ -428,12 +437,12 @@ describe('the worker', () => {
     await until(() => worker.active === 1, 'the claim');
     await worker.stop({ drain: false });
     assert.ok(reason instanceof WorkerStoppedError);
-    const endless = job(engine, 'endless');
-    assert.deepEqual([endless.status, endless.lease.holder, endless.lease.ended.reason, endless.lease.expiries], ['queued', null, 'release', 0]);
+    const endless = job(engine, 'endless').behaviors;
+    assert.deepEqual([endless.Workflow.status, endless.Lease.holder, endless.Lease.ended.reason, endless.Lease.expiries], ['queued', undefined, 'release', 0]);
     release();
     await until(() => late !== undefined, 'the handler to finish');
     assert.ok(late instanceof LeaseLostError && late.reason === 'released');
-    assert.equal(job(engine, 'endless').title, 'endless');
+    assert.equal(job(engine, 'endless').data.title, 'endless');
   });
 
   test('a draining stop waits for the jobs it holds, and releases what outlasts its timeout', async () => {
@@ -455,9 +464,9 @@ describe('the worker', () => {
     const started = Date.now();
     await worker.stop({ timeoutMs: 400 });
     assert.ok(Date.now() - started >= 300);
-    assert.equal(job(engine, 'quick').status, 'done');
-    const stuck = job(engine, 'stuck');
-    assert.deepEqual([stuck.status, stuck.lease.holder, stuck.lease.ended.reason], ['queued', null, 'release']);
+    assert.equal(statusOf(engine, 'quick'), 'done');
+    const stuck = job(engine, 'stuck').behaviors;
+    assert.deepEqual([stuck.Workflow.status, stuck.Lease.holder, stuck.Lease.ended.reason], ['queued', undefined, 'release']);
   });
 
   test('refuses a schema that has no claimable work', async () => {
@@ -497,9 +506,9 @@ describe('the worker\'s presence', () => {
     const before = beats(engine).length;
     await until(() => beats(engine).length >= before + 3, 'three beats while the handler works');
     open = true;
-    await until(() => job(engine, 'long').status === 'done', 'the job done');
+    await until(() => statusOf(engine, 'long') === 'done', 'the job done');
     assert.ok(beats(engine).every((actor) => actor === 'worker'));
-    const presence = engine.instances.get(alice, 'Worker', 'w1')?.data.presence as { lastBeatAt: number | null; missed: boolean };
+    const presence = engine.instances.get(alice, 'Worker', 'w1')?.behaviors.Presence as { lastBeatAt?: number; missed: boolean };
     assert.deepEqual([typeof presence.lastBeatAt, presence.missed], ['number', false]);
     await worker.stop();
     const stopped = beats(engine).length;
@@ -519,7 +528,7 @@ describe('the worker\'s presence', () => {
     await assert.rejects(new QueueWorker(client, { schema: 'Job', presence: { schema: 'Job', id: 'waiting' }, handle }).start(), /Job does not compose Presence/u);
     assert.throws(() => new QueueWorker(client, { schema: 'Job', presence: { schema: 'Worker', id: '' }, handle }), /presence\.id/u);
     assert.throws(() => new QueueWorker(client, { schema: 'Job', presence: { schema: 'Worker', id: 'w1', beatMs: 0 }, handle }), /presence\.beatMs/u);
-    assert.equal(job(engine, 'waiting').status, 'queued');
+    assert.equal(statusOf(engine, 'waiting'), 'queued');
   });
 
   test('while the engine refuses its beats it claims nothing, and it claims again once a beat succeeds', async () => {
@@ -544,7 +553,7 @@ describe('the worker\'s presence', () => {
     const sent = requests.length;
     engine.instances.create(alice, 'Job', { title: 'waiting' }, { id: 'waiting' });
     await sleep(100);
-    assert.equal(job(engine, 'waiting').status, 'queued');
+    assert.equal(statusOf(engine, 'waiting'), 'queued');
     assert.ok(requests.slice(sent).every((request) => !/claimNext|countClaimable/u.test(request)));
     assert.ok(requests.slice(sent).some((request) => request.endsWith('/w1/operations/beat')), 'it beats on');
     // Registered again, it beats, and claims what waited.
@@ -583,12 +592,12 @@ describe('the worker\'s presence', () => {
     assert.equal(held?.signal.aborted, false);
     engine.instances.create(alice, 'Job', { title: 'next' }, { id: 'next' });
     await sleep(100);
-    assert.equal(job(engine, 'next').status, 'queued');
+    assert.equal(statusOf(engine, 'next'), 'queued');
     served.failBeats(false);
-    await until(() => job(engine, 'next').status === 'done', 'the claim once a beat succeeds', 3_000);
+    await until(() => statusOf(engine, 'next') === 'done', 'the claim once a beat succeeds', 3_000);
     assert.equal(worker.present, true);
     open = true;
-    await until(() => job(engine, 'held').status === 'done', 'the held job done');
+    await until(() => statusOf(engine, 'held') === 'done', 'the held job done');
   });
 });
 

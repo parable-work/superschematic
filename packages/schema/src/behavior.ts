@@ -150,9 +150,10 @@ export interface RollupSource {
 
 /**
  * One rollup of a Rollups config. count, all and any take no field;
- * countBy takes a string, enum or boolean field, or status, sum, min
- * and max a number or integer field, and latest any field, or status: its
- * value on the linked instance created last. all and any may gate states
+ * countBy takes a string, enum or boolean field, or "Workflow.status",
+ * the linked instances' Workflow status; sum, min and max a number or
+ * integer field; and latest any field, or "Workflow.status": its value on
+ * the linked instance created last. all and any may gate states
  * of the type's Workflow, and count only terminal states with the
  * outcomes they list.
  */

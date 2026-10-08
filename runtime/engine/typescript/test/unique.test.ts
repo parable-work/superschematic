@@ -268,7 +268,10 @@ for (const driver of drivers) {
       );
       assert.match(described.operations[0].guidance.useWhen, /slug is unique; source and externalId together are unique: a value another Model holds is refused \(conflict\)\./);
       assert.match(described.operations[0].guidance.doNotUseWhen, /Do not create a Model whose slug or source and externalId another holds; call lookup to find it\./);
-      assert.match(described.operations[2].guidance.useWhen, /where keeps the ones whose fields hold the values it gives, null meaning no value and a list of values any of them: slug, title, source or externalId\./);
+      assert.match(
+        described.operations[2].guidance.useWhen,
+        /where keeps the ones whose fields hold the values it gives, null meaning no value and a list of values any of them: slug, title, source or externalId; a behavior's field by its qualified name/
+      );
       // A schema without a unique field has no lookup.
       publish(engine, schemaDocument('Note', [{ name: 'body', typeRef: { name: 'string' } }]));
       assert.deepEqual(engine.tools.describe(alice, 'Note').operations.map((operation) => operation.name), ['create', 'get', 'list', 'update', 'delete']);
@@ -358,7 +361,7 @@ for (const driver of drivers) {
       // A create keeps it inline; its event stores it by hash.
       const created = engine.instances.create(alice, 'Model', { slug: long('b'), body: long('b') }, { id: 'b' });
       assert.equal(engine.storage.get("SELECT value_refs FROM engine_instances WHERE id = 'b'")?.value_refs, '["/body"]');
-      assert.deepEqual(engine.events.read(alice, { schema: 'Model', instanceId: 'b' }).events[0].valueRefs, ['/slug', '/body']);
+      assert.deepEqual(engine.events.read(alice, { schema: 'Model', instanceId: 'b' }).events[0].valueRefs, ['/data/slug', '/data/body']);
       assert.equal(engine.instances.lookup(alice, 'Model', { slug: long('b') })?.id, created.id);
       thrown(() => engine.instances.create(alice, 'Model', { slug: long('b') }), UniqueConflictError);
     });

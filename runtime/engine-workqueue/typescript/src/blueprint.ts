@@ -71,7 +71,7 @@ checks Dependencies for a step's after: one whose Constants no longer
 keeps them refuses the change that stamps (not_constant), so no child is
 stamped whose route a writer could change.
 
-What was stamped is kept in Blueprint's own table: the blueprint field
+What was stamped is kept in Blueprint's own table: the children field
 lists each step's key and its child's id, in the order they were
 created, from the stamp's record and not from the links that point here,
 so a child linked to the parent later is not among them, and one deleted
@@ -88,6 +88,8 @@ import {
   BehaviorConfigError,
   BehaviorVetoError,
   EngineError,
+  LINKS_TARGETS,
+  behaviorField,
   defineBehavior,
   linkPin,
   type ConfigSchema,
@@ -135,9 +137,9 @@ export interface BlueprintConfig {
   readonly listFields: readonly string[];
 }
 
-/** The blueprint field. */
+/** Blueprint's fields, as a read returns them under behaviors.Blueprint: children is absent until the instance is stamped. */
 export interface BlueprintRecord {
-  readonly children: ReadonlyArray<{ readonly key: string; readonly id: string }>;
+  readonly children?: ReadonlyArray<{ readonly key: string; readonly id: string }>;
 }
 
 const NAME = 'Blueprint';
@@ -450,9 +452,9 @@ function stamped(view: InstanceView<BlueprintConfig>): boolean {
   return at !== null && at !== undefined;
 }
 
-// linksOf reads this instance's links field, as the caller.
+// linksOf reads this instance's Links targets field, as the caller.
 function linksOf(context: InstanceContext<BlueprintConfig>): Readonly<Record<string, LinkRecord>> {
-  const links = context.instances.get(context.schema, context.id, { fields: ['links'] })?.data.links;
+  const links = behaviorField(context.instances.get(context.schema, context.id, { fields: [LINKS_TARGETS] }), 'Links', 'targets');
   return (isObject(links) ? links : {}) as Readonly<Record<string, LinkRecord>>;
 }
 
@@ -682,7 +684,7 @@ export const blueprint = defineBehavior<BlueprintConfig>({
   },
 
   fields: {
-    blueprint(view): BlueprintRecord | undefined {
+    children(view): BlueprintRecord['children'] {
       if (!stamped(view)) {
         return undefined;
       }
@@ -690,7 +692,7 @@ export const blueprint = defineBehavior<BlueprintConfig>({
         `SELECT step, child_id FROM ${view.sql.table('children')} WHERE namespace = ? AND schema = ? AND id = ? ORDER BY position`,
         key(view)
       );
-      return { children: rows.map((row) => ({ key: String(row.step), id: String(row.child_id) })) };
+      return rows.map((row) => ({ key: String(row.step), id: String(row.child_id) }));
     },
   },
 

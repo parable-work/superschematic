@@ -62,7 +62,7 @@
     }
   },
   "fields": [
-    { "name": "rollups", "description": "Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {\"over\": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent." }
+    { "name": "values", "description": "Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {\"over\": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent." }
   ],
   "vetoes": [
     { "code": "not_held", "description": "A Workflow transition into a state an all or any rollup gates while the rollup does not hold, or has no value past 500 linked instances; details names the rollup and counts the linked instances." }

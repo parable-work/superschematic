@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -60,12 +61,15 @@ func newStackSecretsCmd(a *app) *cobra.Command {
 	return cmd
 }
 
-// stackFlags are the flags every cloud stack command shares.
+// stackFlags are the flags every cloud stack command shares. outputRoot
+// is a command's own --out, the output root a build wrote (stack run's);
+// empty is <schemas-root>/dist.
 type stackFlags struct {
 	stackDir   string
 	namingPath string
 	programDir string
 	params     []string
+	outputRoot string
 }
 
 // register adds the shared flags; a command that runs one run of an
@@ -133,7 +137,7 @@ func (c *deployContext) close() {
 // with `stack dev`, so only a command that serves one, secrets set,
 // passes allowLocal.
 func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environment string, allowLocal bool) (*deployContext, error) {
-	p, err := openStackProject(cmd, a, flags.stackDir, "", flags.namingPath)
+	p, err := openStackProject(cmd, a, flags.stackDir, flags.outputRoot, flags.namingPath)
 	if err != nil {
 		return nil, err
 	}
@@ -567,7 +571,7 @@ plans.`,
 	}
 	flags.register(cmd, true)
 	gate.register(cmd)
-	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's image: <server>=<repository>@sha256:<digest> (repeatable)")
+	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's or job's image: <deployable>=<repository>@sha256:<digest> (repeatable)")
 	cmd.Flags().StringVar(&out, "out", "", "write the plan as JSON to this file, for stack deploy --expect")
 	cmd.Flags().StringVar(&format, "format", "text", "print the plan as text or json")
 	return cmd
@@ -601,7 +605,7 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 		}
 	}
 	if len(r.Unpinned) > 0 {
-		fmt.Fprintf(&b, "\nServers with no image yet, planned at their repository: %s (deploy builds them, or takes them with --image)\n", strings.Join(r.Unpinned, ", "))
+		fmt.Fprintf(&b, "\nServers and jobs with no image yet, planned at their repository: %s (deploy builds them, or takes them with --image)\n", strings.Join(r.Unpinned, ", "))
 	}
 	if len(r.MissingSecrets) > 0 {
 		fmt.Fprintf(&b, "\nSecrets with no value: %s (stack secrets set %s)\n", strings.Join(r.MissingSecrets, ", "), environment)
@@ -622,24 +626,24 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 
 func newStackBuildCmd(a *app) *cobra.Command {
 	flags := &stackFlags{}
-	var servers []string
+	var deployables, servers []string
 	var force bool
 	var out, format string
 	cmd := &cobra.Command{
 		Use:   "build <environment>",
-		Short: "Build the images of an environment's servers without deploying them",
+		Short: "Build the images of an environment's servers and jobs without deploying them",
 		Long: `build builds, through the environment's target (Cloud Build on gcp), the
-image of each server whose build context changed since the image the
-deploy manifest records, as stack deploy would, and deploys nothing. Each
-Go or TypeScript server builds from the Dockerfile superschematic
-build-all writes at <output-root>/server/<stack>/<server>/, with the
-repository root as its context, cut down by the Dockerfile.dockerignore
-beside it.
+image of each server and job whose build context changed since the image
+the deploy manifest records, as stack deploy would, and deploys nothing.
+Each Go or TypeScript server, and each Go job, builds from the Dockerfile
+superschematic build-all writes at <output-root>/server/<stack>/<deployable>/,
+with the repository root as its context, cut down by the
+Dockerfile.dockerignore beside it.
 
 It prints each image as a stack deploy --image flag; --format json prints
-the result, and --out writes it to a file. --server builds the servers it
-names only, and --force builds a server whose context did not change. A
-build writes no deploy manifest.`,
+the result, and --out writes it to a file. --deployable builds the servers
+and jobs it names only, and --force builds one whose context did not
+change. A build writes no deploy manifest.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if format != "text" && format != "json" {
@@ -655,10 +659,10 @@ build writes no deploy manifest.`,
 			}
 			defer c.close()
 			result, err := stackdeploy.Build(cmd.Context(), stackdeploy.BuildOptions{
-				Options: c.options(cmd, params),
-				Sources: *c.sources(),
-				Servers: servers,
-				Force:   force,
+				Options:     c.options(cmd, params),
+				Sources:     *c.sources(),
+				Deployables: append(slices.Clone(deployables), servers...),
+				Force:       force,
 			})
 			if err != nil {
 				return err
@@ -687,8 +691,9 @@ build writes no deploy manifest.`,
 		},
 	}
 	flags.register(cmd, true)
-	cmd.Flags().StringArrayVar(&servers, "server", nil, "build this server only (repeatable)")
-	cmd.Flags().BoolVar(&force, "force", false, "build a server whose context did not change")
+	cmd.Flags().StringArrayVar(&deployables, "deployable", nil, "build this server or job only (repeatable)")
+	cmd.Flags().StringArrayVar(&servers, "server", nil, "build this server only (repeatable); --deployable takes a job too")
+	cmd.Flags().BoolVar(&force, "force", false, "build a server or job whose context did not change")
 	cmd.Flags().StringVar(&out, "out", "", "write the result as JSON to this file")
 	cmd.Flags().StringVar(&format, "format", "text", "print --image flags (text) or the result as json")
 	return cmd
@@ -708,13 +713,13 @@ func newStackDeployCmd(a *app) *cobra.Command {
 		Long: `deploy applies an environment in the order its resolution gives
 (docs/stack-model.md, section 5.3): the infrastructure; the expand phase
 of each database's migration, planned from the schema the deploy manifest
-records; the servers, callees first, each wave once the platform reports
-it ready; the contract phases; exposure. Then it writes the deploy
+records; the servers and jobs, callees first, each wave once the platform
+reports it ready; the contract phases; exposure. Then it writes the deploy
 manifest to the target's state: the resolved environment, the IR digest of
-each service, the image of each server and each database's schema.
+each service, the image of each server and job and each database's schema.
 
-Each server's image is given by digest with --image, or built through
-the target (Cloud Build on gcp) from the Dockerfile superschematic
+Each server's and job's image is given by digest with --image, or built
+through the target (Cloud Build on gcp) from the Dockerfile superschematic
 build-all wrote for it when its build context changed since the image the
 manifest records, or kept from the manifest. The builds run before
 anything changes. --no-build builds nothing. Every secret needs a value
@@ -783,9 +788,9 @@ schema between the phases, and the next deploy plans from it.`,
 	}
 	flags.register(cmd, true)
 	gate.register(cmd)
-	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's image: <server>=<repository>@sha256:<digest> (repeatable)")
+	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's or job's image: <deployable>=<repository>@sha256:<digest> (repeatable)")
 	cmd.Flags().StringVar(&expect, "expect", "", "a plan stack plan --out wrote: refuse migration plans other than its")
-	cmd.Flags().BoolVar(&noBuild, "no-build", false, "build no image: take each server's from --image or the manifest")
+	cmd.Flags().BoolVar(&noBuild, "no-build", false, "build no image: take each server's and job's from --image or the manifest")
 	return cmd
 }
 

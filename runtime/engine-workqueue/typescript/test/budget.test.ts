@@ -74,7 +74,7 @@ for (const driver of drivers) {
   const invoke = (engine: Engine, who: Principal, schema: string, id: string, operation: string, params: Record<string, unknown> = {}) =>
     engine.instances.invoke(who, schema, id, operation, params);
   const meterOf = (engine: Engine, schema: string, id: string, meter = 'cpu') =>
-    (engine.instances.get(alice, schema, id)?.data.budget as Record<string, Meter>)[meter];
+    (engine.instances.get(alice, schema, id)?.behaviors.Budget?.meters as Record<string, Meter>)[meter];
   const seqOf = (engine: Engine, schema: string, id: string) => engine.instances.get(alice, schema, id)?.seq;
   const veto = (fn: () => unknown) => thrown(fn, BehaviorVetoError);
   const meter = (used: number, reserved: number, limit: number | null): Meter => ({
@@ -486,8 +486,8 @@ for (const driver of drivers) {
   const claimNext = (engine: Engine, who: Principal = worker) =>
     (engine.instances.invokeSchema(who, 'Step', 'claimNext', {}) as { claimed: { id: string; token: number } | null }).claimed;
   const stepOf = (engine: Engine, id: string) => {
-    const data = engine.instances.get(alice, 'Step', id)?.data as { status: string; lease: { holder: string | null; token: number } };
-    return [data.status, data.lease.holder, data.lease.token];
+    const behaviors = engine.instances.get(alice, 'Step', id)?.behaviors as { Workflow: { status: string }; Lease: { holder?: string; token: number } };
+    return [behaviors.Workflow.status, behaviors.Lease.holder, behaviors.Lease.token];
   };
 
   describe(`Budget: claimed through Queue (${driver})`, () => {
@@ -512,7 +512,7 @@ for (const driver of drivers) {
       const refused = veto(() => invoke(engine, other, 'Step', 's2', 'claim'));
       assert.deepEqual([refused.action, refused.reason], ['reserveFor', 'meter cpu has 40 of its limit 100 left, not 60']);
       assert.match(refused.message, /of Pool p1:/);
-      assert.deepEqual(stepOf(engine, 's2'), ['queued', null, 0]);
+      assert.deepEqual(stepOf(engine, 's2'), ['queued', undefined, 0]);
       assert.equal(seqOf(engine, 'Step', 's2'), seq);
       assert.deepEqual([meterOf(engine, 'Step', 's2'), meterOf(engine, 'Run', 'r2'), meterOf(engine, 'Pool', 'p1')], [meter(0, 0, null), meter(0, 0, null), meter(0, 60, 100)]);
     });
@@ -526,7 +526,7 @@ for (const driver of drivers) {
         { caps: { r1: 50 } }
       );
       assert.equal(claimNext(engine)?.id, 's2');
-      assert.deepEqual([stepOf(engine, 's1'), stepOf(engine, 's2')], [['queued', null, 0], ['running', 'wren', 1]]);
+      assert.deepEqual([stepOf(engine, 's1'), stepOf(engine, 's2')], [['queued', undefined, 0], ['running', 'wren', 1]]);
       assert.deepEqual([meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Run', 'r2')], [meter(0, 0, 50), meter(0, 60, null)]);
       assert.equal(claimNext(engine, other), null);
     });
@@ -536,14 +536,14 @@ for (const driver of drivers) {
       assert.equal(claimNext(engine)?.token, 1);
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 10 });
       engine.instances.invoke(worker, 'Step', 's1', 'release', {}, fenced(1));
-      assert.deepEqual(stepOf(engine, 's1'), ['queued', null, 2]);
+      assert.deepEqual(stepOf(engine, 's1'), ['queued', undefined, 2]);
       assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Pool', 'p1')], [meter(10, 0, null), meter(10, 0, 100)]);
 
       assert.equal(claimNext(engine)?.token, 3);
       assert.deepEqual(meterOf(engine, 'Pool', 'p1'), meter(10, 60, 100));
       clock.advance(60000);
       engine.runner.runDue();
-      assert.deepEqual(stepOf(engine, 's1'), ['queued', null, 4]);
+      assert.deepEqual(stepOf(engine, 's1'), ['queued', undefined, 4]);
       assert.deepEqual([meterOf(engine, 'Step', 's1'), meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Pool', 'p1')], [meter(10, 0, null), meter(10, 0, null), meter(10, 0, 100)]);
       assert.deepEqual(claimNext(engine, other), { id: 's1', token: 5, expiresAt: T0 + 120000, heartbeatMs: 20000 });
     });
@@ -565,7 +565,7 @@ for (const driver of drivers) {
       assert.equal(claimNext(engine, other)?.id, 's2');
       assert.deepEqual([meterOf(engine, 'Run', 'r1'), meterOf(engine, 'Run', 'r2'), meterOf(engine, 'Pool', 'p1')], [meter(30, 0, null), meter(0, 60, null), meter(30, 60, 100)]);
       assert.equal(claimNext(engine), null);
-      assert.deepEqual(stepOf(engine, 's3'), ['queued', null, 0]);
+      assert.deepEqual(stepOf(engine, 's3'), ['queued', undefined, 0]);
     });
   });
 
@@ -590,7 +590,7 @@ for (const driver of drivers) {
       assert.deepEqual(invoke(engine, worker, 'Step', 's1', 'checkReserve'), {
         fits: false,
         until: null,
-        scopes: [{ schema: 'Run', id: 'r2', hears: [{ path: '/budget/cpu/remaining', crosses: 60 }, { path: '/links/pool' }] }],
+        scopes: [{ schema: 'Run', id: 'r2', hears: [{ path: '/behaviors/Budget/meters/cpu/remaining', crosses: 60 }, { path: '/behaviors/Links/targets/pool' }] }],
       });
       // The usage counts at the new scope; the part it draws is released at the old one, which holds it.
       invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 10 });
@@ -609,8 +609,8 @@ for (const driver of drivers) {
       // Each scope comes with what the answer turns on there: the meter's
       // remaining, at the amount, and the link up to the next scope.
       const scopes = (amount: number) => [
-        { schema: 'Run', id: 'r1', hears: [{ path: '/budget/cpu/remaining', crosses: amount }, { path: '/links/pool' }] },
-        { schema: 'Pool', id: 'p1', hears: [{ path: '/budget/cpu/remaining', crosses: amount }] },
+        { schema: 'Run', id: 'r1', hears: [{ path: '/behaviors/Budget/meters/cpu/remaining', crosses: amount }, { path: '/behaviors/Links/targets/pool' }] },
+        { schema: 'Pool', id: 'p1', hears: [{ path: '/behaviors/Budget/meters/cpu/remaining', crosses: amount }] },
       ];
       assert.deepEqual(check(), { fits: true, until: null, scopes: scopes(60) });
       claim(engine);
@@ -634,8 +634,8 @@ for (const driver of drivers) {
         fits: false,
         until: null,
         scopes: [
-          { schema: 'Run', id: 'r1', hears: [{ path: '/budget/cpu/remaining', crosses: 60 }, { path: '/links/pool' }] },
-          { schema: 'Pool', id: 'p1', hears: [{ path: '/budget/cpu/remaining', crosses: 60 }] },
+          { schema: 'Run', id: 'r1', hears: [{ path: '/behaviors/Budget/meters/cpu/remaining', crosses: 60 }, { path: '/behaviors/Links/targets/pool' }] },
+          { schema: 'Pool', id: 'p1', hears: [{ path: '/behaviors/Budget/meters/cpu/remaining', crosses: 60 }] },
         ],
       });
       // Lapsed, not yet expired: the 60 still shows, and is counted as gone.
@@ -646,8 +646,8 @@ for (const driver of drivers) {
       const lapsed = invoke(engine, other, 'Step', 's1', 'checkReserve') as { fits: boolean; scopes: Array<{ hears: unknown[] }> };
       assert.equal(lapsed.fits, true);
       assert.deepEqual(lapsed.scopes[1].hears, [
-        { path: '/budget/cpu/remaining', crosses: 0 },
-        { path: '/budget/cpu/remaining', crosses: 60 },
+        { path: '/behaviors/Budget/meters/cpu/remaining', crosses: 0 },
+        { path: '/behaviors/Budget/meters/cpu/remaining', crosses: 60 },
       ]);
       assert.equal((invoke(engine, other, 'Step', 's2', 'checkReserve') as { fits: boolean }).fits, false);
     });
@@ -664,11 +664,11 @@ for (const driver of drivers) {
         fits: false,
         until: DAY,
         scopes: [
-          { schema: 'Run', id: 'r1', hears: [{ path: '/budget/cpu/remaining', crosses: 60 }, { path: '/links/pool' }] },
+          { schema: 'Run', id: 'r1', hears: [{ path: '/behaviors/Budget/meters/cpu/remaining', crosses: 60 }, { path: '/behaviors/Links/targets/pool' }] },
           {
             schema: 'Pool',
             id: 'p1',
-            hears: [{ path: '/budget/cpu/remaining', crosses: 60 }, { path: '/budget/cpu/reserved', crosses: 41 }, { path: '/budget/cpu/limit' }],
+            hears: [{ path: '/behaviors/Budget/meters/cpu/remaining', crosses: 60 }, { path: '/behaviors/Budget/meters/cpu/reserved', crosses: 41 }, { path: '/behaviors/Budget/meters/cpu/limit' }],
           },
         ],
       });
@@ -688,7 +688,7 @@ for (const driver of drivers) {
       claim(engine);
       invoke(engine, worker, 'Step', 's1', 'transition', { to: 'running' });
       assert.deepEqual((invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 50 }) as { overruns: unknown }).overruns, []);
-      assert.deepEqual(engine.instances.get(alice, 'Step', 's1')?.data.status, 'running');
+      assert.deepEqual(engine.instances.get(alice, 'Step', 's1')?.behaviors.Workflow?.status, 'running');
       assert.deepEqual(invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 40 }), {
         meter: 'cpu',
         used: 90,
@@ -697,7 +697,7 @@ for (const driver of drivers) {
         directed: false,
       });
       const last = engine.events.read(alice, { schema: 'Step', instanceId: 's1' }).events.at(-1);
-      assert.deepEqual([(last?.change as { operation: string }).operation, (last?.change as { patch: { status?: string } }).patch.status], ['recordUsage', 'failed']);
+      assert.deepEqual([(last?.change as { operation: string }).operation, (last?.change as { patch: { behaviors: { Workflow: { status?: string } } } }).patch.behaviors.Workflow.status], ['recordUsage', 'failed']);
       // Out of its from states, a later overrun leaves the status.
       assert.equal((invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 1 }) as { overruns: Array<{ escalated: boolean }> }).overruns[0].escalated, false);
     });
@@ -726,14 +726,14 @@ for (const driver of drivers) {
       claim(engine);
       const over = invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 110 }) as { overruns: unknown };
       assert.deepEqual(over.overruns, [{ schema: 'Pool', id: 'p1', used: 110, limit: 100, escalated: false }]);
-      assert.deepEqual([engine.instances.get(alice, 'Pool', 'p1')?.data.status, meterOf(engine, 'Pool', 'p1').used], ['open', 110]);
+      assert.deepEqual([engine.instances.get(alice, 'Pool', 'p1')?.behaviors.Workflow?.status, meterOf(engine, 'Pool', 'p1').used], ['open', 110]);
       // Without the permission on the transition, the caller moves it.
       publish(engine, poolOf());
       const moved = invoke(engine, worker, 'Step', 's1', 'recordUsage', { meter: 'cpu', amount: 1 }) as { overruns: unknown };
       assert.deepEqual(moved.overruns, [{ schema: 'Pool', id: 'p1', used: 111, limit: 100, escalated: true }]);
       const last = engine.events.read(alice, { schema: 'Pool', instanceId: 'p1' }).events.at(-1);
       assert.deepEqual(
-        [last?.actor, (last?.change as { operation: string }).operation, (last?.change as { patch: { status?: string } }).patch.status],
+        [last?.actor, (last?.change as { operation: string }).operation, (last?.change as { patch: { behaviors: { Workflow: { status?: string } } } }).patch.behaviors.Workflow.status],
         ['wren', 'recordUsageFor', 'paused']
       );
     });

@@ -169,7 +169,9 @@ dependencies, then:
 - starts Postgres in a container, with a database for `shop-db` migrated
   to its schema;
 - builds each server and starts it, waiting until it answers `/readyz`,
-  then prints where each one is reached.
+  then prints where each one is reached;
+- builds `shop-orders`' job `ShipOrders` and runs it every minute, as
+  `Dev`'s settings say ([Jobs](/superschematic/guides/stacks/#jobs)).
 
 Nothing in the project names a port or a connection string. The build
 derives them and writes the environment it resolved to
@@ -182,7 +184,8 @@ Ctrl-C stops the servers and the container, which keeps its data for the
 next run; `--remove-database` removes it too. The routes answer a caller
 with a session in `shop-db`. `TestStackDevRunsTheShop`, in
 `examples/acme-shop/go/stack_dev_test.go`, runs `stack dev`, signs a user in
-through the ORM, and calls both APIs through their SDKs. The
+through the ORM, calls both APIs through their SDKs, and sees the job ship
+the order it placed. The
 [CLI reference](/superschematic/reference/cli/#stack-dev-stack-service-dir)
 lists the flags.
 

@@ -11,7 +11,8 @@ A Stack service declares which of your services run, how they group into
 servers and databases, and the environments they run in. Its build wires
 each server to its database and to the APIs it calls, checks the result
 offline, and writes three things: each environment as `environment.json`,
-an entrypoint and Dockerfile for each Go and TypeScript server, and a
+an entrypoint and Dockerfile for each Go and TypeScript server and each Go
+job, and a
 scaffold of each API implementation that is missing. Wiring the schemas already say,
 such as an API's database or the address of an API another one calls, is
 derived and never written by hand.
@@ -19,8 +20,8 @@ derived and never written by hand.
 `superschematic stack dev` runs an environment on your machine, with
 Postgres in Docker and each server as a process. The `stack` commands
 bootstrap, plan and deploy the cloud environments, and the gcp target
-lowers them to Cloud Run, Cloud SQL, Secret Manager, load balancer and DNS
-resources that the Pulumi provisioner applies.
+lowers them to Cloud Run, Cloud Scheduler, Cloud SQL, Secret Manager, load
+balancer and DNS resources that the Pulumi provisioner applies.
 
 ## What is built
 
@@ -35,7 +36,7 @@ resources that the Pulumi provisioner applies.
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
-| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, and Go's `Jobs` and `NewJobs` | a job's entrypoint and image; `stack dev`'s schedules and `stack run`; jobs on gcp |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -309,6 +310,10 @@ declare module "@superschematic/stack" {
         deletionProtection?: boolean;
         diskSize?: number;
       };
+      job: {
+        cpu?: string;
+        memory?: string;
+      };
     };
   }
 }
@@ -454,6 +459,46 @@ it on with `enabled: true`. Each job's resolved deployable records what
 runs in the environment: its schedule, empty for none, its time zone,
 timeout and retries.
 
+### Run a job
+
+The build writes each job an entrypoint module beside the servers',
+`server/shop-stack/shop-orders-ship-orders/`, whose `main` builds the
+API's `Deps`, calls your `NewJobs`, runs the job's method once with a
+context that SIGTERM cancels, and exits 1 when it returns an error. Its
+Dockerfile builds an image as a server's does, and `stack build` and
+`stack deploy` build and pin it beside the servers'.
+
+`stack dev` builds each job with the servers and runs it on its schedule
+while the environment runs, never two runs at once, each line of a run's
+output with the job's name in front:
+
+```text
+job shop-orders-ship-orders runs on * * * * * (UTC)
+...
+job shop-orders-ship-orders: start the run due at 2026-10-07T12:01:00Z, try 1 of 2
+[shop-orders-ship-orders] {"level":"info",...,"msg":"shipped the placed orders",...,"orders":1}
+job shop-orders-ship-orders: the run due at 2026-10-07T12:01:00Z, try 1 of 2 succeeded in 412ms
+```
+
+A run that outlives the job's timeout is stopped, a failed run is run
+again up to its retries, and a run's failure never stops the environment.
+To run a job once, now, run `stack run` from another terminal:
+
+```sh
+superschematic stack run Dev shop-orders-ship-orders
+```
+
+Locally it runs against the environment `stack dev` runs, with its
+values, secrets and keys. It builds no schema, but builds the job's
+binary again, so a change to your job's code is in the run. It exits
+non-zero when the run's last try fails, refuses an environment that is
+not running, and waits for no schedule: while its run goes on, the
+schedule skips the job's runs, and while a scheduled run goes on, it
+refuses to start. On a cloud environment it runs the deployed job, with
+the image the last deploy rolled out, through the target: on gcp, an
+execution of the job's Cloud Run job ([Deploy to Google
+Cloud](#deploy-to-google-cloud)).
+
 ## Build a stack
 
 Build the stack like any service. A single build loads the services it
@@ -468,8 +513,9 @@ Under the output root, `schemas/dist` by default, the build writes:
 
 - `stack/shop-stack/<environment>/environment.json` for each environment;
 - `server/shop-stack/<server>/`, a Go module for each Go server, holding
-  `main.go`, `go.mod`, a `Dockerfile` and `Dockerfile.dockerignore`, and a
-  package for each TypeScript server, holding `main.ts`, `package.json`,
+  `main.go`, `go.mod`, a `Dockerfile` and `Dockerfile.dockerignore`, one
+  the same for each job of a Go API, under the job's name, and a package
+  for each TypeScript server, holding `main.ts`, `package.json`,
   `tsconfig.json`, a `Dockerfile` and `Dockerfile.dockerignore`, a member
   of the output root's Bun workspace.
 
@@ -537,8 +583,9 @@ malformed declarations and names nothing registers.
 `examples/acme-shop` runs on a stack of its own, `shop-stack`. It deploys
 `shop-api` and `shop-orders`, each on a default Go server, and
 `shop-storefront`, on a default TypeScript server, and exposes all three;
-`shop-db`, the `authDb` of both Go APIs, joins as their database. Its one
-environment, `Dev`, is on the core's `local` target:
+`shop-db`, the `authDb` of both Go APIs, joins as their database, and
+`shop-orders`' job `ShipOrders` as a job. Its one environment, `Dev`, is
+on the core's `local` target, and runs the job every minute:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -555,9 +602,14 @@ the storefront's.
 
 From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
 in a container with `shop-db` migrated, both Go servers on their generated
-entrypoints, and the storefront's on Bun. `go/stack_dev_test.go` runs it
-in the example's check whenever Docker is running, calls each Go server
-through its SDK, and reads a cart from the storefront.
+entrypoints, the storefront's on Bun, and the job on its schedule.
+`go/stack_dev_test.go` runs it in the example's check whenever Docker is
+running, calls each Go server through its SDK, reads a cart from the
+storefront, and sees the job ship the order it placed, once with `stack
+run` and once on the schedule. The job's code is `NewJobs` in
+`go/shop-orders/jobs.go`:
+
+<Snippet file="go/shop-orders/jobs.go" symbol="Jobs.ShipOrders" />
 
 ## Run it locally
 
@@ -587,7 +639,9 @@ says how to install it). It then:
    writes `schemas/dist/bun.lock` or brings it up to date, as your own
    install would, starts each server with its resolved config and `PORT`,
    callees first, a TypeScript one as `bun main.ts`, and waits until it
-   answers `/readyz`. Each line a server prints carries its name.
+   answers `/readyz`. Each line a server prints carries its name;
+5. builds each job's entrypoint module the same way, and runs each job
+   with a schedule on it until Ctrl-C ([Run a job](#run-a-job)).
 
 Ctrl-C stops the servers, callers first, and the container, which keeps
 its data for the next run; `--remove-database` removes it instead.
@@ -595,6 +649,7 @@ its data for the next run; `--remove-database` removes it instead.
 | Stack concept | On `local` |
 | --- | --- |
 | server | a Go process, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs. Rust servers do not run locally yet |
+| job | a Go process per run, built from its entrypoint module, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
 | database | a database on the environment's one Postgres container, `postgres:16-alpine` unless `postgresImage` names another |
 | sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential signed by an Ed25519 key pair per calling and called server |
@@ -753,14 +808,16 @@ and the [generated CI](#generated-ci) signs in with.
 | Stack concept | On gcp |
 | --- | --- |
 | server | a Cloud Run service with its own service account; its config in environment variables, a derived field as one variable per member |
+| job | a Cloud Run job with its own service account, named after the job (`shop-orders-ship-orders`), with its API's config, secrets and connections; one task, with the job's timeout for each try and its retries, at most 10 |
+| schedule | a Cloud Scheduler job, named as the job is, on the job's cron in its time zone, that runs the Cloud Run job through the Cloud Run Admin API as the job's own account, which may run that job and no other. A job whose schedule is off has none, and runs only on demand |
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password. A Rust server's sql edge is refused |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password. A Rust server's sql edge is refused |
 | http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback |
 | internal server | internal ingress only, with Cloud Run's invoker check on |
-| calling server | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
+| calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
 | exposed server | with a domain, a global external Application Load Balancer and a Certificate Manager certificate for its host, authorized by a DNS record, with the service taking traffic from the load balancer only; without one, its public `run.app` URL |
-| secret | a Secret Manager secret named `<stack>-<Type>-<FIELD>`, an accessor grant to each reading server, and an environment variable that reads its latest version |
-| image | `<region>-docker.pkg.dev/<project>/<stack>/<server>`, names in kebab case, pinned to the digest a deploy is given |
+| secret | a Secret Manager secret named `<stack>-<Type>-<FIELD>`, an accessor grant to each reading server and job, and an environment variable that reads its latest version |
+| image | `<region>-docker.pkg.dev/<project>/<stack>/<server or job>`, names in kebab case, pinned to the digest a deploy is given |
 | parameter | names suffixed with the parameter and its value (`shop-api-pr123`), and a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits |
 
 Settings and their defaults:
@@ -769,6 +826,7 @@ Settings and their defaults:
 | --- | --- | --- |
 | `gcp.cloudrun` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudrun` | `minInstances`, `maxInstances`, `concurrency` | Cloud Run's |
+| `gcp.cloudrunjob` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudsql` | `tier` | `db-custom-1-3840` |
 | `gcp.cloudsql` | `highAvailability` | false: a zonal instance |
 | `gcp.cloudsql` | `version` | `POSTGRES_16` |
@@ -781,7 +839,8 @@ refuses a zonal instance when `production` is set, and
 `nothing-public-unless-exposed` refuses an internal server that takes
 outside traffic or turns its invoker check off, a load balancer for
 anything but an exposed server, a grant to `allUsers` or
-`allAuthenticatedUsers`, and an instance open to `0.0.0.0/0`. Every
+`allAuthenticatedUsers`, a job's included, and an instance open to
+`0.0.0.0/0`. Every
 resource type is pinned at pulumi-gcp 9.37.1 in `extensions/gcp/schemas`,
 and resolution checks each node's properties against it.
 
@@ -789,7 +848,7 @@ and resolution checks each node's properties against it.
 
 Each command resolves the environment as the build does, without writing
 a build. They reach Google Cloud with application default credentials,
-and all but `secrets set` run the `pulumi` CLI, which must be on `PATH`:
+and all but `secrets set` and `run` run the `pulumi` CLI, which must be on `PATH`:
 
 ```sh
 superschematic stack bootstrap Staging
@@ -797,6 +856,7 @@ superschematic stack secrets set Staging
 superschematic stack plan Staging
 superschematic stack deploy Staging
 superschematic stack outputs Staging --out outputs.json
+superschematic stack run Staging shop-orders-ship-orders
 ```
 
 - **`bootstrap`** runs once per project with an owner's credentials, and
@@ -806,7 +866,9 @@ superschematic stack outputs Staging --out outputs.json
   `<stack>-deployer` and read-only `<stack>-planner` accounts, the
   `builder` account Cloud Build runs as, the `migrator` account the
   migration job runs as, and Workload Identity Federation for the GitHub
-  repository of the git remote. `--repository owner/name` names another
+  repository of the git remote. It enables Cloud Scheduler when the
+  environment runs a job's schedule, and gives `deployer` Cloud
+  Scheduler's admin role to apply it. `--repository owner/name` names another
   repository, and `--repository ""` leaves the federation out, for a
   project no CI deploys to. Last, it records the project's number,
   which the generated CI's Workload Identity Federation needs, as
@@ -828,12 +890,12 @@ superschematic stack outputs Staging --out outputs.json
   asks for the missing values at a terminal.
 - **`plan`** changes nothing: the provisioner's plan of every resource,
   each database's migration plan, the secrets with no value and the
-  servers with no image.
-- **`build`** builds the image of each server whose build context
+  servers and jobs with no image.
+- **`build`** builds the image of each server and job whose build context
   changed, on Cloud Build, and prints each as a `--image` flag. It
   deploys nothing.
-- **`deploy`** first builds, as `build` does, each server whose context
-  changed and that `--image` names no image for. It then runs the deploy
+- **`deploy`** first builds, as `build` does, each server and job whose
+  context changed and that `--image` names no image for. It then runs the deploy
   order: infrastructure, each database's `expand` phase, the servers wave
   by wave, callees first, the `contract` phase, then exposure. Each
   migration phase runs as an execution of the stack's Cloud Run job,
@@ -843,6 +905,15 @@ superschematic stack outputs Staging --out outputs.json
   Cloud Logging, and the next deploy runs the phase again. The deploy
   records a manifest in the state bucket after every step, and refuses a
   migration hazard no `--allow` acknowledges.
+- **`run`** runs a deployed job once: an execution of its Cloud Run job
+  as the last deploy left it. It refuses a job whose Cloud Run job runs
+  another image than the manifest records, as during a deploy, waits for
+  the execution to end, retries included, and when it fails exits
+  non-zero with the last try's error, the error of its `job failed` line
+  or its panic, which it reads from the execution's logs in Cloud
+  Logging. Cloud Run starts an execution each time a schedule fires, even
+  while the last one runs, so a job whose run may outlast its interval
+  keeps its runs apart itself.
 - **`destroy`** removes a run's resources and its manifest, after you
   type the run's name, or with `--yes`. What the stack's runs in the
   project share stays: bootstrap's resources, the stack's images, its
