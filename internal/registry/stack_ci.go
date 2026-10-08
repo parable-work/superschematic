@@ -76,6 +76,14 @@ type CIStack struct {
 	// PackageManager installs the schemas root's packages, as its lockfile
 	// says: PackageManagerBun, PackageManagerNPM, or empty for none.
 	PackageManager string
+
+	// TypeScriptImplementations are the directories of the TypeScript
+	// implementations of the APIs the stack's TypeScript servers serve, by
+	// service: the naming file's [implementation_paths] typescript template
+	// (D51). A check job type-checks each after it installs the output
+	// root's Bun workspace from its lockfile, which the project commits
+	// (D51, amended).
+	TypeScriptImplementations map[string]string
 }
 
 // The package managers CIStack.PackageManager names.

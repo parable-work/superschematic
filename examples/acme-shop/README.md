@@ -26,6 +26,7 @@ kind, decorators and auth provider.
 | `rust-server/` | implements `shop-orders` on the generated Rust server, in memory; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
 | `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`) |
 | `testdata/generated/` | committed copies of the generated files the docs quote, under their `schemas/dist` paths |
+| `schemas/dist/bun.lock` | the lockfile of `schemas/dist`'s Bun workspace, the one generated file committed, so the storefront's image and every install take the same versions; `schemas/.gitignore` ignores the rest of `schemas/dist` |
 | `scripts/check.sh` | builds, compiles and tests all of it |
 
 ## Run it
@@ -59,8 +60,11 @@ again with `superschematic-topcoat` and runs the Topcoat app's tests, and fails
 when a file under `testdata/generated/` differs from the run. `make setup`
 stands up everything it uses, the Python schema runtime's uv environment
 included; the Rust client and server fetch their crates on their first
-build. `UPDATE=1` rewrites `testdata/generated/`
-instead; check the docs pages that quote a changed file. The `acme` job in
+build. It installs `schemas/dist`'s workspace frozen to its committed
+lockfile, and fails once the build's packages no longer match it, as
+after a change to a generated or runtime `package.json`. `UPDATE=1`
+rewrites `testdata/generated/` and the lockfile instead; check the docs
+pages that quote a changed file. The `acme` job in
 `.github/workflows/ci.yml` runs it in CI's full tier: in the release
 candidate run on `main` twice a day and before every release, not on pull
 requests (D40).

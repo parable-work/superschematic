@@ -15,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
@@ -126,6 +127,7 @@ func (r run) generateServers() error {
 		if err := r.writeTypeScriptWorkspace(); err != nil {
 			return fmt.Errorf("stack %s: %w", st.Name, err)
 		}
+		r.noteIgnoredLockfile()
 	}
 	dir := servergen.StackDir(r.Options.OutputRoot, st.Name)
 	if err := os.RemoveAll(dir); err != nil {
@@ -153,6 +155,24 @@ func (r run) generateServers() error {
 	}
 	r.Done(serverGenerator, dir)
 	return nil
+}
+
+// noteIgnoredLockfile says, in one line, how to commit the lockfile of the
+// output root's Bun workspace when git ignores it (D51, amended): a
+// server's image and the generated CI install the versions it pins only
+// when the project commits it. The build leaves the project's ignore
+// rules as they are.
+func (r run) noteIgnoredLockfile() {
+	rule, ignored := tsgen.IgnoredLockfile(r.Options.OutputRoot)
+	if !ignored {
+		return
+	}
+	by := "git"
+	if rule != "" {
+		by = rule
+	}
+	r.Logf("  - %s is ignored by %s; commit it, so images and CI install the TypeScript versions it pins: ignore the output root's contents, not the directory (dist/* and !dist/%s in place of dist/; docs/stack-model.md, section 8.6)\n",
+		filepath.Join(r.Options.OutputRoot, tsgen.LockfileName), by, tsgen.LockfileName)
 }
 
 // checkJobs refuses a stack one of whose Go APIs declares jobs while its

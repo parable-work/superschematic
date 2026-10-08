@@ -5,9 +5,9 @@
 # the repository root, the parent of the schemas root, or the directory the
 # naming file's [paths] build_context names. Build the stack's services
 # first (superschematic build-all), so that every package of the output
-# root's Bun workspace is on disk, and install the workspace (bun install in
-# schemas/dist, as stack dev does), which writes the lockfile the
-# image installs from; then run, from the build context:
+# root's Bun workspace is on disk beside its lockfile, which bun install in
+# schemas/dist writes, as stack dev runs it, and the project commits;
+# then run, from the build context:
 #
 #   docker build -f schemas/dist/server/ts-cloud-stack/ts-shop/Dockerfile .
 #
@@ -25,10 +25,12 @@
 # it where superscalar's binding looks for it, builds the binding's and the
 # HTTP runtime's dist/, which a checkout does not hold and which their
 # packages export, and installs the workspace without its development
-# packages: frozen to the lockfile when the context holds it, as one the
-# output root's install wrote does, and resolved afresh when it does not, as
-# in a clean checkout. The image runs main.ts on the Bun release tools.env
-# pins, as a non-root user.
+# packages: frozen to the lockfile, which fails when the lockfile does not
+# match the packages the build wrote. A context without the lockfile, as in
+# a project that has not committed it, resolves afresh and says so: two
+# images of one commit may then differ. The generated CI's check refuses a
+# missing or stale lockfile before any deploy. The image runs main.ts on the
+# Bun release tools.env pins, as a non-root user.
 
 ARG RUST_VERSION=1.99.0
 ARG BUN_VERSION=1.4.0
@@ -64,7 +66,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     && bunx tsc -p tsconfig.json
 WORKDIR /src/schemas/dist
 RUN --mount=type=cache,target=/root/.bun/install/cache \
-    if [ -f bun.lock ]; then frozen=--frozen-lockfile; else frozen=; fi \
+    if [ -f bun.lock ]; then frozen=--frozen-lockfile; else frozen=; \
+      echo "schemas/dist/bun.lock is not in the context: resolving the workspace afresh; commit it to pin these packages" >&2; fi \
     && bun install --production $frozen
 
 FROM oven/bun:${BUN_VERSION}

@@ -4,11 +4,13 @@
 #
 #   examples/acme-shop/scripts/check.sh            check
 #   UPDATE=1 examples/acme-shop/scripts/check.sh   also rewrite testdata/generated/
+#                                                  and schemas/dist/bun.lock
 #
 # Needs what `make setup` stands up (the superscalar checkout and archive,
 # the version-graph archive, the runtime installs and the Python schema
 # runtime's uv environment), the pinned Go and Rust toolchains, bun and jq. Generated output goes to the example's schemas/dist
-# (gitignored).
+# (gitignored), but for the lockfile of its Bun workspace, schemas/dist/bun.lock,
+# which is committed (D51, amended) and which every step here keeps.
 #
 # Asserts, in order:
 #   1. build-all builds every service with the binary that links no
@@ -20,7 +22,9 @@
 #   3. the generated TypeScript router and SDKs, the entrypoint of
 #      shop-stack's TypeScript server, the storefront's implementation in
 #      typescript/shop-storefront and the clients in typescript/clients
-#      type-check, all of them one Bun workspace; the generated Python
+#      type-check, all of them one Bun workspace, which installs frozen to
+#      the committed schemas/dist/bun.lock and fails when the build's
+#      packages no longer match it; the generated Python
 #      packages import and python/'s type tests pass; the Rust client in
 #      rust/ builds against the generated Rust SDK and its type tests pass;
 #   4. the Go app in go/ builds, vets and passes its tests, which call the
@@ -81,6 +85,13 @@ capture() {
   (cd "$EXAMPLE_DIR" && "$@") | sed "s|$EXAMPLE_DIR/|.../|g" >"$OUT/logs/$name"
 }
 
+# Empties schemas/dist but for the committed lockfile of its Bun workspace.
+clean_dist() {
+  if [[ -d "$DIST" ]]; then
+    find "$DIST" -mindepth 1 -maxdepth 1 ! -name bun.lock -exec rm -rf {} +
+  fi
+}
+
 echo "==> core binary (no extension)"
 # The core with no extension linked, under the name the docs pages run, so
 # the example proves the core alone builds it. The installed binary
@@ -91,7 +102,7 @@ echo "==> core binary (no extension)"
 (cd "$REPO_ROOT/extensions/topcoat" && go build -o "$OUT/superschematic-topcoat" ./cmd/superschematic-topcoat)
 
 echo "==> build-all"
-rm -rf "$DIST"
+clean_dist
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
 grep -q '^All 6 schema services built successfully$' "$OUT/logs/build-all.full.txt"
@@ -140,8 +151,19 @@ APP="$EXAMPLE_DIR/typescript"
 # The output root is one Bun workspace of the generated TypeScript packages,
 # the stack's TypeScript server and the packages in typescript/: the
 # storefront's implementation and the clients (D51). Installing it links
-# each to the packages it imports, so nothing is linked by hand.
-(cd "$DIST" && bun install >/dev/null)
+# each to the packages it imports, so nothing is linked by hand. Its
+# lockfile is committed (D51, amended): the install is frozen to it, as the
+# generated CI's and the storefront's image are, and fails once the build's
+# packages no longer match it. UPDATE=1 brings it up to date instead.
+if [[ "${UPDATE:-}" == 1 ]]; then
+  (cd "$DIST" && bun install >/dev/null)
+elif [[ ! -f "$DIST/bun.lock" ]]; then
+  echo "schemas/dist/bun.lock is missing: rerun with UPDATE=1 and commit it" >&2
+  exit 1
+elif ! (cd "$DIST" && bun install --frozen-lockfile >/dev/null); then
+  echo "schemas/dist/bun.lock does not match the packages the build wrote: rerun with UPDATE=1 and commit it" >&2
+  exit 1
+fi
 TSC="$RUNTIME/node_modules/.bin/tsc"
 for pkg in \
   "$DIST/api/shop-storefront" "$DIST/sdk/typescript/shop-api" "$DIST/sdk/typescript/shop-orders" \
@@ -236,7 +258,7 @@ echo "==> build-all --cache: skip, then restore"
 CACHE_FLAGS=(--cache --cache-root "$OUT/cache")
 superschematic build-all "${CACHE_FLAGS[@]}" "$SCHEMAS/services" >/dev/null
 capture build-all-cache.full.txt superschematic build-all "${CACHE_FLAGS[@]}" schemas/services
-rm -rf "$DIST"
+clean_dist
 capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" schemas/services
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"

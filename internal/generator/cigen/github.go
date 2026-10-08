@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
@@ -225,10 +226,16 @@ func (g github) header(w *yamlWriter, notes []string) {
 }
 
 // check is the job that builds the stack and compiles its servers, with
-// no credentials: levels 1 to 3 of section 10.
+// no credentials: levels 1 to 3 of section 10. A Go server compiles; for
+// the TypeScript servers it installs the output root's Bun workspace from
+// the lockfile the project commits, which fails when the lockfile is
+// missing or does not match the packages the build wrote, and type-checks
+// each TypeScript server and the implementation of each API one serves
+// (D51, amended).
 func (g github) check() job {
 	st := g.req.Stack
 	servers := g.servers()
+	tsServers := g.typeScriptServers()
 	steps := []step{g.checkout(), g.install()}
 	if len(servers) > 0 && g.req.Version != "" {
 		steps = append(steps, g.archives())
@@ -240,7 +247,11 @@ func (g github) check() job {
 			with: [][2]string{{"go-version", servergen.GoVersion}, {"cache", "false"}},
 		})
 	}
-	steps = append(steps, g.packages()...)
+	packages := g.packages()
+	if len(tsServers) > 0 && st.PackageManager != registry.PackageManagerBun {
+		packages = append([]step{setupBun()}, packages...)
+	}
+	steps = append(steps, packages...)
 	steps = append(steps, g.build())
 	for _, server := range servers {
 		steps = append(steps, step{
@@ -249,7 +260,51 @@ func (g github) check() job {
 			run:  "go build -mod=mod -o /dev/null .",
 		})
 	}
+	if len(tsServers) > 0 {
+		steps = append(steps, g.typeScriptWorkspace())
+		for _, server := range tsServers {
+			steps = append(steps, step{
+				name: "Type-check server " + server,
+				dir:  path.Join(st.OutputRoot, "server", st.Name, server),
+				run:  typeCheck,
+			})
+		}
+		for _, service := range slices.Sorted(maps.Keys(st.TypeScriptImplementations)) {
+			steps = append(steps, step{
+				name: "Type-check the implementation of " + service,
+				dir:  st.TypeScriptImplementations[service],
+				run:  typeCheck,
+			})
+		}
+	}
 	return job{id: "check", name: "check", cond: notClosed, steps: steps}
+}
+
+// typeCheck type-checks a TypeScript package with the compiler its
+// manifest depends on, which the workspace's install linked into it, and
+// never with one bunx would download.
+const typeCheck = "bun x --no-install tsc --noEmit -p tsconfig.json"
+
+// typeScriptWorkspace installs the output root's Bun workspace from its
+// lockfile, which the project commits (D51, amended). A frozen install
+// fails on a lockfile that does not match the workspace's manifests, but
+// installs without one, so the step refuses a missing lockfile itself.
+func (g github) typeScriptWorkspace() step {
+	out := g.req.Stack.OutputRoot
+	lock := path.Join(out, "bun.lock")
+	fix := fmt.Sprintf("build every service, run bun install in %s and commit %s", out, lock)
+	return step{
+		name: "Install the TypeScript workspace from " + lock,
+		dir:  out,
+		run: strings.Join([]string{
+			"if [ ! -f bun.lock ]; then",
+			fmt.Sprintf(`  echo "::error file=%s::%s is not committed; %s" && exit 1`, lock, lock, fix),
+			"fi",
+			"bun install --frozen-lockfile || {",
+			fmt.Sprintf(`  echo "::error file=%s::%s does not match the packages the build wrote; %s" && exit 1`, lock, lock, fix),
+			"}",
+		}, "\n"),
+	}
 }
 
 // plan is the job that plans env on a pull request from the repository,
@@ -411,7 +466,7 @@ func (g github) packages() []step {
 	switch g.req.Stack.PackageManager {
 	case registry.PackageManagerBun:
 		return []step{
-			{name: "Set up Bun", uses: &actionSetupBun},
+			setupBun(),
 			{name: "Install the schemas root's packages", dir: root, run: "bun install --frozen-lockfile"},
 		}
 	case registry.PackageManagerNPM:
@@ -421,6 +476,12 @@ func (g github) packages() []step {
 		}
 	}
 	return nil
+}
+
+// setupBun installs Bun at the release tools.env pins, the one a
+// TypeScript server's image runs on.
+func setupBun() step {
+	return step{name: "Set up Bun", uses: &actionSetupBun, with: [][2]string{{"bun-version", servergen.BunVersion}}}
 }
 
 // build builds every service of the services root, the stack's included,
@@ -440,11 +501,18 @@ func (g github) stackCommand(command, environment string, flags ...string) strin
 
 // servers are the stack's Go servers, whose entrypoint modules the build
 // writes, sorted. No environment changes the servers.
-func (g github) servers() []string {
+func (g github) servers() []string { return g.serversIn(registry.APILanguageGo) }
+
+// typeScriptServers are the stack's TypeScript servers, whose entrypoint
+// packages the build writes into the output root's Bun workspace, sorted.
+func (g github) typeScriptServers() []string { return g.serversIn(registry.APILanguageTypeScript) }
+
+// serversIn are the stack's servers in language, sorted.
+func (g github) serversIn(language string) []string {
 	var names []string
 	for _, env := range g.req.Environments {
 		for _, d := range env.Environment.Deployables {
-			if d.Kind == ir.DeployableServer && d.Language == registry.APILanguageGo && !slices.Contains(names, d.Name) {
+			if d.Kind == ir.DeployableServer && d.Language == language && !slices.Contains(names, d.Name) {
 				names = append(names, d.Name)
 			}
 		}

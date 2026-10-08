@@ -61,12 +61,13 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	outputRoot := t.TempDir()
 	// stack dev installs the Bun workspace of that output root, whose
 	// members include the packages in typescript/, which the install links
-	// to it. Installing schemas/dist's workspace again links them back.
+	// to it. Installing schemas/dist's workspace again links them back,
+	// frozen to its committed lockfile, which it leaves as it is.
 	t.Cleanup(func() {
 		if _, err := os.Stat(filepath.Join("..", "schemas", "dist", "package.json")); err != nil {
 			return
 		}
-		install := exec.Command("bun", "install")
+		install := exec.Command("bun", "install", "--frozen-lockfile")
 		install.Dir = filepath.Join("..", "schemas", "dist")
 		if out, err := install.CombinedOutput(); err != nil {
 			t.Errorf("link typescript/ back to schemas/dist: %v\n%s", err, out)

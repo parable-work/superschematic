@@ -2,6 +2,7 @@ package cigen_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"github.com/parable-work/superschematic/internal/buildplan"
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/cigen"
+	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -251,6 +253,9 @@ func TestGoldenWorkflow(t *testing.T) {
 		}
 		if packages := j.step("Install the schemas root's packages"); packages == nil || packages.Run != "bun install --frozen-lockfile" || packages.WorkingDirectory != "schemas" {
 			t.Errorf("%s does not install the schemas root's packages with bun: %+v", tc.id, packages)
+		}
+		if bun := j.step("Set up Bun"); bun == nil || bun.With["bun-version"] != servergen.BunVersion {
+			t.Errorf("%s does not set up Bun at tools.env's %s: %+v", tc.id, servergen.BunVersion, bun)
 		}
 	}
 	for _, id := range []string{"plan-beta", "preview-review", "deploy-live"} {
@@ -512,6 +517,9 @@ func TestRendererNamesEnvironmentsWithNoJob(t *testing.T) {
 	if s := w.jobs["check"].step("Install the schemas root's packages"); s != nil {
 		t.Error("check installs packages for a schemas root with no lockfile")
 	}
+	if s := w.jobs["check"].step("Set up Bun"); s != nil {
+		t.Error("check sets up Bun for a stack with no TypeScript server and a schemas root with no lockfile")
+	}
 
 	unknown := req
 	unknown.Environments = []publicregistry.CIEnvironment{{Environment: env("Staging"), HasSeam: true,
@@ -524,6 +532,245 @@ func TestRendererNamesEnvironmentsWithNoJob(t *testing.T) {
 		Tools: []publicregistry.CLITool{{Name: "terraform", Version: "1.9.0"}}}}
 	if _, err := cigen.GitHub().Render(tool); err == nil || !strings.Contains(err.Error(), "has no step that installs tool terraform") {
 		t.Errorf("an unknown tool: %v", err)
+	}
+}
+
+// tsGolden is the workflow of a stack whose TypeScript servers stand beside
+// a Go one, which TestTypeScriptServersInCheck renders.
+const tsGolden = "testdata/golden/storefront-stack.yml"
+
+// storefrontRequest is a stack with a Go server and two TypeScript ones,
+// whose schemas root has no lockfile, in one cloud environment.
+func storefrontRequest() publicregistry.CIRequest {
+	server := func(name, language string, services ...string) *ir.ResolvedDeployable {
+		d := &ir.ResolvedDeployable{Name: name, Kind: ir.DeployableServer, Language: language}
+		for _, s := range services {
+			d.Services = append(d.Services, ir.ServiceRef{Name: s, Kind: ir.SchemaKindAPI})
+		}
+		return d
+	}
+	identity := func(role string) *publicregistry.CIIdentity {
+		return &publicregistry.CIIdentity{Kind: stacktest.WorkloadIdentity, Fields: map[string]string{
+			"provider": "projects/123456789012/locations/global/workloadIdentityPools/storefront-stack-ci/providers/ci",
+			"account":  "storefront-stack-" + role + "@acme-staging.fake.test",
+		}}
+	}
+	return publicregistry.CIRequest{
+		Stack: publicregistry.CIStack{
+			Name: "storefront-stack", Dir: "schemas/services/storefront-stack", ServicesRoot: "schemas/services", SchemasRoot: "schemas", OutputRoot: "schemas/dist",
+			TypeScriptImplementations: map[string]string{"shop-storefront": "typescript/shop-storefront", "shop-pricing": "typescript/shop-pricing"},
+		},
+		Options: publicregistry.CIOptions{Branch: "main"},
+		Version: version,
+		Archives: map[string]publicregistry.CIArchive{"linux-x64": {
+			URL:    "https://github.com/parable-work/superschematic/releases/download/v1.2.3/superschematic-archives_1.2.3_linux-x64.tar.gz",
+			SHA256: testRelease.Archives["linux-x64"],
+		}},
+		Environments: []publicregistry.CIEnvironment{{
+			Environment: &ir.ResolvedEnvironment{Stack: "storefront-stack", Environment: "Staging", Target: stacktest.Target, Deployables: []*ir.ResolvedDeployable{
+				server("Orders", publicregistry.APILanguageGo, "shop-orders"),
+				server("pricing", publicregistry.APILanguageTypeScript, "shop-pricing"),
+				server("storefront", publicregistry.APILanguageTypeScript, "shop-storefront"),
+			}},
+			HasSeam: true, Planner: identity("planner"), Deployer: identity("deployer"),
+		}},
+	}
+}
+
+// TestTypeScriptServersInCheck: check sets up Bun at the release tools.env
+// pins, though the schemas root has no lockfile, and after the build and
+// the Go server's compile installs the output root's Bun workspace from
+// its lockfile, then type-checks each TypeScript server and the
+// implementation of each API one serves with the compiler the install
+// linked (D51, amended). No other job installs the workspace. The golden,
+// which -update rewrites, shows the job.
+func TestTypeScriptServersInCheck(t *testing.T) {
+	files, err := cigen.GitHub().Render(storefrontRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := files[0].Data
+	if *update {
+		if err := os.WriteFile(tsGolden, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := readFile(t, tsGolden); !bytes.Equal(got, want) {
+		t.Errorf("the workflow differs from %s; run with -update and review the diff", tsGolden)
+	}
+	lint(t, tsGolden)
+
+	w := parseWorkflow(t, got)
+	check := w.jobs["check"]
+	var names []string
+	for _, s := range check.Steps {
+		names = append(names, s.Name)
+	}
+	install := "Install the TypeScript workspace from schemas/dist/bun.lock"
+	want := []string{
+		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Set up Bun",
+		"Build the services", "Compile server Orders", install,
+		"Type-check server pricing", "Type-check server storefront",
+		"Type-check the implementation of shop-pricing", "Type-check the implementation of shop-storefront",
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("check's steps:\n%q\nwant:\n%q", names, want)
+	}
+	if s := check.step("Set up Bun"); s.With["bun-version"] != servergen.BunVersion {
+		t.Errorf("check sets up Bun %q, want tools.env's %s", s.With["bun-version"], servergen.BunVersion)
+	}
+	if s := check.step(install); s.WorkingDirectory != "schemas/dist" || !strings.Contains(s.Run, "bun install --frozen-lockfile") {
+		t.Errorf("check installs the workspace with %+v", s)
+	}
+	for name, dir := range map[string]string{
+		"Type-check server pricing":                        "schemas/dist/server/storefront-stack/pricing",
+		"Type-check server storefront":                     "schemas/dist/server/storefront-stack/storefront",
+		"Type-check the implementation of shop-pricing":    "typescript/shop-pricing",
+		"Type-check the implementation of shop-storefront": "typescript/shop-storefront",
+	} {
+		if s := check.step(name); s.WorkingDirectory != dir || s.Run != "bun x --no-install tsc --noEmit -p tsconfig.json" {
+			t.Errorf("%s: %+v", name, s)
+		}
+	}
+	for _, id := range w.order[1:] {
+		if w.jobs[id].step(install) != nil || w.jobs[id].step("Set up Bun") != nil {
+			t.Errorf("%s installs the TypeScript workspace, which only check does", id)
+		}
+	}
+}
+
+// TestTheWorkspaceStepRefusesALockfileItCannotInstall runs check's install
+// of the TypeScript workspace: without a lockfile it fails and says to
+// commit one; under Bun, with a lockfile the manifests no longer match it
+// fails and says the lockfile is stale, and with a current one it passes.
+func TestTheWorkspaceStepRefusesALockfileItCannotInstall(t *testing.T) {
+	files, err := cigen.GitHub().Render(storefrontRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := parseWorkflow(t, files[0].Data).jobs["check"].step("Install the TypeScript workspace from schemas/dist/bun.lock").Run
+	run := func(dir string) (string, error) {
+		cmd := exec.Command("bash", "-eo", "pipefail", "-c", script)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	// A workspace of members with no dependencies, which installs with no
+	// registry.
+	dir := t.TempDir()
+	workspace := func(members ...string) {
+		t.Helper()
+		list, err := json.Marshal(members)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name": "@acme/workspace", "private": true, "workspaces": `+string(list)+"}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range members {
+			if err := os.MkdirAll(filepath.Join(dir, m), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, m, "package.json"), []byte(`{"name": "@acme/`+m+`", "private": true}`+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	workspace("api")
+	out, err := run(dir)
+	if want := "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock is not committed; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock"; err == nil || !strings.Contains(out, want) {
+		t.Errorf("without a lockfile: %v\n%s", err, out)
+	}
+
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Skip("bun is not installed")
+	}
+	install := exec.Command(bun, "install")
+	install.Dir = dir
+	if out, err := install.CombinedOutput(); err != nil {
+		t.Fatalf("bun install: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bun.lock")); err != nil {
+		t.Fatalf("bun install wrote no lockfile: %v", err)
+	}
+	if out, err := run(dir); err != nil {
+		t.Errorf("with the lockfile the install wrote: %v\n%s", err, out)
+	}
+	// A workspace that gains a member no longer matches its lockfile.
+	workspace("api", "sdk")
+	out, err = run(dir)
+	if want := "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote"; err == nil || !strings.Contains(out, want) {
+		t.Errorf("with a stale lockfile: %v\n%s", err, out)
+	}
+}
+
+// TestCheckFindsTheTypeScriptImplementations builds a stack of TypeScript
+// servers: the workflow's check type-checks each served API's
+// implementation where the naming file's [implementation_paths]
+// typescript template puts it, relative to the repository root.
+func TestCheckFindsTheTypeScriptImplementations(t *testing.T) {
+	const tsServices = "../servergen/testdata/typescript/services"
+	for _, tc := range []struct {
+		name     string
+		template string
+		want     map[string]string
+	}{
+		{"default", "", map[string]string{"ts-pricing": "typescript/ts-pricing", "ts-shop": "typescript/ts-shop"}},
+		{"template", "apps/{service}/server", map[string]string{"ts-pricing": "apps/ts-pricing/server", "ts-shop": "apps/ts-shop/server"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			withGit(t, root)
+			stackDir := filepath.Join(root, "schemas", "services", "ts-cloud-stack")
+			if err := os.MkdirAll(filepath.Join(stackDir, "src"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(stackDir, "schema.config.yaml"), []byte("name: ts-cloud-stack\nkind: Stack\noutputs: {ci: {github: {}}}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(stackDir, "src", "stack.schema.yaml"), readFile(t, filepath.Join(tsServices, "ts-cloud-stack", "src", "stack.schema.yaml")), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			names := publicregistry.DefaultNaming()
+			names.ImplementationPaths.TypeScript = tc.template
+			reg, err := publicregistry.Assemble(names, &stacktest.Extension{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			schema, cfg, err := loader.LoadServiceWithConfig(stackDir, loader.WithRegistry(reg))
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := t.TempDir()
+			var log bytes.Buffer
+			if _, err := generator.Run(schema, cfg, generator.Options{
+				OutputRoot: out, ServicePath: stackDir, Registry: reg, Naming: names, Release: &testRelease, Log: &log,
+				LoadDependency: func(name string) (*ir.Schema, error) {
+					return loader.LoadService(filepath.Join(tsServices, name), loader.WithRegistry(reg))
+				},
+				LoadDependencyConfig: func(name string) (*schemaconfig.SchemaConfig, error) {
+					return buildplan.ReadConfig(filepath.Join(tsServices, name), reg)
+				},
+			}); err != nil {
+				t.Fatalf("build: %v\n%s", err, log.String())
+			}
+			w := parseWorkflow(t, readFile(t, filepath.Join(out, "ci", "ts-cloud-stack", "github", "ts-cloud-stack.yml")))
+			check := w.jobs["check"]
+			for service, dir := range tc.want {
+				if s := check.step("Type-check the implementation of " + service); s == nil || s.WorkingDirectory != dir {
+					t.Errorf("check type-checks %s's implementation with %+v, want it in %s", service, s, dir)
+				}
+			}
+			for _, server := range []string{"ts-pricing", "ts-shop"} {
+				if s := check.step("Type-check server " + server); s == nil || s.WorkingDirectory != "schemas/dist/server/ts-cloud-stack/"+server {
+					t.Errorf("check type-checks server %s with %+v", server, s)
+				}
+			}
+			if check.step("Set up Go") != nil {
+				t.Error("check sets up Go for a stack with no Go server")
+			}
+		})
 	}
 }
 

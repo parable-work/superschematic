@@ -635,10 +635,11 @@ says how to install it). It then:
 3. migrates each database from the model it recorded to its schema's,
    expand and contract back to back;
 4. builds each Go server's entrypoint module with `go build`, runs `bun
-   install` once at the output root for the TypeScript servers, starts
-   each server with its resolved config and `PORT`, callees first, a
-   TypeScript one as `bun main.ts`, and waits until it answers `/readyz`.
-   Each line a server prints carries its name;
+   install` once at the output root for the TypeScript servers, which
+   writes `schemas/dist/bun.lock` or brings it up to date, as your own
+   install would, starts each server with its resolved config and `PORT`,
+   callees first, a TypeScript one as `bun main.ts`, and waits until it
+   answers `/readyz`. Each line a server prints carries its name;
 5. builds each job's entrypoint module the same way, and runs each job
    with a schedule on it until Ctrl-C ([Run a job](#run-a-job)).
 
@@ -750,9 +751,28 @@ field where an operation has a service clause, answers `/healthz` and
 root's Bun workspace, so `bun install` there links it to the API packages,
 the SDKs and the implementations. Its Dockerfile builds superscalar's Node
 addon in a Rust stage, from the checkout the naming file's `[paths]
-scalar_typescript` names, installs the workspace on `oven/bun`, and runs
-`main.ts` as a non-root user; install the workspace before building the
-image, so the build installs from its lockfile.
+scalar_typescript` names, installs the workspace on `oven/bun`, frozen to
+its lockfile, and runs `main.ts` as a non-root user.
+
+Commit the workspace's lockfile, `schemas/dist/bun.lock`, which `bun
+install` in `schemas/dist` writes, so the image, the
+[generated CI](#generated-ci) and every engineer install the same
+versions. Write it after `build-all`, which builds every service, so it
+names every package; `stack dev` brings it up to date as you change the
+schemas. The rest of `schemas/dist` stays ignored, but git cannot take
+back a file under an ignored directory, so ignore the output root's
+contents, not the directory:
+
+```gitignore
+schemas/dist/*
+!schemas/dist/bun.lock
+```
+
+Where a broader rule such as `dist/` already ignores the directory, take
+it back first in `schemas/.gitignore` with `!/dist/`, then `/dist/*` and
+`!/dist/bun.lock`. A stack's build prints one line naming the rule that
+hides the lockfile, and leaves your ignore files as they are. An image
+built without the lockfile resolves the workspace afresh and says so.
 
 No `go.sum` is generated: build with `go build -mod=mod`, which fills it.
 `go mod tidy` can fail, because it also resolves the imports of the
@@ -965,7 +985,13 @@ The workflow:
   for a `bun.lock`, `npm ci` for a `package-lock.json`), runs `build-all`,
   which resolves every environment and checks its graph, and compiles
   each Go server's entrypoint module with `go build -mod=mod`. It needs no
-  credentials, no Rust and no superscalar checkout.
+  credentials, no Rust and no superscalar checkout. For a stack with a
+  TypeScript server it then installs `schemas/dist`'s Bun workspace with
+  `bun install --frozen-lockfile`, failing when `schemas/dist/bun.lock`
+  is not committed or no longer matches the packages the build wrote, and
+  type-checks each TypeScript server and the implementation of each API
+  one serves with `tsc --noEmit`. Every job that sets up Bun installs the
+  release a TypeScript server's image runs on.
 - After it, `plan-<environment>` runs `stack plan` for each cloud
   environment without parameters, as the environment's `planner`
   account, and `preview-<environment>` runs `stack deploy <environment>

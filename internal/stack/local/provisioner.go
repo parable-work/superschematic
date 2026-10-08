@@ -813,7 +813,10 @@ const TypeScriptEntrypoint = "main.ts"
 // root, which links each TypeScript server to the generated packages and
 // the implementations it imports, unless this provisioner installed it
 // already. The build writes the root's package.json; the install writes
-// the lockfile beside it.
+// the lockfile beside it, or brings the one there up to date, as an
+// engineer's own bun install does, so the lockfile the project commits
+// (D51, amended) follows the schemas through stack dev. It is not frozen:
+// the generated CI's frozen install is what refuses a stale lockfile.
 func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun string) error {
 	p.mu.Lock()
 	done := p.installed[outputRoot]
