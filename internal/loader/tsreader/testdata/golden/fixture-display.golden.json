@@ -55,7 +55,7 @@
         "titleField": "title",
         "createLabel": "New ticket",
         "summaryFields": [
-          "status",
+          "Workflow.status",
           "assignee"
         ],
         "states": {

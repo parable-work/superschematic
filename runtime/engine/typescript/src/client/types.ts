@@ -14,8 +14,15 @@ export type JSONObject = Record<string, unknown>;
 /** A JSON Schema, as the describe document and the behavior catalog carry them. */
 export type JSONSchema = Record<string, unknown> | boolean;
 
-/** A stored instance, as a read returns it. `data` holds its own fields, then its behaviors'. */
-export interface Instance<T = JSONObject> {
+/** An instance's behavior fields: by behavior name, an object of the fields the behavior declares that have a value. */
+export type BehaviorFieldsJSON = Record<string, JSONObject>;
+
+/**
+ * A stored instance, as a read returns it. `data` holds its own fields;
+ * `behaviors` its behaviors' fields, under each behavior's name, so the two
+ * never collide.
+ */
+export interface Instance<T = JSONObject, B = BehaviorFieldsJSON> {
   namespace: string;
   schema: string;
   id: string;
@@ -26,6 +33,7 @@ export interface Instance<T = JSONObject> {
   /** The sequence of its last event, its entity tag. */
   seq: number;
   data: T;
+  behaviors: B;
   createdAt: number;
   createdBy: string;
   updatedAt: number;
@@ -39,8 +47,8 @@ export interface Instance<T = JSONObject> {
 }
 
 /** A page of instances in creation order; `next` is null after the last. */
-export interface InstancePage<T = JSONObject> {
-  items: Array<Instance<T>>;
+export interface InstancePage<T = JSONObject, B = BehaviorFieldsJSON> {
+  items: Array<Instance<T, B>>;
   next: string | null;
 }
 
@@ -122,7 +130,11 @@ export interface EngineEvent {
   /** The deployable of the service whose call made the change (D37). */
   service?: string;
   at: number;
-  /** The instance for a create, the merge patch for an update, an OperationChange, null for a delete, the document for a publish, `{ hash }` for a define. */
+  /**
+   * The instance for a create, `{ data, behaviors }`; a merge patch of that
+   * for an update; an OperationChange; null for a delete; the document for
+   * a publish; `{ hash }` for a define.
+   */
   change: unknown;
   cause?: EventCause;
   /**
@@ -139,6 +151,7 @@ export interface OperationChange {
   behavior: string;
   operation: string;
   params: JSONObject;
+  /** A merge patch of the instance's `{ data, behaviors }`: a part it does not change is absent. */
   patch: JSONObject;
 }
 
@@ -162,16 +175,20 @@ export interface DescribeDocument {
   display?: TypeDisplay;
   /** The instance type's own fields, in declaration order. */
   fields: DescribedField[];
+  /** The JSON Schema of an instance's data: its own fields. */
   instance: JSONObject;
+  /** The JSON Schema of an instance's behaviors: each behavior's fields under its name. */
+  instanceBehaviors: JSONObject;
   behaviors: DescribedBehavior[];
   operations: DescribedOperation[];
 }
 
 /**
  * How a UI shows a schema's instances, the instance type's @display (D48):
- * titleField and summaryFields name fields by their keys in an instance's
- * data, and transitions are by the state a transition leaves, then the one
- * it enters.
+ * titleField and summaryFields name own fields by their keys in an
+ * instance's data and behavior fields by their qualified names
+ * (`Workflow.status`), and transitions are by the state a transition
+ * leaves, then the one it enters.
  */
 export interface TypeDisplay {
   noun?: string;

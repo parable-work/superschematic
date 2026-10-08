@@ -209,6 +209,27 @@
         ]
       },
       {
+        "id": "deployer.role.cloudscheduler-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudscheduler.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
         "id": "deployer.role.cloudsql-admin",
         "type": "gcp:projects/iAMMember:IAMMember",
         "properties": {
@@ -808,6 +829,7 @@
         "deployer.role.artifactregistry-writer",
         "deployer.role.certificatemanager-owner",
         "deployer.role.cloudbuild-builds-editor",
+        "deployer.role.cloudscheduler-admin",
         "deployer.role.cloudsql-admin",
         "deployer.role.compute-loadBalancerAdmin",
         "deployer.role.compute-networkAdmin",

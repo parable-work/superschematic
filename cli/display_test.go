@@ -32,7 +32,7 @@ func TestDisplayThroughTheCommands(t *testing.T) {
 	assert.JSONEq(t, string(fromJSON["display"]), string(fromTS["display"]))
 	assert.JSONEq(t, string(fromJSON["fields"]), string(fromTS["fields"]))
 	assert.JSONEq(t, `{"noun": "Ticket", "plural": "Tickets", "titleField": "title", "createLabel": "New ticket",
-		"summaryFields": ["status", "assignee"],
+		"summaryFields": ["Workflow.status", "assignee"],
 		"states": {"done": {"label": "Done", "tone": "success"}, "dropped": {"label": "Dropped", "tone": "danger"},
 			"implementing": {"label": "Implement", "activeForm": "Implementing", "tone": "active"},
 			"review": {"label": "Review", "activeForm": "In review", "tone": "warning"}, "todo": {"label": "To do", "tone": "muted"}},

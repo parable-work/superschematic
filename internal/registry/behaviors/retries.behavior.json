@@ -83,10 +83,11 @@
   },
   "requires": ["Workflow"],
   "fields": [
-    {
-      "name": "retries",
-      "description": "The instance's retries: total (failures counted), classAttempts (failures counted by class), bestScore (null when no scored result is kept), exhausted and stuck."
-    }
+    { "name": "total", "description": "Failures counted." },
+    { "name": "classAttempts", "description": "Failures counted, by failure class." },
+    { "name": "bestScore", "description": "The score of the kept result; absent when no scored result is kept." },
+    { "name": "exhausted", "description": "Whether the instance has run out of attempts." },
+    { "name": "stuck", "description": "Whether the instance failed with the same signature stuckAfter times in a row." }
   ],
   "operations": [
     {

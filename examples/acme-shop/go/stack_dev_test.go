@@ -36,8 +36,12 @@ import (
 // string, URL and port the test uses comes from the environment the build
 // resolved. The test waits for each server's /readyz, signs a user in
 // through the generated ORM, calls each Go API through its generated Go
-// SDK and the storefront over HTTP, then stops the stack as Ctrl-C does,
-// which with --remove-database removes the container.
+// SDK and the storefront over HTTP. Then shop-orders' job ShipOrders, on
+// its generated entrypoint with the implementation's NewJobs, ships the
+// order placed: once on demand with `superschematic stack run`, and again
+// on the every-minute schedule Dev's settings give it, which stack dev runs
+// (section 8.7, D52). Last, the test stops the stack as Ctrl-C does, which
+// with --remove-database removes the container.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary, or
@@ -196,6 +200,48 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("read the cart without a token: %d %s, want 401", status, body)
 	}
 
+	// shop-orders' job ShipOrders ships every placed order (D52).
+	// `superschematic stack run` runs it once, from another terminal,
+	// against the environment stack dev runs.
+	run := runJob(t, binary, outputRoot)
+	for _, want := range []string{
+		"job " + shipOrders + ": start the run stack run asked for, try 1 of 2",
+		"job " + shipOrders + ": the run stack run asked for, try 1 of 2 succeeded",
+		"[" + shipOrders + "] ",
+	} {
+		if !strings.Contains(run, want) {
+			t.Fatalf("stack run printed no %q:\n%s", want, run)
+		}
+	}
+	if got := orderStatus(ctx, t, orders, order.Id); got != orderstypes.OrderStatus_Shipped {
+		t.Fatalf("after stack run, order %s is %s, want shipped", order.Id, got)
+	}
+
+	// Dev's settings run the job every minute, so stack dev ships an order
+	// placed now within about one.
+	if !strings.Contains(output.String(), "job "+shipOrders+" runs on * * * * * (UTC)") {
+		t.Fatalf("stack dev did not schedule %s", shipOrders)
+	}
+	next, err := orders.OrderNamespace.PlaceOrder(ctx, orderstypes.PlaceOrderInput{
+		Lines:           []orderstypes.PlaceOrderLine{{ProductId: product.Id, Quantity: 1}},
+		ShippingAddress: address,
+	})
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	deadline = time.Now().Add(3 * time.Minute)
+	for orderStatus(ctx, t, orders, next.Id) != orderstypes.OrderStatus_Shipped {
+		if time.Now().After(deadline) {
+			t.Fatalf("stack dev's schedule did not ship order %s in 3 minutes", next.Id)
+		}
+		time.Sleep(time.Second)
+	}
+	for _, want := range []string{"job " + shipOrders + ": start the run due at ", "[" + shipOrders + "] "} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("stack dev printed no %q", want)
+		}
+	}
+
 	// Ctrl-C stops the servers, then removes the container and its data.
 	stopped = true
 	if err := stack.Process.Signal(os.Interrupt); err != nil {
@@ -216,6 +262,41 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if exec.Command("docker", "container", "inspect", env.container).Run() == nil {
 		t.Fatalf("container %s outlived --remove-database", env.container)
 	}
+}
+
+// shipOrders is the deployable of shop-orders' job ShipOrders: the API's
+// name, then the job's class in kebab case.
+const shipOrders = "shop-orders-ship-orders"
+
+// runJob runs shop-orders' job once with `superschematic stack run`, from
+// the example's directory as a person would, and returns what it printed.
+// A run from stack dev's every-minute schedule may hold the job while it
+// goes on; then stack run refuses, and runJob tries again.
+func runJob(t *testing.T, binary, outputRoot string) string {
+	t.Helper()
+	for try := 1; ; try++ {
+		cmd := exec.Command(binary, "stack", "run", "Dev", shipOrders, "--out", outputRoot)
+		cmd.Dir = ".."
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return string(out)
+		}
+		if try < 5 && strings.Contains(string(out), "goes on, from stack dev's schedule") {
+			time.Sleep(time.Second)
+			continue
+		}
+		t.Fatalf("stack run: %v\n%s", err, out)
+	}
+}
+
+// orderStatus reads an order's status through the generated SDK.
+func orderStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrdersSDK, id orderstypes.IdentityUUID) orderstypes.OrderStatus {
+	t.Helper()
+	order, err := orders.OrderNamespace.GetOrder(ctx, id.String())
+	if err != nil {
+		t.Fatalf("GetOrder %s: %v", id, err)
+	}
+	return order.Status
 }
 
 // environment is what the test reads from the environment the build

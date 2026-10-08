@@ -91,7 +91,7 @@ func TestSetSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantPrompts := []string{
-		"Value of PaymentsSecrets.STRIPE_KEY (read by Orders, shop-api): ",
+		"Value of PaymentsSecrets.STRIPE_KEY (read by Orders, shop-api, shop-orders-ship-orders): ",
 		"An API token with DNS Edit on zone acme.dev (shop-stack-fake-dns-acme_dev): ",
 	}
 	if !slices.Equal(term.prompts, wantPrompts) || !slices.Equal(stored, []string{"PaymentsSecrets.STRIPE_KEY", "shop-stack-fake-dns-acme_dev"}) {

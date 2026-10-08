@@ -117,7 +117,7 @@ for (const driver of drivers) {
       const engine = open();
       const error = thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'setAndClaim', { on: true }), BehaviorError);
       assert.match(error.message, /said it changed nothing/);
-      assert.equal(engine.instances.get(alice, 'Item', 'a')?.data.on, false);
+      assert.equal(engine.instances.get(alice, 'Item', 'a')?.behaviors['test.Toggle']?.on, false);
       assert.equal(events(engine), 1);
     });
 
@@ -140,7 +140,7 @@ for (const driver of drivers) {
       assert.equal(events(engine), 2);
       // Where the call it made wrote, the claim is refused.
       thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'quietRelay', { on: true }), BehaviorError);
-      assert.equal(engine.instances.get(alice, 'Item', 'a')?.data.on, false);
+      assert.equal(engine.instances.get(alice, 'Item', 'a')?.behaviors['test.Toggle']?.on, false);
     });
 
     test('a read-only operation that says so reads as before', () => {

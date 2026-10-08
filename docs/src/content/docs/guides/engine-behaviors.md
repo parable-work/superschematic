@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
 sidebar:
   order: 7
 ---
@@ -120,6 +120,45 @@ the JSON form to hand to the engine. A behavior an extension adds joins
 [Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
 shows how.
 
+## Behavior fields
+
+A read returns an instance's own fields in `data` and its behaviors'
+fields in `behaviors`, under each behavior's name, so a field a behavior
+adds never collides with one of the type's own or with another
+behavior's:
+
+```json
+{ "id": "t1", "seq": 3,
+  "data": { "title": "Build", "status": "draft" },
+  "behaviors": {
+    "Workflow": { "status": "doing" },
+    "Dependencies": { "blocked": false },
+    "Links": { "targets": { "project": { "schema": "projects", "id": "launch" } } } } }
+```
+
+Here the type declares a `status` of its own beside Workflow's, and each
+reads apart. A behavior's fields are the ones its declaration lists, and
+no config renames one, so every type that composes a behavior reads the
+same.
+
+- **Writes.** A create, an update and an operation's `update()` take the
+  own fields only. A behavior's field changes only through its
+  operations; its name in a patch is an unknown field, as any name the
+  type does not declare.
+- **Qualified names.** Where a string names a behavior's field, it is the
+  behavior's name, a dot, and the field's: `Workflow.status`,
+  `Lease.holder`, `acme.Rating.ratingCount`. A list filters on one
+  (`where: { "Workflow.status": "doing" }`), a rollup counts by one
+  (`"field": "Workflow.status"`) and a display summarizes with one. An
+  own field's name never holds a dot.
+- **Every entry.** Each behavior on the type that declares a field has an
+  entry, `{}` while none has a value; a field with no value is absent.
+  A behavior that adds no field, such as `Search` or `Constants`, has
+  none.
+- **The log.** An event's change is a merge patch of `{ data, behaviors }`:
+  a create the whole instance, an update its patch under `data` and what
+  its behaviors' fields took under `behaviors`.
+
 ## Display
 
 A UI, or an agent, that renders a schema's instances reads how to show
@@ -134,7 +173,7 @@ and summary fields, what a create button says, and labels for the
   plural: "Tasks",
   titleField: "title",
   createLabel: "New task",
-  summaryFields: ["status"],
+  summaryFields: ["Workflow.status"],
   states: {
     todo: { label: "To do", tone: "muted" },
     doing: { label: "Do", activeForm: "Doing", tone: "active" },
@@ -149,7 +188,9 @@ and summary fields, what a create button says, and labels for the
 ```
 
 The JSON form writes the same object under the type's `display` key. A
-UI showing an instance's moves reads `transitions[status]`. `define`
+UI showing an instance's moves reads the transitions from its status,
+`transitions[behaviors.Workflow.status]`. A summary field names one of the
+type's own fields, or a behavior's by its qualified name. `define`
 refuses a title that is not one of the type's own text fields, a summary
 field that is neither the type's nor its behaviors', and a state or a
 transition the `Workflow` config does not list, with the compiler's
@@ -405,8 +446,8 @@ cannot be done while a task it waits on is open.
 ```ts
 engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
 // { schema: 'Task', id: 't2', status: 'todo', open: true }
-engine.instances.get(alice, 'Task', 't1')?.data;
-// { title: 't1', status: 'todo', blocked: true }
+engine.instances.get(alice, 'Task', 't1')?.behaviors;
+// { Workflow: { status: 'todo' }, Dependencies: { blocked: true } }
 ```
 
 - A blocker that ends in a `failure` or `neutral` state stays open, so a
@@ -438,7 +479,7 @@ a task's project, its parent, the spec it implements.
 | | |
 | --- | --- |
 | Config | `links`: by camelCase name, `{ schema, required?, pinned? }`. `pinned: true` (or `"revision"`) pins a revision, and the target schema must compose `Revisions`; `pinned: "release"` pins a release, and it must compose `Branches` |
-| Field | `links`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, absent when the instance holds none |
+| Field | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, absent when the instance holds none |
 | Operations | `link({ name, id, revision?, release? })`, `unlink({ name })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
 | Create parameters | by link name, the target's `id`, or `{ id, revision? }` or `{ id, release? }` for a pinned link |
 | Guard | deleting the target of a required link is `vetoed` (`required_target`) |
@@ -462,7 +503,7 @@ engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: '
   `unlink` event on each instance that pointed there.
 - A **pinned** link records the target's revision, or with `pinned:
   "release"` its release (the target's `Branches` release pointer, its
-  `release` field), and `links` gives the target's latest beside it and
+  `Branches.release` field), and `targets` gives the target's latest beside it and
   `stale: true` once the target has a later one: "pinned 3, latest 5"
   in one read. `listLinked({ ..., stale: true })` finds every instance
   pointing at a superseded revision or release.
@@ -475,7 +516,7 @@ count of tasks, its tasks by status, whether they have all finished.
 | | |
 | --- | --- |
 | Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`. `function` is `count`, `countBy`, `sum`, `min`, `max`, `latest`, `all` or `any`; `countBy`, `sum`, `min`, `max` and `latest` take a `field`; only `all` and `any` take `gatedStates` and `outcomes` |
-| Field | `rollups`: `{ <name>: value }`, computed at each read |
+| Field | `values`: `{ <name>: value }`, computed at each read |
 | Guard | a transition into a state an `all` or `any` rollup gates is `vetoed` (`not_held`) unless the rollup holds, with the rollup and its counts in `details.details` |
 
 On a `projects` schema, with the `tasks` schema linking to it through
@@ -484,12 +525,13 @@ On a `projects` schema, with the `tasks` schema linking to it through
 ```json
 { "name": "Rollups", "config": { "rollups": {
     "tasks": { "schema": "tasks", "link": "project", "function": "count" },
-    "tasksByStatus": { "schema": "tasks", "link": "project", "function": "countBy", "field": "status" },
+    "tasksByStatus": { "schema": "tasks", "link": "project", "function": "countBy", "field": "Workflow.status" },
     "tasksFinished": { "schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"] } } } }
 ```
 
 A project then reads
-`"rollups": { "tasks": 2, "tasksByStatus": { "doing": 1, "todo": 1 }, "tasksFinished": false }`,
+`"Rollups": { "values": { "tasks": 2, "tasksByStatus": { "doing": 1, "todo": 1 }, "tasksFinished": false } }`
+under `behaviors`,
 and cannot move to `done` until every task is done or dropped.
 
 | Function | Value | Over no instance |
@@ -897,7 +939,7 @@ const { ref: committed } = call("commit", { ref: ref.id, version: ref.version, m
 const merged = call("merge", { source: committed.id, target: main.id, targetVersion: main.version, tag: true });
 call("releaseCommit", { commit: merged.commit.id, version: 0 });  // 0: the first release
 call("released");                                                 // { release, tree, contentHash, findings }
-engine.instances.get(me, "Recipe", id)?.data.release;              // 1: the release pointer's version
+engine.instances.get(me, "Recipe", id)?.behaviors.Branches.release; // 1: the release pointer's version
 ```
 
 - **Operations.** `branch`, `save`, `commit`, `seal`, `merge`, `rebase`,

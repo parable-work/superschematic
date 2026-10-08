@@ -47,9 +47,13 @@ describe('the client', () => {
     const { client: open, requests } = serve();
     const client = open();
     const plan = await client.instances.create('Task', { title: 'Plan' }, { id: 'plan' });
-    assert.deepEqual([plan.id, plan.seq, plan.createdBy, plan.data.status, plan.data.blocked], ['plan', 1, 'alice', 'todo', false]);
-    const build = await client.instances.create<{ title: string; blocked: boolean }>('Task', { title: 'Build' }, { id: 'build', behaviors: { Dependencies: { blockers: [{ id: 'plan' }] } } });
-    assert.equal(build.data.blocked, true);
+    assert.deepEqual([plan.id, plan.seq, plan.createdBy, plan.behaviors.Workflow.status, plan.behaviors.Dependencies.blocked], ['plan', 1, 'alice', 'todo', false]);
+    const build = await client.instances.create<{ title: string }, { Dependencies: { blocked: boolean } }>(
+      'Task',
+      { title: 'Build' },
+      { id: 'build', behaviors: { Dependencies: { blockers: [{ id: 'plan' }] } } }
+    );
+    assert.equal(build.behaviors.Dependencies.blocked, true);
     assert.equal(requests.at(-1)!.headers.get('content-type'), 'application/json');
 
     assert.deepEqual((await client.instances.get('Task', 'build')).data.title, 'Build');
@@ -101,8 +105,9 @@ describe('the client', () => {
 
     const invalid = await refused(client.instances.create('Task', { title: 7 }), 422, 'invalid_instance');
     assert.deepEqual(invalid.issues.map((issue) => [issue.path, issue.rule]), [['title', 'type']]);
-    const readOnly = await refused(client.instances.update('Task', 'plan', { status: 'done' }), 422, 'invalid_instance');
-    assert.deepEqual(readOnly.issues.map((issue) => [issue.path, issue.rule]), [['status', 'readOnly']]);
+    // A patch holds own fields only: Workflow's status there is a key Task does not declare.
+    const undeclared = await refused(client.instances.update('Task', 'plan', { status: 'done' }), 422, 'invalid_instance');
+    assert.deepEqual(undeclared.issues.map((issue) => [issue.path, issue.rule]), [['status', 'unknown']]);
 
     const params = await refused(client.instances.create('Task', { title: 'X' }, { behaviors: { Dependencies: { blockers: [{ id: '-' }] } } }), 400, 'invalid_argument');
     assert.deepEqual(params.issues.map((issue) => issue.path), ['/behaviors/Dependencies/blockers/0/id']);

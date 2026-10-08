@@ -1,0 +1,580 @@
+{
+  "token": "gcp:cloudrunv2/job:Job",
+  "terraform": {
+    "type": "google_cloud_run_v2_job",
+    "renames": {
+      "binaryAuthorization": "binary_authorization",
+      "binaryAuthorization.breakglassJustification": "breakglass_justification",
+      "binaryAuthorization.useDefault": "use_default",
+      "clientVersion": "client_version",
+      "deletionPolicy": "deletion_policy",
+      "deletionProtection": "deletion_protection",
+      "launchStage": "launch_stage",
+      "runExecutionToken": "run_execution_token",
+      "startExecutionToken": "start_execution_token",
+      "template.taskCount": "task_count",
+      "template.template.containers.commands": "command",
+      "template.template.containers.dependsOns": "depends_on",
+      "template.template.containers.envs": "env",
+      "template.template.containers.envs.valueSource": "value_source",
+      "template.template.containers.envs.valueSource.secretKeyRef": "secret_key_ref",
+      "template.template.containers.ports.containerPort": "container_port",
+      "template.template.containers.startupProbe": "startup_probe",
+      "template.template.containers.startupProbe.failureThreshold": "failure_threshold",
+      "template.template.containers.startupProbe.httpGet": "http_get",
+      "template.template.containers.startupProbe.httpGet.httpHeaders": "http_headers",
+      "template.template.containers.startupProbe.initialDelaySeconds": "initial_delay_seconds",
+      "template.template.containers.startupProbe.periodSeconds": "period_seconds",
+      "template.template.containers.startupProbe.tcpSocket": "tcp_socket",
+      "template.template.containers.startupProbe.timeoutSeconds": "timeout_seconds",
+      "template.template.containers.volumeMounts": "volume_mounts",
+      "template.template.containers.volumeMounts.mountPath": "mount_path",
+      "template.template.containers.volumeMounts.subPath": "sub_path",
+      "template.template.containers.workingDir": "working_dir",
+      "template.template.encryptionKey": "encryption_key",
+      "template.template.executionEnvironment": "execution_environment",
+      "template.template.gpuZonalRedundancyDisabled": "gpu_zonal_redundancy_disabled",
+      "template.template.maxRetries": "max_retries",
+      "template.template.nodeSelector": "node_selector",
+      "template.template.serviceAccount": "service_account",
+      "template.template.volumes.cloudSqlInstance": "cloud_sql_instance",
+      "template.template.volumes.emptyDir": "empty_dir",
+      "template.template.volumes.emptyDir.sizeLimit": "size_limit",
+      "template.template.volumes.gcs.mountOptions": "mount_options",
+      "template.template.volumes.gcs.readOnly": "read_only",
+      "template.template.volumes.nfs.readOnly": "read_only",
+      "template.template.volumes.secret.defaultMode": "default_mode",
+      "template.template.vpcAccess": "vpc_access",
+      "template.template.vpcAccess.networkInterfaces": "network_interfaces"
+    }
+  },
+  "inputProperties": {
+    "annotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "binaryAuthorization": {
+      "$ref": "#/types/gcp:cloudrunv2/JobBinaryAuthorization:JobBinaryAuthorization"
+    },
+    "client": {
+      "type": "string"
+    },
+    "clientVersion": {
+      "type": "string"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "deletionProtection": {
+      "type": "boolean"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "launchStage": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "runExecutionToken": {
+      "type": "string"
+    },
+    "startExecutionToken": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "template": {
+      "$ref": "#/types/gcp:cloudrunv2/JobTemplate:JobTemplate"
+    }
+  },
+  "requiredInputs": [
+    "location",
+    "template"
+  ],
+  "types": {
+    "gcp:cloudrunv2/JobBinaryAuthorization:JobBinaryAuthorization": {
+      "type": "object",
+      "properties": {
+        "breakglassJustification": {
+          "type": "string"
+        },
+        "policy": {
+          "type": "string"
+        },
+        "useDefault": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplate:JobTemplate": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "parallelism": {
+          "type": "integer"
+        },
+        "taskCount": {
+          "type": "integer"
+        },
+        "template": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplate:JobTemplateTemplate"
+        }
+      },
+      "required": [
+        "template"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplate:JobTemplateTemplate": {
+      "type": "object",
+      "properties": {
+        "containers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainer:JobTemplateTemplateContainer"
+          }
+        },
+        "encryptionKey": {
+          "type": "string"
+        },
+        "executionEnvironment": {
+          "type": "string"
+        },
+        "gpuZonalRedundancyDisabled": {
+          "type": "boolean"
+        },
+        "maxRetries": {
+          "type": "integer"
+        },
+        "nodeSelector": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateNodeSelector:JobTemplateTemplateNodeSelector"
+        },
+        "serviceAccount": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVolume:JobTemplateTemplateVolume"
+          }
+        },
+        "vpcAccess": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVpcAccess:JobTemplateTemplateVpcAccess"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainer:JobTemplateTemplateContainer": {
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dependsOns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "envs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerEnv:JobTemplateTemplateContainerEnv"
+          }
+        },
+        "image": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerPort:JobTemplateTemplateContainerPort"
+          }
+        },
+        "resources": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerResources:JobTemplateTemplateContainerResources"
+        },
+        "startupProbe": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbe:JobTemplateTemplateContainerStartupProbe"
+        },
+        "volumeMounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerVolumeMount:JobTemplateTemplateContainerVolumeMount"
+          }
+        },
+        "workingDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerEnv:JobTemplateTemplateContainerEnv": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "valueSource": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerEnvValueSource:JobTemplateTemplateContainerEnvValueSource"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerEnvValueSource:JobTemplateTemplateContainerEnvValueSource": {
+      "type": "object",
+      "properties": {
+        "secretKeyRef": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerEnvValueSourceSecretKeyRef:JobTemplateTemplateContainerEnvValueSourceSecretKeyRef"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerEnvValueSourceSecretKeyRef:JobTemplateTemplateContainerEnvValueSourceSecretKeyRef": {
+      "type": "object",
+      "properties": {
+        "secret": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret",
+        "version"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerPort:JobTemplateTemplateContainerPort": {
+      "type": "object",
+      "properties": {
+        "containerPort": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerResources:JobTemplateTemplateContainerResources": {
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbe:JobTemplateTemplateContainerStartupProbe": {
+      "type": "object",
+      "properties": {
+        "failureThreshold": {
+          "type": "integer"
+        },
+        "grpc": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbeGrpc:JobTemplateTemplateContainerStartupProbeGrpc"
+        },
+        "httpGet": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbeHttpGet:JobTemplateTemplateContainerStartupProbeHttpGet"
+        },
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "tcpSocket": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbeTcpSocket:JobTemplateTemplateContainerStartupProbeTcpSocket"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbeGrpc:JobTemplateTemplateContainerStartupProbeGrpc": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        },
+        "service": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbeHttpGet:JobTemplateTemplateContainerStartupProbeHttpGet": {
+      "type": "object",
+      "properties": {
+        "httpHeaders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbeHttpGetHttpHeader:JobTemplateTemplateContainerStartupProbeHttpGetHttpHeader"
+          }
+        },
+        "path": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbeHttpGetHttpHeader:JobTemplateTemplateContainerStartupProbeHttpGetHttpHeader": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerStartupProbeTcpSocket:JobTemplateTemplateContainerStartupProbeTcpSocket": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateContainerVolumeMount:JobTemplateTemplateContainerVolumeMount": {
+      "type": "object",
+      "properties": {
+        "mountPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "subPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mountPath",
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateNodeSelector:JobTemplateTemplateNodeSelector": {
+      "type": "object",
+      "properties": {
+        "accelerator": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accelerator"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVolume:JobTemplateTemplateVolume": {
+      "type": "object",
+      "properties": {
+        "cloudSqlInstance": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVolumeCloudSqlInstance:JobTemplateTemplateVolumeCloudSqlInstance"
+        },
+        "emptyDir": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVolumeEmptyDir:JobTemplateTemplateVolumeEmptyDir"
+        },
+        "gcs": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVolumeGcs:JobTemplateTemplateVolumeGcs"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nfs": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVolumeNfs:JobTemplateTemplateVolumeNfs"
+        },
+        "secret": {
+          "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVolumeSecret:JobTemplateTemplateVolumeSecret"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVolumeCloudSqlInstance:JobTemplateTemplateVolumeCloudSqlInstance": {
+      "type": "object",
+      "properties": {
+        "instances": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVolumeEmptyDir:JobTemplateTemplateVolumeEmptyDir": {
+      "type": "object",
+      "properties": {
+        "medium": {
+          "type": "string"
+        },
+        "sizeLimit": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVolumeGcs:JobTemplateTemplateVolumeGcs": {
+      "type": "object",
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "mountOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "readOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bucket"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVolumeNfs:JobTemplateTemplateVolumeNfs": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "server": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVolumeSecret:JobTemplateTemplateVolumeSecret": {
+      "type": "object",
+      "properties": {
+        "defaultMode": {
+          "type": "integer"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVolumeSecretItem:JobTemplateTemplateVolumeSecretItem"
+          }
+        },
+        "secret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVolumeSecretItem:JobTemplateTemplateVolumeSecretItem": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "version"
+      ]
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVpcAccess:JobTemplateTemplateVpcAccess": {
+      "type": "object",
+      "properties": {
+        "connector": {
+          "type": "string"
+        },
+        "egress": {
+          "type": "string"
+        },
+        "networkInterfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/JobTemplateTemplateVpcAccessNetworkInterface:JobTemplateTemplateVpcAccessNetworkInterface"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/JobTemplateTemplateVpcAccessNetworkInterface:JobTemplateTemplateVpcAccessNetworkInterface": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "string"
+        },
+        "subnetwork": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

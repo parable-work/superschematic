@@ -21,7 +21,7 @@ func TestPolicyHighAvailability(t *testing.T) {
 	s := shop()
 	prod := s.Environment("Production")
 	prod.Settings[0].Values["highAvailability"] = false
-	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: "Production"})
+	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Production"})
 	var errs *stack.Errors
 	if !errors.As(err, &errs) || len(errs.List) != 1 || errs.List[0].Code != stack.CodePolicy ||
 		!strings.Contains(err.Error(), gcp.PolicyHighAvailability) || !strings.Contains(err.Error(), "shop-db.instance") {
@@ -29,7 +29,7 @@ func TestPolicyHighAvailability(t *testing.T) {
 	}
 
 	delete(prod.Settings[0].Values, "highAvailability")
-	if _, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: "Production"}); err == nil {
+	if _, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Production"}); err == nil {
 		t.Error("a production database with the default settings passed; the default is not highly available")
 	}
 
@@ -58,8 +58,9 @@ func policy(t *testing.T, reg *registry.Registry, name string) registry.PolicyRu
 
 // TestPolicyNothingPublic runs the rule over a resolved Staging changed
 // one way at a time: each change opens something to the public on behalf
-// of a deployable that is not exposed, and the rule names it. The same
-// change on the exposed shop-api is allowed.
+// of a deployable that is not exposed, a job's included, which never is
+// (D52), and the rule names it. The same change on the exposed shop-api
+// is allowed.
 func TestPolicyNothingPublic(t *testing.T) {
 	reg := assemble(t)
 	rule := policy(t, reg, gcp.PolicyNothingPublic)
@@ -94,6 +95,9 @@ func TestPolicyNothingPublic(t *testing.T) {
 		{"public grant from an edge", func(env *ir.ResolvedEnvironment) {
 			env.Resources.Resources = append(env.Resources.Resources, publicGrant("http:Orders->shop-api"))
 		}, "on behalf of http:Orders->shop-api"},
+		{"a job anyone may run", func(env *ir.ResolvedEnvironment) {
+			env.Resources.Resource("shop-orders-ship-orders.schedule-invoker").Properties["member"] = "allUsers"
+		}, "shop-orders-ship-orders.schedule-invoker grants roles/run.invoker to allUsers on behalf of shop-orders-ship-orders"},
 		{"load balancer", func(env *ir.ResolvedEnvironment) {
 			env.Resources.Resources = append(env.Resources.Resources, &ir.Resource{ID: "Orders.address", Type: gcp.TypeGlobalAddress, Owners: []string{"Orders"}})
 		}, "load balancer Orders.address of Orders is public"},

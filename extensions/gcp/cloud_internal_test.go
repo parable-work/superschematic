@@ -168,7 +168,7 @@ func TestStderrFilter(t *testing.T) {
 		Name:    "projects/acme-staging/locations/us-east1/jobs/shop-migrate/executions/shop-migrate-x7k2p",
 		Created: time.Date(2026, 10, 7, 18, 2, 30, 0, time.FixedZone("EDT", -4*3600)),
 	}
-	project, filter, err := stderrFilter(run)
+	project, filter, err := stderrFilter(run, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,12 +178,16 @@ func TestStderrFilter(t *testing.T) {
 	if project != "acme-staging" || filter != want {
 		t.Errorf("stderrFilter = %s, %s\nwant acme-staging, %s", project, filter, want)
 	}
+	// A job's failure lines alone (D52): the match is one more clause.
+	if _, filter, _ := stderrFilter(run, jobFailedLines); filter != want+" AND ("+jobFailedLines+")" {
+		t.Errorf("stderrFilter with a match = %s", filter)
+	}
 	run.Created = time.Time{}
-	if _, filter, _ := stderrFilter(run); strings.Contains(filter, "timestamp") {
+	if _, filter, _ := stderrFilter(run, ""); strings.Contains(filter, "timestamp") {
 		t.Errorf("an execution with no creation time: %s", filter)
 	}
 	for _, bad := range []string{"", "projects/p/locations/r/jobs/j", "projects/p/locations/r/jobs//executions/e", "projects/p/locations/r/services/s/revisions/x"} {
-		if _, _, err := stderrFilter(&JobRun{Name: bad}); err == nil {
+		if _, _, err := stderrFilter(&JobRun{Name: bad}, ""); err == nil {
 			t.Errorf("stderrFilter(%q) is accepted", bad)
 		}
 	}

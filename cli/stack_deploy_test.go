@@ -197,7 +197,7 @@ func TestStackCommands(t *testing.T) {
 		"create   demo-api.service",
 		"Migration of demo-db on database demo-db: 2 expand, 0 contract step(s)",
 		"CREATE TABLE \"order\"",
-		"Servers with no image yet, planned at their repository: demo-api",
+		"Servers and jobs with no image yet, planned at their repository: demo-api",
 		"Secrets with no value: DemoConfig.API_KEY (stack secrets set Staging)",
 	} {
 		assert.Contains(t, out, want)
@@ -227,7 +227,7 @@ func TestStackCommands(t *testing.T) {
 	out, err = run("plan", "Staging", "--out", planFile)
 	require.NoError(t, err)
 	assert.Contains(t, out, "Migration of demo-db on database demo-db: 0 expand, 0 contract step(s)")
-	assert.NotContains(t, out, "Servers with no image yet")
+	assert.NotContains(t, out, "with no image yet")
 	_, err = run("deploy", "Staging", "--expect", planFile)
 	require.NoError(t, err)
 
@@ -321,7 +321,7 @@ func TestStackCommands(t *testing.T) {
 	_, err = run("plan", "Nowhere")
 	require.ErrorContains(t, err, "stack demo-stack has no environment Nowhere (its environments: Dev, Preview, Staging)")
 	_, err = run("deploy", "Staging", "--image", "demo-api")
-	require.ErrorContains(t, err, "want <server>=<repository>@sha256:<digest>")
+	require.ErrorContains(t, err, "want <deployable>=<repository>@sha256:<digest>")
 }
 
 // TestStackBuild runs stack build and a deploy that builds over the demo
@@ -356,13 +356,13 @@ func TestStackBuild(t *testing.T) {
 		ext.Builder.Context("demo-api"))
 	image := strings.TrimSpace(strings.TrimPrefix(out, "--image demo-api="))
 
-	out, err = run("build", "Staging", "--format", "json", "--server", "demo-api")
+	out, err = run("build", "Staging", "--format", "json", "--deployable", "demo-api")
 	require.NoError(t, err)
 	var result stackdeploy.BuildResult
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	assert.Equal(t, map[string]string{"demo-api": image}, result.Images)
 	_, err = run("build", "Staging", "--server", "demo-db")
-	require.ErrorContains(t, err, "has no server demo-db")
+	require.ErrorContains(t, err, "has no server or job demo-db")
 
 	// --no-build with no image anywhere is refused; a deploy builds.
 	_, err = run("deploy", "Staging", "--no-build")

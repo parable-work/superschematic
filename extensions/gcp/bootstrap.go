@@ -63,9 +63,11 @@ var apiServices = []string{
 }
 
 // graphServices are the APIs a resource type's module needs. A database
-// needs Cloud Run too, for its migration job.
+// needs Cloud Run too, for its migration job, and a job's schedule Cloud
+// Scheduler (D52).
 var graphServices = map[string][]string{
 	"gcp:cloudrunv2/":         {"run.googleapis.com", "cloudtrace.googleapis.com"},
+	"gcp:cloudscheduler/":     {"cloudscheduler.googleapis.com"},
 	"gcp:sql/":                {"sqladmin.googleapis.com", "run.googleapis.com"},
 	"gcp:compute/":            {"compute.googleapis.com"},
 	"gcp:certificatemanager/": {"certificatemanager.googleapis.com"},
@@ -91,12 +93,17 @@ func servicesFor(env *ir.ResolvedEnvironment) []string {
 // The roles of the two accounts that run the generated CI (section 11.3).
 var (
 	// deployerRoles let `deployer` apply every resource the gcp target
-	// emits, push images, run image builds and migration jobs, read a
-	// failed execution's stderr from Cloud Logging, and enable APIs.
+	// emits, push images, run image builds, migration jobs and a job's
+	// executions on demand, read a failed execution's stderr from Cloud
+	// Logging, and enable APIs. Cloud Scheduler's admin role is the one
+	// that creates, updates and deletes scheduler jobs (D52); naming a
+	// job's account in one is acting as it, which
+	// roles/iam.serviceAccountUser allows.
 	deployerRoles = []string{
 		"roles/artifactregistry.writer",
 		"roles/certificatemanager.owner",
 		"roles/cloudbuild.builds.editor",
+		"roles/cloudscheduler.admin",
 		"roles/cloudsql.admin",
 		"roles/compute.loadBalancerAdmin",
 		"roles/compute.networkAdmin",

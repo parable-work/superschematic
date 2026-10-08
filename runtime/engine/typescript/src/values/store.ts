@@ -260,6 +260,35 @@ export class ValueStore {
   }
 
   /**
+   * stowChange stows an instance as the log holds it, or a change of one:
+   * a merge patch of what a read returns, { data, behaviors }. data's own
+   * fields keep the refs known already (pointers from the change's root,
+   * prefix included), and each behavior's fields go under its name, a
+   * large one by hash as an own field is. With whole, the change is the
+   * instance and holds both parts; otherwise a part that is undefined or
+   * changes nothing is left out.
+   */
+  stowChange(
+    prefix: string,
+    data: Readonly<Record<string, unknown>> | undefined,
+    behaviors: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined,
+    options: { readonly whole?: boolean; readonly known?: ReadonlySet<string> } = {}
+  ): Stowed {
+    const parts: Record<string, Stowed> = {};
+    if (data !== undefined && (options.whole === true || Object.keys(data).length > 0)) {
+      parts.data = this.stow(data, `${prefix}/data`, options.known);
+    }
+    if (behaviors !== undefined && (options.whole === true || Object.keys(behaviors).length > 0)) {
+      const entries: Record<string, Stowed> = {};
+      for (const [name, fields] of Object.entries(behaviors)) {
+        entries[name] = this.stow(fields, `${prefix}/behaviors${pointerToken(name)}`, options.known);
+      }
+      parts.behaviors = joinStowed({}, entries);
+    }
+    return joinStowed({}, parts);
+  }
+
+  /**
    * hold records that a holder references exactly these values: it adds
    * the new ones and drops the ones it no longer holds, and removes a
    * dropped value nothing else holds. Call it in the write's transaction.

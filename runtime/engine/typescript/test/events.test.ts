@@ -40,7 +40,7 @@ for (const driver of drivers) {
       // carries the document it made live.
       assert.deepEqual(
         events.map((event) => event.change),
-        [{ hash: defined.hash }, defined.document, { title: 'Desk', quantity: 1 }, { quantity: null, status: 'open' }, null]
+        [{ hash: defined.hash }, defined.document, { data: { title: 'Desk', quantity: 1 }, behaviors: {} }, { data: { quantity: null, status: 'open' } }, null]
       );
       assert.ok(events.every((event) => !('service' in event)), 'no service made these calls');
       const cursors = events.map((event) => event.cursor);

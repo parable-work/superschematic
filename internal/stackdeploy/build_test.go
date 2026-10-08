@@ -13,6 +13,7 @@ import (
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
+	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
 // sources writes a repository whose stack build wrote a Dockerfile, with
@@ -63,15 +64,16 @@ func builds(calls []string) []string {
 }
 
 // TestDeployBuildsImages: a deploy with the build's sources builds each
-// server's image before it changes anything, from a context its ignore
-// file cuts down, and pins the image built; the next deploy builds only
-// the servers whose context changed, and --image overrides a build.
+// server's and job's image before it changes anything, from a context its
+// ignore file cuts down, and pins the image built; the next deploy builds
+// only the deployables whose context changed, and --image overrides a
+// build.
 func TestDeployBuildsImages(t *testing.T) {
 	f := newFixture(t)
 	env := f.env(t, "Staging")
 	f.ready(t, env)
 	ctx := context.Background()
-	src := sources(t, "shop-api", "Orders")
+	src := sources(t, "shop-api", "Orders", stacktest.ShipOrdersJob)
 	p := &planner{to: 1}
 
 	o := deployOptions(f, t, env, nil, p, nil)
@@ -84,9 +86,14 @@ func TestDeployBuildsImages(t *testing.T) {
 	want := []string{
 		"build Orders: schemas/dist/server/shop-stack/Orders/Dockerfile",
 		"build shop-api: schemas/dist/server/shop-stack/shop-api/Dockerfile",
+		"build shop-orders-ship-orders: schemas/dist/server/shop-stack/shop-orders-ship-orders/Dockerfile",
 	}
-	if !slices.Equal(calls[:2], want) || !strings.HasPrefix(calls[2], "render") {
-		t.Fatalf("the first deploy ran:\n%s\nwant both builds before the render", strings.Join(calls, "\n"))
+	if !slices.Equal(calls[:3], want) || !strings.HasPrefix(calls[3], "render") {
+		t.Fatalf("the first deploy ran:\n%s\nwant the three builds before the render", strings.Join(calls, "\n"))
+	}
+	job := f.ext.Provisioner.Rendered().Resources.Resource(stacktest.ShipOrdersJob + ".job")
+	if got, image := job.Properties["image"], m.Images[stacktest.ShipOrdersJob]; got != image || !strings.HasPrefix(image, stacktest.ShipOrdersJob+"@sha256:") {
+		t.Errorf("the job renders image %v, and the manifest records %s", got, image)
 	}
 	if got := f.ext.Builder.Context("shop-api"); !slices.Equal(got, []string{
 		"go/shop-api/", "go/shop-api/implementation.go",
@@ -130,7 +137,7 @@ func TestDeployBuildsImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := builds(f.calls(n)); !slices.Equal(b, want[1:]) {
+	if b := builds(f.calls(n)); !slices.Equal(b, want[1:2]) {
 		t.Errorf("built %v, want shop-api alone", b)
 	}
 	if m3.Images["shop-api"] == built || m3.Images["Orders"] != "orders@"+digest(7) {
@@ -163,7 +170,7 @@ func TestDeployBuildFailures(t *testing.T) {
 	env := f.env(t, "Staging")
 	f.ready(t, env)
 	ctx := context.Background()
-	src := sources(t, "shop-api", "Orders")
+	src := sources(t, "shop-api", "Orders", stacktest.ShipOrdersJob)
 	o := deployOptions(f, t, env, nil, &planner{to: 1}, nil)
 	o.Sources = src
 
@@ -231,20 +238,20 @@ func TestBuild(t *testing.T) {
 	env := f.env(t, "Staging")
 	f.ready(t, env)
 	ctx := context.Background()
-	src := sources(t, "shop-api", "Orders")
+	src := sources(t, "shop-api", "Orders", stacktest.ShipOrdersJob)
 	build := func(force bool, servers ...string) *stackdeploy.BuildResult {
 		t.Helper()
-		r, err := stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *src, Servers: servers, Force: force})
+		r, err := stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *src, Deployables: servers, Force: force})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return r
 	}
 	r := build(false)
-	if !slices.Equal(r.Built, []string{"Orders", "shop-api"}) || len(r.Unchanged) > 0 || len(r.Images) != 2 {
+	if !slices.Equal(r.Built, []string{"Orders", "shop-api", stacktest.ShipOrdersJob}) || len(r.Unchanged) > 0 || len(r.Images) != 3 {
 		t.Fatalf("first build: %+v", r)
 	}
-	if flags := r.ImageFlags(); len(flags) != 2 || !strings.HasPrefix(flags[0], "Orders=orders@sha256:") {
+	if flags := r.ImageFlags(); len(flags) != 3 || !strings.HasPrefix(flags[0], "Orders=orders@sha256:") || !strings.HasPrefix(flags[2], stacktest.ShipOrdersJob+"="+stacktest.ShipOrdersJob+"@sha256:") {
 		t.Errorf("image flags %q", flags)
 	}
 	if _, err := f.ext.State.ReadManifest(ctx, registry.Run{Environment: env}); !errors.Is(err, registry.ErrNoManifest) {
@@ -265,7 +272,7 @@ func TestBuild(t *testing.T) {
 	}
 
 	touch(t, src, "shop-api", "package impl // changed\n")
-	if r := build(false); !slices.Equal(r.Built, []string{"shop-api"}) || !slices.Equal(r.Unchanged, []string{"Orders"}) || len(r.Images) != 2 {
+	if r := build(false); !slices.Equal(r.Built, []string{"shop-api"}) || !slices.Equal(r.Unchanged, []string{"Orders", stacktest.ShipOrdersJob}) || len(r.Images) != 3 {
 		t.Errorf("a build after shop-api changed: %+v", r)
 	}
 	if r := build(false, "Orders"); len(r.Built) > 0 || !slices.Equal(r.Unchanged, []string{"Orders"}) || len(r.Images) != 1 {
@@ -274,11 +281,11 @@ func TestBuild(t *testing.T) {
 	if r := build(true, "Orders"); !slices.Equal(r.Built, []string{"Orders"}) {
 		t.Errorf("a forced build of Orders: %+v", r)
 	}
-	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *src, Servers: []string{"shop-db"}})
-	if err == nil || !strings.Contains(err.Error(), "has no server shop-db") {
+	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *src, Deployables: []string{"shop-db"}})
+	if err == nil || !strings.Contains(err.Error(), "has no server or job shop-db") {
 		t.Errorf("a build of a database: %v", err)
 	}
-	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *sources(t, "shop-api"), Servers: []string{"Orders"}})
+	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *sources(t, "shop-api"), Deployables: []string{"Orders"}})
 	if err == nil || !strings.Contains(err.Error(), "server Orders has no Dockerfile") {
 		t.Errorf("a build of a server with no Dockerfile: %v", err)
 	}
@@ -298,7 +305,7 @@ func TestDeployGrantsNewServers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := m.Databases["shop-db"]["shop-db"].Servers; !slices.Equal(got, []string{"Orders", "shop-api"}) {
+	if got := m.Databases["shop-db"]["shop-db"].Servers; !slices.Equal(got, []string{"Orders", "shop-api", stacktest.ShipOrdersJob}) {
 		t.Fatalf("the runner ran for servers %v", got)
 	}
 
@@ -323,11 +330,11 @@ func TestDeployGrantsNewServers(t *testing.T) {
 			migrations = append(migrations, c)
 		}
 	}
-	if want := []string{"migrate expand shop-db: shop-db (no steps; servers Orders, shop-api)"}; !slices.Equal(migrations, want) {
+	if want := []string{"migrate expand shop-db: shop-db (no steps; servers Orders, shop-api, shop-orders-ship-orders)"}; !slices.Equal(migrations, want) {
 		t.Errorf("ran migrations %q, want %q", migrations, want)
 	}
 	applied := m.Databases["shop-db"]["shop-db"]
-	if !slices.Equal(applied.Servers, []string{"Orders", "shop-api"}) || applied.Hash != modelHash(t, 1) {
+	if !slices.Equal(applied.Servers, []string{"Orders", "shop-api", stacktest.ShipOrdersJob}) || applied.Hash != modelHash(t, 1) {
 		t.Errorf("shop-db: at %s for servers %v", applied.Hash, applied.Servers)
 	}
 

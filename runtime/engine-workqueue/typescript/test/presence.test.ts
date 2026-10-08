@@ -83,21 +83,21 @@ for (const driver of drivers) {
   }
 
   const invoke = (engine: Engine, who: Principal, operation: string, id = 'w1') => engine.instances.invoke(who, 'Worker', id, operation, {});
-  const presenceOf = (engine: Engine, id = 'w1') => engine.instances.get(alice, 'Worker', id)?.data.presence as Record<string, unknown>;
-  const statusOf = (engine: Engine, id = 'w1') => engine.instances.get(alice, 'Worker', id)?.data.status;
+  const presenceOf = (engine: Engine, id = 'w1') => engine.instances.get(alice, 'Worker', id)?.behaviors.Presence as Record<string, unknown>;
+  const statusOf = (engine: Engine, id = 'w1') => engine.instances.get(alice, 'Worker', id)?.behaviors.Workflow?.status;
   const veto = (fn: () => unknown) => thrown(fn, BehaviorVetoError);
 
   describe(`Presence: beat and miss (${driver})`, () => {
-    test('a create sets the first deadline one ttl on, so a worker that never beats is missed; the presence field shows it', () => {
+    test("a create sets the first deadline one ttl on, so a worker that never beats is missed; Presence's fields show it", () => {
       const { engine } = world();
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: false, released: null });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, missed: false });
     });
 
     test('only the principal the instance stands for can beat it', () => {
       const { engine, clock } = world();
       clock.advance(10000);
       assert.deepEqual(invoke(engine, wren, 'beat'), { deadline: T0 + 10000 + TTL });
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + 10000 + TTL, lastBeatAt: T0 + 10000, missed: false, released: null });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + 10000 + TTL, lastBeatAt: T0 + 10000, missed: false });
       // Knowing the subject the instance holds does not make another principal it.
       const refused = veto(() => invoke(engine, otto, 'beat'));
       assert.deepEqual(
@@ -116,7 +116,7 @@ for (const driver of drivers) {
       assert.equal(engine.instances.get(alice, 'Worker', 'w1')?.seq, 1);
       clock.advance(1);
       assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true, released: {} });
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: true, released: {} });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, missed: true, released: {} });
       assert.equal(statusOf(engine), 'missing');
       const seq = engine.instances.get(alice, 'Worker', 'w1')?.seq;
       assert.deepEqual(invoke(engine, otto, 'miss'), { missed: false });
@@ -153,7 +153,7 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Worker', { subject: 'wren' }, { id: 'w1' });
       clock.advance(1000);
       assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true, released: {} });
-      assert.equal(engine.instances.get(alice, 'Worker', 'w1')?.data.status, undefined);
+      assert.equal(engine.instances.get(alice, 'Worker', 'w1')?.behaviors.Workflow, undefined);
       assert.deepEqual(invoke(engine, wren, 'beat'), { deadline: T0 + 2000 });
     });
   });
@@ -202,7 +202,7 @@ for (const driver of drivers) {
       const [status] = engine.runner.status().schedules;
       assert.equal(status.schedule, 'miss');
       assert.match(String(status.error), /runner may not move Worker w1 from idle to missing: the transition needs permission workers.mark/);
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: false, released: null });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, missed: false });
       assert.equal(statusOf(engine), 'idle');
     });
   });
@@ -256,8 +256,8 @@ for (const driver of drivers) {
     // jobs reads each job's status, holder and count of expiries.
     const jobs = (engine: Engine) =>
       ['j1', 'j2', 'j3'].map((id) => {
-        const data = engine.instances.get(alice, 'Job', id)?.data as { status: string; lease: { holder: string | null; expiries: number } };
-        return [data.status, data.lease.holder, data.lease.expiries];
+        const behaviors = engine.instances.get(alice, 'Job', id)?.behaviors as { Workflow: { status: string }; Lease: { holder?: string; expiries: number } };
+        return [behaviors.Workflow.status, behaviors.Lease.holder, behaviors.Lease.expiries];
       });
 
     test("a miss expires every lease the worker's principal holds on the releaseLeases schemas, through Lease's expireHolder, and no other", () => {
@@ -266,8 +266,8 @@ for (const driver of drivers) {
       assert.equal(engine.runner.runDue().failed, 0);
       assert.equal(statusOf(engine), 'missing');
       assert.deepEqual(jobs(engine), [
-        ['queued', null, 1],
-        ['queued', null, 1],
+        ['queued', undefined, 1],
+        ['queued', undefined, 1],
         ['running', 'otto', 0],
       ]);
       // Each expiry is Lease's expire on the job, with its own event, caused by the sweep.
@@ -294,7 +294,7 @@ for (const driver of drivers) {
       assert.equal(engine.runner.runDue().failed, 0);
       assert.equal(statusOf(engine), 'missing');
       assert.deepEqual(jobs(engine), [
-        ['queued', null, 1],
+        ['queued', undefined, 1],
         ['running', 'wren', 0],
         ['running', 'otto', 0],
       ]);
@@ -303,7 +303,7 @@ for (const driver of drivers) {
       const miss = engine.events
         .read(alice, { schema: 'Worker', instanceId: 'w1', limit: 500 })
         .events.find((event) => (event.change as { operation?: string } | null)?.operation === 'miss');
-      assert.deepEqual((miss?.change as { patch: { presence: unknown } }).patch.presence, { missed: true, released: { Job: ['j1'] } });
+      assert.deepEqual((miss?.change as { patch: { behaviors: { Presence: unknown } } }).patch.behaviors.Presence, { missed: true, released: { Job: ['j1'] } });
       const expiry = engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.at(-1);
       assert.deepEqual((expiry?.change as { params: unknown }).params, { holder: 'wren', notRenewedAfter: T0 + 5000 });
     });
@@ -328,8 +328,8 @@ for (const driver of drivers) {
       engine.runner.runDue();
       assert.equal(presenceOf(engine, 'w2').missed, true);
       assert.deepEqual(jobs(engine), [
-        ['queued', null, 1],
-        ['queued', null, 1],
+        ['queued', undefined, 1],
+        ['queued', undefined, 1],
         ['running', 'otto', 0],
       ]);
     });

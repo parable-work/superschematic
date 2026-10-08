@@ -189,8 +189,12 @@ for (const driver of drivers) {
         engine.storage
           .all(`SELECT target_id, key, hears, crosses FROM engine_references WHERE source_id = ? AND behavior = 'Queue' ORDER BY rowid`, [id])
           .map((row) => ({ ...row }));
-      assert.deepEqual(heard('big1'), [{ target_id: 'p1', key: 'budget /budget/cpu/remaining 10', hears: '/budget/cpu/remaining', crosses: 10 }]);
-      assert.deepEqual(heard('small1'), [{ target_id: 'p1', key: 'budget /budget/cpu/remaining 5', hears: '/budget/cpu/remaining', crosses: 5 }]);
+      assert.deepEqual(heard('big1'), [
+        { target_id: 'p1', key: 'budget /behaviors/Budget/meters/cpu/remaining 10', hears: '/behaviors/Budget/meters/cpu/remaining', crosses: 10 },
+      ]);
+      assert.deepEqual(heard('small1'), [
+        { target_id: 'p1', key: 'budget /behaviors/Budget/meters/cpu/remaining 5', hears: '/behaviors/Budget/meters/cpu/remaining', crosses: 5 },
+      ]);
       // A claimed instance is no candidate, and hears nothing.
       claimNext(engine);
       assert.deepEqual(heard('a1'), []);
@@ -337,7 +341,7 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Job', 'j1', 'link', { name: 'spec', id: 'sp1' });
       assert.deepEqual(
         engine.storage.all(`SELECT key, hears, crosses FROM engine_references WHERE source_id = 'j1' AND behavior = 'Queue'`).map((row) => ({ ...row })),
-        [{ key: 'stale spec', hears: '/revision', crosses: 4 }]
+        [{ key: 'stale spec', hears: '/behaviors/Revisions/revision', crosses: 4 }]
       );
       assert.equal(claimNext(engine)?.id, 'j1');
     });
@@ -353,7 +357,7 @@ for (const driver of drivers) {
         ['Queue', 'Links']
       );
       assert.equal(engine.instances.delete(alice, 'Spec', 'sp1'), true);
-      assert.equal(engine.instances.get(alice, 'Job', 'j1')?.data.links, undefined);
+      assert.deepEqual(engine.instances.get(alice, 'Job', 'j1')?.behaviors.Links, {});
       assert.deepEqual(engine.storage.all(`SELECT key FROM engine_references WHERE source_id = 'j1'`), []);
       assert.equal(claimNext(engine)?.id, 'j1');
     });
@@ -416,7 +420,7 @@ for (const driver of drivers) {
       create(engine, 'j2', { priority: 1 });
       assert.deepEqual(
         engine.storage.all(`SELECT key, hears, crosses FROM engine_references WHERE source_id = 'j1' AND behavior = 'Queue'`).map((row) => ({ ...row })),
-        [{ key: 'stale recipe', hears: '/release', crosses: 2 }]
+        [{ key: 'stale recipe', hears: '/behaviors/Branches/release', crosses: 2 }]
       );
       // The recipe's next release crosses the one j1 pins past it: j1 is refreshed out.
       const from = cursorOf(engine);

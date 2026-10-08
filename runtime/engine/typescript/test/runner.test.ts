@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 function notes(engine: Engine, schema: string, id: string): unknown {
-  return engine.instances.get(alice, schema, id)?.data.notes;
+  return engine.instances.get(alice, schema, id)?.behaviors['test.Ledger']?.notes;
 }
 
 function history(engine: Engine, schema: string, id: string): EngineEvent[] {
@@ -79,7 +79,7 @@ for (const driver of drivers) {
       };
       const created = engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
       assert.deepEqual(seen, []);
-      assert.equal(created.data.notes, undefined);
+      assert.deepEqual(created.behaviors, { 'test.Ledger': {} });
 
       assert.deepEqual(engine.runner.runDue(), { handled: 2, skipped: 0, failed: 0, scheduled: 0 });
       const [create, marked] = history(engine, 'Order', 'o1');
@@ -646,7 +646,9 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Order', 'o1', 'mark', { note: 'kept' });
       engine.instances.delete(alice, 'Order', 'o1');
       engine.runner.runDue();
-      assert.deepEqual(before, [null, { title: 'Desk' }, { title: 'Lamp' }, { title: 'Lamp', notes: ['kept'] }]);
+      // As a read returns it: test.Ledger's entry is there, empty, while it holds no notes.
+      const order = (title: string, notes?: string[]) => ({ data: { title }, behaviors: { 'test.Ledger': notes === undefined ? {} : { notes } } });
+      assert.deepEqual(before, [null, order('Desk'), order('Lamp'), order('Lamp', ['kept'])]);
       assert.deepEqual(counted, [0, 0, 0, 0]);
 
       probe.react = (context) => {

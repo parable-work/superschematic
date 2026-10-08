@@ -90,6 +90,9 @@ type Provisioner struct {
 	// 200ms.
 	PollInterval time.Duration
 
+	// Clock is the time the jobs' schedules read; nil is the system's.
+	Clock Clock
+
 	mu      sync.Mutex
 	console *console
 	running map[string][]*runningServer
@@ -98,6 +101,10 @@ type Provisioner struct {
 	// installed: one `bun install` serves every TypeScript server of every
 	// wave.
 	installed map[string]bool
+
+	// jobs are the jobs each environment's rollout built, which Wait runs
+	// on their schedules (jobs.go).
+	jobs map[string][]*builtJob
 }
 
 var _ registry.Provisioner = (*Provisioner)(nil)
@@ -263,6 +270,9 @@ func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) (
 		}
 		changes = append(changes, registry.PlannedChange{Resource: s.ID, Action: action})
 	}
+	for _, j := range prog.Jobs {
+		changes = append(changes, registry.PlannedChange{Resource: j.ID, Action: "build"})
+	}
 	return changes, nil
 }
 
@@ -292,6 +302,7 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 	var databases []*Database
 	var keyPairs []*KeyPair
 	var servers []*Server
+	var jobs []*Job
 	for _, id := range step.Resources {
 		if c := prog.container(id); c != nil {
 			containers = append(containers, c)
@@ -301,8 +312,8 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 			keyPairs = append(keyPairs, k)
 		} else if s := prog.server(id); s != nil {
 			servers = append(servers, s)
-		} else if prog.job(id) != nil {
-			// A job's entrypoint is not built yet, so stack dev runs none.
+		} else if j := prog.job(id); j != nil {
+			jobs = append(jobs, j)
 		} else {
 			return fmt.Errorf("local: step %s applies %s, which is not in the program", step.Step, id)
 		}
@@ -347,7 +358,12 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 		}
 	}
 	if len(servers) > 0 {
-		return p.startServers(ctx, req, prog, servers)
+		if err := p.startServers(ctx, req, prog, servers); err != nil {
+			return err
+		}
+	}
+	if len(jobs) > 0 {
+		return p.buildJobs(ctx, req, prog, jobs)
 	}
 	return nil
 }
@@ -442,11 +458,24 @@ func (prog *Program) outputs() map[string]map[string]any {
 }
 
 // Wait blocks until ctx is done, and returns nil, or until a server of the
-// environment exits, and returns an error that names it.
+// environment exits, and returns an error that names it. Meanwhile it runs
+// each job the rollout built on its schedule (jobs.go): a job's run that
+// ends, however it ends, never stops the environment. Before it returns,
+// it stops the runs going.
 func (p *Provisioner) Wait(ctx context.Context, req registry.ProvisionRequest) error {
 	if req.Environment == nil {
 		return errors.New("local: no environment")
 	}
+	jobsCtx, stopJobs := context.WithCancel(ctx)
+	scheduled := make(chan struct{})
+	go func() {
+		defer close(scheduled)
+		p.scheduleJobs(jobsCtx, req)
+	}()
+	defer func() {
+		stopJobs()
+		<-scheduled
+	}()
 	p.mu.Lock()
 	servers := slices.Clone(p.running[key(req.Environment)])
 	p.mu.Unlock()
@@ -688,7 +717,11 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 	if req.OutputRoot == "" {
 		return errors.New("local: the request names no output root, where the build wrote each server's entrypoint module")
 	}
-	secrets, err := p.secretsFor(req, servers)
+	envs := make([][]EnvVar, len(servers))
+	for i, s := range servers {
+		envs[i] = s.Env
+	}
+	secrets, err := p.secretsFor(req, envs)
 	if err != nil {
 		return err
 	}
@@ -709,21 +742,9 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		cmd    Command
 	}
 	var builds []built
-	outputs := prog.outputs()
-	keys, err := p.keysFor(req, prog)
+	outputs, err := p.runOutputs(req, prog)
 	if err != nil {
 		return err
-	}
-	for id, key := range keys {
-		private, err := json.Marshal(key)
-		if err != nil {
-			return err
-		}
-		public, err := json.Marshal(key.Public())
-		if err != nil {
-			return err
-		}
-		outputs[id] = map[string]any{"kid": key.Kid, "publicJwk": string(public), "privateJwk": string(private)}
 	}
 	for _, s := range servers {
 		module := filepath.Join(req.OutputRoot, filepath.FromSlash(s.Module))
@@ -814,6 +835,30 @@ func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun stri
 	p.installed[outputRoot] = true
 	p.mu.Unlock()
 	return nil
+}
+
+// runOutputs are the outputs a process's env references resolve against:
+// the program's, and each key pair's, its private key included, read from
+// the environment's state directory, where applying its infrastructure
+// generated them.
+func (p *Provisioner) runOutputs(req registry.ProvisionRequest, prog *Program) (map[string]map[string]any, error) {
+	outputs := prog.outputs()
+	keys, err := p.keysFor(req, prog)
+	if err != nil {
+		return nil, err
+	}
+	for id, key := range keys {
+		private, err := json.Marshal(key)
+		if err != nil {
+			return nil, err
+		}
+		public, err := json.Marshal(key.Public())
+		if err != nil {
+			return nil, err
+		}
+		outputs[id] = map[string]any{"kid": key.Kid, "publicJwk": string(public), "privateJwk": string(private)}
+	}
+	return outputs, nil
 }
 
 // buildEnv is the environment `go build` runs a server module in. Each
@@ -951,12 +996,13 @@ func (p *Provisioner) keysFor(req registry.ProvisionRequest, prog *Program) (map
 	return keys, nil
 }
 
-// secretsFor reads the environment's secrets file when a server reads a
-// secret, and refuses a secret that has no value.
-func (p *Provisioner) secretsFor(req registry.ProvisionRequest, servers []*Server) (map[string]string, error) {
+// secretsFor reads the environment's secrets file when a server or a job
+// reads a secret, given each one's env, and refuses a secret that has no
+// value.
+func (p *Provisioner) secretsFor(req registry.ProvisionRequest, envs [][]EnvVar) (map[string]string, error) {
 	var ids []string
-	for _, s := range servers {
-		for _, v := range s.Env {
+	for _, env := range envs {
+		for _, v := range env {
 			if v.Secret != "" && !slices.Contains(ids, v.Secret) {
 				ids = append(ids, v.Secret)
 			}
@@ -991,13 +1037,25 @@ func (p *Provisioner) secretsFor(req registry.ProvisionRequest, servers []*Serve
 // serverEnv is a server process's whole environment: the variables it
 // inherits, each of its env entries, and PORT.
 func serverEnv(s *Server, secrets, params map[string]string, outputs map[string]map[string]any) ([]string, error) {
+	env, err := processEnviron(s.Env, secrets, params, outputs)
+	if err != nil {
+		return nil, err
+	}
+	return append(env, PortVariable+"="+strconv.Itoa(s.Port)), nil
+}
+
+// processEnviron is the environment of a server or a job process before
+// any variable the platform sets itself: the variables it inherits, and
+// each of its env entries, a secret read from secrets and a value with its
+// references resolved.
+func processEnviron(entries []EnvVar, secrets, params map[string]string, outputs map[string]map[string]any) ([]string, error) {
 	var env []string
 	for _, name := range inheritedVariables {
 		if value, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+value)
 		}
 	}
-	for _, v := range s.Env {
+	for _, v := range entries {
 		if v.Secret != "" {
 			env = append(env, v.Name+"="+secrets[v.Secret])
 			continue
@@ -1008,7 +1066,7 @@ func serverEnv(s *Server, secrets, params map[string]string, outputs map[string]
 		}
 		env = append(env, v.Name+"="+value)
 	}
-	return append(env, PortVariable+"="+strconv.Itoa(s.Port)), nil
+	return env, nil
 }
 
 // resolveValue renders a value as an environment variable's text: a string

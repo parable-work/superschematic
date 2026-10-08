@@ -113,8 +113,11 @@ async function refusal(call: Promise<unknown>): Promise<EngineProblem> {
   return error;
 }
 
-/** A read's data, untyped, for the assertions. */
+/** A read's own fields, untyped, for the assertions. */
 type Data = Record<string, any>;
+
+/** A read's behaviors' fields, by behavior name, untyped, for the assertions. */
+type Behaviors = Record<string, Record<string, any>>;
 
 test('a worker claims the most urgent job, works it and finishes it', async () => {
   const { operator, client, worker } = await start();
@@ -142,23 +145,22 @@ test('a worker claims the most urgent job, works it and finishes it', async () =
   await worker1.stop();
   assert.deepEqual(worked, ['catalog']);
 
-  const catalog = await operator.instances.get<Data>('jobs', 'catalog');
-  assert.deepEqual(catalog.data, {
-    title: 'Reindex the catalog',
-    topic: 'search',
-    priority: 9,
-    result: 'Reindexed 1200 products',
-    status: 'done',
-    lease: { holder: null, token: 2, acquiredAt: null, renewedAt: null, expiresAt: null, active: false, expiries: 0, ended: { reason: 'release', at: 1_000_000 } },
-    budget: { cpuSeconds: { used: 45, reserved: 0, limit: 600, remaining: 555 } },
-    retries: { total: 0, classAttempts: { cancelled: 0, invalid: 0, transient: 0 }, bestScore: null, exhausted: false, stuck: false },
-    blocked: false,
+  const catalog = await operator.instances.get<Data, Behaviors>('jobs', 'catalog');
+  assert.deepEqual(catalog.data, { title: 'Reindex the catalog', topic: 'search', priority: 9, result: 'Reindexed 1200 products' });
+  // Its behaviors' fields sit apart, by behavior: a free lease has no holder, and a job no batch stamped no links.
+  assert.deepEqual(catalog.behaviors, {
+    Workflow: { status: 'done' },
+    Lease: { token: 2, active: false, expiries: 0, ended: { reason: 'release', at: 1_000_000 } },
+    Budget: { meters: { cpuSeconds: { used: 45, reserved: 0, limit: 600, remaining: 555 } } },
+    Retries: { total: 0, classAttempts: { cancelled: 0, invalid: 0, transient: 0 }, exhausted: false, stuck: false },
+    Links: {},
+    Dependencies: { blocked: false },
   });
-  assert.equal((await operator.instances.get<Data>('jobs', 'nightly')).data.status, 'queued');
+  assert.equal((await operator.instances.get<Data, Behaviors>('jobs', 'nightly')).behaviors.Workflow.status, 'queued');
   // The worker beat its worker instance before it claimed.
-  const presence = await operator.instances.get<Data>('workers', 'worker-1');
-  assert.equal(presence.data.status, 'active');
-  assert.equal(presence.data.presence.deadline, 1_015_000);
+  const presence = await operator.instances.get<Data, Behaviors>('workers', 'worker-1');
+  assert.equal(presence.behaviors.Workflow.status, 'active');
+  assert.equal(presence.behaviors.Presence.deadline, 1_015_000);
 
   // Search indexes a job's title and the result its worker reported.
   const hits = await operator.instances.invokeSchema<{ items: Array<{ id: string; field: string }> }>('jobs', 'search', { query: 'products' });
@@ -192,7 +194,7 @@ test('a held job belongs to its holder alone', async () => {
   assert.ok(isVeto(finished, 'Lease', 'held_by_another'), String(finished));
 
   open = true;
-  await until(async () => (await operator.instances.get<Data>('jobs', 'digest')).data.status === 'done', 'the job done');
+  await until(async () => (await operator.instances.get<Data, Behaviors>('jobs', 'digest')).behaviors.Workflow.status === 'done', 'the job done');
 });
 
 test('an operator cancels a running job: the worker hears the directive, stops the handler and fails the job', async () => {
@@ -211,14 +213,15 @@ test('an operator cancels a running job: the worker hears the directive, stops t
   // The failed attempt moves the job to failed, and the worker's release
   // follows in a call of its own: the cancel is over once both are in.
   await until(async () => {
-    const { status, lease } = (await operator.instances.get<Data>('jobs', 'crawl')).data;
-    return status === 'failed' && lease.holder === null;
+    const { Workflow, Lease } = (await operator.instances.get<Data, Behaviors>('jobs', 'crawl')).behaviors;
+    return Workflow.status === 'failed' && Lease.holder === undefined;
   }, 'the cancel');
   assert.ok(stopped !== undefined && !(stopped instanceof LeaseLostError), String(stopped));
-  const crawl = (await operator.instances.get<Data>('jobs', 'crawl')).data;
+  const crawl = await operator.instances.get<Data, Behaviors>('jobs', 'crawl');
+  const { Retries, Lease } = crawl.behaviors;
   assert.deepEqual(
-    [crawl.retries.classAttempts.cancelled, crawl.retries.exhausted, crawl.lease.holder, crawl.lease.ended.reason, crawl.result],
-    [1, true, null, 'release', undefined]
+    [Retries.classAttempts.cancelled, Retries.exhausted, Lease.holder, Lease.ended.reason, crawl.data.result],
+    [1, true, undefined, 'release', undefined]
   );
 });
 
@@ -250,12 +253,12 @@ test('a worker cut off from the engine is missed and loses its job to another, a
   clock.ms += 16_000;
   await client('worker-2-token').instances.invoke('workers', 'worker-2', 'beat');
   engine.runner.runDue();
-  const missing = await operator.instances.get<Data>('workers', 'worker-1');
-  assert.equal(missing.data.status, 'missing');
-  assert.deepEqual(missing.data.presence.released, { jobs: ['crawl'] });
-  const crawl = await operator.instances.get<Data>('jobs', 'crawl');
-  assert.equal(crawl.data.status, 'queued');
-  assert.deepEqual(crawl.data.lease, { holder: null, token: 2, acquiredAt: null, renewedAt: null, expiresAt: null, active: false, expiries: 1, ended: { reason: 'holder', at: 1_016_000 } });
+  const missing = await operator.instances.get<Data, Behaviors>('workers', 'worker-1');
+  assert.equal(missing.behaviors.Workflow.status, 'missing');
+  assert.deepEqual(missing.behaviors.Presence.released, { jobs: ['crawl'] });
+  const crawl = await operator.instances.get<Data, Behaviors>('jobs', 'crawl');
+  assert.equal(crawl.behaviors.Workflow.status, 'queued');
+  assert.deepEqual(crawl.behaviors.Lease, { token: 2, active: false, expiries: 1, ended: { reason: 'holder', at: 1_016_000 } });
 
   // worker-2 claims it again, under a new token.
   let open = false;
@@ -281,18 +284,19 @@ test('a worker cut off from the engine is missed and loses its job to another, a
 
   // The job stays worker-2's, and worker-1 wrote nothing to it.
   open = true;
-  await until(async () => (await operator.instances.get<Data>('jobs', 'crawl')).data.status === 'done', 'worker-2 to finish');
-  const done = (await operator.instances.get<Data>('jobs', 'crawl')).data;
-  assert.deepEqual([done.result, done.budget.cpuSeconds.used], ['Crawled', 0]);
+  await until(async () => (await operator.instances.get<Data, Behaviors>('jobs', 'crawl')).behaviors.Workflow.status === 'done', 'worker-2 to finish');
+  const done = await operator.instances.get<Data, Behaviors>('jobs', 'crawl');
+  assert.deepEqual([done.data.result, done.behaviors.Budget.meters.cpuSeconds.used], ['Crawled', 0]);
 
   // A beat brings worker-1 back.
-  await until(async () => (await operator.instances.get<Data>('workers', 'worker-1')).data.status === 'active', 'worker-1 to beat again');
+  await until(async () => (await operator.instances.get<Data, Behaviors>('workers', 'worker-1')).behaviors.Workflow.status === 'active', 'worker-1 to beat again');
 });
 
 test('a batch runs its steps in order, retries a transient failure, and settles when they finish', async () => {
   const { engine, operator, worker } = await start();
   await operator.instances.create('batches', { title: 'Nightly crawl', topic: 'search' }, { id: 'nightly' });
-  const batch = async (id: string) => (await operator.instances.get<Data>('batches', id)).data;
+  // A batch's fields are all its behaviors': its status, its stamped steps and its rollup.
+  const batch = async (id: string) => (await operator.instances.get<Data, Behaviors>('batches', id)).behaviors;
 
   // The batch's create stamped a job per step, each blocked by the one
   // before, so the worker claims them in order. index fails once, and goes
@@ -307,20 +311,20 @@ test('a batch runs its steps in order, retries a transient failure, and settles 
     return `${job.step} ok`;
   };
   const first = await worker('worker-1', handler, { topic: 'search' });
-  await until(async () => (await batch('nightly')).rollups.steps.done === 3, 'every step done');
+  await until(async () => (await batch('nightly')).Rollups.values.steps.done === 3, 'every step done');
   await first.worker.stop();
   assert.deepEqual(steps, ['fetch', 'index', 'index', 'report']);
 
   // The rollup counts the steps at each read; the runner's Reactions
   // settle the batch once every step succeeded.
   let nightly = await batch('nightly');
-  assert.deepEqual([nightly.status, nightly.rollups], ['running', { steps: { done: 3 } }]);
+  assert.deepEqual([nightly.Workflow.status, nightly.Rollups.values], ['running', { steps: { done: 3 } }]);
   engine.runner.runDue();
   nightly = await batch('nightly');
-  assert.equal(nightly.status, 'done');
-  const index = nightly.blueprint.children.find((child: { key: string }) => child.key === 'index');
-  const indexed = await operator.instances.get<Data>('jobs', index.id);
-  assert.deepEqual(indexed.data.retries.classAttempts, { cancelled: 0, invalid: 0, transient: 1 });
+  assert.equal(nightly.Workflow.status, 'done');
+  const index = nightly.Blueprint.children.find((child: { key: string }) => child.key === 'index');
+  const indexed = await operator.instances.get<Data, Behaviors>('jobs', index.id);
+  assert.deepEqual(indexed.behaviors.Retries.classAttempts, { cancelled: 0, invalid: 0, transient: 1 });
 
   // A step that fails for good fails its batch, and the steps after it are never claimed.
   await operator.instances.create('batches', { title: 'Broken crawl', topic: 'mail' }, { id: 'broken' });
@@ -333,21 +337,21 @@ test('a batch runs its steps in order, retries a transient failure, and settles 
     },
     { topic: 'mail' }
   );
-  await until(async () => (await batch('broken')).rollups.steps.failed === 1, 'the first step failed');
+  await until(async () => (await batch('broken')).Rollups.values.steps.failed === 1, 'the first step failed');
   await new Promise((resolve) => setTimeout(resolve, 100));
   await second.worker.stop();
   assert.deepEqual(failed, ['fetch']);
   engine.runner.runDue();
   const broken = await batch('broken');
-  assert.deepEqual([broken.status, broken.rollups], ['failed', { steps: { failed: 1, queued: 2 } }]);
+  assert.deepEqual([broken.Workflow.status, broken.Rollups.values], ['failed', { steps: { failed: 1, queued: 2 } }]);
 
   // The runner moved the batch, as its own principal, and the event says why.
   const { events } = await operator.events.read({ after: 0, schema: 'batches', behaviors: ['Workflow'] });
   assert.deepEqual(
     events.map((event: EngineEvent) => [event.instanceId, event.actor, event.cause?.behavior, (event.change as { patch: unknown }).patch]),
     [
-      ['nightly', 'runner', 'Reactions', { status: 'done' }],
-      ['broken', 'runner', 'Reactions', { status: 'failed' }],
+      ['nightly', 'runner', 'Reactions', { behaviors: { Workflow: { status: 'done' } } }],
+      ['broken', 'runner', 'Reactions', { behaviors: { Workflow: { status: 'failed' } } }],
     ]
   );
 });

@@ -39,7 +39,7 @@ describe('the describe document', () => {
       plural: 'Tickets',
       titleField: 'title',
       createLabel: 'New ticket',
-      summaryFields: ['status', 'assignee'],
+      summaryFields: ['Workflow.status', 'assignee'],
       states: {
         done: { label: 'Done', tone: 'success' },
         dropped: { label: 'Dropped', tone: 'danger' },
@@ -78,18 +78,18 @@ describe('the describe document', () => {
     }
   });
 
-  test('names a field by its key in an instance, and has no display for a type without one', () => {
+  test("names an own field by its key in an instance, a behavior's by its qualified name, and has no display for a type without one", () => {
     const engine = openTestEngine();
     publish(
       engine,
       tickets((ticket) => {
         (ticket.fields as Array<Record<string, unknown>>)[0].jsonTag = 'headline';
-        (ticket.display as Record<string, unknown>).summaryFields = ['title', 'status'];
+        (ticket.display as Record<string, unknown>).summaryFields = ['title', 'Workflow.status'];
       })
     );
     const described = engine.tools.describe(alice, 'tickets');
     assert.equal(described.display?.titleField, 'headline');
-    assert.deepEqual(described.display?.summaryFields, ['headline', 'status']);
+    assert.deepEqual(described.display?.summaryFields, ['headline', 'Workflow.status']);
     assert.deepEqual(described.fields[0], { name: 'headline', title: 'Title', icon: 'text' });
 
     publish(engine, schemaDocument('Plain', [{ name: 'title', typeRef: { name: 'string' } }]));
@@ -121,8 +121,13 @@ describe('define holds a display to its type', () => {
       [{ path, message: 'type Ticket: @display titleField "nope" is not a field of the type (fields: title, assignee, body)' }]
     );
     assert.deepEqual(
+      refusals(tickets((ticket) => ((ticket.display as Record<string, unknown>).titleField = 'Workflow.status'))),
+      [{ path, message: `type Ticket: @display titleField "Workflow.status" is a field behavior Workflow adds; a title is one of the type's own fields (fields: title, assignee, body)` }]
+    );
+    // A bare status names an own field, and Ticket has none.
+    assert.deepEqual(
       refusals(tickets((ticket) => ((ticket.display as Record<string, unknown>).titleField = 'status'))),
-      [{ path, message: `type Ticket: @display titleField "status" is a field behavior Workflow adds; a title is one of the type's own fields (fields: title, assignee, body)` }]
+      [{ path, message: 'type Ticket: @display titleField "status" is not a field of the type (fields: title, assignee, body)' }]
     );
     const typed = (typeRef: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
       tickets((ticket) => {
@@ -154,12 +159,18 @@ describe('define holds a display to its type', () => {
     engine.schemas.define(alice, typed({ name: 'Text.Markdown' }));
   });
 
-  test("its summary fields are the type's own fields or its behaviors'", () => {
+  test("its summary fields are the type's own fields or its behaviors', by qualified name", () => {
     assert.deepEqual(
-      refusals(tickets((ticket) => ((ticket.display as Record<string, unknown>).summaryFields = ['status', 'commentCount', 'ghost']))),
+      refusals(tickets((ticket) => ((ticket.display as Record<string, unknown>).summaryFields = ['Workflow.status', 'Comments.commentCount', 'status', 'ghost']))),
       [
+        // A behavior's field by its name alone is no own field of the type.
         {
           path: '/types/Ticket/display/summaryFields/2',
+          message:
+            'type Ticket: @display summaryFields lists "status", which is not a field of the type or of its behaviors (fields: title, assignee, body); a behavior\'s field is named by its qualified name: Workflow.status',
+        },
+        {
+          path: '/types/Ticket/display/summaryFields/3',
           message: 'type Ticket: @display summaryFields lists "ghost", which is not a field of the type or of its behaviors (fields: title, assignee, body)',
         },
       ]

@@ -127,7 +127,7 @@ export const reader = defineBehavior<{ partnerSchema?: string }>({
   operations: {
     peek(context, params) {
       const found = context.instances.get(params.schema as string, params.id as string, params.fields === undefined ? {} : { fields: params.fields as string[] });
-      return found === undefined ? null : found.data;
+      return found === undefined ? null : { data: found.data, behaviors: found.behaviors };
     },
     peekMany(context, params) {
       const found = context.instances.getMany(
@@ -135,7 +135,7 @@ export const reader = defineBehavior<{ partnerSchema?: string }>({
         params.ids as string[],
         params.fields === undefined ? {} : { fields: params.fields as string[] }
       );
-      return Object.fromEntries([...found].map(([id, record]) => [id, record.data]));
+      return Object.fromEntries([...found].map(([id, record]) => [id, { data: record.data, behaviors: record.behaviors }]));
     },
     configOf(context, params) {
       return context.schemas.config(params.schema as string, params.behavior as string) ?? null;
@@ -184,7 +184,7 @@ export const reader = defineBehavior<{ partnerSchema?: string }>({
       if (typeof partner !== 'string') {
         return undefined;
       }
-      return view.instances.get(view.config.partnerSchema ?? view.schema, partner, { fields: ['echo'] })?.data.title ?? null;
+      return view.instances.get(view.config.partnerSchema ?? view.schema, partner, { fields: ['test.Reader.echo'] })?.data.title ?? null;
     },
   },
 });

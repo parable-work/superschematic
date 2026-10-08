@@ -177,7 +177,7 @@ import { behavior, display, docs } from "@superschematic/schema";
   plural: "Tickets",
   titleField: "title",
   createLabel: "New ticket",
-  summaryFields: ["status", "assignee"],
+  summaryFields: ["Workflow.status", "assignee"],
   states: {
     todo: { label: "To do", tone: "muted" },
     implementing: { label: "Implement", activeForm: "Implementing", tone: "active" },
@@ -201,7 +201,7 @@ export abstract class Ticket {
 | `noun`, `plural` | what to call one instance and several; non-blank |
 | `titleField` | the field whose value is an instance's title: one of the type's own fields, holding a single text value (`string`, or a scalar whose values are strings, such as `Identity.Name`; not a list, a map, a number, an enum or a JSON scalar), neither `Secret` nor `@uiHidden` |
 | `createLabel` | what a button that creates an instance says; non-blank |
-| `summaryFields` | the fields that summarize an instance in a list, in order, each once: the type's own fields, or fields its behaviors add (`Workflow`'s `status`), neither secret nor hidden |
+| `summaryFields` | the fields that summarize an instance in a list, in order, each once: the type's own fields, by name, neither secret nor hidden, or fields its behaviors add, by qualified name, the behavior's name, a dot and the field's (`Workflow.status`), as a read returns them under the behavior's name |
 | `states` | a label per `Workflow` state: `label`, `activeForm` (the present-progressive form a UI shows while an instance is in the state, "Implementing") and `tone`, at least one of the three |
 | `transitions` | a label per `Workflow` transition, by the state it leaves, then the state it enters |
 

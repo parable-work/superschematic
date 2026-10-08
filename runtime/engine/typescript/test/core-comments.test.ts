@@ -42,7 +42,7 @@ for (const driver of drivers) {
     test('comment adds a comment or a reply, numbered per instance, and commentCount counts them', () => {
       let now = 1000;
       const engine = published({ clock: () => now });
-      assert.equal(engine.instances.get(alice, 'Review', 'r1')?.data.commentCount, 0);
+      assert.equal(engine.instances.get(alice, 'Review', 'r1')?.behaviors.Comments.commentCount, 0);
       assert.deepEqual(engine.instances.invoke(alice, 'Review', 'r1', 'comment', { body: 'Looks right.' }), {
         id: 1,
         body: 'Looks right.',
@@ -58,9 +58,10 @@ for (const driver of drivers) {
         createdAt: 2000,
       });
       assert.equal((engine.instances.invoke(alice, 'Review', 'r2', 'comment', { body: 'First on r2.' }) as { id: number }).id, 1);
-      assert.deepEqual(engine.instances.get(alice, 'Review', 'r1')?.data, { title: 'Q3 plan', commentCount: 2 });
-      assert.deepEqual(engine.instances.get(alice, 'Review', 'r2')?.data, { title: 'Q4 plan', commentCount: 1 });
-      assert.deepEqual(engine.instances.list(alice, 'Review').items.map((item) => item.data.commentCount), [2, 1]);
+      const r1 = engine.instances.get(alice, 'Review', 'r1');
+      assert.deepEqual([r1?.data, r1?.behaviors], [{ title: 'Q3 plan' }, { Comments: { commentCount: 2 } }]);
+      assert.deepEqual(engine.instances.get(alice, 'Review', 'r2')?.behaviors, { Comments: { commentCount: 1 } });
+      assert.deepEqual(engine.instances.list(alice, 'Review').items.map((item) => item.behaviors.Comments.commentCount), [2, 1]);
     });
 
     test('a reply names a comment of the same instance, and a body has text', () => {
@@ -72,7 +73,7 @@ for (const driver of drivers) {
       for (const params of [{ body: '' }, { body: '  \n ' }, {}, { body: 'x', parentId: 1 }, { body: 'x', replyTo: 0 }]) {
         thrown(() => engine.instances.invoke(alice, 'Review', 'r1', 'comment', params), OperationParamsError);
       }
-      assert.equal(engine.instances.get(alice, 'Review', 'r1')?.data.commentCount, 2);
+      assert.equal(engine.instances.get(alice, 'Review', 'r1')?.behaviors.Comments.commentCount, 2);
     });
 
     test('listComments pages oldest first and reads through no write', () => {
@@ -126,11 +127,11 @@ for (const driver of drivers) {
         behavior: 'Comments',
         operation: 'comment',
         params: { body: 'Hello.' },
-        patch: { commentCount: 1 },
+        patch: { behaviors: { Comments: { commentCount: 1 } } },
       });
       assert.equal(engine.instances.delete(alice, 'Review', 'r1'), true);
       engine.instances.create(alice, 'Review', { title: 'Q3 plan, again' }, { id: 'r1' });
-      assert.equal(engine.instances.get(alice, 'Review', 'r1')?.data.commentCount, 0);
+      assert.equal(engine.instances.get(alice, 'Review', 'r1')?.behaviors.Comments.commentCount, 0);
       assert.deepEqual(engine.instances.invoke(alice, 'Review', 'r1', 'listComments'), { items: [], next: null });
       assert.equal((engine.instances.invoke(alice, 'Review', 'r1', 'comment', { body: 'Fresh.' }) as { id: number }).id, 1);
     });
@@ -142,7 +143,8 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Review', { title: 'Q3 plan' }, { id: 'r1' });
       engine.schemas.define(alice, reviewSchema());
       assert.equal(engine.schemas.publish(alice, 'Review').version, 2);
-      assert.deepEqual(engine.instances.get(alice, 'Review', 'r1')?.data, { title: 'Q3 plan', commentCount: 0 });
+      const joined = engine.instances.get(alice, 'Review', 'r1');
+      assert.deepEqual([joined?.data, joined?.behaviors], [{ title: 'Q3 plan' }, { Comments: { commentCount: 0 } }]);
       engine.instances.invoke(alice, 'Review', 'r1', 'comment', { body: 'Late, but here.' });
 
       const removed = thrown(() => engine.schemas.define(alice, reviewSchema([])), IncompatibleChangeError);

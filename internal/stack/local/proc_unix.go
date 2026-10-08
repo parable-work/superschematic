@@ -4,6 +4,7 @@ package local
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -20,6 +21,16 @@ func terminate(cmd *exec.Cmd) error { return signalGroup(cmd, syscall.SIGTERM) }
 
 // kill sends SIGKILL to the process's group.
 func kill(cmd *exec.Cmd) error { return signalGroup(cmd, syscall.SIGKILL) }
+
+// tryLock takes an exclusive lock on f without waiting, and reports
+// whether it took it: another process holds it otherwise.
+func tryLock(f *os.File) (bool, error) {
+	err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return false, nil
+	}
+	return err == nil, err
+}
 
 func signalGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 	if cmd.Process == nil {

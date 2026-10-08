@@ -1,0 +1,209 @@
+{
+  "token": "gcp:cloudscheduler/job:Job",
+  "terraform": {
+    "type": "google_cloud_scheduler_job",
+    "renames": {
+      "appEngineHttpTarget": "app_engine_http_target",
+      "appEngineHttpTarget.appEngineRouting": "app_engine_routing",
+      "appEngineHttpTarget.httpMethod": "http_method",
+      "appEngineHttpTarget.relativeUri": "relative_uri",
+      "attemptDeadline": "attempt_deadline",
+      "deletionPolicy": "deletion_policy",
+      "httpTarget": "http_target",
+      "httpTarget.httpMethod": "http_method",
+      "httpTarget.oauthToken": "oauth_token",
+      "httpTarget.oauthToken.serviceAccountEmail": "service_account_email",
+      "httpTarget.oidcToken": "oidc_token",
+      "httpTarget.oidcToken.serviceAccountEmail": "service_account_email",
+      "pubsubTarget": "pubsub_target",
+      "pubsubTarget.topicName": "topic_name",
+      "retryConfig": "retry_config",
+      "retryConfig.maxBackoffDuration": "max_backoff_duration",
+      "retryConfig.maxDoublings": "max_doublings",
+      "retryConfig.maxRetryDuration": "max_retry_duration",
+      "retryConfig.minBackoffDuration": "min_backoff_duration",
+      "retryConfig.retryCount": "retry_count",
+      "timeZone": "time_zone"
+    }
+  },
+  "inputProperties": {
+    "appEngineHttpTarget": {
+      "$ref": "#/types/gcp:cloudscheduler/JobAppEngineHttpTarget:JobAppEngineHttpTarget"
+    },
+    "attemptDeadline": {
+      "type": "string"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "httpTarget": {
+      "$ref": "#/types/gcp:cloudscheduler/JobHttpTarget:JobHttpTarget"
+    },
+    "name": {
+      "type": "string"
+    },
+    "paused": {
+      "type": "boolean"
+    },
+    "project": {
+      "type": "string"
+    },
+    "pubsubTarget": {
+      "$ref": "#/types/gcp:cloudscheduler/JobPubsubTarget:JobPubsubTarget"
+    },
+    "region": {
+      "type": "string"
+    },
+    "retryConfig": {
+      "$ref": "#/types/gcp:cloudscheduler/JobRetryConfig:JobRetryConfig"
+    },
+    "schedule": {
+      "type": "string"
+    },
+    "timeZone": {
+      "type": "string"
+    }
+  },
+  "types": {
+    "gcp:cloudscheduler/JobAppEngineHttpTarget:JobAppEngineHttpTarget": {
+      "type": "object",
+      "properties": {
+        "appEngineRouting": {
+          "$ref": "#/types/gcp:cloudscheduler/JobAppEngineHttpTargetAppEngineRouting:JobAppEngineHttpTargetAppEngineRouting"
+        },
+        "body": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "httpMethod": {
+          "type": "string"
+        },
+        "relativeUri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relativeUri"
+      ]
+    },
+    "gcp:cloudscheduler/JobAppEngineHttpTargetAppEngineRouting:JobAppEngineHttpTargetAppEngineRouting": {
+      "type": "object",
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudscheduler/JobHttpTarget:JobHttpTarget": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "httpMethod": {
+          "type": "string"
+        },
+        "oauthToken": {
+          "$ref": "#/types/gcp:cloudscheduler/JobHttpTargetOauthToken:JobHttpTargetOauthToken"
+        },
+        "oidcToken": {
+          "$ref": "#/types/gcp:cloudscheduler/JobHttpTargetOidcToken:JobHttpTargetOidcToken"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri"
+      ]
+    },
+    "gcp:cloudscheduler/JobHttpTargetOauthToken:JobHttpTargetOauthToken": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "serviceAccountEmail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "serviceAccountEmail"
+      ]
+    },
+    "gcp:cloudscheduler/JobHttpTargetOidcToken:JobHttpTargetOidcToken": {
+      "type": "object",
+      "properties": {
+        "audience": {
+          "type": "string"
+        },
+        "serviceAccountEmail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "serviceAccountEmail"
+      ]
+    },
+    "gcp:cloudscheduler/JobPubsubTarget:JobPubsubTarget": {
+      "type": "object",
+      "properties": {
+        "attributes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "data": {
+          "type": "string"
+        },
+        "topicName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topicName"
+      ]
+    },
+    "gcp:cloudscheduler/JobRetryConfig:JobRetryConfig": {
+      "type": "object",
+      "properties": {
+        "maxBackoffDuration": {
+          "type": "string"
+        },
+        "maxDoublings": {
+          "type": "integer"
+        },
+        "maxRetryDuration": {
+          "type": "string"
+        },
+        "minBackoffDuration": {
+          "type": "string"
+        },
+        "retryCount": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

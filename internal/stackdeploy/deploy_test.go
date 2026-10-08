@@ -9,18 +9,21 @@ import (
 
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
+	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
 // staging is Staging's deploy order on the fake target, as the call log
-// records it: infrastructure, the expand phase, the servers callee first,
-// the contract phase, exposure.
+// records it: infrastructure, the expand phase, the servers and shop-orders'
+// job callee first, the contract phase, exposure.
 var staging = []string{
-	"render 14 nodes",
+	"render 20 nodes",
 	"apply infrastructure: Orders.account, Orders.reads.PaymentsSecrets.STRIPE_KEY, Orders.sql.shop-db, secret.PaymentsSecrets.STRIPE_KEY, " +
-		"shop-api.account, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.sql.shop-db, shop-db.database.shop-db, shop-db.instance",
+		"shop-api.account, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.sql.shop-db, shop-db.database.shop-db, shop-db.instance, " +
+		"shop-orders-ship-orders.account, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-ship-orders.sql.shop-db",
 	"migrate expand shop-db: shop-db",
-	"apply rollout 1: Orders.invokes.shop-api, shop-api.service",
-	"apply rollout 2: Orders.service",
+	"apply rollout 1: Orders.invokes.shop-api, shop-api.service, shop-orders-ship-orders.invokes.shop-api",
+	"apply rollout 2: Orders.service, shop-orders-ship-orders.job, shop-orders-ship-orders.schedule",
 	"migrate contract shop-db: shop-db",
 	"apply exposure: dns.shop-api.1, shop-api.route",
 }
@@ -272,7 +275,7 @@ func TestDeploySecrets(t *testing.T) {
 	if _, err := stackdeploy.Deploy(ctx, o); err != nil {
 		t.Fatal(err)
 	}
-	if len(term.prompts) != 1 || term.prompts[0] != "Value of PaymentsSecrets.STRIPE_KEY (read by Orders, shop-api): " {
+	if len(term.prompts) != 1 || term.prompts[0] != "Value of PaymentsSecrets.STRIPE_KEY (read by Orders, shop-api, shop-orders-ship-orders): " {
 		t.Errorf("prompts %q", term.prompts)
 	}
 	if got, _ := f.ext.Secrets.Get(ctx, env, "PaymentsSecrets.STRIPE_KEY"); string(got) != "sk_live_typed" {
@@ -298,7 +301,7 @@ func TestDeployRefusals(t *testing.T) {
 		want  string
 	}{
 		{"missing image", true, func(o *stackdeploy.DeployOptions) { delete(o.Images, "Orders") }, "no image for server Orders: the manifest records none"},
-		{"image of no server", false, func(o *stackdeploy.DeployOptions) { o.Images["shop-db"] = "shop-db@" + digest(1) }, "--image names shop-db, which is not a server"},
+		{"image of no server", false, func(o *stackdeploy.DeployOptions) { o.Images["shop-db"] = "shop-db@" + digest(1) }, "--image names shop-db, which is no server or job"},
 		{"image of another repository", false, func(o *stackdeploy.DeployOptions) { o.Images["Orders"] = "elsewhere/orders@" + digest(1) }, "no property of its nodes holds the image repository elsewhere/orders"},
 		{"unacknowledged hazard", false, destructive, "destructive:table/product/column/name"},
 		{"plans not the ones shown", false, func(o *stackdeploy.DeployOptions) { o.Expected = map[string]string{"shop-db": "abc"} }, "not the expected abc"},
@@ -337,10 +340,10 @@ func TestPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Changes) != 14 || len(out.Databases) != 1 || out.Databases[0].ExpandSteps == 0 {
+	if len(out.Changes) != 20 || len(out.Databases) != 1 || out.Databases[0].ExpandSteps == 0 {
 		t.Errorf("plan: %d changes, databases %+v", len(out.Changes), out.Databases)
 	}
-	if !slices.Equal(out.Unpinned, []string{"Orders", "shop-api"}) || !slices.Equal(out.MissingSecrets, []string{"PaymentsSecrets.STRIPE_KEY"}) {
+	if !slices.Equal(out.Unpinned, []string{"Orders", "shop-api", "shop-orders-ship-orders"}) || !slices.Equal(out.MissingSecrets, []string{"PaymentsSecrets.STRIPE_KEY"}) {
 		t.Errorf("unpinned %v, missing secrets %v", out.Unpinned, out.MissingSecrets)
 	}
 	if got := out.Expected(); got["shop-db"] != out.Databases[0].Hash {
@@ -411,4 +414,49 @@ func maps(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// TestRunJob runs a deployed job on demand through the target's job
+// runner, with the image the last deploy rolled out, and covers its
+// refusals: a run never deployed, a name that is no job, and a target that
+// runs no job on demand (D52).
+func TestRunJob(t *testing.T) {
+	f := newFixture(t)
+	env := f.env(t, "Staging")
+	f.ready(t, env)
+	ctx := context.Background()
+	run := func(job string) error {
+		return stackdeploy.RunJob(ctx, stackdeploy.RunJobOptions{Options: f.options(t, env, nil), Job: job})
+	}
+	if err := run(stacktest.ShipOrdersJob); err == nil || !strings.Contains(err.Error(), "Staging was never deployed; deploy it, then run job "+stacktest.ShipOrdersJob) {
+		t.Errorf("RunJob before a deploy = %v", err)
+	}
+	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, &planner{to: 1}, images(1))); err != nil {
+		t.Fatal(err)
+	}
+	from := len(f.calls(0))
+	if err := run(stacktest.ShipOrdersJob); err != nil {
+		t.Fatal(err)
+	}
+	if calls := f.calls(from); !slices.Equal(calls, []string{"run job " + stacktest.ShipOrdersJob + ": " + images(1)[stacktest.ShipOrdersJob]}) {
+		t.Errorf("calls %v", calls)
+	}
+	f.ext.Jobs.Fail = map[string]error{stacktest.ShipOrdersJob: errors.New("the run failed")}
+	if err := run(stacktest.ShipOrdersJob); err == nil || err.Error() != "the run failed" {
+		t.Errorf("RunJob of a failing run = %v", err)
+	}
+	if err := run("shop-api"); err == nil || !strings.Contains(err.Error(), "environment Staging has no job shop-api (its jobs: "+stacktest.ShipOrdersJob+")") {
+		t.Errorf("RunJob of a server = %v", err)
+	}
+
+	none := &stacktest.Extension{NoJobRunner: true}
+	reg, err := registry.Assemble(registry.DefaultNaming(), none)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := f.options(t, env, nil)
+	o.Registry = reg
+	if err := stackdeploy.RunJob(ctx, stackdeploy.RunJobOptions{Options: o, Job: stacktest.ShipOrdersJob}); err == nil || !strings.Contains(err.Error(), "target fake runs no job on demand, so `stack run` does not run job "+stacktest.ShipOrdersJob+" of environment Staging") {
+		t.Errorf("RunJob on a target with no job runner = %v", err)
+	}
 }

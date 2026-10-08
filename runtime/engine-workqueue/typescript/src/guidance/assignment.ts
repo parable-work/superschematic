@@ -50,7 +50,7 @@ export function assignmentGuidance(config: AssignmentConfig, target: DescribeTar
         ],
       },
       list: {
-        useWhen: `where: { assignee: <subject> } lists the ${target.type} instances assigned to a principal, assignee: null the unassigned ones, and [null, <subject>] both.`,
+        useWhen: `where: { "Assignment.assignee": <subject> } lists the ${target.type} instances assigned to a principal, "Assignment.assignee": null the unassigned ones, and [null, <subject>] both.`,
       },
       ...(names.has('acquire') ? { acquire: TAKEN } : {}),
       ...(names.has('claim') ? { claim: TAKEN } : {}),

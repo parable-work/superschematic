@@ -41,8 +41,8 @@ engine's release under another name: Lease, which a type may compose
 beside Branches, has release, and a type's behaviors share one namespace
 of operation names.
 
-One read-only field, release, holds the number of the instance's latest
-release, the release pointer's version, read from the behavior's own
+One read-only field, release, which a read returns as Branches.release,
+holds the number of the instance's latest release, the release pointer's version, read from the behavior's own
 table at each read; it is absent before the first release. So a
 releaseCommit's event carries it, and Links pins a release, and reports
 the latest, through it, as it pins a revision through Revisions'

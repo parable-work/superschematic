@@ -185,9 +185,9 @@ const seeds: Record<number, Seed> = {
       engine.schemas.publish(alice, 'Item');
       engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
       engine.instances.invoke(alice, 'Item', 'i1', 'hold', { schema: 'Order', id: 'o1' });
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data.held, ['Order/o1/']);
+      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Holder']?.held, ['Order/o1/']);
       assert.equal(engine.instances.delete(alice, 'Order', 'o1'), true);
-      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.held, undefined);
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Holder']?.held, undefined);
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'notes'), ['delete Order o1']);
     },
   },

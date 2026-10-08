@@ -54,6 +54,7 @@ start with no blockers, and cannot be removed from one: its edges and
 references would stay behind.
 */
 
+import { WORKFLOW_STATUS, behaviorField } from '../fields.js';
 import { BehaviorVetoError, CreateParamsError, OperationParamsError } from '../../errors.js';
 import type { Row } from '../../storage/driver.js';
 import { BehaviorConfigError, defineBehavior, type InstanceContext, type InstanceView } from '../behavior.js';
@@ -132,8 +133,9 @@ function blockers(view: InstanceView<DependenciesConfig>, list: readonly Edge[])
   for (const [schema, ids] of bySchema) {
     const flow = view.schemas.config(schema, 'Workflow') as WorkflowStates | undefined;
     for (let start = 0; start < ids.length; start += BATCH) {
-      for (const [id, record] of view.instances.getMany(schema, ids.slice(start, start + BATCH), { fields: ['status'] })) {
-        const status = typeof record.data.status === 'string' ? record.data.status : undefined;
+      for (const [id, record] of view.instances.getMany(schema, ids.slice(start, start + BATCH), { fields: [WORKFLOW_STATUS] })) {
+        const held = behaviorField(record, 'Workflow', 'status');
+        const status = typeof held === 'string' ? held : undefined;
         const outcome = flow !== undefined && status !== undefined ? stateOutcome(flow, status) : undefined;
         const finished = outcome !== undefined && view.config.satisfiedBy.includes(outcome);
         found.set(`${schema}\u0000${id}`, { schema, id, ...(status === undefined ? {} : { status }), open: !finished });
@@ -217,7 +219,7 @@ function blockerParams(context: InstanceContext<DependenciesConfig>, params: Rea
 // create, before Workflow's initialize when the type lists it later, the
 // initial state its Workflow config gives.
 function statusOf(context: InstanceContext<DependenciesConfig>): string | undefined {
-  const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
+  const status = behaviorField(context.instances.get(context.schema, context.id, { fields: [WORKFLOW_STATUS] }), 'Workflow', 'status');
   if (typeof status === 'string') {
     return status;
   }
