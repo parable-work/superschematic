@@ -159,6 +159,10 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		if err := {{ .JSONDecodeCall "rawValue" (printf "&result.%s" (toGoName .Name)) }}; err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
+		{{- else if .IsGeoPointList }}
+		if err := {{ .GeoPointListDecodeCall "rawValue" (printf "&result.%s" (toGoName .Name)) }}; err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
 		{{- else if .NativeList }}
 		if err := unmarshalJSONListFieldValue(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}, 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
@@ -218,6 +222,8 @@ pgtype.Point{P: pgtype.Vec2{X: {{ . }}.Lon, Y: {{ . }}.Lat}, Valid: true}
 var temp{{ toGoName $member.Field.Name }} []byte
 {{- else if $member.Field.ScansElementPointers }}
 var temp{{ toGoName $member.Field.Name }} []*{{ $member.Field.GoType }}
+{{- else if $member.Field.IsGeoPointList }}
+var temp{{ toGoName $member.Field.Name }} []pgtype.Point
 {{- else if $member.Field.IsGeoPoint }}
 var temp{{ toGoName $member.Field.Name }} pgtype.Point
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
@@ -253,6 +259,10 @@ if err := {{ $member.Field.GenericJSONNullCheck (printf "result.%s" (toGoName $m
 }
 {{- else if $member.Field.ScansElementPointers }}
 if err := copyListElements({{ printf "%q" $member.Field.Name }}, temp{{ toGoName $member.Field.Name }}, &result.{{ toGoName $member.Field.Name }}); err != nil {
+	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
+}
+{{- else if $member.Field.IsGeoPointList }}
+if err := {{ $member.Field.GeoPointListCopy (printf "temp%s" (toGoName $member.Field.Name)) (printf "&result.%s" (toGoName $member.Field.Name)) }}; err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
 {{- else if $member.Field.IsGeoPoint }}
@@ -321,6 +331,10 @@ if err := {{ $member.Field.GenericJSONNullCheck (printf "entity.%s" (toGoName $m
 if err := copyListElements({{ printf "%q" $member.Field.Name }}, temp{{ toGoName $member.Field.Name }}, &entity.{{ toGoName $member.Field.Name }}); err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
+{{- else if $member.Field.IsGeoPointList }}
+if err := {{ $member.Field.GeoPointListCopy (printf "temp%s" (toGoName $member.Field.Name)) (printf "&entity.%s" (toGoName $member.Field.Name)) }}; err != nil {
+	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
+}
 {{- else if $member.Field.IsGeoPoint }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	// A POINT is (x, y): x is the longitude and y the latitude.
@@ -367,6 +381,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.ScansElementPointers }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.IsGeoPointList }}
+&temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.IsGeoPoint }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
@@ -386,6 +402,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.ScansElementPointers }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.IsGeoPointList }}
+&temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.IsGeoPoint }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
@@ -403,6 +421,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 var temp{{ toGoName $field.Name }} []byte
 {{- else if $field.ScansElementPointers }}
 var temp{{ toGoName $field.Name }} []*{{ $field.GoType }}
+{{- else if $field.IsGeoPointList }}
+var temp{{ toGoName $field.Name }} []pgtype.Point
 {{- else if $field.IsGeoPoint }}
 var temp{{ toGoName $field.Name }} pgtype.Point
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
@@ -431,6 +451,8 @@ case "{{ $field.DBName }}":
 	{{- if $field.IsJSONField }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	{{- else if $field.ScansElementPointers }}
+	scanDest[i] = &temp{{ toGoName $field.Name }}
+	{{- else if $field.IsGeoPointList }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	{{- else if $field.IsGeoPoint }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
@@ -469,6 +491,10 @@ if err := {{ $field.GenericJSONNullCheck (printf "result.%s" (toGoName $field.Na
 }
 {{- else if $field.ScansElementPointers }}
 if err := copyListElements({{ printf "%q" $field.Name }}, temp{{ toGoName $field.Name }}, &result.{{ toGoName $field.Name }}); err != nil {
+	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
+}
+{{- else if $field.IsGeoPointList }}
+if err := {{ $field.GeoPointListCopy (printf "temp%s" (toGoName $field.Name)) (printf "&result.%s" (toGoName $field.Name)) }}; err != nil {
 	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
 }
 {{- else if $field.IsGeoPoint }}
@@ -2053,6 +2079,8 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	values = append(values, time.Time(input.{{ toGoName .Name }}))
 	{{- else if .IsGeoPoint }}
 	values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
+	{{- else if .IsGeoPointList }}
+	values = append(values, {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }})
 	{{- else if .EnumDefault }}
 	// An unset enum takes its schema default; "" is never a member.
 	if input.{{ toGoName .Name }} == "" {
@@ -2090,6 +2118,8 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 			{{- end }}
 			{{- else if .IsGeoPoint }}
 			values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
+			{{- else if .IsGeoPointList }}
+			values = append(values, {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }})
 			{{- else if .DerefValue }}
 			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
 			values = append(values, *input.{{ toGoName .Name }})
@@ -2257,6 +2287,8 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 			cell.value = time.Time(input.{{ toGoName .Name }})
 			{{- else if .IsGeoPoint }}
 			cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
+			{{- else if .IsGeoPointList }}
+			cell.value = {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }}
 			{{- else if .EnumDefault }}
 			// An unset enum takes its schema default; "" is never a member.
 			cell.value = input.{{ toGoName .Name }}
@@ -2293,6 +2325,8 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 				{{- end }}
 				{{- else if .IsGeoPoint }}
 				cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
+				{{- else if .IsGeoPointList }}
+				cell.value = {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }}
 				{{- else if .DerefValue }}
 				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
 				cell.value = *input.{{ toGoName .Name }}
@@ -2483,6 +2517,8 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
 		{{- else if .IsGeoPoint }}
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
+		{{- else if .IsGeoPointList }}
+		values = append(values, {{ .GeoPointListValue (printf "*update.%s" (toGoName .Name)) }})
 		{{- else }}
 		values = append(values, *update.{{ toGoName .Name }})
 		{{- end }}
@@ -2661,6 +2697,8 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
 		{{- else if .IsGeoPoint }}
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
+		{{- else if .IsGeoPointList }}
+		values = append(values, {{ .GeoPointListValue (printf "*update.%s" (toGoName .Name)) }})
 		{{- else }}
 		values = append(values, *update.{{ toGoName .Name }})
 		{{- end }}

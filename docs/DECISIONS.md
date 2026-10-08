@@ -4058,3 +4058,33 @@ and a `POINT` column's generated filter is the string filter, whose
 equality Postgres cannot evaluate for a point.
 
 The rule is reversible until the first release.
+
+### D14, amended: the Go ORM reads and writes a list of locations, and a location filters on IS NULL
+
+The amendment that made `Geo.Location` a {lat, lon} object left two gaps
+in the Go ORM. A list of locations, which sqlgen stores as `POINT[]`, was
+handed to pgx and scanned as a `[]GeoLocation`, which fails, and its
+history decoder read the column's JSON list of `"(x,y)"` texts as
+locations. A single location's filter was `StringFilter`, whose `Eq`, `In`
+and `ILike` Postgres cannot evaluate: a point has no `=` and no `ILIKE`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A list of a scalar stored as `POINT` (`Field.IsGeoPointList`) goes through a `[]pgtype.Point` as a single one goes through a `pgtype.Point`. CreateOne, CreateMany, UpdateOne and UpdateMany write each location as `(lon, lat)`; every scan path reads a `[]pgtype.Point` and converts it, refusing a NULL element at `field[i]` as any native list does; the versioned history decoder reads the JSON list of `"(x,y)"` texts `to_jsonb` writes and refuses a null element. A nil list stays nil, which pgx writes as NULL, and an empty one is an empty `POINT[]`. `utils.go` holds the three conversions once per element type, named after it (`geoLocationPoints`, `copyGeoLocationPoints`, `unmarshalGeoLocationPoints`). | Scanning through `[]*pgtype.Point` and `copyListElements`, which still needs a conversion per element. Inlining the loops at each write and scan site, about ten copies per field. |
+| A single location's filter is `GeoPointFilter`, which has `IsNull` only: `IS NULL` or `IS NOT NULL`. It is the one predicate on a point that needs no choice of geometry, and it is what an optional location is filtered on. Every ORM declares the type, as it does the other filter types. A caller that set `Eq`, `In` or `ILike` on a location no longer compiles; the query it built failed in Postgres. | No filter, which leaves an optional location unfilterable on presence. `Eq` and `In` through `~=`, which Postgres evaluates within 1e-6 on a plane in raw degrees: an exact-coordinate match is rarely what a caller of a location wants, and it would commit the API to that equality before a distance or bounding-box filter, which needs a geodesic choice, exists. |
+
+`TestGeoLocationColumnsOnPostgres` now has a required and an optional list
+of locations. It writes them through CreateOne, CreateMany,
+UpdateOneIfVersion and UpdateMany, a nil list, an empty one and `{0, 0}`
+among them, checks the stored points with SQL, writes points with SQL and
+reads them all back through GetOne, FindMany, ListVersions and GetAsOf. A
+NULL element written with SQL is refused by GetOne and by ListVersions. It
+filters on a location's `IS NULL` and `IS NOT NULL`, and UpdateMany writes a
+list where that filter matches. `TestGenerateGeoLocationColumns` checks the
+generated filter and list conversions without a database, so the quick tier
+covers them too.
+
+Not built: a list of locations keeps `ArrayStringFilter`, which, as for
+every list, adds no condition.
+
+The rule is reversible until the first release.

@@ -105,6 +105,13 @@ type DateRange struct {
 	End   string
 }
 
+// GeoPointFilter provides filtering operations for location fields stored as
+// POINT. Postgres has no equality operator for a point, and its ~= compares
+// coordinates within 1e-6 on a plane, so a location matches on presence only.
+type GeoPointFilter struct {
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
+}
+
 // ReferencedByFilter probes for rows another table does or does not
 // reference. It becomes an EXISTS / NOT EXISTS subquery over the referencing
 // table's foreign key, so a filtered page contains only matching rows -- an
@@ -290,6 +297,8 @@ type {{ .TypeName }}Filter struct {
 	{{- if or (not .IsAuditField) .IsAuditTimestamp }}
 	{{- if .IsArray }}
 	{{ toGoName .Name }} *ArrayStringFilter
+	{{- else if .IsGeoPoint }}
+	{{ toGoName .Name }} *GeoPointFilter
 	{{- else if .IsUUIDLike }}
 	{{ toGoName .Name }} *UUIDFilter
 	{{- else if .IsDateTimeLike }}
@@ -474,6 +483,14 @@ func (f *{{ .TypeName }}Filter) buildWhereClause(args *[]interface{}, paramOffse
 	{{- if or (not .IsAuditField) .IsAuditTimestamp }}
 	{{- if .IsArray }}
 	{{- /* Array filters carry no WHERE support yet. */}}
+	{{- else if .IsGeoPoint }}
+	if f.{{ toGoName .Name }} != nil && f.{{ toGoName .Name }}.IsNull != nil {
+		if *f.{{ toGoName .Name }}.IsNull {
+			conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NULL`)
+		} else {
+			conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NOT NULL`)
+		}
+	}
 	{{- else if .IsUUIDLike }}
 	if f.{{ toGoName .Name }} != nil {
 		if f.{{ toGoName .Name }}.Eq != nil {
