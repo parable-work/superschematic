@@ -595,6 +595,7 @@
                   "containerPort": 8080
                 },
                 "resources": {
+                  "cpuIdle": true,
                   "limits": {
                     "cpu": "1",
                     "memory": "512Mi"
@@ -1250,6 +1251,7 @@
                   "containerPort": 8080
                 },
                 "resources": {
+                  "cpuIdle": true,
                   "limits": {
                     "cpu": "1",
                     "memory": "512Mi"
