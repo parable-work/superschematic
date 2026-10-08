@@ -4329,9 +4329,28 @@ bootstrap's `planner` and `deployer`. Designing it settled the rest.
 | A pull request runs a `check` job with no credentials (levels 1 to 3), `stack plan` as `planner` per cloud environment without parameters (levels 5 and 6), and a member of each environment with one parameter, deployed as `deployer` with the pull request's number and destroyed when it closes. A fork's pull request runs `check` alone. | Level 4, `stack dev` with Docker, on every pull request, which an engineer runs on their machine. A workflow per environment, whose order across files GitHub cannot express. A reusable workflow or published action, a second artifact to version beside the binary. |
 | The workflow installs the release that generated it, from the release page of the binary's module, checked against the release's `SHA256SUMS`. The version comes from the binary's build information, as gcp's migration image does (D46); a binary built from a checkout has none, and its workflow's install step fails and says to generate again with a release. | `go install`, which refuses a module with `replace` directives (section 13 of `docs/stack-model.md`). The latest release, which changes a repository's CI with no change in it. |
 
-Status: not built. `projectNumber` is in gcp's values schema; bootstrap
-does not record it yet, the readers do not number environments, and no
-renderer, generator or CI seam exists.
+Status: built.
+- #295 records the design and adds `projectNumber` to gcp's values.
+- #297 numbers environments in declaration order
+  (`EnvironmentDecl.Order`), and the TypeScript writer now writes a
+  stack's declarations.
+- #298 has bootstrap record `projectNumber` in the schema:
+  `Bootstrapper` returns a `BootstrapResult`, and the CLI hands
+  `stackdeploy` the TypeScript edit, so no extension links the compiler.
+- #301 adds `CIRendererSpec`, `TargetSpec.CI`, `ProvisionerSpec.Tools`,
+  `outputs.ci` and the `ci` generator with the `github` renderer, whose
+  goldens actionlint checks.
+
+The amendments below ship the archives the workflow's builds link and
+pin each generated module to the release. No generated workflow has run
+on GitHub Actions: a run needs a release, a project bootstrapped with a
+GitHub remote, and a repository that turns the workflow on.
+
+Not built:
+- a check that the committed workflow is current;
+- pinned Bun and Node releases in the workflow;
+- installing the TypeScript workspace and type-checking TypeScript
+  servers in `check` (D51).
 
 The rule is reversible until the first release.
 
