@@ -187,11 +187,13 @@ The Go loader has the first two. The API package's `EnvConfig` embeds the
 reads. `values-schema.json` lists each derived field in
 `x-superschematic.envVars` with `derived` (the edge kind), `service` and
 `variables`, and each of its variables as an optional string property
-that the platform sets, not a deployment's values. The TypeScript and Rust
-loaders read no derived field yet (section 12). The callers field is in
-neither `EnvConfig` nor `values-schema.json`, since its variables follow
-the environment's edges: the generated entrypoint reads it with
-`stackconfig.LoadCallers` (section 8.1).
+that the platform sets, not a deployment's values. The callers field is
+in neither Go's `EnvConfig` nor `values-schema.json`, since its variables
+follow the environment's edges: the generated entrypoint reads it with
+`stackconfig.LoadCallers` (section 8.1). The TypeScript API package's
+`EnvConfig` holds all three, read through the TypeScript HTTP runtime's
+readers (section 8.6). The Rust loader reads no derived field yet (section
+12).
 
 What a connector derives for each edge kind has a contract, in
 `ir/derived_value.go` and `ir/service_auth.go`. Resolution checks every
@@ -1707,33 +1709,68 @@ Not taken:
 A TypeScript server runs on Bun, which runs the generated packages' `.ts`
 as they are, with no build step (D51). The pieces mirror Go's:
 
-- **Derived config.** The API package's `loadEnvConfig()` joins the types
-  package's `@envVars` loader with the derived fields of section 3.4,
-  which the HTTP runtime reads (`loadDatabase`, `loadService`,
-  `loadCallers`) from the same variables as Go's `stackconfig`. Vectors
-  shared by both runtimes hold them to one encoding.
+- **Derived config.** The API package's `config.ts` declares `EnvConfig`
+  and `loadEnvConfig()`. `EnvConfig` extends the types package's
+  `Loaded<Type>` of the `@envVars` settings with the fields of section 3.4
+  under their names: a `Database` per sql edge, a `Service` per `calls`
+  entry, and, unlike Go's, the API's callers field, a `ServiceAuthConfig`,
+  when an operation has a service clause. `loadEnvConfig()` reads the
+  settings with the types package's loader and the rest with the HTTP
+  runtime's `loadDatabase`, `loadService` and `loadCallers`, which read the
+  variables Go's `stackconfig` reads, and throws a `StackConfigError`
+  naming every variable at fault. Vectors shared by both runtimes
+  (`runtime/http/testdata/stackconfig_parity.json`) hold them to one
+  encoding.
 - **Implementation.** `[implementation_paths] typescript` defaults to
-  `typescript/{service}`. The API generator writes `Deps` and the
-  constructor's type in `deps.ts`, and the scaffold writes the package
-  once, as Go's does (section 8.5). `deps.db` is a `pg` Pool opened from
-  the derived connection; a TypeScript ORM, when one exists, adds a typed
-  client on the same pool.
+  `typescript/{service}`. The API generator writes `Deps` and
+  `Constructor`, `(deps: Deps) => Implementations |
+  Promise<Implementations>`, in `deps.ts`, and, for an API with a route
+  that needs an end user, `AuthenticatorFactory`, the type of the
+  implementation's `authenticate`, which builds the router's
+  `Authenticator` from `Deps` as Go's `AuthMiddleware(deps)` does. `Deps`
+  holds `config`, `db`, a client per callee in a member named after it
+  (`shopApi`), and `logger`, each left out by Go's rule. The scaffold
+  writes the package once, as Go's does (section 8.5), in a directory
+  that holds no `.ts` file: `package.json`
+  (`<npm_scope>/<service>-implementation`), `tsconfig.json`, and an
+  `index.ts` whose `create` is a `Constructor` and whose methods throw the
+  runtime's `notImplemented()`, with an `authenticate` that establishes no
+  end user and a verifier per `@hmacVerified` provider that refuses every
+  request. `deps.db` is a `pg` Pool that the runtime's `connectPostgres`
+  (`@superschematic/http-runtime/postgres`) opens from the derived
+  connection; a TypeScript ORM, when one exists, adds a typed client on
+  the same pool. The Node Cloud SQL connector reads the instance's
+  settings from the Admin API when the pool opens, where Go's dialer waits
+  for the first dial; both pools connect to the database on first use.
 - **Packages.** One Bun workspace spans the generated TypeScript packages,
   the servers and the implementations, so every import resolves with
-  `workspace:*`.
+  `workspace:*` or by name. Its root is the output root's `package.json`,
+  which the generator owns, not the repository root's, which is the
+  project's own: its members are `types/typescript/*`, `sdk/typescript/*`,
+  `api/*` and `server/*/*`, and the implementations through a `../`
+  pattern from the implementation template, which Bun 1.4 accepts. Where
+  `[paths]` names a checkout of superscalar, the HTTP runtime or the
+  version-graph runtime, the root's `overrides` point every dependency on
+  it at the checkout with a `file:` path from the root; a member's own
+  `file:` path is read wrongly by Bun once members sit at different
+  depths. The root depends on superscalar itself, which the runtime and
+  the API packages import without naming. `bun install` runs in the output
+  root, or in a generated package under it; an install inside an
+  implementation does not find the root, and the lockfile lives in the
+  output root.
 - **Entrypoint.** `<output-root>/server/<stack>/<server>/` holds
   `package.json`, `main.ts` and a Dockerfile. `main.ts` does what Go's
   `main` does (section 8.1):
   - loads each API's config and opens a pool per database, through the
     Cloud SQL Node connector when some environment places the database
     there;
-  - builds an SDK client per `calls` edge with its credential source, and
-    calls each constructor;
+  - builds an SDK client per `calls` edge with its credential source
+    (`serviceCredentialFor`), and calls each constructor;
   - mounts each API's `buildRouter`, with `authenticateService` for an API
     with a service clause;
   - serves `/healthz` and `/readyz` on `$PORT` with `Bun.serve`, and
     drains for ten seconds on SIGTERM.
-  
+
   It logs JSON lines through the HTTP runtime's logger.
 - **Image.** A Rust stage builds superscalar's Node addon for Linux, as
   Go's image builds its archive, and the image installs the workspace on
@@ -2667,8 +2704,10 @@ whatever the deploy decides is affected, and needs no list of its own.
    refusal of an `@envVars` field that collides with one; and the callers
    field of an API with a service clause, `ir.ServiceAuth` in
    `ir/service_auth.go`, which the local and gcp connectors write and
-   `stackconfig.LoadCallers` reads (section 9.2). Next: the TypeScript and
-   Rust loaders read the derived fields, in the PR that gives them `Deps`.
+   `stackconfig.LoadCallers` reads (section 9.2). The TypeScript API
+   package's `loadEnvConfig()` reads them through the TypeScript HTTP
+   runtime's readers (section 8.6). Next: the Rust loader reads the
+   derived fields, in the PR that gives it `Deps`.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
    (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`;
@@ -2681,8 +2720,11 @@ whatever the deploy decides is affected, and needs no list of its own.
    endpoint names, `serviceauth.go` builds the service authenticator of
    each API with a service clause from its callers field, and a server
    some environment places on Cloud SQL links the Cloud SQL connector.
-   Next: OpenTelemetry export; then `Deps`, the constructor signature, the scaffold and the
-   entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
+   For TypeScript, `Deps`, `Constructor` and the scaffold have landed, and
+   the output root's Bun workspace holds the implementations (section
+   8.6). Next: OpenTelemetry export; the TypeScript entrypoint; then
+   `Deps`, the constructor signature, the scaffold and the entrypoint in
+   Rust. `examples/acme-shop/go` keeps its
    implementations at the scaffold layout, `go/shop-api` and
    `go/shop-orders`, which the entrypoints of its `shop-stack` import
    (section 14, milestone 1).

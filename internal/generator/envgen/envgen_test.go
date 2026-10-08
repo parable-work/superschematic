@@ -163,3 +163,37 @@ func TestDerivedFields(t *testing.T) {
 		t.Errorf("an API without @envVars: %+v, %v", onlyDerived, err)
 	}
 }
+
+// TestCallersField: with Callers set, an API with a service clause gets
+// its callers field, which only the TypeScript EnvConfig holds (D51), even
+// without settings or other edges; a setting that collides with it is
+// refused; without a service clause or Callers it gets none.
+func TestCallersField(t *testing.T) {
+	clause := &ir.ServiceCallers{Mode: ir.ServiceCallersRequire}
+	schema := &ir.Schema{
+		Name: "shop-api",
+		Kind: ir.SchemaKindAPI,
+		OperationSets: []*ir.OperationSet{{Name: "Stock", ServiceCallers: clause, Operations: []*ir.FieldDef{
+			{Name: "reindex", TypeRef: ir.TypeRef{Name: "string"}, HTTPMethod: "POST"},
+		}}},
+	}
+	output, err := GenerateWithOptions(schema, Options{SchemaName: "shop-api", Derived: true, Callers: true})
+	if err != nil || output == nil || output.CallersField != "SHOP_API_CALLERS" || output.TypeName != "" || len(output.Derived) != 0 {
+		t.Fatalf("an API with a service clause alone: %+v, %v", output, err)
+	}
+	if output, err := GenerateWithOptions(schema, Options{SchemaName: "shop-api", Derived: true}); err != nil || output != nil {
+		t.Errorf("without Callers: %+v, %v", output, err)
+	}
+	schema.Types = map[string]*ir.TypeDef{"ShopConfig": {Name: "ShopConfig", EnvVars: true, Fields: []*ir.FieldDef{
+		{Name: "SHOP_API_CALLERS_ISSUERS", TypeRef: ir.TypeRef{Name: "string"}},
+	}}}
+	if _, err := GenerateWithOptions(schema, Options{SchemaName: "shop-api", Derived: true, Callers: true}); err == nil ||
+		!strings.Contains(err.Error(), "@envVars field SHOP_API_CALLERS_ISSUERS of ShopConfig collides with SHOP_API_CALLERS, the API's callers field") {
+		t.Errorf("a setting that collides with the callers field: %v", err)
+	}
+	schema.Types = nil
+	schema.OperationSets[0].ServiceCallers = nil
+	if output, err := GenerateWithOptions(schema, Options{SchemaName: "shop-api", Derived: true, Callers: true}); err != nil || output != nil {
+		t.Errorf("without a service clause: %+v, %v", output, err)
+	}
+}

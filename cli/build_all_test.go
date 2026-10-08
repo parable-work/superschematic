@@ -97,15 +97,15 @@ func TestBuildAllCommand_CacheSkipsUpToDateService(t *testing.T) {
 }
 
 // TestBuildAllCommand_CachedRunWritesTypeScriptWorkspaceRoot: the manifest
-// that makes the generated TypeScript types packages one Bun workspace
+// that makes the generated TypeScript packages one Bun workspace
 // belongs to no single service, so a restore from the cache does not bring
 // it back. A run that builds nothing writes it anyway.
 func TestBuildAllCommand_CachedRunWritesTypeScriptWorkspaceRoot(t *testing.T) {
 	servicesRoot := prepareJSONServicesRoot(t)
 	outDir := t.TempDir()
 	cacheRoot := t.TempDir()
-	typesRoot := filepath.Join(outDir, "types", "typescript")
-	manifest := filepath.Join(typesRoot, "package.json")
+	// The output root is the Bun workspace root (D51).
+	manifest := filepath.Join(outDir, "package.json")
 	run := func() string {
 		t.Helper()
 		out := new(bytes.Buffer)
@@ -129,6 +129,7 @@ func TestBuildAllCommand_CachedRunWritesTypeScriptWorkspaceRoot(t *testing.T) {
 	assert.Equal(t, string(want), string(got))
 
 	require.NoError(t, os.RemoveAll(filepath.Join(outDir, "types")))
+	require.NoError(t, os.Remove(manifest))
 	out = run()
 	assert.Contains(t, out, "OK: fixture-db (restored from cache")
 	assert.NotContains(t, out, "(built")

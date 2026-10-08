@@ -1,0 +1,25 @@
+name: deps-ts-pricing
+kind: API
+types:
+  Quote:
+    name: Quote
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: currency
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Quotes
+    operations:
+      - name: getQuote
+        typeRef: { name: Quote }
+        required: true
+        httpMethod: GET
+        restPath: quotes/:sku
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true

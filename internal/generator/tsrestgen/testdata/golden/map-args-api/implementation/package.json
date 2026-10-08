@@ -1,0 +1,21 @@
+{
+  "name": "@schemas/map-args-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the map-args-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/map-args-api-api": "workspace:*",
+    "@schemas/map-args-api-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@schemas/workspace",
+  "private": true,
+  "workspaces": [
+    "types/typescript/*",
+    "sdk/typescript/*",
+    "api/*",
+    "server/*/*",
+    "../../typescript/*"
+  ],
+  "dependencies": {
+    "superscalar": "*"
+  }
+}

@@ -18,6 +18,10 @@
       "types": "./router.ts",
       "import": "./router.ts"
     },
+    "./deps": {
+      "types": "./deps.ts",
+      "import": "./deps.ts"
+    },
     "./openapi.json": "./openapi.json"
   },
   "scripts": {
