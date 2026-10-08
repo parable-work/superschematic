@@ -246,8 +246,8 @@ github.com/opentracing/basictracer-go v1.1.0/go.mod h1:V2HZueSJEp879yv285Aap1BS6
 github.com/opentracing/opentracing-go v1.1.0/go.mod h1:UkNAQd3GIcIGf0SeVgPpRdFStlNbqXla1AfSYxPUl2o=
 github.com/opentracing/opentracing-go v1.2.0 h1:uEJPy/1a5RIPAJ0Ov+OIO8OxWu77jEv+1B0VhjKrZUs=
 github.com/opentracing/opentracing-go v1.2.0/go.mod h1:GxEUsuufX4nBwe+T+Wl9TAgYrxe9dPLANfrWvHYVTgc=
-github.com/parable-work/superscalar/go v0.0.0-20261006180731-8bb3cbb31da5 h1:QwsVZLuzIwKm2QcPWCv01fEQjRfxw3NyIihL6Q6SeHU=
-github.com/parable-work/superscalar/go v0.0.0-20261006180731-8bb3cbb31da5/go.mod h1:Km4/TsGNBp2Xk5+HuqjJzkbvTiY/x8eVoKFfjbNsliA=
+github.com/parable-work/superscalar/go v0.0.0-20261007220421-a48468f5a87e h1:hQ6YbfU4am85irvTZHTtI6FZDkoJ5CoI4A4bUnDC+vI=
+github.com/parable-work/superscalar/go v0.0.0-20261007220421-a48468f5a87e/go.mod h1:Km4/TsGNBp2Xk5+HuqjJzkbvTiY/x8eVoKFfjbNsliA=
 github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f h1:BYYFPOUbFv3JsjlWOS8N7y3v29qPvnvtodAKvXL/MMo=
 github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f/go.mod h1:gV4G6M8xxLNqQSRHiFOgKHlY+5YJgYPM6QwFLWllC+8=
 github.com/pb33f/ordered-map/v2 v2.3.1 h1:5319HDO0aw4DA4gzi+zv4FXU9UlSs3xGZ40wcP1nBjY=
