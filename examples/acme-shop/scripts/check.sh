@@ -13,9 +13,10 @@
 # Asserts, in order:
 #   1. build-all builds every service with the binary that links no
 #      extension, dependencies first, and the stack, shop-stack, last of
-#      the services it deploys, which writes each server's entrypoint;
+#      the services it deploys, which writes the entrypoint of each server
+#      and of shop-orders' job;
 #   2. every generated Go module builds and vets, the entrypoints of
-#      shop-stack's servers included;
+#      shop-stack's servers and job included;
 #   3. the generated TypeScript router and SDKs, and the app in typescript/,
 #      type-check; the generated Python packages import and python/'s type
 #      tests pass; the Rust client in rust/ builds against the generated Rust
@@ -29,7 +30,9 @@
 #      they print the same; and, when Docker runs, `superschematic stack
 #      dev` runs shop-stack's Dev environment, Postgres and both Go servers
 #      on their generated entrypoints, and the test calls each API through
-#      its SDK (milestone 1 of docs/stack-model.md);
+#      its SDK (milestone 1 of docs/stack-model.md), then sees shop-orders'
+#      job ship an order with `superschematic stack run` and on the
+#      every-minute schedule stack dev runs (D52);
 #   4a. the Topcoat app in topcoat/ passes its tests: its pages call
 #      shop-orders in-process through the crate the Topcoat extension
 #      writes into schemas/dist-rust, with the binary that links it;
@@ -121,9 +124,9 @@ done
 # superschematic writes no go.sum for an entrypoint, and go mod tidy would
 # resolve the imports of go/'s tests too; -mod=mod fills it as the build
 # reads each module, as stack dev's build does.
-for server in shop-api shop-orders; do
-  echo "    server/shop-stack/$server"
-  (cd "$DIST/server/shop-stack/$server" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
+for entrypoint in shop-api shop-orders shop-orders-ship-orders; do
+  echo "    server/shop-stack/$entrypoint"
+  (cd "$DIST/server/shop-stack/$entrypoint" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
 done
 
 echo "==> TypeScript: the generated router and SDKs type-check"

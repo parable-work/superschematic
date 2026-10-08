@@ -237,15 +237,16 @@ type MigrationRunner interface {
 }
 
 // BuildRequest is one image build (docs/stack-model.md, section 11.2): a
-// server, its Dockerfile and its context. The deploy writes the context:
-// the build context directory as the Dockerfile's ignore file cuts it
-// down, in a gzipped tarball whose entries carry no time, owner or mode
+// server or a job, its Dockerfile and its context. The deploy writes the
+// context: the build context directory as the Dockerfile's ignore file cuts
+// it down, in a gzipped tarball whose entries carry no time, owner or mode
 // of the machine that wrote it, so the same files give the same archive.
 type BuildRequest struct {
 	Run Run
 
-	// Server is the server deployable the image is for.
-	Server string
+	// Deployable is the server or job the image is for (D52): a deployable
+	// whose kind has an image (ir.DeployableKind.HasImage).
+	Deployable string
 
 	// Context is the path of the gzipped tarball of the build context.
 	// ContextDigest names it: `sha256:` and the hex SHA-256 of its tar
@@ -264,35 +265,79 @@ type BuildRequest struct {
 // contextDigestPattern is the shape of a BuildRequest's ContextDigest.
 var contextDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// Check refuses a request with no valid run, no server of the run's
+// Check refuses a request with no valid run, no server or job of the run's
 // environment, no context archive or digest, or a Dockerfile path that is
 // not a relative, slash-separated path inside the context.
 func (r BuildRequest) Check() error {
 	if err := r.Run.Check(); err != nil {
 		return err
 	}
-	d := r.Run.Environment.Deployable(r.Server)
+	d := r.Run.Environment.Deployable(r.Deployable)
 	switch {
-	case d == nil || d.Kind != ir.DeployableServer:
-		return fmt.Errorf("build: environment %s has no server %q", r.Run.Environment.Environment, r.Server)
+	case d == nil || !d.Kind.HasImage():
+		return fmt.Errorf("build: environment %s has no server or job %q", r.Run.Environment.Environment, r.Deployable)
 	case r.Context == "":
-		return fmt.Errorf("build %s: no context archive", r.Server)
+		return fmt.Errorf("build %s: no context archive", r.Deployable)
 	case !contextDigestPattern.MatchString(r.ContextDigest):
-		return fmt.Errorf("build %s: context digest %q is not sha256:<64 hex digits>", r.Server, r.ContextDigest)
+		return fmt.Errorf("build %s: context digest %q is not sha256:<64 hex digits>", r.Deployable, r.ContextDigest)
 	case r.Dockerfile == "" || strings.HasPrefix(r.Dockerfile, "/") || strings.Contains(r.Dockerfile, `\`) ||
 		path.Clean(r.Dockerfile) != r.Dockerfile || r.Dockerfile == ".." || strings.HasPrefix(r.Dockerfile, "../"):
-		return fmt.Errorf("build %s: Dockerfile %q is not a slash-separated path inside the context", r.Server, r.Dockerfile)
+		return fmt.Errorf("build %s: Dockerfile %q is not a slash-separated path inside the context", r.Deployable, r.Dockerfile)
 	}
 	return nil
 }
 
-// ImageBuilder builds a server's image from a context the deploy wrote,
-// and pushes it where the server's platform reads it: the repository path
-// the platform writes into the graph (section 7.2). It returns the image
-// by digest, `<repository>@sha256:<digest>`, which the deploy pins in the
-// server's nodes; one whose repository no node holds is refused there.
+// ImageBuilder builds a server's or a job's image from a context the
+// deploy wrote, and pushes it where the deployable's platform reads it:
+// the repository path the platform writes into the graph (section 7.2). It
+// returns the image by digest, `<repository>@sha256:<digest>`, which the
+// deploy pins in the deployable's nodes; one whose repository no node
+// holds is refused there.
 type ImageBuilder interface {
 	Build(ctx context.Context, req BuildRequest) (image string, err error)
+}
+
+// JobRunRequest is one run of a deployed job on demand, outside its
+// schedule (`superschematic stack run`, docs/stack-model.md, section 8.7,
+// D52).
+type JobRunRequest struct {
+	Run Run
+
+	// Job is the job deployable to run.
+	Job string
+
+	// Image is the image the deploy manifest records for the job: what
+	// the last deploy rolled out, and so what the run runs.
+	Image string
+
+	// Log receives progress, and the run's output where the target reads
+	// it.
+	Log io.Writer
+}
+
+// Check refuses a request with no valid run, no job of the run's
+// environment, or no image.
+func (r JobRunRequest) Check() error {
+	if err := r.Run.Check(); err != nil {
+		return err
+	}
+	d := r.Run.Environment.Deployable(r.Job)
+	switch {
+	case d == nil || d.Kind != ir.DeployableJob:
+		return fmt.Errorf("run: environment %s has no job %q", r.Run.Environment.Environment, r.Job)
+	case r.Image == "":
+		return fmt.Errorf("run %s: no image", r.Job)
+	}
+	return nil
+}
+
+// JobRunner runs a deployed job once on demand (D52), as its platform runs
+// it on its schedule: the job the last deploy applied, with its config,
+// its identity, its timeout and its retries. It returns when the run ends:
+// nil when a try succeeded, else the last try's error, which says where
+// the run's logs are.
+type JobRunner interface {
+	RunJob(ctx context.Context, req JobRunRequest) error
 }
 
 // Credential is a secret a platform needs to write its resources, such
@@ -314,10 +359,11 @@ type Credential struct {
 }
 
 // checkDeploySeams refuses a target that carries a deploy seam it cannot
-// use: State, Bootstrap, Migrations, Builder or CI without a provisioner,
-// and Bootstrap, Migrations, Builder or CI without State, which a
-// bootstrap creates, a deploy records each migration and each build in,
-// and a CI job plans and deploys from.
+// use: State, Bootstrap, Migrations, Builder, CI or Jobs without a
+// provisioner, and Bootstrap, Migrations, Builder, CI or Jobs without
+// State, which a bootstrap creates, a deploy records each migration and
+// each build in, a CI job plans and deploys from, and a job's run on
+// demand reads the image of.
 func checkDeploySeams(spec TargetSpec) error {
 	var named []string
 	if spec.State != nil {
@@ -335,11 +381,14 @@ func checkDeploySeams(spec TargetSpec) error {
 	if spec.CI != nil {
 		named = append(named, "CI")
 	}
+	if spec.Jobs != nil {
+		named = append(named, "Jobs")
+	}
 	if len(named) > 0 && spec.Provisioner == "" {
 		return fmt.Errorf("registry: target %q has %s but names no provisioner to deploy with", spec.Name, strings.Join(named, ", "))
 	}
-	if (spec.Bootstrap != nil || spec.Migrations != nil || spec.Builder != nil || spec.CI != nil) && spec.State == nil {
-		return fmt.Errorf("registry: target %q has Bootstrap, Migrations, Builder or CI but no State: a bootstrap creates the deploy state, a deploy records each migration and each build in it, and a CI job plans and deploys from it", spec.Name)
+	if (spec.Bootstrap != nil || spec.Migrations != nil || spec.Builder != nil || spec.CI != nil || spec.Jobs != nil) && spec.State == nil {
+		return fmt.Errorf("registry: target %q has Bootstrap, Migrations, Builder, CI or Jobs but no State: a bootstrap creates the deploy state, a deploy records each migration and each build in it, a CI job plans and deploys from it, and a job's run on demand runs the image it records", spec.Name)
 	}
 	return nil
 }

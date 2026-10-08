@@ -512,6 +512,11 @@ design is section 8.3 of
    with `go build`, start it with its resolved config and `PORT`, callees
    first, and wait until it answers `/readyz`. Each line a server prints is
    printed with its name in front.
+6. Build each job's entrypoint module at `<out>/server/<stack>/<job>` the
+   same way, and run each job that has a schedule in the environment on
+   it, in its time zone: never two runs of one job at once, a run stopped
+   at the job's timeout and run again up to its retries, each line it
+   prints with its name in front. A job's run never stops the environment.
 
 Dev stays in the foreground until Ctrl-C or until a server exits, then
 stops the servers, callers first, and the container, which keeps its data
@@ -556,6 +561,41 @@ same from run to run:
 export abstract class Dev {}
 ```
 
+## `stack run <environment> <job>`
+
+Run a job of an environment once, outside its schedule, wait for it, and
+exit non-zero when its last try fails. `<job>` is the job's deployable: its
+API service's name and its class in kebab case,
+`shop-orders-ship-orders`. The design is section 8.7 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md).
+
+On the `local` target, run it from another terminal while `stack dev`
+runs the environment. It builds no schema: it reads the environment the
+last build resolved and the program `stack dev` rendered, builds the job's
+binary from its entrypoint module, so a change to the job's code is in
+the run, and runs it with the environment's values, secrets and keys, its
+timeout and its retries, each line it prints with the job's name in front.
+It refuses an environment whose Postgres container or servers do not
+answer, and a job whose scheduled run goes on; `stack dev`'s schedule
+skips the job's runs while this one goes on. Ctrl-C stops the run.
+
+On a cloud target, it runs the deployed job, with the image the deploy
+manifest records, through the target's job runner. It refuses a run whose
+last deploy did not roll the job out, and a target that runs no job on
+demand, which the gcp target does not yet.
+
+```
+superschematic stack run Dev shop-orders-ship-orders
+superschematic stack run Preview shop-orders-ship-orders --param pr=123
+```
+
+It takes the flags of the commands below, `--stack`, `--naming`,
+`--program-dir` and `--param`, and:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--out` | `<schemas-root>/dist` | the output root the build wrote, `stack dev`'s `--out`: where `run` reads a local environment and the job's entrypoint module |
+
 ## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy` and `outputs`
 
 The cloud half of the `stack` group bootstraps, plans, builds, deploys and
@@ -566,8 +606,8 @@ drives the environment's target and provisioner. A binary deploys to a
 target only when it links the target's extension and the provisioner's
 (`gcp.Extension{}`, `pulumi.Extension{...}`). An environment on the
 `local` target runs with `stack dev`; `plan`, `build`, `deploy`,
-`bootstrap`, `destroy` and `outputs` refuse it, and `secrets set` writes
-its `secrets.env`.
+`bootstrap`, `destroy` and `outputs` refuse it, `secrets set` writes its
+`secrets.env`, and `stack run` runs a job against it.
 
 Each of these commands takes these flags:
 
@@ -632,15 +672,15 @@ superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
 Show what `stack deploy` would do, changing nothing: the provisioner's plan
 of every resource, with each server's image pinned, and each database's
 migration plan from the schema the deploy manifest records. It also lists
-the secrets with no value, the servers with no image yet (which a deploy
-builds), the migration
+the secrets with no value, the servers and jobs with no image yet (which a
+deploy builds), the migration
 phases a failed deploy left part-way, and the records to create by hand
 for a domain no DNS platform holds. It exits 1 after printing when a plan
 has a hazard of a `--fail-on` class that no `--allow` names.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--image` | the manifest's | a server's image, `<server>=<repository>@sha256:<digest>`; repeatable |
+| `--image` | the manifest's | a server's or job's image, `<deployable>=<repository>@sha256:<digest>`; repeatable |
 | `--fail-on` | `all` | hazard classes, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--out` | none | write the plan as JSON, for `stack deploy --expect` |
@@ -648,10 +688,11 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 
 ### `stack build <environment>`
 
-Build the image of each server whose build context changed since the image
-the deploy manifest records, as `stack deploy` would, and deploy nothing.
-A Go server builds from the Dockerfile `superschematic build-all` writes at
-`<output-root>/server/<stack>/<server>/`, with the repository root as its
+Build the image of each server and job whose build context changed since
+the image the deploy manifest records, as `stack deploy` would, and deploy
+nothing. A Go server or job builds from the Dockerfile `superschematic
+build-all` writes at `<output-root>/server/<stack>/<deployable>/`, with the
+repository root as its
 context, cut down by the `Dockerfile.dockerignore` beside it; on gcp the
 build runs on Cloud Build and pushes to the stack's Artifact Registry
 repository. It prints each image as a `stack deploy` flag:
@@ -666,19 +707,21 @@ A build writes no deploy manifest.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--server` | every server with a Dockerfile | build this server only; repeatable |
-| `--force` | false | build a server whose context did not change |
+| `--deployable` | every server and job with a Dockerfile | build this server or job only; repeatable |
+| `--server` | none | build this server only; repeatable. `--deployable` takes a job too |
+| `--force` | false | build a server or job whose context did not change |
 | `--out` | none | write the result as JSON |
 | `--format` | `text` | print `--image` flags (`text`) or the result as `json` |
 
 ### `stack deploy <environment>`
 
 Deploy the environment in deploy order: infrastructure, each database's
-`expand` phase, the servers wave by wave, callees first, the `contract`
-phases, exposure. Before any step, it builds the image of each server
+`expand` phase, the servers and jobs wave by wave, callees first, the
+`contract` phases, exposure. Before any step, it builds the image of each
+server and job
 `--image` names none for whose build context changed since the image the
-manifest records, as `stack build` does; a server with no Dockerfile keeps
-the manifest's image. The deploy manifest records each step, and the
+manifest records, as `stack build` does; one with no Dockerfile keeps the
+manifest's image. The deploy manifest records each step, and the
 context each image it built came from. Every secret needs a value before
 the first step after infrastructure; at a terminal the deploy asks for
 each one missing. On gcp each migration phase runs as an execution of the
@@ -700,7 +743,7 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--image` | a build, else the manifest's | a server's image, `<server>=<repository>@sha256:<digest>`; repeatable. A server with none of them is refused |
+| `--image` | a build, else the manifest's | a server's or job's image, `<deployable>=<repository>@sha256:<digest>`; repeatable. One with none of them is refused |
 | `--no-build` | false | build no image: take each from `--image` or the manifest |
 | `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |

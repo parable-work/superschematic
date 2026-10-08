@@ -48,7 +48,7 @@ func newFixture(t *testing.T) *fixture {
 // env resolves an environment of the shop stack.
 func (f *fixture) env(t *testing.T, name string) *ir.ResolvedEnvironment {
 	t.Helper()
-	env, err := stack.Resolve(f.reg, stack.Input{Stack: stacktest.WithoutJobSettings(stacktest.Shop()), Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: name})
+	env, err := stack.Resolve(f.reg, stack.Input{Stack: stacktest.Shop(), Services: stacktest.AcmeShop(), Environment: name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,12 +95,14 @@ func digest(n int) string {
 	return "sha256:" + strings.Repeat(fmt.Sprintf("%x", n%16), 64)
 }
 
-// images are images of both shop servers, by the repository the fake
-// platform writes (the deployable's name in kebab case).
+// images are images of both shop servers and of shop-orders' job, by the
+// repository the fake platforms write (the deployable's name in kebab
+// case).
 func images(n int) map[string]string {
 	return map[string]string{
-		"shop-api": "shop-api@" + digest(n),
-		"Orders":   "orders@" + digest(n),
+		"shop-api":              "shop-api@" + digest(n),
+		"Orders":                "orders@" + digest(n),
+		stacktest.ShipOrdersJob: stacktest.ShipOrdersJob + "@" + digest(n),
 	}
 }
 

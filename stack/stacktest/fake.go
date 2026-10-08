@@ -78,7 +78,8 @@ const (
 // test makes, and the target's deploy seams record theirs in the same
 // log; Register creates each one that is nil. Tools are the command-line
 // tools the fake provisioner declares, which a generated CI job installs;
-// nil declares none.
+// nil declares none. NoJobRunner registers the target with no job runner,
+// as a target that runs no job on demand.
 type Extension struct {
 	Provisioner *FakeProvisioner
 	State       *FakeState
@@ -87,7 +88,9 @@ type Extension struct {
 	Bootstrap   *FakeBootstrap
 	Builder     *FakeBuilder
 	CI          *FakeCI
+	Jobs        *FakeJobs
 	Tools       []registry.CLITool
+	NoJobRunner bool
 }
 
 // Name is the extension's name.
@@ -116,9 +119,17 @@ func (e *Extension) Register(r *registry.Registry) error {
 	if e.CI == nil {
 		e.CI = &FakeCI{}
 	}
+	if e.Jobs == nil {
+		e.Jobs = &FakeJobs{}
+	}
 	e.Migrations.log = e.Provisioner
 	e.Bootstrap.log = e.Provisioner
 	e.Builder.log = e.Provisioner
+	e.Jobs.log = e.Provisioner
+	var jobs registry.JobRunner = e.Jobs
+	if e.NoJobRunner {
+		jobs = nil
+	}
 	server := func(name string, languages ...string) registry.PlatformSpec {
 		return registry.PlatformSpec{
 			Name:      name,
@@ -215,6 +226,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Migrations: e.Migrations,
 		Builder:    e.Builder,
 		CI:         e.CI,
+		Jobs:       jobs,
 	})
 }
 

@@ -2,11 +2,11 @@
 
 package main
 
-// {{ capitalize .Kind }} {{ .Name }} links the Cloud SQL Go connector (docs/stack-model.md,
-// sections 7.4 and 8.1): an environment of stack {{ .Stack }} places
-// {{ range $i, $db := .CloudSQL }}{{ if $i }}, {{ end }}{{ $db }}{{ end }} on Cloud SQL. A database field set to a Cloud SQL connector
+// Job shop-orders-expire-orders links the Cloud SQL Go connector (docs/stack-model.md,
+// sections 7.4 and 8.1): an environment of stack shop-cloud-stack places
+// shop-db on Cloud SQL. A database field set to a Cloud SQL connector
 // configuration connects through it with IAM database authentication: the
-// {{ .Kind }} logs in as the IAM database user of its service account, with a
+// job logs in as the IAM database user of its service account, with a
 // token the connector fetches, so no password exists. A field set to a
 // connection string connects as main.go's connect does, so one binary runs
 // in every environment.
@@ -19,10 +19,10 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
+	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
 )
 
-// cloudSQLDialer is the {{ .Kind }}'s one Cloud SQL dialer, shared by every
+// cloudSQLDialer is the job's one Cloud SQL dialer, shared by every
 // database it reaches on Cloud SQL and built when the first connects. It
 // lives as long as the process. It refreshes an instance's certificate
 // when a dial needs it, not in the background: Cloud Run throttles an
@@ -39,7 +39,7 @@ type cloudSQLDial func(ctx context.Context, instance string, opts ...cloudsqlcon
 
 // connectCloudSQL builds the pool of the database field named field, which
 // the environment sets as field_CLOUD_SQL_INSTANCE, field_CLOUD_SQL_DATABASE
-// and field_CLOUD_SQL_USER. Building the dialer reads the {{ .Kind }}'s
+// and field_CLOUD_SQL_USER. Building the dialer reads the job's
 // application default credentials, its service account's on Cloud Run;
 // the pool connects when it is first used.
 func connectCloudSQL(ctx context.Context, field string, db stackconfig.CloudSQL) (*pgxpool.Pool, error) {

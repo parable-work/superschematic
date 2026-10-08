@@ -63,14 +63,14 @@ type Manifest struct {
 	// name: `sha256:` and the hex SHA-256 of the IR's canonical JSON.
 	Services map[string]string `json:"services,omitempty"`
 
-	// Images holds the image each server runs, by server:
-	// `<repository>@sha256:<digest>`. A server whose rollout wave did not
+	// Images holds the image each server and job runs, by deployable:
+	// `<repository>@sha256:<digest>`. One whose rollout wave did not
 	// finish keeps the image the previous deploy recorded.
 	Images map[string]string `json:"images,omitempty"`
 
-	// Contexts holds, by server, the digest of the build context each
+	// Contexts holds, by deployable, the digest of the build context each
 	// image of Images was built from, when a deploy built it (Context): a
-	// deploy builds the server's image again only when its context's
+	// deploy builds the deployable's image again only when its context's
 	// digest differs. An image given with --image has none.
 	Contexts map[string]string `json:"contexts,omitempty"`
 
@@ -96,7 +96,7 @@ type AppliedSchema struct {
 	// it and refuses any other plan until it does.
 	Pending *PendingMigration `json:"pending,omitempty"`
 
-	// Servers are the servers that connected to the DB service when the
+	// Servers are the servers and jobs that connected to the DB service when the
 	// migration runner last ran on it, sorted. A runner that owns the
 	// database's privileges gave each what it reads and writes (D46), so a
 	// deploy runs the expand phase of a DB service whose connecting
@@ -238,7 +238,7 @@ func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *
 	}
 	for _, d := range env.Deployables {
 		switch d.Kind {
-		case ir.DeployableServer:
+		case ir.DeployableServer, ir.DeployableJob:
 			if image, ok := prev.Images[d.Name]; ok {
 				m.setImage(d.Name, image, prev.Contexts[d.Name])
 			}

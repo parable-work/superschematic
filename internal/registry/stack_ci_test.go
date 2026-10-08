@@ -70,7 +70,7 @@ func TestCISeamAndTools(t *testing.T) {
 		want string
 	}{
 		{"CI without provisioner", TargetSpec{Name: "fake", State: nopState{}, CI: fixedCI{}}, "has State, CI but names no provisioner"},
-		{"CI without state", TargetSpec{Name: "fake", Provisioner: "fake", CI: fixedCI{}}, "has Bootstrap, Migrations, Builder or CI but no State"},
+		{"CI without state", TargetSpec{Name: "fake", Provisioner: "fake", CI: fixedCI{}}, "has Bootstrap, Migrations, Builder, CI or Jobs but no State"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := New(naming.Default()).RegisterTarget(tc.spec)
