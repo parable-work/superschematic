@@ -209,6 +209,27 @@
       "error": "null for a userRole trait: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/userRole': got null, want object"
     },
     {
+      "name": "the user model's route sets",
+      "registry": "core",
+      "input": "{\"kind\": \"API\", \"name\": \"accounts-api\", \"operationSets\": [\n\t\t{\"name\": \"Account\", \"operations\": [], \"userSessions\": {\"path\": \"account\", \"noLogin\": false, \"register\": true}},\n\t\t{\"name\": \"AccountAdmin\", \"operations\": [], \"userAdministration\": {}}]}",
+      "accept": true,
+      "canonical": "{\"kind\":\"API\",\"name\":\"accounts-api\",\"operationSets\":[{\"name\":\"Account\",\"operations\":[],\"userSessions\":{\"path\":\"account\",\"register\":true}},{\"name\":\"AccountAdmin\",\"operations\":[],\"userAdministration\":{}}]}"
+    },
+    {
+      "name": "an unknown key on a route set's config",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Account\", \"operations\": [], \"userSessions\": {\"login\": false}}",
+      "accept": false,
+      "error": "an unknown key on a route set's config: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/userSessions': additional properties 'login' not allowed"
+    },
+    {
+      "name": "a route set's path that is not a string",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"AccountAdmin\", \"operations\": [], \"userAdministration\": {\"path\": 1}}",
+      "accept": false,
+      "error": "a route set's path that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/userAdministration/path': got number, want string"
+    },
+    {
       "name": "visible tool without a policy gets the default",
       "registry": "core",
       "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"DELETE\", \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",

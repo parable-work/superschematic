@@ -5,7 +5,7 @@
 // cross-kind type-reference rules, the classes decorator arguments name,
 // full @source structural verification,
 // trait shape checks, version graph declarations,
-// the User and UserRole traits, projection view
+// the User and UserRole traits and the user model's route sets, projection view
 // declarations, the contexts that refuse an array of arrays, the arguments
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
 // cannot be encrypted, the service clauses an operation cannot take,
@@ -120,6 +120,12 @@ type Input struct {
 	// loader.WithRegistry; nil falls back to a core registry built from
 	// Naming.
 	Registry *registry.Registry
+
+	// AuthDB is the loaded schema the config's authDb names, which the
+	// user model's route sets read their users from (D50). The loader
+	// reads it for an API with a @userSessions or @userAdministration set,
+	// and leaves it nil otherwise.
+	AuthDB *ir.Schema
 }
 
 // registry returns in.Registry or the core fallback.
@@ -197,6 +203,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkVersioned(schema, r)
 	checkVersionGraphs(schema, r)
 	checkIdentity(schema, r)
+	checkIdentityRoutes(schema, in, r)
 	checkProjections(schema, r)
 	checkArraysOfArrays(schema, r)
 	checkEncryptedArguments(schema, r)
