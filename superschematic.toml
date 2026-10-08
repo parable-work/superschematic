@@ -53,6 +53,11 @@ meta_schema_url_prefix = "superschematic://"
 # (<prefix>scalar.canonical_name, <prefix>projection.settings, ...).
 metadata_key_prefix = "superschematic."
 
+# Prefix of the permissions the user model's administration routes need
+# (<prefix>.users.read, <prefix>.users.write, <prefix>.roles.read and
+# <prefix>.roles.write). Dotted segments of letters, digits, _ and -.
+identity_permission_prefix = "identity"
+
 # The transaction-local Postgres setting a versioned table's history trigger
 # reads a hard delete's actor from; generated hard deletes set it from the
 # context user. A custom setting name, so it needs a dot.

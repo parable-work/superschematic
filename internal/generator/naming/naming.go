@@ -137,6 +137,13 @@ type Naming struct {
 	// the schemas' readers expect.
 	MetadataKeyPrefix string `toml:"metadata_key_prefix"`
 
+	// IdentityPermissionPrefix prefixes the permissions the user model's
+	// administration routes need (D50): <prefix>.users.read,
+	// <prefix>.users.write, <prefix>.roles.read and <prefix>.roles.write.
+	// It takes a permission's form, dotted segments of letters, digits, _
+	// and -, so each of the four is a permission a role can hold.
+	IdentityPermissionPrefix string `toml:"identity_permission_prefix"`
+
 	// HistoryActorSetting names the transaction-local Postgres setting the
 	// history trigger of a versioned table reads a hard delete's actor from:
 	// the tombstone's image carries it in deleted_by (or updated_by), and
@@ -497,6 +504,7 @@ func Default() Naming {
 		PackageAuthor:            "superschematic",
 		MetaSchemaURLPrefix:      "superschematic://",
 		MetadataKeyPrefix:        "superschematic.",
+		IdentityPermissionPrefix: ir.DefaultIdentityPermissionPrefix,
 		HistoryActorSetting:      "superschematic.history_actor_id",
 		AuthProvider:             "session",
 		DerivedFields: DerivedFieldsConfig{
@@ -553,6 +561,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.PackageAuthor, d.PackageAuthor)
 	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)
 	fill(&n.MetadataKeyPrefix, d.MetadataKeyPrefix)
+	fill(&n.IdentityPermissionPrefix, d.IdentityPermissionPrefix)
 	fill(&n.HistoryActorSetting, d.HistoryActorSetting)
 	fill(&n.AuthProvider, d.AuthProvider)
 	fill(&n.DerivedFields.Database, d.DerivedFields.Database)
@@ -833,8 +842,16 @@ func Parse(data []byte, name string) (Naming, error) {
 	if !historyActorSettingRE.MatchString(n.HistoryActorSetting) {
 		return Naming{}, fmt.Errorf("naming: %s: history_actor_setting %q is not a custom Postgres setting name: use two or more identifiers (letters, digits and _, not starting with a digit) joined by dots", name, n.HistoryActorSetting)
 	}
+	if !identityPermissionPrefixRE.MatchString(n.IdentityPermissionPrefix) {
+		return Naming{}, fmt.Errorf("naming: %s: identity_permission_prefix %q is not a permission's form: use segments of letters, digits, _ and - joined by dots", name, n.IdentityPermissionPrefix)
+	}
 	return n, nil
 }
+
+// identityPermissionPrefixRE is the prefixes identity_permission_prefix
+// accepts: the form of a permission (D50), so the prefix and the suffix the
+// routes add make one.
+var identityPermissionPrefixRE = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
 
 // historyActorSettingRE is the setting names history_actor_setting accepts:
 // dotted identifiers, the form Postgres takes for a custom setting, so the
