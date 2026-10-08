@@ -1,0 +1,16 @@
+{
+  "name": "@acme/workspace",
+  "private": true,
+  "workspaces": [
+    "types/typescript/*",
+    "sdk/typescript/*",
+    "api/*",
+    "server/*/*"
+  ],
+  "dependencies": {
+    "@acme/scalars": "*"
+  },
+  "overrides": {
+    "@acme/versiongraph": "file:vendor/acme-versiongraph-ts"
+  }
+}

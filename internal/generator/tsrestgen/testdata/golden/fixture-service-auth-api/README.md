@@ -21,9 +21,19 @@ Generated TypeScript API server for the `fixture-service-auth-api` schema. Built
   service: `authenticateService` verifies its `Service-Authorization`
   credential before the end-user step and puts it on `ctx.serviceCaller`;
   without it, such an operation answers 401 `service_unauthorized`.
+- `deps.ts`: `Deps`, what the implementation is built from (its `config`
+  when it has one, a `pg` Pool `db` for its database, an SDK client per API
+  it calls, and a `logger`), and `Constructor`, the type of the
+  implementation's `create`. `AuthenticatorFactory` is the type of its
+  `authenticate`, which builds the end-user `Authenticator` from `Deps`.
 - `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
 - `values-schema.json`: the env-var contract, when the schema declares an
-  `@envVars` class.
+  `@envVars` class or its edges derive config fields.
+
+The implementation is a package of its own, `@schemas/fixture-service-auth-api-implementation`, at
+the naming file's `[implementation_paths] typescript` template, which a
+stack's build (or `build --scaffold`) writes once when it is missing. Its
+`create` is a `Constructor`.
 
 ## Routes
 

@@ -121,12 +121,15 @@ whose package is missing: an `implementation.go` at the naming file's
 the schemas root by default). Its `New` has the signature of the generated
 `Constructor`, `func(deps Deps) (Implementations, error)`, and each
 method answers 501 until it is implemented. It never writes into a
-directory that holds a Go file. Without the flag a build writes nothing
-outside the output root, except a stack's: building a `Stack` service
-writes each Go server's entrypoint under `server/<stack>/<server>` in the
-output root and scaffolds, with no flag, each API its servers serve whose
-implementation is missing, with a `go.mod` beside it when no module holds
-the package.
+directory that holds a Go file. A TypeScript API's is a package at the
+`typescript` template (`typescript/{service}`): `package.json`,
+`tsconfig.json` and an `index.ts` whose `create` is the generated
+`Constructor`, written only while the directory holds no `.ts` file.
+Without the flag a build writes nothing outside the output root, except a
+stack's: building a `Stack` service writes each Go server's entrypoint
+under `server/<stack>/<server>` in the output root and scaffolds, with no
+flag, each API its servers serve whose implementation is missing, with a
+`go.mod` beside a Go one when no module holds the package.
 
 ```
 superschematic build ./schemas/services/shop-db
@@ -144,7 +147,7 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 | `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
-| `--scaffold` | false | write the implementation scaffold of each Go API built whose package is missing, at the `[implementation_paths]` `go` template |
+| `--scaffold` | false | write the implementation scaffold of each Go or TypeScript API built whose package is missing, at the `[implementation_paths]` template of its language |
 
 ## `build-all <services-root>`
 
@@ -195,7 +198,7 @@ superschematic build-all ./schemas/services --parallel --cache
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 | `--deps-copy` | `[deps] copy`, else none | also write the dependency graph to this path |
-| `--scaffold` | false | write the implementation scaffold of each Go API whose package is missing, as `build --scaffold` does; a cached service whose implementation is missing builds again |
+| `--scaffold` | false | write the implementation scaffold of each Go or TypeScript API whose package is missing, as `build --scaffold` does; a cached service whose implementation is missing builds again |
 
 Every service `build-all` builds gets a stamp,
 `<schemas-root>/dist/.build-stamps/<service>`, holding the hash of the
