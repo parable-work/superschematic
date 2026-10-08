@@ -99,6 +99,12 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return false, fmt.Errorf("create implementation package %s: %w", dir, err)
 	}
+	// The implementation has no method for a user model operation, which
+	// the identity runtime serves (D50).
+	output, err = ImplementedOutput(output)
+	if err != nil {
+		return false, err
+	}
 	funcs, err := templateFuncs(output.Provider)
 	if err != nil {
 		return false, err

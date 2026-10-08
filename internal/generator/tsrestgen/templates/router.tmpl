@@ -44,6 +44,7 @@ import type { Implementations } from './interfaces';
 export type OperationName =
 {{- range .Endpoints }}
   | '{{ .Name }}'
+{{- else }} never
 {{- end }};
 
 /** The operation table: what the schema declares about each route. */
