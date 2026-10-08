@@ -10,10 +10,10 @@ totalAttempts. The instance's limitsField may narrow or widen the caps for
 it; an unknown or terminal class, and a value that is not a valid cap, is
 ignored. Once the instance exists, limitsField changes only with
 limitsPermission, and never by the holder of its active lease, read
-through Lease's field: a worker does not raise its own caps. Without
-limitsPermission in the config, the caps an instance is created with
-stay. An attempt's detail, any JSON object, is kept in its operation's
-event, the one place it is recorded.
+through Lease's holder and active fields: a worker does not raise its
+own caps. Without limitsPermission in the config, the caps an instance
+is created with stay. An attempt's detail, any JSON object, is kept in
+its operation's event, the one place it is recorded.
 
 The rules for a failure, in order:
 
@@ -57,8 +57,8 @@ last signature and the best score, and tables for the counts by class and
 the attempts, whose last kept one the keep decision reads. The event log
 is never read.
 
-A list filters on retries.exhausted (where: { 'retries.exhausted': true }),
-the column the field's exhausted reads, through an index on it.
+A list filters on exhausted (where: { 'Retries.exhausted': true }), the
+column the exhausted field reads, through an index on it.
 
 recordAttempt needs the config's permission when it names one, and a
 Lease on the type refuses it to every principal but the holder while a
@@ -78,7 +78,10 @@ import {
   BehaviorVetoError,
   EngineError,
   OperationParamsError,
+  WORKFLOW_STATUS,
+  behaviorField,
   defineBehavior,
+  fieldPath,
   isTerminalState,
   type ConfigTarget,
   type GuardAnswer,
@@ -110,14 +113,14 @@ export interface RetriesConfig {
   readonly leased: boolean;
 }
 
-/** The retries field. */
+/** Retries' fields, as a read returns them under behaviors.Retries: a field with no value is absent. */
 export interface RetriesRecord {
   /** Failures counted. */
   readonly total: number;
   /** Failures counted, by class: every class of the config. */
   readonly classAttempts: Readonly<Record<string, number>>;
-  /** The score of the kept result; null when none is kept with a score. */
-  readonly bestScore: number | null;
+  /** The score of the kept result; absent when none is kept with a score. */
+  readonly bestScore?: number;
   readonly exhausted: boolean;
   /** Whether a repeated signature exhausted it. */
   readonly stuck: boolean;
@@ -140,6 +143,10 @@ const NAME = 'Retries';
 
 /** The operations an exhausted instance refuses besides a transition: taking it again. */
 const TAKES = new Set(['Lease.acquire', 'Queue.claim']);
+
+/** The fields of Lease limitsGuard reads, by qualified name. */
+const LEASE_HOLDER = fieldPath('Lease', 'holder');
+const LEASE_ACTIVE = fieldPath('Lease', 'active');
 
 /** The instance's own columns. */
 interface State {
@@ -251,7 +258,7 @@ function keeps(view: InstanceView<RetriesConfig>, state: State, score: number | 
 // exhaust moves the status to exhaustedState through Workflow's
 // transition, from one of the from states only. A veto leaves it as it is.
 function exhaust(context: OperationContext<RetriesConfig>): void {
-  const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
+  const status = behaviorField(context.instances.get(context.schema, context.id, { fields: [WORKFLOW_STATUS] }), 'Workflow', 'status');
   if (typeof status !== 'string' || !context.config.from.includes(status)) {
     return;
   }
@@ -282,8 +289,9 @@ function fieldOf(target: ConfigTarget, at: string, field: string): unknown[] {
 
 // limitsGuard holds a change of limitsField to limitsPermission, and keeps
 // it from the holder of the instance's active lease, read through Lease's
-// field: the caps a worker's attempts count against are not the worker's
-// to raise. An update that leaves the field as it was passes.
+// holder and active fields: the caps a worker's attempts count against
+// are not the worker's to raise. An update that leaves the field as it
+// was passes.
 function limitsGuard(view: InstanceView<RetriesConfig>, after: Readonly<Record<string, unknown>>): GuardAnswer {
   const field = view.config.limitsField;
   if (field === undefined || JSON.stringify(view.data[field] ?? null) === JSON.stringify(after[field] ?? null)) {
@@ -297,8 +305,8 @@ function limitsGuard(view: InstanceView<RetriesConfig>, after: Readonly<Record<s
     throw new EngineError('forbidden', `${view.principal.subject} may not change ${field}, the caps of ${view.schema} ${view.id}: it needs permission ${permission}`);
   }
   if (view.config.leased) {
-    const lease = view.instances.get(view.schema, view.id, { fields: ['lease'] })?.data.lease as { holder?: unknown; active?: unknown } | undefined;
-    if (lease?.active === true && lease.holder === view.principal.subject) {
+    const lease = view.instances.get(view.schema, view.id, { fields: [LEASE_HOLDER, LEASE_ACTIVE] });
+    if (behaviorField(lease, 'Lease', 'active') === true && behaviorField(lease, 'Lease', 'holder') === view.principal.subject) {
       return { reason: `${field} holds the caps its holder's attempts count against, so the holder of its lease does not change it`, code: 'limits_fixed' };
     }
   }
@@ -422,12 +430,12 @@ export const retries = defineBehavior<RetriesConfig>({
         ) STRICT`);
       },
     },
-    // The index lets a list that filters on retries.exhausted read only
+    // The index lets a list that filters on Retries.exhausted read only
     // the exhausted instances, or the others, in creation order.
     { version: 2, name: 'exhausted index', indexes: { exhausted: ['exhausted'] } },
   ],
 
-  filters: { 'retries.exhausted': { column: 'exhausted', type: 'boolean', description: 'Whether its retries are exhausted.' } },
+  filters: { exhausted: { column: 'exhausted', type: 'boolean', description: 'Whether its retries are exhausted.' } },
 
   // Once exhausted, the instance moves only to exhaustedState and is not
   // taken again; limitsField changes only as a limit does. A create sets
@@ -561,11 +569,14 @@ export const retries = defineBehavior<RetriesConfig>({
     },
   },
 
+  // Each field reads Retries' columns, but classAttempts, its table of
+  // counts by class; no kept score leaves bestScore absent.
   fields: {
-    retries(view): RetriesRecord {
-      const state = stateOf(view);
-      return { total: state.total, classAttempts: counts(view), bestScore: state.bestScore, exhausted: state.exhausted, stuck: state.stuck };
-    },
+    total: (view): RetriesRecord['total'] => stateOf(view).total,
+    classAttempts: (view): RetriesRecord['classAttempts'] => counts(view),
+    bestScore: (view): RetriesRecord['bestScore'] => stateOf(view).bestScore ?? undefined,
+    exhausted: (view): RetriesRecord['exhausted'] => stateOf(view).exhausted,
+    stuck: (view): RetriesRecord['stuck'] => stateOf(view).stuck,
   },
 
   afterChange(context, change) {

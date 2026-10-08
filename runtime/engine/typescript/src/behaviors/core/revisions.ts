@@ -49,6 +49,7 @@ starts at its next change. It cannot be removed from one: the history
 would stay behind with nothing to delete it.
 */
 
+import { REVISIONS_REVISION, behaviorField } from '../fields.js';
 import { BehaviorVetoError, EngineError, InstanceValidationError, OperationParamsError, type SchemaIssue } from '../../errors.js';
 import { jsonEqual, mergePatch } from '../../instances/patch.js';
 import type { Row } from '../../storage/driver.js';
@@ -163,7 +164,7 @@ function evidenceOf(context: InstanceContext<RevisionsConfig>, entries: Readonly
     const revision = entry.revision as number | undefined;
     let target;
     try {
-      target = context.instances.get(schema, id, { fields: revision === undefined ? [] : ['revision'] });
+      target = context.instances.get(schema, id, { fields: revision === undefined ? [] : [REVISIONS_REVISION] });
     } catch (error) {
       if (error instanceof EngineError && error.code === 'not_found') {
         issues.push({ path: `${at}/schema`, message: `${schema} is not a schema of namespace ${context.namespace}` });
@@ -180,7 +181,8 @@ function evidenceOf(context: InstanceContext<RevisionsConfig>, entries: Readonly
         issues.push({ path: `${at}/revision`, message: `${schema} does not compose Revisions, so ${schema} ${id} has no revision to cite` });
         return;
       }
-      const current = typeof target.data.revision === 'number' ? target.data.revision : 0;
+      const held = behaviorField(target, 'Revisions', 'revision');
+      const current = typeof held === 'number' ? held : 0;
       if (revision > current) {
         issues.push({
           path: `${at}/revision`,

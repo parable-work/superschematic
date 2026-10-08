@@ -245,7 +245,7 @@ for (const driver of drivers) {
       assert.equal(veto(() => engine.instances.invoke(alice, 'Item', 'i1', 'forward', { id: 'i2' }, fenced(0))).vetoCode, 'required');
       assert.equal(veto(() => engine.instances.invoke(alice, 'Item', 'i1', 'forward', { id: 'i2', generation: 3 }, fenced(0))).vetoCode, 'stale');
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'forward', { id: 'i2', generation: 0 }, fenced(0)), { generation: 1 });
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i2')?.data.generation, 1);
+      assert.deepEqual(engine.instances.get(alice, 'Item', 'i2')?.behaviors['test.Hold']?.generation, 1);
       // With require, a caller's write that presents none is refused.
       assert.equal(veto(() => engine.instances.update(alice, 'Item', 'i1', { title: 'Bare' })).vetoCode, 'required');
     });

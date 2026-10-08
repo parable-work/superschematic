@@ -3002,7 +3002,13 @@ model, or retired, when it lands.
 4. **Service auth.** Admission and identity (section 9) on Cloud Run.
 5. **Database lifecycle.** The `sqlgen` migration plan and apply step in
    deploys, the hazard gate and the deploy manifest.
-6. **CI generation and parameterized environments.**
+6. **CI generation and parameterized environments.** Built (D47). A
+   stack's `outputs.ci` writes its GitHub Actions workflow (section
+   11.3), which checks with no credentials, plans each cloud environment
+   as `planner`, deploys a preview member per pull request, and deploys
+   the cloud environments in declaration order behind their GitHub
+   environments' reviewers. Bootstrap records the project's number the
+   workflow signs in with. No generated workflow has run on GitHub yet.
 7. **Breadth.** Jobs and scheduled jobs, buckets, queues and static sites,
    and a second target (GKE or Cloudflare) added as a registration, with
    the generic connector (section 6.2) so compute can mix.

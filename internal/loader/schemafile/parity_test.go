@@ -322,7 +322,7 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a behavior name that is not a string", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": 3}]}`},
 	// A type's display (D48): the registered @display schema's shape.
 	{"a display", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {"doing": "Start"}},
-		"states": {"doing": {"tone": "active", "activeForm": "Doing"}, "todo": {"label": "To do"}}, "summaryFields": ["status", "title"], "titleField": "title", "noun": "Ticket"}}`},
+		"states": {"doing": {"tone": "active", "activeForm": "Doing"}, "todo": {"label": "To do"}}, "summaryFields": ["Workflow.status", "title"], "titleField": "title", "noun": "Ticket"}}`},
 	{"a display that declares nothing", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {}}`},
 	{"a blank display noun", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"noun": " "}}`},
 	{"a display summary field twice", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"summaryFields": ["title", "title"]}}`},

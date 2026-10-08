@@ -57,8 +57,8 @@ func TestCoreBehaviors(t *testing.T) {
 		t.Errorf("requires: Dependencies %v, Links %v, Rollups %v, Reactions %v; want [Workflow], none, none and [Workflow]",
 			dependencies.Requires, links.Requires, rollups.Requires, reactions.Requires)
 	}
-	if len(rollups.Operations) != 0 || len(rollups.Fields) != 1 || rollups.Fields[0].Name != "rollups" {
-		t.Errorf("Rollups: operations %v, fields %v; want none and rollups", rollups.Operations, rollups.Fields)
+	if len(rollups.Operations) != 0 || len(rollups.Fields) != 1 || rollups.Fields[0].Name != "values" {
+		t.Errorf("Rollups: operations %v, fields %v; want none and values", rollups.Operations, rollups.Fields)
 	}
 	// Reactions adds no field and no operation: the engine's runner runs it.
 	if len(reactions.Fields) != 0 || len(reactions.Operations) != 0 {
@@ -95,8 +95,8 @@ func TestCoreBehaviors(t *testing.T) {
 		t.Errorf("Presence and Blueprint: config required %v, %v, requires %v, %v; want true, true, none, none",
 			presence.ConfigRequired(), blueprint.ConfigRequired(), presence.Requires, blueprint.Requires)
 	}
-	if len(blueprint.Operations) != 0 || len(blueprint.Fields) != 1 || blueprint.Fields[0].Name != "blueprint" {
-		t.Errorf("Blueprint = %+v, want no operation and one field, blueprint", blueprint)
+	if len(blueprint.Operations) != 0 || len(blueprint.Fields) != 1 || blueprint.Fields[0].Name != "children" {
+		t.Errorf("Blueprint = %+v, want no operation and one field, children", blueprint)
 	}
 	budget, _ := reg.Behavior("Budget")
 	retries, _ := reg.Behavior("Retries")
@@ -247,7 +247,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{links, `{"links": {"spec": {"schema": "documents", "weak": true}}}`, "behavior Links config: "},
 		{links, `{"links": {"spec": {"schema": "documents"}}, "cascade": true}`, "behavior Links config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, ""},
-		{rollups, `{"rollups": {"byStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "status"},
+		{rollups, `{"rollups": {"byStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "Workflow.status"},
 			"estimate": {"schema": "tasks", "link": "project", "function": "sum", "field": "estimate"},
 			"smallest": {"schema": "tasks", "link": "project", "function": "min", "field": "estimate"},
 			"largest": {"schema": "tasks", "link": "project", "function": "max", "field": "estimate"},
@@ -266,8 +266,8 @@ func TestCoreBehaviors(t *testing.T) {
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "average", "field": "estimate"}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "sum"}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "countBy"}}}`, "behavior Rollups config: "},
-		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "field": "status"}}}`, "behavior Rollups config: "},
-		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "field": "status"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "field": "Workflow.status"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "field": "Workflow.status"}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "gatedStates": ["done"]}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": []}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "filter": "open"}}}`, "behavior Rollups config: "},

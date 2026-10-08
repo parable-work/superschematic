@@ -19,22 +19,29 @@ export type ProjectFields = {
   name: string;
 };
 
-/** A Project as a read returns it: its own fields, then its behaviors'. */
-export type Project = ProjectFields & {
-  /** Workflow: The state the instance is in. */
-  readonly status: ProjectState;
-  /** Rollups: Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent. */
-  readonly rollups: {
-    /** countBy over the Task instances whose project points here. */
-    byStatus: { [key: string]: number } | { over: true };
-    /** all over the Task instances whose project points here. */
-    finished: boolean | { over: true };
-    /** sum over the Task instances whose project points here. */
-    hours: number | { over: true };
-    /** max over the Task instances whose project points here. */
-    longest?: number | { over: true };
-    /** count over the Task instances whose project points here. */
-    tasks: number | { over: true };
+/** A Project's data as a read returns it: its own fields. Its behaviors' fields are in ProjectBehaviors. */
+export type Project = ProjectFields;
+
+/** The fields of a Project's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type ProjectBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: ProjectState;
+  };
+  readonly Rollups: {
+    /** Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent. */
+    readonly values: {
+      /** countBy over the Task instances whose project points here. */
+      byStatus: { [key: string]: number } | { over: true };
+      /** all over the Task instances whose project points here. */
+      finished: boolean | { over: true };
+      /** sum over the Task instances whose project points here. */
+      hours: number | { over: true };
+      /** max over the Task instances whose project points here. */
+      longest?: number | { over: true };
+      /** count over the Task instances whose project points here. */
+      tasks: number | { over: true };
+    };
   };
 };
 
@@ -89,13 +96,13 @@ export function isProjectVeto<B extends keyof ProjectVetoes>(error: unknown, beh
 /** The Project schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
 export interface ProjectClient {
   /** create stores a new Project, with its behaviors' create parameters. */
-  create(data: ProjectFields, options?: ProjectCreateOptions): Promise<Instance<Project>>;
+  create(data: ProjectFields, options?: ProjectCreateOptions): Promise<Instance<Project, ProjectBehaviors>>;
   /** get reads a Project; one that does not exist is 404 not_found. */
-  get(id: string, options?: CallOptions): Promise<Instance<Project>>;
+  get(id: string, options?: CallOptions): Promise<Instance<Project, ProjectBehaviors>>;
   /** list returns a page in creation order. */
-  list(options?: ListOptions): Promise<InstancePage<Project>>;
+  list(options?: ListOptions): Promise<InstancePage<Project, ProjectBehaviors>>;
   /** update applies a merge patch of the own fields. */
-  update(id: string, patch: ProjectPatch, options?: ProjectWriteOptions): Promise<Instance<Project>>;
+  update(id: string, patch: ProjectPatch, options?: ProjectWriteOptions): Promise<Instance<Project, ProjectBehaviors>>;
   /** delete removes a Project. */
   delete(id: string, options?: ProjectWriteOptions): Promise<void>;
   /** operate calls an instance operation and returns its result with the instance's sequence after it. */
@@ -108,16 +115,16 @@ export interface ProjectClient {
 export function projectClient(client: EngineClient): ProjectClient {
   return {
     create(data, options) {
-      return client.instances.create<Project>('Project', data, options);
+      return client.instances.create<Project, ProjectBehaviors>('Project', data, options);
     },
     get(id, options) {
-      return client.instances.get<Project>('Project', id, options);
+      return client.instances.get<Project, ProjectBehaviors>('Project', id, options);
     },
     list(options) {
-      return client.instances.list<Project>('Project', options);
+      return client.instances.list<Project, ProjectBehaviors>('Project', options);
     },
     update(id, patch, options) {
-      return client.instances.update<Project>('Project', id, patch, options);
+      return client.instances.update<Project, ProjectBehaviors>('Project', id, patch, options);
     },
     delete(id, options) {
       return client.instances.delete('Project', id, options);
@@ -140,16 +147,25 @@ export type SpecFields = {
   body?: string | null;
 };
 
-/** A Spec as a read returns it: its own fields, then its behaviors'. */
-export type Spec = SpecFields & {
-  /** Workflow: The state the instance is in. */
-  readonly status: SpecState;
-  /** Revisions: The number of the instance's latest revision. */
-  readonly revision?: number;
-  /** Revisions: With review in the config, how many of the instance's proposals are pending; absent without review. */
-  readonly pendingProposals?: unknown;
-  /** Dependencies: Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
-  readonly blocked: boolean;
+/** A Spec's data as a read returns it: its own fields. Its behaviors' fields are in SpecBehaviors. */
+export type Spec = SpecFields;
+
+/** The fields of a Spec's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type SpecBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: SpecState;
+  };
+  readonly Revisions: {
+    /** The number of the instance's latest revision. */
+    readonly revision?: number;
+    /** With review in the config, how many of the instance's proposals are pending; absent without review. */
+    readonly pendingProposals?: unknown;
+  };
+  readonly Dependencies: {
+    /** Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
+    readonly blocked: boolean;
+  };
 };
 
 /** A merge patch of a Spec's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations. */
@@ -455,13 +471,13 @@ export function isSpecVeto<B extends keyof SpecVetoes>(error: unknown, behavior?
 /** The Spec schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
 export interface SpecClient {
   /** create stores a new Spec, with its behaviors' create parameters. */
-  create(data: SpecFields, options?: SpecCreateOptions): Promise<Instance<Spec>>;
+  create(data: SpecFields, options?: SpecCreateOptions): Promise<Instance<Spec, SpecBehaviors>>;
   /** get reads a Spec; one that does not exist is 404 not_found. */
-  get(id: string, options?: CallOptions): Promise<Instance<Spec>>;
+  get(id: string, options?: CallOptions): Promise<Instance<Spec, SpecBehaviors>>;
   /** list returns a page in creation order. */
-  list(options?: ListOptions): Promise<InstancePage<Spec>>;
+  list(options?: ListOptions): Promise<InstancePage<Spec, SpecBehaviors>>;
   /** update applies a merge patch of the own fields. */
-  update(id: string, patch: SpecPatch, options?: SpecWriteOptions): Promise<Instance<Spec>>;
+  update(id: string, patch: SpecPatch, options?: SpecWriteOptions): Promise<Instance<Spec, SpecBehaviors>>;
   /** delete removes a Spec. */
   delete(id: string, options?: SpecWriteOptions): Promise<void>;
   /** operate calls an instance operation and returns its result with the instance's sequence after it. */
@@ -494,16 +510,16 @@ export interface SpecClient {
 export function specClient(client: EngineClient): SpecClient {
   return {
     create(data, options) {
-      return client.instances.create<Spec>('Spec', data, options);
+      return client.instances.create<Spec, SpecBehaviors>('Spec', data, options);
     },
     get(id, options) {
-      return client.instances.get<Spec>('Spec', id, options);
+      return client.instances.get<Spec, SpecBehaviors>('Spec', id, options);
     },
     list(options) {
-      return client.instances.list<Spec>('Spec', options);
+      return client.instances.list<Spec, SpecBehaviors>('Spec', options);
     },
     update(id, patch, options) {
-      return client.instances.update<Spec>('Spec', id, patch, options);
+      return client.instances.update<Spec, SpecBehaviors>('Spec', id, patch, options);
     },
     delete(id, options) {
       return client.instances.delete('Spec', id, options);
@@ -595,32 +611,43 @@ export type TaskFields = {
   | { kind: 'chore'; detail?: null }
 );
 
-/** A Task as a read returns it: its own fields, then its behaviors'. */
-export type Task = TaskFields & {
-  /** Workflow: The state the instance is in. */
-  readonly status: TaskState;
-  /** Comments: How many comments the instance has. */
-  readonly commentCount: number;
-  /** Links: The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it. */
-  readonly links: {
-    /** The Task instance parent points at. */
-    parent?: { id: string; schema: 'Task' };
-    /** The Project instance project points at. */
-    project: { id: string; schema: 'Project' };
-    /** The Spec instance spec points at. */
-    spec?: {
-      id: string;
-      /** The target's latest revision. */
-      latest?: number;
-      /** The target's revision the link records. */
-      revision?: number;
-      schema: 'Spec';
-      /** Whether the target has moved past that revision. */
-      stale?: boolean;
+/** A Task's data as a read returns it: its own fields. Its behaviors' fields are in TaskBehaviors. */
+export type Task = TaskFields;
+
+/** The fields of a Task's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type TaskBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: TaskState;
+  };
+  readonly Comments: {
+    /** How many comments the instance has. */
+    readonly commentCount: number;
+  };
+  readonly Links: {
+    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none. */
+    readonly targets: {
+      /** The Task instance parent points at. */
+      parent?: { id: string; schema: 'Task' };
+      /** The Project instance project points at. */
+      project: { id: string; schema: 'Project' };
+      /** The Spec instance spec points at. */
+      spec?: {
+        id: string;
+        /** The target's latest revision. */
+        latest?: number;
+        /** The target's revision the link records. */
+        revision?: number;
+        schema: 'Spec';
+        /** Whether the target has moved past that revision. */
+        stale?: boolean;
+      };
     };
   };
-  /** Dependencies: Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
-  readonly blocked: boolean;
+  readonly Dependencies: {
+    /** Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
+    readonly blocked: boolean;
+  };
 };
 
 /** A merge patch of a Task's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations. */
@@ -914,13 +941,13 @@ export function isTaskVeto<B extends keyof TaskVetoes>(error: unknown, behavior?
 /** The Task schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
 export interface TaskClient {
   /** create stores a new Task, with its behaviors' create parameters. */
-  create(data: TaskFields, options: TaskCreateOptions): Promise<Instance<Task>>;
+  create(data: TaskFields, options: TaskCreateOptions): Promise<Instance<Task, TaskBehaviors>>;
   /** get reads a Task; one that does not exist is 404 not_found. */
-  get(id: string, options?: CallOptions): Promise<Instance<Task>>;
+  get(id: string, options?: CallOptions): Promise<Instance<Task, TaskBehaviors>>;
   /** list returns a page in creation order. */
-  list(options?: ListOptions): Promise<InstancePage<Task>>;
+  list(options?: ListOptions): Promise<InstancePage<Task, TaskBehaviors>>;
   /** update applies a merge patch of the own fields. */
-  update(id: string, patch: TaskPatch, options?: TaskWriteOptions): Promise<Instance<Task>>;
+  update(id: string, patch: TaskPatch, options?: TaskWriteOptions): Promise<Instance<Task, TaskBehaviors>>;
   /** delete removes a Task. */
   delete(id: string, options?: TaskWriteOptions): Promise<void>;
   /** operate calls an instance operation and returns its result with the instance's sequence after it. */
@@ -951,16 +978,16 @@ export interface TaskClient {
 export function taskClient(client: EngineClient): TaskClient {
   return {
     create(data, options) {
-      return client.instances.create<Task>('Task', data, options);
+      return client.instances.create<Task, TaskBehaviors>('Task', data, options);
     },
     get(id, options) {
-      return client.instances.get<Task>('Task', id, options);
+      return client.instances.get<Task, TaskBehaviors>('Task', id, options);
     },
     list(options) {
-      return client.instances.list<Task>('Task', options);
+      return client.instances.list<Task, TaskBehaviors>('Task', options);
     },
     update(id, patch, options) {
-      return client.instances.update<Task>('Task', id, patch, options);
+      return client.instances.update<Task, TaskBehaviors>('Task', id, patch, options);
     },
     delete(id, options) {
       return client.instances.delete('Task', id, options);

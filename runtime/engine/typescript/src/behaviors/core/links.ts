@@ -7,9 +7,9 @@ schema name is (the namespace, then the shared one). link points it at a
 target, replacing the one it had; unlink clears it. A create may give
 links too, by name, in its parameters (initialize), held to link's
 checks in the create's transaction, so an instance holds them from its
-first event. One read-only field, links, holds every link the instance
+first event. One read-only field, targets, holds every link the instance
 has, since a declaration's fields are fixed and the config's names are
-not.
+not; a read returns it as Links.targets.
 
 A pinned link pins a revision of Revisions or a release of Branches, as
 its config's pinned says (true and "revision" pin a revision, "release"
@@ -58,6 +58,7 @@ unless it has a required link, and cannot be removed from one: their
 links and references would stay behind.
 */
 
+import { behaviorField, fieldPath } from '../fields.js';
 import { BehaviorVetoError, CreateParamsError, OperationParamsError, type SchemaIssue } from '../../errors.js';
 import type { Row } from '../../storage/driver.js';
 import { defineBehavior, type BehaviorScope, type FrozenJSON, type InstanceContext, type InstanceView } from '../behavior.js';
@@ -141,8 +142,8 @@ function spec(scope: BehaviorScope<LinksConfig>, operation: string, name: string
 // revision or release field, as the caller; undefined when it has none
 // yet.
 function latest(scope: BehaviorScope<LinksConfig>, pin: LinkPin, schema: string, id: string): number | undefined {
-  const field = PINS[pin].field;
-  const value = scope.instances.get(schema, id, { fields: [field] })?.data[field];
+  const { behavior, field } = PINS[pin];
+  const value = behaviorField(scope.instances.get(schema, id, { fields: [fieldPath(behavior, field)] }), behavior, field);
   return typeof value === 'number' ? value : undefined;
 }
 
@@ -222,13 +223,13 @@ function setLink(
   if (pin !== undefined && context.schemas.config(link.schema, PINS[pin].behavior) === undefined) {
     throw refuse.param('name', `link ${name} is pinned to a ${pin}, but ${link.schema} does not compose ${PINS[pin].behavior}`);
   }
-  const target = context.instances.get(link.schema, given.id, { fields: pin === undefined ? [] : [PINS[pin].field] });
+  const target = context.instances.get(link.schema, given.id, { fields: pin === undefined ? [] : [fieldPath(PINS[pin].behavior, PINS[pin].field)] });
   if (target === undefined) {
     throw refuse.param('id', `${link.schema} ${given.id} does not exist`);
   }
   let value: number | undefined;
   if (pin !== undefined) {
-    const found = target.data[PINS[pin].field];
+    const found = behaviorField(target, PINS[pin].behavior, PINS[pin].field);
     const current = typeof found === 'number' ? found : undefined;
     if (current === undefined) {
       throw refuse.veto(`${link.schema} ${given.id} has no ${pin} to pin yet`, PINS[pin].code);
@@ -455,7 +456,7 @@ export const links = defineBehavior<LinksConfig>({
   },
 
   fields: {
-    links: (view) => {
+    targets: (view) => {
       const rows = held(view);
       if (rows.length === 0) {
         return undefined;

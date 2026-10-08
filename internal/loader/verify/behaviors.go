@@ -11,12 +11,11 @@ import (
 // checkBehaviors holds every type's behaviors to their declarations in the
 // registry (D16): each behavior is registered and listed once, its config
 // passes its config schema, what it requires is on the type and what it
-// conflicts with is not, the fields it adds collide neither with the type's
-// own fields nor with another behavior's, and no two behaviors add an
-// operation of the same name. A type's own field is taken by its name and
-// by its JSON key (jsonTag), as the engine takes it: behavior fields sit
-// beside the type's own in an instance's JSON. A declaration's own
-// operation names are checked when it registers.
+// conflicts with is not, and no two behaviors add an operation of the same
+// name. The fields a behavior adds cannot collide: an instance keeps them
+// under the behavior's name, apart from the type's own fields (D16,
+// amended: a behavior's fields sit under its name). A declaration's own
+// field and operation names are checked when it registers.
 func checkBehaviors(schema *ir.Schema, reg *registry.Registry, r *Result) {
 	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
 		for _, name := range sortedTypeNames(types) {
@@ -51,16 +50,6 @@ func checkTypeBehaviors(td *ir.TypeDef, reg *registry.Registry, r *Result) {
 		declared = append(declared, behavior)
 	}
 
-	own := make(map[string]bool, len(td.Fields))
-	for _, f := range td.Fields {
-		if f != nil {
-			own[f.Name] = true
-			if f.JSONTag != "" {
-				own[f.JSONTag] = true
-			}
-		}
-	}
-	fieldOwner := map[string]string{}
 	opOwner := map[string]string{}
 	for _, behavior := range declared {
 		for _, required := range behavior.Requires {
@@ -71,16 +60,6 @@ func checkTypeBehaviors(td *ir.TypeDef, reg *registry.Registry, r *Result) {
 		for _, conflict := range behavior.Conflicts {
 			if slices.Contains(listed, conflict) {
 				r.errorf(td.Owner, "type %s: behavior %s conflicts with behavior %s, which the type also lists", td.Name, behavior.Name, conflict)
-			}
-		}
-		for _, field := range behavior.Fields {
-			switch prev, taken := fieldOwner[field.Name]; {
-			case own[field.Name]:
-				r.errorf(td.Owner, "type %s: behavior %s adds field %s, which the type declares", td.Name, behavior.Name, field.Name)
-			case taken:
-				r.errorf(td.Owner, "type %s: behaviors %s and %s both add field %s", td.Name, prev, behavior.Name, field.Name)
-			default:
-				fieldOwner[field.Name] = behavior.Name
 			}
 		}
 		for _, op := range behavior.Operations {

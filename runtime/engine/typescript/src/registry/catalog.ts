@@ -339,7 +339,6 @@ export class SchemaCatalog {
         }
         prefixes.set(bound.behavior.name, prefixOf(stored));
       }
-      const fields = new Map([...composition.fields].map(([field, bound]) => [field, bound.behavior.name]));
       const indexes = ownIndexes(model, record.namespace);
       const filters = filterablesOf(
         scalarFields(model.document, model.instanceType),
@@ -351,7 +350,7 @@ export class SchemaCatalog {
         }))
       );
       runtime = {
-        validator: new SchemaValidator(model, fields),
+        validator: new SchemaValidator(model),
         composition,
         prefixes,
         indexes,
@@ -529,7 +528,7 @@ function toRecord(row: Row): SchemaRecord {
 function lazyValidator(model: SchemaModel, composition: Composition): InstanceValidator {
   let validator: SchemaValidator | undefined;
   const built = (): SchemaValidator =>
-    (validator ??= new SchemaValidator(model, new Map([...composition.fields].map(([field, bound]) => [field, bound.behavior.name]))));
+    (validator ??= new SchemaValidator(model));
   return {
     validate: (value: unknown) => built().validate(value),
     normalize: (value: unknown, mode: NormalizeMode) => built().normalize(value, mode),

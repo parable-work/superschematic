@@ -6,10 +6,12 @@ where is a JSON object of field values: a member keeps the instances whose
 field holds the value, a list of values any of them, and the members
 together keep the instances every one keeps. A field is one of the
 instance type's own top-level fields that holds a string, a number or a
-boolean (indexes.ts, scalarFields), or a field a behavior lets a list
-filter on (BehaviorImplementation.filters), which the behavior keeps in
-one of its columns: Workflow's status, Assignment's assignee, Lease's
-lease.holder, Retries' retries.exhausted. A value is of the field's JSON
+boolean (indexes.ts, scalarFields), by its key, or a field a behavior lets
+a list filter on (BehaviorImplementation.filters), which the behavior
+keeps in one of its columns, by its qualified name, the behavior's name, a
+dot and the filter's: Workflow.status, Assignment.assignee, Lease.holder,
+Retries.exhausted. An own field's key holds no dot, so the two never meet
+(D16, amended: a behavior's fields sit under its name). A value is of the field's JSON
 type, or null, which keeps the instances whose field holds no value
 (absent or null; a null column), and a list holds 1 to 100 of them.
 
@@ -45,6 +47,7 @@ A lookup's key names the fields of one unique index, each with one value,
 and reads the one instance whose fields hold them, through the index.
 */
 
+import { fieldPath } from '../behaviors/fields.js';
 import { indexName } from '../behaviors/storage.js';
 import { EngineError } from '../errors.js';
 import type { SqlValue } from '../storage/driver.js';
@@ -384,8 +387,9 @@ export interface FilteringBehavior {
 
 /**
  * filterablesOf lists the fields a version's list filters on, by key: the
- * instance type's own scalar fields, then each behavior's filters, with
- * the SQL names of their columns and indexes.
+ * instance type's own scalar fields, then each behavior's filters by
+ * qualified name (`Workflow.status`), with the SQL names of their columns
+ * and indexes.
  */
 export function filterablesOf(
   own: ReadonlyMap<string, { readonly key: string; readonly type: ScalarType }>,
@@ -399,8 +403,9 @@ export function filterablesOf(
   }
   for (const behavior of behaviors) {
     for (const [field, filter] of behavior.filters) {
-      found.set(field, {
-        key: field,
+      const key = fieldPath(behavior.name, field);
+      found.set(key, {
+        key,
         type: filter.type,
         behavior: behavior.name,
         column: `${behavior.prefix}${filter.column}`,

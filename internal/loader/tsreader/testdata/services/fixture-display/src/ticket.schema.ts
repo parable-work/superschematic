@@ -17,7 +17,7 @@ import { Validate, behavior, display, docs, icon } from "@superschematic/schema"
   plural: "Tickets",
   titleField: "title",
   createLabel: "New ticket",
-  summaryFields: ["status", "assignee"],
+  summaryFields: ["Workflow.status", "assignee"],
   states: {
     todo: { label: "To do", tone: "muted" },
     implementing: { label: "Implement", activeForm: "Implementing", tone: "active" },

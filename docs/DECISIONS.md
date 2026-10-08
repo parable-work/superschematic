@@ -1131,8 +1131,10 @@ lease's holder hears that a linked target moved" and "a config change
 sees whether the schema has instances" below). A write that changes
 nothing writes nothing, a write stores what the schema's parse makes of
 it, each caller's tools are the ones it may use, and retention and the
-value store have bounds (the four amendments of those names below). Each
-change that lands a piece updates this paragraph. The names and rules are
+value store have bounds (the four amendments of those names below). A
+read returns each behavior's fields under the behavior's name, apart from
+the instance's own (the amendment "a behavior's fields sit under its
+name" below). Each change that lands a piece updates this paragraph. The names and rules are
 reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
@@ -1913,6 +1915,40 @@ size and driver rows).
 | Creating, archiving and unarchiving a namespace append no event, in its own log or another's. A namespace's log is read per schema, `read` asked of each event's schema, and a namespace's change names none, so its readers would need a rule of their own and its CHECKs a rebuild of `engine_events`. A writer learns of an archive from its next write's `namespace_archived`, and a reader reads on, since an archive stops no read. The shared namespace's log would show a project another's name, which `list` hides from it. | An event kind in the namespace's own log, read with `manage`, which a stream filtered by schema never sees and which needs the log rebuilt; one in the shared namespace's log |
 | `values.maxBytes` caps a stored value: 16 MiB of canonical JSON by default, at least the threshold. A write that would store a longer top-level member, of an instance's own fields, an event's change or an object a behavior stows, inline under an index or by hash, is refused as a whole: `ValueTooLargeError`, `value_too_large`, 413 over HTTP with `details: { path, bytes, maxBytes }`, the path the member's pointer in what would be stored. | No cap, as before, where only the HTTP body limit bounded a value and nothing bounded one a behavior computes; a cap per schema, an option keyed by names a deployment makes while the engine runs; the HTTP runtime's `payload_too_large`, which names the request body |
 | A driver outside the file's transactions has its writes settled around them: once the outermost transaction ends, committed or rolled back, the store removes each value the driver wrote in it that no holder references (`Storage.afterTransaction`, which a savepoint's rollback does not drop). So a rolled-back write leaves nothing. A crash between a driver's write and the end of its transaction can still leave one: `engine.values.sweep()` pages through the driver's optional `list(after, limit)` and removes each value no holder references, acting for no principal, as retention's prune does. A deployment runs it after a crash; the default driver lists too and leaves nothing to sweep. | A sweep on a runner schedule, which runs per behavior and schema and needs a principal; keeping the rolled-back values, as before, which a driver over object storage pays for in storage until someone looks; a list on every driver, which a write-only store cannot give |
+
+### D16, amended: a behavior's fields sit under its name
+
+A read returned an instance's own fields and, beside them in `data`, the
+fields its behaviors add, so the loader and the engine refused a
+behavior whose field the type declared, or another behavior on the type
+added. A type that declared `status` could not compose `Workflow`: the
+acme shop's `Order.status` would have had to go to take it. Seven
+behaviors held their state in one object named after themselves,
+`lease`, `budget`, `retries`, `presence`, `blueprint`, `links` and
+`rollups`, only to keep clear of the type's names. A read now returns
+each behavior's fields under the behavior's name, apart from the own
+fields, and nothing a behavior adds can collide. A config never renames
+a field: a behavior's fields are its declaration's, so every type that
+composes it reads the same. This changes the base entry's row on what
+the loader refuses, the amendments "behaviors that reach other
+instances" (a read with its behavior fields), "a reference hears what
+can move its holder" (the pointer), "an instance is found by a unique
+field, and a list filters by equality" and "a list filters on who holds
+the work" (the filters' names), D48's row on `summaryFields`, and D49's
+on the instance type.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A read returns `data`, the instance type's own fields only, and `behaviors`: by behavior name, in the type's list order, an object of the fields the behavior declares that have a value, in its declaration's order. Every behavior on the type that declares a field has an entry, `{}` while none has a value; one that declares none has no entry. A create's `behaviors`, the parameters it gives, and a write's preconditions were keyed by behavior name already. | The behavior's name as a member of `data`, `data.Workflow.status`, which a type that declares a field named `Workflow` still collides with, so the loader would reserve every behavior's name; a prefix, `Workflow_status`, which an own field can take as well; a config key that renames a field, under which two types that compose one behavior read differently and a client cannot know a field's name from the behavior's |
+| The loader and the engine refuse no behavior field: one may share its name with an own field of the type and with another behavior's. A field's name is unique within its declaration, as registration has always held. Operations stay flat: two behaviors on a type still may not add an operation of one name, since an operation names a route, an MCP tool and the policy's `operation`. | Namespacing operations too (`Lease.release` beside `Branches.release`), which renames every route, tool and permission a deployment wrote; `Branches` keeps `releaseCommit` |
+| A string names a behavior's field by its qualified name: the behavior's name, a dot, the field's (`Workflow.status`, `Lease.holder`, `acme.Rating.ratingCount`). A behavior's read of another instance (`ReadOptions.fields`), a list's `where`, a rollup's `field` and a display's `titleField` and `summaryFields` take it. An own field's name holds no dot, so no own field has a qualified name; a projection's `alias.field` reads the same way. Rollups' `field: "status"` becomes `"Workflow.status"`, and a filter on Lease's holder is `Lease.holder`. | Structured filters, `where: { behaviors: { Workflow: { status } } }`, which an own field named `behaviors` takes; a second parameter for behavior filters, which a client has to learn beside `where`; a bare name where it is unambiguous, which a later own field makes ambiguous |
+| A create, an update and a behavior's `update()` write own fields only. A behavior field's name in one is an undeclared key, refused as `unknown` as any other; the `readOnly` rule, which named the behavior that owned the key, goes. | Keeping `readOnly` for a key a behavior's field is named, which an own field of the same name now makes a valid write |
+| Lease, Presence, Retries, Blueprint, Budget, Links and Rollups are redeclared so the members they wrapped are their fields: Lease's `holder`, `token`, `acquiredAt`, `renewedAt`, `expiresAt`, `active`, `expiries` and `ended`; Presence's `deadline`, `lastBeatAt`, `missed` and `released`; Retries' `total`, `classAttempts`, `bestScore`, `exhausted` and `stuck`; Blueprint's `children`. A map keyed by the config's names stays one field with a plain name: Budget's `meters`, Links' `targets`, Rollups' `values`. A member that held null, a free lease's `holder`, is an absent field, as a behavior field without a value always was. | `Lease.lease.holder`, mechanical but a stutter in every read and filter; keeping the null members, a rule for no value beside the engine's own |
+| The log records each change as a merge patch of what a read returns, `{ data, behaviors }`: a create the whole instance, an update its patch under `data` and what its behaviors' fields took under `behaviors`, an operation the same under `patch`, a part absent when it changes nothing. A reaction's `before()` and retention's bases fold to `{ data, behaviors }`. The value store keeps a large own field of an event at `/data/<field>` and a large behavior field at `/behaviors/<behavior>/<field>`, each by itself, as before. | A flat patch with the behaviors' fields under a member of it, which an own field of that name collides with |
+| A reference hears a pointer into `{ data, behaviors }`: `/data/<field>` or `/behaviors/<behavior>/<field>`, on down. `references.add` refuses any other, so a pointer written for the old shape fails when it is recorded rather than never firing. | Any pointer, under which `/status` silently hears nothing |
+| The describe document's `instance` is the JSON Schema of `data`, the own fields, and `instanceBehaviors` that of `behaviors`, each field read-only; a read's tool result carries both. The client's `Instance<T, B>` types `behaviors` beside `data`. | One schema with the behaviors' fields read-only among the own, as before |
+| D49's typed wrappers follow: `<T>` is a read's `data`, the own fields (`<T>Fields`), and `<T>Behaviors` its `behaviors`, by behavior name, each behavior that declares a field with its fields `readonly`, so every call returns `Instance<T, <T>Behaviors>`. A field is optional where the engine can leave it out, as before: `Workflow.status`, `Comments.commentCount`, `Dependencies.blocked` and `Rollups.values` are always there, and `Links.targets` when a link is required. The work-queue behaviors' fields are typed one by one, `Budget.meters` and `Retries.classAttempts` by the config's names, where their wrapping objects were `JSONObject`. The parity file's `fields` are keyed by behavior, then field, and the engine's suite holds the generator's behaviors and fields to the describe document's `instanceBehaviors`. | One type for both, `<T>Fields` intersected with the behaviors' entries, which puts the behavior fields back beside the own |
+| A file written before is not migrated: its events and bases keep their flat changes and its references their old pointers. Flagged: a reaction's `before()` over such an event, and a reference that hears an old pointer, no longer read what they did. Before the first release an engine file is for tests and local use; one kept from before starts again. | A migration that splits each stored change by the behaviors of its version, which needs every behavior's declaration, and how seven of them flattened, in a migration that runs before any implementation registers; rewriting the append-only log in place |
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -4293,9 +4329,28 @@ bootstrap's `planner` and `deployer`. Designing it settled the rest.
 | A pull request runs a `check` job with no credentials (levels 1 to 3), `stack plan` as `planner` per cloud environment without parameters (levels 5 and 6), and a member of each environment with one parameter, deployed as `deployer` with the pull request's number and destroyed when it closes. A fork's pull request runs `check` alone. | Level 4, `stack dev` with Docker, on every pull request, which an engineer runs on their machine. A workflow per environment, whose order across files GitHub cannot express. A reusable workflow or published action, a second artifact to version beside the binary. |
 | The workflow installs the release that generated it, from the release page of the binary's module, checked against the release's `SHA256SUMS`. The version comes from the binary's build information, as gcp's migration image does (D46); a binary built from a checkout has none, and its workflow's install step fails and says to generate again with a release. | `go install`, which refuses a module with `replace` directives (section 13 of `docs/stack-model.md`). The latest release, which changes a repository's CI with no change in it. |
 
-Status: not built. `projectNumber` is in gcp's values schema; bootstrap
-does not record it yet, the readers do not number environments, and no
-renderer, generator or CI seam exists.
+Status: built.
+- #295 records the design and adds `projectNumber` to gcp's values.
+- #297 numbers environments in declaration order
+  (`EnvironmentDecl.Order`), and the TypeScript writer now writes a
+  stack's declarations.
+- #298 has bootstrap record `projectNumber` in the schema:
+  `Bootstrapper` returns a `BootstrapResult`, and the CLI hands
+  `stackdeploy` the TypeScript edit, so no extension links the compiler.
+- #301 adds `CIRendererSpec`, `TargetSpec.CI`, `ProvisionerSpec.Tools`,
+  `outputs.ci` and the `ci` generator with the `github` renderer, whose
+  goldens actionlint checks.
+
+The amendments below ship the archives the workflow's builds link and
+pin each generated module to the release. No generated workflow has run
+on GitHub Actions: a run needs a release, a project bootstrapped with a
+GitHub remote, and a repository that turns the workflow on.
+
+Not built:
+- a check that the committed workflow is current;
+- pinned Bun and Node releases in the workflow;
+- installing the TypeScript workspace and type-checking TypeScript
+  servers in `check` (D51).
 
 The rule is reversible until the first release.
 

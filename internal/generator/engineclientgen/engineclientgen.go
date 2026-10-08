@@ -6,10 +6,10 @@
 // unknown data, an operation unknown parameters. A schema's shape is known
 // before it runs, from its document and the behavior declarations the
 // binary registers, and this package writes it down per schema: the
-// instance type with its own fields and its behaviors' fields, the create
-// input with each behavior's create parameters, the update patch, each
-// operation's parameters and result, the veto codes, and a wrapper object
-// whose methods call the client with them.
+// instance type's own fields, its behaviors' fields under each behavior's
+// name, the create input with each behavior's create parameters, the
+// update patch, each operation's parameters and result, the veto codes,
+// and a wrapper object whose methods call the client with them.
 //
 // A behavior's config narrows what its declaration says: Workflow's states,
 // Links' names, Dependencies' blocker schemas, Variants' types. The engine

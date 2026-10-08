@@ -86,9 +86,11 @@ test('an author creates a note; a reader may not', async () => {
   const created = await api('alice-token', 'POST', '/schemas/notes/instances', { id: 'launch', data: { title: 'Launch', tags: ['launch'] } });
   assert.equal(created.status, 201);
   assert.equal(created.etag, '"1"');
-  // The behaviors' fields sit beside the note's own: Workflow's status,
-  // Comments' commentCount and Revisions' revision and pendingProposals.
-  assert.deepEqual(created.body.data, { title: 'Launch', tags: ['launch'], status: 'draft', commentCount: 0, revision: 1, pendingProposals: 0 });
+  // data holds the note's own fields, and behaviors each behavior's under
+  // its name: Workflow's status, Comments' commentCount and Revisions'
+  // revision and pendingProposals.
+  assert.deepEqual(created.body.data, { title: 'Launch', tags: ['launch'] });
+  assert.deepEqual(created.body.behaviors, { Workflow: { status: 'draft' }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } });
 });
 
 test('a transition that names a permission needs it', async () => {
@@ -135,15 +137,8 @@ test('a reader comments and proposes a change; an editor approves it', async () 
   assert.equal(approved.body.revision, 2);
 
   const note = await api('carol-token', 'GET', '/schemas/notes/instances/launch');
-  assert.deepEqual(note.body.data, {
-    title: 'Launch',
-    body: 'Ships on the first.',
-    tags: ['launch'],
-    status: 'published',
-    commentCount: 1,
-    revision: 2,
-    pendingProposals: 0,
-  });
+  assert.deepEqual(note.body.data, { title: 'Launch', body: 'Ships on the first.', tags: ['launch'] });
+  assert.deepEqual(note.body.behaviors, { Workflow: { status: 'published' }, Comments: { commentCount: 1 }, Revisions: { revision: 2, pendingProposals: 0 } });
   const revisions = await operation('carol-token', 'listRevisions', {});
   assert.deepEqual(
     revisions.body.items.map(({ revision, data }: { revision: number; data: unknown }) => [revision, data]),
@@ -229,7 +224,7 @@ test('the event log reads from a cursor, as JSON pages and as a stream', async (
   try {
     const first = await stream.next();
     assert.equal(first.cursor, events[3].cursor);
-    assert.deepEqual(first.change, { behavior: 'Workflow', operation: 'transition', params: { to: 'review' }, patch: { status: 'review' } });
+    assert.deepEqual(first.change, { behavior: 'Workflow', operation: 'transition', params: { to: 'review' }, patch: { behaviors: { Workflow: { status: 'review' } } } });
     for (const expected of events.slice(4)) {
       assert.equal((await stream.next()).cursor, expected.cursor);
     }
@@ -238,7 +233,7 @@ test('the event log reads from a cursor, as JSON pages and as a stream', async (
     const live = await stream.next();
     assert.equal(live.kind, 'operation');
     assert.equal(live.actor, 'alice');
-    assert.deepEqual((live.change as { patch: unknown }).patch, { commentCount: 2 });
+    assert.deepEqual((live.change as { patch: unknown }).patch, { behaviors: { Comments: { commentCount: 2 } } });
   } finally {
     stream.close();
   }
@@ -274,7 +269,7 @@ test('the MCP tools: each caller lists what the policy lets them call, and calls
 
   const read = (await alice.callTool({ name: 'notes_get', arguments: { id: 'launch' } })) as CallToolResult;
   assert.equal(read.isError, undefined);
-  assert.equal((read.structuredContent as { data: { status: string } }).data.status, 'published');
+  assert.equal((read.structuredContent as { behaviors: { Workflow: { status: string } } }).behaviors.Workflow.status, 'published');
 
   const proposed = (await carol.callTool({ name: 'notes_propose', arguments: { id: 'launch', params: { patch: { tags: ['launch', 'q3'] } } } })) as CallToolResult;
   assert.equal((proposed.structuredContent as { id: number; state: string }).id, 2);
@@ -300,7 +295,7 @@ test('the generated client types the notes schema: its fields, states, operation
   const bob = as('bob-token');
 
   const note = await alice.create({ title: 'Typed', tags: ['client'] }, { id: 'typed' });
-  assert.deepEqual([note.data.status, note.data.commentCount, note.data.revision], ['draft', 0, 1]);
+  assert.deepEqual([note.behaviors.Workflow.status, note.behaviors.Comments.commentCount, note.behaviors.Revisions.revision], ['draft', 0, 1]);
   assert.deepEqual(await alice.transition('typed', { to: 'review' }), { from: 'draft', to: 'review' });
   // review -> published names notes.publish, which alice does not hold.
   await assert.rejects(alice.transition('typed', { to: 'published' }), (error) => isProblem(error, 'forbidden'));
@@ -312,7 +307,7 @@ test('the generated client types the notes schema: its fields, states, operation
   assert.equal(proposal.state, 'pending');
   assert.equal((await bob.approve('typed', { proposal: proposal.id })).state, 'approved');
   const read = await alice.get('typed');
-  assert.deepEqual([read.data.body, read.data.revision], ['Typed end to end.', 2]);
+  assert.deepEqual([read.data.body, read.behaviors.Revisions.revision], ['Typed end to end.', 2]);
 });
 
 test('a draft that would break the stored notes is refused', async () => {
@@ -347,11 +342,11 @@ test('a restart keeps every note, refuses an incompatible schema and publishes a
   assert.equal(live.body.version, 2);
   const note = await api('bob-token', 'GET', '/schemas/notes/instances/launch');
   assert.equal(note.body.data.body, 'Ships on the first.');
-  assert.equal(note.body.data.commentCount, 2);
+  assert.equal(note.body.behaviors.Comments.commentCount, 2);
 
   const pinned = await api('bob-token', 'PATCH', '/schemas/notes/instances/launch', { pinned: true }, { 'if-match': note.etag! });
   assert.equal(pinned.status, 200);
   assert.equal(pinned.body.version, 2);
   assert.equal(pinned.body.data.pinned, true);
-  assert.equal(pinned.body.data.revision, 3);
+  assert.equal(pinned.body.behaviors.Revisions.revision, 3);
 });

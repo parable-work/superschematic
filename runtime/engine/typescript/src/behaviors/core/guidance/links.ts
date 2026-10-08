@@ -46,10 +46,10 @@ export function linksGuidance(config: LinksConfig, target: DescribeTarget): Beha
         ? `Every create gives ${list(required)}; a required link is moved, never unlinked, and the instance it points at cannot be deleted.`
         : undefined,
       revisions.length > 0
-        ? "A link pinned to a revision records the target's revision; links gives the target's latest beside it and says stale once the target has a newer one."
+        ? "A link pinned to a revision records the target's revision; behaviors.Links.targets gives the target's latest beside it and says stale once the target has a newer one."
         : undefined,
       releases.length > 0
-        ? "A link pinned to a release records the target's release; links gives the target's latest beside it and says stale once the target has released again."
+        ? "A link pinned to a release records the target's release; behaviors.Links.targets gives the target's latest beside it and says stale once the target has released again."
         : undefined
     ),
     operations: {

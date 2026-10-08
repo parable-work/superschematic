@@ -31,7 +31,8 @@ export interface DisplayConfig {
   readonly createLabel?: string;
   /**
    * The fields that summarize an instance in a list, in order: the type's
-   * own fields, or fields its behaviors add, such as Workflow's status.
+   * own fields, by name, or fields its behaviors add, by qualified name,
+   * the behavior's name, a dot and the field's: "Workflow.status".
    */
   readonly summaryFields?: readonly string[];
   /** Labels of states of the type's Workflow, by state. */
