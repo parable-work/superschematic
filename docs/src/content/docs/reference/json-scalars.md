@@ -167,7 +167,7 @@ degrees, `{"lat": 37.7749, "lon": -122.4194}`, with `lat` from -90 to 90
 and `lon` from -180 to 180, each bound included, and no other key.
 superscalar refuses the `"lat,lon"` string, an unknown, missing or
 duplicate key, a member that is not a number and a degree out of range,
-and every validator hands it the value (the exception is below). Its
+and every validator hands it the value. Its
 canonical text writes each number as `JSON.stringify` does:
 `{"lat": 90.0, "lon": -180}` reads back as `{"lat":90,"lon":-180}`
 ([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-geolocation-is-a-lat-lon-object)).
@@ -181,10 +181,17 @@ missing key, which `encoding/json` would drop or zero-fill, is refused at
 its path as `custom`; a `@strictJSON` type's decoder refuses an unknown
 key outright. A value set after decoding is checked as set.
 
-The exception is a body argument of a Go API route, which the route
-decodes on its own: its `Geo.Location` is checked as its Go value, so an
-out-of-range degree is refused, but an unknown key is dropped and a
-missing one reads as 0.
+A Go API route decodes a body argument on its own, with
+`runtime/http/go/bodyargs`, and checks a `Geo.Location` the same way:
+each value, alone, in a list or in a map, goes to superscalar as its JSON
+text before the route decodes it. An unknown, duplicate or missing key, a
+member that is not a number and a degree out of range are refused at the
+value's path under the core's name (`custom`, `range`, `parse`), and
+`{"lat": 0, "lon": 0}` reaches the implementation as a location. The
+route passes the check in, as
+`bodyargs.CheckJSON(scalars.ValidatorFor("Geo.Location"))`, so the HTTP
+runtime does not import superscalar itself. A `Generic.StringMap` body
+argument is checked the same way.
 
 In Postgres a `Geo.Location` column is a `POINT`, which is `(x, y)`: x is
 the longitude and y the latitude, so `{"lat": 37.7749, "lon": -122.4194}`
