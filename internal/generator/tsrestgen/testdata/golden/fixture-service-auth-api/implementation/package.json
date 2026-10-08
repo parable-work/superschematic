@@ -1,0 +1,21 @@
+{
+  "name": "@schemas/fixture-service-auth-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the fixture-service-auth-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/fixture-service-auth-api-api": "workspace:*",
+    "@schemas/fixture-service-auth-api-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

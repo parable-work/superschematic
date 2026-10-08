@@ -67,6 +67,7 @@ func Local(t *testing.T) naming.LocalPaths {
 		VersionGraphPython:     filepath.Join(root, "runtime", "versiongraph", "python"),
 		HTTPRuntimeGo:          filepath.Join(root, "runtime", "http", "go"),
 		HTTPRuntimeRust:        filepath.Join(root, "runtime", "http", "rust"),
+		HTTPRuntimeTypeScript:  filepath.Join(root, "runtime", "http", "typescript"),
 	}
 }
 

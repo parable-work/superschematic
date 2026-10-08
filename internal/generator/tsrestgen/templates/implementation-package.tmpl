@@ -1,0 +1,21 @@
+{
+  "name": "{{ .ImplementationPackage }}",
+  "version": "0.0.0",
+  "description": "The implementation of the {{ .SchemaName }} API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "{{ .PackageName }}": "workspace:*",
+    "{{ .TypesPackage }}": "workspace:*",
+    "{{ .RuntimePackage }}": "*"
+  },
+  "devDependencies": {
+    "@types/node": "{{ .NodeTypesVersion }}",
+    "typescript": "{{ .TSVersion }}"
+  }
+}

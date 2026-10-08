@@ -20,6 +20,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
+	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
@@ -60,7 +61,7 @@ func newBuildAllCmd(a *app) *cobra.Command {
 	cmd.Flags().BoolVar(&flags.parallel, "parallel", false, "build independent schemas concurrently within each dependency phase")
 	cmd.Flags().BoolVar(&flags.isolatedTS, "isolated-ts-programs", false, "use one TypeScript compiler program per schema service instead of the build-all shared program")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
-	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go API whose package is missing, at the [implementation_paths] go template")
+	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go or TypeScript API whose package is missing, at the [implementation_paths] template of its language")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <services-root>/../superschematic.toml)")
 	cmd.Flags().StringVar(&flags.depsCopy, "deps-copy", "", "also write the dependency graph to this path (default: [deps] copy in the naming file, relative to the repository root)")
 	return cmd
@@ -240,7 +241,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		if flags.profile {
 			profileTotals.print(cmd.OutOrStdout())
 		}
-		if err := writeTypeScriptWorkspaceRoot(outputRoot, services, activeNaming); err != nil {
+		if err := writeTypeScriptWorkspaceRoot(outputRoot, repoRoot, services, activeNaming); err != nil {
 			return err
 		}
 		if err := emitSchemaDeps(cmd, outputRoot, depsCopy, services); err != nil {
@@ -352,16 +353,21 @@ func hookServices(services []buildplan.Service) []registry.BuildAllService {
 }
 
 // writeTypeScriptWorkspaceRoot writes the manifest that makes the generated
-// TypeScript types packages one Bun workspace (tsgen.WorkspaceRootManifest)
-// when any service has TypeScript types. The types generator writes it next
-// to the package it builds; a service restored from the cache or found up to
+// TypeScript packages and the TypeScript implementations one Bun workspace
+// rooted at the output root (tsgen.WorkspaceRoot, D51) when any service
+// has a TypeScript package. The TypeScript generators write it beside the
+// package they build; a service restored from the cache or found up to
 // date brings back only its own package, so build-all writes it once every
 // service is in place, before the dependency graph reads the output root.
-func writeTypeScriptWorkspaceRoot(outputRoot string, services []buildplan.Service, n naming.Naming) error {
+func writeTypeScriptWorkspaceRoot(outputRoot, repoRoot string, services []buildplan.Service, n naming.Naming) error {
 	for _, service := range services {
-		dir := generator.TypesDir(outputRoot, registry.LangTypeScript, service.Name)
-		if slices.Contains(service.OutputDirs, dir) {
-			return tsgen.WriteWorkspaceRoot(filepath.Dir(dir), n)
+		for _, dir := range []string{
+			generator.TypesDir(outputRoot, registry.LangTypeScript, service.Name),
+			generator.SDKDir(outputRoot, registry.LangTypeScript, service.Name),
+		} {
+			if slices.Contains(service.OutputDirs, dir) {
+				return tsgen.WorkspaceRoot{OutputRoot: outputRoot, RepositoryRoot: repoRoot, Naming: n, Paths: n.LocalPaths(repoRoot)}.Write()
+			}
 		}
 	}
 	return nil
@@ -549,24 +555,34 @@ func (l *loadedServices) take(name string) *buildServiceResult {
 	return result
 }
 
-// needsImplementationScaffold reports whether service is a Go API whose
-// implementation package, at the [implementation_paths] go template under
-// repoRoot, is missing, so --scaffold must build it to write one.
+// needsImplementationScaffold reports whether service is a Go or
+// TypeScript API whose implementation package, at the
+// [implementation_paths] template of its language under repoRoot, is
+// missing, so --scaffold must build it to write one.
 func needsImplementationScaffold(service buildplan.Service, repoRoot string, names naming.Naming, reg *registry.Registry) bool {
 	if service.Config.Kind != ir.SchemaKindAPI {
 		return false
 	}
 	outputs, err := registry.ParseOutputs(service.Config.Outputs, reg)
-	if err != nil || !outputs.APIEnabled() || outputs.API.Language != registry.APILanguageGo {
+	if err != nil || !outputs.APIEnabled() {
 		return false
 	}
-	exists, err := apigen.ImplementationExists(names.GoImplementationDir(repoRoot, service.Name))
+	var exists bool
+	switch outputs.API.Language {
+	case registry.APILanguageGo:
+		exists, err = apigen.ImplementationExists(names.GoImplementationDir(repoRoot, service.Name))
+	case registry.APILanguageTypeScript:
+		exists, err = tsrestgen.ImplementationExists(names.TypeScriptImplementationDir(repoRoot, service.Name))
+	default:
+		return false
+	}
 	return err == nil && !exists
 }
 
 // stackNeedsImplementationScaffold reports whether service is a stack
-// that serves a Go API whose implementation is missing, which the stack's
-// build scaffolds (docs/stack-model.md, section 8.5). The APIs a stack
+// that serves a Go or TypeScript API whose implementation is missing,
+// which the stack's build scaffolds (docs/stack-model.md, sections 8.5 and
+// 8.6). The APIs a stack
 // serves are those its last build recorded as its references (D41) and
 // every API they call; a stack with no record builds anyway.
 func stackNeedsImplementationScaffold(service buildplan.Service, services []buildplan.Service, repoRoot string, names naming.Naming, reg *registry.Registry) bool {

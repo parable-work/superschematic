@@ -23,6 +23,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
@@ -298,9 +299,8 @@ func (r run) generateTSTypes() error {
 			return err
 		}
 		// Sibling packages resolve each other through workspace:*, so the
-		// directory holding them is a Bun workspace root (see
-		// tsgen.WorkspaceRootManifest).
-		return tsgen.WriteWorkspaceRoot(filepath.Dir(dir), r.Options.Naming)
+		// output root is a Bun workspace root (see tsgen.WorkspaceRoot).
+		return r.writeTypeScriptWorkspace()
 	}); err != nil {
 		return fmt.Errorf("generator: typescript types for %s: %w", r.Config.Name, err)
 	}
@@ -532,51 +532,44 @@ func (r run) generateAPI() error {
 }
 
 // generateTypeScriptAPI emits the TypeScript (Hono) REST API package from the
-// shared apigen output. An @envVars class contributes its values-schema.json
-// beside the package; its TypeScript env loader is config.ts in the generated
-// types package (generateTSTypes).
+// shared apigen output, with its Deps (deps.ts) and, when the API has a
+// configuration, its EnvConfig and loadEnvConfig (config.ts): the @envVars
+// settings, whose loader is config.ts in the generated types package
+// (generateTSTypes), joined with the fields its edges derive (D51). The
+// values-schema.json beside the package lists the settings and the derived
+// fields. Under Options.ImplementationRoot it scaffolds a missing
+// implementation.
 func (r run) generateTypeScriptAPI() error {
-	var apiOutput *apigen.APIOutput
-	if err := r.measure("output.api.prepare", func() error {
-		var err error
-		apiOutput, err = r.APIOutput()
-		return err
-	}); err != nil {
-		return err
-	}
-	deps, err := r.loadDependencySchemas()
+	output, envOutput, err := r.typeScriptAPI()
 	if err != nil {
 		return err
-	}
-
-	output, err := tsrestgen.Generate(r.Schema, apiOutput, tsrestgen.Options{
-		SchemaName:   r.Config.Name,
-		Dependencies: deps,
-		Naming:       r.Options.Naming,
-		Clock:        r.Options.Clock,
-	})
-	if err != nil {
-		return fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
 	}
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if output != nil {
 		if err := r.measure("output.api.write", func() error {
-			return tsrestgen.WriteAPI(output, dir)
+			if err := tsrestgen.WriteAPI(output, dir); err != nil {
+				return err
+			}
+			if output.HasEnvConfig {
+				if err := envgen.WriteTypeScriptEnvConfig(envOutput, dir); err != nil {
+					return err
+				}
+			}
+			return r.writeTypeScriptWorkspace()
 		}); err != nil {
 			return fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
 		}
 		r.Done("api-typescript", dir)
+		if r.Options.ImplementationRoot != "" {
+			if err := r.measure("output.api.scaffold-implementation", func() error {
+				return r.scaffoldTypeScriptImplementation(output, r.Options.ImplementationRoot)
+			}); err != nil {
+				return err
+			}
+		}
 	}
 
-	envOutput, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
-		SchemaName:   r.Config.Name,
-		Dependencies: deps,
-		Naming:       r.Options.Naming,
-	})
-	if err != nil {
-		return fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
-	}
-	if envOutput == nil {
+	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0) {
 		return nil
 	}
 	if err := envgen.WriteValuesSchema(envOutput, dir); err != nil {
@@ -584,6 +577,118 @@ func (r run) generateTypeScriptAPI() error {
 	}
 	r.Done("env-values-schema", dir)
 	return nil
+}
+
+// typeScriptAPI is the TypeScript API package of the run's schema, with
+// its Deps and whether it has an EnvConfig, as the API's own build writes
+// it, and the env config it writes beside it: nil for a schema without
+// operations. A stack's build reads the same output for each API its
+// TypeScript servers serve (generateServers).
+func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error) {
+	var apiOutput *apigen.APIOutput
+	if err := r.measure("output.api.prepare", func() error {
+		var err error
+		apiOutput, err = r.APIOutput()
+		return err
+	}); err != nil {
+		return nil, nil, err
+	}
+	deps, err := r.loadDependencySchemas()
+	if err != nil {
+		return nil, nil, err
+	}
+	output, err := tsrestgen.Generate(r.Schema, apiOutput, tsrestgen.Options{
+		SchemaName:   r.Config.Name,
+		Dependencies: deps,
+		Naming:       r.Options.Naming,
+		Clock:        r.Options.Clock,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
+	}
+	envOutput, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
+		SchemaName:   r.Config.Name,
+		Dependencies: deps,
+		Naming:       r.Options.Naming,
+		Derived:      true,
+		Callers:      true,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+	}
+	if output == nil {
+		return nil, envOutput, nil
+	}
+	tsDeps, err := r.typeScriptDeps()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := output.SetDeps(tsDeps); err != nil {
+		return nil, nil, fmt.Errorf("generator: %w", err)
+	}
+	output.HasEnvConfig = envOutput != nil
+	return output, envOutput, nil
+}
+
+// typeScriptDeps returns what the TypeScript API's Deps holds beside its
+// config and logger (D51): a pg Pool for the API's database, its authDb or
+// its one DB-kind dependency, and a client of each calls entry's
+// TypeScript SDK. A callee whose config the build has must generate that
+// SDK; the database needs nothing generated, since the pool is pg's.
+func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
+	var deps tsrestgen.DepsInfo
+	if db, _, ok := r.Schema.Database(); ok {
+		deps.Database = db
+	}
+	for _, call := range r.Schema.Calls {
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(call.Name); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return deps, fmt.Errorf("generator: schema config for %s: %w", call.Name, err)
+				}
+				if !outputs.SDKEnabled(LangTypeScript) {
+					return deps, fmt.Errorf("generator: the TypeScript server of %s holds a client of %s in its Deps, and %s generates none; enable outputs.sdk.%s in %s's config", r.Config.Name, call.Name, call.Name, LangTypeScript, call.Name)
+				}
+			}
+		}
+		deps.Calls = append(deps.Calls, tsrestgen.DepsCall{
+			Service: call.Name,
+			Field:   tsutil.ToCamelCase(call.Name),
+			Package: r.Options.Naming.NpmSDKPackage(call.Name),
+			Client:  sdkgen.ClassName(call.Name),
+		})
+	}
+	return deps, nil
+}
+
+// scaffoldTypeScriptImplementation writes the scaffold of the API's
+// TypeScript implementation under repoRoot, at the naming file's
+// [implementation_paths] typescript template, when that package is
+// missing (D51).
+func (r run) scaffoldTypeScriptImplementation(output *tsrestgen.APIOutput, repoRoot string) error {
+	dir := r.Options.Naming.TypeScriptImplementationDir(repoRoot, output.SchemaName)
+	written, err := tsrestgen.WriteImplementationScaffold(output, dir)
+	if err != nil {
+		return fmt.Errorf("generator: implementation scaffold for %s: %w", output.SchemaName, err)
+	}
+	if written {
+		r.Logf("  + implementation scaffold of %s written to %s\n", output.SchemaName, dir)
+	}
+	return nil
+}
+
+// writeTypeScriptWorkspace writes the Bun workspace root at the output
+// root, whose members are the generated TypeScript packages and the
+// TypeScript implementations under the repository root (D51). Every build
+// of one output root writes the same file.
+func (r run) writeTypeScriptWorkspace() error {
+	return tsgen.WorkspaceRoot{
+		OutputRoot:     r.Options.OutputRoot,
+		RepositoryRoot: r.Options.RepositoryRoot,
+		Naming:         r.Options.Naming,
+		Paths:          r.Options.Paths,
+	}.Write()
 }
 
 // resolveUpstreamAuth determines the DB schema backing authentication for a
@@ -1115,7 +1220,10 @@ func (r run) generateTypeScriptSDK() error {
 
 	dir := SDKDir(r.Options.OutputRoot, "typescript", r.Config.Name)
 	if err := r.measure("output.sdk-typescript.write", func() error {
-		return sdkgen.WriteSDKWithToolsProfiled(sdkOutput, apiOutput, dir, r.Options.Clock, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.sdk-typescript")...)
+		if err := sdkgen.WriteSDKWithToolsProfiled(sdkOutput, apiOutput, dir, r.Options.Clock, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.sdk-typescript")...); err != nil {
+			return err
+		}
+		return r.writeTypeScriptWorkspace()
 	}); err != nil {
 		return fmt.Errorf("generator: typescript sdk for %s: %w", r.Config.Name, err)
 	}

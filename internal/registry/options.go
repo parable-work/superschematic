@@ -78,10 +78,10 @@ type Options struct {
 	Stage BuildStage
 
 	// ImplementationRoot, when set, is the repository root under which the
-	// Go API generator scaffolds a missing implementation, at the naming
-	// file's [implementation_paths] template (docs/stack-model.md, section
-	// 8.5). Empty writes no scaffold; build and build-all set it under
-	// --scaffold.
+	// Go and TypeScript API generators scaffold a missing implementation,
+	// at the naming file's [implementation_paths] template of the API's
+	// language (docs/stack-model.md, sections 8.5 and 8.6). Empty writes no
+	// scaffold; build and build-all set it under --scaffold.
 	ImplementationRoot string
 
 	// RepositoryRoot is the repository root, the parent of the schemas

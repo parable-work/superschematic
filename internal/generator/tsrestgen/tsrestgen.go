@@ -2,7 +2,9 @@
 // API-kind schemas. The generated package (Naming.NpmAPIPackage,
 // <scope>/<svc>-api) carries one implementation interface per operation
 // class, a Hono router built on the TypeScript HTTP runtime
-// (Naming.HTTPRuntimeNpmPackage), and the OpenAPI document.
+// (Naming.HTTPRuntimeNpmPackage), the OpenAPI document, and Deps and the
+// constructor's type in deps.ts (D51). It also writes the scaffold of the
+// API's implementation (deps.go in this package).
 //
 // It is the TypeScript sibling of the Go and Rust API generators: endpoints
 // come from the shared apigen extraction, so path, method, parameter
@@ -224,6 +226,22 @@ type APIOutput struct {
 	// code imports from, for package.json peerDependencies.
 	PeerPackages []string
 
+	// Deps is what deps.ts's Deps holds beside the config and the logger
+	// (D51); the dispatch layer sets it with SetDeps before WriteAPI.
+	Deps DepsInfo
+	// HasEnvConfig reports whether the package's config.ts declares
+	// EnvConfig and loadEnvConfig, which Deps.config holds. The dispatch
+	// layer writes config.ts (envgen) and sets it.
+	HasEnvConfig bool
+	// ImplementationPackage is the npm name the scaffold gives the
+	// implementation (Naming.NpmImplementationPackage).
+	ImplementationPackage string
+	// PGPeerRange, PGTypesVersion and NodeTypesVersion are the package
+	// constants of the same names, for the templates.
+	PGPeerRange      string
+	PGTypesVersion   string
+	NodeTypesVersion string
+
 	OpenAPISpecRaw string
 }
 
@@ -270,6 +288,11 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		Timestamp:         opts.Clock.RFC3339(),
 		OpenAPISpecRaw:    apiOutput.OpenAPISpecRaw,
 		HasServiceCallers: apiOutput.HasServiceCallers,
+
+		ImplementationPackage: opts.Naming.NpmImplementationPackage(opts.SchemaName),
+		PGPeerRange:           PGPeerRange,
+		PGTypesVersion:        PGTypesVersion,
+		NodeTypesVersion:      NodeTypesVersion,
 	}
 
 	byNamespace := map[string]*NamespaceInfo{}
@@ -861,11 +884,20 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "index.tmpl", outputName: "index.ts"},
 		{templateName: "interfaces.tmpl", outputName: "interfaces.ts"},
 		{templateName: "router.tmpl", outputName: "router.ts"},
+		{templateName: "deps.tmpl", outputName: "deps.ts"},
 		{templateName: "readme.tmpl", outputName: "README.md"},
 	}
 	for _, file := range files {
 		if err := generateFile(file.templateName, filepath.Join(outputDir, file.outputName), output); err != nil {
 			return fmt.Errorf("generate %s: %w", file.outputName, err)
+		}
+	}
+	// config.ts is envgen's, written after this when the API has a
+	// configuration; one an earlier build wrote would import what no
+	// longer exists.
+	if !output.HasEnvConfig {
+		if err := os.Remove(filepath.Join(outputDir, ConfigFile)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove stale %s: %w", ConfigFile, err)
 		}
 	}
 
@@ -885,6 +917,11 @@ func generateFile(templateName, outputPath string, data any) error {
 		codegen.NewFileConfig(templatesFS, templateName, outputPath, data, templateFuncs()),
 	)
 }
+
+// ConfigFile is the API package's EnvConfig and loadEnvConfig, which
+// envgen writes (WriteTypeScriptEnvConfig) when the API has a
+// configuration.
+const ConfigFile = "config.ts"
 
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
